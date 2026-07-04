@@ -1,0 +1,27 @@
+{
+  "name": "@agent-kernel/shared",
+  "version": "0.0.0",
+  "description": "Shared protocol types between core, executor, and dashboard.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agent-kernel/kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "sideEffects": false,
+  "license": "MIT"
+}

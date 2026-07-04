@@ -1,0 +1,128 @@
+/**
+ * Built-in ToolSchema list matching the seven tools shipped in
+ * `@agent-kernel/executor`. The host declares these to the LLM so tool_calls
+ * are well-formed; the executor is what actually runs each tool.
+ *
+ * `agent-kernel-host` uses this by default. Callers embedding `startHostServer`
+ * directly can pass their own tools list via `defaultConfig.tools`.
+ */
+
+import type { ToolSchema } from '@agent-kernel/kernel'
+
+export const builtinTools: readonly ToolSchema[] = [
+  {
+    name: 'read',
+    description:
+      'Read a UTF-8 text file. Returns cat -n style output with tab-separated line numbers.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: { type: 'string', description: 'Absolute path to the file.' },
+        offset: {
+          type: 'integer',
+          minimum: 0,
+          description: '0-indexed line to start from.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Maximum lines to return.',
+        },
+      },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'ls',
+    description:
+      'List directory entries. Directories get a trailing "/". Hidden entries excluded unless `hidden: true`.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: { type: 'string' },
+        hidden: { type: 'boolean' },
+      },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'glob',
+    description:
+      'Find files matching a glob pattern (picomatch). Results sorted by mtime desc.',
+    inputSchema: {
+      type: 'object',
+      required: ['pattern'],
+      properties: {
+        pattern: { type: 'string' },
+        path: { type: 'string' },
+      },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'grep',
+    description:
+      'Ripgrep-like regex search. `output_mode` = "content" | "files_with_matches" | "count".',
+    inputSchema: {
+      type: 'object',
+      required: ['pattern'],
+      properties: {
+        pattern: { type: 'string' },
+        path: { type: 'string' },
+        glob: { type: 'string', description: 'Filter files by glob.' },
+        output_mode: {
+          type: 'string',
+          enum: ['content', 'files_with_matches', 'count'],
+        },
+        case_insensitive: { type: 'boolean' },
+      },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'write',
+    description:
+      'Write UTF-8 content to a file, creating parent directories as needed.',
+    inputSchema: {
+      type: 'object',
+      required: ['path', 'content'],
+      properties: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+      },
+    },
+    requiresApproval: true,
+  },
+  {
+    name: 'edit',
+    description:
+      'Exact string replacement. Fails if `old_string` is missing or ambiguous (unless `replace_all: true`).',
+    inputSchema: {
+      type: 'object',
+      required: ['path', 'old_string', 'new_string'],
+      properties: {
+        path: { type: 'string' },
+        old_string: { type: 'string' },
+        new_string: { type: 'string' },
+        replace_all: { type: 'boolean' },
+      },
+    },
+    requiresApproval: true,
+  },
+  {
+    name: 'bash',
+    description:
+      'Run a bash command inside the executor sandbox. Captures stdout+stderr up to 1MB.',
+    inputSchema: {
+      type: 'object',
+      required: ['command'],
+      properties: {
+        command: { type: 'string' },
+        timeout_ms: { type: 'integer', minimum: 1 },
+      },
+    },
+    requiresApproval: true,
+  },
+]
