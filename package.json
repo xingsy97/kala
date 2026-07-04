@@ -1,0 +1,21 @@
+{
+  "name": "agent-kernel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Open-source, minimal, model-agnostic coding agent reference implementation. Core/executor decoupled, replay + fork built in.",
+  "packageManager": "pnpm@11.3.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --parallel run build",
+    "test": "pnpm -r --parallel run test",
+    "typecheck": "pnpm -r --parallel run typecheck",
+    "dev": "pnpm -r --parallel run dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5",
+    "@types/node": "^22.9.0"
+  }
+}

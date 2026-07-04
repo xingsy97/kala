@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+.next/
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+secrets*
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Session data (event logs will land here)
+sessions/
+.agent-kernel/
+
+# Reference projects (cloned for study, not committed)
+references/
+
+# Agent scratch
+.claude/
