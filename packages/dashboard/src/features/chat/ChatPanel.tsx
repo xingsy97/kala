@@ -4,8 +4,12 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Code2,
+  FileText,
+  Lightbulb,
   Pencil,
   Sparkles,
+  Terminal,
   Wrench,
   X,
   XCircle,
@@ -32,13 +36,42 @@ type Props = {
   items?: readonly TranscriptItem[]
   highlightIndex?: number | null
   onEditAndRerun?: (seq: number, text: string) => void
+  onSuggest?: (text: string) => void
 }
+
+const EMPTY_SUGGESTIONS: ReadonlyArray<{
+  icon: typeof Sparkles
+  title: string
+  prompt: string
+}> = [
+  {
+    icon: Code2,
+    title: 'Explain this repo',
+    prompt: 'Give me a quick tour of this repository  -  what does it do, and where should I start reading?',
+  },
+  {
+    icon: Terminal,
+    title: 'Run tests and fix failures',
+    prompt: 'Run the tests. If any fail, propose a fix.',
+  },
+  {
+    icon: FileText,
+    title: 'Draft a change plan',
+    prompt: 'I want to add a new feature. Ask me a few clarifying questions, then draft an implementation plan.',
+  },
+  {
+    icon: Lightbulb,
+    title: 'Suggest improvements',
+    prompt: 'Read the main source files and suggest three concrete improvements I could make today.',
+  },
+]
 
 export function ChatPanel({
   messages,
   items,
   highlightIndex,
   onEditAndRerun,
+  onSuggest,
 }: Props): JSX.Element {
   const fallbackItems: TranscriptItem[] = (messages ?? []).map((message) => ({
     kind: 'message',
@@ -54,13 +87,10 @@ export function ChatPanel({
     }
   }
   let messageIndex = -1
+  const isEmpty = transcriptItems.length === 0
   return (
     <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
-      {transcriptItems.length === 0 ? (
-        <div className="py-16 text-center text-sm text-muted-foreground">
-          No messages yet.
-        </div>
-      ) : null}
+      {isEmpty ? <EmptyState onSuggest={onSuggest} /> : null}
       {transcriptItems.map((item, itemIndex) => {
         if (item.kind === 'compact_boundary') {
           return <CompactBoundaryRow key={`compact-${item.seq}`} boundary={item} />
@@ -79,6 +109,60 @@ export function ChatPanel({
           />
         )
       })}
+    </div>
+  )
+}
+
+function EmptyState({
+  onSuggest,
+}: {
+  onSuggest?: (text: string) => void
+}): JSX.Element {
+  return (
+    <div className="flex flex-col items-center gap-8 py-16 text-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border bg-muted/40">
+          <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          What can I help with?
+        </h1>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Ask a question, request code changes, or pick one of the suggestions below to get started.
+        </p>
+      </div>
+      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+        {EMPTY_SUGGESTIONS.map((s) => {
+          const Icon = s.icon
+          const clickable = typeof onSuggest === 'function'
+          return (
+            <button
+              key={s.title}
+              type="button"
+              onClick={() => onSuggest?.(s.prompt)}
+              disabled={!clickable}
+              className={cn(
+                'group flex min-w-0 items-start gap-3 rounded-xl border bg-muted/40 p-4 text-left transition-colors',
+                clickable
+                  ? 'hover:border-ring hover:bg-muted cursor-pointer'
+                  : 'cursor-default opacity-70',
+              )}
+              data-testid={`empty-suggestion-${s.title.toLowerCase().replace(/\s+/g, '-')}`}
+            >
+              <div className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg border bg-background text-muted-foreground group-hover:text-foreground">
+                <Icon className="h-4 w-4" aria-hidden="true" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 text-sm font-medium text-foreground">{s.title}</div>
+                <div className="line-clamp-2 text-xs text-muted-foreground">{s.prompt}</div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <div className="text-xs text-muted-foreground" data-testid="empty-state-hint">
+        No messages yet  -  type below to begin.
+      </div>
     </div>
   )
 }

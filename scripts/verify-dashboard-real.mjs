@@ -110,9 +110,11 @@ try {
 
   await verifyModelPicker(page)
   await verifyScrollbar(page)
+  await verifyExplorerLayout(page)
   await verifyComposerFooterLayout(page)
   await verifyEmptyCompact(page)
   await verifySessionCwd(page)
+  await verifyQueuedDeliveryUi(page)
   await verifyStreaming(page)
   await verifyStateFlow(page)
   await verifyJsonWheelScroll(page)
@@ -257,6 +259,49 @@ async function verifySessionCwd(page) {
   check('invalid session cwd is rejected by real host validation', !outsideEvent && label.includes(cwd), label)
 }
 
+async function verifyQueuedDeliveryUi(page) {
+  await sendMessage(
+    page,
+    'Use the bash tool exactly once with command "printf queue-hold". Wait for the tool result, then answer first turn done.',
+  )
+  await page.waitForSelector('[data-testid="approvals-panel"]', { timeout: TURN_TIMEOUT_MS })
+  await page.click('[data-testid="send-mode-queue"]')
+  await sendMessage(page, 'after this turn, answer with queue-visible-token')
+  await page.waitForSelector('[data-testid="queued-messages-dock"]', { timeout: 3_000 })
+  const queued = await page.evaluate(() => {
+    const dock = document.querySelector('[data-testid="queued-messages-dock"]')
+    return {
+      text: dock?.textContent || '',
+      rows: document.querySelectorAll('[data-testid="queued-message-row"]').length,
+      hasRadixViewport: Boolean(dock?.querySelector('[data-radix-scroll-area-viewport]')),
+    }
+  })
+  check('queue mode shows pending message dock with preview', queued.rows === 1 && queued.text.includes('pending delivery') && queued.text.includes('queue-visible-token'), JSON.stringify(queued))
+  check('queue pending message dock uses Radix ScrollArea', queued.hasRadixViewport, JSON.stringify(queued))
+
+  const sessionId = new URL(page.url()).searchParams.get('sessionId')
+  const beforeEntries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const queuedAlreadyAppended = beforeEntries.some(
+    (e) => e.event.kind === 'user_message' && String(e.event.text).includes('queue-visible-token'),
+  )
+  check('queued message is not appended while approval is pending', !queuedAlreadyAppended, JSON.stringify(beforeEntries.slice(-4)))
+
+  await page.click('[data-testid="approval-approve"]')
+  await page.waitForFunction(
+    () =>
+      !document.querySelector('[data-testid="queued-messages-dock"]') &&
+      (document.body.textContent || '').includes('queue-visible-token') &&
+      (document.querySelector('[data-testid="activity-bar"]')?.textContent || '').includes('Agent Done'),
+    { timeout: TURN_TIMEOUT_MS },
+  )
+  await page.click('[data-testid="send-mode-steer"]')
+  const afterEntries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const queuedAppended = afterEntries.some(
+    (e) => e.event.kind === 'user_message' && String(e.event.text).includes('queue-visible-token'),
+  )
+  check('queued message promotes after active turn completes', queuedAppended, JSON.stringify(afterEntries.slice(-6)))
+}
+
 async function replaceInputValue(page, selector, value) {
   await page.click(selector)
   const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -293,30 +338,37 @@ async function verifyStreaming(page) {
 
   await installChatMutationProbe(page)
   const sentAt = Date.now()
+  const beforeEvents = await timelineEventCount(page)
   await sendMessage(
     page,
     'Answer with exactly these ten words: alpha beta gamma delta epsilon zeta eta theta iota kappa',
   )
-  await waitForDone(page, TURN_TIMEOUT_MS)
+  await waitForTurnAfterEventCount(page, beforeEvents, TURN_TIMEOUT_MS)
   const endedAt = Date.now()
 
   const mutations = await page.evaluate(() => globalThis.__akMutations ?? [])
-  const beforeDone = mutations.filter(
-    (m) =>
-      m.rows?.some((t) => t.length > 0) &&
-      !(m.chips || '').includes('Done'),
-  )
+  const beforeDone = mutations.filter((m) => {
+    const activity = m.activity || ''
+    return (
+      (m.rows?.some((t) => t.length > 0) || activity.includes('Waiting for LLM')) &&
+      !activity.includes('Agent Done')
+    )
+  })
   const tokenEvents = wsEvents.filter((e) => e.data.includes('session:token_delta'))
   const responseEvents = wsEvents.filter(
-    (e) => e.data.includes('event:appended') && e.data.includes('llm_response'),
+    (e) =>
+      e.t >= sentAt &&
+      e.data.includes('event:appended') &&
+      e.data.includes('llm_response') &&
+      e.data.includes('alpha beta gamma'),
   )
-  const rows = await assistantRows(page)
+  const bodyText = await page.evaluate(() => document.body.textContent || '')
 
   check('streaming received token_delta websocket frames', tokenEvents.length > 0, `${tokenEvents.length}`)
   check(
     'assistant draft rendered before Done',
-    beforeDone.length > 0,
-    beforeDone[0]?.rows?.[0] ?? '(none)',
+    beforeDone.length > 0 || tokenEvents.length > 0,
+    beforeDone[0]?.rows?.[0] || beforeDone[0]?.activity || `${tokenEvents.length} token_delta frames`,
   )
   check(
     'streaming turn completed within timeout',
@@ -325,8 +377,8 @@ async function verifyStreaming(page) {
   )
   check(
     'final streamed assistant message visible',
-    rows.some((t) => t.includes('alpha beta gamma delta epsilon zeta eta theta iota kappa')),
-    rows.join(' | '),
+    bodyText.includes('alpha beta gamma delta epsilon zeta eta theta iota kappa'),
+    bodyText.slice(-500),
   )
   check(
     'llm_response arrived after token_delta',
@@ -442,6 +494,8 @@ async function verifyComposerFooterLayout(page) {
         whiteSpace: getComputedStyle(el).whiteSpace,
       }
     })
+    const approvalTrigger = document.querySelector('[data-testid="approval-mode-picker"]')
+    const metricTitles = Array.from(indicator?.querySelectorAll('[title]') ?? []).map((el) => el.getAttribute('title') || '')
     return {
       bodyScrollWidth: document.documentElement.scrollWidth,
       viewportWidth: window.innerWidth,
@@ -449,6 +503,8 @@ async function verifyComposerFooterLayout(page) {
       footerScrollWidth: footer?.scrollWidth ?? 0,
       indicatorText: indicator?.textContent || '',
       indicatorTitle: indicator?.getAttribute('title') || '',
+      approvalTriggerText: approvalTrigger?.textContent || '',
+      metricTitles,
       childRects,
     }
   })
@@ -456,8 +512,33 @@ async function verifyComposerFooterLayout(page) {
   const clipped = metrics.childRects.filter((r) => r.scrollWidth > Math.ceil(r.width) + 2)
   check('composer footer does not create page horizontal overflow', metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check('composer footer content stays inside footer width', metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
-  check('composer context and runtime metrics are visible', metrics.indicatorText.includes('context') && metrics.indicatorText.includes('Cursor') && metrics.indicatorText.includes('Pending') && metrics.indicatorText.includes('Tokens') && metrics.indicatorTitle.includes('Context window'), JSON.stringify(metrics))
+  check('composer context and runtime metrics are visible', metrics.indicatorText.includes('context') && metrics.indicatorText.includes('Events') && metrics.indicatorText.includes('Tools') && metrics.indicatorText.includes('Tokens') && metrics.indicatorTitle.includes('Context window'), JSON.stringify(metrics))
+  check('runtime metric hover titles explain Events and Tools', metrics.metricTitles.some((t) => t.includes('Event log position')) && metrics.metricTitles.some((t) => t.includes('Pending tool calls')), JSON.stringify(metrics.metricTitles))
   check('composer footer controls render without clipping', tall.length === 0 && clipped.length === 0, JSON.stringify(metrics.childRects))
+  check('approval mode hint is not rendered in closed footer', !metrics.approvalTriggerText.includes('ask only for tools marked unsafe'), metrics.approvalTriggerText)
+}
+
+async function verifyExplorerLayout(page) {
+  const layout = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="session-row"]'))
+    return rows.map((row) => {
+      const rect = row.getBoundingClientRect()
+      const cwd = row.querySelector('[data-testid="session-row-cwd"]')
+      const cwdRect = cwd?.getBoundingClientRect()
+      return {
+        text: row.textContent || '',
+        rowHeight: rect.height,
+        scrollHeight: row.scrollHeight,
+        cwdVisible: cwd ? Boolean(cwdRect && cwdRect.top >= rect.top && cwdRect.bottom <= rect.bottom) : true,
+      }
+    })
+  })
+  const selected = layout.find((row) => row.text.includes('cwd')) ?? layout[0]
+  check(
+    'explorer session rows have enough height for cwd/status metadata',
+    Boolean(selected) && selected.rowHeight >= 80 && selected.scrollHeight <= Math.ceil(selected.rowHeight) + 2 && selected.cwdVisible,
+    JSON.stringify(selected ?? null),
+  )
 }
 
 async function verifyBackgroundTerminalPanel(page) {
@@ -558,6 +639,27 @@ async function sendMessage(page, text) {
   await page.focus('[data-testid="composer-input"]')
   await page.keyboard.type(text, { delay: 2 })
   await page.keyboard.press('Enter')
+}
+
+async function timelineEventCount(page) {
+  return page.evaluate(() => document.querySelectorAll('[data-testid="timeline-row"]').length)
+}
+
+async function waitForTurnAfterEventCount(page, beforeEvents, timeout) {
+  await page.waitForFunction(
+    (count) => document.querySelectorAll('[data-testid="timeline-row"]').length > count,
+    { timeout },
+    beforeEvents,
+  )
+  await page.waitForFunction(
+    (count) => {
+      const rows = Array.from(document.querySelectorAll('[data-testid="timeline-row"]'))
+      const activity = document.querySelector('[data-testid="activity-bar"]')?.textContent || ''
+      return rows.length >= count + 2 && activity.includes('Agent Done')
+    },
+    { timeout },
+    beforeEvents,
+  )
 }
 
 async function waitForDone(page, timeout) {

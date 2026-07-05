@@ -445,6 +445,15 @@ export function App(): JSX.Element {
                             seedMessage: text,
                           })
                         }}
+                        onSuggest={(text) => {
+                          if (!session.socket || session.status !== 'ready' || !sessionWorkspaceOnline) return
+                          session.socket.emit('client:user_message', {
+                            sessionId: config.sessionId,
+                            text,
+                            mode: 'steer',
+                          })
+                          if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
+                        }}
                       />
                     </ScrollArea>
                     <ApprovalsPanel

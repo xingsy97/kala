@@ -20,6 +20,7 @@ import type {
   AttachedExecutor,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
+  QueuedMessagePreview,
   SessionErrorEvent,
   SessionForkedEvent,
   SessionSummary,
@@ -52,7 +53,7 @@ export type SessionView = {
   timeline: readonly TimelineEntry[]
   streamingText: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
-  queuedMessages: number
+  queuedMessages: readonly QueuedMessagePreview[]
   lastError: SessionErrorEvent | null
   parentSessionId: string | null
   parentCursor: number | null
@@ -89,7 +90,7 @@ export function useSession({
   const [pendingApprovals, setPendingApprovals] = useState<
     readonly ApprovalRequiredEvent[]
   >([])
-  const [queuedMessages, setQueuedMessages] = useState(0)
+  const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
   const [lastError, setLastError] = useState<SessionErrorEvent | null>(null)
   const [parentSessionId, setParentSessionId] = useState<string | null>(null)
   const [parentCursor, setParentCursor] = useState<number | null>(null)
@@ -105,7 +106,7 @@ export function useSession({
     setTimeline([])
     setStreamingText('')
     setPendingApprovals([])
-    setQueuedMessages(0)
+    setQueuedMessages([])
     setLastError(null)
     setParentSessionId(null)
     setParentCursor(null)
@@ -174,7 +175,7 @@ export function useSession({
       setPendingApprovals((prev) => [...prev, p])
     })
     socket.on('server:message_queue', (p) => {
-      if (p.sessionId === sessionId) setQueuedMessages(p.pending)
+      if (p.sessionId === sessionId) setQueuedMessages(p.items ?? [])
     })
     socket.on('session:error', (p) => {
       setStreamingText('')
