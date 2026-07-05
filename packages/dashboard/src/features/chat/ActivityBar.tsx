@@ -1,10 +1,14 @@
-import { Check, Clock, Loader2, Wrench } from 'lucide-react'
+import { AlertTriangle, Check, Clock, Loader2, Wrench } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 
 import { cn } from '../../lib/utils.js'
 
-export type CompactStatus = 'idle' | 'running' | 'done'
+export type CompactStatus =
+  | { kind: 'idle' }
+  | { kind: 'running' }
+  | { kind: 'done' }
+  | { kind: 'error'; message: string }
 
 type Props = {
   state: AgentState | null
@@ -56,7 +60,7 @@ function activityFor(
   pulse?: boolean
   className: string
 } | null {
-  if (compactStatus === 'running') {
+  if (compactStatus.kind === 'running') {
     return {
       label: 'Compacting context',
       detail: 'waiting for summarizer response',
@@ -66,12 +70,21 @@ function activityFor(
         'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
     }
   }
-  if (compactStatus === 'done') {
+  if (compactStatus.kind === 'done') {
     return {
       label: 'Context compacted',
       icon: Check,
       className:
         'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/35 dark:text-emerald-200',
+    }
+  }
+  if (compactStatus.kind === 'error') {
+    return {
+      label: 'Compact failed',
+      detail: compactStatus.message,
+      icon: AlertTriangle,
+      className:
+        'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200',
     }
   }
   if (!state) return null

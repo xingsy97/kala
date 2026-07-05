@@ -16,14 +16,14 @@ describe('InspectorPanel', () => {
     render(<InspectorPanel state={null} timeline={[]} />)
     expect(screen.getByText(/timeline/i)).toBeTruthy()
     expect(screen.getByText(/no events yet/i)).toBeTruthy()
-    expect(screen.getByText(/raw state/i)).toBeTruthy()
+    expect(screen.getByText(/Agent state/i)).toBeTruthy()
     expect(screen.getByText('—')).toBeTruthy()
   })
 
   it('shows empty timeline and raw state JSON', () => {
     render(<InspectorPanel state={baseState} timeline={[]} />)
     expect(screen.getByText(/no events yet/i)).toBeTruthy()
-    expect(screen.getByText(/full AgentState/)).toBeTruthy()
+    expect(screen.getByText(/full runtime state JSON/)).toBeTruthy()
     expect(document.body.textContent ?? '').toContain('inputTokens')
     expect(document.body.textContent ?? '').toContain('42')
   })
@@ -149,7 +149,7 @@ describe('InspectorPanel', () => {
     expect(onJumpToMessage).toHaveBeenCalledWith(1)
   })
 
-  it('expands a timeline row to show event JSON', () => {
+  it('opens a modal with event JSON when clicking a timeline row', () => {
     render(
       <InspectorPanel
         state={baseState}
@@ -165,9 +165,8 @@ describe('InspectorPanel', () => {
     )
     // Before clicking, no details section rendered.
     expect(screen.queryByTestId('timeline-row-details')).toBeNull()
-    // Click the row header — whole row is now the toggle target, not a
-    // trivial chevron button.
     fireEvent.click(screen.getByTestId('timeline-row-header'))
+    expect(screen.getByText('Timeline event #1')).toBeTruthy()
     const details = screen.getByTestId('timeline-row-details')
     // JsonBlock renders the event kind in its label ("event · user_message").
     expect(details.textContent ?? '').toMatch(/user_message/)

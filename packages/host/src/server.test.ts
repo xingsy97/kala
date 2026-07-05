@@ -761,6 +761,61 @@ describe('wire protocol', () => {
     dashboard.close()
     executor.close()
   })
+
+  it('client:compact rejects an empty session without calling the summarizer', async () => {
+    const sessionId = 'wire-empty-compact'
+    let llmCalls = 0
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'compact-counter',
+        async call() {
+          llmCalls += 1
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'summary' }],
+            },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const err = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.on('session:error', resolve)
+    })
+    dashboard.emit('client:compact', { sessionId })
+
+    await expect(err).resolves.toMatchObject({
+      scope: 'kernel',
+      message: 'nothing to compact yet',
+    })
+    expect(llmCalls).toBe(0)
+
+    dashboard.close()
+  })
 })
 
 describe('protocol doc drift', () => {

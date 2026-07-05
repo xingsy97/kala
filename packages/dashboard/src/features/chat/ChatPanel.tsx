@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Wrench, XCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -16,6 +16,12 @@ type Props = {
 }
 
 export function ChatPanel({ messages, highlightIndex }: Props): JSX.Element {
+  const toolNameByCallId = new Map<string, string>()
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call') toolNameByCallId.set(content.callId, content.name)
+    }
+  }
   return (
     <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-900">
       {messages.length === 0 ? (
@@ -27,6 +33,7 @@ export function ChatPanel({ messages, highlightIndex }: Props): JSX.Element {
           index={i}
           message={m}
           highlighted={highlightIndex === i}
+          toolNameByCallId={toolNameByCallId}
         />
       ))}
     </div>
@@ -37,20 +44,19 @@ function MessageRow({
   index,
   message,
   highlighted,
+  toolNameByCallId,
 }: {
   index: number
   message: Message
   highlighted: boolean
+  toolNameByCallId: ReadonlyMap<string, string>
 }): JSX.Element {
-  const label =
-    message.role === 'user'
-      ? 'You'
-      : message.role === 'assistant'
-        ? 'Assistant'
-        : message.role
+  const label = roleLabel(message.role)
   const labelColor =
     message.role === 'user'
       ? 'text-slate-500 dark:text-slate-400'
+      : message.role === 'tool'
+        ? 'text-emerald-700 dark:text-emerald-400'
       : 'text-amber-700 dark:text-amber-400'
   return (
     <div
@@ -67,7 +73,12 @@ function MessageRow({
       </div>
       <div className="flex flex-col gap-2">
         {message.content.map((c, i) => (
-          <ContentBlock key={i} content={c} role={message.role} />
+          <ContentBlock
+            key={i}
+            content={c}
+            role={message.role}
+            toolNameByCallId={toolNameByCallId}
+          />
         ))}
       </div>
     </div>
@@ -77,9 +88,11 @@ function MessageRow({
 function ContentBlock({
   content,
   role,
+  toolNameByCallId,
 }: {
   content: MessageContent
   role: Message['role']
+  toolNameByCallId: ReadonlyMap<string, string>
 }): JSX.Element {
   if (content.type === 'text') {
     if (role === 'assistant') return <AssistantMarkdown text={content.text} />
@@ -90,8 +103,22 @@ function ContentBlock({
     )
   }
   if (content.type === 'tool_call') return <ToolCallBlock call={content} />
-  if (content.type === 'tool_result') return <ToolResultBlock result={content} />
+  if (content.type === 'tool_result') {
+    return (
+      <ToolResultBlock
+        result={content}
+        toolName={toolNameByCallId.get(content.callId)}
+      />
+    )
+  }
   return <ImageBlock content={content} />
+}
+
+function roleLabel(role: Message['role']): string {
+  if (role === 'user') return 'You'
+  if (role === 'assistant') return 'Assistant'
+  if (role === 'tool') return 'Tool result'
+  return role
 }
 
 function ImageBlock({ content }: { content: import('@agent-kernel/kernel').ImageContent }): JSX.Element {
@@ -119,22 +146,30 @@ function AssistantMarkdown({ text }: { text: string }): JSX.Element {
 function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
   const [open, setOpen] = useState(false)
   return (
-    <div className="font-mono text-xs">
+    <div className="rounded border border-amber-200 bg-amber-50/70 text-xs dark:border-amber-900/60 dark:bg-amber-950/25">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-amber-700 dark:text-amber-400 hover:text-amber-600 dark:hover:text-amber-300"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-amber-800 hover:bg-amber-100/70 dark:text-amber-200 dark:hover:bg-amber-900/30"
         data-testid={`tool-call-toggle-${call.callId}`}
       >
+        <Wrench className="h-3.5 w-3.5 flex-none" />
+        <span className="font-medium">Assistant requested tool</span>
+        <span className="font-mono rounded bg-white/70 px-1.5 py-0.5 dark:bg-slate-950/60">
+          {call.name}
+        </span>
+        <span className="flex-1" />
+        <span className="font-mono text-[11px] text-amber-700/75 dark:text-amber-200/70">
+          {call.callId}
+        </span>
         {open ? (
-          <ChevronDown className="h-3 w-3" />
+          <ChevronDown className="h-3 w-3 flex-none" />
         ) : (
-          <ChevronRight className="h-3 w-3" />
+          <ChevronRight className="h-3 w-3 flex-none" />
         )}
-        <span>→ {call.name}</span>
       </button>
       {open ? (
-        <pre className="mt-1 ml-4 border-l border-amber-300/50 dark:border-amber-800/40 pl-2 text-amber-800/80 dark:text-amber-100/70 whitespace-pre-wrap">
+        <pre className="border-t border-amber-200 px-3 py-2 text-amber-900/90 dark:border-amber-900/60 dark:text-amber-100/80 whitespace-pre-wrap overflow-x-auto">
           {JSON.stringify(call.input, null, 2)}
         </pre>
       ) : null}
@@ -144,34 +179,49 @@ function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
 
 function ToolResultBlock({
   result,
+  toolName,
 }: {
   result: ToolResultContent
+  toolName?: string
 }): JSX.Element {
   const [open, setOpen] = useState(false)
-  const color = result.ok
-    ? 'text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300'
-    : 'text-rose-700 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300'
-  const borderColor = result.ok
-    ? 'border-emerald-300/50 dark:border-emerald-800/40'
-    : 'border-rose-300/50 dark:border-rose-800/40'
+  const Icon = result.ok ? CheckCircle2 : XCircle
+  const tone = result.ok
+    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200'
+    : 'border-rose-200 bg-rose-50/70 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/25 dark:text-rose-200'
+  const hover = result.ok
+    ? 'hover:bg-emerald-100/70 dark:hover:bg-emerald-900/30'
+    : 'hover:bg-rose-100/70 dark:hover:bg-rose-900/30'
+  const border = result.ok ? 'border-emerald-200 dark:border-emerald-900/60' : 'border-rose-200 dark:border-rose-900/60'
   return (
-    <div className="font-mono text-xs">
+    <div className={`rounded border text-xs ${tone}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 ${color}`}
+        className={`flex w-full items-center gap-2 px-3 py-2 text-left ${hover}`}
         data-testid={`tool-result-toggle-${result.callId}`}
       >
+        <Icon className="h-3.5 w-3.5 flex-none" />
+        <span className="font-medium">Tool result</span>
+        {toolName ? (
+          <span className="font-mono rounded bg-white/70 px-1.5 py-0.5 dark:bg-slate-950/60">
+            {toolName}
+          </span>
+        ) : null}
+        <span className="rounded bg-white/70 px-1.5 py-0.5 dark:bg-slate-950/60">
+          {result.ok ? 'Succeeded' : 'Failed'}
+        </span>
+        <span className="flex-1" />
+        <span className="font-mono text-[11px] opacity-75">{result.callId}</span>
         {open ? (
-          <ChevronDown className="h-3 w-3" />
+          <ChevronDown className="h-3 w-3 flex-none" />
         ) : (
-          <ChevronRight className="h-3 w-3" />
+          <ChevronRight className="h-3 w-3 flex-none" />
         )}
-        <span>← {result.ok ? 'ok' : 'err'}</span>
       </button>
       {open ? (
         <pre
-          className={`mt-1 ml-4 border-l ${borderColor} pl-2 whitespace-pre-wrap text-slate-700 dark:text-slate-200`}
+          className={`border-t ${border} px-3 py-2 whitespace-pre-wrap overflow-x-auto text-slate-700 dark:text-slate-200`}
         >
           {result.content}
         </pre>
