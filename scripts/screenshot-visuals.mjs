@@ -128,6 +128,20 @@ async function main() {
   await sleep(200)
   await snap('10-settings-mcp-dark.png')
 
+  // Close settings and stack up sessions so the Explorer time-buckets kick in
+  await page.keyboard.press('Escape')
+  await sleep(200)
+  await toggleLight()
+  await createSession()
+  await sleep(200)
+  await createSession()
+  await sleep(400)
+  await snap('11-explorer-time-buckets-light.png')
+
+  await toggleDark()
+  await sleep(200)
+  await snap('12-explorer-time-buckets-dark.png')
+
   // Approval inline states are covered by ChatPanel.test.tsx unit tests —
   // driving a real pending approval requires either an LLM call or exposing
   // the socket globally, both of which are out of scope for a pure visual
