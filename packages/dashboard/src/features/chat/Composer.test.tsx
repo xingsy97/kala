@@ -44,9 +44,24 @@ describe('Composer', () => {
     )
 
     const chips = screen.getByTestId('composer-state-chips')
-    expect(chips.textContent ?? '').toContain('statusdone')
-    expect(chips.textContent ?? '').toContain('cur3')
-    expect(chips.textContent ?? '').toContain('tok42 in / 7 out')
+    expect(chips.textContent ?? '').toContain('AgentDone')
+    expect(chips.textContent ?? '').toContain('Cursor3')
+    expect(chips.textContent ?? '').toContain('Tokens42 in / 7 out')
+  })
+
+  it('shows slash command suggestions for /compact', () => {
+    const onCompact = vi.fn()
+    renderComposer({ onCompact })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/co' },
+    })
+
+    expect(screen.getByTestId('slash-command-menu')).toBeTruthy()
+    expect(screen.getByText('/compact')).toBeTruthy()
+    expect(screen.getByText('Compact context')).toBeTruthy()
+    fireEvent.click(screen.getByText('/compact'))
+    expect(onCompact).toHaveBeenCalledTimes(1)
   })
 
   it('submits /compact as a command instead of a user message', () => {

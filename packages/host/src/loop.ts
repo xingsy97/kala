@@ -90,6 +90,7 @@ export type LoopHandle = {
  */
 const SUMMARIZER_PROMPT =
   'You are a summarizer. Compress the conversation above into a single, dense summary under 800 tokens. Preserve every decision, file path, tool result, and open task. Do not add commentary. Reply with ONLY the summary text.'
+const COMPACT_TIMEOUT_MS = 60_000
 
 const AGENT_TOOL_NAME = 'agent'
 const DEFAULT_MAX_AGENT_DEPTH = 3
@@ -150,7 +151,12 @@ async function runCompact(
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
   const s = record.state.status
-  if (s !== 'idle' && s !== 'done' && s !== 'error') return
+  if (s !== 'idle' && s !== 'done' && s !== 'error') {
+    throw new Error('cannot compact while the session is busy')
+  }
+  if (!hasCompactableContent(record.state.messages)) {
+    throw new Error('nothing to compact yet')
+  }
 
   inFlight.add(sessionId)
   try {
@@ -184,17 +190,32 @@ async function summarize(
   messages: readonly Message[],
 ): Promise<string> {
   const model = deps.models?.get(sessionId)
-  const res = await deps.llm.call({
-    messages,
-    tools: [],
-    systemPrompt: SUMMARIZER_PROMPT,
-    ...(model ? { model } : {}),
-  })
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), COMPACT_TIMEOUT_MS)
+  let res: Awaited<ReturnType<HostLoopDeps['llm']['call']>>
+  try {
+    res = await deps.llm.call({
+      messages,
+      tools: [],
+      systemPrompt: SUMMARIZER_PROMPT,
+      signal: ctrl.signal,
+      ...(model ? { model } : {}),
+    })
+  } catch (err) {
+    if (ctrl.signal.aborted) throw new Error('compact timed out')
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
   const text = res.message.content
     .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
     .map((c) => c.text)
     .join('\n')
   return text.trim() || '[compact produced empty summary]'
+}
+
+function hasCompactableContent(messages: readonly Message[]): boolean {
+  return messages.some((m) => m.role !== 'system')
 }
 
 async function dispatchOne(
