@@ -114,7 +114,7 @@ export function InspectorPanel({
             <AlertDialogTitle>Fork session?</AlertDialogTitle>
             <AlertDialogDescription>
               A new session will branch at cursor{' '}
-              <span className="font-mono text-slate-700 dark:text-slate-200">
+              <span className="font-mono text-foreground dark:text-foreground">
                 {pendingForkSeq ?? ''}
               </span>{' '}
                -  its history up to (but not including) this row is copied. You
@@ -141,7 +141,7 @@ export function InspectorPanel({
         }}
       >
         <DialogContent className="max-w-5xl h-[86vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
-          <DialogHeader className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+          <DialogHeader className="border-b border-border px-4 py-3 dark:border-border">
             <DialogTitle className="text-base">
               Timeline event #{selectedTimeline?.entry.seq}
             </DialogTitle>
@@ -160,7 +160,7 @@ export function InspectorPanel({
             ) : null}
             </div>
           </ScrollArea>
-          <DialogFooter className="border-t border-slate-200 px-4 py-3 dark:border-slate-800">
+          <DialogFooter className="border-t border-border px-4 py-3 dark:border-border">
             <DialogClose asChild>
               <Button variant="outline" className="mt-0">Close</Button>
             </DialogClose>
@@ -195,10 +195,10 @@ function HistorySection({
 }): JSX.Element {
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500 flex-none">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
         <span className="font-medium">History</span>
         <div
-          className="ml-auto inline-flex rounded border border-slate-200 bg-white p-0.5 dark:border-slate-800 dark:bg-slate-950"
+          className="ml-auto inline-flex rounded border border-border bg-white p-0.5 dark:border-border dark:bg-background"
           data-testid="history-view-switch"
         >
           <button
@@ -207,8 +207,8 @@ function HistorySection({
             className={cn(
               'rounded px-2 py-0.5 text-[11px]',
               view === 'timeline'
-                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
+                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
             )}
             data-testid="history-view-timeline"
           >
@@ -220,8 +220,8 @@ function HistorySection({
             className={cn(
               'rounded px-2 py-0.5 text-[11px]',
               view === 'state-flow'
-                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
+                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
             )}
             data-testid="history-view-state-flow"
           >
@@ -247,12 +247,12 @@ function HistorySection({
 function StateFlowSection({ steps }: { steps: readonly StateFlowStep[] }): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-3 pb-2 text-xs text-slate-500 flex-none">
+      <div className="px-3 pb-2 text-xs text-muted-foreground flex-none">
         reducer status after each event
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {steps.length === 0 ? (
-          <div className="px-3 pb-3 text-sm text-slate-500">no state transitions yet</div>
+          <div className="px-3 pb-3 text-sm text-muted-foreground">no state transitions yet</div>
         ) : (
           <ol className="px-2 pb-3 space-y-1" data-testid="state-flow-list">
             {steps.map((step) => (
@@ -269,20 +269,20 @@ function StateFlowRow({ step }: { step: StateFlowStep }): JSX.Element {
   const changed = step.from !== step.to
   return (
     <li
-      className="rounded border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-800"
+      className="rounded border border-border px-2 py-1.5 text-xs dark:border-border"
       data-testid="state-flow-row"
     >
       <div className="flex items-center gap-2">
-        <span className="w-8 flex-none text-right font-mono text-slate-500">#{step.seq}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-slate-700 dark:text-slate-200">
+        <span className="w-8 flex-none text-right font-mono text-muted-foreground">#{step.seq}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-foreground dark:text-foreground">
           {step.eventKind}
         </span>
-        <span className={cn('font-mono', changed ? 'text-sky-700 dark:text-sky-300' : 'text-slate-500')}>
+        <span className={cn('font-mono', changed ? 'text-sky-700 dark:text-sky-300' : 'text-muted-foreground')}>
           {statusLabel(step.from)}  -  {statusLabel(step.to)}
         </span>
       </div>
       {step.effects.length > 0 ? (
-        <div className="mt-1 truncate pl-10 font-mono text-[11px] text-slate-500">
+        <div className="mt-1 truncate pl-10 font-mono text-[11px] text-muted-foreground">
           effects: {step.effects.map((e) => e.kind).join(', ')}
         </div>
       ) : null}
@@ -346,7 +346,7 @@ function effectTarget(e: Effect): { target: string; tone: string } {
     case 'request_approval':
       return { target: 'user', tone: 'text-amber-600 dark:text-amber-300' }
     case 'finish':
-      return { target: 'done', tone: 'text-slate-500' }
+      return { target: 'done', tone: 'text-muted-foreground' }
     case 'emit_error':
       return { target: 'error', tone: 'text-rose-600 dark:text-rose-300' }
   }
@@ -397,12 +397,12 @@ function Timeline({
 }): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-3 pb-2 text-xs text-slate-500 flex-none">
+      <div className="px-3 pb-2 text-xs text-muted-foreground flex-none">
         click any row to inspect the raw event + effects JSON
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {timeline.length === 0 ? (
-          <div className="px-3 pb-3 text-sm text-slate-500">no events yet</div>
+          <div className="px-3 pb-3 text-sm text-muted-foreground">no events yet</div>
         ) : (
           <ul className="px-2 pb-3 space-y-1">
             {timeline.map((t, i) => (
@@ -474,10 +474,10 @@ function TimelineRow({
         data-testid="timeline-row-header"
         className={cn(
           'group flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer select-none',
-          'hover:bg-slate-100 dark:hover:bg-slate-800/60',
+          'hover:bg-secondary dark:hover:bg-secondary/60',
         )}
       >
-        <span className="text-slate-500 w-8 text-right font-mono flex-none">
+        <span className="text-muted-foreground w-8 text-right font-mono flex-none">
           #{entry.seq}
         </span>
         <span
@@ -486,10 +486,10 @@ function TimelineRow({
         >
           {inbound.source}
         </span>
-        <span className="text-slate-500 flex-none"> - </span>
+        <span className="text-muted-foreground flex-none"> - </span>
         <span
           className={cn(
-            'font-mono flex-1 min-w-0 truncate text-slate-700 dark:text-slate-200',
+            'font-mono flex-1 min-w-0 truncate text-foreground dark:text-foreground',
           )}
           title={entry.event.kind}
         >
@@ -504,7 +504,7 @@ function TimelineRow({
             }}
             title={`scroll chat to message #${messageIndex}`}
             data-testid="jump-to-message-button"
-            className="inline-flex items-center gap-1 rounded border border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 hover:text-sky-700 hover:border-sky-400 dark:hover:text-sky-300 dark:hover:border-sky-500"
+            className="inline-flex items-center gap-1 rounded border border-border dark:border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-sky-700 hover:border-sky-400 dark:hover:text-sky-300 dark:hover:border-sky-500"
           >
             msg #{messageIndex}
           </button>
@@ -519,7 +519,7 @@ function TimelineRow({
             title={`fork a new session at cursor ${entry.seq}`}
             aria-label={`fork at cursor ${entry.seq}`}
             data-testid="fork-button"
-            className="inline-flex items-center gap-1 rounded border border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 hover:text-amber-700 hover:border-amber-400 dark:hover:text-amber-300 dark:hover:border-amber-500"
+            className="inline-flex items-center gap-1 rounded border border-border dark:border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-amber-700 hover:border-amber-400 dark:hover:text-amber-300 dark:hover:border-amber-500"
           >
             <GitBranch className="h-3 w-3" />
             fork
@@ -533,12 +533,12 @@ function TimelineRow({
             return (
               <li
                 key={ei}
-                className="flex items-center gap-1 text-[11px] text-slate-500 font-mono"
+                className="flex items-center gap-1 text-[11px] text-muted-foreground font-mono"
               >
-                <span className="text-slate-500"> - </span>
+                <span className="text-muted-foreground"> - </span>
                 <span className={target.tone}>{target.target}</span>
-                <span className="text-slate-500"> - </span>
-                <span className="text-slate-600 dark:text-slate-400 truncate">
+                <span className="text-muted-foreground"> - </span>
+                <span className="text-muted-foreground dark:text-muted-foreground truncate">
                   {eff.kind}
                 </span>
               </li>
@@ -699,16 +699,16 @@ function RuntimeSection({
 }): JSX.Element {
   const toolCount = config?.tools.length ?? 0
   return (
-    <div className="h-full flex flex-col border-t border-slate-200 dark:border-slate-800">
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500 flex-none">
+    <div className="h-full flex flex-col border-t border-border dark:border-border">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
         <span className="font-medium">Runtime</span>
-        <span className="ml-2 normal-case tracking-normal text-slate-500 dark:text-slate-600">
+        <span className="ml-2 normal-case tracking-normal text-muted-foreground dark:text-muted-foreground">
           {view === 'state'
             ? 'full runtime state JSON'
             : `${toolCount} registered ${toolCount === 1 ? 'tool' : 'tools'}`}
         </span>
         <div
-          className="ml-auto inline-flex rounded border border-slate-200 bg-white p-0.5 dark:border-slate-800 dark:bg-slate-950"
+          className="ml-auto inline-flex rounded border border-border bg-white p-0.5 dark:border-border dark:bg-background"
           data-testid="runtime-view-switch"
         >
           <button
@@ -717,8 +717,8 @@ function RuntimeSection({
             className={cn(
               'rounded px-2 py-0.5 text-[11px]',
               view === 'state'
-                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
+                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
             )}
             data-testid="runtime-view-state"
           >
@@ -730,8 +730,8 @@ function RuntimeSection({
             className={cn(
               'rounded px-2 py-0.5 text-[11px]',
               view === 'tools'
-                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
-                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
+                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
             )}
             data-testid="runtime-view-tools"
           >
@@ -747,7 +747,7 @@ function RuntimeSection({
 }
 
 function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {
-  if (!state) return <div className="text-xs text-slate-500"> - </div>
+  if (!state) return <div className="text-xs text-muted-foreground"> - </div>
   return (
     <JsonBlock
       label="AgentState"
@@ -761,7 +761,7 @@ function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {
 function ToolRegistrySection({ tools }: { tools: readonly ToolSchema[] }): JSX.Element {
   if (tools.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center rounded border border-dashed border-slate-200 px-3 text-center text-xs text-slate-500 dark:border-slate-800">
+      <div className="flex h-full items-center justify-center rounded border border-dashed border-border px-3 text-center text-xs text-muted-foreground dark:border-border">
         No tools registered for this session.
       </div>
     )
@@ -780,11 +780,11 @@ function ToolRegistrySection({ tools }: { tools: readonly ToolSchema[] }): JSX.E
 function ToolRegistryItem({ tool }: { tool: ToolSchema }): JSX.Element {
   return (
     <section
-      className="rounded border border-slate-200 bg-white p-2 text-xs dark:border-slate-800 dark:bg-slate-950/40"
+      className="rounded border border-border bg-white p-2 text-xs dark:border-border dark:bg-background/40"
       data-testid="tool-registry-item"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-slate-800 dark:text-slate-100">
+        <span className="min-w-0 flex-1 truncate font-mono text-foreground dark:text-foreground">
           {tool.name}
         </span>
         <span
@@ -798,7 +798,7 @@ function ToolRegistryItem({ tool }: { tool: ToolSchema }): JSX.Element {
           {tool.requiresApproval ? 'approval required' : 'auto allowed'}
         </span>
       </div>
-      <p className="mt-1 line-clamp-3 text-slate-600 dark:text-slate-400">
+      <p className="mt-1 line-clamp-3 text-muted-foreground dark:text-muted-foreground">
         {tool.description || 'No description provided.'}
       </p>
       <div className="mt-2">

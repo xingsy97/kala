@@ -46,11 +46,11 @@ function EditDiff({ input }: { input: EditInput }): JSX.Element {
   const replaceAll = input.replace_all === true
   return (
     <div
-      className="mt-1.5 basis-full overflow-hidden rounded border border-amber-200 bg-white dark:border-amber-900/60 dark:bg-slate-950"
+      className="mt-1.5 basis-full overflow-hidden rounded border border-amber-200 bg-white dark:border-amber-900/60 dark:bg-background"
       data-testid="diff-preview"
     >
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-2 py-1 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
-        <span className="font-mono normal-case text-slate-700 dark:text-slate-200">{path}</span>
+      <div className="flex items-center justify-between border-b border-border bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground dark:border-border dark:bg-card/60 dark:text-muted-foreground">
+        <span className="font-mono normal-case text-foreground dark:text-foreground">{path}</span>
         <span>{replaceAll ? 'edit  -  replace_all' : 'edit'}</span>
       </div>
       <ScrollArea className="max-h-80">
@@ -73,11 +73,11 @@ function WritePreview({ input }: { input: WriteInput }): JSX.Element {
   const shown = truncated ? lines.slice(0, WRITE_PREVIEW_LINES) : lines
   return (
     <div
-      className="mt-1.5 basis-full overflow-hidden rounded border border-emerald-200 bg-white dark:border-emerald-900/60 dark:bg-slate-950"
+      className="mt-1.5 basis-full overflow-hidden rounded border border-emerald-200 bg-white dark:border-emerald-900/60 dark:bg-background"
       data-testid="diff-preview"
     >
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-2 py-1 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
-        <span className="font-mono normal-case text-slate-700 dark:text-slate-200">{path}</span>
+      <div className="flex items-center justify-between border-b border-border bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground dark:border-border dark:bg-card/60 dark:text-muted-foreground">
+        <span className="font-mono normal-case text-foreground dark:text-foreground">{path}</span>
         <span>
           write  -  {formatBytes(bytes)}
           {truncated ? `  -  showing ${WRITE_PREVIEW_LINES} of ${lines.length} lines` : ''}
@@ -87,12 +87,12 @@ function WritePreview({ input }: { input: WriteInput }): JSX.Element {
         <pre className="whitespace-pre px-2 py-1 font-mono text-[11px] leading-snug">
           {shown.map((line, i) => (
             <span key={i} className="flex">
-              <span className="mr-2 w-8 flex-none select-none text-right text-slate-400">{i + 1}</span>
+              <span className="mr-2 w-8 flex-none select-none text-right text-muted-foreground">{i + 1}</span>
               <span className="text-emerald-700 dark:text-emerald-300">+ {line}</span>
             </span>
           ))}
           {truncated ? (
-            <span className="mt-1 block text-slate-400 italic"> - {lines.length - WRITE_PREVIEW_LINES} more lines</span>
+            <span className="mt-1 block text-muted-foreground italic"> - {lines.length - WRITE_PREVIEW_LINES} more lines</span>
           ) : null}
         </pre>
       </ScrollArea>
@@ -109,7 +109,7 @@ type DiffRow =
 function DiffLineRow({ row }: { row: DiffRow }): JSX.Element {
   if (row.kind === 'gap') {
     return (
-      <span className="block px-1 text-slate-400 italic">
+      <span className="block px-1 text-muted-foreground italic">
          -  {row.count} unchanged line{row.count === 1 ? '' : 's'} skipped
       </span>
     )
@@ -120,7 +120,7 @@ function DiffLineRow({ row }: { row: DiffRow }): JSX.Element {
       ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
       : row.kind === 'del'
         ? 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
-        : 'text-slate-700 dark:text-slate-300'
+        : 'text-foreground dark:text-muted-foreground'
   return (
     <span className={`block px-1 ${tone}`}>
       <span className="mr-1 select-none">{prefix}</span>

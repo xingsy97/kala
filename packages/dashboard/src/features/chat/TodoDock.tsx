@@ -28,30 +28,30 @@ export function TodoDock({ todos }: Props): JSX.Element | null {
 
   return (
     <div
-      className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60"
+      className="border-t border-border dark:border-border bg-muted dark:bg-card/60"
       data-testid="todo-dock"
     >
       <button
         type="button"
-        className="w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/60"
+        className="w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-secondary dark:hover:bg-secondary/60"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         data-testid="todo-dock-toggle"
       >
         {open ? (
-          <ChevronDown className="h-4 w-4 text-slate-500 dark:text-slate-400 flex-none" />
+          <ChevronDown className="h-4 w-4 text-muted-foreground dark:text-muted-foreground flex-none" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-slate-500 dark:text-slate-400 flex-none" />
+          <ChevronRight className="h-4 w-4 text-muted-foreground dark:text-muted-foreground flex-none" />
         )}
         <span
-          className="font-medium text-slate-700 dark:text-slate-200"
+          className="font-medium text-foreground dark:text-foreground"
           data-testid="todo-dock-progress"
         >
           {completed}/{total} tasks
         </span>
         {!open && active ? (
           <span
-            className="truncate text-xs text-slate-500 dark:text-slate-400 flex-1 text-left"
+            className="truncate text-xs text-muted-foreground dark:text-muted-foreground flex-1 text-left"
             data-testid="todo-dock-active-preview"
           >
             {active.content}
@@ -85,10 +85,10 @@ function TodoRow({ todo }: { todo: TodoItem }): JSX.Element {
       <span
         className={cn(
           'flex-1 min-w-0',
-          strike && 'line-through text-slate-400 dark:text-slate-500',
+          strike && 'line-through text-muted-foreground dark:text-muted-foreground',
           todo.status === 'in_progress' &&
-            'text-slate-900 dark:text-slate-100 font-medium',
-          todo.status === 'pending' && 'text-slate-700 dark:text-slate-300',
+            'text-foreground dark:text-foreground font-medium',
+          todo.status === 'pending' && 'text-foreground dark:text-muted-foreground',
         )}
       >
         {todo.content}
@@ -102,7 +102,7 @@ function TodoRow({ todo }: { todo: TodoItem }): JSX.Element {
             todo.priority === 'medium' &&
               'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300',
             todo.priority === 'low' &&
-              'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400',
+              'bg-muted dark:bg-secondary text-muted-foreground dark:text-muted-foreground',
           )}
         >
           {todo.priority}
@@ -118,7 +118,7 @@ function StatusIcon({ status }: { status: TodoStatus }): JSX.Element {
     return <Check className={cn(cls, 'text-emerald-600 dark:text-emerald-400')} />
   }
   if (status === 'cancelled') {
-    return <X className={cn(cls, 'text-slate-400 dark:text-slate-500')} />
+    return <X className={cn(cls, 'text-muted-foreground dark:text-muted-foreground')} />
   }
   if (status === 'in_progress') {
     return (
@@ -127,5 +127,5 @@ function StatusIcon({ status }: { status: TodoStatus }): JSX.Element {
       />
     )
   }
-  return <Circle className={cn(cls, 'text-slate-400 dark:text-slate-500')} />
+  return <Circle className={cn(cls, 'text-muted-foreground dark:text-muted-foreground')} />
 }

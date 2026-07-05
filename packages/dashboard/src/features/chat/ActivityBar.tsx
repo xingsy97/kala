@@ -39,7 +39,7 @@ export function ActivityBar({ state, compactStatus }: Props): JSX.Element | null
       </span>
       {activity.detail ? (
         <span
-          className="truncate text-slate-600 dark:text-slate-300"
+          className="truncate text-muted-foreground dark:text-muted-foreground"
           data-testid="activity-detail"
         >
           {activity.detail}
@@ -102,7 +102,7 @@ function activityFor(
       detail: compactStatus.message,
       icon: Check,
       className:
-        'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200',
+        'border-border bg-muted text-foreground dark:border-border dark:bg-card/60 dark:text-foreground',
     }
   }
   if (!state) {
@@ -111,7 +111,7 @@ function activityFor(
       detail: 'waiting for session state',
       icon: Clock,
       className:
-        'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200',
+        'border-border bg-muted text-foreground dark:border-border dark:bg-card/60 dark:text-foreground',
     }
   }
   if (state.status === 'thinking') {
@@ -150,7 +150,7 @@ function activityFor(
     label: `Agent ${agentStatusLabel(state.status)}`,
     icon: Check,
     className:
-      'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200',
+      'border-border bg-muted text-foreground dark:border-border dark:bg-card/60 dark:text-foreground',
   }
 }
 

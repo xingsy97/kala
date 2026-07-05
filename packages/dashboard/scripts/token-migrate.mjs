@@ -21,6 +21,8 @@ const ROOT = new URL('../src/', import.meta.url).pathname
 const WRITE = process.argv.includes('--write')
 const ONLY_IDX = process.argv.indexOf('--only')
 const ONLY = ONLY_IDX >= 0 ? process.argv[ONLY_IDX + 1] : null
+const EXCLUDE_IDX = process.argv.indexOf('--exclude')
+const EXCLUDE = EXCLUDE_IDX >= 0 ? process.argv[EXCLUDE_IDX + 1].split(',') : []
 
 const REPLACEMENTS = [
   // Backgrounds (order matters: 950 before 900 before 950-suffixed variants)
@@ -70,7 +72,9 @@ function* walk(dir) {
 
 const changed = []
 for (const file of walk(ROOT)) {
-  if (ONLY && !file.replace(ROOT, '').startsWith(ONLY)) continue
+  const rel = file.replace(ROOT, '')
+  if (ONLY && !rel.startsWith(ONLY)) continue
+  if (EXCLUDE.some((pat) => rel.includes(pat))) continue
   const src = readFileSync(file, 'utf8')
   let out = src
   const perFile = {}
