@@ -16,7 +16,7 @@ describe('InspectorPanel', () => {
     render(<InspectorPanel state={null} timeline={[]} />)
     expect(screen.getByText(/timeline/i)).toBeTruthy()
     expect(screen.getByText(/no events yet/i)).toBeTruthy()
-    expect(screen.getByText(/Agent state/i)).toBeTruthy()
+    expect(screen.getByText('Runtime')).toBeTruthy()
     expect(screen.getByText(' - ')).toBeTruthy()
   })
 
@@ -26,6 +26,49 @@ describe('InspectorPanel', () => {
     expect(screen.getByText(/full runtime state JSON/)).toBeTruthy()
     expect(document.body.textContent ?? '').toContain('inputTokens')
     expect(document.body.textContent ?? '').toContain('42')
+  })
+
+  it('shows the current session tool registry with descriptions and input schema', () => {
+    render(
+      <InspectorPanel
+        state={baseState}
+        config={{
+          tools: [
+            {
+              name: 'shell_exec',
+              description: 'Run a shell command in the session workspace.',
+              requiresApproval: true,
+              inputSchema: {
+                type: 'object',
+                required: ['cmd'],
+                properties: {
+                  cmd: { type: 'string', description: 'Command to run.' },
+                  timeoutMs: { type: 'number' },
+                },
+              },
+            },
+          ],
+        }}
+        timeline={[]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('runtime-view-tools'))
+
+    expect(screen.getByTestId('tool-registry')).toBeTruthy()
+    expect(screen.getByText('shell_exec')).toBeTruthy()
+    expect(screen.getByText('approval required')).toBeTruthy()
+    expect(screen.getByText('Run a shell command in the session workspace.')).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('expand all JSON'))
+    const text = document.body.textContent ?? ''
+    expect(text).toContain('input schema  -  shell_exec')
+    expect(text).toContain('timeoutMs')
+  })
+
+  it('shows an empty tool registry state when no tools are registered', () => {
+    render(<InspectorPanel state={baseState} config={{ tools: [] }} timeline={[]} />)
+    fireEvent.click(screen.getByTestId('runtime-view-tools'))
+    expect(screen.getByText('No tools registered for this session.')).toBeTruthy()
   })
 
   describe('fork confirmation', () => {
