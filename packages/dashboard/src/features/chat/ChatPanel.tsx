@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   Archive,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -23,6 +24,7 @@ import type {
   ToolCallContent,
   ToolResultContent,
 } from '@agent-kernel/kernel'
+import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
@@ -30,6 +32,7 @@ import { Textarea } from '../../components/ui/textarea.js'
 import { formatTokens } from '../../lib/format.js'
 import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
+import { DiffPreview } from './DiffPreview.js'
 
 type Props = {
   messages?: readonly Message[]
@@ -37,6 +40,8 @@ type Props = {
   highlightIndex?: number | null
   onEditAndRerun?: (seq: number, text: string) => void
   onSuggest?: (text: string) => void
+  pendingApprovals?: readonly ApprovalRequiredEvent[]
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
 }
 
 const EMPTY_SUGGESTIONS: ReadonlyArray<{
@@ -72,6 +77,8 @@ export function ChatPanel({
   highlightIndex,
   onEditAndRerun,
   onSuggest,
+  pendingApprovals,
+  onApprovalDecision,
 }: Props): JSX.Element {
   const fallbackItems: TranscriptItem[] = (messages ?? []).map((message) => ({
     kind: 'message',
@@ -86,6 +93,8 @@ export function ChatPanel({
       if (content.type === 'tool_call') toolNameByCallId.set(content.callId, content.name)
     }
   }
+  const approvalByCallId = new Map<string, ApprovalRequiredEvent>()
+  for (const a of pendingApprovals ?? []) approvalByCallId.set(a.callId, a)
   let messageIndex = -1
   const isEmpty = transcriptItems.length === 0
   return (
@@ -104,6 +113,8 @@ export function ChatPanel({
             message={item.message}
             highlighted={highlightIndex === currentMessageIndex}
             toolNameByCallId={toolNameByCallId}
+            approvalByCallId={approvalByCallId}
+            onApprovalDecision={onApprovalDecision}
             seq={item.seq}
             onEditAndRerun={onEditAndRerun}
           />
@@ -198,6 +209,8 @@ function MessageRow({
   message,
   highlighted,
   toolNameByCallId,
+  approvalByCallId,
+  onApprovalDecision,
   seq,
   onEditAndRerun,
 }: {
@@ -205,6 +218,8 @@ function MessageRow({
   message: Message
   highlighted: boolean
   toolNameByCallId: ReadonlyMap<string, string>
+  approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   seq?: number
   onEditAndRerun?: (seq: number, text: string) => void
 }): JSX.Element {
@@ -288,6 +303,8 @@ function MessageRow({
                 content={c}
                 role={message.role}
                 toolNameByCallId={toolNameByCallId}
+                approvalByCallId={approvalByCallId}
+                onApprovalDecision={onApprovalDecision}
               />
             ))}
           </div>
@@ -355,6 +372,8 @@ function MessageRow({
               content={c}
               role={message.role}
               toolNameByCallId={toolNameByCallId}
+              approvalByCallId={approvalByCallId}
+              onApprovalDecision={onApprovalDecision}
             />
           ))}
         </div>
@@ -367,10 +386,14 @@ function ContentBlock({
   content,
   role,
   toolNameByCallId,
+  approvalByCallId,
+  onApprovalDecision,
 }: {
   content: MessageContent
   role: Message['role']
   toolNameByCallId: ReadonlyMap<string, string>
+  approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
 }): JSX.Element {
   if (content.type === 'text') {
     if (role === 'assistant') return <AssistantMarkdown text={content.text} />
@@ -387,7 +410,15 @@ function ContentBlock({
       </div>
     )
   }
-  if (content.type === 'tool_call') return <ToolCallBlock call={content} />
+  if (content.type === 'tool_call') {
+    return (
+      <ToolCallBlock
+        call={content}
+        approval={approvalByCallId.get(content.callId) ?? null}
+        onApprovalDecision={onApprovalDecision}
+      />
+    )
+  }
   if (content.type === 'tool_result') {
     return (
       <ToolResultBlock
@@ -487,18 +518,59 @@ function AssistantMarkdown({ text }: { text: string }): JSX.Element {
   )
 }
 
-function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
-  const [open, setOpen] = useState(false)
+function ToolCallBlock({
+  call,
+  approval,
+  onApprovalDecision,
+}: {
+  call: ToolCallContent
+  approval: ApprovalRequiredEvent | null
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
+}): JSX.Element {
+  const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
+  const hasDiffPreview = isPendingApproval && (call.name === 'edit' || call.name === 'write')
+  const [open, setOpen] = useState(isPendingApproval)
   return (
-    <div className="min-w-0 max-w-full">
+    <div
+      className={cn(
+        'min-w-0 max-w-full rounded-lg border transition-colors',
+        isPendingApproval
+          ? 'border-amber-400/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20'
+          : 'border-border',
+      )}
+      data-testid={
+        isPendingApproval ? `tool-call-pending-${call.callId}` : undefined
+      }
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="group/tool flex w-full min-w-0 items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-muted"
+        className={cn(
+          'group/tool flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors',
+          isPendingApproval
+            ? 'hover:bg-amber-100/40 dark:hover:bg-amber-950/30'
+            : 'bg-muted/40 hover:bg-muted',
+        )}
         data-testid={`tool-call-toggle-${call.callId}`}
       >
-        <Wrench className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-        <span className="font-medium text-muted-foreground">Assistant requested tool</span>
+        <Wrench
+          className={cn(
+            'h-3.5 w-3.5 flex-none',
+            isPendingApproval
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-muted-foreground',
+          )}
+        />
+        <span
+          className={cn(
+            'font-medium',
+            isPendingApproval
+              ? 'text-amber-800 dark:text-amber-200'
+              : 'text-muted-foreground',
+          )}
+        >
+          {isPendingApproval ? 'Approval needed' : 'Assistant requested tool'}
+        </span>
         <span className="min-w-0 max-w-[45%] truncate rounded border bg-background px-1.5 py-0.5 font-mono text-[11px]">
           {call.name}
         </span>
@@ -513,12 +585,41 @@ function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
         )}
       </button>
       {open ? (
-        <div className="mt-2 overflow-hidden rounded-lg border bg-muted/30">
-          <ScrollArea>
-            <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
-              {JSON.stringify(call.input, null, 2)}
-            </pre>
-          </ScrollArea>
+        <div className="flex min-w-0 flex-col gap-2 border-t border-inherit px-3 py-2">
+          {isPendingApproval && hasDiffPreview ? (
+            <DiffPreview toolName={call.name} input={approval.input} />
+          ) : (
+            <div className="overflow-hidden rounded-md border bg-muted/30">
+              <ScrollArea>
+                <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                  {JSON.stringify(call.input, null, 2)}
+                </pre>
+              </ScrollArea>
+            </div>
+          )}
+          {isPendingApproval ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onApprovalDecision?.(call.callId, 'reject')}
+                data-testid="approval-reject"
+                className="h-7 px-3 flex-none"
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                Reject
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => onApprovalDecision?.(call.callId, 'approve')}
+                data-testid="approval-approve"
+                className="h-7 flex-none bg-emerald-600 px-3 text-white hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600"
+              >
+                <Check className="mr-1 h-3.5 w-3.5" />
+                Approve
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
