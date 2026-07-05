@@ -298,11 +298,13 @@ export class SessionStore {
     // pendingCalls. The promise that would have resolved is gone, so the
     // session hangs. Synthesize a failed tool_result for each pending call
     // and append it to the log so replay stays exact.
+    let recoveredPending = false
     if (
       (finalState.status === 'awaiting_approval' ||
         finalState.status === 'executing_tools') &&
       finalState.pendingCalls.length > 0
     ) {
+      recoveredPending = true
       for (const pending of finalState.pendingCalls) {
         const recoveryEvent: AgentEvent = {
           kind: 'tool_result',
@@ -339,6 +341,41 @@ export class SessionStore {
           effects: [],
         })
       }
+    }
+
+    // Mid-stream recovery: status='thinking' with no pendingCalls means the
+    // last effect was `call_llm` and the reply never came back before the
+    // host died. Without a synthetic response the session would sit in
+    // `thinking` forever  -  no client notification, no way to send a new
+    // user message (reducer only accepts `user_message` from idle/done/error).
+    // Synthesize a minimal assistant message so the reducer transitions to
+    // `done` and dashboards see the closure via the normal event broadcast.
+    //
+    // Guard: skip if we just recovered pending tool calls above. In that
+    // case `thinking` is a transient state produced by our synthetic events
+    // asking the LLM to react to the failures  -  that's a legitimate next
+    // turn, not a stuck stream.
+    if (
+      !recoveredPending &&
+      finalState.status === 'thinking' &&
+      finalState.pendingCalls.length === 0
+    ) {
+      const recoveryEvent: AgentEvent = {
+        kind: 'llm_response',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '[interrupted]' }],
+        },
+      }
+      const { next } = step(finalState, recoveryEvent, parsed.header.config)
+      finalState = next
+      cursor = next.cursor
+      await appendEventEntry({
+        path,
+        seq: cursor,
+        event: recoveryEvent,
+        effects: [],
+      })
     }
 
     const record: SessionRecord = {
