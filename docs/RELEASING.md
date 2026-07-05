@@ -41,3 +41,49 @@ pnpm run publish:all       # kernel → host → executor in order
 
 Each calls the package's `publish:npm` script, which rebuilds first and then
 runs `pnpm publish --access public --no-git-checks`.
+
+## GitHub Release assets
+
+Codex-style direct downloads are produced by the `GitHub Release Assets`
+workflow. It runs on aggregate tags matching `v*` and component tags matching
+`host-v*`, `executor-v*`, or `dashboard-v*`. It can also be run manually with a
+target tag and component. The workflow builds, tests, typechecks, bundles
+release assets, and uploads them to the GitHub Release for that tag.
+
+Current assets:
+
+| Asset                                  | Description                                      |
+| -------------------------------------- | ------------------------------------------------ |
+| `agent-kernel-host.cjs`                | Single-file Node 22 executable for the host CLI. |
+| `agent-kernel-executor.cjs`            | Single-file Node 22 executable for the executor. |
+| `agent-kernel-dashboard-dist.tar.gz`   | Static dashboard bundle served by the host.      |
+| `manifest.json`                        | Asset manifest and runtime notes.                |
+| `SHA256SUMS`                           | Checksums for release verification.              |
+
+Tag behavior:
+
+| Tag pattern       | Uploaded assets                                      |
+| ----------------- | ---------------------------------------------------- |
+| `v*`              | Host, executor, dashboard tarball, manifest, sums.   |
+| `host-v*`         | Host, dashboard tarball, manifest, sums.             |
+| `executor-v*`     | Executor, manifest, sums.                            |
+| `dashboard-v*`    | Dashboard tarball, manifest, sums.                   |
+
+These are single-file Node executables, not native binaries. They require
+Node.js 22 or newer. To serve the dashboard with the host asset, unpack the
+dashboard tarball and set `DASHBOARD_DIR`:
+
+```bash
+tar -xzf agent-kernel-dashboard-dist.tar.gz -C /tmp/agent-kernel-dashboard
+DASHBOARD_DIR=/tmp/agent-kernel-dashboard node agent-kernel-host.cjs
+HOST_URL=http://localhost:3000 node agent-kernel-executor.cjs
+```
+
+Local dry run:
+
+```bash
+pnpm run build:release-assets
+pnpm run build:release-assets -- --component host
+ls -lh release/
+(cd release && shasum -a 256 -c SHA256SUMS)
+```

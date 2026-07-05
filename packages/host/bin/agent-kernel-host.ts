@@ -24,7 +24,6 @@
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import process from 'node:process'
 
 import type { ModelInfo } from '@agent-kernel/shared'
@@ -205,7 +204,7 @@ function resolveDashboardDir(): string | undefined {
   if (override) {
     return existsSync(join(override, 'index.html')) ? override : undefined
   }
-  const here = dirname(fileURLToPath(import.meta.url))
+  const here = dirname(currentModulePath())
   const candidates = [
     // Monorepo layout: packages/host/bin/ → packages/dashboard/dist/
     resolve(here, '..', '..', 'dashboard', 'dist'),
@@ -216,6 +215,10 @@ function resolveDashboardDir(): string | undefined {
     if (existsSync(join(c, 'index.html'))) return c
   }
   return undefined
+}
+
+function currentModulePath(): string {
+  return resolve(process.argv[1] ?? process.cwd())
 }
 
 main().catch((err) => {
