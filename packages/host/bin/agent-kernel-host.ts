@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
-import type { ModelInfo } from '@agent-kernel/shared'
+import type { ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
 
 import { anthropicAdapter } from '../src/llm/anthropic.js'
 import { openaiAdapter } from '../src/llm/openai.js'
@@ -56,6 +56,32 @@ async function main(): Promise<void> {
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
 
+  const settings: ServerSettingsPayload = {
+    providers: runtime.providers.map((p) => ({
+      id: p.id,
+      label: p.label,
+      wire: p.wire,
+      ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
+      models: p.models,
+    })),
+    defaultModel,
+    hooks: hooks.map((h) => ({
+      event: h.event,
+      command: h.command,
+      ...(h.match !== undefined ? { match: h.match } : {}),
+    })),
+    paths: {
+      claudeSettings: join(homedir(), '.claude', 'settings.json'),
+      codexConfig: join(homedir(), '.codex', 'config.toml'),
+      hooksConfig: join(homedir(), '.config', 'agent-kernel', 'config.toml'),
+      sessionsDir,
+    },
+    mcp: {
+      supported: false,
+      note: 'MCP runtime is not implemented yet — declaring servers in session config is a no-op.',
+    },
+  }
+
   const server = await startHostServer({
     port,
     sessionsDir,
@@ -69,6 +95,7 @@ async function main(): Promise<void> {
     },
     models,
     defaultModel,
+    settings,
     ...(process.env.HOST_AUTH_TOKEN
       ? { authToken: process.env.HOST_AUTH_TOKEN }
       : {}),
