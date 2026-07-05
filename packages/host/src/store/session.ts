@@ -46,6 +46,7 @@ export type CreateSessionParams = {
   sessionId?: string
   workspaceId?: string
   workspaceName?: string
+  initialCwd?: string
 }
 
 export class SessionStore {
@@ -71,12 +72,15 @@ export class SessionStore {
         sessionId,
         systemPrompt: params.systemPrompt ?? params.config.systemPrompt,
       })
+    const stateWithCwd: AgentState = params.initialCwd
+      ? { ...initialState, cwd: params.initialCwd }
+      : initialState
     const logPath = this.pathFor(sessionId)
     await writeHeader({
       path: logPath,
       sessionId,
       config: params.config,
-      initialState,
+      initialState: stateWithCwd,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
@@ -89,12 +93,15 @@ export class SessionStore {
       ...(params.workspaceName !== undefined
         ? { workspaceName: params.workspaceName }
         : {}),
+      ...(params.initialCwd !== undefined
+        ? { initialCwd: params.initialCwd }
+        : {}),
     })
     const record: SessionRecord = {
       sessionId,
       logPath,
       config: params.config,
-      state: initialState,
+      state: stateWithCwd,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
@@ -369,6 +376,11 @@ function summarizeLog(
   // would be a guess. Host can layer it on later by tracking attach history.
   const status =
     lastSnapshot?.state.status ?? statusFromEffects(events)
+  const foldedState = lastSnapshot?.state ?? fold(
+    header.initialState,
+    events.map((e) => e.event),
+    header.config,
+  )
   return {
     sessionId: header.sessionId,
     createdAt: header.ts,
@@ -382,6 +394,9 @@ function summarizeLog(
       ? { workspaceName: header.workspaceName }
       : {}),
     ...(status ? { status } : {}),
+    ...(foldedState.cwd
+      ? { currentCwd: foldedState.cwd }
+      : {}),
     ...(firstUserText
       ? { firstUserMessage: firstUserText.slice(0, 120) }
       : {}),

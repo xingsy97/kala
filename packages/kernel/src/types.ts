@@ -161,6 +161,7 @@ export type AgentState = {
   readonly usage: UsageTotal
   readonly cursor: number // monotonic event counter, for replay positioning
   readonly todos: readonly TodoItem[]
+  readonly cwd?: string
   /**
    * Derived on every step from `usage.inputTokens / config.contextLimit`.
    * `'none'` when contextLimit is unset or well below soft threshold. The
@@ -249,6 +250,11 @@ export type ApprovalModeChangedEvent = {
   mode: ApprovalMode
 }
 
+export type CwdChangedEvent = {
+  kind: 'cwd_changed'
+  cwd: string
+}
+
 export type AgentEvent =
   | UserMessageEvent
   | LlmResponseEvent
@@ -259,6 +265,7 @@ export type AgentEvent =
   | CancelEvent
   | CompactReplacedEvent
   | ApprovalModeChangedEvent
+  | CwdChangedEvent
 
 // ============================================================================
 // Effects (outputs from the reducer; host performs the actual IO)
@@ -275,6 +282,7 @@ export type CallToolEffect = {
   callId: string
   name: string
   input: Record<string, unknown>
+  cwd?: string
 }
 
 export type RequestApprovalEffect = {
