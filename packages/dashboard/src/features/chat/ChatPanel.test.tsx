@@ -180,4 +180,58 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByTestId('edit-message-submit-0'))
     expect(onEditAndRerun).toHaveBeenCalledWith(4, 'revised text')
   })
+
+  it('renders inline approval controls on the pending tool_call', () => {
+    const onApprovalDecision = vi.fn()
+    render(
+      <ChatPanel
+        pendingApprovals={[
+          { sessionId: 's', callId: 'c9', name: 'write', input: { path: '/tmp/x' } },
+        ]}
+        onApprovalDecision={onApprovalDecision}
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'c9',
+                name: 'write',
+                input: { path: '/tmp/x' },
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+    expect(screen.getByTestId('tool-call-pending-c9')).toBeTruthy()
+    expect(screen.getByText('Approval needed')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('approval-approve'))
+    expect(onApprovalDecision).toHaveBeenCalledWith('c9', 'approve')
+    fireEvent.click(screen.getByTestId('approval-reject'))
+    expect(onApprovalDecision).toHaveBeenCalledWith('c9', 'reject')
+  })
+
+  it('leaves non-pending tool_calls as regular collapsed cards', () => {
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'c10',
+                name: 'bash',
+                input: { command: 'echo hi' },
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+    expect(screen.queryByTestId('tool-call-pending-c10')).toBeNull()
+    expect(screen.queryByTestId('approval-approve')).toBeNull()
+    expect(screen.getByText('Assistant requested tool')).toBeTruthy()
+  })
 })

@@ -21,7 +21,6 @@ import {
 } from './components/ui/resizable.js'
 import { ScrollArea } from './components/ui/scroll-area.js'
 import { ActivityBar, type CompactStatus } from './features/chat/ActivityBar.js'
-import { ApprovalsPanel } from './features/chat/ApprovalsPanel.js'
 import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
@@ -437,6 +436,12 @@ export function App(): JSX.Element {
                       <ChatPanel
                         items={chatItems}
                         highlightIndex={highlightIndex}
+                        pendingApprovals={session.pendingApprovals}
+                        onApprovalDecision={(callId, decision) => {
+                          if (!session.socket) return
+                          respondApproval(session.socket, config.sessionId, callId, decision)
+                          session.dismissApproval(callId)
+                        }}
                         onEditAndRerun={(seq, text) => {
                           if (!session.socket) return
                           session.socket.emit('client:fork', {
@@ -456,14 +461,6 @@ export function App(): JSX.Element {
                         }}
                       />
                     </ScrollArea>
-                    <ApprovalsPanel
-                      approvals={session.pendingApprovals}
-                      onDecision={(callId, decision) => {
-                        if (!session.socket) return
-                        respondApproval(session.socket, config.sessionId, callId, decision)
-                        session.dismissApproval(callId)
-                      }}
-                    />
                     <TodoDock todos={session.state?.todos ?? []} />
                     <BackgroundTerminalPanel tasks={backgroundTasks} />
                     <ActivityBar state={session.state} compactStatus={compactStatus} />
