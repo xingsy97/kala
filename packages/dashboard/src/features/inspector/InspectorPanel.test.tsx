@@ -111,6 +111,40 @@ describe('InspectorPanel', () => {
     expect(screen.getByText('finish')).toBeTruthy()
   })
 
+  it('renders state flow transitions separately from timeline rows', () => {
+    render(
+      <InspectorPanel
+        state={baseState}
+        timeline={[
+          {
+            seq: 1,
+            ts: '2026-07-04T00:00:00Z',
+            event: { kind: 'user_message', text: 'hi' },
+            effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+          },
+          {
+            seq: 2,
+            ts: '2026-07-04T00:00:01Z',
+            event: {
+              kind: 'llm_response',
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'ok' }],
+              },
+            },
+            effects: [{ kind: 'finish' }],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('State flow')).toBeTruthy()
+    const rows = screen.getAllByTestId('state-flow-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.textContent).toContain('Ready → Waiting for LLM')
+    expect(rows[1]?.textContent).toContain('Waiting for LLM → Done')
+  })
+
   it('invokes onJumpToMessage with the message index of a clicked row', () => {
     const onJumpToMessage = vi.fn()
     render(
