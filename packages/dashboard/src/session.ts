@@ -16,10 +16,12 @@ import type {
 } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
+  AttachedExecutor,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
   SessionErrorEvent,
   SessionForkedEvent,
+  SessionSummary,
 } from '@agent-kernel/shared'
 import { io, type Socket } from 'socket.io-client'
 
@@ -50,7 +52,16 @@ export type SessionView = {
   lastError: SessionErrorEvent | null
   parentSessionId: string | null
   parentCursor: number | null
+  selectedModel: string | null
   socket: DashboardSocket | null
+  /**
+   * Optimistically drop a pending approval from the local list, so the card
+   * disappears the instant the user clicks approve/reject instead of lingering
+   * until a `state:changed` roundtrip. The host will eventually emit
+   * `event:appended` for the tool_result  -  that path re-renders unrelated UI
+   * and does not re-add the approval, so the local drop is safe.
+   */
+  dismissApproval(callId: string): void
 }
 
 export type UseSessionOptions = {
@@ -75,6 +86,7 @@ export function useSession({
   const [lastError, setLastError] = useState<SessionErrorEvent | null>(null)
   const [parentSessionId, setParentSessionId] = useState<string | null>(null)
   const [parentCursor, setParentCursor] = useState<number | null>(null)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
   const onForkedRef = useRef(onForked)
   onForkedRef.current = onForked
@@ -87,6 +99,7 @@ export function useSession({
     setLastError(null)
     setParentSessionId(null)
     setParentCursor(null)
+    setSelectedModel(null)
 
     const socket = io(`${host}/dashboard`, {
       transports: ['websocket'],
@@ -106,6 +119,22 @@ export function useSession({
       setState(p.state)
       setParentSessionId(p.parentSessionId ?? null)
       setParentCursor(p.parentCursor ?? null)
+      setSelectedModel(p.selectedModel ?? null)
+      // Timeline was cleared for a fresh connect; ask the host to replay
+      // the log so a page reload doesn't leave the user staring at an
+      // empty timeline for a session that already has history. Live
+      // event:appended events overlapping the tail of history are
+      // deduped by seq below.
+      socket.emit('client:load_history', { sessionId: p.sessionId })
+    })
+    socket.on('server:history', (p) => {
+      const entries: TimelineEntry[] = p.entries.map((e) => ({
+        seq: e.seq,
+        ts: e.ts,
+        event: e.event,
+        effects: e.effects,
+      }))
+      setTimeline((prev) => mergeByseq(prev, entries))
     })
     socket.on('session:forked', (p) => {
       onForkedRef.current?.(p)
@@ -114,21 +143,27 @@ export function useSession({
       setState(p.state)
     })
     socket.on('event:appended', (p) => {
-      setTimeline((prev) => [
-        ...prev,
-        {
-          seq: p.seq,
-          ts: p.ts,
-          event: p.event,
-          effects: p.effects,
-        },
-      ])
+      setTimeline((prev) =>
+        mergeByseq(prev, [
+          {
+            seq: p.seq,
+            ts: p.ts,
+            event: p.event,
+            effects: p.effects,
+          },
+        ]),
+      )
     })
     socket.on('approval:required', (p) => {
       setPendingApprovals((prev) => [...prev, p])
     })
     socket.on('session:error', (p) => {
       setLastError(p)
+    })
+    socket.on('session:model_changed', (p) => {
+      if (p.sessionId === sessionId) {
+        setSelectedModel(p.model.length > 0 ? p.model : null)
+      }
     })
     socket.on('connect_error', () => {
       setStatus('error')
@@ -152,7 +187,10 @@ export function useSession({
       lastError,
       parentSessionId,
       parentCursor,
+      selectedModel,
       socket: socketRef.current,
+      dismissApproval: (callId: string) =>
+        setPendingApprovals((prev) => prev.filter((a) => a.callId !== callId)),
     }),
     [
       status,
@@ -162,6 +200,7 @@ export function useSession({
       lastError,
       parentSessionId,
       parentCursor,
+      selectedModel,
     ],
   )
 }
@@ -182,4 +221,133 @@ export function respondApproval(
       ...(reason !== undefined ? { reason } : {}),
     })
   }
+}
+
+export function deleteSession(
+  socket: DashboardSocket,
+  sessionId: string,
+): void {
+  socket.emit('client:delete_session', { sessionId })
+}
+
+/**
+ * Ask the host to materialise a session on disk bound to `workspaceId`.
+ * Emitted when the user clicks "New" so the session shows up in the
+ * Explorer immediately and is grouped under the right workspace, instead
+ * of appearing in Unassigned after the first message triggers lazy-create.
+ */
+export function createSession(
+  socket: DashboardSocket,
+  sessionId: string,
+  workspaceId: string,
+  workspaceName: string | undefined,
+): void {
+  socket.emit('client:create_session', {
+    sessionId,
+    workspaceId,
+    ...(workspaceName !== undefined ? { workspaceName } : {}),
+  })
+}
+
+export function setSessionModel(
+  socket: DashboardSocket,
+  sessionId: string,
+  model: string,
+): void {
+  socket.emit('client:set_model', { sessionId, model })
+}
+
+export type ControlPlaneView = {
+  executors: readonly AttachedExecutor[]
+  sessions: readonly SessionSummary[]
+  refreshSessions(): void
+}
+
+/**
+ * Subscribes to the host's control-plane events (executors / sessions) using
+ * an already-open dashboard socket. Fetches an initial snapshot on socket
+ * change and keeps the daemon list live via `server:executor_changed`.
+ *
+ * Sessions are pulled on `refreshSessions()`  -  we don't yet get a live
+ * push for them (v1 keeps the wire small), so the UI polls on load and
+ * after actions that mutate the on-disk set (fork completion, initial
+ * connect). This is cheap because it's a single read per call.
+ */
+export function useControlPlane(
+  socket: DashboardSocket | null,
+): ControlPlaneView {
+  const [executors, setExecutors] = useState<readonly AttachedExecutor[]>([])
+  const [sessions, setSessions] = useState<readonly SessionSummary[]>([])
+
+  useEffect(() => {
+    if (!socket) {
+      setExecutors([])
+      setSessions([])
+      return
+    }
+    const onExecutors = (p: { executors: readonly AttachedExecutor[] }): void => {
+      setExecutors(p.executors)
+    }
+    const onSessions = (p: { sessions: readonly SessionSummary[] }): void => {
+      setSessions(p.sessions)
+    }
+    const onExecutorChanged: DashboardServerToClientEvents['server:executor_changed'] = (
+      change,
+    ) => {
+      setExecutors((prev) => {
+        if (change.change === 'detached') {
+          return prev.filter((e) => e.executorId !== change.executorId)
+        }
+        const next = prev.filter((e) => e.executorId !== change.executorId)
+        next.push(change.executor)
+        return next
+      })
+    }
+    socket.on('server:executors', onExecutors)
+    socket.on('server:sessions', onSessions)
+    socket.on('server:executor_changed', onExecutorChanged)
+    const onSessionDeleted: DashboardServerToClientEvents['server:session_deleted'] = (
+      payload,
+    ) => {
+      setSessions((prev) => prev.filter((s) => s.sessionId !== payload.sessionId))
+    }
+    socket.on('server:session_deleted', onSessionDeleted)
+
+    const requestBoth = (): void => {
+      socket.emit('client:list_executors', {})
+      socket.emit('client:list_sessions', {})
+    }
+    if (socket.connected) requestBoth()
+    socket.on('connect', requestBoth)
+
+    return () => {
+      socket.off('server:executors', onExecutors)
+      socket.off('server:sessions', onSessions)
+      socket.off('server:executor_changed', onExecutorChanged)
+      socket.off('server:session_deleted', onSessionDeleted)
+      socket.off('connect', requestBoth)
+    }
+  }, [socket])
+
+  const refreshSessions = useMemo(
+    () => () => {
+      if (socket && socket.connected) socket.emit('client:list_sessions', {})
+    },
+    [socket],
+  )
+
+  return { executors, sessions, refreshSessions }
+}
+
+function mergeByseq(
+  prev: readonly TimelineEntry[],
+  add: readonly TimelineEntry[],
+): readonly TimelineEntry[] {
+  if (add.length === 0) return prev
+  const map = new Map<number, TimelineEntry>()
+  for (const e of prev) map.set(e.seq, e)
+  for (const e of add) map.set(e.seq, e)
+  const out = [...map.values()]
+  out.sort((a, b) => a.seq - b.seq)
+  return out
 }

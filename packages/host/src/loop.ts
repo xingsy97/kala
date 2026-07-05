@@ -52,11 +52,16 @@ export type ToolDispatcher = {
   cancelPending(sessionId: string): void
 }
 
+export type ModelResolver = {
+  get(sessionId: string): string | undefined
+}
+
 export type HostLoopDeps = {
   store: SessionStore
   llm: LLMAdapter
   tools: ToolDispatcher
   broadcast: LoopBroadcast
+  models?: ModelResolver
 }
 
 export type LoopHandle = {
@@ -145,11 +150,13 @@ async function performCallLlm(
   config: AgentConfig,
   effect: CallLlmEffect,
 ): Promise<void> {
+  const model = deps.models?.get(sessionId)
   try {
     const res = await deps.llm.call({
       messages: effect.messages,
       tools: effect.tools,
       ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
+      ...(model ? { model } : {}),
     })
     await dispatchOne(deps, sessionId, {
       kind: 'llm_response',

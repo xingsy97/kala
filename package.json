@@ -11,11 +11,13 @@
     "build": "pnpm -r --parallel run build",
     "test": "pnpm -r --parallel run test",
     "typecheck": "pnpm -r --parallel run typecheck",
-    "dev": "pnpm -r --parallel run dev"
+    "dev": "pnpm -r --parallel run dev",
+    "executor:dev": "pnpm --filter @agent-kernel/executor dev"
   },
   "devDependencies": {
+    "@types/node": "^22.9.0",
+    "puppeteer-core": "^25.3.0",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.5",
-    "@types/node": "^22.9.0"
+    "vitest": "^2.1.5"
   }
 }

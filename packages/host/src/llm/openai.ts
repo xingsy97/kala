@@ -79,7 +79,8 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
   return {
     name: `openai:${model}`,
     async call(params: LLMCallParams): Promise<LLMResponse> {
-      const body = buildRequestBody(params, model, maxTokens)
+      const effectiveModel = params.model ?? model
+      const body = buildRequestBody(params, effectiveModel, maxTokens)
       const res = await fetchImpl(url, {
         method: 'POST',
         headers: {

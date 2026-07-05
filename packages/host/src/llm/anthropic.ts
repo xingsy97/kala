@@ -66,7 +66,8 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
   return {
     name: `anthropic:${model}`,
     async call(params: LLMCallParams): Promise<LLMResponse> {
-      const body = buildRequestBody(params, model, maxTokens)
+      const effectiveModel = params.model ?? model
+      const body = buildRequestBody(params, effectiveModel, maxTokens)
       const res = await fetchImpl(apiUrl, {
         method: 'POST',
         headers: {

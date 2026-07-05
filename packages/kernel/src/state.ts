@@ -14,6 +14,7 @@ export function createInitialState(params: {
     status: 'idle',
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
     cursor: 0,
+    todos: [],
   }
 }
 

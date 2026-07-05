@@ -32,6 +32,8 @@ export type WriteHeaderParams = {
   initialState: AgentState
   parentSessionId?: string
   parentCursor?: number
+  workspaceId?: string
+  workspaceName?: string
 }
 
 export async function writeHeader(params: WriteHeaderParams): Promise<void> {
@@ -50,6 +52,12 @@ export async function writeHeader(params: WriteHeaderParams): Promise<void> {
       : {}),
     ...(params.parentCursor !== undefined
       ? { parentCursor: params.parentCursor }
+      : {}),
+    ...(params.workspaceId !== undefined
+      ? { workspaceId: params.workspaceId }
+      : {}),
+    ...(params.workspaceName !== undefined
+      ? { workspaceName: params.workspaceName }
       : {}),
   }
   await writeFile(params.path, JSON.stringify(entry) + '\n', 'utf8')

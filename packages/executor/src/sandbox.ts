@@ -1,9 +1,14 @@
 /**
- * Workspace sandbox: canonicalize a caller-supplied path and verify it lives
- * under one of the whitelisted workspace roots.
+ * Machine sandbox: canonicalize a caller-supplied path and  -  if the operator
+ * configured `--sandbox-root` whitelist(s)  -  verify it lives inside one.
  *
- * The check MUST happen after symlink resolution  -  a symlink that dangles
- * outside the workspace would otherwise be a data-leak vector.
+ * When `roots` is empty, the executor trusts the whole filesystem (a design
+ * choice: the executor runs on the operator's machine under their user, so
+ * the OS's own permission model is enforcement enough by default). Operators
+ * who want a stricter jail pass one or more `--sandbox-root` paths.
+ *
+ * The whitelist check MUST happen after symlink resolution  -  a symlink
+ * dangling outside the whitelist would otherwise be a data-leak vector.
  */
 
 import { realpath } from 'node:fs/promises'
@@ -11,13 +16,20 @@ import { existsSync } from 'node:fs'
 import { dirname, isAbsolute, resolve, sep } from 'node:path'
 
 export type Sandbox = {
+  /**
+   * Configured sandbox roots. Empty array means "no path restriction"  -  the
+   * `resolve()` call still canonicalises the input but does not reject it
+   * for being outside any root.
+   */
   readonly roots: readonly string[]
   /**
-   * Resolve a caller-supplied path to an absolute canonical path inside the
-   * workspace. Throws `EACCES: outside workspace` if the target escapes the
-   * whitelist. Non-existent leaves are allowed as long as their nearest
-   * existing ancestor is inside the workspace (needed for write/edit tools
-   * that create new files).
+   * Resolve a caller-supplied path to an absolute canonical path. If
+   * `roots` is non-empty, the resolved path must live under one of them or
+   * `EACCES: outside sandbox` is thrown. Non-existent leaves are allowed as
+   * long as their nearest existing ancestor is inside the whitelist
+   * (needed for write/edit tools that create new files). Relative inputs
+   * are resolved against `roots[0]` if configured, otherwise against
+   * `process.cwd()`.
    */
   resolve(path: string): Promise<string>
 }
@@ -53,12 +65,9 @@ async function canonicalizeMaybeMissing(p: string): Promise<string> {
 }
 
 export function createSandbox(options: SandboxOptions): Sandbox {
-  if (options.roots.length === 0) {
-    throw new Error('sandbox requires at least one workspace root')
-  }
   const canonicalRoots = options.roots.map((r) => {
     if (!isAbsolute(r)) {
-      throw new Error(`workspace root must be absolute: ${r}`)
+      throw new Error(`sandbox root must be absolute: ${r}`)
     }
     return resolve(r)
   })
@@ -69,16 +78,16 @@ export function createSandbox(options: SandboxOptions): Sandbox {
       if (typeof input !== 'string' || input.length === 0) {
         throw new SandboxError('EACCES: empty path', 'EACCES')
       }
-      const absolute = isAbsolute(input)
-        ? input
-        : resolve(canonicalRoots[0]!, input)
+      const base = canonicalRoots[0] ?? process.cwd()
+      const absolute = isAbsolute(input) ? input : resolve(base, input)
       const canonical = await canonicalizeMaybeMissing(absolute)
+      if (canonicalRoots.length === 0) return canonical
       for (const root of canonicalRoots) {
         if (canonical === root) return canonical
         if (canonical.startsWith(root + sep)) return canonical
       }
       throw new SandboxError(
-        `EACCES: outside workspace: ${input}`,
+        `EACCES: outside sandbox: ${input}`,
         'EACCES',
       )
     },

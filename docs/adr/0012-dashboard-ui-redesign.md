@@ -1,7 +1,9 @@
 # ADR 0012: Dashboard UI  -  session/executor management + layout + framework upgrade
 
-**Status**: proposed
+**Status**: superseded by [ADR 0013](0013-dashboard-finder-layout.md)
 **Date**: 2026-07-04
+
+> **Note (2026-07-04)**: This ADR's diagnosis (missing session list, missing executor visibility, missing multi-Host awareness) is still accurate and its Alternatives-Considered section still reads correctly. Its *Decision*  -  an opencode-style rail with `@tanstack/react-router` + `@tanstack/react-query` + shadcn/ui  -  was reversed before implementation. ADR 0013 adopts Azure PR #879's Finder-style five-column layout instead (i.e., Alternative D below, reversed). Read this ADR for the analysis; read 0013 for what shipped.
 
 ## Context
 

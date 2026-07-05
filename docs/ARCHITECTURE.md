@@ -258,7 +258,7 @@ The topology is the same. What changes is **who has the public IP**.
 **Local dev** (everything on your laptop):
 - Host listens on `localhost:3000`
 - Executor connects to `ws://localhost:3000/executor`
-- Dashboard served at `http://localhost:5173` (vite dev), connects to `ws://localhost:3000/dashboard`
+- Dashboard served at `http://localhost:5288` (vite dev, `/socket.io` proxied to host), connects to `ws://localhost:3000/dashboard`
 - One `pnpm dev` starts all three.
 
 **Cloud + local executor** (the differentiating deployment):

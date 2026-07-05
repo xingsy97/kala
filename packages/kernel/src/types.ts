@@ -83,6 +83,17 @@ export type UsageTotal = {
   readonly costUsd: number
 }
 
+export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+export type TodoPriority = 'high' | 'medium' | 'low'
+
+export type TodoItem = {
+  readonly content: string
+  readonly status: TodoStatus
+  readonly priority?: TodoPriority
+}
+
+export const TODOWRITE_TOOL_NAME = 'todowrite'
+
 export type AgentState = {
   readonly sessionId: string
   readonly messages: readonly Message[]
@@ -90,6 +101,7 @@ export type AgentState = {
   readonly status: AgentStatus
   readonly usage: UsageTotal
   readonly cursor: number // monotonic event counter, for replay positioning
+  readonly todos: readonly TodoItem[]
   readonly error?: string
 }
 

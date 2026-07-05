@@ -17,7 +17,10 @@ import type {
   ToolResultAck,
 } from '@agent-kernel/shared'
 
-import { createExecutorRegistry } from './executor.js'
+import {
+  createExecutorRegistry,
+  type WorkspaceResolver,
+} from './executor.js'
 
 type EmittedCall = {
   event: 'tool:call' | 'tool:cancel'
@@ -47,16 +50,30 @@ function makeFakeSocket(id: string): FakeSocket {
 }
 
 function fakeIo(): unknown {
-  // The registry only needs `io` for potential future use; today it's stored
-  // and never called. `unknown` cast keeps us honest about not depending on
-  // the shape.
   return {}
 }
 
-function announceOf(sessionId: string, executorId: string): ExecutorAnnounce {
+/**
+ * Test-only resolver. Real deployments back this with `SessionStore.get`, but
+ * that would drag the whole store into every unit test. This map lets each
+ * test express the invariant it cares about (session S is bound to
+ * workspace W) without file I/O.
+ */
+function makeResolver(bindings: Record<string, string | undefined> = {}): WorkspaceResolver {
   return {
-    sessionId,
+    workspaceIdFor: (sid) => bindings[sid],
+  }
+}
+
+function announceOf(
+  executorId: string,
+  workspaceId = 'ws-default',
+  workspaceName = 'default-workspace',
+): ExecutorAnnounce {
+  return {
     executorId,
+    workspaceId,
+    workspaceName,
     tools: ['bash'],
     runtime: 'node',
     runtimeVersion: 'test',
@@ -74,9 +91,13 @@ function callEffect(callId: string, name = 'bash'): CallToolEffect {
 
 describe('ExecutorRegistry', () => {
   it('dispatches a tool call and resolves on ack', async () => {
-    const reg = createExecutorRegistry(fakeIo() as never, 5_000)
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-1': 'ws-default' }),
+      5_000,
+    )
     const sock = makeFakeSocket('s1')
-    reg.attach('sess-1', sock as never, announceOf('sess-1', 'e1'))
+    reg.attach(sock as never, announceOf('e1'))
 
     const p = reg.callTool('sess-1', callEffect('c1'))
     expect(sock.emitted).toHaveLength(1)
@@ -88,9 +109,13 @@ describe('ExecutorRegistry', () => {
   })
 
   it('resolves via executor:tool_result when the ack callback is skipped', async () => {
-    const reg = createExecutorRegistry(fakeIo() as never, 5_000)
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-2': 'ws-default' }),
+      5_000,
+    )
     const sock = makeFakeSocket('s2')
-    reg.attach('sess-2', sock as never, announceOf('sess-2', 'e2'))
+    reg.attach(sock as never, announceOf('e2'))
 
     const p = reg.callTool('sess-2', callEffect('c1'))
     reg.fulfill('sess-2', {
@@ -103,9 +128,13 @@ describe('ExecutorRegistry', () => {
   })
 
   it('fails pending calls when the executor disconnects with no replacement', async () => {
-    const reg = createExecutorRegistry(fakeIo() as never, 5_000)
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-3': 'ws-default' }),
+      5_000,
+    )
     const sock = makeFakeSocket('s3')
-    reg.attach('sess-3', sock as never, announceOf('sess-3', 'e3'))
+    reg.attach(sock as never, announceOf('e3'))
 
     const p = reg.callTool('sess-3', callEffect('c1'))
     reg.detach(sock as never)
@@ -116,36 +145,38 @@ describe('ExecutorRegistry', () => {
   })
 
   it('preserves pending calls across a reconnect and re-emits to the new socket', async () => {
-    // This is the B7 regression: previously, a network blip mid-tool-call
-    // resolved every in-flight call with `ok:false` before the new executor
-    // ever got a chance to run them. The kernel then took an entire turn
-    // reasoning about a bogus failure.
-    const reg = createExecutorRegistry(fakeIo() as never, 5_000)
+    // B7 regression: a network blip mid-tool-call previously failed every
+    // in-flight call before the new executor got to run them. Session
+    // identity is baked into the pending record so redispatch delivers the
+    // same sessionId onward.
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-4': 'ws-default' }),
+      5_000,
+    )
     const oldSock = makeFakeSocket('old')
-    reg.attach('sess-4', oldSock as never, announceOf('sess-4', 'e-old'))
+    reg.attach(oldSock as never, announceOf('e-reconnect'))
 
     const p = reg.callTool('sess-4', callEffect('c1', 'bash'))
     expect(oldSock.emitted).toHaveLength(1)
 
-    // Simulate reconnect: new socket announces itself for the same session.
-    // Under the old implementation `p` resolves here with a supersede error.
+    // Reconnect: same executorId, fresh socket.
     const newSock = makeFakeSocket('new')
-    reg.attach('sess-4', newSock as never, announceOf('sess-4', 'e-new'))
+    reg.attach(newSock as never, announceOf('e-reconnect'))
 
-    // The pending promise should NOT be resolved yet.
     let resolvedEarly = false
     void p.then(() => {
       resolvedEarly = true
     })
-    await Promise.resolve() // let any spurious microtasks flush
+    await Promise.resolve()
     expect(resolvedEarly).toBe(false)
 
-    // The call must have been re-emitted with the same callId + args.
     expect(newSock.emitted).toHaveLength(1)
     const redispatched = newSock.emitted[0]!
     expect(redispatched.event).toBe('tool:call')
     const rePayload = redispatched.payload as ToolCallMessage
     expect(rePayload.callId).toBe('c1')
+    expect(rePayload.sessionId).toBe('sess-4')
     expect(rePayload.name).toBe('bash')
     expect(rePayload.input).toEqual({ command: 'echo hi' })
 
@@ -156,20 +187,21 @@ describe('ExecutorRegistry', () => {
       content: 'ghost result',
     })
 
-    // New executor completes normally.
     redispatched.ack!({ callId: 'c1', ok: true, content: 'redone' })
     await expect(p).resolves.toEqual({ ok: true, content: 'redone' })
   })
 
   it('supersede-then-disconnect only fails calls still pending on the new socket', async () => {
-    // Belt-and-braces: after redispatch, if the NEW executor also drops
-    // without acking, the call must fail cleanly (not hang forever).
-    const reg = createExecutorRegistry(fakeIo() as never, 5_000)
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-5': 'ws-default' }),
+      5_000,
+    )
     const oldSock = makeFakeSocket('old-2')
-    reg.attach('sess-5', oldSock as never, announceOf('sess-5', 'e-old-2'))
+    reg.attach(oldSock as never, announceOf('e-drop'))
     const p = reg.callTool('sess-5', callEffect('c1'))
     const newSock = makeFakeSocket('new-2')
-    reg.attach('sess-5', newSock as never, announceOf('sess-5', 'e-new-2'))
+    reg.attach(newSock as never, announceOf('e-drop'))
     reg.detach(newSock as never)
     await expect(p).resolves.toEqual({
       ok: false,
@@ -178,19 +210,19 @@ describe('ExecutorRegistry', () => {
   })
 
   it('detach on a stale socket is a no-op (does not disturb the current bind)', async () => {
-    // After supersede the old socket's disconnect event still fires. It must
-    // not tear down the new bind's pending calls.
-    const reg = createExecutorRegistry(fakeIo() as never, 5_000)
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-6': 'ws-default' }),
+      5_000,
+    )
     const oldSock = makeFakeSocket('stale-old')
-    reg.attach('sess-6', oldSock as never, announceOf('sess-6', 'e-old-6'))
+    reg.attach(oldSock as never, announceOf('e-stale'))
     const p = reg.callTool('sess-6', callEffect('c1'))
     const newSock = makeFakeSocket('stale-new')
-    reg.attach('sess-6', newSock as never, announceOf('sess-6', 'e-new-6'))
+    reg.attach(newSock as never, announceOf('e-stale'))
 
-    // Simulate the delayed disconnect from the old socket.
     reg.detach(oldSock as never)
 
-    // Pending call still resolvable via the new socket.
     const redispatched = newSock.emitted[newSock.emitted.length - 1]!
     redispatched.ack!({ callId: 'c1', ok: true, content: 'ok' })
     await expect(p).resolves.toEqual({ ok: true, content: 'ok' })
@@ -199,9 +231,13 @@ describe('ExecutorRegistry', () => {
   it('honours the tool-call timeout when nobody ever acks', async () => {
     vi.useFakeTimers()
     try {
-      const reg = createExecutorRegistry(fakeIo() as never, 100)
+      const reg = createExecutorRegistry(
+        fakeIo() as never,
+        makeResolver({ 'sess-7': 'ws-default' }),
+        100,
+      )
       const sock = makeFakeSocket('to')
-      reg.attach('sess-7', sock as never, announceOf('sess-7', 'e-to'))
+      reg.attach(sock as never, announceOf('e-to'))
       const p = reg.callTool('sess-7', callEffect('c1'))
       await vi.advanceTimersByTimeAsync(150)
       await expect(p).resolves.toEqual({
@@ -213,10 +249,14 @@ describe('ExecutorRegistry', () => {
     }
   })
 
-  it('cancelPending emits tool:cancel for every in-flight call', () => {
-    const reg = createExecutorRegistry(fakeIo() as never, 5_000)
+  it('cancelPending emits tool:cancel for every in-flight call in that session', () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-8': 'ws-default' }),
+      5_000,
+    )
     const sock = makeFakeSocket('cx')
-    reg.attach('sess-8', sock as never, announceOf('sess-8', 'e-cx'))
+    reg.attach(sock as never, announceOf('e-cx'))
     void reg.callTool('sess-8', callEffect('c1'))
     void reg.callTool('sess-8', callEffect('c2'))
     reg.cancelPending('sess-8')
@@ -226,5 +266,123 @@ describe('ExecutorRegistry', () => {
       'c1',
       'c2',
     ])
+  })
+
+  it('routes two different sessions to the same executor (1:N)', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-A': 'ws-default', 'sess-B': 'ws-default' }),
+      5_000,
+    )
+    const sock = makeFakeSocket('daemon')
+    reg.attach(sock as never, announceOf('e-shared'))
+
+    const pA = reg.callTool('sess-A', callEffect('a1'))
+    const pB = reg.callTool('sess-B', callEffect('b1'))
+    expect(sock.emitted).toHaveLength(2)
+    expect((sock.emitted[0]!.payload as ToolCallMessage).sessionId).toBe('sess-A')
+    expect((sock.emitted[1]!.payload as ToolCallMessage).sessionId).toBe('sess-B')
+
+    sock.emitted[0]!.ack!({ callId: 'a1', ok: true, content: 'A' })
+    sock.emitted[1]!.ack!({ callId: 'b1', ok: true, content: 'B' })
+    await expect(pA).resolves.toEqual({ ok: true, content: 'A' })
+    await expect(pB).resolves.toEqual({ ok: true, content: 'B' })
+  })
+
+  it('cancelPending only cancels calls for the target session, not siblings sharing the executor', () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({
+        'sess-keep': 'ws-default',
+        'sess-cancel': 'ws-default',
+      }),
+      5_000,
+    )
+    const sock = makeFakeSocket('shared')
+    reg.attach(sock as never, announceOf('e-shared-cancel'))
+
+    void reg.callTool('sess-keep', callEffect('k1'))
+    void reg.callTool('sess-cancel', callEffect('c1'))
+    void reg.callTool('sess-cancel', callEffect('c2'))
+
+    reg.cancelPending('sess-cancel')
+
+    const cancels = sock.emitted.filter((e) => e.event === 'tool:cancel')
+    expect(cancels).toHaveLength(2)
+    for (const c of cancels) {
+      expect((c.payload as { sessionId: string }).sessionId).toBe('sess-cancel')
+    }
+  })
+
+  it('reports no-executor when a session tries to call before any daemon attaches', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-orphan': 'ws-default' }),
+      5_000,
+    )
+    const p = reg.callTool('sess-orphan', callEffect('c1'))
+    await expect(p).resolves.toEqual({
+      ok: false,
+      content: 'workspace ws-default is offline  -  start its executor to run tools',
+    })
+  })
+
+  it('routes a call to the executor announcing the matching workspaceId', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-mbp': 'ws-mbp', 'sess-linux': 'ws-linux' }),
+      5_000,
+    )
+    const mbp = makeFakeSocket('mbp')
+    const linux = makeFakeSocket('linux')
+    reg.attach(mbp as never, announceOf('e-mbp', 'ws-mbp', 'mbp'))
+    reg.attach(linux as never, announceOf('e-linux', 'ws-linux', 'linux-box'))
+
+    const p1 = reg.callTool('sess-mbp', callEffect('c1'))
+    const p2 = reg.callTool('sess-linux', callEffect('c2'))
+    expect(mbp.emitted).toHaveLength(1)
+    expect(linux.emitted).toHaveLength(1)
+    expect((mbp.emitted[0]!.payload as ToolCallMessage).sessionId).toBe('sess-mbp')
+    expect((linux.emitted[0]!.payload as ToolCallMessage).sessionId).toBe('sess-linux')
+
+    mbp.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'mbp' })
+    linux.emitted[0]!.ack!({ callId: 'c2', ok: true, content: 'linux' })
+    await expect(p1).resolves.toEqual({ ok: true, content: 'mbp' })
+    await expect(p2).resolves.toEqual({ ok: true, content: 'linux' })
+  })
+
+  it('reports workspace-offline when the bound workspace has no executor attached', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-lonely': 'ws-missing' }),
+      5_000,
+    )
+    // Attach a different workspace  -  the target one is still offline.
+    reg.attach(
+      makeFakeSocket('other') as never,
+      announceOf('e-other', 'ws-other', 'other'),
+    )
+    const p = reg.callTool('sess-lonely', callEffect('c1'))
+    await expect(p).resolves.toEqual({
+      ok: false,
+      content: 'workspace ws-missing is offline  -  start its executor to run tools',
+    })
+  })
+
+  it('legacy sessions with no workspaceId fall back to any online executor', async () => {
+    // Sessions predating the workspaceId field must keep working  -  the
+    // resolver returns undefined for them and the registry picks whichever
+    // executor is online.
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-legacy': undefined }),
+      5_000,
+    )
+    const sock = makeFakeSocket('only')
+    reg.attach(sock as never, announceOf('e-only', 'ws-only', 'only'))
+    const p = reg.callTool('sess-legacy', callEffect('c1'))
+    expect(sock.emitted).toHaveLength(1)
+    sock.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'ok' })
+    await expect(p).resolves.toEqual({ ok: true, content: 'ok' })
   })
 })

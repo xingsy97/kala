@@ -2,14 +2,21 @@
 /**
  * `agent-kernel-executor` CLI.
  *
- * Reads:
- *   HOST_URL        -  required (e.g. http://localhost:3000)
- *   SESSION_ID      -  required
- *   WORKSPACE       -  required; absolute path or `:`-separated list
- *   EXECUTOR_TOKEN  -  optional; must match host's HOST_AUTH_TOKEN if set
- *   EXECUTOR_ID     -  optional; defaults to a ULID
+ * Env / flags:
+ *   HOST_URL / --host           required (e.g. http://localhost:3000)
+ *   WORKSPACE_NAME / --name     optional display label; defaults to os.hostname().
+ *                               Free to rename  -  routing uses the workspaceId
+ *                               (persisted at ~/.agent-kernel/workspace-id).
+ *   SANDBOX_ROOTS / --sandbox-root
+ *     optional filesystem jail(s). Absolute path(s). `SANDBOX_ROOTS` is a
+ *     `:`-separated list; `--sandbox-root <path>` is repeatable. Empty = no
+ *     jail (executor trusts the whole machine).
+ *   EXECUTOR_TOKEN / --token    optional; must match host's HOST_AUTH_TOKEN if set
+ *   EXECUTOR_ID / --id          optional; defaults to a ULID
  *
- * Also accepts `--host`, `--session`, `--workspace`, `--token`, `--id` overrides.
+ * The executor is a daemon: it does NOT bind to a sessionId at startup.
+ * The host routes `tool:call` messages to it for any session whose
+ * `workspaceId` matches this executor's stored workspace id.
  */
 
 import process from 'node:process'
@@ -18,14 +25,14 @@ import { startExecutor } from '../src/client.js'
 
 type Args = {
   host?: string
-  session?: string
-  workspace?: string
+  name?: string
+  sandboxRoots: string[]
   token?: string
   id?: string
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  const out: Args = {}
+  const out: Args = { sandboxRoots: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!
     const eq = a.indexOf('=')
@@ -37,11 +44,11 @@ function parseArgs(argv: readonly string[]): Args {
       case '--host':
         out.host = value
         break
-      case '--session':
-        out.session = value
+      case '--name':
+        out.name = value
         break
-      case '--workspace':
-        out.workspace = value
+      case '--sandbox-root':
+        out.sandboxRoots.push(value)
         break
       case '--token':
         out.token = value
@@ -59,31 +66,31 @@ function parseArgs(argv: readonly string[]): Args {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
   const host = args.host ?? process.env.HOST_URL
-  const session = args.session ?? process.env.SESSION_ID
-  const workspaceRaw = args.workspace ?? process.env.WORKSPACE
+  const name = args.name ?? process.env.WORKSPACE_NAME
+  const envRoots = process.env.SANDBOX_ROOTS
+    ? process.env.SANDBOX_ROOTS.split(':').filter((s) => s.length > 0)
+    : []
+  const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : envRoots
   const token = args.token ?? process.env.EXECUTOR_TOKEN
   const executorId = args.id ?? process.env.EXECUTOR_ID
 
-  if (!host || !session || !workspaceRaw) {
-    console.error(
-      'usage: agent-kernel-executor --host <url> --session <id> --workspace <path>',
-    )
-    console.error('or set HOST_URL / SESSION_ID / WORKSPACE env vars')
+  if (!host) {
+    console.error('usage: agent-kernel-executor --host <url> [--name <workspace>] [--sandbox-root <path>]...')
+    console.error('or set HOST_URL env var')
     process.exit(1)
   }
-  const workspace = workspaceRaw.split(':').filter((s) => s.length > 0)
 
   const handle = startExecutor({
     host,
-    sessionId: session,
-    workspace,
+    ...(name !== undefined ? { workspaceName: name } : {}),
+    ...(sandboxRoots.length > 0 ? { sandboxRoots } : {}),
     ...(token !== undefined ? { token } : {}),
     ...(executorId !== undefined ? { executorId } : {}),
   })
 
   handle.socket.on('connect', () => {
     console.log(
-      `executor ${handle.executorId} connected to ${host} for session ${session}`,
+      `executor ${handle.executorId} (workspace=${handle.workspaceName} [${handle.workspaceId}]) connected to ${host}`,
     )
   })
   handle.socket.on('disconnect', (reason) => {
