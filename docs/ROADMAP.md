@@ -226,3 +226,16 @@ Ideas that don't fit in phases 1–6 but are on the mind:
 **Total**: 86 tests across the monorepo. Kernel → Host → Executor → Dashboard runs end-to-end. A real-LLM smoke over an OpenAI-compatible endpoint is scripted in `examples/e2e-smoke.mjs`.
 
 **Next action** (post-v1): [ADR 0012](adr/0012-dashboard-ui-redesign.md) — Dashboard v1.1 UI redesign (session + executor management, layout, framework upgrade). Design proposed, implementation pending review of the ADR.
+
+---
+
+## Current status snapshot (2026-07-05)
+
+Batch A backend work is complete through the automatic gate:
+
+- Implemented compaction, streaming deltas, cancel-in-flight, crash recovery, permission modes, multimodal messages, MCP stub, session cwd, host-side `agent`, and background shell tools.
+- Composer footer now owns status/cursor/pending/token chips.
+- Automatic gate passed: `pnpm -r typecheck`, kernel tests, host tests, executor tests.
+- Manual compaction smoke remains a runtime verification step before closing the full batch gate.
+
+Next planned work is Batch B dashboard UX: compact banner, streaming render + ESC cancel, permission picker, message edit/rerun, image paste, `@file` picker, hooks, settings, rename, cwd toolbar/metadata modal.

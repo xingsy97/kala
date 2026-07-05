@@ -449,3 +449,16 @@ If in doubt, ask. The specs were written carefully; deviating usually costs more
 4. Ask the project owner with a concrete question and a proposed answer. "I want to do X because Y; the spec says Z; which wins?" is a much faster question than "I'm stuck."
 
 Good luck. The specs are meant to make this a walk. If you find them unclear, that's a spec bug — file it.
+
+---
+
+## 13. Implementation Update (2026-07-05)
+
+This guide is older than the current implementation. When continuing work, treat the code plus `docs/HANDOFF-2026-07-05.md` as current for Batch A. Key deltas:
+
+- Kernel tests are now 43; host tests 64; executor tests 60.
+- Host loop supports compaction, streaming deltas, stream cancellation, approval modes, cwd routing, and host-side `agent` tool orchestration.
+- Executor implements more than the original seven tools: `todowrite`, `bash_output`, `kill_shell`, and background mode for `bash`.
+- MCP is deliberately only a stub.
+- Dashboard is served by Host from `packages/dashboard/dist`; after `.tsx` edits run `pnpm --filter @agent-kernel/dashboard build` and verify through the real Host page.
+- Use `@uiw/react-json-view` through `components/ui/json-block.tsx` for JSON rendering.

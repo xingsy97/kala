@@ -305,3 +305,12 @@ Everything left in the "12 core categories" that isn't listed above
 (edit tool, todo tracking, session fork, multi-model config) — we
 already match the reference agents.
 
+---
+
+## Status update (2026-07-05)
+
+The following gaps above are now closed or partially closed in code:
+
+- Closed: context compaction core/host path, streaming tokens, cancel-in-flight, crash recovery for pending tool calls, permission modes, image content type, sub-agent tool, session cwd, and background shell polling.
+- Stubbed only: MCP config shape and `initMcp()` exist, but no MCP runtime is implemented.
+- Still open for Batch B: slash command UX, compact banner, streaming render in dashboard, permission picker UI, message edit/rerun, image paste UI, `@file` picker, hooks, settings UI, session rename, cwd toolbar/metadata modal, diff preview, web tools, memory.
