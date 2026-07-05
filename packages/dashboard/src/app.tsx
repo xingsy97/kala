@@ -370,7 +370,7 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className="h-screen w-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
+    <div className="h-screen w-screen bg-white text-foreground dark:bg-background dark:text-foreground overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
@@ -382,7 +382,7 @@ export function App(): JSX.Element {
               className="min-w-[240px]"
               data-testid="explorer-panel"
             >
-              <div className="h-full border-r border-slate-200 dark:border-slate-800">
+              <div className="h-full border-r border-border dark:border-border">
                 <Explorer
                   executors={control.executors}
                   sessions={control.sessions}
@@ -516,7 +516,7 @@ export function App(): JSX.Element {
                 <>
                   <ResizableHandle withHandle />
                   <ResizablePanel defaultSize={26} minSize={22} maxSize={36} data-testid="inspector-panel">
-                    <div className="h-full border-l border-slate-200 dark:border-slate-800 min-h-0 overflow-hidden" data-testid="inspector-drawer">
+                    <div className="h-full border-l border-border dark:border-border min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <InspectorPanel
                         state={session.state}
                         config={session.config}
@@ -608,7 +608,7 @@ function WorkbenchToolbar({
 }): JSX.Element {
   return (
     <div
-      className="h-10 flex-none px-3 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950 flex items-center gap-2 text-sm min-w-0"
+      className="h-10 flex-none px-3 border-b border-border bg-white dark:border-border dark:bg-background flex items-center gap-2 text-sm min-w-0"
       data-testid="workbench-toolbar"
     >
       <span
@@ -625,7 +625,7 @@ function WorkbenchToolbar({
         onClick={onChangeCwd}
         title={cwd ? `change session cwd: ${cwd}` : 'set session cwd'}
         data-testid="cwd-button"
-        className="min-w-0 max-w-[45%] justify-start gap-1.5 px-2 text-xs text-slate-600 dark:text-slate-300"
+        className="min-w-0 max-w-[45%] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground"
       >
         <FolderOpen className="h-3.5 w-3.5 flex-none" />
         <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
@@ -672,7 +672,7 @@ function ConnectionStatus({ status }: { status: string }): JSX.Element {
   const label = hostStatusLabel(status)
   return (
     <div
-      className="inline-flex h-7 flex-none items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300"
+      className="inline-flex h-7 flex-none items-center gap-1.5 rounded-md border border-border bg-muted px-2 text-[11px] text-muted-foreground dark:border-border dark:bg-card/70 dark:text-muted-foreground"
       data-testid="connection-status"
       data-status={status}
       title={label}
@@ -696,7 +696,7 @@ function statusDot(status: string): string {
   if (status === 'ready') return 'bg-emerald-500'
   if (status === 'error' || status === 'disconnected') return 'bg-rose-500'
   if (status === 'connecting') return 'bg-amber-500 animate-pulse'
-  return 'bg-slate-400'
+  return 'bg-muted'
 }
 
 function CwdDialog({
