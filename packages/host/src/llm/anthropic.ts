@@ -56,6 +56,7 @@ type AnthropicBlock =
       is_error?: boolean
     }
   | { type: 'image'; source: AnthropicImageSource }
+  | { type: 'thinking'; thinking: string; signature?: string }
 
 type AnthropicMessage = {
   role: 'user' | 'assistant'
@@ -227,6 +228,11 @@ function handleStreamEvent(
       if (t) onText(t)
     } else if (dtype === 'input_json_delta' && target.type === 'tool_use') {
       toolBuf[idx] = (toolBuf[idx] ?? '') + ((delta.partial_json as string) ?? '')
+    } else if (dtype === 'thinking_delta' && target.type === 'thinking') {
+      target.thinking += (delta.thinking as string) ?? ''
+    } else if (dtype === 'signature_delta' && target.type === 'thinking') {
+      target.signature = ((target.signature ?? '') +
+        ((delta.signature as string) ?? '')) || undefined
     }
     return
   }
@@ -288,6 +294,12 @@ async function buildRequestBody(
   }
   if (resolvedSystem) body.system = resolvedSystem
   if (tools.length > 0) body.tools = tools.map(toAnthropicTool)
+  if (typeof params.thinkingBudget === 'number' && params.thinkingBudget > 0) {
+    body.thinking = {
+      type: 'enabled',
+      budget_tokens: params.thinkingBudget,
+    }
+  }
   return body
 }
 
@@ -335,6 +347,12 @@ async function toAnthropicBlock(content: MessageContent): Promise<AnthropicBlock
       }
     case 'image':
       return { type: 'image', source: await toAnthropicImageSource(content) }
+    case 'thinking':
+      return {
+        type: 'thinking',
+        thinking: content.text,
+        ...(content.signature ? { signature: content.signature } : {}),
+      }
   }
 }
 
@@ -403,6 +421,13 @@ function fromAnthropicBlock(block: AnthropicBlock): MessageContent | null {
       callId: block.id,
       name: block.name,
       input: block.input,
+    }
+  }
+  if (block.type === 'thinking') {
+    return {
+      type: 'thinking',
+      text: block.thinking,
+      ...(block.signature ? { signature: block.signature } : {}),
     }
   }
   return null

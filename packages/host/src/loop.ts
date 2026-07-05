@@ -30,6 +30,8 @@ import type {
 import { step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
+import type { HookConfig, HookRunner } from './hooks.js'
+import { selectHooks } from './hooks.js'
 import type { SessionRecord, SessionStore } from './store/session.js'
 
 export type LoopBroadcast = {
@@ -69,6 +71,8 @@ export type HostLoopDeps = {
   tools: ToolDispatcher
   broadcast: LoopBroadcast
   models?: ModelResolver
+  hooks?: readonly HookConfig[]
+  hookRunner?: HookRunner
 }
 
 export type LoopHandle = {
@@ -333,6 +337,9 @@ async function performCallLlm(
       signal: controller.signal,
       ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
       ...(model ? { model } : {}),
+      ...(config.thinkingBudget !== undefined
+        ? { thinkingBudget: config.thinkingBudget }
+        : {}),
       ...(onTextDelta ? { onTextDelta } : {}),
     })
     await dispatchOne(
@@ -379,9 +386,25 @@ async function performCallTool(
   aborts: Map<string, AbortController>,
 ): Promise<void> {
   try {
+    const blocked = await runPreToolHooks(deps, sessionId, effect)
+    if (blocked) {
+      await dispatchOne(
+        deps,
+        sessionId,
+        {
+          kind: 'tool_result',
+          callId: effect.callId,
+          ok: false,
+          content: blocked,
+        },
+        aborts,
+      )
+      return
+    }
     const res = effect.name === AGENT_TOOL_NAME
       ? await runAgentTool(deps, sessionId, effect, aborts)
       : await deps.tools.callTool(sessionId, effect)
+    await runPostToolHooks(deps, sessionId, effect, res)
     await dispatchOne(
       deps,
       sessionId,
@@ -406,6 +429,63 @@ async function performCallTool(
       },
       aborts,
     )
+  }
+}
+
+async function runPreToolHooks(
+  deps: HostLoopDeps,
+  sessionId: string,
+  effect: CallToolEffect,
+): Promise<string | null> {
+  const hooks = deps.hooks
+  const runner = deps.hookRunner
+  if (!hooks || !runner || hooks.length === 0) return null
+  const matching = selectHooks(hooks, 'pre_tool_use', effect.name)
+  if (matching.length === 0) return null
+  const record = deps.store.get(sessionId)
+  for (const hook of matching) {
+    const outcome = await runner.run(hook, {
+      event: 'pre_tool_use',
+      sessionId,
+      ...(record?.workspaceId !== undefined
+        ? { workspaceId: record.workspaceId }
+        : {}),
+      toolName: effect.name,
+      toolInput: effect.input,
+    })
+    if (!outcome.ok) {
+      const detail = (outcome.stdout || outcome.stderr).trim()
+      return detail.length > 0
+        ? `blocked by pre_tool_use hook (exit ${outcome.exitCode}): ${detail}`
+        : `blocked by pre_tool_use hook (exit ${outcome.exitCode})`
+    }
+  }
+  return null
+}
+
+async function runPostToolHooks(
+  deps: HostLoopDeps,
+  sessionId: string,
+  effect: CallToolEffect,
+  result: { ok: boolean; content: string },
+): Promise<void> {
+  const hooks = deps.hooks
+  const runner = deps.hookRunner
+  if (!hooks || !runner || hooks.length === 0) return
+  const matching = selectHooks(hooks, 'post_tool_use', effect.name)
+  if (matching.length === 0) return
+  const record = deps.store.get(sessionId)
+  for (const hook of matching) {
+    await runner.run(hook, {
+      event: 'post_tool_use',
+      sessionId,
+      ...(record?.workspaceId !== undefined
+        ? { workspaceId: record.workspaceId }
+        : {}),
+      toolName: effect.name,
+      toolInput: effect.input,
+      toolResult: { ok: result.ok, content: result.content },
+    })
   }
 }
 

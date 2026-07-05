@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { loadRuntimeConfig, parseCodexToml } from './runtime-config.js'
+import { loadRuntimeConfig, parseCodexToml, parseHookConfigToml, loadHookConfigs } from './runtime-config.js'
 
 describe('parseCodexToml', () => {
   it('extracts top-level model + provider block fields', () => {
@@ -148,5 +148,82 @@ describe('loadRuntimeConfig', () => {
     expect(cfg.providers).toEqual([])
     expect(cfg.models).toEqual([])
     expect(cfg.defaultModel).toBe('')
+  })
+})
+
+describe('parseHookConfigToml', () => {
+  it('extracts multiple [[hooks]] blocks with optional match', () => {
+    const input = [
+      '[[hooks]]',
+      'event = "pre_tool_use"',
+      'match = "bash"',
+      'command = "/usr/local/bin/lint-shell.sh"',
+      '',
+      '[[hooks]]',
+      'event = "post_tool_use"',
+      'command = "echo done"',
+    ].join('\n')
+    const out = parseHookConfigToml(input)
+    expect(out).toEqual([
+      {
+        event: 'pre_tool_use',
+        command: '/usr/local/bin/lint-shell.sh',
+        match: 'bash',
+      },
+      { event: 'post_tool_use', command: 'echo done' },
+    ])
+  })
+
+  it('drops blocks with unknown event or missing command', () => {
+    const input = [
+      '[[hooks]]',
+      'event = "not_a_real_event"',
+      'command = "true"',
+      '',
+      '[[hooks]]',
+      'event = "session_start"',
+      '# no command here',
+      '',
+      '[[hooks]]',
+      'event = "session_end"',
+      'command = "notify.sh"',
+    ].join('\n')
+    const out = parseHookConfigToml(input)
+    expect(out).toEqual([{ event: 'session_end', command: 'notify.sh' }])
+  })
+
+  it('ignores blocks belonging to other sections', () => {
+    const input = [
+      '[unrelated]',
+      'foo = "bar"',
+      '',
+      '[[hooks]]',
+      'event = "pre_tool_use"',
+      'command = "echo hi"',
+    ].join('\n')
+    const out = parseHookConfigToml(input)
+    expect(out).toEqual([{ event: 'pre_tool_use', command: 'echo hi' }])
+  })
+})
+
+describe('loadHookConfigs', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-hooks-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('returns [] when file is missing', () => {
+    expect(loadHookConfigs(join(dir, 'nope.toml'))).toEqual([])
+  })
+
+  it('reads hooks from an explicit path', () => {
+    const path = join(dir, 'config.toml')
+    writeFileSync(
+      path,
+      ['[[hooks]]', 'event = "pre_tool_use"', 'command = "echo ok"'].join('\n'),
+    )
+    const out = loadHookConfigs(path)
+    expect(out).toEqual([{ event: 'pre_tool_use', command: 'echo ok' }])
   })
 })

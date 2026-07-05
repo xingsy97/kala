@@ -291,9 +291,19 @@ describe('wire protocol', () => {
     expect(ev.state.cursor).toBe(2)
     // Original session has cursor 4; fork stops at 2 (user + llm tool_call).
     const forkedRec = server.store.get('wire-fork-child')
+    expect(forkedRec?.state.sessionId).toBe('wire-fork-child')
     expect(forkedRec?.parentSessionId).toBe(sessionId)
     expect(forkedRec?.parentCursor).toBe(2)
     expect(forkedRec?.state.cursor).toBe(2)
+    expect(forkedRec).toBeTruthy()
+    const forkedLog = await readSessionLog(forkedRec!.logPath)
+    expect(forkedLog.header.sessionId).toBe('wire-fork-child')
+    expect(forkedLog.header.initialState.sessionId).toBe('wire-fork-child')
+
+    const summaries = await server.store.listSummaries()
+    const childSummary = summaries.find((s) => s.sessionId === 'wire-fork-child')
+    expect(childSummary).toBeTruthy()
+    expect(childSummary?.parentSessionId).toBe(sessionId)
 
     dashboard.close()
     executor.close()
@@ -965,6 +975,158 @@ describe('wire protocol', () => {
       message: 'nothing to compact yet',
     })
     expect(llmCalls).toBe(0)
+
+    dashboard.close()
+  })
+
+  it('queues user messages while a turn is running and dispatches them after rest', async () => {
+    const sessionId = 'wire-message-queue'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: `answer ${seenPrompts.length}` }],
+            },
+            usage: { inputTokens: 10, outputTokens: 1 },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const queueCounts: number[] = []
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) queueCounts.push(p.pending)
+    })
+    const finalDone = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('queued turn never finished')), 4000)
+      dashboard.on('state:changed', (p) => {
+        if (p.state.status === 'done' && p.state.messages.length >= 5) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    releaseFirst()
+    await finalDone
+
+    expect(queueCounts).toContain(1)
+    expect(queueCounts).toContain(0)
+    expect(seenPrompts).toEqual(['first', 'first|second'])
+
+    dashboard.close()
+  })
+
+  it('fires session_start and session_end lifecycle hooks around create/delete', async () => {
+    const sessionId = 'wire-lifecycle-hooks'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const calls: Array<{ event: string; sessionId: string }> = []
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: scriptedLlm(),
+      hooks: [
+        { event: 'session_start', command: 'true' },
+        { event: 'session_end', command: 'true' },
+        { event: 'session_start', command: 'true', match: 'nope' },
+      ],
+      hookRunner: {
+        async run(hook, payload) {
+          calls.push({ event: hook.event, sessionId: payload.sessionId })
+          return { ok: true, exitCode: 0, stdout: '', stderr: '' }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const created = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.on('server:sessions', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-life',
+      workspaceName: 'life-box',
+    })
+    await created
+    // Wait one tick so the async lifecycle hook has a chance to run.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(calls).toEqual([{ event: 'session_start', sessionId }])
+
+    const deleted = new Promise<{ sessionId: string }>((resolve) => {
+      dashboard.on('server:session_deleted', resolve)
+    })
+    dashboard.emit('client:delete_session', { sessionId })
+    await deleted
+    await new Promise((r) => setTimeout(r, 50))
+    expect(calls).toEqual([
+      { event: 'session_start', sessionId },
+      { event: 'session_end', sessionId },
+    ])
 
     dashboard.close()
   })

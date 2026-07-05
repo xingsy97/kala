@@ -59,12 +59,29 @@ import { ulid } from 'ulid'
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LoopBroadcast, LoopHandle } from './loop.js'
 import { runHostLoop } from './loop.js'
+import type { HookConfig, HookPayload, HookRunner } from './hooks.js'
+import { selectHooks } from './hooks.js'
 import { readSessionLog } from './store/log.js'
 import { SessionStore, type SessionRecord } from './store/session.js'
 import {
   createExecutorRegistry,
   DEFAULT_TOOL_TIMEOUT_MS,
 } from './connection/executor.js'
+
+type QueuedUserMessage = {
+  text: string
+  content?: readonly import('@agent-kernel/kernel').MessageContent[]
+}
+
+type MessageQueueManager = {
+  enqueue(sessionId: string, msg: QueuedUserMessage, priority?: 'front'): void
+  pending(sessionId: string): number
+  drain(sessionId: string): Promise<void>
+}
+
+function isRestingStatus(status: AgentState['status']): boolean {
+  return status === 'idle' || status === 'done' || status === 'error'
+}
 
 export type HostServerOptions = {
   port: number
@@ -82,6 +99,14 @@ export type HostServerOptions = {
    */
   models?: readonly ModelInfo[]
   defaultModel?: string
+  /**
+   * User-configured hooks (from `~/.config/agent-kernel/config.toml`). When
+   * present the loop invokes matching hooks around every tool dispatch;
+   * session_start / session_end hooks fire from server.ts around
+   * create/delete.
+   */
+  hooks?: readonly HookConfig[]
+  hookRunner?: HookRunner
 }
 
 export type HostServer = {
@@ -131,9 +156,61 @@ export async function startHostServer(
   // the host restarts, sessions revert to the adapter's construction-time
   // default model until the dashboard sets one again.
   const selectedModels = new Map<string, string>()
+  const queuedMessages = new Map<string, QueuedUserMessage[]>()
+  const drainingQueues = new Set<string>()
 
   const dashboardNs: DashboardNs = io.of('/dashboard')
   const executorNs: ExecutorNs = io.of('/executor')
+
+  let loop: LoopHandle
+  const messageQueues: MessageQueueManager = {
+    enqueue(sessionId, msg, priority) {
+      const queue = queuedMessages.get(sessionId) ?? []
+      if (priority === 'front') queue.unshift(msg)
+      else queue.push(msg)
+      queuedMessages.set(sessionId, queue)
+      dashboardNs.to(`session:${sessionId}`).emit('server:message_queue', {
+        sessionId,
+        pending: queue.length,
+      })
+    },
+    pending(sessionId) {
+      return queuedMessages.get(sessionId)?.length ?? 0
+    },
+    async drain(sessionId) {
+      if (drainingQueues.has(sessionId)) return
+      drainingQueues.add(sessionId)
+      try {
+        while (true) {
+          const queue = queuedMessages.get(sessionId) ?? []
+          if (queue.length === 0) return
+          let record = store.get(sessionId)
+          if (!record) {
+            try {
+              record = await store.load(sessionId)
+            } catch {
+              return
+            }
+          }
+          if (!record || !isRestingStatus(record.state.status)) return
+          const next = queue.shift()
+          dashboardNs.to(`session:${sessionId}`).emit('server:message_queue', {
+            sessionId,
+            pending: queue.length,
+          })
+          if (queue.length === 0) queuedMessages.delete(sessionId)
+          if (!next) return
+          await loop.dispatch(sessionId, {
+            kind: 'user_message',
+            text: next.text,
+            ...(next.content ? { content: next.content } : {}),
+          })
+        }
+      } finally {
+        drainingQueues.delete(sessionId)
+      }
+    },
+  }
 
   const broadcast: LoopBroadcast = {
     onEvent(sessionId, seq, event, effects, state) {
@@ -162,6 +239,11 @@ export async function startHostServer(
         cursor: state.cursor,
         state,
       })
+      if (isRestingStatus(state.status) && messageQueues.pending(sessionId) > 0) {
+        setTimeout(() => {
+          void messageQueues.drain(sessionId)
+        }, 0)
+      }
     },
     onApprovalRequired(sessionId, eff: RequestApprovalEffect) {
       io.of('/dashboard').to(`session:${sessionId}`).emit('approval:required', {
@@ -194,7 +276,7 @@ export async function startHostServer(
     },
   }
 
-  const loop = runHostLoop({
+  loop = runHostLoop({
     store,
     llm: options.llm,
     tools: executors,
@@ -202,17 +284,48 @@ export async function startHostServer(
     models: {
       get: (sessionId) => selectedModels.get(sessionId),
     },
+    ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
+    ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
   })
+
+  const fireLifecycleHook = async (
+    event: 'session_start' | 'session_end',
+    record: SessionRecord,
+  ): Promise<void> => {
+    const hooks = options.hooks
+    const runner = options.hookRunner
+    if (!hooks || !runner || hooks.length === 0) return
+    const matching = selectHooks(hooks, event)
+    if (matching.length === 0) return
+    const payload: HookPayload = {
+      event,
+      sessionId: record.sessionId,
+      ...(record.workspaceId !== undefined
+        ? { workspaceId: record.workspaceId }
+        : {}),
+    }
+    for (const hook of matching) {
+      try {
+        await runner.run(hook, payload)
+      } catch {
+        // Lifecycle hooks are advisory  -  one failing hook must not block
+        // session creation or deletion.
+      }
+    }
+  }
 
   configureDashboardNamespace(dashboardNs, {
     store,
     loop,
     executors,
     defaultConfig: options.defaultConfig,
-    authToken: options.authToken,
+    ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
     broadcastError,
     selectedModels,
     dashboardNs,
+    messageQueues,
+    onSessionCreated: (record) => fireLifecycleHook('session_start', record),
+    onSessionDeleted: (record) => fireLifecycleHook('session_end', record),
   })
   configureExecutorNamespace(executorNs, {
     store,
@@ -284,6 +397,9 @@ type DashboardDeps = {
   ): void
   selectedModels: Map<string, string>
   dashboardNs: DashboardNs
+  messageQueues: MessageQueueManager
+  onSessionCreated?(record: SessionRecord): void | Promise<void>
+  onSessionDeleted?(record: SessionRecord): void | Promise<void>
 }
 
 function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void {
@@ -354,8 +470,7 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
     })
 
     socket.on('client:user_message', async (p: ClientUserMessage) => {
-      const evt: AgentEvent = { kind: 'user_message', text: p.text }
-      await safeDispatch(deps, p.sessionId, evt)
+      await handleUserMessage(deps, p)
     })
     socket.on('client:user_approve', async (p: ClientUserApprove) => {
       const evt: AgentEvent = { kind: 'user_approve', callId: p.callId }
@@ -469,7 +584,16 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
           'session:ready',
           readyEventFor(record, deps.selectedModels.get(record.sessionId)),
         )
-        if (created) await broadcastSessionList(deps)
+        if (created) {
+          await broadcastSessionList(deps)
+          if (deps.onSessionCreated) {
+            try {
+              await deps.onSessionCreated(record)
+            } catch {
+              // Lifecycle hook errors are advisory  -  swallow.
+            }
+          }
+        }
       } catch (err) {
         deps.broadcastError(
           p.sessionId,
@@ -524,6 +648,12 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
         }
         socket.emit('session:forked', forked)
         await broadcastSessionList(deps)
+        if (typeof p.seedMessage === 'string' && p.seedMessage.trim().length > 0) {
+          await deps.loop.dispatch(record.sessionId, {
+            kind: 'user_message',
+            text: p.seedMessage,
+          })
+        }
       } catch (err) {
         deps.broadcastError(
           p.sourceSessionId,
@@ -585,6 +715,14 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
 
     socket.on('client:delete_session', async (p: ClientDeleteSession) => {
       try {
+        const record = deps.store.get(p.sessionId)
+        if (record && deps.onSessionDeleted) {
+          try {
+            await deps.onSessionDeleted(record)
+          } catch {
+            // Lifecycle hook errors are advisory  -  swallow.
+          }
+        }
         await deps.store.delete(p.sessionId)
         deps.selectedModels.delete(p.sessionId)
         ns.emit('server:session_deleted', { sessionId: p.sessionId })
@@ -623,14 +761,7 @@ async function safeDispatch(
     // way we refuse to lazy-create, because a lazy-created session has no
     // workspaceId, cannot route tool calls, and lands in the Explorer's
     // Unassigned bucket forever. Surface the miss so the user notices.
-    let record: SessionRecord | undefined = deps.store.get(sessionId)
-    if (!record) {
-      try {
-        record = await deps.store.load(sessionId)
-      } catch {
-        record = undefined
-      }
-    }
+    const record = await loadRecordForDashboard(deps, sessionId)
     if (!record) {
       deps.broadcastError(
         sessionId,
@@ -649,6 +780,56 @@ async function safeDispatch(
   }
 }
 
+async function handleUserMessage(
+  deps: DashboardDeps,
+  p: ClientUserMessage,
+): Promise<void> {
+  const record = await loadRecordForDashboard(deps, p.sessionId)
+  if (!record) {
+    deps.broadcastError(
+      p.sessionId,
+      'host',
+      'session not created  -  click "New" in the sidebar to start a session bound to a workspace',
+    )
+    return
+  }
+  const mode = p.mode ?? 'steer'
+  const queued: QueuedUserMessage = {
+    text: p.text,
+    ...(p.content ? { content: p.content } : {}),
+  }
+  if (mode === 'queue') {
+    deps.messageQueues.enqueue(p.sessionId, queued)
+    await deps.messageQueues.drain(p.sessionId)
+    return
+  }
+  if (!isRestingStatus(record.state.status)) {
+    if (record.state.status === 'thinking') deps.loop.cancelStream(p.sessionId)
+    deps.messageQueues.enqueue(p.sessionId, queued, 'front')
+    return
+  }
+  await deps.loop.dispatch(p.sessionId, {
+    kind: 'user_message',
+    text: p.text,
+    ...(p.content ? { content: p.content } : {}),
+  })
+}
+
+async function loadRecordForDashboard(
+  deps: DashboardDeps,
+  sessionId: string,
+): Promise<SessionRecord | undefined> {
+  let record: SessionRecord | undefined = deps.store.get(sessionId)
+  if (!record) {
+    try {
+      record = await deps.store.load(sessionId)
+    } catch {
+      record = undefined
+    }
+  }
+  return record
+}
+
 function validateSessionCwd(
   deps: DashboardDeps,
   sessionId: string,
@@ -659,6 +840,30 @@ function validateSessionCwd(
   const resolved = resolvePath(trimmed)
   const executor = deps.executors.executorForSession(sessionId)
   const roots = executor?.sandboxRoots ?? []
+  if (roots.length === 0) return { ok: true, cwd: resolved }
+  for (const root of roots) {
+    const r = resolvePath(root)
+    if (resolved === r || resolved.startsWith(r + sep)) {
+      return { ok: true, cwd: resolved }
+    }
+  }
+  return {
+    ok: false,
+    reason: 'cwd outside sandbox roots',
+  }
+}
+
+function validateWorkspaceCwd(
+  deps: DashboardDeps,
+  workspaceId: string,
+  cwd: string,
+): { ok: true; cwd: string } | { ok: false; reason: string } {
+  const trimmed = cwd.trim()
+  if (trimmed.length === 0) return { ok: false, reason: 'cwd is empty' }
+  const resolved = resolvePath(trimmed)
+  const executor = deps.executors.snapshot().find((e) => e.workspaceId === workspaceId)
+  if (!executor) return { ok: false, reason: 'workspace offline' }
+  const roots = executor.sandboxRoots ?? []
   if (roots.length === 0) return { ok: true, cwd: resolved }
   for (const root of roots) {
     const r = resolvePath(root)
