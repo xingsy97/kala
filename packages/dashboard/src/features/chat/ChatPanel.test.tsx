@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { ChatPanel } from './ChatPanel.js'
@@ -42,8 +42,13 @@ describe('ChatPanel', () => {
     )
     expect(screen.getByText('hello')).toBeTruthy()
     expect(screen.getByText('about to write')).toBeTruthy()
+    // Tool call header is always visible; details expand on click.
     expect(screen.getByText(/ -  write/)).toBeTruthy()
-    expect(screen.getByText(/wrote 3 bytes/)).toBeTruthy()
+    expect(screen.getByText(/ -  ok/)).toBeTruthy()
+    // Body is collapsed by default  -  expanding the tool_result reveals it.
+    expect(screen.queryByText('wrote 3 bytes')).toBeNull()
+    fireEvent.click(screen.getByTestId('tool-result-toggle-c1'))
+    expect(screen.getByText('wrote 3 bytes')).toBeTruthy()
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
@@ -97,7 +102,7 @@ describe('ChatPanel', () => {
       />,
     )
     const rows = container.querySelectorAll('[data-message-index]')
-    expect(rows[0]!.className).not.toMatch(/ring-/)
-    expect(rows[1]!.className).toMatch(/ring-/)
+    expect(rows[0]!.className).not.toMatch(/bg-amber-50/)
+    expect(rows[1]!.className).toMatch(/bg-amber-50/)
   })
 })

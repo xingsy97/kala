@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -15,9 +17,9 @@ type Props = {
 
 export function ChatPanel({ messages, highlightIndex }: Props): JSX.Element {
   return (
-    <div className="flex flex-col gap-3 p-4">
+    <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-900">
       {messages.length === 0 ? (
-        <div className="text-slate-500 text-sm">No messages yet.</div>
+        <div className="px-6 py-8 text-slate-500 text-sm">No messages yet.</div>
       ) : null}
       {messages.map((m, i) => (
         <MessageRow
@@ -40,28 +42,27 @@ function MessageRow({
   message: Message
   highlighted: boolean
 }): JSX.Element {
-  const bg =
-    message.role === 'user'
-      ? 'bg-slate-100 dark:bg-slate-800'
-      : message.role === 'assistant'
-        ? 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'
-        : 'bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800'
   const label =
     message.role === 'user'
-      ? 'you'
+      ? 'You'
       : message.role === 'assistant'
-        ? 'assistant'
+        ? 'Assistant'
         : message.role
-  const ring = highlighted
-    ? 'ring-2 ring-amber-400/70 shadow-lg shadow-amber-500/10'
-    : ''
+  const labelColor =
+    message.role === 'user'
+      ? 'text-slate-500 dark:text-slate-400'
+      : 'text-amber-700 dark:text-amber-400'
   return (
     <div
       id={`msg-${index}`}
       data-message-index={index}
-      className={`rounded-md p-3 transition-shadow ${bg} ${ring}`}
+      className={`px-6 py-4 transition-colors ${
+        highlighted ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
+      }`}
     >
-      <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+      <div
+        className={`text-[11px] uppercase tracking-wider font-medium mb-2 ${labelColor}`}
+      >
         {label}
       </div>
       <div className="flex flex-col gap-2">
@@ -94,24 +95,34 @@ function ContentBlock({
 
 function AssistantMarkdown({ text }: { text: string }): JSX.Element {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none text-slate-800 dark:text-slate-100 leading-relaxed [&_pre]:bg-slate-100 dark:[&_pre]:bg-slate-950 [&_pre]:border [&_pre]:border-slate-200 dark:[&_pre]:border-slate-800 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-amber-700 dark:[&_code]:text-amber-200 [&_code]:bg-slate-100 dark:[&_code]:bg-slate-900 [&_code]:px-1 [&_code]:rounded [&_pre_code]:bg-transparent [&_pre_code]:text-slate-800 dark:[&_pre_code]:text-slate-100 [&_pre_code]:p-0 [&_a]:text-sky-600 dark:[&_a]:text-sky-400 [&_a]:underline [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:border [&_table]:border-slate-300 dark:[&_table]:border-slate-700 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-700 [&_th]:px-2 [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 dark:[&_blockquote]:border-slate-600 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 dark:[&_blockquote]:text-slate-300">
+    <div className="prose prose-sm dark:prose-invert max-w-none text-slate-800 dark:text-slate-100 leading-relaxed [&_pre]:bg-slate-50 dark:[&_pre]:bg-slate-950 [&_pre]:border [&_pre]:border-slate-200 dark:[&_pre]:border-slate-800 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-amber-700 dark:[&_code]:text-amber-200 [&_code]:bg-slate-100 dark:[&_code]:bg-slate-900 [&_code]:px-1 [&_code]:rounded [&_pre_code]:bg-transparent [&_pre_code]:text-slate-800 dark:[&_pre_code]:text-slate-100 [&_pre_code]:p-0 [&_a]:text-sky-600 dark:[&_a]:text-sky-400 [&_a]:underline [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:border [&_table]:border-slate-300 dark:[&_table]:border-slate-700 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-700 [&_th]:px-2 [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 dark:[&_blockquote]:border-slate-600 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 dark:[&_blockquote]:text-slate-300">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   )
 }
 
 function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
+  const [open, setOpen] = useState(false)
   return (
-    <div className="border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/40 rounded p-2 font-mono text-xs">
-      <div className="text-amber-700 dark:text-amber-400">
-         -  {call.name}{' '}
-        <span className="text-slate-500 dark:text-slate-500">
-          ({call.callId})
-        </span>
-      </div>
-      <pre className="mt-1 text-amber-800 dark:text-amber-100/80 whitespace-pre-wrap">
-        {JSON.stringify(call.input, null, 2)}
-      </pre>
+    <div className="font-mono text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-amber-700 dark:text-amber-400 hover:text-amber-600 dark:hover:text-amber-300"
+        data-testid={`tool-call-toggle-${call.callId}`}
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        <span> -  {call.name}</span>
+      </button>
+      {open ? (
+        <pre className="mt-1 ml-4 border-l border-amber-300/50 dark:border-amber-800/40 pl-2 text-amber-800/80 dark:text-amber-100/70 whitespace-pre-wrap">
+          {JSON.stringify(call.input, null, 2)}
+        </pre>
+      ) : null}
     </div>
   )
 }
@@ -121,26 +132,35 @@ function ToolResultBlock({
 }: {
   result: ToolResultContent
 }): JSX.Element {
-  const border = result.ok
-    ? 'border-emerald-300 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/40'
-    : 'border-rose-300 dark:border-rose-800/60 bg-rose-50 dark:bg-rose-950/40'
+  const [open, setOpen] = useState(false)
+  const color = result.ok
+    ? 'text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300'
+    : 'text-rose-700 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300'
+  const borderColor = result.ok
+    ? 'border-emerald-300/50 dark:border-emerald-800/40'
+    : 'border-rose-300/50 dark:border-rose-800/40'
   return (
-    <div
-      className={`border ${border} rounded p-2 font-mono text-xs whitespace-pre-wrap text-slate-700 dark:text-slate-200`}
-    >
-      <div
-        className={
-          result.ok
-            ? 'text-emerald-700 dark:text-emerald-400'
-            : 'text-rose-700 dark:text-rose-400'
-        }
+    <div className="font-mono text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-1 ${color}`}
+        data-testid={`tool-result-toggle-${result.callId}`}
       >
-         -  {result.ok ? 'ok' : 'err'}{' '}
-        <span className="text-slate-500 dark:text-slate-500">
-          ({result.callId})
-        </span>
-      </div>
-      <div className="mt-1">{result.content}</div>
+        {open ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        <span> -  {result.ok ? 'ok' : 'err'}</span>
+      </button>
+      {open ? (
+        <pre
+          className={`mt-1 ml-4 border-l ${borderColor} pl-2 whitespace-pre-wrap text-slate-700 dark:text-slate-200`}
+        >
+          {result.content}
+        </pre>
+      ) : null}
     </div>
   )
 }

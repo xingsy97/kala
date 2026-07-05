@@ -12,7 +12,11 @@
     "test": "pnpm -r --parallel run test",
     "typecheck": "pnpm -r --parallel run typecheck",
     "dev": "pnpm -r --parallel run dev",
-    "executor:dev": "pnpm --filter @agent-kernel/executor dev"
+    "executor:dev": "pnpm --filter @agent-kernel/executor dev",
+    "publish:kernel": "pnpm --filter @agent-kernel/kernel run publish:npm",
+    "publish:host": "pnpm --filter @agent-kernel/host run publish:npm",
+    "publish:executor": "pnpm --filter @agent-kernel/executor run publish:npm",
+    "publish:all": "pnpm run publish:kernel && pnpm run publish:host && pnpm run publish:executor"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
