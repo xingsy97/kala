@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react'
 import type { AgentEvent, AgentState, CallLlmEffect, Effect } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
+import { stateFlow, type StateFlowStep } from '../../state-flow.js'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,6 +53,7 @@ export function InspectorPanel({
     entry: TimelineEntry
     priorCallLlm: { seq: number; effect: CallLlmEffect } | null
   } | null>(null)
+  const flow = stateFlow(timeline)
 
   const confirmFork = (): void => {
     if (pendingForkSeq !== null && onFork) onFork(pendingForkSeq)
@@ -65,7 +67,7 @@ export function InspectorPanel({
           direction="vertical"
           autoSaveId="ak-inspector-split"
         >
-          <ResizablePanel defaultSize={65} minSize={25}>
+          <ResizablePanel defaultSize={52} minSize={20}>
             <Timeline
               timeline={timeline}
               messagesCount={visibleMessagesCount ?? state?.messages.length ?? 0}
@@ -75,7 +77,11 @@ export function InspectorPanel({
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={35} minSize={10}>
+          <ResizablePanel defaultSize={24} minSize={12}>
+            <StateFlowSection steps={flow} />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={24} minSize={10}>
             <RawStateSection state={state} />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -146,6 +152,72 @@ export function InspectorPanel({
       </Dialog>
     </div>
   )
+}
+
+function StateFlowSection({ steps }: { steps: readonly StateFlowStep[] }): JSX.Element {
+  return (
+    <div className="h-full flex flex-col border-t border-slate-200 dark:border-slate-800">
+      <div className="px-3 py-2 text-xs text-slate-500 flex-none">
+        <span className="font-medium">State flow</span>
+        <span className="ml-2 normal-case tracking-normal text-slate-500 dark:text-slate-600">
+          reducer status after each event
+        </span>
+      </div>
+      <ScrollArea className="flex-1 min-h-0">
+        {steps.length === 0 ? (
+          <div className="px-3 pb-3 text-sm text-slate-500">no state transitions yet</div>
+        ) : (
+          <ol className="px-2 pb-3 space-y-1" data-testid="state-flow-list">
+            {steps.map((step) => (
+              <StateFlowRow key={step.seq} step={step} />
+            ))}
+          </ol>
+        )}
+      </ScrollArea>
+    </div>
+  )
+}
+
+function StateFlowRow({ step }: { step: StateFlowStep }): JSX.Element {
+  const changed = step.from !== step.to
+  return (
+    <li
+      className="rounded border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-800"
+      data-testid="state-flow-row"
+    >
+      <div className="flex items-center gap-2">
+        <span className="w-8 flex-none text-right font-mono text-slate-500">#{step.seq}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-slate-700 dark:text-slate-200">
+          {step.eventKind}
+        </span>
+        <span className={cn('font-mono', changed ? 'text-sky-700 dark:text-sky-300' : 'text-slate-500')}>
+          {statusLabel(step.from)}  -  {statusLabel(step.to)}
+        </span>
+      </div>
+      {step.effects.length > 0 ? (
+        <div className="mt-1 truncate pl-10 font-mono text-[11px] text-slate-500">
+          effects: {step.effects.map((e) => e.kind).join(', ')}
+        </div>
+      ) : null}
+    </li>
+  )
+}
+
+function statusLabel(status: StateFlowStep['from']): string {
+  switch (status) {
+    case 'idle':
+      return 'Ready'
+    case 'thinking':
+      return 'Waiting for LLM'
+    case 'awaiting_approval':
+      return 'Needs approval'
+    case 'executing_tools':
+      return 'Running tools'
+    case 'done':
+      return 'Done'
+    case 'error':
+      return 'Error'
+  }
 }
 
 function inboundOf(event: AgentEvent): { source: string; tone: string } {

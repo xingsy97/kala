@@ -31,6 +31,8 @@ const WORKSPACE = mkdtempSync(join(tmpdir(), 'agent-kernel-dashboard-workspace-'
 const WORKSPACE_ID_FILE = join(tmpdir(), `agent-kernel-dashboard-workspace-id-${process.pid}`)
 const CHROME_DEBUG_URL = process.env.CHROME_DEBUG_URL ?? 'http://127.0.0.1:9222'
 const MODEL = process.env.VERIFY_MODEL
+const ANTHROPIC_MODEL = process.env.VERIFY_ANTHROPIC_MODEL ?? 'claude-opus-4.7-1m-internal'
+const REMOVED_ANTHROPIC_MODEL = process.env.VERIFY_REMOVED_ANTHROPIC_MODEL ?? 'claude-haiku-4-5'
 const TURN_TIMEOUT_MS = Number(process.env.VERIFY_TURN_TIMEOUT_MS ?? 10_000)
 
 const checks = []
@@ -105,8 +107,10 @@ try {
 
   if (MODEL) await selectModel(page, MODEL)
 
+  await verifyModelPicker(page)
   await verifyScrollbar(page)
   await verifyStreaming(page)
+  await verifyStateFlow(page)
   await verifyCompact(page)
 
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
@@ -116,6 +120,29 @@ try {
   if (browser) await browser.disconnect().catch(() => {})
   await stopProcess(executor)
   await stopProcess(host)
+}
+
+async function verifyModelPicker(page) {
+  await page.click('[data-testid="model-picker"]')
+  const optionText = await page.evaluate(() => document.body.textContent || '')
+  check('anthropic primary model is selectable', optionText.includes(ANTHROPIC_MODEL), ANTHROPIC_MODEL)
+  check('unavailable anthropic small model is not advertised', !optionText.includes(REMOVED_ANTHROPIC_MODEL), REMOVED_ANTHROPIC_MODEL)
+  await page.keyboard.press('Escape')
+}
+
+async function verifyStateFlow(page) {
+  const flow = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="state-flow-row"]')).map(
+      (row) => row.textContent || '',
+    )
+    return {
+      rows,
+      hasSection: (document.body.textContent || '').includes('State flow'),
+    }
+  })
+  check('state flow section is visible', flow.hasSection)
+  check('state flow records Waiting for LLM transition', flow.rows.some((r) => r.includes('Ready  -  Waiting for LLM')), flow.rows.join(' | '))
+  check('state flow records Done transition', flow.rows.some((r) => r.includes('Waiting for LLM  -  Done')), flow.rows.join(' | '))
 }
 
 const failed = checks.filter((c) => !c.pass)
