@@ -282,7 +282,7 @@ Current logs may contain these additional deterministic fields and events:
 - Header may include `parentSessionId`, `parentCursor`, `workspaceId`, `workspaceName`, and `initialCwd`.
 - Header `initialState` includes `contextPressureLevel`, `approvalMode`, `todos`, and optional `cwd`.
 - Events may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
-- `compact_replaced` stores `summary`, `replacedCount`, `tokensBefore`, and `tokensAfter`.
+- `compact_replaced` stores `summary`, `replacedCount`, `tokensBefore`, and `tokensAfter`. Newer logs also store `trigger`, the summarizer `request` (`model`, `systemPrompt`, `messages`, `tools`), and optional `responseUsage`; replay ignores those metadata fields, but dashboard history uses them to inspect the compact LLM request.
 - Crash recovery appends synthetic `user_approve` and/or failed `tool_result` events when a loaded session was stuck with pending tool calls.
 - Child sessions created by the host-side `agent` tool use normal fork/lineage header fields (`parentSessionId`, `parentCursor`) and their own JSONL file.
 - Background shell internals are not stored directly. The parent session only logs the normal `tool_result` content returned by `bash`, `bash_output`, or `kill_shell`.

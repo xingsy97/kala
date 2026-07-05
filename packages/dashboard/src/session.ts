@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
+  AgentConfig,
   AgentEvent,
   AgentState,
   Effect,
@@ -47,6 +48,7 @@ export type ConnectionStatus =
 export type SessionView = {
   status: ConnectionStatus
   state: AgentState | null
+  config: AgentConfig | null
   timeline: readonly TimelineEntry[]
   streamingText: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
@@ -80,6 +82,7 @@ export function useSession({
 }: UseSessionOptions): SessionView {
   const [status, setStatus] = useState<ConnectionStatus>('idle')
   const [state, setState] = useState<AgentState | null>(null)
+  const [config, setConfig] = useState<AgentConfig | null>(null)
   const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [pendingApprovals, setPendingApprovals] = useState<
@@ -96,6 +99,7 @@ export function useSession({
   useEffect(() => {
     setStatus('connecting')
     setState(null)
+    setConfig(null)
     setTimeline([])
     setStreamingText('')
     setPendingApprovals([])
@@ -120,6 +124,7 @@ export function useSession({
     socket.on('session:ready', (p) => {
       setStatus('ready')
       setState(p.state)
+      setConfig(p.config)
       setParentSessionId(p.parentSessionId ?? null)
       setParentCursor(p.parentCursor ?? null)
       setSelectedModel(p.selectedModel ?? null)
@@ -193,6 +198,7 @@ export function useSession({
     () => ({
       status,
       state,
+      config,
       timeline,
       streamingText,
       pendingApprovals,
@@ -207,6 +213,7 @@ export function useSession({
     [
       status,
       state,
+      config,
       timeline,
       streamingText,
       pendingApprovals,

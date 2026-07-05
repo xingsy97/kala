@@ -1,7 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Loader2, Minimize2, Send } from 'lucide-react'
+import { Archive, Loader2, Send } from 'lucide-react'
 
 import type { ModelInfo } from '@agent-kernel/shared'
+import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -23,6 +24,8 @@ type Props = {
   models: readonly ModelInfo[]
   onModelChange(model: string): void
   status: string
+  state: AgentState | null
+  config: AgentConfig | null
 }
 
 export function Composer({
@@ -34,6 +37,8 @@ export function Composer({
   models,
   onModelChange,
   status,
+  state,
+  config,
 }: Props): JSX.Element {
   const [text, setText] = useState('')
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
@@ -157,6 +162,11 @@ export function Composer({
         >
           {hostStatusLabel(status)}
         </span>
+        <ContextUsageIndicator
+          state={state}
+          config={config}
+          modelInfo={models.find((m) => m.id === model) ?? null}
+        />
         <div className="min-w-0 flex-1" />
         <Button
           type="button"
@@ -172,7 +182,7 @@ export function Composer({
           {compacting ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Minimize2 className="h-3.5 w-3.5" />
+            <Archive className="h-3.5 w-3.5" />
           )}
         </Button>
         <Button
@@ -187,6 +197,75 @@ export function Composer({
       </div>
     </form>
   )
+}
+
+function ContextUsageIndicator({
+  state,
+  config,
+  modelInfo,
+}: {
+  state: AgentState | null
+  config: AgentConfig | null
+  modelInfo: ModelInfo | null
+}): JSX.Element {
+  const inputTokens = state?.usage.inputTokens ?? 0
+  const totalContextWindow = modelInfo?.contextWindow ?? config?.contextLimit ?? null
+  const userContextWindow = config?.contextLimit ?? totalContextWindow
+  const ratio = userContextWindow && userContextWindow > 0
+    ? Math.min(1, Math.max(0, inputTokens / userContextWindow))
+    : 0
+  const percent = Math.round(ratio * 100)
+  const circumference = 2 * Math.PI * 8
+  const dash = userContextWindow && userContextWindow > 0 ? circumference * ratio : 0
+  const tone = state?.contextPressureLevel === 'hard'
+    ? 'text-rose-600 dark:text-rose-300'
+    : state?.contextPressureLevel === 'soft'
+      ? 'text-amber-600 dark:text-amber-300'
+      : 'text-sky-600 dark:text-sky-300'
+  const title = userContextWindow && userContextWindow > 0
+    ? `Context window: ${formatTokens(inputTokens)} of ${formatTokens(userContextWindow)} user tokens (${percent}%). Total model context window: ${totalContextWindow ? formatTokens(totalContextWindow) : 'unknown'} tokens. User context window: ${formatTokens(userContextWindow)} tokens.`
+    : `Context window usage unavailable. Input tokens seen: ${formatTokens(inputTokens)}.`
+  return (
+    <div
+      className="flex flex-none items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[11px] text-slate-600 dark:text-slate-300"
+      title={title}
+      aria-label={title}
+      data-testid="context-usage-indicator"
+    >
+      <svg viewBox="0 0 20 20" className="h-5 w-5 flex-none" aria-hidden="true">
+        <circle
+          cx="10"
+          cy="10"
+          r="8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className="text-slate-200 dark:text-slate-800"
+        />
+        <circle
+          cx="10"
+          cy="10"
+          r="8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${circumference - dash}`}
+          transform="rotate(-90 10 10)"
+          className={tone}
+        />
+      </svg>
+      <span className="whitespace-nowrap">
+        {userContextWindow && userContextWindow > 0 ? `${percent}% context` : 'context n/a'}
+      </span>
+    </div>
+  )
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
+  return String(tokens)
 }
 
 function hostStatusLabel(status: string): string {

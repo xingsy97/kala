@@ -13,6 +13,8 @@ function renderComposer(props?: {
       models={[]}
       onModelChange={() => {}}
       status="ready"
+      state={null}
+      config={null}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
     />,
@@ -27,6 +29,8 @@ describe('Composer', () => {
         models={[]}
         onModelChange={() => {}}
         status="ready"
+        state={null}
+        config={null}
         onSubmit={() => {}}
         onCompact={() => {}}
       />,
@@ -82,6 +86,8 @@ describe('Composer', () => {
         models={[]}
         onModelChange={() => {}}
         status="ready"
+        state={null}
+        config={null}
         compacting
         onSubmit={() => {}}
         onCompact={() => {}}

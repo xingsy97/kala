@@ -569,6 +569,32 @@ function EventDetails({
       </div>
     )
   }
+  if (entry.event.kind === 'compact_replaced') {
+    return (
+      <div
+        className="grid grid-cols-1 lg:grid-cols-2 gap-2"
+        data-testid="timeline-row-details"
+      >
+        <JsonBlock
+          label={`compact summarizer request · #${entry.seq}`}
+          value={entry.event.request ?? { missing: 'compact request metadata was not recorded' }}
+          collapsed={2}
+        />
+        <JsonBlock
+          label={`compact result · #${entry.seq}`}
+          value={{
+            trigger: entry.event.trigger,
+            summary: entry.event.summary,
+            replacedCount: entry.event.replacedCount,
+            tokensBefore: entry.event.tokensBefore,
+            tokensAfter: entry.event.tokensAfter,
+            responseUsage: entry.event.responseUsage,
+          }}
+          collapsed={2}
+        />
+      </div>
+    )
+  }
   return (
     <div
       className="space-y-2"

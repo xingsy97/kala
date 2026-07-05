@@ -108,4 +108,28 @@ describe('ChatPanel', () => {
     expect(rows[0]!.className).not.toMatch(/bg-amber-50/)
     expect(rows[1]!.className).toMatch(/bg-amber-50/)
   })
+
+  it('renders compact boundaries between transcript messages', () => {
+    render(
+      <ChatPanel
+        items={[
+          { kind: 'message', message: { role: 'user', content: [{ type: 'text', text: 'before' }] } },
+          {
+            kind: 'compact_boundary',
+            seq: 7,
+            trigger: 'manual',
+            replacedCount: 2,
+            tokensBefore: 1200,
+            tokensAfter: 80,
+            summary: 'before summarized',
+          },
+          { kind: 'message', message: { role: 'user', content: [{ type: 'text', text: 'after' }] } },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('compact-boundary')).toBeTruthy()
+    expect(screen.getByText('Context compacted')).toBeTruthy()
+    expect(screen.getByText(/Manual compact/)).toBeTruthy()
+  })
 })
