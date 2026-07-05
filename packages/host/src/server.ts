@@ -13,12 +13,15 @@ import { extname, join, normalize, resolve as resolvePath, sep } from 'node:path
 
 import type {
   ClientCancel,
+  ClientCancelStream,
+  ClientCompact,
   ClientCreateSession,
   ClientFork,
   ClientListExecutors,
   ClientListSessions,
   ClientLoadHistory,
   ClientDeleteSession,
+  ClientSetApprovalMode,
   ClientSetModel,
   ClientSubscribe,
   ClientUserApprove,
@@ -179,6 +182,12 @@ export async function startHostServer(
       io.of('/dashboard').to(`session:${sessionId}`).emit('usage:updated', {
         sessionId,
         usage: state.usage,
+      })
+    },
+    onTokenDelta(sessionId, text) {
+      io.of('/dashboard').to(`session:${sessionId}`).emit('session:token_delta', {
+        sessionId,
+        text,
       })
     },
   }
@@ -361,6 +370,57 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
     socket.on('client:cancel', async (p: ClientCancel) => {
       const evt: AgentEvent = { kind: 'cancel' }
       await safeDispatch(deps, p.sessionId, evt)
+    })
+    socket.on('client:compact', async (p: ClientCompact) => {
+      try {
+        let record: SessionRecord | undefined = deps.store.get(p.sessionId)
+        if (!record) {
+          try {
+            record = await deps.store.load(p.sessionId)
+          } catch {
+            record = undefined
+          }
+        }
+        if (!record) {
+          deps.broadcastError(
+            p.sessionId,
+            'host',
+            'session not created — nothing to compact',
+          )
+          return
+        }
+        await deps.loop.compact(p.sessionId)
+      } catch (err) {
+        deps.broadcastError(
+          p.sessionId,
+          'kernel',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
+    })
+    socket.on('client:cancel_stream', (p: ClientCancelStream) => {
+      // No error path — cancelStream is a no-op when nothing is streaming.
+      // The loop turns the abort into a normal llm_response, so the FSM
+      // and log stay coherent without any special-case wiring here.
+      deps.loop.cancelStream(p.sessionId)
+    })
+    socket.on('client:set_approval_mode', async (p: ClientSetApprovalMode) => {
+      // Guard rail: `allow_all` may only be set when the operator opted in
+      // via env flag on the host. Prevents a compromised dashboard from
+      // silently disabling every approval prompt on an unattended session.
+      // The other three modes are freely settable.
+      if (p.mode === 'allow_all' && process.env.AK_ALLOW_ALL_OK !== '1') {
+        deps.broadcastError(
+          p.sessionId,
+          'host',
+          'approval mode "allow_all" requires AK_ALLOW_ALL_OK=1 on the host',
+        )
+        return
+      }
+      await safeDispatch(deps, p.sessionId, {
+        kind: 'approval_mode_changed',
+        mode: p.mode,
+      })
     })
     socket.on('client:create_session', async (p: ClientCreateSession) => {
       try {

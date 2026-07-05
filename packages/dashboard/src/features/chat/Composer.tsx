@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Send } from 'lucide-react'
 
+import type { AgentState } from '@agent-kernel/kernel'
 import type { ModelInfo } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -21,6 +22,7 @@ type Props = {
   models: readonly ModelInfo[]
   onModelChange(model: string): void
   status: string
+  state: AgentState | null
 }
 
 export function Composer({
@@ -30,6 +32,7 @@ export function Composer({
   models,
   onModelChange,
   status,
+  state,
 }: Props): JSX.Element {
   const [text, setText] = useState('')
 
@@ -99,6 +102,7 @@ export function Composer({
         >
           {status}
         </span>
+        <StateChips state={state} />
         <div className="flex-1" />
         <Button
           type="submit"
@@ -112,6 +116,89 @@ export function Composer({
       </div>
     </form>
   )
+}
+
+function StateChips({ state }: { state: AgentState | null }): JSX.Element | null {
+  if (!state) return null
+  return (
+    <div
+      className="hidden md:flex items-center gap-1 text-[11px] font-mono text-slate-500 dark:text-slate-400"
+      data-testid="composer-state-chips"
+    >
+      <Chip label="status" value={state.status} tone={statusChipTone(state.status)} />
+      <Chip label="cur" value={String(state.cursor)} />
+      <Chip
+        label="pend"
+        value={String(state.pendingCalls.length)}
+        tone={state.pendingCalls.length > 0 ? 'amber' : undefined}
+      />
+      <Chip
+        label="tok"
+        value={`${formatTokens(state.usage.inputTokens)} in / ${formatTokens(state.usage.outputTokens)} out`}
+      />
+    </div>
+  )
+}
+
+type ChipTone = 'default' | 'green' | 'amber' | 'rose' | 'sky'
+
+function Chip({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone?: ChipTone
+}): JSX.Element {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 border',
+        chipToneStyles(tone),
+      )}
+      title={`${label}: ${value}`}
+    >
+      <span className="uppercase tracking-wide opacity-70">{label}</span>
+      <span className="text-slate-800 dark:text-slate-100">{value}</span>
+    </span>
+  )
+}
+
+function chipToneStyles(tone: ChipTone | undefined): string {
+  switch (tone) {
+    case 'green':
+      return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+    case 'amber':
+      return 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
+    case 'rose':
+      return 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+    case 'sky':
+      return 'bg-sky-500/10 border-sky-500/30 text-sky-700 dark:text-sky-300'
+    default:
+      return 'bg-slate-500/5 border-slate-300/40 dark:border-slate-700/60'
+  }
+}
+
+function statusChipTone(status: AgentState['status']): ChipTone {
+  switch (status) {
+    case 'idle':
+    case 'done':
+      return 'green'
+    case 'thinking':
+    case 'executing_tools':
+      return 'sky'
+    case 'awaiting_approval':
+      return 'amber'
+    case 'error':
+      return 'rose'
+  }
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 function statusStyles(status: string): string {

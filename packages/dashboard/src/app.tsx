@@ -320,6 +320,7 @@ export function App(): JSX.Element {
                 models={models}
                 onModelChange={onModelChange}
                 status={session.status}
+                state={session.state}
                 onSubmit={(text) => {
                   session.socket?.emit('client:user_message', {
                     sessionId: config.sessionId,
