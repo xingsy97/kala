@@ -29,6 +29,7 @@ export type SessionNode = {
   workspaceId?: string
   label: string
   status?: SessionSummary['status']
+  currentCwd?: string
   eventCount: number
   parentSessionId?: string
   lastActivityIso: string
@@ -100,6 +101,7 @@ function sessionNode(s: SessionSummary): SessionNode {
     workspaceId: s.workspaceId,
     label: labelFor(s),
     status: s.status,
+    currentCwd: s.currentCwd,
     eventCount: s.eventCount,
     parentSessionId: s.parentSessionId,
     lastActivityIso: s.lastEventAt ?? s.createdAt,

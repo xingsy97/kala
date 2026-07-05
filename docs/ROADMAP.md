@@ -235,6 +235,7 @@ Batch A backend work is complete through the automatic gate. Current focused cou
 
 - Implemented compaction, streaming deltas, cancel-in-flight, crash recovery, permission modes, multimodal messages, MCP stub, session cwd, host-side `agent`, and background shell tools.
 - Composer footer now owns the model picker, host status, context usage ring, and send button. Manual compaction is available through the `/compact` slash command. Runtime cursor/pending/token details live in `ActivityBar`.
+- Explorer is a top-level left rail. The workbench toolbar sits to its right, shows session title plus cwd, and opens the real `client:set_cwd` editor; Explorer session rows also surface the current cwd when known.
 - Compact is observable in both History and Chat: timeline details show the summarizer request/result, and the transcript renders a visible compact boundary.
 - Background shell tasks have a dashboard Background terminal panel derived from normal tool events.
 - `ActivityBar` gives visible feedback for LLM wait, tool execution, approval wait, compact running, and compact completion.

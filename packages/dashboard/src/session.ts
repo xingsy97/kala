@@ -152,6 +152,7 @@ export function useSession({
       if (p.state.status !== 'thinking') setStreamingText('')
     })
     socket.on('event:appended', (p) => {
+      setLastError(null)
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
         setStreamingText('')
       }
