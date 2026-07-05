@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Minimize2, Send } from 'lucide-react'
+import { Loader2, Minimize2, Send } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ModelInfo } from '@agent-kernel/shared'
@@ -19,6 +19,7 @@ type Props = {
   disabled?: boolean
   onSubmit(text: string): void
   onCompact(): void
+  compacting?: boolean
   model: string
   models: readonly ModelInfo[]
   onModelChange(model: string): void
@@ -30,6 +31,7 @@ export function Composer({
   disabled,
   onSubmit,
   onCompact,
+  compacting = false,
   model,
   models,
   onModelChange,
@@ -115,14 +117,18 @@ export function Composer({
           type="button"
           variant="outline"
           size="icon"
-          disabled={disabled}
+          disabled={disabled || compacting}
           onClick={onCompact}
-          aria-label="compact context"
-          title="Compact context"
+          aria-label={compacting ? 'compacting context' : 'compact context'}
+          title={compacting ? 'Compacting context' : 'Compact context'}
           data-testid="composer-compact"
           className="h-7 w-7"
         >
-          <Minimize2 className="h-3.5 w-3.5" />
+          {compacting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Minimize2 className="h-3.5 w-3.5" />
+          )}
         </Button>
         <Button
           type="submit"
