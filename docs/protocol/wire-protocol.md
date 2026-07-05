@@ -559,7 +559,7 @@ Current protocol includes these additive events and fields:
 - Kernel events in `event:appended` may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
 - `compact_replaced` events may include the compact summarizer `request`, `trigger`, and `responseUsage` so history can show the compact LLM request and result side by side.
 - `ToolCallMessage` includes optional `cwd`; executor client merges it into the tool input before running the tool.
-- `SessionSummary` includes optional `currentCwd`.
+- `SessionSummary` includes optional `currentCwd`; dashboard uses it in Explorer session rows and as a fallback for the workbench cwd label before the live session state arrives.
 - `ExecutorAnnounce` is daemon-scoped and includes stable `workspaceId`, display `workspaceName`, `sandboxRoots`, `workingDir`, runtime, host OS, pid, and start time.
 - `session:token_delta` is UI-only. The event log remains authoritative through the final `llm_response`.
 - Background shell uses normal tool calls: `bash` starts the task, `bash_output` polls it, and `kill_shell` stops it. No special background output wire event is required yet; dashboard derives its background terminal panel from normal timeline tool calls/results.

@@ -38,7 +38,7 @@ type Props = {
   onDelete(sessionId: string): void
 }
 
-const ROW_HEIGHT = 56
+const ROW_HEIGHT = 68
 
 export function Explorer({
   executors,
@@ -269,6 +269,15 @@ function SessionRow({
             {formatWhen(s.lastActivityIso)}
           </span>
         </div>
+        {s.currentCwd ? (
+          <div
+            className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-500 font-mono truncate"
+            title={s.currentCwd}
+            data-testid="session-row-cwd"
+          >
+            cwd {s.currentCwd}
+          </div>
+        ) : null}
         {s.parentSessionId ? (
           <div className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400 font-mono truncate">
              -  fork of {s.parentSessionId.slice(0, 8)} - 

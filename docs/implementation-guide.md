@@ -460,6 +460,7 @@ This guide is older than the current implementation. When continuing work, treat
 - Host loop supports compaction, streaming deltas, stream cancellation, approval modes, cwd routing, and host-side `agent` tool orchestration.
 - Executor implements more than the original seven tools: `todowrite`, `bash_output`, `kill_shell`, and background mode for `bash`.
 - MCP is deliberately only a stub.
-- Dashboard Composer has the current manual compact entry points: compact icon button and exact `/compact` command, both emitting `client:compact`.
+- Dashboard Composer exposes manual compaction through the exact `/compact` slash command, which emits `client:compact` and is not appended as a user message.
+- Dashboard Explorer is the top-level left rail. The workbench toolbar shows session title plus current cwd, opens a cwd edit dialog backed by `client:set_cwd`, and keeps theme/inspector controls scoped to the workbench.
 - Dashboard is served by Host from `packages/dashboard/dist`; after `.tsx` edits run `pnpm --filter @agent-kernel/dashboard build` and verify through the real Host page.
 - Use `@uiw/react-json-view` through `components/ui/json-block.tsx` for JSON rendering.

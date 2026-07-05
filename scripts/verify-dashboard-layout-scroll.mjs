@@ -91,6 +91,9 @@ async function verifyViewports(page) {
   for (const viewport of VIEWPORTS) {
     await page.setViewport({ ...viewport, deviceScaleFactor: 1 })
     await sleep(150)
+    if (viewport.width >= 1024) {
+      await page.waitForSelector('[data-testid="session-row-cwd"]', { timeout: 3_000 })
+    }
     await verifyResponsivePanels(page, viewport.width)
     await verifyChatContentLayout(page, viewport.width)
     await verifyFooterLayout(page, viewport.width)
@@ -110,11 +113,13 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const chat = document.querySelector('[data-testid="chat-panel"]')
     const explorer = document.querySelector('[data-testid="explorer-panel"]')
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
-    const toolbar = document.querySelector('[data-testid="global-toolbar"]')
+    const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
     const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
+    const selectedSession = document.querySelector('[data-testid="session-row"]')
+    const sessionCwd = selectedSession?.querySelector('[data-testid="session-row-cwd"]')
     const rectFor = (el) => {
       const rect = el?.getBoundingClientRect()
-      return rect ? { width: rect.width, height: rect.height, left: rect.left, right: rect.right } : null
+      return rect ? { width: rect.width, height: rect.height, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } : null
     }
     return {
       viewportWidth: window.innerWidth,
@@ -124,6 +129,9 @@ async function verifyResponsivePanels(page, viewportWidth) {
       inspector: rectFor(inspector),
       toolbar: rectFor(toolbar),
       inspectorTogglePresent: Boolean(inspectorToggle),
+      sessionCwdText: sessionCwd?.textContent || '',
+      sessionCwd: rectFor(sessionCwd),
+      selectedSession: rectFor(selectedSession),
     }
   })
   if (viewportWidth < 1024) {
@@ -137,6 +145,8 @@ async function verifyResponsivePanels(page, viewportWidth) {
   const minMainWidth = viewportWidth === 1200 ? 660 : 820
   check(`wide layout keeps explorer rail at ${viewportWidth}px`, Boolean(metrics.explorer?.width), JSON.stringify(metrics))
   check(`wide layout keeps inspector rail at ${viewportWidth}px`, Boolean(metrics.inspector?.width), JSON.stringify(metrics))
+  check(`wide layout keeps explorer at top level at ${viewportWidth}px`, metrics.explorer?.top === 0 && metrics.toolbar && metrics.toolbar.left >= (metrics.explorer?.right ?? 0), JSON.stringify(metrics))
+  check(`wide layout shows session cwd metadata at ${viewportWidth}px`, metrics.sessionCwdText.includes('cwd /tmp') && metrics.sessionCwd && metrics.selectedSession && metrics.sessionCwd.bottom <= metrics.selectedSession.bottom + 1, JSON.stringify(metrics))
   check(`wide layout keeps explorer rail compact at ${viewportWidth}px`, metrics.explorer?.width <= viewportWidth * 0.19, JSON.stringify(metrics))
   check(`wide layout keeps inspector rail compact at ${viewportWidth}px`, metrics.inspector?.width <= viewportWidth * 0.31, JSON.stringify(metrics))
   check(`wide layout keeps main panel usable at ${viewportWidth}px`, metrics.main?.width >= minMainWidth, JSON.stringify(metrics))
@@ -259,7 +269,7 @@ async function verifyVisualIntegrity(page, viewportWidth) {
   const metrics = await page.evaluate(() => {
     const viewport = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
     const selectors = [
-      ['toolbar', '[data-testid="global-toolbar"]'],
+      ['toolbar', '[data-testid="workbench-toolbar"]'],
       ['chat', '[data-testid="chat-panel"]'],
       ['activity', '[data-testid="activity-bar"]'],
       ['composer', '[data-testid="composer"]'],
