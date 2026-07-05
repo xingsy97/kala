@@ -92,7 +92,10 @@ export function JsonBlock({
           )}
         </button>
       </div>
-      <ScrollArea className="max-h-96 text-xs">
+      <ScrollArea
+        className="max-h-96 text-xs [&>[data-radix-scroll-area-viewport]]:max-h-96"
+        data-testid="json-block-scrollarea"
+      >
         <div className="p-2">
         <JsonView
           key={`${dark ? 'dark' : 'light'}-${expanded ? 'expanded' : 'collapsed'}`}

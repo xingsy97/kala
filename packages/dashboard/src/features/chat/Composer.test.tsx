@@ -45,8 +45,8 @@ describe('Composer', () => {
 
     const chips = screen.getByTestId('composer-state-chips')
     expect(chips.textContent ?? '').toContain('AgentDone')
-    expect(chips.textContent ?? '').toContain('Cursor3')
-    expect(chips.textContent ?? '').toContain('Tokens42 in / 7 out')
+    expect(chips.textContent ?? '').toContain('Cur3')
+    expect(chips.textContent ?? '').toContain('Tokens42 / 7')
   })
 
   it('shows slash command suggestions for /compact', () => {
