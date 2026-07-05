@@ -110,7 +110,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const chat = document.querySelector('[data-testid="chat-panel"]')
     const explorer = document.querySelector('[data-testid="explorer-panel"]')
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
-    const toolbar = document.querySelector('[data-testid="session-toolbar"]')
+    const toolbar = document.querySelector('[data-testid="global-toolbar"]')
     const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
     const rectFor = (el) => {
       const rect = el?.getBoundingClientRect()
@@ -214,7 +214,6 @@ async function verifyFooterLayout(page, viewportWidth) {
     const realControls = [
       '[data-testid="model-picker"]',
       '[data-testid="connection-status"]',
-      '[data-testid="composer-compact"]',
       '[data-testid="composer-send"]',
     ]
       .map((selector) => document.querySelector(selector))
@@ -260,14 +259,13 @@ async function verifyVisualIntegrity(page, viewportWidth) {
   const metrics = await page.evaluate(() => {
     const viewport = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
     const selectors = [
-      ['toolbar', '[data-testid="session-toolbar"]'],
+      ['toolbar', '[data-testid="global-toolbar"]'],
       ['chat', '[data-testid="chat-panel"]'],
       ['activity', '[data-testid="activity-bar"]'],
       ['composer', '[data-testid="composer"]'],
       ['composerFooter', '[data-testid="composer-footer"]'],
       ['modelPicker', '[data-testid="model-picker"]'],
       ['connectionStatus', '[data-testid="connection-status"]'],
-      ['compactButton', '[data-testid="composer-compact"]'],
       ['sendButton', '[data-testid="composer-send"]'],
       ['explorer', '[data-testid="explorer-panel"]'],
       ['inspector', '[data-testid="inspector-panel"]'],

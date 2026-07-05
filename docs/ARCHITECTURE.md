@@ -294,7 +294,7 @@ Every non-obvious topology choice above has an ADR:
 Batch A is implemented in the running codebase:
 
 - Host streams LLM deltas as `session:token_delta` and supports cancel-in-flight via `client:cancel_stream`. The log still records one final `llm_response`.
-- Host handles manual/auto compaction by summarizing with the LLM and recording `compact_replaced`; dashboard manual compaction is available from the Composer compact button and exact `/compact` command. The event includes summarizer request metadata, so History can show the exact compact request and Chat can render a visible compact boundary.
+- Host handles manual/auto compaction by summarizing with the LLM and recording `compact_replaced`; dashboard manual compaction is available from the exact `/compact` slash command. The event includes summarizer request metadata, so History can show the exact compact request and Chat can render a visible compact boundary.
 - Store load recovers stuck pending tool calls after host restart by appending synthetic failed `tool_result` events.
 - Approval mode lives in kernel state and is changed by `client:set_approval_mode`; host guards `allow_all` with `AK_ALLOW_ALL_OK=1`.
 - Image content is supported in kernel types, Anthropic/OpenAI adapters, and dashboard rendering.
@@ -302,4 +302,4 @@ Batch A is implemented in the running codebase:
 - MCP is currently a stub only: `McpServerConfig` plus `initMcp()` returning no tools.
 - Session cwd is changed by `client:set_cwd`, stored as `state.cwd`, and passed to executor tool calls.
 - Background shell is executor-owned: `bash { run_in_background: true }` starts a task, `bash_output` polls logs, and `kill_shell` stops it. Dashboard derives a background terminal panel from those normal tool events.
-- Dashboard runtime status lives in `ActivityBar`; the Composer footer keeps the model picker, host status, manual compact button, send button, and a context usage ring based on `ModelInfo.contextWindow` / `AgentConfig.contextLimit`.
+- Dashboard runtime status lives in `ActivityBar`; the Composer footer keeps the model picker, host status, send button, and a context usage ring based on `ModelInfo.contextWindow` / `AgentConfig.contextLimit`. Theme and inspector controls live in the global app toolbar above the resizable panels.
