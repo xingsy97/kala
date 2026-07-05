@@ -52,6 +52,7 @@ export type SessionView = {
   timeline: readonly TimelineEntry[]
   streamingText: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
+  queuedMessages: number
   lastError: SessionErrorEvent | null
   parentSessionId: string | null
   parentCursor: number | null
@@ -88,6 +89,7 @@ export function useSession({
   const [pendingApprovals, setPendingApprovals] = useState<
     readonly ApprovalRequiredEvent[]
   >([])
+  const [queuedMessages, setQueuedMessages] = useState(0)
   const [lastError, setLastError] = useState<SessionErrorEvent | null>(null)
   const [parentSessionId, setParentSessionId] = useState<string | null>(null)
   const [parentCursor, setParentCursor] = useState<number | null>(null)
@@ -103,6 +105,7 @@ export function useSession({
     setTimeline([])
     setStreamingText('')
     setPendingApprovals([])
+    setQueuedMessages(0)
     setLastError(null)
     setParentSessionId(null)
     setParentCursor(null)
@@ -170,6 +173,9 @@ export function useSession({
     socket.on('approval:required', (p) => {
       setPendingApprovals((prev) => [...prev, p])
     })
+    socket.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) setQueuedMessages(p.pending)
+    })
     socket.on('session:error', (p) => {
       setStreamingText('')
       setLastError(p)
@@ -203,6 +209,7 @@ export function useSession({
       timeline,
       streamingText,
       pendingApprovals,
+      queuedMessages,
       lastError,
       parentSessionId,
       parentCursor,
@@ -218,6 +225,7 @@ export function useSession({
       timeline,
       streamingText,
       pendingApprovals,
+      queuedMessages,
       lastError,
       parentSessionId,
       parentCursor,
@@ -278,6 +286,14 @@ export function setSessionModel(
   model: string,
 ): void {
   socket.emit('client:set_model', { sessionId, model })
+}
+
+export function setSessionApprovalMode(
+  socket: DashboardSocket,
+  sessionId: string,
+  mode: import('@agent-kernel/kernel').ApprovalMode,
+): void {
+  socket.emit('client:set_approval_mode', { sessionId, mode })
 }
 
 export type ControlPlaneView = {

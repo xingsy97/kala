@@ -8,10 +8,23 @@
  * sessions without a workspaceId (older logs) group under "Unassigned".
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactElement, type RefCallback } from 'react'
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
-import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react'
+import type { RowRendererProps } from 'react-arborist'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Folder,
+  GitFork,
+  Loader2,
+  MessageSquare,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
 
 import {
@@ -38,7 +51,7 @@ type Props = {
   onDelete(sessionId: string): void
 }
 
-const ROW_HEIGHT = 68
+const ROW_HEIGHT = 72
 
 export function Explorer({
   executors,
@@ -64,7 +77,7 @@ export function Explorer({
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-slate-950">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <Header onNewSession={onNewSession} />
       <div
         ref={ref}
@@ -95,6 +108,7 @@ export function Explorer({
             disableSelect={(d) => d.kind === 'workspace'}
             selection={selection}
             onActivate={activate}
+            renderRow={TreeRow}
             rowHeight={ROW_HEIGHT}
             indent={16}
             width={bounds.width}
@@ -146,10 +160,25 @@ export function Explorer({
   )
 }
 
+function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>): ReactElement {
+  return (
+    <div
+      {...attrs}
+      ref={innerRef as RefCallback<HTMLDivElement>}
+      onFocus={(e) => e.stopPropagation()}
+      onClick={node.handleClick}
+      className={cn(attrs.className, 'min-w-0 max-w-full overflow-hidden')}
+      style={{ ...attrs.style, minWidth: 0, width: '100%' }}
+    >
+      {children}
+    </div>
+  )
+}
+
 function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
   return (
-    <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-950">
-      <span className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+    <div className="px-3 py-2 border-b border-slate-200 bg-white/90 dark:border-slate-800 dark:bg-slate-950 flex items-center justify-between">
+      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
         Explorer
       </span>
       <Button
@@ -158,7 +187,7 @@ function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
         onClick={onNewSession}
         data-testid="new-session-button"
         title="Start a new session"
-        className="h-6 px-2 text-xs text-sky-600 hover:text-sky-800 dark:text-sky-400 dark:hover:text-sky-200"
+        className="h-6 px-2 text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-slate-50"
       >
         <Plus className="mr-1 h-3 w-3" /> new
       </Button>
@@ -213,7 +242,7 @@ function WorkspaceRow({
       data-workspace-id={w.workspaceId ?? 'unassigned'}
       data-online={w.online ? 'true' : 'false'}
       onClick={() => node.toggle()}
-      className="px-2 border-b border-slate-100 dark:border-slate-900 hover:bg-slate-100 dark:hover:bg-slate-900 cursor-pointer select-none"
+      className="min-w-0 px-2 border-b border-slate-200/70 dark:border-slate-900 hover:bg-slate-100 dark:hover:bg-slate-900 cursor-pointer select-none"
     >
       <div className="flex items-center gap-1.5 h-7">
         {node.isOpen ? (
@@ -222,11 +251,11 @@ function WorkspaceRow({
           <ChevronRight className="h-3.5 w-3.5 text-slate-500" />
         )}
         <span className={`inline-block w-2 h-2 rounded-full ${dotCls}`} />
-        <span className="text-sm text-slate-800 dark:text-slate-100 font-mono truncate">
+        <span className="text-sm text-slate-800 dark:text-slate-100 truncate">
           {w.name}
         </span>
       </div>
-      <div className="pl-6 -mt-1 text-[11px] text-slate-500 dark:text-slate-500 font-mono truncate">
+      <div className="pl-6 -mt-1 text-[11px] text-slate-500 dark:text-slate-500 truncate">
         {meta}
       </div>
     </div>
@@ -250,37 +279,42 @@ function SessionRow({
       data-testid="session-row"
       data-session-id={s.sessionId}
       className={cn(
-        'group relative border-b border-slate-100 dark:border-slate-900 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors',
+        'group relative min-w-0 overflow-hidden border-b border-slate-200/70 dark:border-slate-900 hover:bg-white dark:hover:bg-slate-900/80 transition-colors',
         selected &&
-          'bg-slate-200 dark:bg-slate-800 border-l-2 border-l-sky-500 dark:border-l-sky-400',
+          'bg-white dark:bg-slate-900 border-l-2 border-l-sky-500 dark:border-l-sky-400 shadow-[inset_0_1px_0_rgba(148,163,184,0.18)]',
       )}
       onClick={() => node.activate()}
     >
-      <div className="px-2 pl-6 py-1.5 pr-9 cursor-pointer">
-        <div className="text-sm text-slate-800 dark:text-slate-100 truncate">
-          {s.label}
+      <div className="min-w-0 px-2 pl-6 py-2 pr-9 cursor-pointer">
+        <div className="flex min-w-0 items-center gap-2">
+          <MessageSquare className="h-3.5 w-3.5 flex-none text-slate-400 dark:text-slate-500" />
+          <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+            {s.label}
+          </div>
         </div>
-        <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400 font-mono flex gap-2 items-center">
+        <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-[11px] text-slate-500 dark:text-slate-400">
           <StatusChip status={s.status} />
-          <span className="text-slate-500 dark:text-slate-500 truncate">
+          <span className="truncate tabular-nums text-slate-500 dark:text-slate-500">
             {s.eventCount} evt
           </span>
-          <span className="text-slate-500 dark:text-slate-600 truncate ml-auto">
+          <span className="ml-auto truncate tabular-nums text-slate-400 dark:text-slate-600">
             {formatWhen(s.lastActivityIso)}
           </span>
         </div>
         {s.currentCwd ? (
           <div
-            className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-500 font-mono truncate"
+            className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-slate-500 dark:text-slate-500"
             title={s.currentCwd}
             data-testid="session-row-cwd"
           >
-            cwd {s.currentCwd}
+            <Folder className="h-3 w-3 flex-none text-slate-400 dark:text-slate-600" />
+            <span className="min-w-0 truncate font-mono">cwd {s.currentCwd}</span>
           </div>
         ) : null}
         {s.parentSessionId ? (
-          <div className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400 font-mono truncate">
-             -  fork of {s.parentSessionId.slice(0, 8)} - 
+          <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-amber-600 dark:text-amber-400">
+            <GitFork className="h-3 w-3 flex-none" />
+            <span className="min-w-0 truncate font-mono">fork of {s.parentSessionId.slice(0, 8)}...</span>
           </div>
         ) : null}
       </div>
@@ -294,9 +328,9 @@ function SessionRow({
         data-testid="session-delete-button"
         title="Delete this session (irreversible)"
         aria-label={`delete session ${s.sessionId}`}
-        className="opacity-50 hover:opacity-100 absolute top-1.5 right-1.5 h-7 w-7 rounded-md text-slate-500 hover:text-white hover:bg-rose-500 dark:text-slate-400 dark:hover:text-white dark:hover:bg-rose-600 transition-colors"
+        className="absolute right-1.5 top-1.5 h-7 w-7 rounded-md text-slate-400 opacity-0 transition-colors hover:bg-rose-500 hover:text-white group-hover:opacity-100 dark:text-slate-500 dark:hover:bg-rose-600 dark:hover:text-white"
       >
-        <X className="h-4 w-4" strokeWidth={2.5} />
+        <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
       </Button>
     </div>
   )
@@ -307,22 +341,56 @@ function StatusChip({
 }: {
   status?: SessionSummary['status']
 }): JSX.Element {
+  const meta = statusMeta(status)
+  const Icon = meta.icon
+  return (
+    <span className={cn('inline-flex min-w-0 items-center gap-1 truncate', meta.className)}>
+      <Icon className={cn('h-3 w-3 flex-none', meta.spin ? 'animate-spin' : '')} />
+      <span className="truncate">{meta.label}</span>
+    </span>
+  )
+}
+
+function statusMeta(status: SessionSummary['status'] | undefined): {
+  label: string
+  icon: typeof CheckCircle2
+  spin?: boolean
+  className: string
+} {
   if (!status) {
-    return (
-      <span className="px-1 text-slate-500 border border-slate-300 dark:border-slate-800 rounded">
-         - 
-      </span>
-    )
+    return {
+      label: 'unknown',
+      icon: Clock3,
+      className: 'text-slate-500 dark:text-slate-500',
+    }
   }
-  const cls =
-    status === 'done'
-      ? 'text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/30'
-      : status === 'error'
-        ? 'text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800/60 bg-rose-50 dark:bg-rose-950/30'
-        : status === 'awaiting_approval'
-          ? 'text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30'
-          : 'text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800/60 bg-sky-50 dark:bg-sky-950/30'
-  return <span className={`px-1 border rounded ${cls}`}>{status}</span>
+  if (status === 'done' || status === 'idle') {
+    return {
+      label: status === 'done' ? 'done' : 'ready',
+      icon: CheckCircle2,
+      className: 'text-emerald-600 dark:text-emerald-400',
+    }
+  }
+  if (status === 'error') {
+    return {
+      label: 'error',
+      icon: AlertCircle,
+      className: 'text-rose-600 dark:text-rose-400',
+    }
+  }
+  if (status === 'awaiting_approval') {
+    return {
+      label: 'approval',
+      icon: Clock3,
+      className: 'text-amber-600 dark:text-amber-400',
+    }
+  }
+  return {
+    label: status === 'executing_tools' ? 'tools' : 'thinking',
+    icon: Loader2,
+    spin: status === 'thinking',
+    className: 'text-sky-600 dark:text-sky-400',
+  }
 }
 
 function formatWhen(iso: string): string {

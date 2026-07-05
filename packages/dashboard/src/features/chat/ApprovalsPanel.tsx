@@ -5,6 +5,7 @@ import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
 
 import { JsonBlock } from '../../components/ui/json-block.js'
 import { Button } from '../../components/ui/button.js'
+import { DiffPreview } from './DiffPreview.js'
 
 type Props = {
   approvals: readonly ApprovalRequiredEvent[]
@@ -32,10 +33,11 @@ function ApprovalRow({
   approval: ApprovalRequiredEvent
   onDecision(callId: string, decision: 'approve' | 'reject'): void
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(false)
+  const hasDiffPreview = approval.name === 'edit' || approval.name === 'write'
+  const [expanded, setExpanded] = useState(hasDiffPreview)
   const preview = formatArgsPreview(approval.input)
   return (
-    <div className="px-3 py-1.5 flex items-center gap-2 text-xs border-b border-amber-200/60 last:border-b-0 dark:border-amber-900/40">
+    <div className="px-3 py-1.5 flex flex-wrap items-center gap-2 text-xs border-b border-amber-200/60 last:border-b-0 dark:border-amber-900/40">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -77,9 +79,13 @@ function ApprovalRow({
         reject
       </Button>
       {expanded ? (
-        <div className="basis-full mt-1.5">
-          <JsonBlock value={approval.input} label={approval.name} collapsed={2} />
-        </div>
+        hasDiffPreview ? (
+          <DiffPreview toolName={approval.name} input={approval.input} />
+        ) : (
+          <div className="basis-full mt-1.5">
+            <JsonBlock value={approval.input} label={approval.name} collapsed={2} />
+          </div>
+        )
       ) : null}
     </div>
   )

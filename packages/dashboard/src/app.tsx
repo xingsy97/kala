@@ -25,6 +25,7 @@ import { ApprovalsPanel } from './features/chat/ApprovalsPanel.js'
 import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
+import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { TodoDock } from './features/chat/TodoDock.js'
 import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
@@ -33,12 +34,14 @@ import {
   createSession,
   deleteSession,
   respondApproval,
+  setSessionApprovalMode,
   setSessionModel,
   type TimelineEntry,
   useControlPlane,
   useSession,
 } from './session.js'
 import { backgroundTerminalTasks } from './background-terminal.js'
+import { cn } from './lib/utils.js'
 import { visibleMessages, visibleTranscript } from './transcript.js'
 
 type Theme = 'dark' | 'light'
@@ -234,6 +237,36 @@ export function App(): JSX.Element {
     }
   }
 
+  const onApprovalModeChange = (mode: import('@agent-kernel/kernel').ApprovalMode): void => {
+    if (!session.socket) return
+    setSessionApprovalMode(session.socket, config.sessionId, mode)
+  }
+
+  const runCompactNow = (): void => {
+    if (!hasCompactableContent(session.state)) {
+      setCompactStatus({ kind: 'empty', message: 'send a message before compacting context' })
+      scheduleCompactIdle(6000)
+      return
+    }
+    if (session.state && !isResting(session.state.status)) {
+      setCompactStatus({ kind: 'error', message: 'wait for the current turn to finish before compacting' })
+      scheduleCompactIdle(6000)
+      return
+    }
+    if (compactResetTimer.current !== null) {
+      window.clearTimeout(compactResetTimer.current)
+      compactResetTimer.current = null
+    }
+    compactStartSeq.current = session.timeline.at(-1)?.seq ?? 0
+    setCompactStatus({
+      kind: 'running',
+      startedAt: Date.now(),
+      tokensBefore: session.state?.usage.inputTokens ?? 0,
+    })
+    session.socket?.emit('client:compact', { sessionId: config.sessionId })
+    if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
+  }
+
   const control = useControlPlane(session.socket)
 
   const selectSession = (sessionId: string): void => {
@@ -275,6 +308,20 @@ export function App(): JSX.Element {
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
   )
+
+  useEffect(() => {
+    if (config.explicit) return
+    if (control.sessions.length === 0) return
+    const latest = control.sessions.find((s) => s.eventCount > 0) ?? control.sessions[0]
+    if (!latest) return
+    if (latest.sessionId === config.sessionId) return
+    setConfig((prev) => ({
+      ...prev,
+      sessionId: latest.sessionId,
+      explicit: true,
+    }))
+  }, [config.explicit, config.sessionId, control.sessions])
+
   const currentCwd = session.state?.cwd ?? currentSession?.currentCwd ?? ''
   const firstMsg = currentSession?.firstUserMessage
   const sessionLabel = firstMsg
@@ -325,13 +372,14 @@ export function App(): JSX.Element {
   return (
     <div className="h-screen w-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
-      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v4">
+      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
           <>
             <ResizablePanel
-              defaultSize={14}
-              minSize={12}
-              maxSize={18}
+              defaultSize={20}
+              minSize={17}
+              maxSize={22}
+              className="min-w-[240px]"
               data-testid="explorer-panel"
             >
               <div className="h-full border-r border-slate-200 dark:border-slate-800">
@@ -349,14 +397,15 @@ export function App(): JSX.Element {
           </>
         ) : null}
         <ResizablePanel
-          defaultSize={wideLayout ? 86 : 100}
-          minSize={wideLayout ? 82 : 100}
+          defaultSize={wideLayout ? 80 : 100}
+          minSize={wideLayout ? 78 : 100}
           data-testid="workbench-panel"
         >
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
             <WorkbenchToolbar
               sessionLabel={sessionLabel}
               cwd={currentCwd}
+              status={session.status}
               onChangeCwd={openCwdDialog}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
@@ -385,7 +434,18 @@ export function App(): JSX.Element {
                   ) : null}
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                     <ScrollArea className="flex-1 min-h-0" data-testid="chat-panel">
-                      <ChatPanel items={chatItems} highlightIndex={highlightIndex} />
+                      <ChatPanel
+                        items={chatItems}
+                        highlightIndex={highlightIndex}
+                        onEditAndRerun={(seq, text) => {
+                          if (!session.socket) return
+                          session.socket.emit('client:fork', {
+                            sourceSessionId: config.sessionId,
+                            cursor: seq - 1,
+                            seedMessage: text,
+                          })
+                        }}
+                      />
                     </ScrollArea>
                     <ApprovalsPanel
                       approvals={session.pendingApprovals}
@@ -414,36 +474,38 @@ export function App(): JSX.Element {
                         workspace <span className="font-mono">{currentSession?.workspaceName ?? currentSession?.workspaceId}</span> is offline  -  start its executor to send messages.
                       </div>
                     ) : null}
+                    <ContextPressureBanner
+                      state={session.state}
+                      compactRunning={compactStatus.kind === 'running'}
+                      onCompactNow={runCompactNow}
+                    />
                     <Composer
                       disabled={session.status !== 'ready' || !sessionWorkspaceOnline}
                       model={session.selectedModel ?? preferredModel}
                       models={models}
                       onModelChange={onModelChange}
-                      status={session.status}
+                      approvalMode={session.state?.approvalMode ?? 'auto'}
+                      onApprovalModeChange={onApprovalModeChange}
                       state={session.state}
                       config={session.config}
-                      onCompact={() => {
-                        if (!hasCompactableContent(session.state)) {
-                          setCompactStatus({ kind: 'empty', message: 'send a message before compacting context' })
-                          scheduleCompactIdle(6000)
-                          return
-                        }
-                        if (session.state && !isResting(session.state.status)) {
-                          setCompactStatus({ kind: 'error', message: 'wait for the current turn to finish before compacting' })
-                          scheduleCompactIdle(6000)
-                          return
-                        }
-                        if (compactResetTimer.current !== null) {
-                          window.clearTimeout(compactResetTimer.current)
-                          compactResetTimer.current = null
-                        }
-                        compactStartSeq.current = session.timeline.at(-1)?.seq ?? 0
-                        setCompactStatus({ kind: 'running' })
-                        session.socket?.emit('client:compact', { sessionId: config.sessionId })
-                        if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
-                      }}
-                      onSubmit={(text) => {
-                        session.socket?.emit('client:user_message', { sessionId: config.sessionId, text })
+                      queuedMessages={session.queuedMessages}
+                      onCompact={runCompactNow}
+                      onSubmit={(text, mode, images) => {
+                        const imageBlocks = images ?? []
+                        const content = imageBlocks.length > 0
+                          ? [
+                              ...(text.length > 0
+                                ? [{ type: 'text' as const, text }]
+                                : []),
+                              ...imageBlocks,
+                            ]
+                          : undefined
+                        session.socket?.emit('client:user_message', {
+                          sessionId: config.sessionId,
+                          text,
+                          mode,
+                          ...(content ? { content } : {}),
+                        })
                         if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
                       }}
                     />
@@ -526,6 +588,7 @@ function readInitialConfig(): Config {
 function WorkbenchToolbar({
   sessionLabel,
   cwd,
+  status,
   onChangeCwd,
   onToggleInspector,
   inspectorOpen,
@@ -535,6 +598,7 @@ function WorkbenchToolbar({
 }: {
   sessionLabel: string
   cwd: string
+  status: string
   onChangeCwd(): void
   onToggleInspector(): void
   inspectorOpen: boolean
@@ -569,6 +633,7 @@ function WorkbenchToolbar({
         </span>
       </Button>
       <span className="min-w-0 flex-1" />
+      <ConnectionStatus status={status} />
       <Button
         variant="ghost"
         size="icon"
@@ -601,6 +666,37 @@ function WorkbenchToolbar({
       ) : null}
     </div>
   )
+}
+
+function ConnectionStatus({ status }: { status: string }): JSX.Element {
+  const label = hostStatusLabel(status)
+  return (
+    <div
+      className="inline-flex h-7 flex-none items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300"
+      data-testid="connection-status"
+      data-status={status}
+      title={label}
+      aria-label={label}
+    >
+      <span className={cn('h-2 w-2 rounded-full', statusDot(status))} />
+      <span className="hidden sm:inline">{label}</span>
+    </div>
+  )
+}
+
+function hostStatusLabel(status: string): string {
+  if (status === 'ready') return 'Connected'
+  if (status === 'connecting') return 'Connecting'
+  if (status === 'disconnected') return 'Disconnected'
+  if (status === 'error') return 'Connection error'
+  return status
+}
+
+function statusDot(status: string): string {
+  if (status === 'ready') return 'bg-emerald-500'
+  if (status === 'error' || status === 'disconnected') return 'bg-rose-500'
+  if (status === 'connecting') return 'bg-amber-500 animate-pulse'
+  return 'bg-slate-400'
 }
 
 function CwdDialog({

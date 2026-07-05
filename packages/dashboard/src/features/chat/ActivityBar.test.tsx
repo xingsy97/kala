@@ -8,7 +8,7 @@ import { ActivityBar } from './ActivityBar.js'
 const baseState = createInitialState({ sessionId: 'sess-activity' })
 
 describe('ActivityBar', () => {
-  it('shows readable resting state and runtime counters when idle', () => {
+  it('shows readable resting state without duplicating composer metrics', () => {
     render(
       <ActivityBar
         state={{
@@ -21,18 +21,18 @@ describe('ActivityBar', () => {
       />,
     )
     expect(screen.getByText('Agent Done')).toBeTruthy()
-    const summary = screen.getByTestId('runtime-summary')
-    expect(summary.textContent ?? '').toContain('Cursor3')
-    expect(summary.textContent ?? '').toContain('Pending tools0')
-    expect(summary.textContent ?? '').toContain('Tokens in/out42 / 7')
+    expect(screen.queryByTestId('runtime-summary')).toBeNull()
   })
 
   it('shows compact progress and completion', () => {
     const { rerender } = render(
-      <ActivityBar state={baseState} compactStatus={{ kind: 'running' }} />,
+      <ActivityBar
+        state={baseState}
+        compactStatus={{ kind: 'running', startedAt: Date.now() - 3_000, tokensBefore: 5_500 }}
+      />,
     )
-    expect(screen.getByText('Compacting context')).toBeTruthy()
-    expect(screen.getByText('waiting for summarizer response')).toBeTruthy()
+    expect(screen.getByText('Compacting conversation...')).toBeTruthy()
+    expect(screen.getByTestId('activity-detail').textContent ?? '').toContain(' -  5.5k tokens')
 
     rerender(<ActivityBar state={baseState} compactStatus={{ kind: 'done' }} />)
     expect(screen.getByText('Context compacted')).toBeTruthy()

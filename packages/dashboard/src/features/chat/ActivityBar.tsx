@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { AlertTriangle, Check, Clock, Loader2, Wrench } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
@@ -6,7 +7,7 @@ import { cn } from '../../lib/utils.js'
 
 export type CompactStatus =
   | { kind: 'idle' }
-  | { kind: 'running' }
+  | { kind: 'running'; startedAt: number; tokensBefore: number }
   | { kind: 'done' }
   | { kind: 'empty'; message: string }
   | { kind: 'error'; message: string }
@@ -17,7 +18,8 @@ type Props = {
 }
 
 export function ActivityBar({ state, compactStatus }: Props): JSX.Element | null {
-  const activity = activityFor(state, compactStatus)
+  const now = useActivityClock(compactStatus.kind === 'running')
+  const activity = activityFor(state, compactStatus, now)
   const Icon = activity.icon
   return (
     <div
@@ -50,7 +52,6 @@ export function ActivityBar({ state, compactStatus }: Props): JSX.Element | null
           <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:300ms]" />
         </span>
       ) : null}
-      <RuntimeSummary state={state} />
     </div>
   )
 }
@@ -58,6 +59,7 @@ export function ActivityBar({ state, compactStatus }: Props): JSX.Element | null
 function activityFor(
   state: AgentState | null,
   compactStatus: CompactStatus,
+  now: number,
 ): {
   label: string
   detail?: string
@@ -68,10 +70,11 @@ function activityFor(
 } {
   if (compactStatus.kind === 'running') {
     return {
-      label: 'Compacting context',
-      detail: 'waiting for summarizer response',
+      label: 'Compacting conversation...',
+      detail: `(${formatElapsed(now - compactStatus.startedAt)}  -   -  ${formatTokens(compactStatus.tokensBefore)} tokens)`,
       icon: Loader2,
       spin: true,
+      pulse: true,
       className:
         'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
     }
@@ -151,50 +154,29 @@ function activityFor(
   }
 }
 
-function RuntimeSummary({ state }: { state: AgentState | null }): JSX.Element | null {
-  if (!state) return null
-  return (
-    <div
-      className="ml-auto hidden min-w-0 shrink-0 items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 2xl:flex"
-      data-testid="runtime-summary"
-    >
-      <SummaryItem label="Cursor" value={String(state.cursor)} />
-      <SummaryItem
-        label="Pending tools"
-        value={String(state.pendingCalls.length)}
-        tone={state.pendingCalls.length > 0 ? 'amber' : undefined}
-      />
-      <SummaryItem
-        label="Tokens in/out"
-        value={`${formatTokens(state.usage.inputTokens)} / ${formatTokens(state.usage.outputTokens)}`}
-      />
-    </div>
-  )
+function useActivityClock(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [active])
+  return now
 }
 
-function SummaryItem({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone?: 'amber'
-}): JSX.Element {
-  return (
-    <span
-      className={cn(
-        'inline-flex h-6 min-w-max items-center gap-1 rounded border px-2 leading-none whitespace-nowrap',
-        tone === 'amber'
-          ? 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200'
-          : 'border-slate-300/60 bg-white/55 dark:border-slate-700/80 dark:bg-slate-950/45',
-      )}
-      title={`${label}: ${value}`}
-    >
-      <span className="opacity-75">{label}</span>
-      <span className="font-mono text-slate-900 dark:text-slate-100">{value}</span>
-    </span>
-  )
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes <= 0) return `${seconds}s`
+  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
+  return `${(n / 1_000_000).toFixed(1)}m`
 }
 
 function agentStatusLabel(status: AgentState['status']): string {
@@ -212,10 +194,4 @@ function agentStatusLabel(status: AgentState['status']): string {
     case 'error':
       return 'Error'
   }
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
 }
