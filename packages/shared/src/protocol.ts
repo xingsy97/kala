@@ -20,9 +20,15 @@ import type {
 
 export type ClientRole = 'dashboard' | 'executor'
 
+/**
+ * Dashboard connections carry a `sessionId` (the session they subscribe to).
+ * Executor connections do NOT — an executor daemon serves all sessions the
+ * host routes to it. `sessionId` on individual `tool:call` / `tool:cancel`
+ * messages is the per-call routing key.
+ */
 export type HandshakeAuth = {
-  sessionId: string
   role: ClientRole
+  sessionId?: string
   token?: string
   clientVersion: string
 }
@@ -38,6 +44,14 @@ export type SessionReadyEvent = {
   config: AgentConfig
   parentSessionId?: string
   parentCursor?: number
+  /**
+   * Routing key: the workspaceId this session is bound to. Undefined for
+   * legacy sessions predating the field.
+   */
+  workspaceId?: string
+  /** Display label captured at session-create time. */
+  workspaceName?: string
+  selectedModel?: string
 }
 
 export type StateChangedEvent = {
@@ -70,6 +84,8 @@ export type SessionForkedEvent = {
   cursor: number
   state: AgentState
   config: AgentConfig
+  workspaceId?: string
+  workspaceName?: string
 }
 
 // ============================================================================
@@ -102,8 +118,26 @@ export type ClientFork = {
   newSessionId?: string
 }
 
+/**
+ * Ask the host to materialise a session on disk with a workspace binding.
+ * Dashboard emits this when the user clicks "New" so the Explorer row shows
+ * up immediately (instead of waiting until the first user_message triggers
+ * lazy-create) and the session's workspaceId is set from the start.
+ * Idempotent — a second emit for the same id is a no-op on the store side.
+ */
+export type ClientCreateSession = {
+  sessionId: string
+  workspaceId: string
+  workspaceName?: string
+}
+
 export type ClientSubscribe = {
   sessionId: string
+}
+
+export type ClientSetModel = {
+  sessionId: string
+  model: string
 }
 
 // ============================================================================
@@ -122,19 +156,47 @@ export type UsageUpdatedEvent = {
   usage: UsageTotal
 }
 
+export type SessionModelChangedEvent = {
+  sessionId: string
+  model: string
+}
+
 // ============================================================================
 // Executor → Host
 // ============================================================================
 
 export type ExecutorRuntime = 'node' | 'browser-webcontainer' | 'other'
 
+export type ExecutorOs = 'linux' | 'darwin' | 'win32' | 'other'
+
 export type ExecutorAnnounce = {
-  sessionId: string
   executorId: string
+  /**
+   * Stable machine identity. A ULID minted on the executor's first launch
+   * and persisted (see packages/executor/src/workspace-id.ts). Sessions
+   * bind to this in their JSONL header; Host routes tool calls by matching
+   * `session.workspaceId` against a live executor. Never renamed — a lost
+   * or regenerated id detaches the machine's existing sessions, which is
+   * why the executor refuses to boot with a corrupted id file.
+   */
+  workspaceId: string
+  /**
+   * Human-readable workspace label. Display only — the operator can
+   * change it freely via `--name` without affecting routing. Falls back
+   * to `os.hostname()` when the operator doesn't pass a name.
+   */
+  workspaceName: string
   tools: string[]
+  /** Optional filesystem jail. Empty/missing = executor trusts whole machine. */
+  sandboxRoots?: string[]
   workingDir?: string
   runtime: ExecutorRuntime
   runtimeVersion: string
+  hostname?: string
+  os?: ExecutorOs
+  ipAddresses?: string[]
+  pid?: number
+  startedAt?: string
 }
 
 export type ExecutorToolResult = {
@@ -171,12 +233,117 @@ export type ToolResultAck = {
 // Socket.IO event maps
 // ============================================================================
 
+// ============================================================================
+// Control-plane events (Dashboard ⇄ Host)
+// ============================================================================
+
+export type AttachedExecutor = ExecutorAnnounce & {
+  attachedAt: string
+  /**
+   * The `clientVersion` from the executor's handshake auth. Recorded so the
+   * dashboard can distinguish "os field is undefined because this executor
+   * predates the field" from "executor connected but never got announced".
+   */
+  clientVersion?: string
+}
+
+export type ClientListExecutors = Record<string, never>
+
+export type ServerExecutorsPayload = {
+  executors: readonly AttachedExecutor[]
+}
+
+export type ExecutorChange = 'attached' | 'detached' | 'updated'
+
+export type ServerExecutorChangedPayload =
+  | { change: 'detached'; executorId: string }
+  | {
+      change: 'attached' | 'updated'
+      executorId: string
+      executor: AttachedExecutor
+    }
+
+export type ClientListSessions = Record<string, never>
+
+export type SessionSummary = {
+  sessionId: string
+  createdAt: string
+  lastEventAt?: string
+  eventCount: number
+  parentSessionId?: string
+  /**
+   * The workspace this session is bound to (see ADR 0014). Routing key —
+   * matches an executor's announced `workspaceId`. Written to the JSONL
+   * header at create time; never rewritten. Sessions predating the field
+   * have this undefined and render under a synthetic "unassigned" root
+   * in the dashboard tree.
+   */
+  workspaceId?: string
+  /**
+   * Display label for the workspace, captured at session-create time.
+   * Not authoritative — the current display name comes from the live
+   * executor's announce when one is attached. Held here so the dashboard
+   * can render offline workspaces without needing every executor online.
+   */
+  workspaceName?: string
+  executorId?: string
+  status?: AgentState['status']
+  firstUserMessage?: string
+}
+
+export type ServerSessionsPayload = {
+  sessions: readonly SessionSummary[]
+}
+
+export type ClientLoadHistory = {
+  sessionId: string
+  sinceCursor?: number
+}
+
+export type ClientDeleteSession = {
+  sessionId: string
+}
+
+export type ServerSessionDeletedPayload = {
+  sessionId: string
+}
+
+export type ServerHistoryPayload = {
+  sessionId: string
+  entries: readonly EventAppendedEvent[]
+}
+
+/**
+ * Advertised model. Returned by `GET /models` on the host. The dashboard uses
+ * this to populate the model picker instead of hardcoding a list.
+ */
+export type ModelInfo = {
+  id: string
+  label: string
+  provider: string
+}
+
+export type ServerModelsPayload = {
+  models: readonly ModelInfo[]
+  defaultModel: string
+}
+
+// ============================================================================
+// Socket.IO event maps
+// ============================================================================
+
 export type DashboardClientToServerEvents = {
   'client:user_message': (payload: ClientUserMessage) => void
   'client:user_approve': (payload: ClientUserApprove) => void
   'client:user_reject': (payload: ClientUserReject) => void
   'client:cancel': (payload: ClientCancel) => void
   'client:fork': (payload: ClientFork) => void
+  'client:create_session': (payload: ClientCreateSession) => void
+  'client:list_executors': (payload: ClientListExecutors) => void
+  'client:list_sessions': (payload: ClientListSessions) => void
+  'client:load_history': (payload: ClientLoadHistory) => void
+  'client:delete_session': (payload: ClientDeleteSession) => void
+  'client:set_model': (payload: ClientSetModel) => void
   subscribe: (payload: ClientSubscribe) => void
 }
 
@@ -188,6 +355,12 @@ export type DashboardServerToClientEvents = {
   'session:error': (payload: SessionErrorEvent) => void
   'approval:required': (payload: ApprovalRequiredEvent) => void
   'usage:updated': (payload: UsageUpdatedEvent) => void
+  'session:model_changed': (payload: SessionModelChangedEvent) => void
+  'server:executors': (payload: ServerExecutorsPayload) => void
+  'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
+  'server:sessions': (payload: ServerSessionsPayload) => void
+  'server:history': (payload: ServerHistoryPayload) => void
+  'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
 }
 
 export type ExecutorClientToServerEvents = {

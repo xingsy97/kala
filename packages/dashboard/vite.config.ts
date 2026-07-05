@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
+const HOST_URL = process.env.HOST_URL ?? 'http://localhost:3000'
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -11,7 +13,18 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 5288,
+    proxy: {
+      '/socket.io': {
+        target: HOST_URL,
+        ws: true,
+        changeOrigin: true,
+      },
+      '/models': {
+        target: HOST_URL,
+        changeOrigin: true,
+      },
+    },
   },
   test: {
     environment: 'jsdom',

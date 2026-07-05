@@ -5,6 +5,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type {
@@ -15,6 +16,7 @@ import type {
   UsageTotal,
 } from '@agent-kernel/kernel'
 import { createInitialState, fold } from '@agent-kernel/kernel'
+import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
 
 import {
@@ -29,6 +31,8 @@ export type SessionRecord = {
   readonly config: AgentConfig
   readonly parentSessionId?: string
   readonly parentCursor?: number
+  readonly workspaceId?: string
+  readonly workspaceName?: string
   state: AgentState
 }
 
@@ -39,6 +43,8 @@ export type CreateSessionParams = {
   parentCursor?: number
   initialState?: AgentState
   sessionId?: string
+  workspaceId?: string
+  workspaceName?: string
 }
 
 export class SessionStore {
@@ -76,6 +82,12 @@ export class SessionStore {
       ...(params.parentCursor !== undefined
         ? { parentCursor: params.parentCursor }
         : {}),
+      ...(params.workspaceId !== undefined
+        ? { workspaceId: params.workspaceId }
+        : {}),
+      ...(params.workspaceName !== undefined
+        ? { workspaceName: params.workspaceName }
+        : {}),
     })
     const record: SessionRecord = {
       sessionId,
@@ -87,6 +99,12 @@ export class SessionStore {
         : {}),
       ...(params.parentCursor !== undefined
         ? { parentCursor: params.parentCursor }
+        : {}),
+      ...(params.workspaceId !== undefined
+        ? { workspaceId: params.workspaceId }
+        : {}),
+      ...(params.workspaceName !== undefined
+        ? { workspaceName: params.workspaceName }
         : {}),
     }
     this.records.set(sessionId, record)
@@ -125,26 +143,46 @@ export class SessionStore {
    * see exactly one create + one record installation. This is the primary
    * entrypoint for connection handlers; `create` / `load` are lower-level
    * building blocks retained for tests and explicit fork flows.
+   *
+   * Returns `created: true` iff `ensure` had to synthesize a new record
+   * (no in-memory cache hit and no log on disk). The caller uses this to
+   * fan out a `server:sessions` refresh to connected dashboards without
+   * every store hit spamming a broadcast.
    */
   async ensure(params: {
     sessionId: string
     defaultConfig: AgentConfig
-  }): Promise<SessionRecord> {
+    workspaceId?: string
+    workspaceName?: string
+  }): Promise<{ record: SessionRecord; created: boolean }> {
     const cached = this.records.get(params.sessionId)
-    if (cached) return cached
+    if (cached) return { record: cached, created: false }
     const inflight = this.inFlight.get(params.sessionId)
-    if (inflight) return inflight
-    const promise = this.ensureInner(params.sessionId, params.defaultConfig)
-      .finally(() => {
-        this.inFlight.delete(params.sessionId)
-      })
+    if (inflight) {
+      const record = await inflight
+      return { record, created: false }
+    }
+    let created = false
+    const promise = this.ensureInner(
+      params.sessionId,
+      params.defaultConfig,
+      params.workspaceId,
+      params.workspaceName,
+      () => { created = true },
+    ).finally(() => {
+      this.inFlight.delete(params.sessionId)
+    })
     this.inFlight.set(params.sessionId, promise)
-    return promise
+    const record = await promise
+    return { record, created }
   }
 
   private async ensureInner(
     sessionId: string,
     defaultConfig: AgentConfig,
+    workspaceId: string | undefined,
+    workspaceName: string | undefined,
+    markCreated: () => void,
   ): Promise<SessionRecord> {
     try {
       return await this.loadInner(sessionId)
@@ -153,7 +191,13 @@ export class SessionStore {
       // single writeHeader() which is the atomic commit point; if it
       // throws the sessionId stays uninstalled and the next caller can
       // retry.
-      return await this.create({ sessionId, config: defaultConfig })
+      markCreated()
+      return await this.create({
+        sessionId,
+        config: defaultConfig,
+        ...(workspaceId !== undefined ? { workspaceId } : {}),
+        ...(workspaceName !== undefined ? { workspaceName } : {}),
+      })
     }
   }
 
@@ -178,6 +222,38 @@ export class SessionStore {
 
   list(): SessionRecord[] {
     return [...this.records.values()]
+  }
+
+  async delete(sessionId: string): Promise<void> {
+    const cached = this.records.get(sessionId)
+    const path = cached?.logPath ?? this.findLogByPrefix(sessionId)
+    this.records.delete(sessionId)
+    this.inFlight.delete(sessionId)
+    if (path && existsSync(path)) await unlink(path)
+  }
+
+  async listSummaries(): Promise<SessionSummary[]> {
+    if (!existsSync(this.sessionsDir)) return []
+    const files = readdirSync(this.sessionsDir).filter((f) =>
+      f.endsWith('.jsonl'),
+    )
+    const out: SessionSummary[] = []
+    for (const file of files) {
+      const path = join(this.sessionsDir, file)
+      try {
+        const parsed = await readSessionLog(path)
+        const summary = summarizeLog(parsed)
+        out.push(summary)
+      } catch {
+        // Skip malformed files — a first-line-missing-header log means the
+        // process crashed before it wrote anything usable. Don't fail the
+        // whole listing because of one bad file.
+      }
+    }
+    out.sort((a, b) =>
+      (b.lastEventAt ?? b.createdAt).localeCompare(a.lastEventAt ?? a.createdAt),
+    )
+    return out
   }
 
   private pathFor(sessionId: string): string {
@@ -210,8 +286,70 @@ export class SessionStore {
       ...(parsed.header.parentCursor !== undefined
         ? { parentCursor: parsed.header.parentCursor }
         : {}),
+      ...(parsed.header.workspaceId !== undefined
+        ? { workspaceId: parsed.header.workspaceId }
+        : {}),
+      ...(parsed.header.workspaceName !== undefined
+        ? { workspaceName: parsed.header.workspaceName }
+        : {}),
     }
     this.records.set(sessionId, record)
     return record
   }
+}
+
+function summarizeLog(
+  parsed: Awaited<ReturnType<typeof readSessionLog>>,
+): SessionSummary {
+  const header = parsed.header
+  const events = parsed.events
+  const lastEvent = events.length > 0 ? events[events.length - 1]! : undefined
+  const lastSnapshot =
+    parsed.snapshots.length > 0
+      ? parsed.snapshots[parsed.snapshots.length - 1]!
+      : undefined
+  const firstUserEvent = events.find((e) => e.event.kind === 'user_message')
+  const firstUserText =
+    firstUserEvent && firstUserEvent.event.kind === 'user_message'
+      ? firstUserEvent.event.text
+      : undefined
+  // executorId is deliberately not inferred from the log — the JSONL doesn't
+  // record which executor produced each tool_result, so any inference here
+  // would be a guess. Host can layer it on later by tracking attach history.
+  const status =
+    lastSnapshot?.state.status ?? statusFromEffects(events)
+  return {
+    sessionId: header.sessionId,
+    createdAt: header.ts,
+    eventCount: events.length,
+    ...(lastEvent ? { lastEventAt: lastEvent.ts } : {}),
+    ...(header.parentSessionId ? { parentSessionId: header.parentSessionId } : {}),
+    ...(header.workspaceId !== undefined
+      ? { workspaceId: header.workspaceId }
+      : {}),
+    ...(header.workspaceName !== undefined
+      ? { workspaceName: header.workspaceName }
+      : {}),
+    ...(status ? { status } : {}),
+    ...(firstUserText
+      ? { firstUserMessage: firstUserText.slice(0, 120) }
+      : {}),
+  }
+}
+
+// Older logs (pre-snapshot-writer) have no snapshot lines. Recover an
+// approximate status from the effects the reducer emitted on each event —
+// finish → done, emit_error → error, request_approval → awaiting_approval.
+function statusFromEffects(
+  events: Awaited<ReturnType<typeof readSessionLog>>['events'],
+): SessionSummary['status'] | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const effects = events[i]!.effects
+    for (const eff of effects) {
+      if (eff.kind === 'finish') return 'done'
+      if (eff.kind === 'emit_error') return 'error'
+      if (eff.kind === 'request_approval') return 'awaiting_approval'
+    }
+  }
+  return undefined
 }

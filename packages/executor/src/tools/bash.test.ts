@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { bashTool } from './bash.js'
 import { makeCtx } from './_test-helpers.js'
+import { createSandbox } from '../sandbox.js'
 
 describe('bash', () => {
   let root: string
@@ -81,6 +82,18 @@ describe('bash', () => {
     expect(out).toContain('--- aborted')
     // Should not have been treated as a timeout kill.
     expect(out).not.toContain('(timeout)')
+  })
+
+  it('falls back to process.cwd() when no sandbox root and no cwd input', async () => {
+    const out = await bashTool.run(
+      { command: 'pwd' },
+      {
+        sandbox: createSandbox({ roots: [] }),
+        signal: new AbortController().signal,
+      },
+    )
+    expect(out).toContain(process.cwd())
+    expect(out).toContain('--- exit code: 0')
   })
 
   it('resolves with a spawn-failure marker when the child errors', async () => {

@@ -6,5 +6,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*", "bin/**/*"],
-  "exclude": ["dist", "node_modules", "**/*.test.ts"]
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "bin/e2e-driver.ts"]
 }

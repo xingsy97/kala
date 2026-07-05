@@ -1,5 +1,5 @@
 /**
- * Built-in ToolSchema list matching the seven tools shipped in
+ * Built-in ToolSchema list matching the tools shipped in
  * `@agent-kernel/executor`. The host declares these to the LLM so tool_calls
  * are well-formed; the executor is what actually runs each tool.
  *
@@ -124,5 +124,39 @@ export const builtinTools: readonly ToolSchema[] = [
       },
     },
     requiresApproval: true,
+  },
+  {
+    name: 'todowrite',
+    description:
+      'Create and maintain a structured task list for the current session. Use for multi-step work (three or more steps), or whenever the user asks for a todo list. The input REPLACES the entire list — always include every todo you want to keep, not just the ones changing. Exactly one item may be in_progress at a time; mark items completed only after the work is verified.',
+    inputSchema: {
+      type: 'object',
+      required: ['todos'],
+      properties: {
+        todos: {
+          type: 'array',
+          description: 'The complete replacement list of todos.',
+          items: {
+            type: 'object',
+            required: ['content', 'status'],
+            properties: {
+              content: {
+                type: 'string',
+                description: 'Short imperative description of the task.',
+              },
+              status: {
+                type: 'string',
+                enum: ['pending', 'in_progress', 'completed', 'cancelled'],
+              },
+              priority: {
+                type: 'string',
+                enum: ['high', 'medium', 'low'],
+              },
+            },
+          },
+        },
+      },
+    },
+    requiresApproval: false,
   },
 ]

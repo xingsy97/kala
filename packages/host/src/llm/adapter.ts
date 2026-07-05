@@ -18,6 +18,7 @@ export type LLMCallParams = {
   messages: readonly Message[]
   tools: readonly ToolSchema[]
   systemPrompt?: string
+  model?: string
   signal?: AbortSignal
 }
 

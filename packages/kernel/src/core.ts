@@ -32,10 +32,14 @@ import type {
   MessageContent,
   PendingToolCall,
   StepResult,
+  TodoItem,
+  TodoPriority,
+  TodoStatus,
   ToolCallContent,
   UsageDelta,
   UsageTotal,
 } from './types.js'
+import { TODOWRITE_TOOL_NAME } from './types.js'
 
 type EventOfKind<K extends AgentEvent['kind']> = Extract<AgentEvent, { kind: K }>
 
@@ -269,7 +273,16 @@ function onToolResult(
   const pendingCalls = state.pendingCalls.filter((c) => c.callId !== callId)
   const messages = [...state.messages, toolResultMsg]
 
-  return afterPendingSettled(state, messages, pendingCalls, config)
+  // Special case: `todowrite` promotes its input to first-class state. The
+  // tool's own return value is just an ack; the authoritative todos list is
+  // what the LLM passed in. Parsing from `target.input` (not `content`) means
+  // a broken executor can't corrupt the todo state.
+  const nextTodos =
+    ok && target.name === TODOWRITE_TOOL_NAME
+      ? parseTodosFromInput(target.input, state.todos)
+      : state.todos
+
+  return afterPendingSettled(state, messages, pendingCalls, config, nextTodos)
 }
 
 function onCancel(state: AgentState): StepResult {
@@ -292,6 +305,7 @@ function afterPendingSettled(
   messages: readonly Message[],
   pendingCalls: readonly PendingToolCall[],
   config: AgentConfig,
+  todos: readonly TodoItem[] = state.todos,
 ): StepResult {
   if (pendingCalls.length > 0) {
     const stillAwaiting = pendingCalls.some((c) => c.status === 'awaiting_approval')
@@ -300,6 +314,7 @@ function afterPendingSettled(
         ...state,
         messages,
         pendingCalls,
+        todos,
         status: stillAwaiting ? 'awaiting_approval' : 'executing_tools',
       },
       effects: [],
@@ -309,6 +324,7 @@ function afterPendingSettled(
     ...state,
     messages,
     pendingCalls: [],
+    todos,
     status: 'thinking',
   }
   return {
@@ -327,4 +343,39 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
 
 function noop(state: AgentState): StepResult {
   return { next: state, effects: [] }
+}
+
+const TODO_STATUSES: readonly TodoStatus[] = [
+  'pending',
+  'in_progress',
+  'completed',
+  'cancelled',
+]
+const TODO_PRIORITIES: readonly TodoPriority[] = ['high', 'medium', 'low']
+
+function parseTodosFromInput(
+  input: Record<string, unknown>,
+  fallback: readonly TodoItem[],
+): readonly TodoItem[] {
+  const raw = (input as { todos?: unknown }).todos
+  if (!Array.isArray(raw)) return fallback
+  const out: TodoItem[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const rec = entry as Record<string, unknown>
+    const content = typeof rec.content === 'string' ? rec.content : null
+    const status =
+      typeof rec.status === 'string' &&
+      (TODO_STATUSES as readonly string[]).includes(rec.status)
+        ? (rec.status as TodoStatus)
+        : null
+    if (!content || !status) continue
+    const priority =
+      typeof rec.priority === 'string' &&
+      (TODO_PRIORITIES as readonly string[]).includes(rec.priority)
+        ? (rec.priority as TodoPriority)
+        : undefined
+    out.push(priority ? { content, status, priority } : { content, status })
+  }
+  return out
 }

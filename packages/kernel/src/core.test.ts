@@ -368,6 +368,107 @@ describe('step: tool_result', () => {
   })
 })
 
+describe('step: tool_result — todowrite promotes to state.todos', () => {
+  it('replaces state.todos with the input list on ok result', () => {
+    const s0: AgentState = {
+      ...initial(),
+      todos: [{ content: 'old', status: 'pending' }],
+      status: 'executing_tools',
+      pendingCalls: [
+        {
+          callId: 'c1',
+          name: 'todowrite',
+          input: {
+            todos: [
+              { content: 'ship v1', status: 'in_progress', priority: 'high' },
+              { content: 'write tests', status: 'pending' },
+            ],
+          },
+          status: 'dispatched',
+        },
+      ],
+    }
+    const { next } = step(
+      s0,
+      { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
+      CONFIG,
+    )
+    expect(next.todos).toEqual([
+      { content: 'ship v1', status: 'in_progress', priority: 'high' },
+      { content: 'write tests', status: 'pending' },
+    ])
+  })
+
+  it('leaves state.todos untouched when the tool call failed (ok=false)', () => {
+    const prior = [{ content: 'keep me', status: 'pending' as const }]
+    const s0: AgentState = {
+      ...initial(),
+      todos: prior,
+      status: 'executing_tools',
+      pendingCalls: [
+        {
+          callId: 'c1',
+          name: 'todowrite',
+          input: { todos: [{ content: 'new', status: 'pending' }] },
+          status: 'dispatched',
+        },
+      ],
+    }
+    const { next } = step(
+      s0,
+      { kind: 'tool_result', callId: 'c1', ok: false, content: 'EINVAL' },
+      CONFIG,
+    )
+    expect(next.todos).toEqual(prior)
+  })
+
+  it('other tools do not touch state.todos', () => {
+    const prior = [{ content: 'keep me', status: 'pending' as const }]
+    const s0: AgentState = {
+      ...initial(),
+      todos: prior,
+      status: 'executing_tools',
+      pendingCalls: [
+        { callId: 'c1', name: 'read', input: {}, status: 'dispatched' },
+      ],
+    }
+    const { next } = step(
+      s0,
+      { kind: 'tool_result', callId: 'c1', ok: true, content: 'stuff' },
+      CONFIG,
+    )
+    expect(next.todos).toEqual(prior)
+  })
+
+  it('drops malformed todo entries silently', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'executing_tools',
+      pendingCalls: [
+        {
+          callId: 'c1',
+          name: 'todowrite',
+          input: {
+            todos: [
+              { content: 'ok', status: 'pending' },
+              { content: 'bad status', status: 'weird' },
+              { status: 'pending' }, // missing content
+              null,
+            ],
+          },
+          status: 'dispatched',
+        },
+      ],
+    }
+    const { next } = step(
+      s0,
+      { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
+      CONFIG,
+    )
+    expect(next.todos).toEqual([{ content: 'ok', status: 'pending' }])
+  })
+})
+
 describe('step: cancel + errors', () => {
   it('cancel terminates the turn', () => {
     const s0: AgentState = {
