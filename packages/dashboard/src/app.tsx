@@ -321,6 +321,14 @@ export function App(): JSX.Element {
                 onModelChange={onModelChange}
                 status={session.status}
                 state={session.state}
+                onCompact={() => {
+                  session.socket?.emit('client:compact', {
+                    sessionId: config.sessionId,
+                  })
+                  if (!config.explicit) {
+                    setConfig((prev) => ({ ...prev, explicit: true }))
+                  }
+                }}
                 onSubmit={(text) => {
                   session.socket?.emit('client:user_message', {
                     sessionId: config.sessionId,

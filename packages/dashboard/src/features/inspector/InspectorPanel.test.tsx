@@ -1,30 +1,31 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AgentState } from '@agent-kernel/kernel'
+import { createInitialState, type AgentState } from '@agent-kernel/kernel'
 import { InspectorPanel } from './InspectorPanel.js'
 
 const baseState: AgentState = {
-  sessionId: 's',
-  messages: [],
-  pendingCalls: [],
+  ...createInitialState({ sessionId: 's' }),
   status: 'idle',
   usage: { inputTokens: 42, outputTokens: 7, costUsd: 0 },
   cursor: 3,
 }
 
 describe('InspectorPanel', () => {
-  it('shows connecting when state is null', () => {
+  it('shows timeline and empty raw state while state is null', () => {
     render(<InspectorPanel state={null} timeline={[]} />)
-    expect(screen.getByText(/connecting/i)).toBeTruthy()
+    expect(screen.getByText(/timeline/i)).toBeTruthy()
+    expect(screen.getByText(/no events yet/i)).toBeTruthy()
+    expect(screen.getByText(/raw state/i)).toBeTruthy()
+    expect(screen.getByText('—')).toBeTruthy()
   })
 
-  it('shows metrics and empty timeline', () => {
+  it('shows empty timeline and raw state JSON', () => {
     render(<InspectorPanel state={baseState} timeline={[]} />)
-    expect(screen.getAllByText(/idle/).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('3').length).toBeGreaterThan(0)
-    expect(screen.getByText(/42 in \/ 7 out/)).toBeTruthy()
     expect(screen.getByText(/no events yet/i)).toBeTruthy()
+    expect(screen.getByText(/full AgentState/)).toBeTruthy()
+    expect(document.body.textContent ?? '').toContain('inputTokens')
+    expect(document.body.textContent ?? '').toContain('42')
   })
 
   describe('fork confirmation', () => {

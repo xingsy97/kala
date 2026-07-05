@@ -41,9 +41,9 @@ per hour, not most important overall:
 
 ### 1. Context compaction / summarization
 
-**agent-kernel:** No compaction. Kernel tracks token usage in `state.usage`
-but does not gate on context-window size. When the model runs out, requests
-just fail.
+**agent-kernel:** Implemented. Kernel tracks token usage and derives
+`state.contextPressureLevel`; host owns the LLM summarization step and records
+deterministic `compact_replaced` events for replay/fork.
 
 - **claude-code-collection**: `maybe_compact(state, config)` runs before each
   streaming call, checks against context window, calls a compaction model.
@@ -55,19 +55,16 @@ just fail.
 - **opencode**: Emits a `session.compacted` event so extensions can implement
   the reduction strategy of their choice.
 
-**How `/compact` would work in agent-kernel:**
+**Implemented shape in agent-kernel:**
 
-- Kernel emits a new `CompactionSuggested` observation event when
-  `state.usage.inputTokens > config.contextLimit * 0.8`.
-- New host tool `compact` invokes the LLM with a fixed summarizer prompt over
-  the current message list, replaces `state.messages` with a single
-  `system-summary` message, resets `usage`.
-- Slash command `/compact` in the composer emits an executor-side action
-  (`client:compact { sessionId }`) that runs the same reducer step.
-- The event log records `{ kind: 'compacted', summary, replacedMessages: N,
+- Host manual compaction invokes the LLM with a fixed summarizer prompt over
+  the current message list, then dispatches `compact_replaced`.
+- Composer exposes a compact icon button and exact `/compact` command; both
+  emit `client:compact { sessionId }` and do not append a user message.
+- The event log records `{ kind: 'compact_replaced', summary, replacedCount,
   tokensBefore, tokensAfter }` so replay/fork is deterministic.
-- Optionally auto-fire when the observation event lands, guarded by a
-  config toggle. Manual first, auto second.
+- Host also auto-fires compaction when `contextPressureLevel` reaches the hard
+  tier while the session is at rest.
 
 ### 2. Slash commands
 
@@ -265,16 +262,16 @@ Grouped by cost/value ratio:
 1. **`/cost` and token footer** — data already in `state.usage`, just needs
    dashboard chrome. Under an hour.
 2. **Command history (↑ key)** — session-local buffer + Composer keyhandler.
-3. **Cancel-in-flight (ESC)** — protocol event exists conceptually, host
-   just needs to abort the streaming request. ~2 hours.
-4. **Slash-command layer** (`/help`, `/clear`, `/model`, `/compact`, `/cost`)
-   in the composer parser. ~half a day.
+3. **Slash-command layer beyond `/compact`** (`/help`, `/clear`, `/model`,
+   `/cost`) in the composer parser. ~half a day.
+4. **Compact pressure banner** — surface `contextPressureLevel` in chat and
+   offer a visible compact-now action at the soft tier. ~half a day.
 
 **High leverage, moderate effort:**
-5. **Compaction hook + `/compact`** — see §1 above. Requires new event
-   kind + host tool + reducer step. ~1 day.
-6. **Streaming tokens** — new `token:delta` protocol event, incremental
-   renderer. Kernel/event log unaffected. ~1 day.
+5. **Streaming render in dashboard** — host already emits
+   `session:token_delta`; dashboard still needs the incremental renderer. ~1 day.
+6. **ESC cancel UI** — host supports `client:cancel_stream`; dashboard still
+   needs the keybinding and visible state. ~2 hours.
 7. **`@file` reference in composer** — fuzzy finder + auto-inject. ~1 day.
 8. **Persistent bash shell** in executor — spawn one `bash -i` per session
    and pipe commands through it. ~half a day + edge-case testing.
@@ -311,6 +308,6 @@ already match the reference agents.
 
 The following gaps above are now closed or partially closed in code:
 
-- Closed: context compaction core/host path, streaming tokens, cancel-in-flight, crash recovery for pending tool calls, permission modes, image content type, sub-agent tool, session cwd, and background shell polling.
+- Closed: context compaction core/host path, manual compact UI (`/compact` and compact icon), streaming tokens, cancel-in-flight, crash recovery for pending tool calls, permission modes, image content type, sub-agent tool, session cwd, and background shell polling.
 - Stubbed only: MCP config shape and `initMcp()` exist, but no MCP runtime is implemented.
-- Still open for Batch B: slash command UX, compact banner, streaming render in dashboard, permission picker UI, message edit/rerun, image paste UI, `@file` picker, hooks, settings UI, session rename, cwd toolbar/metadata modal, diff preview, web tools, memory.
+- Still open for Batch B: broader slash command UX beyond `/compact`, compact pressure banner, streaming render in dashboard, permission picker UI, message edit/rerun, image paste UI, `@file` picker, hooks, settings UI, session rename, cwd toolbar/metadata modal, diff preview, web tools, memory.

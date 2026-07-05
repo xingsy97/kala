@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Send } from 'lucide-react'
+import { Minimize2, Send } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ModelInfo } from '@agent-kernel/shared'
@@ -18,6 +18,7 @@ import { cn } from '../../lib/utils.js'
 type Props = {
   disabled?: boolean
   onSubmit(text: string): void
+  onCompact(): void
   model: string
   models: readonly ModelInfo[]
   onModelChange(model: string): void
@@ -28,6 +29,7 @@ type Props = {
 export function Composer({
   disabled,
   onSubmit,
+  onCompact,
   model,
   models,
   onModelChange,
@@ -39,6 +41,11 @@ export function Composer({
   const submit = (): void => {
     const trimmed = text.trim()
     if (trimmed.length === 0) return
+    if (trimmed === '/compact') {
+      onCompact()
+      setText('')
+      return
+    }
     onSubmit(trimmed)
     setText('')
   }
@@ -104,6 +111,19 @@ export function Composer({
         </span>
         <StateChips state={state} />
         <div className="flex-1" />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          disabled={disabled}
+          onClick={onCompact}
+          aria-label="compact context"
+          title="Compact context"
+          data-testid="composer-compact"
+          className="h-7 w-7"
+        >
+          <Minimize2 className="h-3.5 w-3.5" />
+        </Button>
         <Button
           type="submit"
           disabled={disabled || text.trim().length === 0}

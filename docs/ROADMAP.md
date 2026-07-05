@@ -234,8 +234,8 @@ Ideas that don't fit in phases 1–6 but are on the mind:
 Batch A backend work is complete through the automatic gate:
 
 - Implemented compaction, streaming deltas, cancel-in-flight, crash recovery, permission modes, multimodal messages, MCP stub, session cwd, host-side `agent`, and background shell tools.
-- Composer footer now owns status/cursor/pending/token chips.
+- Composer footer now owns status/cursor/pending/token chips and exposes manual compaction via a compact icon plus exact `/compact` command.
 - Automatic gate passed: `pnpm -r typecheck`, kernel tests, host tests, executor tests.
-- Manual compaction smoke remains a runtime verification step before closing the full batch gate.
+- Manual compaction smoke passed against a real Host + Executor and headless Chrome: the Composer compact button and exact `/compact` command both emitted `client:compact` and produced `compact_replaced` JSONL entries without appending `/compact` as a user message.
 
-Next planned work is Batch B dashboard UX: compact banner, streaming render + ESC cancel, permission picker, message edit/rerun, image paste, `@file` picker, hooks, settings, rename, cwd toolbar/metadata modal.
+Next planned work is Batch B dashboard UX: compact pressure banner, streaming render + ESC cancel, permission picker, message edit/rerun, image paste, `@file` picker, hooks, settings, rename, cwd toolbar/metadata modal.
