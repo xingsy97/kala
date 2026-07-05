@@ -262,11 +262,13 @@ export function createSession(
   sessionId: string,
   workspaceId: string,
   workspaceName: string | undefined,
+  cwd?: string,
 ): void {
   socket.emit('client:create_session', {
     sessionId,
     workspaceId,
     ...(workspaceName !== undefined ? { workspaceName } : {}),
+    ...(cwd !== undefined && cwd.length > 0 ? { cwd } : {}),
   })
 }
 

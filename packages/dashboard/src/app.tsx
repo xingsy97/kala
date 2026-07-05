@@ -240,32 +240,17 @@ export function App(): JSX.Element {
     setConfig((prev) => ({ ...prev, sessionId, explicit: true }))
   }
   const newSession = (): void => {
-    const online = control.executors
-    if (online.length === 0) {
-      // No daemon attached — session lands in Unassigned, no binding to
-      // record. Rare, but not worth hard-blocking the button.
-      selectSession(crypto.randomUUID())
-      return
-    }
-    if (online.length === 1) {
-      const only = online[0]!
-      const id = crypto.randomUUID()
-      if (session.socket) {
-        createSession(session.socket, id, only.workspaceId, only.workspaceName)
-      }
-      selectSession(id)
-      return
-    }
     setPendingWorkspacePick({ sessionId: crypto.randomUUID() })
   }
   const pickWorkspaceForNew = (
     workspaceId: string,
     workspaceName: string | undefined,
+    cwd: string,
   ): void => {
     if (!pendingWorkspacePick) return
     const { sessionId } = pendingWorkspacePick
     if (session.socket) {
-      createSession(session.socket, sessionId, workspaceId, workspaceName)
+      createSession(session.socket, sessionId, workspaceId, workspaceName, cwd)
     }
     selectSession(sessionId)
     setPendingWorkspacePick(null)
@@ -505,7 +490,10 @@ export function App(): JSX.Element {
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
         workspaces={control.executors}
-        onPick={pickWorkspaceForNew}
+        socket={session.socket}
+        onCreate={({ workspaceId, workspaceName, cwd }) =>
+          pickWorkspaceForNew(workspaceId, workspaceName, cwd)
+        }
         onCancel={() => setPendingWorkspacePick(null)}
       />
     </div>

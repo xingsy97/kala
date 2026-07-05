@@ -28,6 +28,7 @@ import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import { startHostServer, type HostServer } from './server.js'
+import { readSessionLog } from './store/log.js'
 
 const WRITE = {
   name: 'write',
@@ -84,6 +85,23 @@ async function waitForAnyExecutor(
     await new Promise((r) => setTimeout(r, 10))
   }
   throw new Error('announce wait timeout')
+}
+
+async function waitForWorkspace(
+  dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>,
+  workspaceId: string,
+  timeoutMs = 1000,
+): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const list = await new Promise<ServerExecutorsPayload>((resolve) => {
+      dashboard.once('server:executors', resolve)
+      dashboard.emit('client:list_executors', {})
+    })
+    if (list.executors.some((e) => e.workspaceId === workspaceId)) return
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error(`workspace wait timeout: ${workspaceId}`)
 }
 
 describe('wire protocol', () => {
@@ -689,6 +707,140 @@ describe('wire protocol', () => {
     expect(secondBroadcast).toBe(0)
 
     dashboard.close()
+  })
+
+  it('client:create_session validates and writes the initial cwd', async () => {
+    const sessionId = 'wire-create-session-cwd'
+    const root = resolve(dir, 'workspace-root')
+    const child = resolve(root, 'child')
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', {
+      executorId: 'ex-create-cwd',
+      workspaceId: 'ws-create-cwd',
+      workspaceName: 'cwd-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+    await waitForWorkspace(dashboard, 'ws-create-cwd')
+
+    const ready = new Promise<SessionReadyEvent>((resolve) => {
+      dashboard.off('session:ready')
+      dashboard.on('session:ready', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-create-cwd',
+      workspaceName: 'cwd-box',
+      cwd: child,
+    })
+    const createdReady = await ready
+    expect(createdReady.state.cwd).toBe(child)
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    const err = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.on('session:error', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId: 'wire-create-session-cwd-bad',
+      workspaceId: 'ws-create-cwd',
+      workspaceName: 'cwd-box',
+      cwd: resolve(dir, 'outside'),
+    })
+    await expect(err).resolves.toMatchObject({
+      scope: 'host',
+      message: 'cwd outside sandbox roots',
+    })
+
+    dashboard.close()
+    executor.close()
+  })
+
+  it('client:list_dirs returns directory entries from the selected executor', async () => {
+    const sessionId = 'wire-list-dirs'
+    const root = resolve(dir, 'dir-root')
+    const child = resolve(root, 'child')
+    await import('node:fs/promises').then((fs) => fs.mkdir(child, { recursive: true }))
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.on('fs:list_dirs', (payload, ack) => {
+      ack({
+        requestId: payload.requestId,
+        workspaceId: payload.workspaceId,
+        path: root,
+        roots: [root],
+        entries: [{ name: 'child', path: child }],
+      })
+    })
+    executor.emit('executor:announce', {
+      executorId: 'ex-list-dirs',
+      workspaceId: 'ws-list-dirs',
+      workspaceName: 'dir-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    await waitForAnyExecutor(server)
+
+    const listed = new Promise<import('@agent-kernel/shared').DirListResult>((resolve) => {
+      dashboard.on('server:dir_list', resolve)
+    })
+    dashboard.emit('client:list_dirs', {
+      requestId: 'dirs-1',
+      workspaceId: 'ws-list-dirs',
+      path: root,
+    })
+    await expect(listed).resolves.toMatchObject({
+      requestId: 'dirs-1',
+      workspaceId: 'ws-list-dirs',
+      path: root,
+      entries: [{ name: 'child', path: child }],
+    })
+
+    dashboard.close()
+    executor.close()
   })
 
   it('client:set_cwd validates sandbox roots and updates session summaries', async () => {

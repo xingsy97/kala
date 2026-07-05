@@ -103,9 +103,7 @@ try {
   })
 
   await page.goto(DASHBOARD_URL, { waitUntil: 'networkidle2', timeout: 15_000 })
-  await page.waitForSelector('[data-testid="new-session-button"]')
-  await page.click('[data-testid="new-session-button"]')
-  await page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
+  await createSessionFromFinder(page)
   await page.waitForSelector('[data-testid="composer-input"]')
 
   if (MODEL) await selectModel(page, MODEL)
@@ -136,6 +134,56 @@ async function verifyModelPicker(page) {
   check('anthropic primary model is selectable', optionText.includes(ANTHROPIC_MODEL), ANTHROPIC_MODEL)
   check('unavailable anthropic small model is not advertised', !optionText.includes(REMOVED_ANTHROPIC_MODEL), REMOVED_ANTHROPIC_MODEL)
   await page.keyboard.press('Escape')
+}
+
+async function createSessionFromFinder(page) {
+  const parent = join(WORKSPACE, 'finder-parent')
+  const child = join(parent, 'finder-child')
+  mkdirSync(child, { recursive: true })
+
+  await page.waitForSelector('[data-testid="new-session-button"]')
+  await page.click('[data-testid="new-session-button"]')
+  await page.waitForSelector('[data-testid="new-session-dialog"]')
+  await page.waitForFunction(
+    (workspace) => document.querySelector('[data-testid="new-session-cwd-input"]')?.value === workspace,
+    { timeout: 5_000 },
+    WORKSPACE,
+  )
+  await page.waitForFunction(
+    () => Array.from(document.querySelectorAll('[data-testid="finder-dir"]')).some((el) => el.textContent?.includes('finder-parent')),
+    { timeout: 5_000 },
+  )
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="finder-dir"]'))
+    const row = rows.find((el) => el.textContent?.includes('finder-parent'))
+    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await page.waitForFunction(
+    () => Array.from(document.querySelectorAll('[data-testid="finder-dir"]')).some((el) => el.textContent?.includes('finder-child')),
+    { timeout: 5_000 },
+  )
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="finder-dir"]'))
+    const row = rows.find((el) => el.textContent?.includes('finder-child'))
+    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await page.waitForFunction(
+    (expected) => document.querySelector('[data-testid="new-session-cwd-input"]')?.value === expected,
+    { timeout: 5_000 },
+    child,
+  )
+  await page.click('[data-testid="new-session-create"]')
+  await page.waitForFunction(() => new URL(location.href).searchParams.has('sessionId'))
+  await page.waitForFunction(
+    (expected) => document.querySelector('[data-testid="cwd-label"]')?.textContent?.includes(expected),
+    { timeout: 5_000 },
+    child,
+  )
+
+  const sessionId = new URL(page.url()).searchParams.get('sessionId')
+  const header = readSessionHeader(SESSIONS_DIR, sessionId)
+  check('new session dialog creates session with selected initial cwd', header?.initialCwd === child && header?.initialState?.cwd === child, JSON.stringify(header ?? null).slice(0, 400))
+  check('new session finder opens nested workspace directories', true, child)
 }
 
 async function verifyStateFlow(page) {
@@ -189,8 +237,7 @@ async function verifySessionCwd(page) {
 
   await page.click('[data-testid="cwd-button"]')
   await page.waitForSelector('[data-testid="cwd-input"]')
-  await page.click('[data-testid="cwd-input"]', { clickCount: 3 })
-  await page.keyboard.type('/tmp/outside-agent-kernel-cwd')
+  await replaceInputValue(page, '[data-testid="cwd-input"]', '/tmp/outside-agent-kernel-cwd')
   await page.click('[data-testid="cwd-save-button"]')
   await page.waitForFunction(
     () => document.querySelector('[data-testid="session-error"]')?.textContent?.includes('cwd outside sandbox roots'),
@@ -200,6 +247,15 @@ async function verifySessionCwd(page) {
   const outsideEvent = entries.find((e) => e.event.kind === 'cwd_changed' && e.event.cwd === '/tmp/outside-agent-kernel-cwd')
   const label = await page.$eval('[data-testid="cwd-label"]', (el) => el.textContent || '')
   check('invalid session cwd is rejected by real host validation', !outsideEvent && label.includes(cwd), label)
+}
+
+async function replaceInputValue(page, selector, value) {
+  await page.click(selector)
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await page.keyboard.down(modifier)
+  await page.keyboard.press('KeyA')
+  await page.keyboard.up(modifier)
+  await page.keyboard.type(value)
 }
 
 const failed = checks.filter((c) => !c.pass)
@@ -387,7 +443,7 @@ async function verifyComposerFooterLayout(page) {
   const clipped = metrics.childRects.filter((r) => r.scrollWidth > Math.ceil(r.width) + 2)
   check('composer footer does not create page horizontal overflow', metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check('composer footer content stays inside footer width', metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
-  check('composer context usage indicator is visible', metrics.indicatorText.includes('context') && metrics.indicatorTitle.includes('Context window'), JSON.stringify(metrics))
+  check('composer context and runtime metrics are visible', metrics.indicatorText.includes('context') && metrics.indicatorText.includes('Cursor') && metrics.indicatorText.includes('Pending') && metrics.indicatorText.includes('Tokens') && metrics.indicatorTitle.includes('Context window'), JSON.stringify(metrics))
   check('composer footer controls render without clipping', tall.length === 0 && clipped.length === 0, JSON.stringify(metrics.childRects))
 }
 
@@ -541,6 +597,15 @@ function readSessionEntries(dir, sessionId) {
     } catch {}
   }
   return entries
+}
+
+function readSessionHeader(dir, sessionId) {
+  if (!sessionId) return null
+  const file = readdirSync(dir).find((f) => f.endsWith(`${sessionId}.jsonl`) || f.includes(sessionId))
+  if (!file) return null
+  const first = readFileSync(join(dir, file), 'utf8').split('\n')[0]
+  if (!first) return null
+  return JSON.parse(first)
 }
 
 function findRawOverflowUtilityClasses() {

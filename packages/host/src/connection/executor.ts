@@ -22,6 +22,8 @@ import type {
 } from '@agent-kernel/kernel'
 import type {
   AttachedExecutor,
+  ClientListDirs,
+  DirListResult,
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
   ExecutorServerToClientEvents,
@@ -57,6 +59,7 @@ export type WorkspaceResolver = {
 
 export type ExecutorLookup = {
   executorForSession(sessionId: string): AttachedExecutor | undefined
+  listDirs(workspaceId: string, path: string | undefined, requestId: string): Promise<DirListResult>
 }
 
 export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
@@ -177,6 +180,22 @@ export function createExecutorRegistry(
       if (bind.announcement.workspaceId === workspaceId) return bind
     }
     return undefined
+  }
+
+  function defaultDirList(
+    requestId: string,
+    workspaceId: string,
+    path: string | undefined,
+    error: string,
+  ): DirListResult {
+    return {
+      requestId,
+      workspaceId,
+      path: path ?? '',
+      roots: [],
+      entries: [],
+      error,
+    }
   }
 
   /**
@@ -321,6 +340,26 @@ export function createExecutorRegistry(
     executorForSession(sessionId) {
       const picked = pickBindFor(sessionId)
       return picked.ok ? toAttached(picked.bind) : undefined
+    },
+    async listDirs(workspaceId, path, requestId) {
+      const bind = findBindByWorkspace(workspaceId)
+      if (!bind) {
+        return defaultDirList(requestId, workspaceId, path, 'workspace offline')
+      }
+      return await new Promise<DirListResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve(defaultDirList(requestId, workspaceId, path, 'directory listing timed out'))
+        }, toolTimeoutMs)
+        const payload: ClientListDirs = {
+          requestId,
+          workspaceId,
+          ...(path !== undefined ? { path } : {}),
+        }
+        bind.socket.emit('fs:list_dirs', payload, (result: DirListResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
     },
     onChange(listener) {
       listeners.add(listener)
