@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Moon, PanelRight, PanelRightClose, Sun } from 'lucide-react'
 
 import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
-import type { Message } from '@agent-kernel/kernel'
 
 import { Button } from './components/ui/button.js'
 import {
@@ -28,6 +27,7 @@ import {
   useControlPlane,
   useSession,
 } from './session.js'
+import { visibleMessages } from './transcript.js'
 
 type Theme = 'dark' | 'light'
 
@@ -262,7 +262,11 @@ export function App(): JSX.Element {
       ? `${firstMsg.slice(0, 40)} - `
       : firstMsg
     : 'new session'
-  const chatMessages = visibleMessages(session.state?.messages ?? [], session.timeline)
+  const chatMessages = visibleMessages(
+    session.state?.messages ?? [],
+    session.timeline,
+    session.streamingText,
+  )
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
@@ -454,43 +458,6 @@ export function App(): JSX.Element {
       />
     </div>
   )
-}
-
-function visibleMessages(
-  stateMessages: readonly Message[],
-  timeline: readonly TimelineEntry[],
-): readonly Message[] {
-  const out: Message[] = []
-  const first = stateMessages[0]
-  if (first?.role === 'system') out.push(first)
-
-  for (const entry of timeline) {
-    const event = entry.event
-    if (event.kind === 'user_message') {
-      out.push({
-        role: 'user',
-        content: event.content
-          ? [...event.content]
-          : [{ type: 'text', text: event.text ?? '' }],
-      })
-    } else if (event.kind === 'llm_response') {
-      out.push(event.message)
-    } else if (event.kind === 'tool_result') {
-      out.push({
-        role: 'tool',
-        content: [
-          {
-            type: 'tool_result',
-            callId: event.callId,
-            ok: event.ok,
-            content: event.content,
-          },
-        ],
-      })
-    }
-  }
-
-  return out.length > 1 ? out : stateMessages
 }
 
 function hasCompactableContent(state: import('@agent-kernel/kernel').AgentState | null): boolean {

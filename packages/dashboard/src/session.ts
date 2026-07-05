@@ -48,6 +48,7 @@ export type SessionView = {
   status: ConnectionStatus
   state: AgentState | null
   timeline: readonly TimelineEntry[]
+  streamingText: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
   lastError: SessionErrorEvent | null
   parentSessionId: string | null
@@ -80,6 +81,7 @@ export function useSession({
   const [status, setStatus] = useState<ConnectionStatus>('idle')
   const [state, setState] = useState<AgentState | null>(null)
   const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
+  const [streamingText, setStreamingText] = useState('')
   const [pendingApprovals, setPendingApprovals] = useState<
     readonly ApprovalRequiredEvent[]
   >([])
@@ -95,6 +97,7 @@ export function useSession({
     setStatus('connecting')
     setState(null)
     setTimeline([])
+    setStreamingText('')
     setPendingApprovals([])
     setLastError(null)
     setParentSessionId(null)
@@ -141,8 +144,12 @@ export function useSession({
     })
     socket.on('state:changed', (p) => {
       setState(p.state)
+      if (p.state.status !== 'thinking') setStreamingText('')
     })
     socket.on('event:appended', (p) => {
+      if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
+        setStreamingText('')
+      }
       setTimeline((prev) =>
         mergeByseq(prev, [
           {
@@ -158,7 +165,11 @@ export function useSession({
       setPendingApprovals((prev) => [...prev, p])
     })
     socket.on('session:error', (p) => {
+      setStreamingText('')
       setLastError(p)
+    })
+    socket.on('session:token_delta', (p) => {
+      if (p.sessionId === sessionId) setStreamingText((prev) => prev + p.text)
     })
     socket.on('session:model_changed', (p) => {
       if (p.sessionId === sessionId) {
@@ -183,6 +194,7 @@ export function useSession({
       status,
       state,
       timeline,
+      streamingText,
       pendingApprovals,
       lastError,
       parentSessionId,
@@ -196,6 +208,7 @@ export function useSession({
       status,
       state,
       timeline,
+      streamingText,
       pendingApprovals,
       lastError,
       parentSessionId,
