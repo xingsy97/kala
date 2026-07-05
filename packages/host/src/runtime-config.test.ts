@@ -93,7 +93,6 @@ describe('loadRuntimeConfig', () => {
       expect(cfg.defaultModel).toBe('gpt-5.5')
       expect(cfg.models.map((m) => m.id)).toEqual([
         'claude-opus-4.7-1m-internal',
-        'claude-haiku-4-5',
         'gpt-5.5',
       ])
       // Model list is the sanitized DTO  -  no `apiKey` field on ModelInfo.
