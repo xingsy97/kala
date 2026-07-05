@@ -27,6 +27,7 @@ export function createConfig(params: {
   contextLimit?: number
   softThreshold?: number
   hardThreshold?: number
+  maxAgentDepth?: number
 }): AgentConfig {
   return {
     tools: params.tools,
@@ -39,6 +40,9 @@ export function createConfig(params: {
       : {}),
     ...(params.hardThreshold !== undefined
       ? { hardThreshold: params.hardThreshold }
+      : {}),
+    ...(params.maxAgentDepth !== undefined
+      ? { maxAgentDepth: params.maxAgentDepth }
       : {}),
   }
 }

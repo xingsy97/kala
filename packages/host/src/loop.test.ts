@@ -48,6 +48,13 @@ const READ = {
   requiresApproval: false,
 } as const
 
+const AGENT = {
+  name: 'agent',
+  description: 'spawn agent',
+  inputSchema: { type: 'object' },
+  requiresApproval: false,
+} as const
+
 describe('host loop', () => {
   let dir: string
   let store: SessionStore
@@ -516,6 +523,73 @@ describe('host loop', () => {
       expect(text).toMatch(/\[cancelled\]$/)
       expect(text).toMatch(/^partial /)
     }
+  })
+
+  it('handles agent tool calls inside the host and records a child session', async () => {
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-parent',
+      workspaceId: 'ws-agent',
+    })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'agent-1',
+              name: 'agent',
+              input: { prompt: 'answer the question' },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '42' }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'parent done' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          throw new Error('agent should not dispatch to executor')
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    const parentLog = await readSessionLog(parent.logPath)
+    const toolResult = parentLog.events.find(
+      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-1',
+    )
+    expect(toolResult?.event).toMatchObject({
+      kind: 'tool_result',
+      ok: true,
+      content: '42',
+    })
+
+    const children = store
+      .list()
+      .filter((r) => r.parentSessionId === parent.sessionId)
+    expect(children).toHaveLength(1)
+    expect(children[0]!.workspaceId).toBe('ws-agent')
+    const childLog = await readSessionLog(children[0]!.logPath)
+    expect(childLog.header.parentSessionId).toBe(parent.sessionId)
+    expect(children[0]!.state.status).toBe('done')
   })
 })
 
