@@ -70,6 +70,7 @@ export function Explorer({
         ref={ref}
         className="flex-1 min-h-0"
         data-testid="explorer-column"
+        data-scroll-owner="react-arborist"
       >
         {empty ? (
           <div className="p-3 text-xs text-slate-500 leading-relaxed">

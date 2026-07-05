@@ -8,9 +8,23 @@ import { ActivityBar } from './ActivityBar.js'
 const baseState = createInitialState({ sessionId: 'sess-activity' })
 
 describe('ActivityBar', () => {
-  it('renders nothing when idle', () => {
-    render(<ActivityBar state={baseState} compactStatus={{ kind: 'idle' }} />)
-    expect(screen.queryByTestId('activity-bar')).toBeNull()
+  it('shows readable resting state and runtime counters when idle', () => {
+    render(
+      <ActivityBar
+        state={{
+          ...baseState,
+          status: 'done',
+          cursor: 3,
+          usage: { inputTokens: 42, outputTokens: 7, costUsd: 0 },
+        }}
+        compactStatus={{ kind: 'idle' }}
+      />,
+    )
+    expect(screen.getByText('Agent Done')).toBeTruthy()
+    const summary = screen.getByTestId('runtime-summary')
+    expect(summary.textContent ?? '').toContain('Cursor3')
+    expect(summary.textContent ?? '').toContain('Pending tools0')
+    expect(summary.textContent ?? '').toContain('Tokens in/out42 / 7')
   })
 
   it('shows compact progress and completion', () => {

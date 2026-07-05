@@ -82,6 +82,19 @@ function useTheme(): [Theme, () => void] {
   return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))]
 }
 
+function useMinWidth(px: number): boolean {
+  const query = `(min-width: ${px}px)`
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const onChange = (): void => setMatches(media.matches)
+    onChange()
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [query])
+  return matches
+}
+
 export function App(): JSX.Element {
   const [config, setConfig] = useState(() => readInitialConfig())
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
@@ -93,6 +106,7 @@ export function App(): JSX.Element {
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
   const [theme, toggleTheme] = useTheme()
+  const wideLayout = useMinWidth(1024)
   const { models, defaultModel } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
     try {
@@ -287,31 +301,40 @@ export function App(): JSX.Element {
   return (
     <div className="h-screen w-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
-      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v2">
+      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v4">
+        {wideLayout ? (
+          <>
+            <ResizablePanel
+              defaultSize={14}
+              minSize={12}
+              maxSize={18}
+              data-testid="explorer-panel"
+            >
+              <div className="h-full border-r border-slate-200 dark:border-slate-800">
+                <Explorer
+                  executors={control.executors}
+                  sessions={control.sessions}
+                  selectedSessionId={config.sessionId}
+                  onSelect={selectSession}
+                  onNewSession={newSession}
+                  onDelete={deleteSessionAt}
+                />
+              </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+          </>
+        ) : null}
         <ResizablePanel
-          defaultSize={22}
-          minSize={14}
-          maxSize={45}
-          data-testid="explorer-panel"
+          defaultSize={wideLayout ? (inspectorOpen ? 64 : 86) : 100}
+          minSize={wideLayout ? 52 : 100}
+          data-testid="main-panel"
         >
-          <div className="h-full border-r border-slate-200 dark:border-slate-800">
-            <Explorer
-              executors={control.executors}
-              sessions={control.sessions}
-              selectedSessionId={config.sessionId}
-              onSelect={selectSession}
-              onNewSession={newSession}
-              onDelete={deleteSessionAt}
-            />
-          </div>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={inspectorOpen ? 54 : 78} minSize={30}>
           <div className="h-full flex flex-col min-w-0 min-h-0">
             <SessionToolbar
               sessionLabel={sessionLabel}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
-              inspectorOpen={inspectorOpen}
+              inspectorOpen={wideLayout && inspectorOpen}
+              inspectorAvailable={wideLayout}
               theme={theme}
               onToggleTheme={toggleTheme}
             />
@@ -378,7 +401,6 @@ export function App(): JSX.Element {
                 models={models}
                 onModelChange={onModelChange}
                 status={session.status}
-                state={session.state}
                 compacting={compactStatus.kind === 'running'}
                 onCompact={() => {
                   if (!hasCompactableContent(session.state)) {
@@ -423,13 +445,13 @@ export function App(): JSX.Element {
             </div>
           </div>
         </ResizablePanel>
-        {inspectorOpen ? (
+        {wideLayout && inspectorOpen ? (
           <>
             <ResizableHandle withHandle />
             <ResizablePanel
-              defaultSize={24}
-              minSize={15}
-              maxSize={50}
+              defaultSize={22}
+              minSize={18}
+              maxSize={30}
               data-testid="inspector-panel"
             >
               <div
@@ -497,12 +519,14 @@ function SessionToolbar({
   sessionLabel,
   onToggleInspector,
   inspectorOpen,
+  inspectorAvailable,
   theme,
   onToggleTheme,
 }: {
   sessionLabel: string
   onToggleInspector(): void
   inspectorOpen: boolean
+  inspectorAvailable: boolean
   theme: Theme
   onToggleTheme(): void
 }): JSX.Element {
@@ -532,20 +556,22 @@ function SessionToolbar({
           <Moon className="h-4 w-4" />
         )}
       </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onToggleInspector}
-        title={inspectorOpen ? 'hide inspector' : 'show inspector'}
-        aria-label={inspectorOpen ? 'hide inspector' : 'show inspector'}
-        data-testid="inspector-toggle"
-      >
-        {inspectorOpen ? (
-          <PanelRightClose className="h-4 w-4" />
-        ) : (
-          <PanelRight className="h-4 w-4" />
-        )}
-      </Button>
+      {inspectorAvailable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggleInspector}
+          title={inspectorOpen ? 'hide inspector' : 'show inspector'}
+          aria-label={inspectorOpen ? 'hide inspector' : 'show inspector'}
+          data-testid="inspector-toggle"
+        >
+          {inspectorOpen ? (
+            <PanelRightClose className="h-4 w-4" />
+          ) : (
+            <PanelRight className="h-4 w-4" />
+          )}
+        </Button>
+      ) : null}
     </div>
   )
 }
