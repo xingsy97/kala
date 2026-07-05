@@ -72,4 +72,23 @@ describe('Composer', () => {
 
     expect(onCompact).toHaveBeenCalledTimes(1)
   })
+
+  it('shows compact progress on the compact button', () => {
+    render(
+      <Composer
+        model=""
+        models={[]}
+        onModelChange={() => {}}
+        status="ready"
+        state={baseState}
+        compacting
+        onSubmit={() => {}}
+        onCompact={() => {}}
+      />,
+    )
+
+    const compact = screen.getByTestId('composer-compact')
+    expect(compact.getAttribute('aria-label')).toBe('compacting context')
+    expect(compact).toHaveProperty('disabled', true)
+  })
 })

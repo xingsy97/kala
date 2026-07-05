@@ -9,6 +9,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from './components/ui/resizable.js'
+import { ActivityBar, type CompactStatus } from './features/chat/ActivityBar.js'
 import { ApprovalsPanel } from './features/chat/ApprovalsPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
@@ -84,6 +85,7 @@ export function App(): JSX.Element {
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string } | null
   >(null)
+  const [compactStatus, setCompactStatus] = useState<CompactStatus>('idle')
   const [theme, toggleTheme] = useTheme()
   const { models, defaultModel } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
@@ -125,6 +127,19 @@ export function App(): JSX.Element {
       setConfig((prev) => ({ ...prev, sessionId: p.sessionId, explicit: true }))
     },
   })
+
+  useEffect(() => {
+    setCompactStatus('idle')
+  }, [config.sessionId])
+
+  useEffect(() => {
+    if (compactStatus !== 'running') return
+    const last = session.timeline[session.timeline.length - 1]
+    if (last?.event.kind !== 'compact_replaced') return
+    setCompactStatus('done')
+    const timer = window.setTimeout(() => setCompactStatus('idle'), 2500)
+    return () => window.clearTimeout(timer)
+  }, [compactStatus, session.timeline])
 
   // If the host already has a per-session model on record, that's the truth
   // (persists across reloads because host keeps it in memory). Only push the
@@ -294,6 +309,10 @@ export function App(): JSX.Element {
                 }}
               />
               <TodoDock todos={session.state?.todos ?? []} />
+              <ActivityBar
+                state={session.state}
+                compactStatus={compactStatus}
+              />
               {session.lastError ? (
                 <div
                   className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
@@ -321,7 +340,9 @@ export function App(): JSX.Element {
                 onModelChange={onModelChange}
                 status={session.status}
                 state={session.state}
+                compacting={compactStatus === 'running'}
                 onCompact={() => {
+                  setCompactStatus('running')
                   session.socket?.emit('client:compact', {
                     sessionId: config.sessionId,
                   })

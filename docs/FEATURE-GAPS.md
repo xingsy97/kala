@@ -307,6 +307,6 @@ already match the reference agents.
 
 The following gaps above are now closed or partially closed in code:
 
-- Closed: context compaction core/host path, manual compact UI (`/compact` and compact icon), streaming tokens, cancel-in-flight, crash recovery for pending tool calls, permission modes, image content type, sub-agent tool, session cwd, and background shell polling.
+- Closed: context compaction core/host path, manual compact UI (`/compact` and compact icon), visible runtime activity feedback, streaming tokens, cancel-in-flight, crash recovery for pending tool calls, permission modes, image content type, sub-agent tool, session cwd, and background shell polling.
 - Stubbed only: MCP config shape and `initMcp()` exist, but no MCP runtime is implemented.
 - Still open for Batch B: broader slash command UX beyond `/compact`, compact pressure banner, streaming render in dashboard, permission picker UI, message edit/rerun, image paste UI, `@file` picker, hooks, settings UI, session rename, cwd toolbar/metadata modal, diff preview, web tools, memory.
