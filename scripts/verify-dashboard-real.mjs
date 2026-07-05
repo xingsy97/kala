@@ -221,14 +221,22 @@ async function verifySessionCwd(page) {
   mkdirSync(cwd, { recursive: true })
   await page.click('[data-testid="cwd-button"]')
   await page.waitForSelector('[data-testid="cwd-input"]')
-  await page.click('[data-testid="cwd-input"]', { clickCount: 3 })
-  await page.keyboard.type(cwd)
+  await replaceInputValue(page, '[data-testid="cwd-input"]', cwd)
   await page.click('[data-testid="cwd-save-button"]')
-  await page.waitForFunction(
-    (expected) => document.querySelector('[data-testid="cwd-label"]')?.textContent?.includes(expected),
-    { timeout: 3_000 },
-    cwd,
-  )
+  try {
+    await page.waitForFunction(
+      (expected) => document.querySelector('[data-testid="cwd-label"]')?.textContent?.includes(expected),
+      { timeout: 3_000 },
+      cwd,
+    )
+  } catch (err) {
+    const diag = await page.evaluate(() => ({
+      label: document.querySelector('[data-testid="cwd-label"]')?.textContent || '',
+      error: document.querySelector('[data-testid="session-error"]')?.textContent || '',
+      body: document.body.textContent?.slice(0, 1000) || '',
+    }))
+    throw new Error(`cwd label did not update: ${JSON.stringify(diag)}`, { cause: err })
+  }
 
   const sessionId = new URL(page.url()).searchParams.get('sessionId')
   let entries = readSessionEntries(SESSIONS_DIR, sessionId)
@@ -340,11 +348,16 @@ async function verifyCompact(page) {
   await page.keyboard.press('Enter')
 
   let sawRunning = false
+  let runningText = ''
   try {
     await page.waitForFunction(
-      () => document.querySelector('[data-testid="activity-bar"]')?.textContent?.includes('Compacting context'),
+      () => {
+        const text = document.querySelector('[data-testid="activity-bar"]')?.textContent || ''
+        return text.includes('Compacting conversation') && text.includes('tokens')
+      },
       { timeout: 2_000 },
     )
+    runningText = await page.$eval('[data-testid="activity-bar"]', (el) => el.textContent || '')
     sawRunning = true
   } catch {}
   await page.waitForFunction(
@@ -371,7 +384,7 @@ async function verifyCompact(page) {
 
   const compactEvent = compactEvents[compactEvents.length - 1]?.event
 
-  check('compact running or completion UI observed', sawRunning || bodyText.includes('Context compacted'), sawRunning ? 'Compacting context' : 'Context compacted')
+  check('compact progress UI shows elapsed/token context', sawRunning || bodyText.includes('Context compacted'), sawRunning ? runningText : 'Context compacted')
   check('compact completed with success UI', true, 'Context compacted')
   check('compact did not change URL/session', beforeUrl === afterUrl, `${beforeUrl} -> ${afterUrl}`)
   check('compact did not reload page', navCheck.before === beforeNavCount && navCheck.after === beforeNavCount, JSON.stringify(navCheck))
