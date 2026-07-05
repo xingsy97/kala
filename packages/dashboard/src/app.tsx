@@ -307,9 +307,17 @@ export function App(): JSX.Element {
   }, [currentSession?.workspaceId, control.executors])
 
   return (
-    <div className="h-screen w-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
+    <div className="h-screen w-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden flex flex-col">
       <div className="hidden" data-testid="login-column-hidden" />
-      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v4">
+      <GlobalToolbar
+        sessionLabel={sessionLabel}
+        onToggleInspector={() => setInspectorOpen((v) => !v)}
+        inspectorOpen={wideLayout && inspectorOpen}
+        inspectorAvailable={wideLayout}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v4" className="min-h-0 flex-1">
         {wideLayout ? (
           <>
             <ResizablePanel
@@ -338,14 +346,6 @@ export function App(): JSX.Element {
           data-testid="main-panel"
         >
           <div className="h-full flex flex-col min-w-0 min-h-0">
-            <SessionToolbar
-              sessionLabel={sessionLabel}
-              onToggleInspector={() => setInspectorOpen((v) => !v)}
-              inspectorOpen={wideLayout && inspectorOpen}
-              inspectorAvailable={wideLayout}
-              theme={theme}
-              onToggleTheme={toggleTheme}
-            />
             {session.parentSessionId ? (
               <LineageBar
                 parentSessionId={session.parentSessionId}
@@ -412,7 +412,6 @@ export function App(): JSX.Element {
                 status={session.status}
                 state={session.state}
                 config={session.config}
-                compacting={compactStatus.kind === 'running'}
                 onCompact={() => {
                   if (!hasCompactableContent(session.state)) {
                     setCompactStatus({
@@ -526,7 +525,7 @@ function readInitialConfig(): Config {
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
-function SessionToolbar({
+function GlobalToolbar({
   sessionLabel,
   onToggleInspector,
   inspectorOpen,
@@ -543,8 +542,8 @@ function SessionToolbar({
 }): JSX.Element {
   return (
     <div
-      className="px-3 py-2 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2 text-sm min-w-0"
-      data-testid="session-toolbar"
+      className="h-10 flex-none px-3 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950 flex items-center gap-2 text-sm min-w-0"
+      data-testid="global-toolbar"
     >
       <span
         className="truncate font-medium min-w-0 flex-1"
