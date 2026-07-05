@@ -54,11 +54,27 @@ export type ImageContent = {
   source: ImageSource
 }
 
+/**
+ * Extended-thinking block (Anthropic-specific). The model's private
+ * reasoning that produced the visible answer. Preserved in the message log
+ * because the API requires echoing it back on the next turn for tool-use
+ * flows; UI displays it collapsed by default.
+ *
+ * `signature` is a provider-generated opaque token proving the block came
+ * from the API, required on the next turn per Anthropic's spec.
+ */
+export type ThinkingContent = {
+  type: 'thinking'
+  text: string
+  signature?: string
+}
+
 export type MessageContent =
   | TextContent
   | ToolCallContent
   | ToolResultContent
   | ImageContent
+  | ThinkingContent
 
 export type Message = {
   role: Role
@@ -95,6 +111,13 @@ export type AgentConfig = {
   readonly hardThreshold?: number
   /** Maximum nested `agent` tool depth. Host default is 3. */
   readonly maxAgentDepth?: number
+  /**
+   * Extended-thinking budget in tokens (Anthropic-only). When set to a
+   * positive integer, the adapter requests the model's private reasoning
+   * blocks up to this many tokens. Undefined = extended thinking off.
+   * Ignored by non-Anthropic adapters.
+   */
+  readonly thinkingBudget?: number
 }
 
 export const DEFAULT_SOFT_THRESHOLD = 0.75

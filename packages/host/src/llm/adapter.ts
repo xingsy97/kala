@@ -32,6 +32,11 @@ export type LLMCallParams = {
   model?: string
   signal?: AbortSignal
   onTextDelta?: (delta: string) => void
+  /**
+   * Extended-thinking budget in tokens. Anthropic-only: the adapter for
+   * other providers ignores it. Undefined = disabled.
+   */
+  thinkingBudget?: number
 }
 
 export type LLMAdapter = {

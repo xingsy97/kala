@@ -12,6 +12,7 @@ import type {
   AgentState,
   ApprovalMode,
   Effect,
+  MessageContent,
   UsageTotal,
 } from '@agent-kernel/kernel'
 
@@ -96,6 +97,13 @@ export type SessionForkedEvent = {
 export type ClientUserMessage = {
   sessionId: string
   text: string
+  mode?: 'steer' | 'queue'
+  /**
+   * Structured content blocks. When present, kernel uses these verbatim
+   * (mixing text + image blocks from pasted screenshots); `text` is kept as
+   * a plain-text mirror for logs and non-image adapters.
+   */
+  content?: readonly MessageContent[]
 }
 
 export type ClientUserApprove = {
@@ -148,6 +156,13 @@ export type ClientFork = {
   sourceSessionId: string
   cursor: number
   newSessionId?: string
+  /**
+   * Optional first user message to dispatch on the freshly-forked session in
+   * the same operation. Used by "edit and rerun" — dashboard forks at the
+   * cursor *before* the message the user edited, then seeds the edited text
+   * so the child session runs to completion without a second roundtrip.
+   */
+  seedMessage?: string
 }
 
 /**
@@ -433,12 +448,18 @@ export type DashboardServerToClientEvents = {
   'session:model_changed': (payload: SessionModelChangedEvent) => void
   'session:token_delta': (payload: ServerTokenDeltaEvent) => void
   'session:approval_mode': (payload: SessionApprovalModeEvent) => void
+  'server:message_queue': (payload: ServerMessageQueueEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
   'server:sessions': (payload: ServerSessionsPayload) => void
   'server:dir_list': (payload: DirListResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
+}
+
+export type ServerMessageQueueEvent = {
+  sessionId: string
+  pending: number
 }
 
 export type ExecutorClientToServerEvents = {
