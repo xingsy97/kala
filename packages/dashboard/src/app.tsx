@@ -382,7 +382,10 @@ export function App(): JSX.Element {
                 compacting={compactStatus.kind === 'running'}
                 onCompact={() => {
                   if (!hasCompactableContent(session.state)) {
-                    setCompactStatus({ kind: 'error', message: 'nothing to compact yet' })
+                    setCompactStatus({
+                      kind: 'empty',
+                      message: 'send a message before compacting context',
+                    })
                     scheduleCompactIdle(6000)
                     return
                   }

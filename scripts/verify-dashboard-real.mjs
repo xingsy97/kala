@@ -109,6 +109,7 @@ try {
 
   await verifyModelPicker(page)
   await verifyScrollbar(page)
+  await verifyEmptyCompact(page)
   await verifyStreaming(page)
   await verifyStateFlow(page)
   await verifyCompact(page)
@@ -131,6 +132,7 @@ async function verifyModelPicker(page) {
 }
 
 async function verifyStateFlow(page) {
+  await page.click('[data-testid="history-view-state-flow"]')
   const flow = await page.evaluate(() => {
     const rows = Array.from(document.querySelectorAll('[data-testid="state-flow-row"]')).map(
       (row) => row.textContent || '',
@@ -143,6 +145,20 @@ async function verifyStateFlow(page) {
   check('state flow section is visible', flow.hasSection)
   check('state flow records Waiting for LLM transition', flow.rows.some((r) => r.includes('Ready  -  Waiting for LLM')), flow.rows.join(' | '))
   check('state flow records Done transition', flow.rows.some((r) => r.includes('Waiting for LLM  -  Done')), flow.rows.join(' | '))
+  await page.click('[data-testid="history-view-timeline"]')
+}
+
+async function verifyEmptyCompact(page) {
+  const timelineRows = await page.$$eval('[data-testid="timeline-row"]', (rows) => rows.length)
+  check('history defaults to timeline view', timelineRows === 0, `${timelineRows}`)
+  await page.type('[data-testid="composer-input"]', '/compact')
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="activity-bar"]')?.textContent?.includes('Nothing to compact'),
+    { timeout: 2_000 },
+  )
+  const activity = await page.$eval('[data-testid="activity-bar"]', (el) => el.textContent || '')
+  check('empty compact shows neutral hint', activity.includes('Nothing to compact') && !activity.includes('Compact failed'), activity)
 }
 
 const failed = checks.filter((c) => !c.pass)
