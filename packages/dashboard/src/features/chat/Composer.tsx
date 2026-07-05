@@ -124,14 +124,14 @@ export function Composer({
           </div>
         ) : null}
       </div>
-      <div className="flex items-center gap-2 px-2 py-1.5 border-t border-slate-200 dark:border-slate-800">
+      <div className="flex flex-wrap items-center gap-2 px-2 py-1.5 border-t border-slate-200 dark:border-slate-800">
         <Select
           value={model && models.some((m) => m.id === model) ? model : ''}
           onValueChange={onModelChange}
           disabled={models.length === 0}
         >
           <SelectTrigger
-            className="h-7 w-44 flex-none"
+            className="h-7 w-44 max-w-[calc(100vw-1rem)] flex-none"
             data-testid="model-picker"
             aria-label="model"
           >
@@ -157,7 +157,7 @@ export function Composer({
           {hostStatusLabel(status)}
         </span>
         <StateChips state={state} />
-        <div className="flex-1" />
+        <div className="min-w-0 flex-1 basis-4" />
         <Button
           type="button"
           variant="outline"
@@ -167,7 +167,7 @@ export function Composer({
           aria-label={compacting ? 'compacting context' : 'compact context'}
           title={compacting ? 'Compacting context' : 'Compact context'}
           data-testid="composer-compact"
-          className="h-7 w-7"
+          className="h-7 w-7 flex-none"
         >
           {compacting ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -179,7 +179,7 @@ export function Composer({
           type="submit"
           disabled={disabled || text.trim().length === 0}
           data-testid="composer-send"
-          className="h-7 px-3"
+          className="h-7 flex-none px-3"
         >
           <Send className="mr-1 h-3.5 w-3.5" />
           Send
@@ -193,19 +193,20 @@ function StateChips({ state }: { state: AgentState | null }): JSX.Element | null
   if (!state) return null
   return (
     <div
-      className="hidden md:flex items-center gap-1 text-[11px] font-mono text-slate-500 dark:text-slate-400"
+      className="hidden min-w-0 flex-1 flex-wrap items-center gap-1 text-[11px] font-mono text-slate-500 dark:text-slate-400 md:flex"
       data-testid="composer-state-chips"
     >
       <Chip label="Agent" value={agentStatusLabel(state.status)} tone={statusChipTone(state.status)} />
-      <Chip label="Cursor" value={String(state.cursor)} />
+      <Chip label="Cursor" value={String(state.cursor)} compactLabel="Cur" />
       <Chip
         label="Pending tools"
+        compactLabel="Tools"
         value={String(state.pendingCalls.length)}
         tone={state.pendingCalls.length > 0 ? 'amber' : undefined}
       />
       <Chip
         label="Tokens"
-        value={`${formatTokens(state.usage.inputTokens)} in / ${formatTokens(state.usage.outputTokens)} out`}
+        value={`${formatTokens(state.usage.inputTokens)} / ${formatTokens(state.usage.outputTokens)}`}
       />
     </div>
   )
@@ -217,20 +218,22 @@ function Chip({
   label,
   value,
   tone,
+  compactLabel,
 }: {
   label: string
   value: string
   tone?: ChipTone
+  compactLabel?: string
 }): JSX.Element {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 border',
+        'inline-flex h-7 min-w-max shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 leading-none whitespace-nowrap',
         chipToneStyles(tone),
       )}
       title={`${label}: ${value}`}
     >
-      <span className="opacity-70">{label}</span>
+      <span className="opacity-70">{compactLabel ?? label}</span>
       <span className="text-slate-800 dark:text-slate-100">{value}</span>
     </span>
   )

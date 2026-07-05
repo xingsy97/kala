@@ -13,6 +13,8 @@
     "test": "pnpm -r --parallel run test",
     "typecheck": "pnpm -r --parallel run typecheck",
     "dev": "pnpm -r --parallel run dev",
+    "verify:dashboard-real": "node scripts/verify-dashboard-real.mjs",
+    "verify:dashboard-layout-scroll": "node scripts/verify-dashboard-layout-scroll.mjs",
     "executor:dev": "pnpm --filter @agent-kernel/executor dev",
     "publish:kernel": "pnpm --filter @agent-kernel/kernel run publish:npm",
     "publish:host": "pnpm --filter @agent-kernel/host run publish:npm",
