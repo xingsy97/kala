@@ -620,7 +620,7 @@ function WorkbenchToolbar({
 }): JSX.Element {
   return (
     <div
-      className="h-10 flex-none px-3 border-b border-border bg-white dark:border-border dark:bg-background flex items-center gap-2 text-sm min-w-0"
+      className="h-12 flex-none px-3 border-b border-border/60 bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/50 flex items-center gap-2 text-sm min-w-0"
       data-testid="workbench-toolbar"
     >
       <span
@@ -694,14 +694,13 @@ function ConnectionStatus({ status }: { status: string }): JSX.Element {
   const label = hostStatusLabel(status)
   return (
     <div
-      className="inline-flex h-7 flex-none items-center gap-1.5 rounded-md border border-border bg-muted px-2 text-[11px] text-muted-foreground dark:border-border dark:bg-card/70 dark:text-muted-foreground"
+      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md hover:bg-accent/60 transition-colors"
       data-testid="connection-status"
       data-status={status}
       title={label}
       aria-label={label}
     >
       <span className={cn('h-2 w-2 rounded-full', statusDot(status))} />
-      <span className="hidden sm:inline">{label}</span>
     </div>
   )
 }
