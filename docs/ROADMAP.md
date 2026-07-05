@@ -194,10 +194,10 @@ These aren't phases but must be maintained throughout:
 Ideas that don't fit in phases 1 - 6 but are on the mind:
 
 - **Dashboard v1.1  -  session + executor management UI** ([ADR 0012](adr/0012-dashboard-ui-redesign.md), proposed): the current two-column layout has no session list, no executor/workspace panel, no multi-Host support. Redesign proposes a Hosts / Sessions sidebar (opencode-style rail + expandable panel), a per-session toolbar (model / mode / usage / working), and create-session + executor drawer modals. Requires two additive wire-protocol events (`client:list_sessions`, `client:list_executors`) and adds `@tanstack/react-router` + `@tanstack/react-query` + shadcn/ui to the dashboard. **Design only; no code yet.**
-- **Second LLM adapter**: OpenAI at minimum, ideally also a local (llama.cpp / ollama) adapter to prove provider-agnosticism
+- **Additional LLM adapters**: Anthropic and OpenAI-compatible adapters are implemented; local llama.cpp / ollama adapters remain possible future work.
 - **MCP shim**: expose the executor as an MCP server too, so `agent-kernel` can be adopted by Claude Desktop / Cursor without changing Executor code
 - **Multi-executor per session**: `bash` goes to local daemon, `read`/`write` go to browser vfs, `web_fetch` goes to a third executor
-- **Streaming LLM responses**: `llm_delta` event, dashboard renders tokens as they arrive
+- **Dashboard live streaming render**: Host emits `session:token_delta`; dashboard still needs the incremental assistant-row renderer and ESC keybinding.
 - **Kernel port to Rust**: for people who need to embed the kernel in a non-JS environment. Same spec, different impl language
 - **Extension API**: a documented way to add planning/memory/subagent orchestration around the kernel, without patching the kernel itself
 - **Session sharing**: publish a session (JSONL) as a public URL, viewable but not forkable without the API key. Doubles as a "share a bug repro" tool
@@ -213,7 +213,7 @@ Ideas that don't fit in phases 1 - 6 but are on the mind:
 
 ---
 
-## Current status snapshot (2026-07-04)
+## Historical status snapshot (2026-07-04)
 
 - Phase 0: ð -  Complete
 - Phase 1: ð -  Complete (kernel, 23 tests)
@@ -231,7 +231,7 @@ Ideas that don't fit in phases 1 - 6 but are on the mind:
 
 ## Current status snapshot (2026-07-05)
 
-Batch A backend work is complete through the automatic gate:
+Batch A backend work is complete through the automatic gate. Current focused counts: kernel 43 tests, host 66 tests, executor 60 tests, dashboard 40 tests.
 
 - Implemented compaction, streaming deltas, cancel-in-flight, crash recovery, permission modes, multimodal messages, MCP stub, session cwd, host-side `agent`, and background shell tools.
 - Composer footer now owns status/cursor/pending/token chips and exposes manual compaction via a compact icon plus exact `/compact` command.

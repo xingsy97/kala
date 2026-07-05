@@ -690,6 +690,77 @@ describe('wire protocol', () => {
 
     dashboard.close()
   })
+
+  it('client:set_cwd validates sandbox roots and updates session summaries', async () => {
+    const sessionId = 'wire-set-cwd'
+    const root = resolve(dir, 'workspace')
+    const child = resolve(root, 'child')
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', {
+      executorId: 'ex-cwd',
+      workspaceId: 'ws-cwd',
+      workspaceName: 'cwd-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    await waitForAnyExecutor(server)
+
+    const created = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.on('server:sessions', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-cwd',
+      workspaceName: 'cwd-box',
+    })
+    await created
+
+    const changed = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.off('server:sessions')
+      dashboard.on('server:sessions', resolve)
+    })
+    dashboard.emit('client:set_cwd', { sessionId, cwd: child })
+    const list = await changed
+    const summary = list.sessions.find((s) => s.sessionId === sessionId)
+    expect(summary?.currentCwd).toBe(child)
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    const err = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.on('session:error', resolve)
+    })
+    dashboard.emit('client:set_cwd', { sessionId, cwd: resolve(dir, 'outside') })
+    await expect(err).resolves.toMatchObject({
+      scope: 'host',
+      message: 'cwd outside sandbox roots',
+    })
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    dashboard.close()
+    executor.close()
+  })
 })
 
 describe('protocol doc drift', () => {

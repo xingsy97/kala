@@ -1,13 +1,13 @@
 # v1 Tool Set
 
-**Status**: Normative for v1 executor implementation.
-Every executor bundled in this repo MUST implement all seven tools below to the semantics defined here. Third-party executors MAY implement a subset (declared via `executor:announce.tools`  -  see [wire-protocol.md](protocol/wire-protocol.md)).
+**Status**: Normative for the original v1 executor core, with Batch A additions listed in  - 9.
+Every executor bundled in this repo MUST implement the seven core tools below plus the implemented additions in  - 9. Third-party executors MAY implement a subset (declared via `executor:announce.tools`  -  see [wire-protocol.md](protocol/wire-protocol.md)).
 
 ---
 
 ## 0. Design principles
 
-1. **Take the intersection of leading agents.** The seven tools below are the intersection of Claude Code / opencode / codex / pi's tool sets. No exotic surface.
+1. **Take the intersection of leading agents first.** The seven core tools below are the intersection of Claude Code / opencode / codex / pi's tool sets. Batch A adds small, explicitly documented extensions where the product now depends on them.
 2. **Approval-gate only what can lose data.** Read-only tools never require approval. Write / mutate tools always require approval. This is the *default*; runtime config MAY override.
 3. **JSON Schema as the input contract.** Executor validates input against the schema before running. Failure  -  `ok: false, content: <validation error>`.
 4. **Output is always a string.** Structured data is JSON-stringified. This keeps the wire protocol dumb and the kernel string-only.
@@ -25,7 +25,11 @@ Every executor bundled in this repo MUST implement all seven tools below to the 
 | `grep` | Content search |  -  | Read-only |
 | `write` | Overwrite entire file |  -  | Mutating |
 | `edit` | Precise string replace |  -  | Mutating |
-| `bash` | Execute shell command |  -  | Mutating |
+| `bash` | Execute shell command; can start background tasks with `run_in_background` |  -  | Mutating |
+| `todowrite` | Replace the session todo list |  -  | Planning state |
+| `agent` | Spawn a host-side child agent session |  -  | Host builtin |
+| `bash_output` | Poll background shell task output |  -  | Background shell |
+| `kill_shell` | Stop a background shell task |  -  | Background shell |
 
 ---
 
@@ -311,8 +315,8 @@ These are attractive but not in v1:
 |---|---|
 | `web_fetch` | Adds network egress concerns. Punt to v2 as an optional extension. |
 | `web_search` | Same. Also needs a provider (Brave / Serper /  - ), adds ops cost. |
-| `todo_write` / `todo_read` | Planning is kernel-external by design. Extensions can add it later. |
-| `subagent` / `task` | Subagent recursion requires kernel changes; not v1. |
+| `todo_read` | `todowrite` is implemented; a separate read tool is unnecessary because state carries `todos`. |
+| third-party `subagent` / `task` executors | `agent` is implemented as a host-side builtin, not an executor-side recursive primitive. |
 | `memory` / `remember` | Persistence layer for cross-session context, own subsystem. |
 
 Explicit exclusion is a feature: the "seven core tools" boundary is what lets the kernel stay tiny.

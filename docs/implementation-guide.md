@@ -1,7 +1,7 @@
 # Implementation Guide
 
 **Audience**: a code agent (or human implementer) picking up `agent-kernel` after Phase 1 and implementing Phases 2 - 6 from the specs in this repo.
-**Assumes**: kernel v0.1 is already in `packages/kernel/` (complete, 23 tests passing). This guide covers everything downstream.
+**Assumes**: kernel v0.1 is already in `packages/kernel/`; the current implementation has since grown to 43 kernel tests with Batch A additions. This guide covers everything downstream and is older than the latest implementation notes near the end.
 
 The docs are normative; this guide is procedural. If a doc says one thing and the guide says another, **the doc wins**  -  please open a PR to fix the guide.
 
@@ -15,7 +15,7 @@ The docs are normative; this guide is procedural. If a doc says one thing and th
 2. [docs/ARCHITECTURE.md](ARCHITECTURE.md)  -  the 3-process shape and turn lifecycle.
 3. [docs/protocol/wire-protocol.md](protocol/wire-protocol.md)  -  Socket.IO events between processes.
 4. [docs/protocol/event-log.md](protocol/event-log.md)  -  JSONL file format.
-5. [docs/tools.md](tools.md)  -  the 7 tools Executor must implement.
+5. [docs/tools.md](tools.md)  -  the core tools plus Batch A additions Executor/Host must expose.
 6. [docs/ROADMAP.md](ROADMAP.md)  -  phase acceptance criteria (your definition of "done").
 7. [docs/testing.md](testing.md)  -  what tests each layer needs.
 8. [docs/adr/](adr/)  -  read all ADRs. They explain *why* the design is what it is; you'll be tempted to deviate, and the ADRs pre-empt those temptations.
@@ -195,7 +195,7 @@ Auth: for Phase 2, accept any handshake with a `token` field. Real auth is a Pha
 
 ## 4. Phase 3  -  Executor
 
-**Goal**: implement the 7 tools in `docs/tools.md` as a Node daemon that dials into Host.
+**Goal**: implement the original 7 core tools in `docs/tools.md` as a Node daemon that dials into Host. The current codebase also includes the Batch A tool additions documented in `docs/tools.md`  - 9.
 
 ### 4.1 Directory layout
 
@@ -258,7 +258,7 @@ Suggested order: `read`  -  `ls`  -  `glob`  -  `grep`  -  `write`  -  `edit`  -
 - Announces on start; keeps running until killed.
 
 **Acceptance criteria met when**:
-- All 7 tools pass their unit tests.
+- All original 7 core tools pass their unit tests; current code also tests `todowrite` and background shell behavior.
 - End-to-end: `curl` or a script that acts as a dashboard drives `client:user_message: "read /tmp/x.txt"`  -  Host  -  LLM  -  tool_call  -  Executor  -  tool_result  -  LLM  -  final answer. All logged to JSONL.
 
 ---
@@ -357,7 +357,7 @@ Reference: `docs/protocol/event-log.md`  - 3.3 +  - 4.
 
 1. **New package** `packages/executor-webcontainer/` (or a `packages/dashboard/src/webcontainer-executor/` module  -  pick one, be consistent).
 2. Depends on `@webcontainer/api`. Boot a WebContainer instance on demand.
-3. Implement the same 7 tools against WebContainer's `fs` API. `bash` maps to `webcontainer.spawn('bash', args)`.
+3. Implement the same original 7 core tools against WebContainer's `fs` API. `bash` maps to `webcontainer.spawn('bash', args)`; Batch A additions can follow after parity.
 4. Instead of dialing into Host over Socket.IO, this executor lives in the same tab as the dashboard. Wire it via a shared in-memory `ExecutorChannel` on the client side  -  the dashboard sends `tool:call` to this local channel, which returns `tool:result` locally without a network hop.
 5. **Session creation UI**: radio button "Local daemon" vs. "Browser (WebContainer)".
 
