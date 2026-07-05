@@ -16,7 +16,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
   "dependencies": {},
   "devDependencies": {
@@ -24,5 +25,8 @@
     "vitest": "^2.1.5"
   },
   "sideEffects": false,
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

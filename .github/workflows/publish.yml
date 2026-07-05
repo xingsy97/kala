@@ -1,0 +1,88 @@
+name: Publish to npm
+
+# Publish is tag-driven. Push a tag like `kernel-v0.1.0`, `host-v0.1.0`, or
+# `executor-v0.1.0` and the matching package (plus its non-published workspace
+# dependencies) gets published. `@agent-kernel/shared` is not user-facing but
+# is a transitive dep of host + executor, so publishing host/executor also
+# publishes a fresh shared if its version has been bumped.
+#
+# Prereqs:
+#   - repo secret `NPM_TOKEN` with publish rights on the @agent-kernel scope.
+#   - the target package.json `version` matches the tag's version.
+
+on:
+  push:
+    tags:
+      - 'kernel-v*'
+      - 'host-v*'
+      - 'executor-v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # for npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse tag
+        id: tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PKG="${TAG%%-v*}"
+          VER="${TAG#${PKG}-v}"
+          echo "package=$PKG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run build
+      - run: pnpm run test
+      - run: pnpm run typecheck
+
+      # Verify the tag version matches the package.json version, so we don't
+      # publish a lie.
+      - name: Verify version match
+        run: |
+          FILE_VER=$(node -p "require('./packages/${{ steps.tag.outputs.package }}/package.json').version")
+          if [ "$FILE_VER" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "tag version ${{ steps.tag.outputs.version }} != package.json version $FILE_VER"
+            exit 1
+          fi
+
+      # If publishing host/executor, publish shared first (transitive dep).
+      # pnpm publish is idempotent — a version that already exists on the
+      # registry short-circuits with a non-zero exit that we swallow.
+      - name: Publish shared (transitive)
+        if: steps.tag.outputs.package != 'kernel'
+        run: |
+          pnpm --filter @agent-kernel/shared run build
+          pnpm --filter @agent-kernel/shared publish --access public --no-git-checks || echo "shared already at this version, skipping"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Kernel is a dep of shared/host/executor, so always publish first when
+      # not the target itself. Same idempotent skip.
+      - name: Publish kernel (transitive)
+        if: steps.tag.outputs.package != 'kernel'
+        run: |
+          pnpm --filter @agent-kernel/kernel run build
+          pnpm --filter @agent-kernel/kernel publish --access public --no-git-checks || echo "kernel already at this version, skipping"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish target package
+        run: pnpm --filter @agent-kernel/${{ steps.tag.outputs.package }} run publish:npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
