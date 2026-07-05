@@ -111,7 +111,7 @@ describe('InspectorPanel', () => {
     expect(screen.getByText('finish')).toBeTruthy()
   })
 
-  it('renders state flow transitions separately from timeline rows', () => {
+  it('switches the history block from timeline to state flow', () => {
     render(
       <InspectorPanel
         state={baseState}
@@ -138,7 +138,11 @@ describe('InspectorPanel', () => {
       />,
     )
 
-    expect(screen.getByText('State flow')).toBeTruthy()
+    expect(screen.getByTestId('history-view-switch')).toBeTruthy()
+    expect(screen.getAllByTestId('timeline-row')).toHaveLength(2)
+    expect(screen.queryByTestId('state-flow-row')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('history-view-state-flow'))
     const rows = screen.getAllByTestId('state-flow-row')
     expect(rows).toHaveLength(2)
     expect(rows[0]?.textContent).toContain('Ready → Waiting for LLM')

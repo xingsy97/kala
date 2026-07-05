@@ -49,6 +49,7 @@ export function InspectorPanel({
   onJumpToMessage,
 }: Props): JSX.Element {
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
+  const [historyView, setHistoryView] = useState<'timeline' | 'state-flow'>('timeline')
   const [selectedTimeline, setSelectedTimeline] = useState<{
     entry: TimelineEntry
     priorCallLlm: { seq: number; effect: CallLlmEffect } | null
@@ -67,9 +68,12 @@ export function InspectorPanel({
           direction="vertical"
           autoSaveId="ak-inspector-split"
         >
-          <ResizablePanel defaultSize={52} minSize={20}>
-            <Timeline
+          <ResizablePanel defaultSize={65} minSize={25}>
+            <HistorySection
+              view={historyView}
+              onViewChange={setHistoryView}
               timeline={timeline}
+              flow={flow}
               messagesCount={visibleMessagesCount ?? state?.messages.length ?? 0}
               onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
               onJumpToMessage={onJumpToMessage}
@@ -77,11 +81,7 @@ export function InspectorPanel({
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={24} minSize={12}>
-            <StateFlowSection steps={flow} />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={24} minSize={10}>
+          <ResizablePanel defaultSize={35} minSize={10}>
             <RawStateSection state={state} />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -154,14 +154,84 @@ export function InspectorPanel({
   )
 }
 
+function HistorySection({
+  view,
+  onViewChange,
+  timeline,
+  flow,
+  messagesCount,
+  onForkRequest,
+  onJumpToMessage,
+  onInspect,
+}: {
+  view: 'timeline' | 'state-flow'
+  onViewChange(view: 'timeline' | 'state-flow'): void
+  timeline: readonly TimelineEntry[]
+  flow: readonly StateFlowStep[]
+  messagesCount: number
+  onForkRequest?(cursor: number): void
+  onJumpToMessage?(messageIndex: number): void
+  onInspect(payload: {
+    entry: TimelineEntry
+    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
+  }): void
+}): JSX.Element {
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500 flex-none">
+        <span className="font-medium">History</span>
+        <div
+          className="ml-auto inline-flex rounded border border-slate-200 bg-white p-0.5 dark:border-slate-800 dark:bg-slate-950"
+          data-testid="history-view-switch"
+        >
+          <button
+            type="button"
+            onClick={() => onViewChange('timeline')}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px]',
+              view === 'timeline'
+                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+            )}
+            data-testid="history-view-timeline"
+          >
+            Timeline
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewChange('state-flow')}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px]',
+              view === 'state-flow'
+                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+            )}
+            data-testid="history-view-state-flow"
+          >
+            State flow
+          </button>
+        </div>
+      </div>
+      {view === 'timeline' ? (
+        <Timeline
+          timeline={timeline}
+          messagesCount={messagesCount}
+          onForkRequest={onForkRequest}
+          onJumpToMessage={onJumpToMessage}
+          onInspect={onInspect}
+        />
+      ) : (
+        <StateFlowSection steps={flow} />
+      )}
+    </div>
+  )
+}
+
 function StateFlowSection({ steps }: { steps: readonly StateFlowStep[] }): JSX.Element {
   return (
-    <div className="h-full flex flex-col border-t border-slate-200 dark:border-slate-800">
-      <div className="px-3 py-2 text-xs text-slate-500 flex-none">
-        <span className="font-medium">State flow</span>
-        <span className="ml-2 normal-case tracking-normal text-slate-500 dark:text-slate-600">
-          reducer status after each event
-        </span>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-3 pb-2 text-xs text-slate-500 flex-none">
+        reducer status after each event
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {steps.length === 0 ? (
@@ -309,12 +379,9 @@ function Timeline({
   }): void
 }): JSX.Element {
   return (
-    <div className="h-full flex flex-col">
-      <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500 flex-none">
-        timeline
-        <span className="ml-2 normal-case tracking-normal text-slate-500 dark:text-slate-600">
-          click any row to inspect the raw event + effects JSON
-        </span>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-3 pb-2 text-xs text-slate-500 flex-none">
+        click any row to inspect the raw event + effects JSON
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {timeline.length === 0 ? (

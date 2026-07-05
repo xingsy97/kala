@@ -26,11 +26,23 @@ describe('ActivityBar', () => {
     rerender(
       <ActivityBar
         state={baseState}
-        compactStatus={{ kind: 'error', message: 'nothing to compact yet' }}
+        compactStatus={{ kind: 'error', message: 'provider failed' }}
       />,
     )
     expect(screen.getByText('Compact failed')).toBeTruthy()
-    expect(screen.getByText('nothing to compact yet')).toBeTruthy()
+    expect(screen.getByText('provider failed')).toBeTruthy()
+  })
+
+  it('shows an empty compact hint without labeling it as a failure', () => {
+    render(
+      <ActivityBar
+        state={baseState}
+        compactStatus={{ kind: 'empty', message: 'send a message before compacting context' }}
+      />,
+    )
+    expect(screen.getByText('Nothing to compact')).toBeTruthy()
+    expect(screen.queryByText('Compact failed')).toBeNull()
+    expect(screen.getByText('send a message before compacting context')).toBeTruthy()
   })
 
   it('shows LLM and tool wait states from agent state', () => {
