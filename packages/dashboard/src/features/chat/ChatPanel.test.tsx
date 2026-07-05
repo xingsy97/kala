@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { ChatPanel } from './ChatPanel.js'
 
@@ -131,5 +131,32 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('compact-boundary')).toBeTruthy()
     expect(screen.getByText('Context compacted')).toBeTruthy()
     expect(screen.getByText(/Manual compact/)).toBeTruthy()
+  })
+
+  it('fires onEditAndRerun with the correct seq when a user message is edited', () => {
+    const onEditAndRerun = vi.fn()
+    render(
+      <ChatPanel
+        onEditAndRerun={onEditAndRerun}
+        items={[
+          {
+            kind: 'message',
+            seq: 4,
+            message: { role: 'user', content: [{ type: 'text', text: 'original text' }] },
+          },
+          {
+            kind: 'message',
+            seq: 5,
+            message: { role: 'assistant', content: [{ type: 'text', text: 'reply' }] },
+          },
+        ]}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('edit-message-0'))
+    fireEvent.change(screen.getByTestId('edit-message-input-0'), {
+      target: { value: 'revised text' },
+    })
+    fireEvent.click(screen.getByTestId('edit-message-submit-0'))
+    expect(onEditAndRerun).toHaveBeenCalledWith(4, 'revised text')
   })
 })
