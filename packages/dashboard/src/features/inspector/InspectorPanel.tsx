@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { GitBranch } from 'lucide-react'
-import type { AgentEvent, AgentState, CallLlmEffect, Effect } from '@agent-kernel/kernel'
+import type { AgentEvent, AgentState, CallLlmEffect, Effect, Message } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
@@ -139,6 +139,7 @@ export function InspectorPanel({
               <EventDetails
                 entry={selectedTimeline.entry}
                 priorCallLlm={selectedTimeline.priorCallLlm}
+                timeline={timeline}
               />
             ) : null}
             </div>
@@ -536,9 +537,11 @@ function TimelineRow({
 function EventDetails({
   entry,
   priorCallLlm,
+  timeline,
 }: {
   entry: TimelineEntry
   priorCallLlm: { seq: number; effect: CallLlmEffect } | null
+  timeline: readonly TimelineEntry[]
 }): JSX.Element {
   // For an `llm_response`, split the "request JSON" (from the prior call_llm)
   // and the "response JSON" (this event's message) so the operator can eyeball
@@ -570,14 +573,18 @@ function EventDetails({
     )
   }
   if (entry.event.kind === 'compact_replaced') {
+    const compactRequest =
+      entry.event.request ?? compactRequestFromTimeline(timeline, entry.seq)
     return (
       <div
         className="grid grid-cols-1 lg:grid-cols-2 gap-2"
         data-testid="timeline-row-details"
       >
         <JsonBlock
-          label={`compact summarizer request  -  #${entry.seq}`}
-          value={entry.event.request ?? { missing: 'compact request metadata was not recorded' }}
+          label={entry.event.request
+            ? `compact summarizer request  -  #${entry.seq}`
+            : `compact input reconstructed from history  -  #${entry.seq}`}
+          value={compactRequest}
           collapsed={2}
         />
         <JsonBlock
@@ -615,6 +622,52 @@ function EventDetails({
       ))}
     </div>
   )
+}
+
+function compactRequestFromTimeline(
+  timeline: readonly TimelineEntry[],
+  compactSeq: number,
+): {
+  metadataSource: 'reconstructed_from_timeline'
+  note: string
+  unavailable: readonly string[]
+  messages: readonly Message[]
+  tools: readonly []
+} {
+  const messages: Message[] = []
+  for (const row of timeline) {
+    if (row.seq >= compactSeq) break
+    const event = row.event
+    if (event.kind === 'user_message') {
+      messages.push({
+        role: 'user',
+        content: event.content
+          ? [...event.content]
+          : [{ type: 'text', text: event.text ?? '' }],
+      })
+    } else if (event.kind === 'llm_response') {
+      messages.push(event.message)
+    } else if (event.kind === 'tool_result') {
+      messages.push({
+        role: 'tool',
+        content: [
+          {
+            type: 'tool_result',
+            callId: event.callId,
+            ok: event.ok,
+            content: event.content,
+          },
+        ],
+      })
+    }
+  }
+  return {
+    metadataSource: 'reconstructed_from_timeline',
+    note: 'This compact_replaced event predates request metadata. The dashboard reconstructed the visible transcript before compaction; exact summarizer prompt, model, and tool schema were not recorded in the log.',
+    unavailable: ['model', 'systemPrompt', 'tool schemas', 'provider request options'],
+    messages,
+    tools: [],
+  }
 }
 
 function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {

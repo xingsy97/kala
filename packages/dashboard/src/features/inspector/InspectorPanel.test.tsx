@@ -209,4 +209,52 @@ describe('InspectorPanel', () => {
     // JsonBlock renders the event kind in its label ("event  -  user_message").
     expect(details.textContent ?? '').toMatch(/user_message/)
   })
+
+  it('reconstructs compact input for legacy compact events without request metadata', () => {
+    render(
+      <InspectorPanel
+        state={baseState}
+        timeline={[
+          {
+            seq: 1,
+            ts: '2026-07-04T00:00:00Z',
+            event: { kind: 'user_message', text: 'Hello?' },
+            effects: [],
+          },
+          {
+            seq: 2,
+            ts: '2026-07-04T00:00:01Z',
+            event: {
+              kind: 'llm_response',
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Hello!' }],
+              },
+            },
+            effects: [],
+          },
+          {
+            seq: 3,
+            ts: '2026-07-04T00:00:02Z',
+            event: {
+              kind: 'compact_replaced',
+              summary: 'Hello!',
+              replacedCount: 3,
+              tokensBefore: 1008,
+              tokensAfter: 2,
+            },
+            effects: [],
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getAllByTestId('timeline-row-header')[2]!)
+    fireEvent.click(screen.getAllByText('expand all')[0]!)
+    const details = screen.getByTestId('timeline-row-details')
+    const text = details.textContent ?? ''
+    expect(text).toContain('compact input reconstructed from history')
+    expect(text).toContain('reconstructed_from_timeline')
+    expect(text).not.toContain('compact request metadata was not recorded')
+  })
 })
