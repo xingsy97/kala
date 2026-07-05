@@ -57,7 +57,7 @@ describe('openaiAdapter', () => {
 
     expect(res.message.role).toBe('assistant')
     expect(res.message.content).toEqual([{ type: 'text', text: 'hi there' }])
-    expect(res.usage).toEqual({ inputTokens: 12, outputTokens: 4 })
+    expect(res.usage).toEqual({ inputTokens: 12, outputTokens: 4, cacheReadTokens: 0 })
     expect(sink[0].url).toBe('https://api.openai.com/v1/chat/completions')
     const body = JSON.parse(String(sink[0].init.body))
     expect(body.model).toBe('gpt-4o')
@@ -372,6 +372,35 @@ describe('openaiAdapter', () => {
       messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
       tools: [],
     })
-    expect(res.usage).toEqual({ inputTokens: 0, outputTokens: 0 })
+    expect(res.usage).toEqual({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 })
+  })
+
+  it('surfaces cached_tokens from prompt_tokens_details', async () => {
+    const llm = openaiAdapter({
+      apiKey: 'k',
+      fetchImpl: mockFetch({
+        id: 'x',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'hi' },
+          },
+        ],
+        usage: {
+          prompt_tokens: 1200,
+          completion_tokens: 8,
+          prompt_tokens_details: { cached_tokens: 1024 },
+        },
+      }),
+    })
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [],
+    })
+    expect(res.usage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 8,
+      cacheReadTokens: 1024,
+    })
   })
 })

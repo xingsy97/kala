@@ -463,6 +463,10 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
     inputTokens: total.inputTokens + delta.inputTokens,
     outputTokens: total.outputTokens + delta.outputTokens,
     costUsd: total.costUsd + (delta.costUsd ?? 0),
+    cacheCreationTokens:
+      (total.cacheCreationTokens ?? 0) + (delta.cacheCreationTokens ?? 0),
+    cacheReadTokens:
+      (total.cacheReadTokens ?? 0) + (delta.cacheReadTokens ?? 0),
   }
 }
 
