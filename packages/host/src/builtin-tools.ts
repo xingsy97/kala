@@ -159,4 +159,18 @@ export const builtinTools: readonly ToolSchema[] = [
     },
     requiresApproval: false,
   },
+  {
+    name: 'agent',
+    description: 'Spawn a sub-agent to handle a focused sub-task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string' },
+        model: { type: 'string' },
+        tools: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['prompt'],
+    },
+    requiresApproval: false,
+  },
 ]

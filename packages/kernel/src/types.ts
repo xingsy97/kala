@@ -93,6 +93,8 @@ export type AgentConfig = {
   readonly softThreshold?: number
   /** Hard threshold ratio (default 0.92). Host auto-fires compact at/above. */
   readonly hardThreshold?: number
+  /** Maximum nested `agent` tool depth. Host default is 3. */
+  readonly maxAgentDepth?: number
 }
 
 export const DEFAULT_SOFT_THRESHOLD = 0.75

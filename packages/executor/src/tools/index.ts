@@ -6,6 +6,7 @@ export { writeTool } from './write.js'
 export { editTool } from './edit.js'
 export { bashTool } from './bash.js'
 export { todowriteTool } from './todowrite.js'
+export { agentToolSchema } from './agent.js'
 export { createToolRegistry, ToolError } from './registry.js'
 export type { Tool, ToolContext, ToolRunner } from './registry.js'
 
