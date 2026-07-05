@@ -32,6 +32,7 @@ import { visibleMessages } from './transcript.js'
 type Theme = 'dark' | 'light'
 
 const MODEL_STORAGE_KEY = 'ak-model'
+const COMPACT_WATCHDOG_MS = 75_000
 
 /**
  * Fetch the host's advertised models on mount. The host reads them from
@@ -90,6 +91,7 @@ export function App(): JSX.Element {
   >(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
+  const compactStartSeq = useRef<number | null>(null)
   const [theme, toggleTheme] = useTheme()
   const { models, defaultModel } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
@@ -134,6 +136,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     setCompactStatus({ kind: 'idle' })
+    compactStartSeq.current = null
   }, [config.sessionId])
 
   const scheduleCompactIdle = (ms: number): void => {
@@ -147,9 +150,11 @@ export function App(): JSX.Element {
   }
 
   useEffect(() => {
-    if (compactStatus.kind !== 'running') return
+    if (compactStartSeq.current === null) return
     const last = session.timeline[session.timeline.length - 1]
     if (last?.event.kind !== 'compact_replaced') return
+    if (last.seq <= compactStartSeq.current) return
+    compactStartSeq.current = null
     setCompactStatus({ kind: 'done' })
     scheduleCompactIdle(2500)
   }, [compactStatus, session.timeline])
@@ -157,6 +162,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (compactStatus.kind !== 'running') return
     if (!session.lastError) return
+    compactStartSeq.current = null
     setCompactStatus({ kind: 'error', message: session.lastError.message })
     scheduleCompactIdle(6000)
   }, [compactStatus, session.lastError])
@@ -166,9 +172,9 @@ export function App(): JSX.Element {
     const timer = window.setTimeout(() => {
       setCompactStatus({
         kind: 'error',
-        message: 'compact is still waiting; try again after the current request finishes',
+        message: 'compact did not finish after the host timeout window',
       })
-    }, 45_000)
+    }, COMPACT_WATCHDOG_MS)
     return () => window.clearTimeout(timer)
   }, [compactStatus])
 
@@ -392,6 +398,7 @@ export function App(): JSX.Element {
                     window.clearTimeout(compactResetTimer.current)
                     compactResetTimer.current = null
                   }
+                  compactStartSeq.current = session.timeline.at(-1)?.seq ?? 0
                   setCompactStatus({ kind: 'running' })
                   session.socket?.emit('client:compact', {
                     sessionId: config.sessionId,
