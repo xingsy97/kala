@@ -201,6 +201,13 @@ export type ExecutorRuntime = 'node' | 'browser-webcontainer' | 'other'
 
 export type ExecutorOs = 'linux' | 'darwin' | 'win32' | 'other'
 
+export type McpServerConfig = {
+  name: string
+  command: string
+  args?: readonly string[]
+  env?: Record<string, string>
+}
+
 export type ExecutorAnnounce = {
   executorId: string
   /**
