@@ -4,20 +4,36 @@ _Written 2026-07-05. Sources: local checkouts under `references/` — codex, ope
 
 ## TL;DR
 
-agent-kernel is a pure reducer kernel with intentionally narrow scope: FSM state,
-tool approval gating, token tracking, todo management. It defers UX, persistence,
-and orchestration to the host. Compared with mature refs, the biggest missing
-pieces are **context compaction**, **session resume/fork**, and **slash commands**.
-Everything else is either already present in some form or is properly a
-host/extension concern.
+agent-kernel has ~24 real feature gaps vs mature coding agents, grouped
+below. The 12 "core capability" categories (compaction, slash commands,
+sub-agents, memory, session resume, approval modes, MCP, diff/edit,
+todos, cost, multi-model, streaming) cover the big architectural axes.
+On top of those there's another ~12 quality-of-life features
+(command history, `@file` refs, image paste, persistent bash, web
+tools, hooks, diff preview, cancel-in-flight, etc.) that individually
+are small but collectively are a lot of why the reference agents feel
+"done".
 
-Rough priority for closing the gap:
+Rough priority for closing the gap — top of the list is highest value
+per hour, not most important overall:
 
-1. Compaction hook (kernel-observable, host-decided) — **highest impact**
-2. Session resume / fork (already 80% there via event log; needs a UI + protocol)
-3. Slash-command layer in the dashboard (`/compact`, `/model`, `/clear`, `/help`)
-4. MCP tool-server support in the executor
-5. Sub-agent spawning (deferred)
+1. `/cost` footer (data already exists, ~1h)
+2. Command history in composer (~2h)
+3. Cancel-in-flight streaming (~2h)
+4. Slash-command layer (~half day)
+5. `/compact` context compaction (~1 day)
+6. Streaming token rendering (~1 day)
+7. `@file` reference in composer (~1 day)
+8. Persistent bash shell in executor (~half day)
+9. Diff preview in approval cards (~half day)
+10. Crash-recovery for stuck `awaiting_tool` sessions
+11. MCP support in executor
+12. Image content type
+13. Web tools (`webfetch`, `websearch`)
+14. Permission modes
+15. Hooks system
+16. Persistent memory / CLAUDE.md-style
+17+ Sub-agent, provider fallback, settings UI, session export
 
 ---
 
@@ -186,18 +202,106 @@ event log stays authoritative because deltas are UI-only.
 
 ---
 
+## 13. Additional gaps not covered by the 12-feature survey
+
+The 12 categories above are the canonical "coding agent capabilities" axis.
+When you actually sit in front of Claude Code / Codex / opencode there is
+a second layer of quality-of-life features that we're missing:
+
+- **Command history (↑ key in composer).** Claude Code, codex both have it.
+  We don't. Trivial (session-local ring buffer + arrow key handler).
+- **Edit / rerun last user message.** Claude Code lets you edit the last
+  `user` turn and re-fire from there without a full fork. Cheaper than a
+  fork for typo/rephrase.
+- **`@file` reference in composer.** Type `@packages/host/src/server.ts` and
+  the file's contents are auto-injected into the message. Also a fuzzy
+  file-finder popup (cmd+P style).
+- **Image / screenshot paste.** Claude Code and codex accept image content
+  blocks. Our kernel `MessageContent` union has only `text` / `tool_call` /
+  `tool_result`. Would need a new `image` variant and adapter support.
+- **Persistent bash session.** Our executor spawns a fresh `bash -c` per
+  `bash` tool call, so `cd`, exported env vars, and shell state don't
+  persist between calls. Claude Code's bash tool keeps a long-lived shell.
+  This bites users doing multi-step shell work.
+- **Web tools (`webfetch` / `websearch`).** Claude Code has both built-in.
+  Executor tool set right now: `bash`, `read`, `write`, `edit`, `todowrite`.
+  No network access from the model without shelling out.
+- **Hooks / lifecycle events** (pre-tool-use, post-tool-use, session-start,
+  session-end). Claude Code has a whole hook config system. We have
+  no equivalent — user can't intercept, log, or block tool calls externally.
+- **Settings UI.** All config is `~/.config/agent-kernel/config.toml` +
+  `~/.claude/settings.json` + `~/.codex/config.toml` edited by hand. No
+  in-app settings page.
+- **Manual session rename / label.** We derive the label from
+  `firstUserMessage.slice(0, 40)`. No way for the user to rename a
+  session for their own filing.
+- **Diff preview before write / edit.** When the model calls `edit` or
+  `write`, we just apply and show the result. Claude Code shows a real
+  diff and (in ask mode) waits for approval. Our approval card just
+  shows the raw JSON args.
+- **Cancel-in-flight during LLM streaming.** We can cancel a pending
+  tool call (`tool:cancel`), but there's no way to interrupt the model
+  mid-token-stream. Claude Code has ESC-to-cancel.
+- **Cost / rate-limit awareness.** No warning when approaching context
+  window; no per-day spend cap. `state.usage` exists but no policy layer.
+- **Provider fallback / retry.** If Anthropic errors out, we surface the
+  error. Codex retries with exponential backoff and (with multi-provider
+  config) falls back to a secondary provider. We do not.
+- **Session export / share.** Claude Code can dump a session as
+  markdown / JSON for sharing. We have the JSONL on disk but no
+  first-class export command.
+
+That's another ~13 items on top of the 12 numbered features — many of
+them small individually, collectively they're a lot of what makes the
+reference agents feel "finished".
+
+---
+
 ## Recommended next work, in order
 
-1. **Compaction hook + `/compact` slash command.** Directly addresses the
-   user's specific ask. New event kind, new tool, new dashboard command
-   parser. ~1 day.
-2. **Streaming tokens to the dashboard.** Biggest UX win. Requires a new
-   protocol event but no state-machine change. ~1 day.
-3. **Slash-command layer** (`/help`, `/clear`, `/cost`, `/model` shortcut).
-   Small.
-4. **Resume-from-crash** for sessions stuck in `awaiting_tool` on host restart.
-5. **MCP support in the executor.** Nice-to-have, decouples us from the
-   fixed tool set.
+Grouped by cost/value ratio:
 
-Everything else (sub-agent, memory, per-session approval mode) is
-deferrable behind these five.
+**High leverage, small effort (do first):**
+1. **`/cost` and token footer** — data already in `state.usage`, just needs
+   dashboard chrome. Under an hour.
+2. **Command history (↑ key)** — session-local buffer + Composer keyhandler.
+3. **Cancel-in-flight (ESC)** — protocol event exists conceptually, host
+   just needs to abort the streaming request. ~2 hours.
+4. **Slash-command layer** (`/help`, `/clear`, `/model`, `/compact`, `/cost`)
+   in the composer parser. ~half a day.
+
+**High leverage, moderate effort:**
+5. **Compaction hook + `/compact`** — see §1 above. Requires new event
+   kind + host tool + reducer step. ~1 day.
+6. **Streaming tokens** — new `token:delta` protocol event, incremental
+   renderer. Kernel/event log unaffected. ~1 day.
+7. **`@file` reference in composer** — fuzzy finder + auto-inject. ~1 day.
+8. **Persistent bash shell** in executor — spawn one `bash -i` per session
+   and pipe commands through it. ~half a day + edge-case testing.
+9. **Diff preview in approval card** — when the pending tool is `edit`
+   or `write`, render a diff instead of raw JSON. ~half a day.
+10. **Resume-from-crash** for `awaiting_tool` sessions on host restart.
+
+**Structural, higher effort:**
+11. **MCP in executor** — spawn stdio processes from config, merge their
+    advertised tools into announce. ~2 days.
+12. **Image content type** — new `MessageContent` variant, propagate through
+    kernel/adapters/dashboard. ~1-2 days.
+13. **Web tools** (`webfetch`, `websearch`). Straightforward once the
+    request/response tool-content shape is clean.
+14. **Permission modes** (`auto` / `ask` / `deny` + glob rules per tool).
+15. **Hooks system.** Modeled on Claude Code — config-driven pre/post
+    tool-use shell commands, session lifecycle events.
+16. **Persistent memory / CLAUDE.md** — read `AGENT-KERNEL.md` from cwd +
+    `~/.agent-kernel/memory/*.md` as system prompt prefix.
+
+**Deferrable:**
+17. Sub-agent tool. Rare use case, big surface area.
+18. Provider fallback / retry policy. Nice-to-have.
+19. Settings UI. Only matters once config surface grows.
+20. Session export. Users can just cat the JSONL for now.
+
+Everything left in the "12 core categories" that isn't listed above
+(edit tool, todo tracking, session fork, multi-model config) — we
+already match the reference agents.
+
