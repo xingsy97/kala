@@ -27,6 +27,8 @@ import type {
   AgentEvent,
   AgentState,
   AgentStatus,
+  ApprovalMode,
+  ContextPressureLevel,
   Effect,
   Message,
   MessageContent,
@@ -39,7 +41,11 @@ import type {
   UsageDelta,
   UsageTotal,
 } from './types.js'
-import { TODOWRITE_TOOL_NAME } from './types.js'
+import {
+  DEFAULT_HARD_THRESHOLD,
+  DEFAULT_SOFT_THRESHOLD,
+  TODOWRITE_TOOL_NAME,
+} from './types.js'
 
 type EventOfKind<K extends AgentEvent['kind']> = Extract<AgentEvent, { kind: K }>
 
@@ -55,28 +61,38 @@ type TransitionRow = {
 
 const transitions: Record<AgentStatus, TransitionRow> = {
   idle: {
-    user_message: (s, e, c) => onUserMessage(s, e.text, c),
+    user_message: (s, e, c) => onUserMessage(s, e, c),
     cancel: (s) => noop(s),
+    compact_replaced: (s, e) => onCompactReplaced(s, e),
+    approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   thinking: {
     llm_response: (s, e, c) => onLlmResponse(s, e.message, e.usage, c),
     llm_error: (s, e) => onLlmError(s, e.error),
     cancel: (s) => onCancel(s),
+    approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   awaiting_approval: {
     user_approve: (s, e) => onUserApprove(s, e.callId),
     user_reject: (s, e, c) => onUserReject(s, e.callId, e.reason, c),
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
     cancel: (s) => onCancel(s),
+    approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   executing_tools: {
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
     cancel: (s) => onCancel(s),
+    approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   done: {
-    user_message: (s, e, c) => onUserMessage(s, e.text, c),
+    user_message: (s, e, c) => onUserMessage(s, e, c),
+    compact_replaced: (s, e) => onCompactReplaced(s, e),
+    approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
-  error: {},
+  error: {
+    compact_replaced: (s, e) => onCompactReplaced(s, e),
+    approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
+  },
 }
 
 export function step(
@@ -87,8 +103,11 @@ export function step(
   const advanced: AgentState = { ...state, cursor: state.cursor + 1 }
   const row = transitions[advanced.status]
   const handler = row[event.kind] as Handler<typeof event.kind> | undefined
-  if (!handler) return noop(advanced)
-  return handler(advanced, event, config)
+  const result = handler ? handler(advanced, event, config) : noop(advanced)
+  return {
+    next: withPressure(result.next, config),
+    effects: result.effects,
+  }
 }
 
 // ============================================================================
@@ -97,12 +116,15 @@ export function step(
 
 function onUserMessage(
   state: AgentState,
-  text: string,
+  event: Extract<AgentEvent, { kind: 'user_message' }>,
   config: AgentConfig,
 ): StepResult {
+  const content: MessageContent[] = event.content
+    ? [...event.content]
+    : [{ type: 'text', text: event.text ?? '' }]
   const userMsg: Message = {
     role: 'user',
-    content: [{ type: 'text', text }],
+    content,
   }
   // Defensive reset: entering a fresh turn wipes any residual pendingCalls or
   // error text so invariant I5 (status  -  pendingCalls) can't be left broken
@@ -139,16 +161,39 @@ function onLlmResponse(
     }
   }
 
-  const pending: PendingToolCall[] = toolCalls.map((tc) => {
-    const schema = config.tools.find((t) => t.name === tc.name)
-    const requiresApproval = schema?.requiresApproval ?? true
-    return {
-      callId: tc.callId,
-      name: tc.name,
-      input: tc.input,
-      status: requiresApproval ? 'awaiting_approval' : 'approved',
-    }
-  })
+  // Approval decision per call. Mode overrides the tool schema's flag when
+  // it wants to. `deny` short-circuits into a synthetic tool_result message
+  // so the LLM can respond to the refusal on the next turn without the host
+  // ever dispatching anything.
+  type Decision = 'dispatch' | 'ask' | 'reject'
+  const decisions: Array<{ call: ToolCallContent; decision: Decision }> =
+    toolCalls.map((tc) => {
+      const schema = config.tools.find((t) => t.name === tc.name)
+      const needsApproval = schema?.requiresApproval ?? true
+      const decision = decide(state.approvalMode, needsApproval)
+      return { call: tc, decision }
+    })
+
+  // Any denied calls get their synthetic refusal appended as tool_result
+  // content on a fresh `tool` message. The dispatched / awaiting ones flow
+  // through the normal pending-call machinery.
+  const rejectedContents: MessageContent[] = decisions
+    .filter((d) => d.decision === 'reject')
+    .map((d) => ({
+      type: 'tool_result',
+      callId: d.call.callId,
+      ok: false,
+      content: 'rejected: approval mode is "deny"',
+    }))
+
+  const pending: PendingToolCall[] = decisions
+    .filter((d) => d.decision !== 'reject')
+    .map((d) => ({
+      callId: d.call.callId,
+      name: d.call.name,
+      input: d.call.input,
+      status: d.decision === 'dispatch' ? 'approved' : 'awaiting_approval',
+    }))
 
   const effects: Effect[] = []
   for (const p of pending) {
@@ -173,6 +218,37 @@ function onLlmResponse(
     p.status === 'approved' ? { ...p, status: 'dispatched' } : p,
   )
 
+  // If every call was rejected outright, the turn ends with an implicit
+  // "the LLM must answer using these refusals"  -  but we can't dispatch
+  // anything, so we go back to thinking with a synthetic tool-result
+  // message and let the host schedule the next call_llm.
+  const messagesWithRejections =
+    rejectedContents.length > 0
+      ? [
+          ...messages,
+          { role: 'tool' as const, content: rejectedContents },
+        ]
+      : messages
+
+  if (pending.length === 0) {
+    return {
+      next: {
+        ...state,
+        messages: messagesWithRejections,
+        usage: nextUsage,
+        pendingCalls: [],
+        status: 'thinking',
+      },
+      effects: [
+        {
+          kind: 'call_llm',
+          messages: messagesWithRejections,
+          tools: config.tools,
+        },
+      ],
+    }
+  }
+
   const status: AgentStatus = pending.some(
     (p) => p.status === 'awaiting_approval',
   )
@@ -182,12 +258,28 @@ function onLlmResponse(
   return {
     next: {
       ...state,
-      messages,
+      messages: messagesWithRejections,
       usage: nextUsage,
       pendingCalls: nextPending,
       status,
     },
     effects,
+  }
+}
+
+function decide(
+  mode: ApprovalMode,
+  needsApproval: boolean,
+): 'dispatch' | 'ask' | 'reject' {
+  switch (mode) {
+    case 'allow_all':
+      return 'dispatch'
+    case 'ask':
+      return 'ask'
+    case 'deny':
+      return needsApproval ? 'reject' : 'dispatch'
+    case 'auto':
+      return needsApproval ? 'ask' : 'dispatch'
   }
 }
 
@@ -292,6 +384,35 @@ function onCancel(state: AgentState): StepResult {
   }
 }
 
+function onCompactReplaced(
+  state: AgentState,
+  event: Extract<AgentEvent, { kind: 'compact_replaced' }>,
+): StepResult {
+  // Preserve the leading system prompt (index 0 if role === 'system') so the
+  // agent's identity/tools framing is not lost. Everything after becomes one
+  // synthetic system message carrying the summary.
+  const preserved: Message[] = []
+  if (state.messages.length > 0 && state.messages[0]!.role === 'system') {
+    preserved.push(state.messages[0]!)
+  }
+  const summaryMsg: Message = {
+    role: 'system',
+    content: [{ type: 'text', text: event.summary }],
+  }
+  const usage: UsageTotal = {
+    ...state.usage,
+    inputTokens: event.tokensAfter,
+  }
+  return {
+    next: {
+      ...state,
+      messages: [...preserved, summaryMsg],
+      usage,
+    },
+    effects: [],
+  }
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -343,6 +464,33 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
 
 function noop(state: AgentState): StepResult {
   return { next: state, effects: [] }
+}
+
+function onApprovalModeChanged(
+  state: AgentState,
+  mode: ApprovalMode,
+): StepResult {
+  if (state.approvalMode === mode) return noop(state)
+  return { next: { ...state, approvalMode: mode }, effects: [] }
+}
+
+function withPressure(state: AgentState, config: AgentConfig): AgentState {
+  const level = derivePressure(state.usage.inputTokens, config)
+  if (level === state.contextPressureLevel) return state
+  return { ...state, contextPressureLevel: level }
+}
+
+function derivePressure(
+  inputTokens: number,
+  config: AgentConfig,
+): ContextPressureLevel {
+  if (!config.contextLimit || config.contextLimit <= 0) return 'none'
+  const ratio = inputTokens / config.contextLimit
+  const hard = config.hardThreshold ?? DEFAULT_HARD_THRESHOLD
+  const soft = config.softThreshold ?? DEFAULT_SOFT_THRESHOLD
+  if (ratio >= hard) return 'hard'
+  if (ratio >= soft) return 'soft'
+  return 'none'
 }
 
 const TODO_STATUSES: readonly TodoStatus[] = [

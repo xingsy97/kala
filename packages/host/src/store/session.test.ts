@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createConfig } from '@agent-kernel/kernel'
 
 import { SessionStore } from './session.js'
+import { appendEventEntry, readSessionLog, writeHeader } from './log.js'
+import { createInitialState } from '@agent-kernel/kernel'
 
 const config = createConfig({ tools: [], systemPrompt: 'sys' })
 
@@ -99,5 +101,130 @@ describe('SessionStore.ensure', () => {
     expect(rec2.created).toBe(false)
     // No second file was created.
     expect(readdirSync(dir).length).toBe(1)
+  })
+})
+
+describe('SessionStore crash recovery', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-crash-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('closes a session that was executing_tools when the host died', async () => {
+    // Seed a log by hand: header + user_message + assistant tool_call, then
+    // NO tool_result  -  simulating the host crashing after dispatching the
+    // tool call. On next load the store must synthesize a failure result.
+    const sessionId = 'sess-crash-exec'
+    const path = join(dir, `2026-07-05T00-00-00.000Z_${sessionId}.jsonl`)
+    const tool = {
+      name: 'read',
+      description: 'read',
+      inputSchema: { type: 'object' },
+      requiresApproval: false,
+    } as const
+    const cfg = createConfig({ tools: [tool], systemPrompt: 'sys' })
+    const initial = createInitialState({ sessionId, systemPrompt: 'sys' })
+    await writeHeader({ path, sessionId, config: cfg, initialState: initial })
+    await appendEventEntry({
+      path,
+      seq: 1,
+      event: { kind: 'user_message', text: 'read x' },
+      effects: [],
+    })
+    await appendEventEntry({
+      path,
+      seq: 2,
+      event: {
+        kind: 'llm_response',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'c1',
+              name: 'read',
+              input: { path: '/x' },
+            },
+          ],
+        },
+      },
+      effects: [],
+    })
+
+    const store = new SessionStore(dir)
+    const rec = await store.load(sessionId)
+
+    // Session is settled again  -  the reducer flowed tool_result  -  thinking
+    // (because pendingCalls emptied out)  -  but with no follow-up LLM call
+    // to make, dispatch never happens; the load-time fold leaves status
+    // wherever the synthetic events land it. What matters is: pendingCalls
+    // is empty and status is not 'awaiting_approval' / 'executing_tools'.
+    expect(rec.state.pendingCalls).toEqual([])
+    expect(rec.state.status).not.toBe('awaiting_approval')
+    expect(rec.state.status).not.toBe('executing_tools')
+
+    // Log was appended: seq 3 is the synthetic tool_result.
+    const parsed = await readSessionLog(path)
+    const lastEvent = parsed.events[parsed.events.length - 1]!
+    expect(lastEvent.event.kind).toBe('tool_result')
+    if (lastEvent.event.kind === 'tool_result') {
+      expect(lastEvent.event.ok).toBe(false)
+      expect(lastEvent.event.content).toMatch(/host restarted/)
+    }
+  })
+
+  it('closes a session that was awaiting_approval when the host died', async () => {
+    // Same as above but the tool required approval, so on crash the pending
+    // call had status='awaiting_approval'. Recovery must first approve, then
+    // fail, so the reducer accepts the tool_result.
+    const sessionId = 'sess-crash-approve'
+    const path = join(dir, `2026-07-05T00-00-01.000Z_${sessionId}.jsonl`)
+    const tool = {
+      name: 'shell',
+      description: 'shell',
+      inputSchema: { type: 'object' },
+      requiresApproval: true,
+    } as const
+    const cfg = createConfig({ tools: [tool], systemPrompt: 'sys' })
+    const initial = createInitialState({ sessionId, systemPrompt: 'sys' })
+    await writeHeader({ path, sessionId, config: cfg, initialState: initial })
+    await appendEventEntry({
+      path,
+      seq: 1,
+      event: { kind: 'user_message', text: 'shell rm -rf' },
+      effects: [],
+    })
+    await appendEventEntry({
+      path,
+      seq: 2,
+      event: {
+        kind: 'llm_response',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'c2',
+              name: 'shell',
+              input: { cmd: 'ls' },
+            },
+          ],
+        },
+      },
+      effects: [],
+    })
+
+    const store = new SessionStore(dir)
+    const rec = await store.load(sessionId)
+
+    expect(rec.state.pendingCalls).toEqual([])
+    expect(rec.state.status).not.toBe('awaiting_approval')
+
+    const parsed = await readSessionLog(path)
+    // Two synthetic events appended: approve + failed tool_result.
+    expect(parsed.events).toHaveLength(4)
+    expect(parsed.events[2]!.event.kind).toBe('user_approve')
+    expect(parsed.events[3]!.event.kind).toBe('tool_result')
   })
 })

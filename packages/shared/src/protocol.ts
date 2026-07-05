@@ -10,6 +10,7 @@ import type {
   AgentConfig,
   AgentEvent,
   AgentState,
+  ApprovalMode,
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
@@ -110,6 +111,37 @@ export type ClientUserReject = {
 
 export type ClientCancel = {
   sessionId: string
+}
+
+export type ClientCompact = {
+  sessionId: string
+}
+
+/**
+ * Abort the in-flight LLM call for a session. The host tears down the
+ * network request (via AbortController) and lets the loop synthesize a
+ * normal `llm_response` from whatever partial text was already streamed  - 
+ * append `[cancelled]` so operators can spot it. Idempotent: emitting it
+ * for a session that isn't streaming is a no-op.
+ */
+export type ClientCancelStream = {
+  sessionId: string
+}
+
+export type ServerTokenDeltaEvent = {
+  sessionId: string
+  /** UTF-8 text delta appended to the current assistant message. */
+  text: string
+}
+
+export type ClientSetApprovalMode = {
+  sessionId: string
+  mode: ApprovalMode
+}
+
+export type SessionApprovalModeEvent = {
+  sessionId: string
+  mode: ApprovalMode
 }
 
 export type ClientFork = {
@@ -337,6 +369,9 @@ export type DashboardClientToServerEvents = {
   'client:user_approve': (payload: ClientUserApprove) => void
   'client:user_reject': (payload: ClientUserReject) => void
   'client:cancel': (payload: ClientCancel) => void
+  'client:compact': (payload: ClientCompact) => void
+  'client:cancel_stream': (payload: ClientCancelStream) => void
+  'client:set_approval_mode': (payload: ClientSetApprovalMode) => void
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession) => void
   'client:list_executors': (payload: ClientListExecutors) => void
@@ -356,6 +391,8 @@ export type DashboardServerToClientEvents = {
   'approval:required': (payload: ApprovalRequiredEvent) => void
   'usage:updated': (payload: UsageUpdatedEvent) => void
   'session:model_changed': (payload: SessionModelChangedEvent) => void
+  'session:token_delta': (payload: ServerTokenDeltaEvent) => void
+  'session:approval_mode': (payload: SessionApprovalModeEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
   'server:sessions': (payload: ServerSessionsPayload) => void
