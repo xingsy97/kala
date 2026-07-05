@@ -460,6 +460,14 @@ export type DashboardServerToClientEvents = {
 export type ServerMessageQueueEvent = {
   sessionId: string
   pending: number
+  items: readonly QueuedMessagePreview[]
+}
+
+export type QueuedMessagePreview = {
+  id: string
+  text: string
+  mode: 'steer' | 'queue'
+  createdAt: string
 }
 
 export type ExecutorClientToServerEvents = {

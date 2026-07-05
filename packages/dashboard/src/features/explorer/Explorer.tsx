@@ -51,7 +51,7 @@ type Props = {
   onDelete(sessionId: string): void
 }
 
-const ROW_HEIGHT = 72
+const ROW_HEIGHT = 86
 
 export function Explorer({
   executors,
@@ -281,11 +281,11 @@ function SessionRow({
       className={cn(
         'group relative min-w-0 overflow-hidden border-b border-slate-200/70 dark:border-slate-900 hover:bg-white dark:hover:bg-slate-900/80 transition-colors',
         selected &&
-          'bg-white dark:bg-slate-900 border-l-2 border-l-sky-500 dark:border-l-sky-400 shadow-[inset_0_1px_0_rgba(148,163,184,0.18)]',
+          'bg-sky-50/70 dark:bg-slate-900/80 border-l-2 border-l-sky-500 dark:border-l-sky-400 shadow-[inset_0_1px_0_rgba(56,189,248,0.18)]',
       )}
       onClick={() => node.activate()}
     >
-      <div className="min-w-0 px-2 pl-6 py-2 pr-9 cursor-pointer">
+      <div className="min-w-0 px-2 pl-6 py-2.5 pr-9 cursor-pointer">
         <div className="flex min-w-0 items-center gap-2">
           <MessageSquare className="h-3.5 w-3.5 flex-none text-slate-400 dark:text-slate-500" />
           <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 dark:text-slate-100">
@@ -303,7 +303,7 @@ function SessionRow({
         </div>
         {s.currentCwd ? (
           <div
-            className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-slate-500 dark:text-slate-500"
+            className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] leading-4 text-slate-500 dark:text-slate-500"
             title={s.currentCwd}
             data-testid="session-row-cwd"
           >

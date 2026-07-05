@@ -39,6 +39,7 @@ import type {
   HandshakeAuth,
   ModelInfo,
   ServerHistoryPayload,
+  ServerMessageQueueEvent,
   ServerModelsPayload,
   SessionErrorEvent,
   SessionErrorScope,
@@ -69,13 +70,17 @@ import {
 } from './connection/executor.js'
 
 type QueuedUserMessage = {
+  id: string
   text: string
+  mode: 'steer' | 'queue'
+  createdAt: string
   content?: readonly import('@agent-kernel/kernel').MessageContent[]
 }
 
 type MessageQueueManager = {
   enqueue(sessionId: string, msg: QueuedUserMessage, priority?: 'front'): void
   pending(sessionId: string): number
+  snapshot(sessionId: string): ServerMessageQueueEvent
   drain(sessionId: string): Promise<void>
 }
 
@@ -163,20 +168,36 @@ export async function startHostServer(
   const executorNs: ExecutorNs = io.of('/executor')
 
   let loop: LoopHandle
+  const queueSnapshot = (sessionId: string): ServerMessageQueueEvent => {
+    const queue = queuedMessages.get(sessionId) ?? []
+    return {
+      sessionId,
+      pending: queue.length,
+      items: queue.map((item) => ({
+        id: item.id,
+        text: item.text,
+        mode: item.mode,
+        createdAt: item.createdAt,
+      })),
+    }
+  }
+
+  const emitQueueUpdate = (sessionId: string): void => {
+    dashboardNs.to(`session:${sessionId}`).emit('server:message_queue', queueSnapshot(sessionId))
+  }
+
   const messageQueues: MessageQueueManager = {
     enqueue(sessionId, msg, priority) {
       const queue = queuedMessages.get(sessionId) ?? []
       if (priority === 'front') queue.unshift(msg)
       else queue.push(msg)
       queuedMessages.set(sessionId, queue)
-      dashboardNs.to(`session:${sessionId}`).emit('server:message_queue', {
-        sessionId,
-        pending: queue.length,
-      })
+      emitQueueUpdate(sessionId)
     },
     pending(sessionId) {
       return queuedMessages.get(sessionId)?.length ?? 0
     },
+    snapshot: queueSnapshot,
     async drain(sessionId) {
       if (drainingQueues.has(sessionId)) return
       drainingQueues.add(sessionId)
@@ -194,11 +215,8 @@ export async function startHostServer(
           }
           if (!record || !isRestingStatus(record.state.status)) return
           const next = queue.shift()
-          dashboardNs.to(`session:${sessionId}`).emit('server:message_queue', {
-            sessionId,
-            pending: queue.length,
-          })
           if (queue.length === 0) queuedMessages.delete(sessionId)
+          emitQueueUpdate(sessionId)
           if (!next) return
           await loop.dispatch(sessionId, {
             kind: 'user_message',
@@ -448,6 +466,7 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
           deps.selectedModels.get(sessionId),
         )
     socket.emit('session:ready', ready)
+    socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
 
     socket.on('subscribe', async ({ sessionId }: ClientSubscribe) => {
       let target = deps.store.get(sessionId)
@@ -467,6 +486,7 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
             deps.selectedModels.get(sessionId),
           )
       socket.emit('session:ready', payload)
+      socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
     })
 
     socket.on('client:user_message', async (p: ClientUserMessage) => {
@@ -795,7 +815,10 @@ async function handleUserMessage(
   }
   const mode = p.mode ?? 'steer'
   const queued: QueuedUserMessage = {
+    id: ulid(),
     text: p.text,
+    mode,
+    createdAt: new Date().toISOString(),
     ...(p.content ? { content: p.content } : {}),
   }
   if (mode === 'queue') {

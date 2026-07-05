@@ -94,6 +94,27 @@ describe('ChatPanel', () => {
     expect(screen.getByText('# not a heading')).toBeTruthy()
   })
 
+  it('constrains image content to the chat column', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { kind: 'base64', mediaType: 'image/png', data: 'iVBORw0KGgo=' },
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+    const img = container.querySelector('img')
+    expect(img?.className ?? '').toContain('max-w-full')
+    expect(img?.className ?? '').toContain('object-contain')
+  })
+
   it('highlights the message matching highlightIndex', () => {
     const { container } = render(
       <ChatPanel
