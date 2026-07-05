@@ -302,7 +302,12 @@ async function selectModel(page, model) {
   const optionSel = `[data-testid="model-option-${cssEscape(model)}"]`
   await page.waitForSelector(optionSel, { timeout: 4_000 })
   await page.click(optionSel)
-  await sleep(200)
+  await page.waitForFunction(
+    (expected) => document.querySelector('[data-testid="model-picker"]')?.textContent?.includes(expected),
+    { timeout: 4_000 },
+    model,
+  )
+  check('requested model is selected in UI', true, model)
 }
 
 function cssEscape(value) {
