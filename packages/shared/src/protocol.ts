@@ -367,6 +367,8 @@ export type ModelInfo = {
   id: string
   label: string
   provider: string
+  /** Model context window in tokens, when known by the host. */
+  contextWindow?: number
 }
 
 export type ServerModelsPayload = {

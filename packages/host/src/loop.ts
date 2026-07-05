@@ -73,7 +73,7 @@ export type HostLoopDeps = {
 
 export type LoopHandle = {
   dispatch(sessionId: string, event: AgentEvent): Promise<void>
-  compact(sessionId: string): Promise<void>
+  compact(sessionId: string, trigger?: 'manual' | 'auto'): Promise<void>
   /**
    * Abort the in-flight LLM call for a session, if any. Any streamed text
    * so far becomes the final assistant message with a `[cancelled]` suffix,
@@ -112,8 +112,8 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       await dispatchOne(deps, sessionId, event, inFlightAborts)
       await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
     },
-    async compact(sessionId) {
-      await runCompact(deps, sessionId, compactionInFlight, inFlightAborts)
+    async compact(sessionId, trigger = 'manual') {
+      await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts)
     },
     cancelStream(sessionId) {
       const ctrl = inFlightAborts.get(sessionId)
@@ -138,12 +138,13 @@ async function maybeAutoCompact(
   const s = record.state.status
   if (s !== 'idle' && s !== 'done' && s !== 'error') return
   if (inFlight.has(sessionId)) return
-  await handle.compact(sessionId)
+  await handle.compact(sessionId, 'auto')
 }
 
 async function runCompact(
   deps: HostLoopDeps,
   sessionId: string,
+  trigger: 'manual' | 'auto',
   inFlight: Set<string>,
   aborts: Map<string, AbortController>,
 ): Promise<void> {
@@ -162,17 +163,20 @@ async function runCompact(
   try {
     const tokensBefore = record.state.usage.inputTokens
     const replacedCount = record.state.messages.length
-    const summary = await summarize(deps, sessionId, record.state.messages)
+    const compact = await summarize(deps, sessionId, record.state.messages)
     // No provider gives a reliable prompt-token count for the summary alone
     // before it's used. Estimate cheaply: 4 chars  -  1 token. Refined on the
     // next real LLM call where usage.inputTokens is reported by the provider.
-    const tokensAfter = Math.max(0, Math.round(summary.length / 4))
+    const tokensAfter = Math.max(0, Math.round(compact.summary.length / 4))
     await dispatchOne(
       deps,
       sessionId,
       {
         kind: 'compact_replaced',
-        summary,
+        trigger,
+        request: compact.request,
+        ...(compact.usage ? { responseUsage: compact.usage } : {}),
+        summary: compact.summary,
         replacedCount,
         tokensBefore,
         tokensAfter,
@@ -188,18 +192,25 @@ async function summarize(
   deps: HostLoopDeps,
   sessionId: string,
   messages: readonly Message[],
-): Promise<string> {
+): Promise<{
+  summary: string
+  request: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['request']>
+  usage?: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['responseUsage']>
+}> {
   const model = deps.models?.get(sessionId)
+  const request = {
+    ...(model ? { model } : {}),
+    systemPrompt: SUMMARIZER_PROMPT,
+    messages,
+    tools: [],
+  }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), COMPACT_TIMEOUT_MS)
   let res: Awaited<ReturnType<HostLoopDeps['llm']['call']>>
   try {
     res = await deps.llm.call({
-      messages,
-      tools: [],
-      systemPrompt: SUMMARIZER_PROMPT,
+      ...request,
       signal: ctrl.signal,
-      ...(model ? { model } : {}),
     })
   } catch (err) {
     if (ctrl.signal.aborted) throw new Error('compact timed out')
@@ -211,7 +222,11 @@ async function summarize(
     .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
     .map((c) => c.text)
     .join('\n')
-  return text.trim() || '[compact produced empty summary]'
+  return {
+    summary: text.trim() || '[compact produced empty summary]',
+    request,
+    ...(res.usage ? { usage: res.usage } : {}),
+  }
 }
 
 function hasCompactableContent(messages: readonly Message[]): boolean {

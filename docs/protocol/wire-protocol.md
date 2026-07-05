@@ -555,9 +555,11 @@ Current protocol includes these additive events and fields:
 - Dashboard  -  Host: `client:compact`, `client:cancel_stream`, `client:set_approval_mode`, `client:set_cwd`, `client:create_session`, `client:list_executors`, `client:list_sessions`, `client:load_history`, `client:delete_session`, `client:set_model`.
 - Dashboard emits `client:compact` from the Composer compact button and from exact `/compact` input; `/compact` is not appended as a `user_message`.
 - Host  -  Dashboard: `session:token_delta`, `usage:updated`, `session:model_changed`, `server:executors`, `server:executor_changed`, `server:sessions`, `server:history`, `server:session_deleted`.
+- `GET /models` returns `ModelInfo { id, label, provider, contextWindow? }`; dashboard uses `contextWindow` plus session `config.contextLimit` for the Composer context usage ring.
 - Kernel events in `event:appended` may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
+- `compact_replaced` events may include the compact summarizer `request`, `trigger`, and `responseUsage` so history can show the compact LLM request and result side by side.
 - `ToolCallMessage` includes optional `cwd`; executor client merges it into the tool input before running the tool.
 - `SessionSummary` includes optional `currentCwd`.
 - `ExecutorAnnounce` is daemon-scoped and includes stable `workspaceId`, display `workspaceName`, `sandboxRoots`, `workingDir`, runtime, host OS, pid, and start time.
 - `session:token_delta` is UI-only. The event log remains authoritative through the final `llm_response`.
-- Background shell uses normal tool calls: `bash` starts the task, `bash_output` polls it, and `kill_shell` stops it. No special background output wire event is required yet.
+- Background shell uses normal tool calls: `bash` starts the task, `bash_output` polls it, and `kill_shell` stops it. No special background output wire event is required yet; dashboard derives its background terminal panel from normal timeline tool calls/results.

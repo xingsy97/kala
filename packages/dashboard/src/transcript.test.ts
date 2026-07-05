@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from './session.js'
-import { visibleMessages } from './transcript.js'
+import { visibleMessages, visibleTranscript } from './transcript.js'
 
 const system: Message = {
   role: 'system',
@@ -54,6 +54,18 @@ describe('visibleMessages', () => {
     expect(visible.map((m) => m.role)).toEqual(['system', 'user', 'assistant'])
     expect(visible[1]?.content[0]).toEqual({ type: 'text', text: 'hello' })
     expect(visible[2]?.content[0]).toEqual({ type: 'text', text: 'hi' })
+    const transcript = visibleTranscript(
+      [system, { role: 'system', content: [{ type: 'text', text: 'hello -> hi' }] }],
+      timeline,
+      '',
+    )
+    expect(transcript[3]).toMatchObject({
+      kind: 'compact_boundary',
+      seq: 3,
+      trigger: 'unknown',
+      tokensBefore: 100,
+      tokensAfter: 8,
+    })
   })
 
   it('appends an assistant draft while token deltas are streaming', () => {

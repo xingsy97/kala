@@ -85,6 +85,10 @@ Static per-session configuration. Never mutated.
 type AgentConfig = {
   readonly tools: readonly ToolSchema[]
   readonly systemPrompt?: string        // used only by createInitialState()
+  readonly contextLimit?: number        // user/session context window in tokens
+  readonly softThreshold?: number       // default 0.75
+  readonly hardThreshold?: number       // default 0.92
+  readonly maxAgentDepth?: number       // host-side sub-agent nesting limit
 }
 ```
 
@@ -145,6 +149,21 @@ type UserApproveEvent   = { kind: 'user_approve';   callId: string }
 type UserRejectEvent    = { kind: 'user_reject';    callId: string; reason?: string }
 type ToolResultEvent    = { kind: 'tool_result';    callId: string; ok: boolean; content: string }
 type CancelEvent        = { kind: 'cancel' }
+type CompactReplacedEvent = {
+  kind: 'compact_replaced'
+  trigger?: 'manual' | 'auto'
+  request?: {
+    model?: string
+    systemPrompt: string
+    messages: readonly Message[]
+    tools: readonly ToolSchema[]
+  }
+  responseUsage?: UsageDelta
+  summary: string
+  replacedCount: number
+  tokensBefore: number
+  tokensAfter: number
+}
 
 type AgentEvent =
   | UserMessageEvent
@@ -562,4 +581,4 @@ The implementation has additive Batch A surface beyond the older v0.1 text:
 - `CallToolEffect` includes optional `cwd`, copied from `state.cwd` when the tool is dispatched.
 - Approval mode is reducer-owned. `deny` synthesizes failed tool results for approval-requiring calls; `allow_all` dispatches without prompting.
 - `todowrite` successful results promote `target.input.todos` into `state.todos`.
-- Context compaction remains host-owned IO; the reducer only applies the deterministic `compact_replaced` event.
+- Context compaction remains host-owned IO; the reducer only applies the deterministic `compact_replaced` event. New logs include the summarizer `request`, `trigger`, and optional `responseUsage` so the timeline can show exactly what was sent to the LLM for compaction.

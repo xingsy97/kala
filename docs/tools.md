@@ -332,5 +332,6 @@ The bundled tool surface is now larger than the original seven-tool v1 document:
 - `bash` accepts `run_in_background: true`. It returns `{"taskId":"...","note":"started"}` immediately.
 - `bash_output` reads background task logs by `task_id`; input supports `offset`, `block`, and `timeout_ms`.
 - `kill_shell` stops a background task by `task_id`.
+- Dashboard shows background shell tasks in a Background terminal panel by deriving task state from ordinary `bash`, `bash_output`, and `kill_shell` tool calls/results in the timeline.
 - `cwd` can be controlled at session level (`state.cwd`) and is passed to tool dispatch. Tool-level `cwd` remains supported for compatibility.
 - MCP currently has a placeholder `initMcp()` and `McpServerConfig`; it does not spawn servers or add runtime tools yet.

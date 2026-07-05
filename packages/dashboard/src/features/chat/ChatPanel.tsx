@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronDown, ChevronRight, Wrench, XCircle } from 'lucide-react'
+import { Archive, CheckCircle2, ChevronDown, ChevronRight, Wrench, XCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -11,35 +11,73 @@ import type {
 } from '@agent-kernel/kernel'
 
 import { ScrollArea } from '../../components/ui/scroll-area.js'
+import type { TranscriptItem } from '../../transcript.js'
 
 type Props = {
-  messages: readonly Message[]
+  messages?: readonly Message[]
+  items?: readonly TranscriptItem[]
   highlightIndex?: number | null
 }
 
-export function ChatPanel({ messages, highlightIndex }: Props): JSX.Element {
+export function ChatPanel({ messages, items, highlightIndex }: Props): JSX.Element {
+  const transcriptItems = items ?? (messages ?? []).map((message) => ({ kind: 'message' as const, message }))
   const toolNameByCallId = new Map<string, string>()
-  for (const message of messages) {
+  for (const item of transcriptItems) {
+    if (item.kind !== 'message') continue
+    const message = item.message
     for (const content of message.content) {
       if (content.type === 'tool_call') toolNameByCallId.set(content.callId, content.name)
     }
   }
+  let messageIndex = -1
   return (
     <div className="flex min-w-0 flex-col divide-y divide-slate-100 dark:divide-slate-900">
-      {messages.length === 0 ? (
+      {transcriptItems.length === 0 ? (
         <div className="px-6 py-8 text-slate-500 text-sm">No messages yet.</div>
       ) : null}
-      {messages.map((m, i) => (
-        <MessageRow
-          key={i}
-          index={i}
-          message={m}
-          highlighted={highlightIndex === i}
-          toolNameByCallId={toolNameByCallId}
-        />
-      ))}
+      {transcriptItems.map((item, itemIndex) => {
+        if (item.kind === 'compact_boundary') {
+          return <CompactBoundaryRow key={`compact-${item.seq}`} boundary={item} />
+        }
+        messageIndex += 1
+        const currentMessageIndex = messageIndex
+        return (
+          <MessageRow
+            key={`message-${itemIndex}`}
+            index={currentMessageIndex}
+            message={item.message}
+            highlighted={highlightIndex === currentMessageIndex}
+            toolNameByCallId={toolNameByCallId}
+          />
+        )
+      })}
     </div>
   )
+}
+
+function CompactBoundaryRow({ boundary }: { boundary: Extract<TranscriptItem, { kind: 'compact_boundary' }> }): JSX.Element {
+  return (
+    <div
+      className="px-6 py-3 bg-sky-50/70 text-sky-900 dark:bg-sky-950/25 dark:text-sky-100"
+      data-testid="compact-boundary"
+    >
+      <div className="flex min-w-0 items-center gap-3 rounded border border-sky-200 bg-white/70 px-3 py-2 text-xs dark:border-sky-900/70 dark:bg-slate-950/60">
+        <Archive className="h-4 w-4 flex-none text-sky-600 dark:text-sky-300" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">Context compacted</div>
+          <div className="mt-0.5 truncate text-[11px] text-sky-700/80 dark:text-sky-200/75">
+            {boundary.trigger === 'auto' ? 'Automatic compact' : 'Manual compact'}  -  event #{boundary.seq}  -  {formatTokens(boundary.tokensBefore)}  -  {formatTokens(boundary.tokensAfter)} tokens  -  {boundary.replacedCount} messages summarized
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
+  return String(tokens)
 }
 
 function MessageRow({

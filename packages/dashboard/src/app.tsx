@@ -12,6 +12,7 @@ import {
 import { ScrollArea } from './components/ui/scroll-area.js'
 import { ActivityBar, type CompactStatus } from './features/chat/ActivityBar.js'
 import { ApprovalsPanel } from './features/chat/ApprovalsPanel.js'
+import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
 import { TodoDock } from './features/chat/TodoDock.js'
@@ -27,7 +28,8 @@ import {
   useControlPlane,
   useSession,
 } from './session.js'
-import { visibleMessages } from './transcript.js'
+import { backgroundTerminalTasks } from './background-terminal.js'
+import { visibleMessages, visibleTranscript } from './transcript.js'
 
 type Theme = 'dark' | 'light'
 
@@ -287,6 +289,12 @@ export function App(): JSX.Element {
     session.timeline,
     session.streamingText,
   )
+  const chatItems = visibleTranscript(
+    session.state?.messages ?? [],
+    session.timeline,
+    session.streamingText,
+  )
+  const backgroundTasks = backgroundTerminalTasks(session.timeline)
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
@@ -353,7 +361,7 @@ export function App(): JSX.Element {
             <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
               <ScrollArea className="flex-1 min-h-0" data-testid="chat-panel">
                 <ChatPanel
-                  messages={chatMessages}
+                  items={chatItems}
                   highlightIndex={highlightIndex}
                 />
               </ScrollArea>
@@ -371,6 +379,7 @@ export function App(): JSX.Element {
                 }}
               />
               <TodoDock todos={session.state?.todos ?? []} />
+              <BackgroundTerminalPanel tasks={backgroundTasks} />
               <ActivityBar
                 state={session.state}
                 compactStatus={compactStatus}
@@ -401,6 +410,8 @@ export function App(): JSX.Element {
                 models={models}
                 onModelChange={onModelChange}
                 status={session.status}
+                state={session.state}
+                config={session.config}
                 compacting={compactStatus.kind === 'running'}
                 onCompact={() => {
                   if (!hasCompactableContent(session.state)) {

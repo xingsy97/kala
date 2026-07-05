@@ -237,6 +237,14 @@ export type CancelEvent = {
  */
 export type CompactReplacedEvent = {
   kind: 'compact_replaced'
+  trigger?: 'manual' | 'auto'
+  request?: {
+    model?: string
+    systemPrompt: string
+    messages: readonly Message[]
+    tools: readonly ToolSchema[]
+  }
+  responseUsage?: UsageDelta
   summary: string
   replacedCount: number
   tokensBefore: number
