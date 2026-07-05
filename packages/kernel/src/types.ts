@@ -146,6 +146,8 @@ export type UsageTotal = {
   readonly inputTokens: number
   readonly outputTokens: number
   readonly costUsd: number
+  readonly cacheCreationTokens: number
+  readonly cacheReadTokens: number
 }
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
@@ -215,6 +217,8 @@ export type UsageDelta = {
   inputTokens: number
   outputTokens: number
   costUsd?: number
+  cacheCreationTokens?: number
+  cacheReadTokens?: number
 }
 
 export type LlmResponseEvent = {

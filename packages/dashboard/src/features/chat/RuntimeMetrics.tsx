@@ -19,6 +19,8 @@ export function RuntimeMetrics({
 }: Props): JSX.Element {
   const inputTokens = state?.usage.inputTokens ?? 0
   const outputTokens = state?.usage.outputTokens ?? 0
+  const cacheReadTokens = state?.usage.cacheReadTokens ?? 0
+  const cacheCreationTokens = state?.usage.cacheCreationTokens ?? 0
   const totalContextWindow = modelInfo?.contextWindow ?? config?.contextLimit ?? null
   const userContextWindow = config?.contextLimit ?? totalContextWindow
   const ratio = userContextWindow && userContextWindow > 0
@@ -88,6 +90,15 @@ export function RuntimeMetrics({
         title="Token usage: input tokens sent to the model / output tokens received from the model."
         className="hidden 2xl:inline-flex"
       />
+      {cacheReadTokens > 0 || cacheCreationTokens > 0 ? (
+        <Metric
+          label="Cache"
+          value={formatTokens(cacheReadTokens)}
+          title={`Prompt cache  -  hits: ${formatTokens(cacheReadTokens)} tokens read from cache, ${formatTokens(cacheCreationTokens)} tokens written to cache.`}
+          tone="sky"
+          className="hidden 2xl:inline-flex"
+        />
+      ) : null}
       {queuedMessages > 0 ? (
         <Metric
           label="Queued"

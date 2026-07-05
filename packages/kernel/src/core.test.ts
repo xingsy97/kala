@@ -154,6 +154,8 @@ describe('step: llm_response (plain answer)', () => {
       inputTokens: 100,
       outputTokens: 20,
       costUsd: 0.001,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
     })
   })
 
@@ -161,7 +163,13 @@ describe('step: llm_response (plain answer)', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'thinking',
-      usage: { inputTokens: 50, outputTokens: 10, costUsd: 0.0005 },
+      usage: {
+        inputTokens: 50,
+        outputTokens: 10,
+        costUsd: 0.0005,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
     }
     const { next } = step(
       s0,
@@ -176,6 +184,8 @@ describe('step: llm_response (plain answer)', () => {
       inputTokens: 80,
       outputTokens: 15,
       costUsd: 0.0005, // delta had no cost
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
     })
   })
 })

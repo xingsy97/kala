@@ -26,6 +26,12 @@ export type AnthropicOptions = {
   maxTokens?: number
   apiUrl?: string
   fetchImpl?: typeof fetch
+  /**
+   * Toggle Anthropic prompt caching (attaches `cache_control: ephemeral`
+   * markers on the system prompt, last tool, and last non-assistant message).
+   * Defaults to true. Set false against gateways that reject the field.
+   */
+  cache?: boolean
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
@@ -41,8 +47,10 @@ type AnthropicImageSource =
     }
   | { type: 'url'; url: string }
 
+type CacheControl = { type: 'ephemeral' }
+
 type AnthropicBlock =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; cache_control?: CacheControl }
   | {
       type: 'tool_use'
       id: string
@@ -54,8 +62,9 @@ type AnthropicBlock =
       tool_use_id: string
       content: string
       is_error?: boolean
+      cache_control?: CacheControl
     }
-  | { type: 'image'; source: AnthropicImageSource }
+  | { type: 'image'; source: AnthropicImageSource; cache_control?: CacheControl }
   | { type: 'thinking'; thinking: string; signature?: string }
 
 type AnthropicMessage = {
@@ -71,6 +80,8 @@ type AnthropicResponseBody = {
   usage?: {
     input_tokens: number
     output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
   }
 }
 
@@ -79,12 +90,13 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
   const model = opts.model ?? DEFAULT_MODEL
   const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS
   const apiUrl = opts.apiUrl ?? DEFAULT_URL
+  const cache = opts.cache ?? true
 
   return {
     name: `anthropic:${model}`,
     async call(params: LLMCallParams): Promise<LLMResponse> {
       const effectiveModel = params.model ?? model
-      const body = await buildRequestBody(params, effectiveModel, maxTokens)
+      const body = await buildRequestBody(params, effectiveModel, maxTokens, cache)
       if (params.onTextDelta) {
         body.stream = true
         return await callStreaming(
@@ -155,6 +167,8 @@ async function callStreaming(
   const toolInputBuf: string[] = []
   let inputTokens = 0
   let outputTokens = 0
+  let cacheCreationTokens = 0
+  let cacheReadTokens = 0
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -185,6 +199,8 @@ async function callStreaming(
         (u) => {
           inputTokens += u.input
           outputTokens += u.output
+          cacheCreationTokens += u.cacheCreation
+          cacheReadTokens += u.cacheRead
         },
       )
     }
@@ -195,8 +211,11 @@ async function callStreaming(
     .filter((c): c is MessageContent => c !== null)
   const message: Message = { role: 'assistant', content }
   const usage =
-    inputTokens > 0 || outputTokens > 0
-      ? { inputTokens, outputTokens }
+    inputTokens > 0 ||
+    outputTokens > 0 ||
+    cacheCreationTokens > 0 ||
+    cacheReadTokens > 0
+      ? { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens }
       : undefined
   return { message, usage }
 }
@@ -206,7 +225,12 @@ function handleStreamEvent(
   blocks: AnthropicBlock[],
   toolBuf: string[],
   onText: (t: string) => void,
-  onUsage: (u: { input: number; output: number }) => void,
+  onUsage: (u: {
+    input: number
+    output: number
+    cacheCreation: number
+    cacheRead: number
+  }) => void,
 ): void {
   const kind = evt.type as string | undefined
   if (kind === 'content_block_start') {
@@ -249,9 +273,22 @@ function handleStreamEvent(
     return
   }
   if (kind === 'message_start') {
-    const msg = (evt.message as { usage?: { input_tokens: number; output_tokens: number } }) ?? {}
+    const msg =
+      (evt.message as {
+        usage?: {
+          input_tokens: number
+          output_tokens: number
+          cache_creation_input_tokens?: number
+          cache_read_input_tokens?: number
+        }
+      }) ?? {}
     if (msg.usage) {
-      onUsage({ input: msg.usage.input_tokens ?? 0, output: msg.usage.output_tokens ?? 0 })
+      onUsage({
+        input: msg.usage.input_tokens ?? 0,
+        output: msg.usage.output_tokens ?? 0,
+        cacheCreation: msg.usage.cache_creation_input_tokens ?? 0,
+        cacheRead: msg.usage.cache_read_input_tokens ?? 0,
+      })
     }
     return
   }
@@ -262,7 +299,12 @@ function handleStreamEvent(
       // Anthropic reports cumulative output_tokens here; we already captured
       // input on message_start, and content_block_delta events don't include
       // usage. Overwrite by treating this as final output.
-      onUsage({ input: 0, output: usage.output_tokens })
+      onUsage({
+        input: 0,
+        output: usage.output_tokens,
+        cacheCreation: 0,
+        cacheRead: 0,
+      })
     }
   }
 }
@@ -281,6 +323,7 @@ async function buildRequestBody(
   params: LLMCallParams,
   model: string,
   maxTokens: number,
+  cache: boolean,
 ): Promise<Record<string, unknown>> {
   const { messages, tools, systemPrompt } = params
   const resolvedSystem = systemPrompt ?? extractSystem(messages)
@@ -292,8 +335,23 @@ async function buildRequestBody(
     max_tokens: maxTokens,
     messages: anthropicMessages,
   }
-  if (resolvedSystem) body.system = resolvedSystem
-  if (tools.length > 0) body.tools = tools.map(toAnthropicTool)
+  if (resolvedSystem) {
+    body.system = cache
+      ? [{ type: 'text', text: resolvedSystem, cache_control: { type: 'ephemeral' } }]
+      : resolvedSystem
+  }
+  if (tools.length > 0) {
+    const toolPayload = tools.map(toAnthropicTool)
+    if (cache && toolPayload.length > 0) {
+      const last = toolPayload[toolPayload.length - 1]!
+      toolPayload[toolPayload.length - 1] = {
+        ...last,
+        cache_control: { type: 'ephemeral' },
+      }
+    }
+    body.tools = toolPayload
+  }
+  if (cache) markLastUserBlockForCache(anthropicMessages)
   if (typeof params.thinkingBudget === 'number' && params.thinkingBudget > 0) {
     body.thinking = {
       type: 'enabled',
@@ -301,6 +359,29 @@ async function buildRequestBody(
     }
   }
   return body
+}
+
+/**
+ * Rotating cache breakpoint on the growing conversation: attach cache_control
+ * to the last block of the last non-assistant message. On the next turn the
+ * previous breakpoint stops matching but Anthropic falls back to the earlier
+ * system+tools breakpoints, and the new one covers the just-appended turn.
+ */
+function markLastUserBlockForCache(messages: AnthropicMessage[]): void {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]!
+    if (msg.role !== 'user') continue
+    const last = msg.content[msg.content.length - 1]
+    if (!last) return
+    if (
+      last.type === 'text' ||
+      last.type === 'tool_result' ||
+      last.type === 'image'
+    ) {
+      last.cache_control = { type: 'ephemeral' }
+    }
+    return
+  }
 }
 
 function extractSystem(messages: readonly Message[]): string | undefined {
@@ -404,6 +485,8 @@ function parseResponse(body: AnthropicResponseBody): LLMResponse {
     ? {
         inputTokens: numOr(body.usage.input_tokens, 0),
         outputTokens: numOr(body.usage.output_tokens, 0),
+        cacheCreationTokens: numOr(body.usage.cache_creation_input_tokens, 0),
+        cacheReadTokens: numOr(body.usage.cache_read_input_tokens, 0),
       }
     : undefined
   return { message, usage }
