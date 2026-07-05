@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { bashTool } from './bash.js'
+import { bashOutputTool } from './bash-output.js'
 import { makeCtx } from './_test-helpers.js'
 import { createSandbox } from '../sandbox.js'
 
@@ -108,5 +109,32 @@ describe('bash', () => {
     )
     expect(out).toContain('spawn failed')
     expect(out).toContain('--- exit code: -1')
+  })
+
+  it('starts a background task and reads output later', async () => {
+    const started = await bashTool.run(
+      { command: 'sleep 0.2; echo done', run_in_background: true },
+      makeCtx(root),
+    )
+    const parsed = JSON.parse(started) as { taskId: string }
+    expect(parsed.taskId).toBeTruthy()
+
+    const first = JSON.parse(
+      await bashOutputTool.run(
+        { task_id: parsed.taskId, block: false },
+        makeCtx(root),
+      ),
+    ) as { content: string; nextOffset: number; done: boolean }
+    expect(first.content).toBe('')
+    expect(first.done).toBe(false)
+
+    const second = JSON.parse(
+      await bashOutputTool.run(
+        { task_id: parsed.taskId, block: true, timeout_ms: 1000 },
+        makeCtx(root),
+      ),
+    ) as { content: string; done: boolean }
+    expect(second.content).toContain('done')
+    expect(second.done).toBe(true)
   })
 })
