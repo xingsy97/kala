@@ -40,7 +40,12 @@ import {
 import { Button } from '../../components/ui/button.js'
 import { cn } from '../../lib/utils.js'
 import { buildTree } from './tree-model.js'
-import type { SessionNode, TreeNode, WorkspaceNode } from './tree-model.js'
+import type {
+  SessionNode,
+  TimeBucketNode,
+  TreeNode,
+  WorkspaceNode,
+} from './tree-model.js'
 
 type Props = {
   executors: readonly AttachedExecutor[]
@@ -51,7 +56,9 @@ type Props = {
   onDelete(sessionId: string): void
 }
 
-const ROW_HEIGHT = 88
+const SESSION_ROW_HEIGHT = 88
+const WORKSPACE_ROW_HEIGHT = 48
+const BUCKET_ROW_HEIGHT = 28
 
 export function Explorer({
   executors,
@@ -97,7 +104,9 @@ export function Explorer({
           <Tree<TreeNode>
             data={data as unknown as TreeNode[]}
             childrenAccessor={(d) =>
-              d.kind === 'workspace' ? d.children : null
+              d.kind === 'workspace' || d.kind === 'bucket'
+                ? d.children
+                : null
             }
             idAccessor="id"
             openByDefault
@@ -105,11 +114,11 @@ export function Explorer({
             disableDrop
             disableEdit
             disableMultiSelection
-            disableSelect={(d) => d.kind === 'workspace'}
+            disableSelect={(d) => d.kind !== 'session'}
             selection={selection}
             onActivate={activate}
             renderRow={TreeRow}
-            rowHeight={ROW_HEIGHT}
+            rowHeight={rowHeightFor}
             indent={12}
             width={bounds.width}
             height={bounds.height}
@@ -175,6 +184,12 @@ function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>
   )
 }
 
+function rowHeightFor(node: NodeApi<TreeNode>): number {
+  if (node.data.kind === 'workspace') return WORKSPACE_ROW_HEIGHT
+  if (node.data.kind === 'bucket') return BUCKET_ROW_HEIGHT
+  return SESSION_ROW_HEIGHT
+}
+
 function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
   return (
     <div className="flex items-center justify-between border-b bg-background/80 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -210,6 +225,9 @@ function Row({
       <WorkspaceRow node={node as NodeApi<WorkspaceNode>} style={style} />
     )
   }
+  if (node.data.kind === 'bucket') {
+    return <BucketRow node={node as NodeApi<TimeBucketNode>} style={style} />
+  }
   return (
     <SessionRow
       node={node as NodeApi<SessionNode>}
@@ -243,22 +261,49 @@ function WorkspaceRow({
       data-workspace-id={w.workspaceId ?? 'unassigned'}
       data-online={w.online ? 'true' : 'false'}
       onClick={() => node.toggle()}
-      className="group/ws min-w-0 cursor-pointer select-none px-3 hover:bg-accent/50"
+      className="group/ws flex min-w-0 cursor-pointer select-none flex-col justify-center px-3 hover:bg-accent/50"
     >
-      <div className="flex h-8 items-center gap-1.5">
+      <div className="flex items-center gap-1.5">
         {node.isOpen ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
-        <span className={cn('inline-block h-2 w-2 rounded-full', dotCls)} />
+        <span className={cn('inline-block h-2 w-2 flex-none rounded-full', dotCls)} />
         <span className="truncate text-[13px] font-semibold text-foreground">
           {w.name}
         </span>
       </div>
-      <div className="-mt-1 pl-6 text-[11px] text-muted-foreground truncate">
+      <div className="mt-0.5 truncate pl-6 text-[11px] text-muted-foreground">
         {meta}
       </div>
+    </div>
+  )
+}
+
+function BucketRow({
+  node,
+  style,
+}: {
+  node: NodeApi<TimeBucketNode>
+  style: React.CSSProperties
+}): JSX.Element {
+  const b = node.data
+  return (
+    <div
+      style={style}
+      data-testid="bucket-row"
+      data-bucket={b.bucket}
+      onClick={() => node.toggle()}
+      className="flex min-w-0 cursor-pointer select-none items-center gap-1.5 px-3 pl-5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80 hover:text-foreground"
+    >
+      {node.isOpen ? (
+        <ChevronDown className="h-3 w-3 flex-none opacity-60" />
+      ) : (
+        <ChevronRight className="h-3 w-3 flex-none opacity-60" />
+      )}
+      <span className="truncate">{b.label}</span>
+      <span className="ml-1 tabular-nums opacity-60">{b.children.length}</span>
     </div>
   )
 }
