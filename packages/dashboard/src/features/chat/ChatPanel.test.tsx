@@ -75,7 +75,8 @@ describe('ChatPanel', () => {
     // inline `code`  -  <code>, and fenced block  -  <pre><code>
     const codes = container.querySelectorAll('code')
     expect(codes.length).toBeGreaterThanOrEqual(2)
-    expect(container.querySelector('pre')?.textContent).toContain('console.log(1)')
+    expect(container.textContent ?? '').toContain('console.log(1)')
+    expect(container.querySelector('[data-radix-scroll-area-viewport]')).toBeTruthy()
   })
 
   it('leaves user text as literal (no markdown parsing)', () => {

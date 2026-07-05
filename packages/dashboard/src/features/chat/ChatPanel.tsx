@@ -10,6 +10,8 @@ import type {
   ToolResultContent,
 } from '@agent-kernel/kernel'
 
+import { ScrollArea } from '../../components/ui/scroll-area.js'
+
 type Props = {
   messages: readonly Message[]
   highlightIndex?: number | null
@@ -137,8 +139,21 @@ function ImageBlock({ content }: { content: import('@agent-kernel/kernel').Image
 
 function AssistantMarkdown({ text }: { text: string }): JSX.Element {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none text-slate-800 dark:text-slate-100 leading-relaxed [&_pre]:bg-slate-50 dark:[&_pre]:bg-slate-950 [&_pre]:border [&_pre]:border-slate-200 dark:[&_pre]:border-slate-800 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-amber-700 dark:[&_code]:text-amber-200 [&_code]:bg-slate-100 dark:[&_code]:bg-slate-900 [&_code]:px-1 [&_code]:rounded [&_pre_code]:bg-transparent [&_pre_code]:text-slate-800 dark:[&_pre_code]:text-slate-100 [&_pre_code]:p-0 [&_a]:text-sky-600 dark:[&_a]:text-sky-400 [&_a]:underline [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:border [&_table]:border-slate-300 dark:[&_table]:border-slate-700 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-700 [&_th]:px-2 [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 dark:[&_blockquote]:border-slate-600 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 dark:[&_blockquote]:text-slate-300">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    <div className="prose prose-sm dark:prose-invert max-w-none text-slate-800 dark:text-slate-100 leading-relaxed [&_pre]:m-0 [&_pre]:bg-transparent [&_pre]:p-0 [&_pre]:overflow-visible [&_code]:text-amber-700 dark:[&_code]:text-amber-200 [&_code]:bg-slate-100 dark:[&_code]:bg-slate-900 [&_code]:px-1 [&_code]:rounded [&_pre_code]:block [&_pre_code]:bg-transparent [&_pre_code]:text-slate-800 dark:[&_pre_code]:text-slate-100 [&_pre_code]:p-2 [&_pre_code]:min-w-max [&_a]:text-sky-600 dark:[&_a]:text-sky-400 [&_a]:underline [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:border [&_table]:border-slate-300 dark:[&_table]:border-slate-700 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-700 [&_th]:px-2 [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 dark:[&_blockquote]:border-slate-600 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 dark:[&_blockquote]:text-slate-300">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          pre({ children }) {
+            return (
+              <ScrollArea className="my-2 rounded border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+                {children}
+              </ScrollArea>
+            )
+          },
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   )
 }
@@ -169,9 +184,11 @@ function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
         )}
       </button>
       {open ? (
-        <pre className="border-t border-amber-200 px-3 py-2 text-amber-900/90 dark:border-amber-900/60 dark:text-amber-100/80 whitespace-pre-wrap overflow-x-auto">
-          {JSON.stringify(call.input, null, 2)}
-        </pre>
+        <ScrollArea className="border-t border-amber-200 dark:border-amber-900/60">
+          <pre className="min-w-max px-3 py-2 text-amber-900/90 dark:text-amber-100/80 whitespace-pre-wrap">
+            {JSON.stringify(call.input, null, 2)}
+          </pre>
+        </ScrollArea>
       ) : null}
     </div>
   )
@@ -220,11 +237,11 @@ function ToolResultBlock({
         )}
       </button>
       {open ? (
-        <pre
-          className={`border-t ${border} px-3 py-2 whitespace-pre-wrap overflow-x-auto text-slate-700 dark:text-slate-200`}
-        >
-          {result.content}
-        </pre>
+        <ScrollArea className={`border-t ${border}`}>
+          <pre className="min-w-max px-3 py-2 whitespace-pre-wrap text-slate-700 dark:text-slate-200">
+            {result.content}
+          </pre>
+        </ScrollArea>
       ) : null}
     </div>
   )
