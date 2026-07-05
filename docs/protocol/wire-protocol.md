@@ -305,6 +305,24 @@ Response to `client:load_history`.
 
 Every entry has the same shape as a live `event:appended` payload  -  Dashboard can feed them into its timeline state the same way. Entries are ordered by `seq` ascending. Dashboard dedups by `seq` in case a live `event:appended` overlaps the tail of history.
 
+#### `server:dir_list`
+
+Response-scoped reply to `client:list_dirs`. Dashboard uses this to populate the new-session Finder-style directory picker before a session exists, so the request is keyed by `workspaceId` instead of `sessionId`.
+
+```ts
+{
+  requestId: string
+  workspaceId: string
+  path: string              // resolved directory path that was listed, or the requested path on error
+  roots: string[]           // executor sandbox roots visible to the picker
+  entries: Array<{
+    name: string
+    path: string
+  }>
+  error?: string
+}
+```
+
 ---
 
 ## 5. Executor-specific events
@@ -342,6 +360,20 @@ A workspace is a machine, not a directory (see ADR 0014). Two executor processes
 Host stores the attach in a registry keyed by `executorId`. A second `executor:announce` from the same executorId replaces the first entry and fires `server:executor_changed { change: 'updated' }` ( - 4.2).
 
 ### 5.2 Host  -  Executor
+
+#### `fs:list_dirs`
+
+Host forwards `client:list_dirs` to the executor currently attached for the requested `workspaceId`. The executor resolves the requested path through its sandbox and returns directory entries only, sorted by name. The ACK payload is the same `DirListResult` shape emitted back to Dashboard as `server:dir_list`.
+
+```ts
+{
+  requestId: string
+  workspaceId: string
+  path?: string
+}
+```
+
+If `path` is omitted, executor lists its first sandbox root, falling back to `process.cwd()` when no roots are configured.
 
 #### `tool:call`
 
@@ -552,9 +584,10 @@ This session yields 4 lines in the JSONL event log (see [event-log.md](event-log
 
 Current protocol includes these additive events and fields:
 
-- Dashboard  -  Host: `client:compact`, `client:cancel_stream`, `client:set_approval_mode`, `client:set_cwd`, `client:create_session`, `client:list_executors`, `client:list_sessions`, `client:load_history`, `client:delete_session`, `client:set_model`.
+- Dashboard  -  Host: `client:compact`, `client:cancel_stream`, `client:set_approval_mode`, `client:set_cwd`, `client:create_session`, `client:list_dirs`, `client:list_executors`, `client:list_sessions`, `client:load_history`, `client:delete_session`, `client:set_model`.
+- `client:create_session` includes optional `cwd`; Host validates it against the selected workspace sandbox roots and persists it as the session `initialCwd` / initial `state.cwd`.
 - Dashboard emits `client:compact` from exact `/compact` input; `/compact` is not appended as a `user_message`.
-- Host  -  Dashboard: `session:token_delta`, `usage:updated`, `session:model_changed`, `server:executors`, `server:executor_changed`, `server:sessions`, `server:history`, `server:session_deleted`.
+- Host  -  Dashboard: `session:token_delta`, `usage:updated`, `session:model_changed`, `server:executors`, `server:executor_changed`, `server:sessions`, `server:history`, `server:dir_list`, `server:session_deleted`.
 - `GET /models` returns `ModelInfo { id, label, provider, contextWindow? }`; dashboard uses `contextWindow` plus session `config.contextLimit` for the Composer context usage ring.
 - Kernel events in `event:appended` may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
 - `compact_replaced` events may include the compact summarizer `request`, `trigger`, and `responseUsage` so history can show the compact LLM request and result side by side.

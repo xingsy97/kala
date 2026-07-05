@@ -582,3 +582,4 @@ The implementation has additive Batch A surface beyond the older v0.1 text:
 - Approval mode is reducer-owned. `deny` synthesizes failed tool results for approval-requiring calls; `allow_all` dispatches without prompting.
 - `todowrite` successful results promote `target.input.todos` into `state.todos`.
 - Context compaction remains host-owned IO; the reducer only applies the deterministic `compact_replaced` event. New logs include the summarizer `request`, `trigger`, and optional `responseUsage` so the timeline can show exactly what was sent to the LLM for compaction.
+- Session creation may include an initial cwd. The host validates it against the selected workspace sandbox roots, writes it to the JSONL header as `initialCwd`, and seeds initial `AgentState.cwd`; dashboard obtains selectable directories from the real executor rather than a mock filesystem.

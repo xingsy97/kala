@@ -17,6 +17,7 @@ import type {
   ClientCompact,
   ClientCreateSession,
   ClientFork,
+  ClientListDirs,
   ClientListExecutors,
   ClientListSessions,
   ClientLoadHistory,
@@ -435,8 +436,25 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
       })
       await broadcastSessionList(deps)
     })
+    socket.on('client:list_dirs', async (p: ClientListDirs) => {
+      const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
+      socket.emit('server:dir_list', result)
+    })
     socket.on('client:create_session', async (p: ClientCreateSession) => {
       try {
+        const cwd = p.cwd?.trim()
+        if (cwd && cwd.length > 0) {
+          const validation = validateWorkspaceCwd(deps, p.workspaceId, cwd)
+          if (!validation.ok) {
+            socket.emit('session:error', {
+              sessionId: p.sessionId,
+              scope: 'host',
+              message: validation.reason,
+            })
+            return
+          }
+          p = { ...p, cwd: validation.cwd }
+        }
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
           defaultConfig: deps.defaultConfig,
@@ -444,6 +462,7 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }
             : {}),
+          ...(p.cwd !== undefined ? { initialCwd: p.cwd } : {}),
         })
         await socket.join(`session:${record.sessionId}`)
         socket.emit(

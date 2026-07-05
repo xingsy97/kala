@@ -72,9 +72,13 @@ export class SessionStore {
         sessionId,
         systemPrompt: params.systemPrompt ?? params.config.systemPrompt,
       })
+    const stateForSession: AgentState =
+      initialState.sessionId === sessionId
+        ? initialState
+        : { ...initialState, sessionId }
     const stateWithCwd: AgentState = params.initialCwd
-      ? { ...initialState, cwd: params.initialCwd }
-      : initialState
+      ? { ...stateForSession, cwd: params.initialCwd }
+      : stateForSession
     const logPath = this.pathFor(sessionId)
     await writeHeader({
       path: logPath,
@@ -162,6 +166,7 @@ export class SessionStore {
     defaultConfig: AgentConfig
     workspaceId?: string
     workspaceName?: string
+    initialCwd?: string
   }): Promise<{ record: SessionRecord; created: boolean }> {
     const cached = this.records.get(params.sessionId)
     if (cached) return { record: cached, created: false }
@@ -176,6 +181,7 @@ export class SessionStore {
       params.defaultConfig,
       params.workspaceId,
       params.workspaceName,
+      params.initialCwd,
       () => { created = true },
     ).finally(() => {
       this.inFlight.delete(params.sessionId)
@@ -190,6 +196,7 @@ export class SessionStore {
     defaultConfig: AgentConfig,
     workspaceId: string | undefined,
     workspaceName: string | undefined,
+    initialCwd: string | undefined,
     markCreated: () => void,
   ): Promise<SessionRecord> {
     try {
@@ -205,6 +212,7 @@ export class SessionStore {
         config: defaultConfig,
         ...(workspaceId !== undefined ? { workspaceId } : {}),
         ...(workspaceName !== undefined ? { workspaceName } : {}),
+        ...(initialCwd !== undefined ? { initialCwd } : {}),
       })
     }
   }

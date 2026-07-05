@@ -461,6 +461,6 @@ This guide is older than the current implementation. When continuing work, treat
 - Executor implements more than the original seven tools: `todowrite`, `bash_output`, `kill_shell`, and background mode for `bash`.
 - MCP is deliberately only a stub.
 - Dashboard Composer exposes manual compaction through the exact `/compact` slash command, which emits `client:compact` and is not appended as a user message.
-- Dashboard Explorer is the top-level left rail. The workbench toolbar shows session title plus current cwd, opens a cwd edit dialog backed by `client:set_cwd`, and keeps theme/inspector controls scoped to the workbench.
+- Dashboard Explorer is the top-level left rail. Creating a session opens a modal that selects the workspace and initial cwd through executor-backed `client:list_dirs` / `server:dir_list`; the host validates the chosen cwd before persisting `initialCwd`. The workbench toolbar shows session title plus current cwd, opens a cwd edit dialog backed by `client:set_cwd`, and keeps theme/inspector controls scoped to the workbench.
 - Dashboard is served by Host from `packages/dashboard/dist`; after `.tsx` edits run `pnpm --filter @agent-kernel/dashboard build` and verify through the real Host page.
 - Use `@uiw/react-json-view` through `components/ui/json-block.tsx` for JSON rendering.

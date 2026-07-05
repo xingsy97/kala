@@ -161,6 +161,14 @@ export type ClientCreateSession = {
   sessionId: string
   workspaceId: string
   workspaceName?: string
+  /** Initial tool cwd for the session. Validated against the workspace sandbox. */
+  cwd?: string
+}
+
+export type ClientListDirs = {
+  requestId: string
+  workspaceId: string
+  path?: string
 }
 
 export type ClientSubscribe = {
@@ -248,6 +256,20 @@ export type ExecutorToolResult = {
   callId: string
   ok: boolean
   content: string
+}
+
+export type DirListEntry = {
+  name: string
+  path: string
+}
+
+export type DirListResult = {
+  requestId: string
+  workspaceId: string
+  path: string
+  roots: readonly string[]
+  entries: readonly DirListEntry[]
+  error?: string
 }
 
 // ============================================================================
@@ -390,6 +412,7 @@ export type DashboardClientToServerEvents = {
   'client:set_approval_mode': (payload: ClientSetApprovalMode) => void
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession) => void
+  'client:list_dirs': (payload: ClientListDirs) => void
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
@@ -413,6 +436,7 @@ export type DashboardServerToClientEvents = {
   'server:executors': (payload: ServerExecutorsPayload) => void
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
   'server:sessions': (payload: ServerSessionsPayload) => void
+  'server:dir_list': (payload: DirListResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
 }
@@ -432,6 +456,10 @@ export type ExecutorServerToClientEvents = {
     ack: (result: ToolResultAck) => void,
   ) => void
   'tool:cancel': (payload: ToolCancelMessage) => void
+  'fs:list_dirs': (
+    payload: ClientListDirs,
+    ack: (result: DirListResult) => void,
+  ) => void
 }
 
 export const PROTOCOL_VERSION = '0.1.0' as const

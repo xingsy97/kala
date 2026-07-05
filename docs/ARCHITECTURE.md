@@ -300,6 +300,7 @@ Batch A is implemented in the running codebase:
 - Image content is supported in kernel types, Anthropic/OpenAI adapters, and dashboard rendering.
 - `agent` is a host-side builtin tool that creates a child JSONL session, runs it in the same workspace, and returns the child assistant text to the parent.
 - MCP is currently a stub only: `McpServerConfig` plus `initMcp()` returning no tools.
-- Session cwd is changed by `client:set_cwd`, stored as `state.cwd`, and passed to executor tool calls.
+- New sessions are created through a Dashboard modal that binds to a workspace and chooses an initial cwd with a Finder-style directory picker. Dashboard requests directories with `client:list_dirs`; Host forwards to the selected executor as `fs:list_dirs`; Host validates the selected cwd against the executor sandbox before writing the session header and initial `state.cwd`.
+- Existing session cwd is changed by `client:set_cwd`, stored as `state.cwd`, and passed to executor tool calls.
 - Background shell is executor-owned: `bash { run_in_background: true }` starts a task, `bash_output` polls logs, and `kill_shell` stops it. Dashboard derives a background terminal panel from those normal tool events.
 - Dashboard runtime status lives in `ActivityBar`; the Composer footer keeps the model picker, host status, send button, and a context usage ring based on `ModelInfo.contextWindow` / `AgentConfig.contextLimit`. The Explorer is the top-level left rail. The right-side workbench owns the session toolbar, which shows the session title and current cwd, opens the cwd editor, and hosts theme/inspector controls without covering the Explorer.

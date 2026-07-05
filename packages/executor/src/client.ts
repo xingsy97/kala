@@ -10,12 +10,15 @@
 
 import { hostname, networkInterfaces, platform } from 'node:os'
 import process from 'node:process'
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import type {
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
   ExecutorOs,
   ExecutorServerToClientEvents,
+  DirListResult,
   ToolCallMessage,
   ToolCancelMessage,
   ToolResultAck,
@@ -134,6 +137,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     if (ctrl) ctrl.abort()
   })
 
+  socket.on('fs:list_dirs', async (payload, ack) => {
+    ack(await listDirs(payload.requestId, payload.workspaceId, payload.path, sandbox))
+  })
+
   return {
     executorId,
     workspaceId,
@@ -180,6 +187,39 @@ async function runOne(
       callId: payload.callId,
       ok: false,
       content: `ERROR: EIO: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+}
+
+async function listDirs(
+  requestId: string,
+  workspaceId: string,
+  inputPath: string | undefined,
+  sandbox: Sandbox,
+): Promise<DirListResult> {
+  const roots = sandbox.roots.length > 0 ? sandbox.roots : [process.cwd()]
+  const requested = inputPath && inputPath.trim().length > 0 ? inputPath : roots[0]!
+  try {
+    const resolved = await sandbox.resolve(requested)
+    const entries = await readdir(resolved, { withFileTypes: true })
+    return {
+      requestId,
+      workspaceId,
+      path: resolved,
+      roots,
+      entries: entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({ name: entry.name, path: join(resolved, entry.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    }
+  } catch (err) {
+    return {
+      requestId,
+      workspaceId,
+      path: requested,
+      roots,
+      entries: [],
+      error: err instanceof Error ? err.message : String(err),
     }
   }
 }
