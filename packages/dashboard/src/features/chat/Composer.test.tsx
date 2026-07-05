@@ -1,11 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createInitialState } from '@agent-kernel/kernel'
-
 import { Composer } from './Composer.js'
-
-const baseState = createInitialState({ sessionId: 'sess-composer' })
 
 function renderComposer(props?: {
   onSubmit?: (text: string) => void
@@ -17,7 +13,6 @@ function renderComposer(props?: {
       models={[]}
       onModelChange={() => {}}
       status="ready"
-      state={baseState}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
     />,
@@ -25,28 +20,20 @@ function renderComposer(props?: {
 }
 
 describe('Composer', () => {
-  it('renders session status chips in the footer', () => {
+  it('keeps runtime state out of the composer footer', () => {
     render(
       <Composer
         model=""
         models={[]}
         onModelChange={() => {}}
         status="ready"
-        state={{
-          ...baseState,
-          status: 'done',
-          cursor: 3,
-          usage: { inputTokens: 42, outputTokens: 7, costUsd: 0 },
-        }}
         onSubmit={() => {}}
         onCompact={() => {}}
       />,
     )
 
-    const chips = screen.getByTestId('composer-state-chips')
-    expect(chips.textContent ?? '').toContain('AgentDone')
-    expect(chips.textContent ?? '').toContain('Cur3')
-    expect(chips.textContent ?? '').toContain('Tokens42 / 7')
+    expect(screen.queryByTestId('composer-state-chips')).toBeNull()
+    expect(screen.getByTestId('connection-status').textContent ?? '').toContain('Host ready')
   })
 
   it('shows slash command suggestions for /compact', () => {
@@ -95,7 +82,6 @@ describe('Composer', () => {
         models={[]}
         onModelChange={() => {}}
         status="ready"
-        state={baseState}
         compacting
         onSubmit={() => {}}
         onCompact={() => {}}

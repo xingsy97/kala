@@ -1,7 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Loader2, Minimize2, Send } from 'lucide-react'
 
-import type { AgentState } from '@agent-kernel/kernel'
 import type { ModelInfo } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -24,7 +23,6 @@ type Props = {
   models: readonly ModelInfo[]
   onModelChange(model: string): void
   status: string
-  state: AgentState | null
 }
 
 export function Composer({
@@ -36,7 +34,6 @@ export function Composer({
   models,
   onModelChange,
   status,
-  state,
 }: Props): JSX.Element {
   const [text, setText] = useState('')
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
@@ -78,6 +75,7 @@ export function Composer({
     <form
       onSubmit={handleSubmit}
       className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950"
+      data-testid="composer"
     >
       <div className="relative">
         <Textarea
@@ -124,7 +122,10 @@ export function Composer({
           </div>
         ) : null}
       </div>
-      <div className="flex flex-wrap items-center gap-2 px-2 py-1.5 border-t border-slate-200 dark:border-slate-800">
+      <div
+        className="flex items-center gap-2 px-2 py-1.5 border-t border-slate-200 dark:border-slate-800"
+        data-testid="composer-footer"
+      >
         <Select
           value={model && models.some((m) => m.id === model) ? model : ''}
           onValueChange={onModelChange}
@@ -156,8 +157,7 @@ export function Composer({
         >
           {hostStatusLabel(status)}
         </span>
-        <StateChips state={state} />
-        <div className="min-w-0 flex-1 basis-4" />
+        <div className="min-w-0 flex-1" />
         <Button
           type="button"
           variant="outline"
@@ -189,115 +189,12 @@ export function Composer({
   )
 }
 
-function StateChips({ state }: { state: AgentState | null }): JSX.Element | null {
-  if (!state) return null
-  return (
-    <div
-      className="hidden min-w-0 flex-1 flex-wrap items-center gap-1 text-[11px] font-mono text-slate-500 dark:text-slate-400 md:flex"
-      data-testid="composer-state-chips"
-    >
-      <Chip label="Agent" value={agentStatusLabel(state.status)} tone={statusChipTone(state.status)} />
-      <Chip label="Cursor" value={String(state.cursor)} compactLabel="Cur" />
-      <Chip
-        label="Pending tools"
-        compactLabel="Tools"
-        value={String(state.pendingCalls.length)}
-        tone={state.pendingCalls.length > 0 ? 'amber' : undefined}
-      />
-      <Chip
-        label="Tokens"
-        value={`${formatTokens(state.usage.inputTokens)} / ${formatTokens(state.usage.outputTokens)}`}
-      />
-    </div>
-  )
-}
-
-type ChipTone = 'default' | 'green' | 'amber' | 'rose' | 'sky'
-
-function Chip({
-  label,
-  value,
-  tone,
-  compactLabel,
-}: {
-  label: string
-  value: string
-  tone?: ChipTone
-  compactLabel?: string
-}): JSX.Element {
-  return (
-    <span
-      className={cn(
-        'inline-flex h-7 min-w-max shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 leading-none whitespace-nowrap',
-        chipToneStyles(tone),
-      )}
-      title={`${label}: ${value}`}
-    >
-      <span className="opacity-70">{compactLabel ?? label}</span>
-      <span className="text-slate-800 dark:text-slate-100">{value}</span>
-    </span>
-  )
-}
-
-function agentStatusLabel(status: AgentState['status']): string {
-  switch (status) {
-    case 'idle':
-      return 'Ready'
-    case 'done':
-      return 'Done'
-    case 'thinking':
-      return 'Waiting for LLM'
-    case 'executing_tools':
-      return 'Running tools'
-    case 'awaiting_approval':
-      return 'Needs approval'
-    case 'error':
-      return 'Error'
-  }
-}
-
 function hostStatusLabel(status: string): string {
   if (status === 'ready') return 'Host ready'
   if (status === 'connecting') return 'Connecting'
   if (status === 'disconnected') return 'Disconnected'
   if (status === 'error') return 'Host error'
   return status
-}
-
-function chipToneStyles(tone: ChipTone | undefined): string {
-  switch (tone) {
-    case 'green':
-      return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-    case 'amber':
-      return 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
-    case 'rose':
-      return 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
-    case 'sky':
-      return 'bg-sky-500/10 border-sky-500/30 text-sky-700 dark:text-sky-300'
-    default:
-      return 'bg-slate-500/5 border-slate-300/40 dark:border-slate-700/60'
-  }
-}
-
-function statusChipTone(status: AgentState['status']): ChipTone {
-  switch (status) {
-    case 'idle':
-    case 'done':
-      return 'green'
-    case 'thinking':
-    case 'executing_tools':
-      return 'sky'
-    case 'awaiting_approval':
-      return 'amber'
-    case 'error':
-      return 'rose'
-  }
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 function statusStyles(status: string): string {
