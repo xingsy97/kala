@@ -547,3 +547,19 @@ The reference implementation is the tie-breaker only for things this spec is sil
 ## 9. Versioning
 
 This spec is v0.1. Breaking changes bump the major version. The event/effect/state shapes are considered public API and any change is a breaking change. Adding a new event or effect *kind* to the union is allowed as a minor bump if it does not change existing behavior.
+
+---
+
+## 10. Implementation Update (2026-07-05)
+
+The implementation has additive Batch A surface beyond the older v0.1 text:
+
+- `MessageContent` includes `{ type: 'image', source }` for base64 and file-ref images. Reducer handling is opaque and preserves blocks unchanged.
+- `UserMessageEvent` accepts legacy `text` or structured `content`.
+- `AgentState` includes `contextPressureLevel`, `approvalMode`, `todos`, and optional `cwd`.
+- `AgentConfig` includes optional `contextLimit`, `softThreshold`, `hardThreshold`, and `maxAgentDepth`.
+- New events: `compact_replaced`, `approval_mode_changed`, `cwd_changed`.
+- `CallToolEffect` includes optional `cwd`, copied from `state.cwd` when the tool is dispatched.
+- Approval mode is reducer-owned. `deny` synthesizes failed tool results for approval-requiring calls; `allow_all` dispatches without prompting.
+- `todowrite` successful results promote `target.input.todos` into `state.todos`.
+- Context compaction remains host-owned IO; the reducer only applies the deterministic `compact_replaced` event.

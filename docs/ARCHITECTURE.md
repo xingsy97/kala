@@ -286,3 +286,20 @@ Every non-obvious topology choice above has an ADR:
 | Config separated from state | [ADR 0004](adr/0004-config-state-separation.md) |
 | Planning / memory / subagents outside kernel | [ADR 0005](adr/0005-kernel-boundary.md) |
 | No independent relay process in v1 | [ADR 0006](adr/0006-no-relay-process.md) |
+
+---
+
+## 9. Implementation Update (2026-07-05)
+
+Batch A is implemented in the running codebase:
+
+- Host streams LLM deltas as `session:token_delta` and supports cancel-in-flight via `client:cancel_stream`. The log still records one final `llm_response`.
+- Host handles manual/auto compaction by summarizing with the LLM and recording `compact_replaced`.
+- Store load recovers stuck pending tool calls after host restart by appending synthetic failed `tool_result` events.
+- Approval mode lives in kernel state and is changed by `client:set_approval_mode`; host guards `allow_all` with `AK_ALLOW_ALL_OK=1`.
+- Image content is supported in kernel types, Anthropic/OpenAI adapters, and dashboard rendering.
+- `agent` is a host-side builtin tool that creates a child JSONL session, runs it in the same workspace, and returns the child assistant text to the parent.
+- MCP is currently a stub only: `McpServerConfig` plus `initMcp()` returning no tools.
+- Session cwd is changed by `client:set_cwd`, stored as `state.cwd`, and passed to executor tool calls.
+- Background shell is executor-owned: `bash { run_in_background: true }` starts a task, `bash_output` polls logs, and `kill_shell` stops it.
+- Dashboard state chips moved from Inspector into the Composer footer.

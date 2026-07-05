@@ -545,3 +545,18 @@ Host calls Anthropic again; plain text answer:
 ```
 
 This session yields 4 lines in the JSONL event log (see [event-log.md](event-log.md)  - 3).
+
+---
+
+## 12. Implementation Update (2026-07-05)
+
+Current protocol includes these additive events and fields:
+
+- Dashboard  -  Host: `client:compact`, `client:cancel_stream`, `client:set_approval_mode`, `client:set_cwd`, `client:create_session`, `client:list_executors`, `client:list_sessions`, `client:load_history`, `client:delete_session`, `client:set_model`.
+- Host  -  Dashboard: `session:token_delta`, `usage:updated`, `session:model_changed`, `server:executors`, `server:executor_changed`, `server:sessions`, `server:history`, `server:session_deleted`.
+- Kernel events in `event:appended` may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
+- `ToolCallMessage` includes optional `cwd`; executor client merges it into the tool input before running the tool.
+- `SessionSummary` includes optional `currentCwd`.
+- `ExecutorAnnounce` is daemon-scoped and includes stable `workspaceId`, display `workspaceName`, `sandboxRoots`, `workingDir`, runtime, host OS, pid, and start time.
+- `session:token_delta` is UI-only. The event log remains authoritative through the final `llm_response`.
+- Background shell uses normal tool calls: `bash` starts the task, `bash_output` polls it, and `kill_shell` stops it. No special background output wire event is required yet.
