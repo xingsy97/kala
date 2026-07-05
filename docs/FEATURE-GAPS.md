@@ -82,14 +82,17 @@ already in the composer) or as a wire event (`/compact`, `/fork`, `/help`).
 
 ### 3. Sub-agent spawning
 
-**agent-kernel:** Not supported. Kernel has no recursion mechanism.
+**agent-kernel:** Implemented as a host-side `agent` tool, not as kernel
+recursion. Host opens a child session in the same workspace, applies a depth
+guard, drives the child loop, and returns the child assistant text as the
+parent tool result.
 
 - **claude-code-collection**: `Agent` tool spawns subagents with tracked
   nesting depth.
 - Refs: mostly implemented as a special tool, not a kernel primitive.
 
-Deferable — implement as a tool that opens a nested session bound to the
-same workspace, returns its final assistant message as tool output.
+This matches the intended boundary: the pure kernel still does not recurse,
+while orchestration lives in Host.
 
 ### 4. Persistent memory / project memory
 
@@ -106,44 +109,41 @@ loaded as system message prefix. No kernel change required.
 
 **agent-kernel:** Fork already works (dashboard "fork from cursor" +
 `session:forked` protocol event). Resume works implicitly (page reload
-replays the JSONL via `server:history`). What's missing: a **UI to list
-past sessions**, which the Explorer already does per-workspace, and
-resume-from-crash — currently a session that dies mid-tool-call has a
-pending call frozen forever.
+replays the JSONL via `server:history`). Explorer lists sessions per
+workspace. Crash recovery for pending tool calls is implemented by appending
+synthetic failed `tool_result` events when loading a stuck session.
 
 - **pi**: `SessionManager.forkFrom(sourcePath, cwd)` with `parentId`
   tracking on every JSONL entry. We already match this shape via the
   fork protocol event.
 - **codex**: `~/.codex/sessions/`, resume via `threadId`.
 
-Gap to close: on host restart, scan sessions with `state === 'awaiting_tool'`
-and either mark the pending calls failed or re-emit them. Currently the
-`awaiting_tool` state persists across restart but the pending call
-promise is lost.
+Remaining gap: richer resume UI for old sessions and cross-host session
+management. The log-level recovery path is no longer a gap.
 
 ### 6. Approval / permission modes
 
-**agent-kernel:** Kernel marks tools with `requiresApproval`. Host gates on
-that flag. There is no per-user "auto-approve safe ops" mode — every
-approval-requiring call goes through the dashboard `approval:required` event.
+**agent-kernel:** Kernel owns per-session approval mode
+(`auto` | `ask` | `deny` | `allow_all`). Host gates `allow_all` behind
+`AK_ALLOW_ALL_OK=1`; dashboard still needs a picker UI.
 
 - **claude-code-collection**: `auto` / `manual` / `accept-all` modes.
 - **codex**: `--config approval_policy=auto|ask|always_deny`.
 - **opencode**: Layered permission system with glob rules per tool.
 
-Small gap. A per-session "approvals mode" enum passed through
-`agent_config` would slot in cleanly.
+Remaining gap: expose the mode selector in dashboard and add an explicit
+confirmation for `allow_all`.
 
 ### 7. MCP (Model Context Protocol)
 
-**agent-kernel:** Not supported. Tool set is fixed by the executor at build
-time.
+**agent-kernel:** Stubbed only. `McpServerConfig` and `initMcp()` exist, but
+runtime MCP server spawning and dynamic tool registration are not implemented.
 
 - **opencode**: MCP context module, hot-reload.
 - **claude-code-collection**: `/mcp` commands, stdio-based servers.
 
-Executor-side task: accept `mcp_servers` in the config, spawn stdio
-processes, add their advertised tools to the announce message.
+Future executor-side task: accept MCP server config, spawn stdio processes,
+and add their advertised tools to the announce message.
 
 ### 8. Diff / edit tool
 
@@ -183,19 +183,18 @@ picks tools, big model writes code") is out of scope.
 
 ### 12. Streaming UX
 
-**agent-kernel:** LLM adapters call `.stream()` and the host emits
-`event:appended` after each turn is complete. There is no incremental
-token stream to the dashboard — the assistant message appears all at
-once when the turn finishes.
+**agent-kernel:** Host adapters stream and emit `session:token_delta`; the
+event log remains authoritative through the final `llm_response`. Dashboard
+does not yet render deltas incrementally, so the visible chat row still lands
+at turn completion.
 
 - **claude-code-collection**: Yields `TextChunk` / `ThinkingChunk` for
   live rendering.
 - **pi**: Rendered in-place via TUI component model.
 - **opencode**: `scrollback.surface.ts` handles it.
 
-Gap. Would require a `token:delta` protocol event and an incremental
-message renderer. Not tiny, but not architecturally awkward — the
-event log stays authoritative because deltas are UI-only.
+Remaining gap: dashboard incremental message renderer and ESC keybinding. The
+protocol/host side is already implemented.
 
 ---
 
@@ -273,11 +272,11 @@ Grouped by cost/value ratio:
 6. **ESC cancel UI** — host supports `client:cancel_stream`; dashboard still
    needs the keybinding and visible state. ~2 hours.
 7. **`@file` reference in composer** — fuzzy finder + auto-inject. ~1 day.
-8. **Persistent bash shell** in executor — spawn one `bash -i` per session
-   and pipe commands through it. ~half a day + edge-case testing.
+8. **Richer background shell UI** — executor background `bash` polling exists;
+   dashboard does not yet surface long-running task status. ~half a day.
 9. **Diff preview in approval card** — when the pending tool is `edit`
    or `write`, render a diff instead of raw JSON. ~half a day.
-10. **Resume-from-crash** for `awaiting_tool` sessions on host restart.
+10. **Resume/session management UX** for older/offline sessions across hosts.
 
 **Structural, higher effort:**
 11. **MCP in executor** — spawn stdio processes from config, merge their
