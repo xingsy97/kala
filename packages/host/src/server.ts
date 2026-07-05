@@ -22,6 +22,7 @@ import type {
   ClientLoadHistory,
   ClientDeleteSession,
   ClientSetApprovalMode,
+  ClientSetCwd,
   ClientSetModel,
   ClientSubscribe,
   ClientUserApprove,
@@ -422,6 +423,18 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
         mode: p.mode,
       })
     })
+    socket.on('client:set_cwd', async (p: ClientSetCwd) => {
+      const validation = validateSessionCwd(deps, p.sessionId, p.cwd)
+      if (!validation.ok) {
+        deps.broadcastError(p.sessionId, 'host', validation.reason)
+        return
+      }
+      await safeDispatch(deps, p.sessionId, {
+        kind: 'cwd_changed',
+        cwd: validation.cwd,
+      })
+      await broadcastSessionList(deps)
+    })
     socket.on('client:create_session', async (p: ClientCreateSession) => {
       try {
         const { record, created } = await deps.store.ensure({
@@ -614,6 +627,29 @@ async function safeDispatch(
       'kernel',
       err instanceof Error ? err.message : String(err),
     )
+  }
+}
+
+function validateSessionCwd(
+  deps: DashboardDeps,
+  sessionId: string,
+  cwd: string,
+): { ok: true; cwd: string } | { ok: false; reason: string } {
+  const trimmed = cwd.trim()
+  if (trimmed.length === 0) return { ok: false, reason: 'cwd is empty' }
+  const resolved = resolvePath(trimmed)
+  const executor = deps.executors.executorForSession(sessionId)
+  const roots = executor?.sandboxRoots ?? []
+  if (roots.length === 0) return { ok: true, cwd: resolved }
+  for (const root of roots) {
+    const r = resolvePath(root)
+    if (resolved === r || resolved.startsWith(r + sep)) {
+      return { ok: true, cwd: resolved }
+    }
+  }
+  return {
+    ok: false,
+    reason: 'cwd outside sandbox roots',
   }
 }
 

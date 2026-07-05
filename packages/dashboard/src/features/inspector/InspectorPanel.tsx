@@ -123,6 +123,8 @@ function inboundOf(event: AgentEvent): { source: string; tone: string } {
       return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
     case 'approval_mode_changed':
       return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
+    case 'cwd_changed':
+      return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
   }
 }
 

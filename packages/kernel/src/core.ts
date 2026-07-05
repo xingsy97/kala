@@ -65,6 +65,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     cancel: (s) => noop(s),
     compact_replaced: (s, e) => onCompactReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
+    cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
   },
   thinking: {
     llm_response: (s, e, c) => onLlmResponse(s, e.message, e.usage, c),
@@ -88,6 +89,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     user_message: (s, e, c) => onUserMessage(s, e, c),
     compact_replaced: (s, e) => onCompactReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
+    cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
   },
   error: {
     compact_replaced: (s, e) => onCompactReplaced(s, e),
@@ -210,6 +212,7 @@ function onLlmResponse(
         callId: p.callId,
         name: p.name,
         input: p.input,
+        ...(state.cwd !== undefined ? { cwd: state.cwd } : {}),
       })
     }
   }
@@ -307,6 +310,7 @@ function onUserApprove(state: AgentState, callId: string): StepResult {
     callId,
     name: target.name,
     input: target.input,
+    ...(state.cwd !== undefined ? { cwd: state.cwd } : {}),
   }
 
   const stillAwaiting = pendingCalls.some((c) => c.status === 'awaiting_approval')
@@ -472,6 +476,11 @@ function onApprovalModeChanged(
 ): StepResult {
   if (state.approvalMode === mode) return noop(state)
   return { next: { ...state, approvalMode: mode }, effects: [] }
+}
+
+function onCwdChanged(state: AgentState, cwd: string): StepResult {
+  if (state.cwd === cwd) return noop(state)
+  return { next: { ...state, cwd }, effects: [] }
 }
 
 function withPressure(state: AgentState, config: AgentConfig): AgentState {

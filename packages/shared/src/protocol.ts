@@ -172,6 +172,11 @@ export type ClientSetModel = {
   model: string
 }
 
+export type ClientSetCwd = {
+  sessionId: string
+  cwd: string
+}
+
 // ============================================================================
 // Host  -  Dashboard only
 // ============================================================================
@@ -254,6 +259,7 @@ export type ToolCallMessage = {
   callId: string
   name: string
   input: Record<string, unknown>
+  cwd?: string
   timeoutMs?: number
 }
 
@@ -327,6 +333,7 @@ export type SessionSummary = {
   workspaceName?: string
   executorId?: string
   status?: AgentState['status']
+  currentCwd?: string
   firstUserMessage?: string
 }
 
@@ -386,6 +393,7 @@ export type DashboardClientToServerEvents = {
   'client:load_history': (payload: ClientLoadHistory) => void
   'client:delete_session': (payload: ClientDeleteSession) => void
   'client:set_model': (payload: ClientSetModel) => void
+  'client:set_cwd': (payload: ClientSetCwd) => void
   subscribe: (payload: ClientSubscribe) => void
 }
 

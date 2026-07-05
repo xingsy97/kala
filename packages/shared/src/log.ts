@@ -34,6 +34,7 @@ export type HeaderEntry = {
    * workspaces still render with something more useful than a bare ULID.
    */
   workspaceName?: string
+  initialCwd?: string
   formatVersion: 1
   kernelVersion: string
   config: AgentConfig

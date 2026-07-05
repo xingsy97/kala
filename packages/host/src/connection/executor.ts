@@ -39,6 +39,7 @@ type Pending = {
   callId: string
   name: string
   input: Record<string, unknown>
+  cwd?: string
   resolve: (result: { ok: boolean; content: string }) => void
   timer: NodeJS.Timeout
 }
@@ -54,7 +55,11 @@ export type WorkspaceResolver = {
   workspaceIdFor(sessionId: string): string | undefined
 }
 
-export type ExecutorRegistry = ToolDispatcher & {
+export type ExecutorLookup = {
+  executorForSession(sessionId: string): AttachedExecutor | undefined
+}
+
+export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
   attach(
     socket: Socket<
       ExecutorClientToServerEvents,
@@ -141,6 +146,7 @@ export function createExecutorRegistry(
         callId: p.callId,
         name: p.name,
         input: p.input,
+        ...(p.cwd !== undefined ? { cwd: p.cwd } : {}),
         resolve: p.resolve,
         timer,
       })
@@ -151,6 +157,7 @@ export function createExecutorRegistry(
           callId: p.callId,
           name: p.name,
           input: p.input,
+          ...(p.cwd !== undefined ? { cwd: p.cwd } : {}),
           timeoutMs: toolTimeoutMs,
         },
         (ack: ToolResultAck) => {
@@ -266,6 +273,7 @@ export function createExecutorRegistry(
           callId: eff.callId,
           name: eff.name,
           input: eff.input,
+          ...(eff.cwd !== undefined ? { cwd: eff.cwd } : {}),
           resolve,
           timer,
         })
@@ -276,6 +284,7 @@ export function createExecutorRegistry(
             callId: eff.callId,
             name: eff.name,
             input: eff.input,
+            ...(eff.cwd !== undefined ? { cwd: eff.cwd } : {}),
             timeoutMs: toolTimeoutMs,
           },
           (ack: ToolResultAck) => {
@@ -309,6 +318,10 @@ export function createExecutorRegistry(
     snapshot() {
       return [...byExecutor.values()].map(toAttached)
     },
+    executorForSession(sessionId) {
+      const picked = pickBindFor(sessionId)
+      return picked.ok ? toAttached(picked.bind) : undefined
+    },
     onChange(listener) {
       listeners.add(listener)
       return () => {
@@ -317,4 +330,3 @@ export function createExecutorRegistry(
     },
   }
 }
-

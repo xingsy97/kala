@@ -915,3 +915,58 @@ describe('step: approval mode', () => {
     }
   })
 })
+
+describe('step: cwd', () => {
+  it('updates cwd only while idle or done', () => {
+    const s0 = initial()
+    const idle = step(s0, { kind: 'cwd_changed', cwd: '/work/app' }, CONFIG)
+    expect(idle.next.cwd).toBe('/work/app')
+
+    const thinking = step(
+      { ...idle.next, status: 'thinking' },
+      { kind: 'cwd_changed', cwd: '/work/other' },
+      CONFIG,
+    )
+    expect(thinking.next.cwd).toBe('/work/app')
+
+    const done = step(
+      { ...idle.next, status: 'done' },
+      { kind: 'cwd_changed', cwd: '/work/other' },
+      CONFIG,
+    )
+    expect(done.next.cwd).toBe('/work/other')
+  })
+
+  it('routes subsequent tool calls with the current cwd', () => {
+    const config = createConfig({
+      tools: [
+        {
+          name: 'bash',
+          description: 'run shell',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+        },
+      ],
+      systemPrompt: 'sys',
+    })
+    const s0 = step(initial(), { kind: 'cwd_changed', cwd: '/work/app' }, config).next
+    const r = step(
+      { ...s0, status: 'thinking' },
+      {
+        kind: 'llm_response',
+        message: asst({
+          type: 'tool_call',
+          callId: 'c1',
+          name: 'bash',
+          input: { command: 'pwd' },
+        }),
+      },
+      config,
+    )
+    expect(r.effects[0]).toMatchObject({
+      kind: 'call_tool',
+      callId: 'c1',
+      cwd: '/work/app',
+    })
+  })
+})
