@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { GitBranch } from 'lucide-react'
-import type { AgentEvent, AgentState, CallLlmEffect, Effect, Message } from '@agent-kernel/kernel'
+import type {
+  AgentConfig,
+  AgentEvent,
+  AgentState,
+  CallLlmEffect,
+  Effect,
+  Message,
+  ToolSchema,
+} from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
@@ -35,6 +43,7 @@ import { cn } from '../../lib/utils.js'
 
 type Props = {
   state: AgentState | null
+  config?: AgentConfig | null
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
   onFork?(cursor: number): void
@@ -43,6 +52,7 @@ type Props = {
 
 export function InspectorPanel({
   state,
+  config,
   timeline,
   visibleMessagesCount,
   onFork,
@@ -50,6 +60,7 @@ export function InspectorPanel({
 }: Props): JSX.Element {
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
   const [historyView, setHistoryView] = useState<'timeline' | 'state-flow'>('timeline')
+  const [runtimeView, setRuntimeView] = useState<'state' | 'tools'>('state')
   const [selectedTimeline, setSelectedTimeline] = useState<{
     entry: TimelineEntry
     priorCallLlm: { seq: number; effect: CallLlmEffect } | null
@@ -82,7 +93,12 @@ export function InspectorPanel({
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={35} minSize={10}>
-            <RawStateSection state={state} />
+            <RuntimeSection
+              view={runtimeView}
+              onViewChange={setRuntimeView}
+              state={state}
+              config={config}
+            />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
@@ -670,27 +686,129 @@ function compactRequestFromTimeline(
   }
 }
 
-function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {
+function RuntimeSection({
+  view,
+  onViewChange,
+  state,
+  config,
+}: {
+  view: 'state' | 'tools'
+  onViewChange(view: 'state' | 'tools'): void
+  state: AgentState | null
+  config?: AgentConfig | null
+}): JSX.Element {
+  const toolCount = config?.tools.length ?? 0
   return (
     <div className="h-full flex flex-col border-t border-slate-200 dark:border-slate-800">
-      <div className="px-3 py-2 text-xs text-slate-500 flex-none">
-        <span className="font-medium">Agent state</span>
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500 flex-none">
+        <span className="font-medium">Runtime</span>
         <span className="ml-2 normal-case tracking-normal text-slate-500 dark:text-slate-600">
-          full runtime state JSON
+          {view === 'state'
+            ? 'full runtime state JSON'
+            : `${toolCount} registered ${toolCount === 1 ? 'tool' : 'tools'}`}
         </span>
+        <div
+          className="ml-auto inline-flex rounded border border-slate-200 bg-white p-0.5 dark:border-slate-800 dark:bg-slate-950"
+          data-testid="runtime-view-switch"
+        >
+          <button
+            type="button"
+            onClick={() => onViewChange('state')}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px]',
+              view === 'state'
+                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+            )}
+            data-testid="runtime-view-state"
+          >
+            State
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewChange('tools')}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px]',
+              view === 'tools'
+                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+            )}
+            data-testid="runtime-view-tools"
+          >
+            Tools
+          </button>
+        </div>
       </div>
       <div className="flex-1 min-h-0 mx-3 mb-3">
-        {state ? (
-          <JsonBlock
-            label="AgentState"
-            value={state}
-            collapsed={2}
-            className="h-full [&>div:last-child]:max-h-none [&>div:last-child]:h-[calc(100%-2rem)]"
-          />
-        ) : (
-          <div className="text-xs text-slate-500">—</div>
-        )}
+        {view === 'state' ? <RawStateSection state={state} /> : <ToolRegistrySection tools={config?.tools ?? []} />}
       </div>
     </div>
+  )
+}
+
+function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {
+  if (!state) return <div className="text-xs text-slate-500">—</div>
+  return (
+    <JsonBlock
+      label="AgentState"
+      value={state}
+      collapsed={2}
+      className="h-full [&>div:last-child]:max-h-none [&>div:last-child]:h-[calc(100%-2rem)]"
+    />
+  )
+}
+
+function ToolRegistrySection({ tools }: { tools: readonly ToolSchema[] }): JSX.Element {
+  if (tools.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center rounded border border-dashed border-slate-200 px-3 text-center text-xs text-slate-500 dark:border-slate-800">
+        No tools registered for this session.
+      </div>
+    )
+  }
+  return (
+    <ScrollArea className="h-full" data-testid="tool-registry-scrollarea">
+      <div className="space-y-2 pb-1" data-testid="tool-registry">
+        {tools.map((tool) => (
+          <ToolRegistryItem key={tool.name} tool={tool} />
+        ))}
+      </div>
+    </ScrollArea>
+  )
+}
+
+function ToolRegistryItem({ tool }: { tool: ToolSchema }): JSX.Element {
+  return (
+    <section
+      className="rounded border border-slate-200 bg-white p-2 text-xs dark:border-slate-800 dark:bg-slate-950/40"
+      data-testid="tool-registry-item"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono text-slate-800 dark:text-slate-100">
+          {tool.name}
+        </span>
+        <span
+          className={cn(
+            'flex-none rounded border px-1.5 py-0.5 text-[10px]',
+            tool.requiresApproval
+              ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+              : 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200',
+          )}
+        >
+          {tool.requiresApproval ? 'approval required' : 'auto allowed'}
+        </span>
+      </div>
+      <p className="mt-1 line-clamp-3 text-slate-600 dark:text-slate-400">
+        {tool.description || 'No description provided.'}
+      </p>
+      <div className="mt-2">
+        <JsonBlock
+          label={`input schema · ${tool.name}`}
+          value={tool.inputSchema}
+          collapsed={false}
+          className="[&>div:last-child]:max-h-56 [&>div:last-child]:h-56 [&_[data-radix-scroll-area-viewport]]:max-h-56"
+        />
+      </div>
+    </section>
   )
 }

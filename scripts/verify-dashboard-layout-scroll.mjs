@@ -100,6 +100,7 @@ async function verifyViewports(page) {
     await verifyActivityBar(page, viewport.width)
     await verifyVisualIntegrity(page, viewport.width)
     await verifyJsonWheelScroll(page, viewport.width)
+    await verifyToolRegistry(page, viewport.width)
     const path = join(SHOTS_DIR, `dashboard-${viewport.width}.png`)
     await page.screenshot({ path, fullPage: false })
     check(`dashboard screenshot ${viewport.width}px`, true, path)
@@ -425,8 +426,58 @@ async function verifyJsonWheelScroll(page, viewportWidth) {
   check(`json viewer wheel changes scrollTop at ${viewportWidth}px`, after.found && after.scrollTop > before.scrollTop, JSON.stringify(result))
 }
 
+async function verifyToolRegistry(page, viewportWidth) {
+  if (viewportWidth < 1024) {
+    const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="runtime-view-tools"]')))
+    check(`narrow layout does not render inspector tool registry at ${viewportWidth}px`, found === false, String(found))
+    return
+  }
+  await page.click('[data-testid="runtime-view-tools"]')
+  await page.waitForSelector('[data-testid="tool-registry"]', { timeout: 3_000 })
+  const metrics = await page.evaluate(() => {
+    const registry = document.querySelector('[data-testid="tool-registry"]')
+    const item = document.querySelector('[data-testid="tool-registry-item"]')
+    const jsonScroll = item?.querySelector('[data-testid="json-block-scrollarea"]')
+    const viewport = jsonScroll?.querySelector('[data-radix-scroll-area-viewport]')
+    return {
+      text: registry?.textContent ?? '',
+      itemCount: document.querySelectorAll('[data-testid="tool-registry-item"]').length,
+      hasRadixSchemaScroll: Boolean(viewport),
+    }
+  })
+  check(`inspector shows current tool registry at ${viewportWidth}px`, metrics.itemCount >= 1 && metrics.text.includes('layout_fixture_tool'), JSON.stringify(metrics))
+  check(`tool registry shows descriptions and approval mode at ${viewportWidth}px`, metrics.text.includes('Exercise the dashboard tool registry view') && metrics.text.includes('approval required'), JSON.stringify(metrics))
+  check(`tool registry shows input schema parameters at ${viewportWidth}px`, metrics.text.includes('path') && metrics.text.includes('recursive'), JSON.stringify(metrics))
+  check(`tool registry schema uses JSON block Radix scroll area at ${viewportWidth}px`, metrics.hasRadixSchemaScroll === true, JSON.stringify(metrics))
+  await page.click('[data-testid="runtime-view-state"]')
+}
+
 function writeLargeSessionFixture() {
-  const config = { tools: [], systemPrompt: 'layout regression fixture' }
+  const config = {
+    tools: [
+      {
+        name: 'layout_fixture_tool',
+        description: 'Exercise the dashboard tool registry view with a realistic JSON schema.',
+        requiresApproval: true,
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['path'],
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Workspace-relative path to inspect.',
+            },
+            recursive: {
+              type: 'boolean',
+              description: 'Whether nested directories should be included.',
+            },
+          },
+        },
+      },
+    ],
+    systemPrompt: 'layout regression fixture',
+  }
   const initialState = {
     sessionId: SESSION_ID,
     messages: [
@@ -472,7 +523,7 @@ function writeLargeSessionFixture() {
       seq,
       ts: new Date().toISOString(),
       event: userEvent,
-      effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+      effects: [{ kind: 'call_llm', messages: [], tools: config.tools }],
     })
 
     const assistantEvent = {

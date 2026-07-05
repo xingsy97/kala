@@ -472,6 +472,7 @@ export function App(): JSX.Element {
                     <div className="h-full border-l border-slate-200 dark:border-slate-800 min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <InspectorPanel
                         state={session.state}
+                        config={session.config}
                         timeline={session.timeline}
                         visibleMessagesCount={chatMessages.length}
                         onFork={(cursor) => {
