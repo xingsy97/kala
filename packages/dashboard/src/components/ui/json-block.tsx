@@ -49,16 +49,16 @@ export function JsonBlock({
   return (
     <div
       className={cn(
-        'rounded border border-border dark:border-border overflow-hidden bg-muted dark:bg-card/60',
+        'rounded border overflow-hidden bg-muted/40',
         className,
       )}
     >
-      <div className="flex items-center gap-2 px-2 py-1 border-b border-border dark:border-border text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-2 px-2 py-1 border-b text-[11px] text-muted-foreground">
         <span className="flex-1 truncate">{label ?? 'json'}</span>
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] normal-case tracking-normal text-muted-foreground hover:text-foreground dark:hover:text-foreground hover:bg-muted dark:hover:bg-secondary"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] normal-case tracking-normal text-muted-foreground hover:text-foreground hover:bg-accent"
           aria-label={expanded ? 'collapse all JSON' : 'expand all JSON'}
         >
           {expanded ? (
@@ -76,7 +76,7 @@ export function JsonBlock({
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] normal-case tracking-normal text-muted-foreground hover:text-foreground dark:hover:text-foreground hover:bg-muted dark:hover:bg-secondary"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] normal-case tracking-normal text-muted-foreground hover:text-foreground hover:bg-accent"
           aria-label="copy JSON"
         >
           {copied ? (
