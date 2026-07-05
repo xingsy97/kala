@@ -41,6 +41,7 @@ import type {
   ServerHistoryPayload,
   ServerMessageQueueEvent,
   ServerModelsPayload,
+  ServerSettingsPayload,
   SessionErrorEvent,
   SessionErrorScope,
   SessionForkedEvent,
@@ -112,6 +113,13 @@ export type HostServerOptions = {
    */
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
+  /**
+   * Advertised via `GET /settings`. Read-only settings snapshot for the
+   * dashboard's Settings dialog  -  providers, hooks, MCP status, config
+   * file paths. Never carries API keys or command args beyond what the
+   * operator already put in their config.
+   */
+  settings?: ServerSettingsPayload
 }
 
 export type HostServer = {
@@ -143,6 +151,7 @@ export async function startHostServer(
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
+    ...(options.settings ? { settings: options.settings } : {}),
   })
 
   if (options.staticDir) {
@@ -1024,7 +1033,11 @@ const MIME: Record<string, string> = {
 
 function attachJsonRoutes(
   server: HttpServer,
-  payloads: { models: readonly ModelInfo[]; defaultModel: string },
+  payloads: {
+    models: readonly ModelInfo[]
+    defaultModel: string
+    settings?: ServerSettingsPayload
+  },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/'
@@ -1033,20 +1046,33 @@ function attachJsonRoutes(
     // Strip query string / fragment before matching, so `/models?ts= - `
     // (cache-buster) still hits.
     const path = url.split('?')[0]!.split('#')[0]
-    if (path !== '/models') return
-    const body: ServerModelsPayload = {
-      models: payloads.models,
-      defaultModel: payloads.defaultModel,
+    if (path === '/models') {
+      const body: ServerModelsPayload = {
+        models: payloads.models,
+        defaultModel: payloads.defaultModel,
+      }
+      sendJson(req, res, body)
+      return
     }
-    const json = JSON.stringify(body)
-    res.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'content-length': Buffer.byteLength(json).toString(),
-    })
-    if (req.method === 'HEAD') return res.end()
-    res.end(json)
+    if (path === '/settings' && payloads.settings) {
+      sendJson(req, res, payloads.settings)
+      return
+    }
   })
+}
+
+function sendJson(req: IncomingMessage, res: ServerResponse, body: unknown): void {
+  const json = JSON.stringify(body)
+  res.writeHead(200, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(json).toString(),
+  })
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  res.end(json)
 }
 
 function attachStaticHandler(server: HttpServer, staticDir: string): void {
