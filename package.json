@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "pnpm -r --parallel run build",
+    "build:release-assets": "node scripts/build-release-assets.mjs",
     "test": "pnpm -r --parallel run test",
     "typecheck": "pnpm -r --parallel run typecheck",
     "dev": "pnpm -r --parallel run dev",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
+    "esbuild": "0.28.1",
     "puppeteer-core": "^25.3.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
