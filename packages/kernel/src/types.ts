@@ -160,6 +160,23 @@ export type TodoItem = {
 }
 
 export const TODOWRITE_TOOL_NAME = 'todowrite'
+export const MEMORY_WRITE_TOOL_NAME = 'memory_write'
+export const MEMORY_DELETE_TOOL_NAME = 'memory_delete'
+
+/**
+ * Session-scoped notepad the agent maintains for itself across turns of the
+ * current conversation. Written via the `memory_write` executor tool with
+ * `scope: 'session'`; the reducer intercepts the tool_result and lifts the
+ * (key, content) into this map so future turns see it inlined in state
+ * without re-hitting IO. Workspace- and global-scope memory live on disk
+ * (executor writes them, dashboard fetches them lazily) and never touch
+ * kernel state.
+ */
+export type MemoryEntry = {
+  readonly key: string
+  readonly content: string
+  readonly updatedAt: string  // ISO-8601, provider-supplied via tool input
+}
 
 export type ContextPressureLevel = 'none' | 'soft' | 'hard'
 
@@ -188,6 +205,7 @@ export type AgentState = {
   readonly usage: UsageTotal
   readonly cursor: number // monotonic event counter, for replay positioning
   readonly todos: readonly TodoItem[]
+  readonly memory: readonly MemoryEntry[]
   readonly cwd?: string
   /**
    * Derived on every step from `usage.inputTokens / config.contextLimit`.

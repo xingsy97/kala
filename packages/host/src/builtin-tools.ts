@@ -223,4 +223,62 @@ export const builtinTools: readonly ToolSchema[] = [
     },
     requiresApproval: false,
   },
+  {
+    name: 'memory_read',
+    description:
+      'Read the agent\'s persistent notepad. Three scopes exist: `session` (in-memory, dies with the session unless forked), `workspace` (on-disk, shared across sessions in this workspace), `global` (on-disk, shared across every workspace on this machine). Omit `key` to list all keys in the given scope.',
+    inputSchema: {
+      type: 'object',
+      required: ['scope'],
+      properties: {
+        scope: { type: 'string', enum: ['session', 'workspace', 'global'] },
+        key: {
+          type: 'string',
+          description:
+            'The memory entry key. Omit to list all keys. Pattern: ^[a-zA-Z0-9_-]{1,64}$.',
+        },
+      },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'memory_write',
+    description:
+      'Write to the agent\'s persistent notepad. Upserts by `key` within the given scope. Use for durable facts the agent should remember later (project conventions, useful commands, user preferences). Session scope is in-memory only; workspace/global scope persist to disk. Content is plain text/markdown, capped at 128 KB per entry.',
+    inputSchema: {
+      type: 'object',
+      required: ['scope', 'key', 'content'],
+      properties: {
+        scope: { type: 'string', enum: ['session', 'workspace', 'global'] },
+        key: {
+          type: 'string',
+          description: 'Unique key within the scope. Pattern: ^[a-zA-Z0-9_-]{1,64}$.',
+        },
+        content: {
+          type: 'string',
+          description: 'Text/markdown content. Replaces any prior entry with the same key.',
+        },
+        updatedAt: {
+          type: 'string',
+          description:
+            'ISO-8601 timestamp for when this entry was authored (optional). The kernel uses this for session-scope entries; workspace/global scope use file mtime instead.',
+        },
+      },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'memory_delete',
+    description:
+      'Delete a memory entry from the specified scope. Idempotent: deleting a missing key returns success.',
+    inputSchema: {
+      type: 'object',
+      required: ['scope', 'key'],
+      properties: {
+        scope: { type: 'string', enum: ['session', 'workspace', 'global'] },
+        key: { type: 'string' },
+      },
+    },
+    requiresApproval: false,
+  },
 ]
