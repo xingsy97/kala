@@ -32,6 +32,7 @@ import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import {
+  cancelSession,
   createSession,
   deleteQueuedMessage,
   deleteSession,
@@ -651,7 +652,14 @@ export function App(): JSX.Element {
                     </ScrollArea>
                     <TodoDock todos={session.state?.todos ?? []} />
                     <BackgroundTerminalPanel tasks={backgroundTasks} />
-                    <ActivityBar state={session.state} compactStatus={compactStatus} />
+                    <ActivityBar
+                      state={session.state}
+                      compactStatus={compactStatus}
+                      onCancel={() => {
+                        if (!session.socket) return
+                        cancelSession(session.socket, config.sessionId)
+                      }}
+                    />
                     {session.lastError ? (
                       <div
                         className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
@@ -709,6 +717,10 @@ export function App(): JSX.Element {
                         if (session.socket) deleteQueuedMessage(session.socket, config.sessionId, id)
                       }}
                       onCompact={runCompactNow}
+                      onCancel={() => {
+                        if (!session.socket) return
+                        cancelSession(session.socket, config.sessionId)
+                      }}
                       onConsolidateMemory={runConsolidateMemory}
                       workspaceOnline={sessionWorkspaceOnline}
                       onListFiles={listWorkspaceFiles}

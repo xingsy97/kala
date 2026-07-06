@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
 
@@ -87,5 +87,28 @@ describe('ActivityBar', () => {
     )
     expect(screen.getByText('Running tool')).toBeTruthy()
     expect(screen.getByText('bash')).toBeTruthy()
+  })
+
+  it('offers cancel while a turn is active', () => {
+    const onCancel = vi.fn()
+    const { rerender } = render(
+      <ActivityBar
+        compactStatus={{ kind: 'idle' }}
+        state={{ ...baseState, status: 'thinking' }}
+        onCancel={onCancel}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('activity-cancel'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <ActivityBar
+        compactStatus={{ kind: 'idle' }}
+        state={{ ...baseState, status: 'done' }}
+        onCancel={onCancel}
+      />,
+    )
+    expect(screen.queryByTestId('activity-cancel')).toBeNull()
   })
 })

@@ -290,6 +290,20 @@ export function deleteSession(
 }
 
 /**
+ * Interrupt the current turn: dispatches a `cancel` event through the FSM so
+ * pendingCalls are cleared and the executor is told to stop. This is stronger
+ * than `client:cancel_stream`, which only aborts the in-flight HTTP call and
+ * lets whatever was streamed become the final assistant message. Use this
+ * when the user actually wants to stop the agent, not just cut the stream.
+ */
+export function cancelSession(
+  socket: DashboardSocket,
+  sessionId: string,
+): void {
+  socket.emit('client:cancel', { sessionId })
+}
+
+/**
  * Ask the host to materialise a session on disk bound to `workspaceId`.
  * Emitted when the user clicks "New" so the session shows up in the
  * Explorer immediately and is grouped under the right workspace, instead

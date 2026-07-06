@@ -27,6 +27,7 @@ type Props = {
   disabled?: boolean
   onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void
   onCompact(): void
+  onCancel?(): void
   onConsolidateMemory?(): void
   model: string
   models: readonly ModelInfo[]
@@ -77,6 +78,7 @@ export function Composer({
   disabled,
   onSubmit,
   onCompact,
+  onCancel,
   onConsolidateMemory,
   model,
   models,
@@ -114,6 +116,13 @@ export function Composer({
           run: onCompact,
         },
       ]
+      if (onCancel) {
+        commands.push({
+          command: '/cancel',
+          label: 'Stop the current turn',
+          run: onCancel,
+        })
+      }
       if (onConsolidateMemory) {
         commands.push({
           command: '/consolidate-memory',
@@ -123,7 +132,7 @@ export function Composer({
       }
       return commands
     },
-    [onCompact, onConsolidateMemory],
+    [onCompact, onCancel, onConsolidateMemory],
   )
   const matchingCommands = slashQuery
     ? slashCommands.filter((c) => c.command.startsWith(slashQuery))

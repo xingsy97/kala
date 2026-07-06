@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Check, Clock, Loader2, Wrench } from 'lucide-react'
+import { AlertTriangle, Check, Clock, Loader2, Square, Wrench } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 
@@ -16,12 +16,19 @@ export type CompactStatus =
 type Props = {
   state: AgentState | null
   compactStatus: CompactStatus
+  onCancel?: () => void
 }
 
-export function ActivityBar({ state, compactStatus }: Props): JSX.Element | null {
+export function ActivityBar({ state, compactStatus, onCancel }: Props): JSX.Element | null {
   const now = useActivityClock(compactStatus.kind === 'running')
   const activity = activityFor(state, compactStatus, now)
   const Icon = activity.icon
+  const canCancel =
+    onCancel !== undefined &&
+    state !== null &&
+    (state.status === 'thinking' ||
+      state.status === 'executing_tools' ||
+      state.status === 'awaiting_approval')
   return (
     <div
       className={cn(
@@ -52,6 +59,21 @@ export function ActivityBar({ state, compactStatus }: Props): JSX.Element | null
           <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:150ms]" />
           <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:300ms]" />
         </span>
+      ) : null}
+      {canCancel ? (
+        <button
+          type="button"
+          onClick={onCancel}
+          data-testid="activity-cancel"
+          title="Stop the current turn (Esc)"
+          className={cn(
+            activity.pulse ? '' : 'ml-auto',
+            'inline-flex items-center gap-1 rounded border border-current/30 px-1.5 py-0.5 text-[11px] font-medium hover:bg-current/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-current',
+          )}
+        >
+          <Square className="h-3 w-3" />
+          Stop
+        </button>
       ) : null}
     </div>
   )
