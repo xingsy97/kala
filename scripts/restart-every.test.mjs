@@ -6,6 +6,19 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 describe('restart-every', () => {
+  it('is opt-in and not the default backend dev command', async () => {
+    const hostPkg = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile('packages/host/package.json', 'utf8')))
+    const executorPkg = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile('packages/executor/package.json', 'utf8')))
+
+    expect(hostPkg.scripts.dev).toContain('tsx watch')
+    expect(hostPkg.scripts.dev).toContain('--exclude "../dashboard/**"')
+    expect(hostPkg.scripts.dev).not.toContain('restart-every.mjs')
+    expect(executorPkg.scripts.dev).toBe('tsx watch bin/agent-kernel-executor.ts')
+    expect(executorPkg.scripts.dev).not.toContain('restart-every.mjs')
+    expect(hostPkg.scripts['dev:restart']).toContain('restart-every.mjs')
+    expect(executorPkg.scripts['dev:restart']).toContain('restart-every.mjs')
+  })
+
   it('strips pnpm argument separators before spawning the child command', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ak-restart-every-'))
     const script = join(dir, 'argv.mjs')
