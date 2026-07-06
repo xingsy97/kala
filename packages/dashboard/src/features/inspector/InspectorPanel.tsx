@@ -198,17 +198,17 @@ function HistorySection({
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
         <span className="font-medium">History</span>
         <div
-          className="ml-auto inline-flex rounded border border-border bg-white p-0.5 dark:border-border dark:bg-background"
+          className="ml-auto inline-flex rounded border border-border bg-background p-0.5"
           data-testid="history-view-switch"
         >
           <button
             type="button"
             onClick={() => onViewChange('timeline')}
             className={cn(
-              'rounded px-2 py-0.5 text-[11px]',
+              'rounded px-2 py-0.5 text-[11px] transition-colors',
               view === 'timeline'
-                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
-                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
             )}
             data-testid="history-view-timeline"
           >
@@ -218,10 +218,10 @@ function HistorySection({
             type="button"
             onClick={() => onViewChange('state-flow')}
             className={cn(
-              'rounded px-2 py-0.5 text-[11px]',
+              'rounded px-2 py-0.5 text-[11px] transition-colors',
               view === 'state-flow'
-                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
-                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
             )}
             data-testid="history-view-state-flow"
           >
@@ -708,17 +708,17 @@ function RuntimeSection({
             : `${toolCount} registered ${toolCount === 1 ? 'tool' : 'tools'}`}
         </span>
         <div
-          className="ml-auto inline-flex rounded border border-border bg-white p-0.5 dark:border-border dark:bg-background"
+          className="ml-auto inline-flex rounded border border-border bg-background p-0.5"
           data-testid="runtime-view-switch"
         >
           <button
             type="button"
             onClick={() => onViewChange('state')}
             className={cn(
-              'rounded px-2 py-0.5 text-[11px]',
+              'rounded px-2 py-0.5 text-[11px] transition-colors',
               view === 'state'
-                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
-                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
             )}
             data-testid="runtime-view-state"
           >
@@ -728,10 +728,10 @@ function RuntimeSection({
             type="button"
             onClick={() => onViewChange('tools')}
             className={cn(
-              'rounded px-2 py-0.5 text-[11px]',
+              'rounded px-2 py-0.5 text-[11px] transition-colors',
               view === 'tools'
-                ? 'bg-card text-white dark:bg-secondary dark:text-foreground'
-                : 'text-muted-foreground hover:bg-secondary dark:text-muted-foreground dark:hover:bg-card',
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
             )}
             data-testid="runtime-view-tools"
           >
@@ -780,7 +780,7 @@ function ToolRegistrySection({ tools }: { tools: readonly ToolSchema[] }): JSX.E
 function ToolRegistryItem({ tool }: { tool: ToolSchema }): JSX.Element {
   return (
     <section
-      className="rounded border border-border bg-white p-2 text-xs dark:border-border dark:bg-background/40"
+      className="rounded border border-border bg-card p-2 text-xs"
       data-testid="tool-registry-item"
     >
       <div className="flex min-w-0 items-center gap-2">
