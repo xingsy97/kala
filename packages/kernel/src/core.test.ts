@@ -108,6 +108,38 @@ describe('step: user_message', () => {
   })
 })
 
+describe('step: clear', () => {
+  it('clears the current session while preserving session context', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'executing_tools',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'system' }] },
+        { role: 'user', content: [{ type: 'text', text: 'old prompt' }] },
+      ],
+      pendingCalls: [{ callId: 'c1', name: 'bash', input: {}, status: 'dispatched' }],
+      usage: { inputTokens: 100, outputTokens: 20, cacheCreationTokens: 4, cacheReadTokens: 8 },
+      todos: [{ content: 'old todo', status: 'in_progress' }],
+      memory: [{ key: 'old', content: 'value', updatedAt: '2026-07-07T00:00:00.000Z' }],
+      cwd: '/tmp/project',
+      approvalMode: 'ask',
+    }
+
+    const { next, effects } = step(s0, { kind: 'clear' }, CONFIG)
+
+    expect(next.sessionId).toBe(s0.sessionId)
+    expect(next.cwd).toBe('/tmp/project')
+    expect(next.approvalMode).toBe('ask')
+    expect(next.status).toBe('idle')
+    expect(next.messages).toEqual([])
+    expect(next.pendingCalls).toEqual([])
+    expect(next.todos).toEqual([])
+    expect(next.memory).toEqual([])
+    expect(next.usage).toEqual({ inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 })
+    expect(effects).toEqual([])
+  })
+})
+
 describe('step: llm_response (plain answer)', () => {
   it('marks turn done and emits finish', () => {
     const s0 = { ...initial(), status: 'thinking' as const }
@@ -146,14 +178,13 @@ describe('step: llm_response (plain answer)', () => {
       {
         kind: 'llm_response',
         message: asst({ type: 'text', text: 'hi' }),
-        usage: { inputTokens: 100, outputTokens: 20, costUsd: 0.001 },
+        usage: { inputTokens: 100, outputTokens: 20 },
       },
       CONFIG,
     )
     expect(next.usage).toEqual({
       inputTokens: 100,
       outputTokens: 20,
-      costUsd: 0.001,
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     })
@@ -166,7 +197,6 @@ describe('step: llm_response (plain answer)', () => {
       usage: {
         inputTokens: 50,
         outputTokens: 10,
-        costUsd: 0.0005,
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
@@ -183,7 +213,6 @@ describe('step: llm_response (plain answer)', () => {
     expect(next.usage).toEqual({
       inputTokens: 80,
       outputTokens: 15,
-      costUsd: 0.0005, // delta had no cost
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     })
@@ -648,12 +677,13 @@ describe('step: compact_replaced', () => {
         { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
         { role: 'user', content: [{ type: 'text', text: 'c' }] },
       ],
-      usage: { inputTokens: 95, outputTokens: 40, costUsd: 0.02 },
+      usage: { inputTokens: 95, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const { next } = step(
       s0,
       {
         kind: 'compact_replaced',
+        preserveFrom: s0.messages.length,
         summary: 'we discussed X and Y',
         replacedCount: 3,
         tokensBefore: 95,
@@ -668,7 +698,7 @@ describe('step: compact_replaced', () => {
     expect(next.messages[1]?.content).toEqual([
       { type: 'text', text: 'we discussed X and Y' },
     ])
-    expect(next.usage).toEqual({ inputTokens: 10, outputTokens: 40, costUsd: 0.02 })
+    expect(next.usage).toEqual({ inputTokens: 10, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0 })
     expect(next.contextPressureLevel).toBe('none')
   })
 
@@ -680,13 +710,14 @@ describe('step: compact_replaced', () => {
         { role: 'system', content: [{ type: 'text', text: 'you are' }] },
         { role: 'user', content: [{ type: 'text', text: 'a' }] },
       ],
-      usage: { inputTokens: 90, outputTokens: 1, costUsd: 0 },
+      usage: { inputTokens: 90, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const { next } = step(
       s0,
       {
         kind: 'compact_replaced',
         trigger: 'manual',
+        preserveFrom: s0.messages.length,
         request: {
           model: 'm',
           systemPrompt: 'summarize',
@@ -709,6 +740,41 @@ describe('step: compact_replaced', () => {
     expect(next.usage.inputTokens).toBe(3)
   })
 
+  it('replaces only the old prefix when preserveFrom is provided', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'done',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'you are' }] },
+        { role: 'user', content: [{ type: 'text', text: 'old request' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+        { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+      ],
+      usage: { inputTokens: 90, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0 },
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'compact_replaced',
+        preserveFrom: 3,
+        summary: 'old context summary',
+        replacedCount: 3,
+        tokensBefore: 90,
+        tokensAfter: 20,
+      },
+      c,
+    )
+
+    expect(next.messages).toEqual([
+      { role: 'system', content: [{ type: 'text', text: 'you are' }] },
+      { role: 'system', content: [{ type: 'text', text: 'old context summary' }] },
+      { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+    ])
+    expect(next.usage.inputTokens).toBe(20)
+  })
+
   it('is a no-op while awaiting_approval (unsafe to drop pending calls)', () => {
     const s0: AgentState = {
       ...initial(),
@@ -720,12 +786,13 @@ describe('step: compact_replaced', () => {
         { role: 'system', content: [{ type: 'text', text: 'x' }] },
         { role: 'user', content: [{ type: 'text', text: 'big prompt' }] },
       ],
-      usage: { inputTokens: 95, outputTokens: 0, costUsd: 0 },
+      usage: { inputTokens: 95, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const { next } = step(
       s0,
       {
         kind: 'compact_replaced',
+        preserveFrom: s0.messages.length,
         summary: 'should be ignored',
         replacedCount: 0,
         tokensBefore: 95,
@@ -742,12 +809,13 @@ describe('step: compact_replaced', () => {
       ...initial(),
       status: 'error',
       error: 'boom',
-      usage: { inputTokens: 100, outputTokens: 0, costUsd: 0 },
+      usage: { inputTokens: 100, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const { next } = step(
       s0,
       {
         kind: 'compact_replaced',
+        preserveFrom: s0.messages.length,
         summary: 's',
         replacedCount: 0,
         tokensBefore: 100,
