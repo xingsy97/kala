@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, Info, Moon, PanelRight, PanelRightClose, Settings, Sun } from 'lucide-react'
+import { FolderOpen, Info, Moon, PanelRight, PanelRightClose, Settings, Sparkles, Sun } from 'lucide-react'
 
 import type {
   FileContentsResult,
@@ -10,16 +10,6 @@ import type {
 } from '@agent-kernel/shared'
 
 import { Button } from './components/ui/button.js'
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './components/ui/dialog.js'
-import { Input } from './components/ui/input.js'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -32,6 +22,7 @@ import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
+import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { TodoDock } from './features/chat/TodoDock.js'
 import { Explorer } from './features/explorer/Explorer.js'
@@ -127,7 +118,6 @@ export function App(): JSX.Element {
     { sessionId: string } | null
   >(null)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
-  const [cwdDraft, setCwdDraft] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
@@ -324,6 +314,13 @@ export function App(): JSX.Element {
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
   )
+  const hasSelectedSession = currentSession !== undefined
+  const currentWorkspaceExecutor = useMemo(() => {
+    if (!currentSession?.workspaceId) return undefined
+    return control.executors.find(
+      (e) => e.workspaceId === currentSession.workspaceId,
+    )
+  }, [currentSession?.workspaceId, control.executors])
 
   useEffect(() => {
     if (config.explicit) return
@@ -388,24 +385,10 @@ export function App(): JSX.Element {
   }, [currentSession?.workspaceId, control.executors])
 
   const openCwdDialog = (): void => {
-    setCwdDraft(currentCwd)
     setCwdDialogOpen(true)
   }
 
-  const submitCwd = (): void => {
-    const cwd = cwdDraft.trim()
-    if (!cwd || !session.socket) return
-    session.socket.emit('client:set_cwd', {
-      sessionId: config.sessionId,
-      cwd,
-    })
-    setCwdDialogOpen(false)
-    if (!config.explicit) {
-      setConfig((prev) => ({ ...prev, explicit: true }))
-    }
-  }
-
-  const changeCwdInline = (cwd: string): void => {
+  const submitCwd = (cwd: string): void => {
     if (!cwd || !session.socket) return
     session.socket.emit('client:set_cwd', {
       sessionId: config.sessionId,
@@ -496,7 +479,7 @@ export function App(): JSX.Element {
               className="min-w-[240px] bg-sidebar text-sidebar-foreground"
               data-testid="explorer-panel"
             >
-              <div className="h-full border-r border-border dark:border-border">
+              <div className="h-full">
                 <Explorer
                   executors={control.executors}
                   sessions={control.sessions}
@@ -528,10 +511,18 @@ export function App(): JSX.Element {
               onOpenMetadata={() => setMetadataOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
-              inspectorAvailable={wideLayout}
+              inspectorAvailable={wideLayout && hasSelectedSession}
               theme={theme}
               onToggleTheme={toggleTheme}
+              sessionSelected={hasSelectedSession}
             />
+            {!hasSelectedSession ? (
+              <NoSessionArea
+                onNewSession={newSession}
+                hasSessions={control.sessions.length > 0}
+                data-testid="no-session-placeholder"
+              />
+            ) : (
             <ResizablePanelGroup direction="horizontal" autoSaveId="ak-workbench-cols-v1" className="min-h-0 flex-1">
               <ResizablePanel
                 defaultSize={wideLayout ? (inspectorOpen ? 74 : 100) : 100}
@@ -651,7 +642,7 @@ export function App(): JSX.Element {
                 <>
                   <ResizableHandle withHandle />
                   <ResizablePanel defaultSize={26} minSize={22} maxSize={36} className="bg-card text-card-foreground" data-testid="inspector-panel">
-                    <div className="h-full border-l border-border dark:border-border min-h-0 overflow-hidden" data-testid="inspector-drawer">
+                    <div className="h-full min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <InspectorPanel
                         state={session.state}
                         config={session.config}
@@ -674,14 +665,16 @@ export function App(): JSX.Element {
                 </>
               ) : null}
             </ResizablePanelGroup>
+            )}
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
-      <CwdDialog
+      <ChangeCwdDialog
         open={cwdDialogOpen}
-        value={cwdDraft}
-        onValueChange={setCwdDraft}
-        onSubmit={submitCwd}
+        socket={session.socket}
+        workspace={currentWorkspaceExecutor}
+        currentCwd={currentCwd}
+        onSave={submitCwd}
         onOpenChange={setCwdDialogOpen}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
@@ -694,7 +687,7 @@ export function App(): JSX.Element {
         selectedModel={session.selectedModel}
         {...(executorHost !== undefined ? { executorHost } : {})}
         onRename={(label) => renameSessionAt(config.sessionId, label)}
-        onChangeCwd={changeCwdInline}
+        onOpenChangeCwdDialog={openCwdDialog}
         onChangeApprovalMode={onApprovalModeChange}
       />
       <WorkspacePicker
@@ -742,6 +735,38 @@ function readInitialConfig(): Config {
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
+function NoSessionArea({
+  onNewSession,
+  hasSessions,
+}: {
+  onNewSession(): void
+  hasSessions: boolean
+}): JSX.Element {
+  return (
+    <div
+      className="flex-1 min-h-0 flex items-center justify-center bg-background"
+      data-testid="no-session-placeholder"
+    >
+      <div className="flex max-w-md flex-col items-center gap-4 px-6 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border bg-muted/40">
+          <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        </div>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          No session selected
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {hasSessions
+            ? 'Pick a session from the sidebar, or start a new one.'
+            : 'Create your first session to start a conversation with the agent.'}
+        </p>
+        <Button type="button" onClick={onNewSession} data-testid="no-session-new-button">
+          New session
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function WorkbenchToolbar({
   sessionLabel,
   cwd,
@@ -754,6 +779,7 @@ function WorkbenchToolbar({
   inspectorAvailable,
   theme,
   onToggleTheme,
+  sessionSelected,
 }: {
   sessionLabel: string
   cwd: string
@@ -766,19 +792,21 @@ function WorkbenchToolbar({
   inspectorAvailable: boolean
   theme: Theme
   onToggleTheme(): void
+  sessionSelected: boolean
 }): JSX.Element {
   return (
     <div
-      className="h-12 flex-none px-3 border-b border-border bg-card text-card-foreground backdrop-blur-md flex items-center gap-2 text-sm min-w-0"
+      className="h-12 flex-none px-3 bg-card text-card-foreground backdrop-blur-md flex items-center gap-2 text-sm min-w-0"
       data-testid="workbench-toolbar"
     >
       <span
         className="truncate font-medium min-w-0"
-        title={sessionLabel}
+        title={sessionSelected ? sessionLabel : 'no session selected'}
         data-testid="session-label"
       >
-        {sessionLabel}
+        {sessionSelected ? sessionLabel : 'no session selected'}
       </span>
+      {sessionSelected ? (
       <Button
         type="button"
         variant="ghost"
@@ -793,8 +821,10 @@ function WorkbenchToolbar({
           {cwd || 'cwd unset'}
         </span>
       </Button>
+      ) : null}
       <span className="min-w-0 flex-1" />
-      <ConnectionStatus status={status} />
+      {sessionSelected ? <ConnectionStatus status={status} /> : null}
+      {sessionSelected ? (
       <Button
         variant="ghost"
         size="icon"
@@ -805,6 +835,7 @@ function WorkbenchToolbar({
       >
         <Info className="h-4 w-4" />
       </Button>
+      ) : null}
       <Button
         variant="ghost"
         size="icon"
@@ -877,56 +908,6 @@ function statusDot(status: string): string {
   if (status === 'error' || status === 'disconnected') return 'bg-rose-500'
   if (status === 'connecting') return 'bg-amber-500 animate-pulse'
   return 'bg-muted'
-}
-
-function CwdDialog({
-  open,
-  value,
-  onValueChange,
-  onSubmit,
-  onOpenChange,
-}: {
-  open: boolean
-  value: string
-  onValueChange(value: string): void
-  onSubmit(): void
-  onOpenChange(open: boolean): void
-}): JSX.Element {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Change session cwd</DialogTitle>
-          <DialogDescription>
-            Tool calls for this session will run from this directory after the host accepts it.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            onSubmit()
-          }}
-        >
-          <Input
-            value={value}
-            onChange={(e) => onValueChange(e.target.value)}
-            placeholder="/tmp/project"
-            data-testid="cwd-input"
-            autoFocus
-          />
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">Cancel</Button>
-            </DialogClose>
-            <Button type="submit" data-testid="cwd-save-button" disabled={value.trim().length === 0}>
-              Save cwd
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
 }
 
 function LineageBar({
