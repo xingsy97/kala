@@ -46,7 +46,7 @@ describe('SessionMetadataDialog', () => {
         state={baseState}
         selectedModel="claude-opus-4-7"
         onRename={() => {}}
-        onChangeCwd={() => {}}
+        onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={() => {}}
       />,
     )
@@ -55,6 +55,52 @@ describe('SessionMetadataDialog', () => {
     expect(dlg.textContent).toContain('my-mbp')
     expect(dlg.textContent).toContain('claude-opus-4-7')
     expect(dlg.textContent).toContain('1,200')
+  })
+
+  it('shows the current cwd as a read-only display next to a Change trigger', () => {
+    render(
+      <SessionMetadataDialog
+        open
+        onOpenChange={() => {}}
+        sessionId={baseSummary.sessionId}
+        summary={baseSummary}
+        state={baseState}
+        selectedModel={null}
+        onRename={() => {}}
+        onOpenChangeCwdDialog={() => {}}
+        onChangeApprovalMode={() => {}}
+      />,
+    )
+    expect(screen.getByTestId('session-metadata-cwd').textContent).toContain(
+      '/tmp/current',
+    )
+    // The cwd display is not an <input>: users go through the Change -  button,
+    // which opens the Finder-style picker.
+    expect(
+      screen.getByTestId('session-metadata-cwd').tagName.toLowerCase(),
+    ).not.toBe('input')
+    expect(screen.getByTestId('session-metadata-cwd-change')).toBeTruthy()
+  })
+
+  it('closes itself and opens the change-cwd dialog when Change is clicked', () => {
+    const onOpenChange = vi.fn()
+    const onOpenChangeCwdDialog = vi.fn()
+    render(
+      <SessionMetadataDialog
+        open
+        onOpenChange={onOpenChange}
+        sessionId={baseSummary.sessionId}
+        summary={baseSummary}
+        state={baseState}
+        selectedModel={null}
+        onRename={() => {}}
+        onOpenChangeCwdDialog={onOpenChangeCwdDialog}
+        onChangeApprovalMode={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('session-metadata-cwd-change'))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(onOpenChangeCwdDialog).toHaveBeenCalledTimes(1)
   })
 
   it('fires onRename with the trimmed value on blur when label changes', () => {
@@ -68,7 +114,7 @@ describe('SessionMetadataDialog', () => {
         state={baseState}
         selectedModel={null}
         onRename={onRename}
-        onChangeCwd={() => {}}
+        onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={() => {}}
       />,
     )
@@ -78,30 +124,8 @@ describe('SessionMetadataDialog', () => {
     expect(onRename).toHaveBeenCalledWith('renamed')
   })
 
-  it('fires onChangeCwd with a new absolute path on blur', () => {
-    const onChangeCwd = vi.fn()
-    render(
-      <SessionMetadataDialog
-        open
-        onOpenChange={() => {}}
-        sessionId={baseSummary.sessionId}
-        summary={baseSummary}
-        state={baseState}
-        selectedModel={null}
-        onRename={() => {}}
-        onChangeCwd={onChangeCwd}
-        onChangeApprovalMode={() => {}}
-      />,
-    )
-    const cwdInput = screen.getByTestId('session-metadata-cwd') as HTMLInputElement
-    fireEvent.change(cwdInput, { target: { value: '/tmp/next' } })
-    fireEvent.blur(cwdInput)
-    expect(onChangeCwd).toHaveBeenCalledWith('/tmp/next')
-  })
-
-  it('ignores empty label commits and unchanged cwd', () => {
+  it('ignores empty label commits', () => {
     const onRename = vi.fn()
-    const onChangeCwd = vi.fn()
     render(
       <SessionMetadataDialog
         open
@@ -111,16 +135,12 @@ describe('SessionMetadataDialog', () => {
         state={baseState}
         selectedModel={null}
         onRename={onRename}
-        onChangeCwd={onChangeCwd}
+        onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={() => {}}
       />,
     )
     const labelInput = screen.getByTestId('session-metadata-label') as HTMLInputElement
     fireEvent.blur(labelInput)
     expect(onRename).not.toHaveBeenCalled()
-
-    const cwdInput = screen.getByTestId('session-metadata-cwd') as HTMLInputElement
-    fireEvent.blur(cwdInput)
-    expect(onChangeCwd).not.toHaveBeenCalled()
   })
 })
