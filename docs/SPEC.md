@@ -153,7 +153,7 @@ type AgentState = {
   readonly approvalMode: ApprovalMode   // per-session gate for tools with requiresApproval
   readonly contextPressureLevel: ContextPressureLevel  // derived from usage vs config thresholds
   readonly todos: readonly TodoItem[]   // set by the todowrite tool
-  readonly memory: readonly MemoryEntry[]  // session-scope entries lifted by memory_write/memory_delete
+  readonly memory: readonly MemoryEntry[]  // session-scope entries lifted by memory operation=write/delete
   readonly cwd?: string                 // session working directory (absolute); mutated by cwd_changed
   readonly error?: string
 }
@@ -474,7 +474,7 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
 - Append tool_result message with `{ callId, ok, content }` from the event.
 - Remove the call from `pendingCalls`.
 - **`todowrite` special case**: if the settled call's `name === 'todowrite'` and `event.ok === true`, promote `pendingCall.input.todos` into `state.todos` (replacing the whole list).
-- **`memory_write` / `memory_delete` special case (scope='session' only)**: if the settled call's `name === 'memory_write'` and `event.ok === true` and `input.scope === 'session'`, upsert `{ key: input.key, content: input.content, updatedAt: input.updatedAt }` into `state.memory` (replacing any entry with the same key). Symmetric for `memory_delete`  -  remove the matching entry. Workspace / global scope produce ordinary tool_results and never touch `state.memory`. These are the only tools the reducer looks inside; every other tool result is opaque.
+- **`memory` special case (scope='session' only)**: if the settled call's `name === 'memory'`, `event.ok === true`, `input.scope === 'session'`, and `input.operation === 'write'`, upsert `{ key: input.key, content: input.content, updatedAt: input.updatedAt }` into `state.memory` (replacing any entry with the same key). Symmetric for `input.operation === 'delete'`  -  remove the matching entry. Workspace / global scope produce ordinary tool_results and never touch `state.memory`. Legacy `memory_write` / `memory_delete` calls are recognized for replay compatibility. These are the only tools the reducer looks inside; every other tool result is opaque.
 - Apply pending-settled transition ( - 4.6.1).
 
 #### 4.6.1 Pending-settled transition

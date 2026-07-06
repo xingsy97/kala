@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FolderOpen, Info, Moon, PanelRight, PanelRightClose, Settings, Sparkles, Sun } from 'lucide-react'
 
 import type {
+  ConsolidateMemoryResult,
   FileContentsResult,
   FileListEntry,
   FileListResult,
   ModelInfo,
+  OverflowContentsResult,
   ServerModelsPayload,
 } from '@agent-kernel/shared'
 
@@ -31,12 +33,15 @@ import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import {
   createSession,
+  deleteQueuedMessage,
   deleteSession,
+  reorderQueuedMessage,
   renameSession,
   respondApproval,
   setSessionApprovalMode,
   setSessionModel,
   type TimelineEntry,
+  updateQueuedMessage,
   useControlPlane,
   useSession,
 } from './session.js'
@@ -54,11 +59,12 @@ const COMPACT_WATCHDOG_MS = 75_000
  * `~/.claude/settings.json` and `~/.codex/config.toml`; hardcoding a list here
  * would drift away from what the host actually accepts.
  */
-function useModels(): { models: readonly ModelInfo[]; defaultModel: string } {
+function useModels(): { models: readonly ModelInfo[]; defaultModel: string; reload(): void } {
   const [state, setState] = useState<{
     models: readonly ModelInfo[]
     defaultModel: string
   }>({ models: [], defaultModel: '' })
+  const [version, setVersion] = useState(0)
   useEffect(() => {
     let cancelled = false
     void fetch('/models', { cache: 'no-store' })
@@ -76,8 +82,8 @@ function useModels(): { models: readonly ModelInfo[]; defaultModel: string } {
     return () => {
       cancelled = true
     }
-  }, [])
-  return state
+  }, [version])
+  return { ...state, reload: () => setVersion((v) => v + 1) }
 }
 
 function useTheme(): [Theme, () => void] {
@@ -126,7 +132,7 @@ export function App(): JSX.Element {
   const compactStartSeq = useRef<number | null>(null)
   const [theme, toggleTheme] = useTheme()
   const wideLayout = useMinWidth(1024)
-  const { models, defaultModel } = useModels()
+  const { models, defaultModel, reload: reloadModels } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
     try {
       return localStorage.getItem(MODEL_STORAGE_KEY)
@@ -268,6 +274,42 @@ export function App(): JSX.Element {
     session.socket?.emit('client:compact', { sessionId: config.sessionId })
     if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
   }
+
+  const [consolidateToast, setConsolidateToast] = useState<
+    { kind: 'success' | 'info' | 'error'; message: string } | null
+  >(null)
+  const consolidateToastTimer = useRef<number | null>(null)
+  const runConsolidateMemory = useCallback((): void => {
+    if (!session.socket) return
+    const socket = session.socket
+    const requestId = crypto.randomUUID()
+    const handler = (result: ConsolidateMemoryResult): void => {
+      if (result.requestId !== requestId) return
+      socket.off('server:memory_consolidated', handler)
+      if (consolidateToastTimer.current !== null) {
+        window.clearTimeout(consolidateToastTimer.current)
+      }
+      if (result.error) {
+        setConsolidateToast({ kind: 'error', message: `Consolidate memory failed: ${result.error}` })
+      } else if (result.saved.length > 0) {
+        setConsolidateToast({
+          kind: 'success',
+          message: `Saved ${result.saved.length} memor${result.saved.length === 1 ? 'y' : 'ies'}: ${result.saved.join(', ')}`,
+        })
+      } else {
+        setConsolidateToast({
+          kind: 'info',
+          message: result.reason ?? 'Nothing worth saving',
+        })
+      }
+      consolidateToastTimer.current = window.setTimeout(() => {
+        setConsolidateToast(null)
+        consolidateToastTimer.current = null
+      }, 6000)
+    }
+    socket.on('server:memory_consolidated', handler)
+    socket.emit('client:consolidate_memory', { requestId, sessionId: config.sessionId })
+  }, [session.socket, config.sessionId])
 
   const control = useControlPlane(session.socket)
 
@@ -466,6 +508,34 @@ export function App(): JSX.Element {
     [session.socket, currentSession?.workspaceId],
   )
 
+  const readOverflow = useCallback(
+    async (callId: string): Promise<{ content?: string; error?: string }> => {
+      const socket = session.socket
+      if (!socket) return { error: 'not connected' }
+      return await new Promise((resolve) => {
+        const requestId = crypto.randomUUID()
+        const timer = setTimeout(() => {
+          socket.off('server:overflow_contents', handler)
+          resolve({ error: 'timed out' })
+        }, 5000)
+        const handler = (result: OverflowContentsResult): void => {
+          if (result.requestId !== requestId) return
+          clearTimeout(timer)
+          socket.off('server:overflow_contents', handler)
+          if (result.error) resolve({ error: result.error })
+          else resolve({ content: result.content ?? '' })
+        }
+        socket.on('server:overflow_contents', handler)
+        socket.emit('client:read_overflow', {
+          requestId,
+          sessionId: config.sessionId,
+          callId,
+        })
+      })
+    },
+    [session.socket, config.sessionId],
+  )
+
   return (
     <div className="h-screen w-screen bg-background text-foreground overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
@@ -552,6 +622,7 @@ export function App(): JSX.Element {
                         items={chatItems}
                         highlightIndex={highlightIndex}
                         pendingApprovals={session.pendingApprovals}
+                        onReadOverflow={readOverflow}
                         onApprovalDecision={(callId, decision) => {
                           if (!session.socket) return
                           respondApproval(session.socket, config.sessionId, callId, decision)
@@ -594,6 +665,22 @@ export function App(): JSX.Element {
                         workspace <span className="font-mono">{currentSession?.workspaceName ?? currentSession?.workspaceId}</span> is offline  -  start its executor to send messages.
                       </div>
                     ) : null}
+                    {consolidateToast ? (
+                      <div
+                        className={cn(
+                          'px-3 py-2 text-xs border-t',
+                          consolidateToast.kind === 'success' &&
+                            'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900',
+                          consolidateToast.kind === 'error' &&
+                            'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900',
+                          consolidateToast.kind === 'info' &&
+                            'text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-900',
+                        )}
+                        data-testid="consolidate-toast"
+                      >
+                        {consolidateToast.message}
+                      </div>
+                    ) : null}
                     <ContextPressureBanner
                       state={session.state}
                       compactRunning={compactStatus.kind === 'running'}
@@ -609,7 +696,17 @@ export function App(): JSX.Element {
                       state={session.state}
                       config={session.config}
                       queuedMessages={session.queuedMessages}
+                      onQueuedReorder={(id, beforeId) => {
+                        if (session.socket) reorderQueuedMessage(session.socket, config.sessionId, id, beforeId)
+                      }}
+                      onQueuedUpdate={(id, text) => {
+                        if (session.socket) updateQueuedMessage(session.socket, config.sessionId, id, text)
+                      }}
+                      onQueuedDelete={(id) => {
+                        if (session.socket) deleteQueuedMessage(session.socket, config.sessionId, id)
+                      }}
                       onCompact={runCompactNow}
+                      onConsolidateMemory={runConsolidateMemory}
                       workspaceOnline={sessionWorkspaceOnline}
                       onListFiles={listWorkspaceFiles}
                       onReadFile={readWorkspaceFile}
@@ -677,7 +774,7 @@ export function App(): JSX.Element {
         onSave={submitCwd}
         onOpenChange={setCwdDialogOpen}
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
       <SessionMetadataDialog
         open={metadataOpen}
         onOpenChange={setMetadataOpen}

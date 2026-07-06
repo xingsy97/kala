@@ -18,12 +18,12 @@
  */
 
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import process from 'node:process'
 
-import type { ModelInfo } from '@agent-kernel/shared'
+import type { ManualModelInput, ModelInfo, ModelSource } from '@agent-kernel/shared'
 
 import type { HookConfig, HookEvent } from './hooks.js'
 
@@ -31,6 +31,7 @@ export type ProviderSpec = {
   id: string
   label: string
   wire: 'anthropic' | 'openai'
+  source: ModelSource
   baseUrl?: string
   apiKey: string
   models: readonly string[]
@@ -40,11 +41,13 @@ export type RuntimeConfig = {
   providers: readonly ProviderSpec[]
   models: readonly ModelInfo[]
   defaultModel: string
+  manualModels: readonly ManualModelInput[]
 }
 
 export type LoadRuntimeConfigOptions = {
   claudeSettingsPath?: string
   codexConfigPath?: string
+  manualModelsPath?: string
 }
 
 export function loadRuntimeConfig(
@@ -55,29 +58,40 @@ export function loadRuntimeConfig(
     opts.claudeSettingsPath ?? join(home, '.claude', 'settings.json')
   const codexPath =
     opts.codexConfigPath ?? join(home, '.codex', 'config.toml')
+  const manualPath =
+    opts.manualModelsPath ?? join(home, '.config', 'agent-kernel', 'models.json')
 
   const providers: ProviderSpec[] = []
   const claude = loadClaudeSettings(claudePath)
   if (claude) providers.push(claude)
   const codex = loadCodexProviders(codexPath)
   providers.push(...codex.providers)
+  const discoveredModels = new Map(providers.map((p) => [p.id, new Set(p.models)]))
+  const manualModels = loadManualModels(manualPath)
+  applyManualModels(providers, manualModels)
 
   const models: ModelInfo[] = providers.flatMap((p) =>
-    p.models.map((m) => modelInfo(m, p.label)),
+    p.models.map((m) => modelInfo(m, p.label, { providerId: p.id, source: modelSourceFor(p, m, manualModels, discoveredModels) })),
   )
 
   const defaultModel =
     codex.defaultModel ?? claude?.models[0] ?? models[0]?.id ?? ''
 
-  return { providers, models, defaultModel }
+  return { providers, models, defaultModel, manualModels }
 }
 
-export function modelInfo(model: string, provider: string): ModelInfo {
-  const contextWindow = knownContextWindow(model)
+export function modelInfo(
+  model: string,
+  provider: string,
+  opts: { providerId?: string; source?: ModelSource; label?: string; contextWindow?: number } = {},
+): ModelInfo {
+  const contextWindow = opts.contextWindow ?? knownContextWindow(model)
   return {
     id: model,
-    label: model,
+    label: opts.label ?? model,
     provider,
+    ...(opts.providerId ? { providerId: opts.providerId } : {}),
+    ...(opts.source ? { source: opts.source } : {}),
     ...(contextWindow ? { contextWindow } : {}),
   }
 }
@@ -121,13 +135,16 @@ function loadClaudeSettings(path: string): ProviderSpec | undefined {
     (parsed.apiKeyHelper ? runApiKeyHelper(parsed.apiKeyHelper) : undefined)
   if (!apiKey) return undefined
   const primary = env.ANTHROPIC_MODEL
+  const small = env.ANTHROPIC_SMALL_FAST_MODEL
   const models: string[] = []
   if (primary) models.push(primary)
+  if (small && !models.includes(small)) models.push(small)
   if (models.length === 0) return undefined
   return {
     id: 'anthropic',
     label: 'Anthropic',
     wire: 'anthropic',
+    source: 'claude-settings',
     ...(env.ANTHROPIC_BASE_URL ? { baseUrl: env.ANTHROPIC_BASE_URL } : {}),
     apiKey,
     models,
@@ -179,6 +196,7 @@ function loadCodexProviders(path: string): CodexParsed {
       id: p.id,
       label: p.name ?? p.id,
       wire: 'openai',
+      source: 'codex-config',
       ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
       apiKey,
       models,
@@ -188,6 +206,71 @@ function loadCodexProviders(path: string): CodexParsed {
     ...(defaultModel ? { defaultModel } : {}),
     providers,
   }
+}
+
+// ============================================================================
+// Manual models (`~/.config/agent-kernel/models.json`)
+// ============================================================================
+
+export type ManualModelsFile = {
+  models: readonly ManualModelInput[]
+}
+
+export function loadManualModels(path: string): readonly ManualModelInput[] {
+  const raw = tryReadFile(path)
+  if (raw === undefined) return []
+  try {
+    const parsed = JSON.parse(raw) as Partial<ManualModelsFile>
+    if (!Array.isArray(parsed.models)) return []
+    return parsed.models.filter(isManualModelInput)
+  } catch {
+    return []
+  }
+}
+
+export function writeManualModels(path: string, models: readonly ManualModelInput[]): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const normalized = models.map((m) => ({
+    providerId: m.providerId,
+    id: m.id,
+    ...(m.label ? { label: m.label } : {}),
+    ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+  }))
+  writeFileSync(path, `${JSON.stringify({ models: normalized }, null, 2)}\n`, 'utf8')
+}
+
+function applyManualModels(
+  providers: ProviderSpec[],
+  manualModels: readonly ManualModelInput[],
+): void {
+  for (const manual of manualModels) {
+    const provider = providers.find((p) => p.id === manual.providerId)
+    if (!provider || provider.models.includes(manual.id)) continue
+    provider.models = [...provider.models, manual.id]
+  }
+}
+
+function modelSourceFor(
+  provider: ProviderSpec,
+  model: string,
+  manualModels: readonly ManualModelInput[],
+  discoveredModels: ReadonlyMap<string, ReadonlySet<string>>,
+): ModelSource {
+  const discovered = discoveredModels.get(provider.id)
+  if (discovered?.has(model)) return provider.source
+  return manualModels.some((m) => m.providerId === provider.id && m.id === model)
+    ? 'manual'
+    : provider.source
+}
+
+function isManualModelInput(value: unknown): value is ManualModelInput {
+  if (!value || typeof value !== 'object') return false
+  const rec = value as Record<string, unknown>
+  if (typeof rec.providerId !== 'string' || rec.providerId.length === 0) return false
+  if (typeof rec.id !== 'string' || rec.id.length === 0) return false
+  if (rec.label !== undefined && typeof rec.label !== 'string') return false
+  if (rec.contextWindow !== undefined && typeof rec.contextWindow !== 'number') return false
+  return true
 }
 
 type CodexProviderBlock = {

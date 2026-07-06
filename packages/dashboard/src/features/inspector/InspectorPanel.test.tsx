@@ -112,16 +112,21 @@ describe('InspectorPanel', () => {
     render(<InspectorPanel state={null} timeline={[]} />)
 
     expect(screen.getByText('Agent Kernel Debugger')).toBeTruthy()
-    expect(screen.getByText('Trace View')).toBeTruthy()
+    expect(screen.getByTestId('inspector-sidebar-tabs')).toBeTruthy()
+    expect(screen.getByTestId('debugger-sidebar-tabpanel')).toBeTruthy()
     expect(screen.getByText('Runtime Objects')).toBeTruthy()
     expect(screen.queryByText('Selected Detail')).toBeNull()
-    expect(screen.getByText('No reducer events yet.')).toBeTruthy()
     expect(screen.getByText('No AgentState loaded.')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+    expect(screen.getByTestId('trace-sidebar-tabpanel')).toBeTruthy()
+    expect(screen.getByText('No reducer events yet.')).toBeTruthy()
   })
 
   it('combines event timeline and state flow in Reducer Trace rows', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     expect(screen.getByTestId('trace-view-switch')).toBeTruthy()
     expect(screen.getAllByTestId('timeline-row')).toHaveLength(4)
     expect(document.body.textContent ?? '').toContain('idle  -  thinking')
@@ -132,6 +137,7 @@ describe('InspectorPanel', () => {
   it('shows LLM calls with provider trace and selected request/response JSON', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     fireEvent.click(screen.getByTestId('trace-view-switch-llm'))
     expect(screen.getAllByTestId('llm-call-row')).toHaveLength(2)
     expect(document.body.textContent ?? '').toContain('anthropic / claude-sonnet-4-6')
@@ -145,9 +151,47 @@ describe('InspectorPanel', () => {
     expect(detail.textContent ?? '').toContain('test-redacted-api-key')
   })
 
+  it('falls back to provider request body when trace model is missing', () => {
+    const legacyTraceTimeline: TimelineEntry[] = [
+      {
+        seq: 1,
+        ts: '2026-07-06T06:10:00Z',
+        event: { kind: 'user_message', text: 'Use the small model.' },
+        effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+      },
+      {
+        seq: 2,
+        ts: '2026-07-06T06:10:01Z',
+        event: {
+          kind: 'llm_response',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+        },
+        effects: [],
+        llmTrace: {
+          provider: 'unknown',
+          request: {
+            url: 'https://api.anthropic.com/v1/messages',
+            headers: { 'content-type': 'application/json' },
+            body: { model: 'claude-haiku-4-6', messages: [] },
+          },
+          response: { status: 200, body: { content: [{ type: 'text', text: 'Done.' }] } },
+        } as TimelineEntry['llmTrace'],
+      },
+    ]
+    render(<InspectorPanel state={baseState} timeline={legacyTraceTimeline} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+    fireEvent.click(screen.getByTestId('trace-view-switch-llm'))
+    expect(document.body.textContent ?? '').toContain('anthropic / claude-haiku-4-6')
+
+    fireEvent.click(screen.getByTestId('llm-call-row'))
+    expect(screen.getByTestId('llm-detail').textContent ?? '').toContain('claude-haiku-4-6')
+  })
+
   it('groups tool lifecycle events by call id', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     fireEvent.click(screen.getByTestId('trace-view-switch-tools'))
     expect(screen.getAllByTestId('tool-call-row')).toHaveLength(1)
     expect(document.body.textContent ?? '').toContain('requested #121  -  approved #122  -  result #123')
@@ -192,6 +236,42 @@ describe('InspectorPanel', () => {
     expect(document.body.textContent ?? '').toContain('Input schema  -  edit')
   })
 
+  it('marks the skill loader tool in the tools object inspector', () => {
+    render(
+      <InspectorPanel
+        state={baseState}
+        timeline={timeline}
+        config={{
+          tools: [
+            {
+              name: 'skill',
+              description: 'Load one reusable agent skill by name.',
+              requiresApproval: false,
+              inputSchema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string' } },
+              },
+            },
+            {
+              name: 'edit',
+              description: 'Replace exact text in a workspace file.',
+              requiresApproval: true,
+              inputSchema: { type: 'object' },
+            },
+          ],
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('runtime-view-switch-tools'))
+
+    expect(screen.getByTestId('tool-registry').textContent ?? '').toContain('skill')
+    expect(screen.getByTestId('tool-registry').textContent ?? '').toContain('auto')
+    expect(screen.getByText('Skill loader')).toBeTruthy()
+    expect(screen.getByText('auto allowed')).toBeTruthy()
+  })
+
   it('invokes jump-to-message and confirms fork from reducer rows', () => {
     const onJumpToMessage = vi.fn()
     const onFork = vi.fn()
@@ -211,6 +291,7 @@ describe('InspectorPanel', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     fireEvent.click(screen.getByTitle(/scroll chat to message #1/))
     expect(onJumpToMessage).toHaveBeenCalledWith(1)
 
@@ -241,6 +322,7 @@ describe('InspectorPanel', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     fireEvent.click(screen.getAllByTestId('timeline-row-header')[2]!)
     const details = screen.getByTestId('timeline-row-details')
     expect(details.textContent ?? '').toContain('Compaction Request')

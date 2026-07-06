@@ -13,6 +13,7 @@
  */
 
 import { hostname, platform } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
 
 import type {
@@ -31,9 +32,14 @@ import type { Sandbox } from './sandbox.js'
 import { allTools as defaultTools } from './tools/index.js'
 import type { Tool } from './tools/registry.js'
 import { ToolError, createToolRegistry } from './tools/registry.js'
+import {
+  maybeOverflow,
+  overflowConfigFromEnv,
+  type OverflowConfig,
+} from './tools/overflow.js'
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
-import { listDirs, listFiles, readWorkspaceFile } from './fs-handlers.js'
+import { listDirs, listFiles, readOverflowFile, readWorkspaceFile } from './fs-handlers.js'
 
 export type ExecutorOptions = {
   /** Host URL (e.g. `wss://host.example.com` or `http://localhost:3000`). */
@@ -82,6 +88,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   const executorId = options.executorId ?? ulid()
   const workspaceId = options.workspaceId ?? loadOrCreateWorkspaceId()
   const workspaceName = options.workspaceName ?? hostname()
+  const workspaceRoot = sandboxRoots[0] ?? process.cwd()
+  const overflowConfig = overflowConfigFromEnv(
+    join(workspaceRoot, '.agent-kernel', 'overflow'),
+  )
 
   const factory = options.ioFactory ?? clientIO
   const socket = factory(`${options.host}/executor`, {
@@ -123,7 +133,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   socket.on('tool:call', async (payload: ToolCallMessage, ack) => {
     const controller = new AbortController()
     inFlight.set(payload.callId, controller)
-    const result = await runOne(tools, sandbox, controller.signal, payload)
+    const result = await runOne(tools, sandbox, controller.signal, payload, overflowConfig)
     inFlight.delete(payload.callId)
     ack(result)
     socket.emit('executor:tool_result', {
@@ -151,6 +161,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     ack(await readWorkspaceFile(payload, sandbox))
   })
 
+  socket.on('fs:read_overflow', async (payload, ack) => {
+    ack(await readOverflowFile(payload, sandbox))
+  })
+
   return {
     executorId,
     workspaceId,
@@ -165,11 +179,20 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   }
 }
 
+const OVERFLOW_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
+  'todowrite',
+  'memory',
+  'memory_write',
+  'memory_delete',
+  'bash_output',
+])
+
 async function runOne(
   tools: Map<string, Tool>,
   sandbox: Sandbox,
   signal: AbortSignal,
   payload: ToolCallMessage,
+  overflowConfig: OverflowConfig,
 ): Promise<ToolResultAck> {
   const tool = tools.get(payload.name)
   if (!tool) {
@@ -185,7 +208,15 @@ async function runOne(
       signal,
       ...(payload.cwd ? { cwd: payload.cwd } : {}),
     })
-    return { callId: payload.callId, ok: true, content }
+    if (OVERFLOW_EXEMPT_TOOLS.has(payload.name)) {
+      return { callId: payload.callId, ok: true, content }
+    }
+    const overflow = await maybeOverflow(content, {
+      sessionId: payload.sessionId,
+      callId: payload.callId,
+      config: overflowConfig,
+    })
+    return { callId: payload.callId, ok: true, content: overflow.content }
   } catch (err) {
     if (err instanceof ToolError) {
       return {

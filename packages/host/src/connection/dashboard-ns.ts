@@ -15,6 +15,7 @@ import type {
   ClientCancel,
   ClientCancelStream,
   ClientCompact,
+  ClientConsolidateMemory,
   ClientCreateSession,
   ClientDeleteSession,
   ClientFork,
@@ -24,10 +25,14 @@ import type {
   ClientListSessions,
   ClientLoadHistory,
   ClientReadFile,
+  ClientReadOverflow,
+  ClientDeleteQueuedMessage,
+  ClientReorderQueuedMessage,
   ClientRenameSession,
   ClientSetApprovalMode,
   ClientSetCwd,
   ClientSetModel,
+  ClientUpdateQueuedMessage,
   ClientSubscribe,
   ClientUserApprove,
   ClientUserMessage,
@@ -52,7 +57,8 @@ import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { Namespace } from 'socket.io'
 import { ulid } from 'ulid'
 
-import type { LoopHandle } from '../loop.js'
+import type { HostLoopDeps, LoopHandle } from '../loop.js'
+import { consolidateMemory, type ConsolidationOutcome } from '../memory-consolidation.js'
 import { readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
@@ -68,6 +74,9 @@ export type QueuedUserMessage = {
 
 export type MessageQueueManager = {
   enqueue(sessionId: string, msg: QueuedUserMessage, priority?: 'front'): void
+  reorder(sessionId: string, id: string, beforeId?: string | null): void
+  update(sessionId: string, id: string, text: string): void
+  delete(sessionId: string, id: string): void
   pending(sessionId: string): number
   snapshot(sessionId: string): ServerMessageQueueEvent
   drain(sessionId: string): Promise<void>
@@ -85,6 +94,7 @@ export function isRestingStatus(status: AgentState['status']): boolean {
 export type DashboardDeps = {
   store: SessionStore
   loop: LoopHandle
+  loopDeps: HostLoopDeps
   executors: ReturnType<typeof createExecutorRegistry>
   defaultConfig: AgentConfig
   authToken?: string
@@ -310,6 +320,15 @@ export function configureDashboardNamespace(
       })
       await broadcastSessionList(deps)
     })
+    socket.on('client:reorder_queued_message', (p: ClientReorderQueuedMessage) => {
+      deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId)
+    })
+    socket.on('client:update_queued_message', (p: ClientUpdateQueuedMessage) => {
+      deps.messageQueues.update(p.sessionId, p.id, p.text)
+    })
+    socket.on('client:delete_queued_message', (p: ClientDeleteQueuedMessage) => {
+      deps.messageQueues.delete(p.sessionId, p.id)
+    })
     socket.on('client:rename_session', async (p: ClientRenameSession) => {
       try {
         const applied = await deps.store.rename(p.sessionId, p.label)
@@ -337,6 +356,39 @@ export function configureDashboardNamespace(
     socket.on('client:read_file', async (p: ClientReadFile) => {
       const result = await deps.executors.readFile(p)
       socket.emit('server:file_contents', result)
+    })
+    socket.on('client:read_overflow', async (p: ClientReadOverflow) => {
+      const record = deps.store.get(p.sessionId) ?? (await deps.store.load(p.sessionId).catch(() => undefined))
+      const workspaceId = record?.workspaceId
+      if (!workspaceId) {
+        socket.emit('server:overflow_contents', {
+          requestId: p.requestId,
+          sessionId: p.sessionId,
+          callId: p.callId,
+          error: 'unknown session or session has no workspace',
+        })
+        return
+      }
+      const result = await deps.executors.readOverflow(p, workspaceId)
+      socket.emit('server:overflow_contents', result)
+    })
+    socket.on('client:consolidate_memory', async (p: ClientConsolidateMemory) => {
+      const outcome = await consolidateMemory(deps.loopDeps, p.sessionId).catch(
+        (err: unknown): ConsolidationOutcome => ({
+          saved: [],
+          skipped: 0,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      )
+      const payload = {
+        requestId: p.requestId,
+        sessionId: p.sessionId,
+        saved: outcome.saved,
+        skipped: outcome.skipped,
+        ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+        ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+      }
+      socket.emit('server:memory_consolidated', payload)
     })
     socket.on('client:create_session', async (p: ClientCreateSession) => {
       try {

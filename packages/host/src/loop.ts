@@ -35,6 +35,8 @@ import type { SessionRecord, SessionStore } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './compaction.js'
 import { AGENT_TOOL_NAME, runAgentTool } from './agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './hooks-runner.js'
+import { runSkillTool, SKILL_TOOL_NAME } from './skills.js'
+import type { SkillRegistry } from './skills.js'
 
 export type LoopBroadcast = {
   onEvent(
@@ -76,6 +78,7 @@ export type HostLoopDeps = {
   models?: ModelResolver
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
+  skills?: SkillRegistry
 }
 
 export type LoopHandle = {
@@ -308,7 +311,11 @@ async function performCallTool(
     }
     const res = effect.name === AGENT_TOOL_NAME
       ? await runAgentTool(deps, sessionId, effect, aborts)
-      : await deps.tools.callTool(sessionId, effect)
+      : effect.name === SKILL_TOOL_NAME
+        ? deps.skills
+          ? await runSkillTool(deps.skills, effect.input)
+          : { ok: false, content: 'skills are not configured on this host' }
+        : await deps.tools.callTool(sessionId, effect)
     await runPostToolHooks(deps, sessionId, effect, res)
     await dispatchOne(
       deps,

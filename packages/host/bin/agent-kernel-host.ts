@@ -26,13 +26,13 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
-import type { ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { ManualModelInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
 
 import { anthropicAdapter } from '../src/llm/anthropic.js'
 import { openaiAdapter } from '../src/llm/openai.js'
-import { routerAdapter } from '../src/llm/router.js'
+import { routerAdapter, type MutableRouter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
-import { builtinTools } from '../src/builtin-tools.js'
+import { createBuiltinTools } from '../src/builtin-tools.js'
 import { createHookRunner } from '../src/hooks.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import {
@@ -41,16 +41,19 @@ import {
   loadRuntimeConfig,
   modelInfo,
   type ProviderSpec,
+  writeManualModels,
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
+import { discoverSkills } from '../src/skills.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 
 async function main(): Promise<void> {
   const runtime = loadRuntimeConfig()
-  const { llm, models, defaultModel } = buildAdapters(runtime.providers, {
+  const registry = createModelRegistry(runtime.providers, runtime.manualModels, {
     fallbackDefault: runtime.defaultModel,
   })
+  const { llm, defaultModel } = registry
 
   const port = Number(process.env.HOST_PORT ?? 3000)
   const sessionsDir =
@@ -58,24 +61,29 @@ async function main(): Promise<void> {
   const staticDir = resolveDashboardDir()
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
+  const skills = await discoverSkills()
 
-  const settings: ServerSettingsPayload = {
-    providers: runtime.providers.map((p) => ({
-      id: p.id,
-      label: p.label,
-      wire: p.wire,
-      ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
-      models: p.models,
-    })),
-    defaultModel,
-    hooks: hooks.map((h) => ({
+  const manualModelsPath = join(homedir(), '.config', 'agent-kernel', 'models.json')
+  const hookSummaries = hooks.map((h) => ({
       event: h.event,
       command: h.command,
       ...(h.match !== undefined ? { match: h.match } : {}),
+  }))
+  const makeSettings = (): ServerSettingsPayload => ({
+    providers: registry.providers.map((p) => ({
+      id: p.id,
+      label: p.label,
+      wire: p.wire,
+      source: p.source,
+      ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
+      models: registry.models.filter((m) => m.providerId === p.id),
     })),
+    defaultModel,
+    hooks: hookSummaries,
     paths: {
       claudeSettings: join(homedir(), '.claude', 'settings.json'),
       codexConfig: join(homedir(), '.codex', 'config.toml'),
+      manualModels: manualModelsPath,
       hooksConfig: join(homedir(), '.config', 'agent-kernel', 'config.toml'),
       sessionsDir,
     },
@@ -83,28 +91,39 @@ async function main(): Promise<void> {
       supported: false,
       note: 'MCP runtime is not implemented yet  -  see docs/mcp.md for the planned design.',
     },
-  }
+  })
 
   const server = await startHostServer({
     port,
     sessionsDir,
     llm,
     defaultConfig: {
-      tools: [...builtinTools],
+      tools: [...createBuiltinTools(skills.skills)],
       systemPrompt: 'You are a coding agent running via agent-kernel.',
       ...(knownContextWindow(defaultModel)
         ? { contextLimit: knownContextWindow(defaultModel) }
         : {}),
     },
-    models,
+    models: () => registry.models,
     defaultModel,
-    settings,
+    settings: makeSettings,
+    addManualModel: (input) => {
+      registry.addManual(input)
+      writeManualModels(manualModelsPath, registry.manualModels)
+      return makeSettings()
+    },
+    deleteManualModel: (input) => {
+      registry.deleteManual(input.providerId, input.id)
+      writeManualModels(manualModelsPath, registry.manualModels)
+      return makeSettings()
+    },
     ...(process.env.HOST_AUTH_TOKEN
       ? { authToken: process.env.HOST_AUTH_TOKEN }
       : {}),
     ...(staticDir ? { staticDir } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
+    skills,
   })
 
   logger.info(
@@ -112,14 +131,15 @@ async function main(): Promise<void> {
       port: server.port,
       sessionsDir,
       llm: llm.name,
-      models: models.map((m) => m.id),
+      models: registry.models.map((m) => m.id),
       defaultModel,
       ...(staticDir ? { staticDir } : {}),
       hooks: hooks.length,
+      skills: skills.skills.length,
     },
     'host listening',
   )
-  if (models.length === 0) {
+  if (registry.models.length === 0) {
     logger.warn(
       'no models configured; check ~/.claude/settings.json and ~/.codex/config.toml',
     )
@@ -135,23 +155,32 @@ async function main(): Promise<void> {
 }
 
 type BuildResult = {
-  llm: LLMAdapter
+  llm: MutableRouter | LLMAdapter
+  providers: readonly ProviderSpec[]
   models: readonly ModelInfo[]
+  manualModels: readonly ManualModelInput[]
   defaultModel: string
+  addManual(input: ManualModelInput): void
+  deleteManual(providerId: string, id: string): void
 }
 
-function buildAdapters(
+function createModelRegistry(
   providers: readonly ProviderSpec[],
+  initialManualModels: readonly ManualModelInput[],
   opts: { fallbackDefault: string },
 ): BuildResult {
   const byPrefix: Array<{ prefix: string; adapter: LLMAdapter }> = []
   const models: ModelInfo[] = []
+  const manualModels: ManualModelInput[] = [...initialManualModels]
   let primary: LLMAdapter | undefined
 
   for (const p of providers) {
     const perModelAdapters = buildProviderAdapters(p)
     for (const [modelId, adapter] of perModelAdapters) {
-      models.push(modelInfo(modelId, p.label))
+      models.push(modelInfo(modelId, p.label, {
+        providerId: p.id,
+        source: manualModels.some((m) => m.providerId === p.id && m.id === modelId) ? 'manual' : p.source,
+      }))
       byPrefix.push({ prefix: modelId, adapter })
       if (!primary) primary = adapter
     }
@@ -161,9 +190,48 @@ function buildAdapters(
     primary = legacyEnvAdapter(models)
   }
 
-  const llm = routerAdapter({ defaultAdapter: primary, byPrefix })
+  const router = routerAdapter({ defaultAdapter: primary, byPrefix })
   const defaultModel = process.env.HOST_MODEL ?? opts.fallbackDefault
-  return { llm, models, defaultModel }
+  return {
+    llm: router,
+    providers,
+    models,
+    manualModels,
+    defaultModel,
+    addManual(input) {
+      const provider = providers.find((p) => p.id === input.providerId)
+      if (!provider) throw new Error(`unknown provider: ${input.providerId}`)
+      const id = input.id.trim()
+      if (id.length === 0) throw new Error('model id is required')
+      if (!models.some((m) => m.providerId === provider.id && m.id === id)) {
+        const adapter = buildSingleAdapter(provider, id)
+        router.addRoute(id, adapter)
+        models.push(modelInfo(id, provider.label, {
+          providerId: provider.id,
+          source: 'manual',
+          ...(input.label ? { label: input.label } : {}),
+          ...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
+        }))
+      }
+      const existing = manualModels.findIndex((m) => m.providerId === provider.id && m.id === id)
+      const normalized = {
+        providerId: provider.id,
+        id,
+        ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+        ...(input.contextWindow ? { contextWindow: input.contextWindow } : {}),
+      }
+      if (existing === -1) manualModels.push(normalized)
+      else manualModels[existing] = normalized
+    },
+    deleteManual(providerId, id) {
+      const manualIndex = manualModels.findIndex((m) => m.providerId === providerId && m.id === id)
+      if (manualIndex === -1) return
+      manualModels.splice(manualIndex, 1)
+      const modelIndex = models.findIndex((m) => m.providerId === providerId && m.id === id && m.source === 'manual')
+      if (modelIndex !== -1) models.splice(modelIndex, 1)
+      router.deleteRoute(id)
+    },
+  }
 }
 
 function buildProviderAdapters(
@@ -171,29 +239,26 @@ function buildProviderAdapters(
 ): Array<[string, LLMAdapter]> {
   const out: Array<[string, LLMAdapter]> = []
   for (const model of provider.models) {
-    if (provider.wire === 'anthropic') {
-      out.push([
-        model,
-        anthropicAdapter({
-          apiKey: provider.apiKey,
-          model,
-          ...(provider.baseUrl
-            ? { apiUrl: joinPath(provider.baseUrl, '/messages') }
-            : {}),
-        }),
-      ])
-    } else {
-      out.push([
-        model,
-        openaiAdapter({
-          apiKey: provider.apiKey,
-          model,
-          ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
-        }),
-      ])
-    }
+    out.push([model, buildSingleAdapter(provider, model)])
   }
   return out
+}
+
+function buildSingleAdapter(provider: ProviderSpec, model: string): LLMAdapter {
+  if (provider.wire === 'anthropic') {
+    return anthropicAdapter({
+      apiKey: provider.apiKey,
+      model,
+      ...(provider.baseUrl
+        ? { apiUrl: joinPath(provider.baseUrl, '/messages') }
+        : {}),
+    })
+  }
+  return openaiAdapter({
+    apiKey: provider.apiKey,
+    model,
+    ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
+  })
 }
 
 /**
@@ -221,7 +286,7 @@ function legacyEnvAdapter(models: ModelInfo[]): LLMAdapter {
   const openaiKey = process.env.OPENAI_API_KEY
   if (provider === 'openai' && openaiKey) {
     const model = process.env.HOST_MODEL ?? 'gpt-4'
-    models.push(modelInfo(model, 'openai (env)'))
+    models.push(modelInfo(model, 'openai (env)', { providerId: 'openai-env', source: 'env' }))
     return openaiAdapter({
       apiKey: openaiKey,
       model,
@@ -232,7 +297,7 @@ function legacyEnvAdapter(models: ModelInfo[]): LLMAdapter {
   }
   if (anthropicKey) {
     const model = process.env.HOST_MODEL ?? 'claude-opus-4-7'
-    models.push(modelInfo(model, 'anthropic (env)'))
+    models.push(modelInfo(model, 'anthropic (env)', { providerId: 'anthropic-env', source: 'env' }))
     return anthropicAdapter({
       apiKey: anthropicKey,
       model,

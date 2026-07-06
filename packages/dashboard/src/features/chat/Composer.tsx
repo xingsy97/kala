@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { AtSign, ChevronDown, ChevronUp, CornerDownRight, ListChecks, Navigation, X } from 'lucide-react'
+import { AtSign, Check, ChevronDown, ChevronUp, CornerDownRight, GripVertical, ListChecks, Navigation, Pencil, Trash2, X } from 'lucide-react'
 
 import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
@@ -27,6 +27,7 @@ type Props = {
   disabled?: boolean
   onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void
   onCompact(): void
+  onConsolidateMemory?(): void
   model: string
   models: readonly ModelInfo[]
   onModelChange(model: string): void
@@ -35,6 +36,9 @@ type Props = {
   state: AgentState | null
   config: AgentConfig | null
   queuedMessages: readonly QueuedMessagePreview[]
+  onQueuedReorder?(id: string, beforeId?: string | null): void
+  onQueuedUpdate?(id: string, text: string): void
+  onQueuedDelete?(id: string): void
   workspaceOnline?: boolean
   onListFiles?(query: string): Promise<readonly FileListEntry[]>
   onReadFile?(path: string): Promise<{ content?: string; error?: string }>
@@ -73,6 +77,7 @@ export function Composer({
   disabled,
   onSubmit,
   onCompact,
+  onConsolidateMemory,
   model,
   models,
   onModelChange,
@@ -81,6 +86,9 @@ export function Composer({
   state,
   config,
   queuedMessages,
+  onQueuedReorder,
+  onQueuedUpdate,
+  onQueuedDelete,
   workspaceOnline,
   onListFiles,
   onReadFile,
@@ -98,14 +106,24 @@ export function Composer({
   const approvalModeLabel = APPROVAL_MODE_BY_VALUE.get(approvalMode)?.label ?? approvalMode
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
   const slashCommands = useMemo(
-    () => [
-      {
-        command: '/compact',
-        label: 'Compact context',
-        run: onCompact,
-      },
-    ],
-    [onCompact],
+    () => {
+      const commands: { command: string; label: string; run: () => void }[] = [
+        {
+          command: '/compact',
+          label: 'Compact context',
+          run: onCompact,
+        },
+      ]
+      if (onConsolidateMemory) {
+        commands.push({
+          command: '/consolidate-memory',
+          label: 'Consolidate memory',
+          run: onConsolidateMemory,
+        })
+      }
+      return commands
+    },
+    [onCompact, onConsolidateMemory],
   )
   const matchingCommands = slashQuery
     ? slashCommands.filter((c) => c.command.startsWith(slashQuery))
@@ -264,7 +282,12 @@ export function Composer({
       data-testid="composer"
     >
       <div className="mx-auto max-w-[68rem]">
-        <QueuedMessagesDock items={queuedMessages} />
+        <QueuedMessagesDock
+          items={queuedMessages}
+          onReorder={onQueuedReorder}
+          onUpdate={onQueuedUpdate}
+          onDelete={onQueuedDelete}
+        />
         <div
           className={cn(
             'relative rounded-2xl border border-border/60 bg-background/60 transition-shadow',
@@ -620,10 +643,45 @@ function SendButton({
 
 function QueuedMessagesDock({
   items,
+  onReorder,
+  onUpdate,
+  onDelete,
 }: {
   items: readonly QueuedMessagePreview[]
+  onReorder?(id: string, beforeId?: string | null): void
+  onUpdate?(id: string, text: string): void
+  onDelete?(id: string): void
 }): JSX.Element | null {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [draggingId, setDraggingId] = useState<string | null>(null)
   if (items.length === 0) return null
+  const beginEdit = (item: QueuedMessagePreview): void => {
+    setEditingId(item.id)
+    setDraft(item.text)
+  }
+  const commitEdit = (): void => {
+    if (!editingId) return
+    const trimmed = draft.trim()
+    if (trimmed.length > 0) onUpdate?.(editingId, trimmed)
+    setEditingId(null)
+    setDraft('')
+  }
+  const cancelEdit = (): void => {
+    setEditingId(null)
+    setDraft('')
+  }
+  const move = (index: number, direction: -1 | 1): void => {
+    const item = items[index]
+    if (!item) return
+    if (direction < 0) {
+      const before = items[index - 1]
+      if (before) onReorder?.(item.id, before.id)
+    } else {
+      const afterNext = items[index + 2]
+      onReorder?.(item.id, afterNext?.id ?? null)
+    }
+  }
   return (
     <div
       className="mb-2 rounded-2xl border border-border/50 bg-muted/40 px-3 py-2 text-xs"
@@ -645,27 +703,116 @@ function QueuedMessagesDock({
           {items.map((item, index) => (
             <div
               key={item.id}
-              className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-lg border border-border/50 bg-background px-2 py-1.5"
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg border border-border/50 bg-background px-2 py-1.5"
               data-testid="queued-message-row"
               title={item.text}
+              draggable={Boolean(onReorder)}
+              onDragStart={(e) => {
+                setDraggingId(item.id)
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', item.id)
+              }}
+              onDragOver={(e) => {
+                if (!onReorder) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(e) => {
+                if (!onReorder) return
+                e.preventDefault()
+                const id = e.dataTransfer.getData('text/plain') || draggingId
+                if (id && id !== item.id) onReorder(id, item.id)
+                setDraggingId(null)
+              }}
+              onDragEnd={() => setDraggingId(null)}
             >
-              <span className="mt-0.5 flex h-5 min-w-5 items-center justify-center rounded bg-muted font-mono text-[10px] text-muted-foreground">
-                #{index + 1}
+              <span className="mt-0.5 flex h-5 min-w-8 items-center justify-center gap-0.5 rounded bg-muted font-mono text-[10px] text-muted-foreground">
+                {onReorder ? <GripVertical className="h-3 w-3" aria-hidden="true" /> : null}
+                {index + 1}
               </span>
               <span className="min-w-0">
                 <span className="mb-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
                   <CornerDownRight className="h-3 w-3" aria-hidden="true" />
                   {item.mode === 'steer' ? 'Steering update' : 'Queued follow-up'}
                 </span>
-                <span className="block truncate text-foreground">
-                  {item.text.trim().length > 0 ? item.text : '(image attachment)'}
-                </span>
+                {editingId === item.id ? (
+                  <input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitEdit()
+                      if (e.key === 'Escape') cancelEdit()
+                    }}
+                    className="h-6 w-full rounded border border-border/50 bg-background px-2 text-xs outline-none focus:border-ring"
+                    data-testid="queued-message-edit-input"
+                    autoFocus
+                  />
+                ) : (
+                  <span className="block truncate text-foreground">
+                    {item.text.trim().length > 0 ? item.text : '(image attachment)'}
+                  </span>
+                )}
+              </span>
+              <span className="flex items-center gap-0.5">
+                {editingId === item.id ? (
+                  <>
+                    <QueueAction label="save queued message" onClick={commitEdit} testId="queued-message-save">
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="cancel edit" onClick={cancelEdit} testId="queued-message-cancel">
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                  </>
+                ) : (
+                  <>
+                    <QueueAction label="move queued message up" onClick={() => move(index, -1)} disabled={!onReorder || index === 0} testId="queued-message-up">
+                      <ChevronUp className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="move queued message down" onClick={() => move(index, 1)} disabled={!onReorder || index === items.length - 1} testId="queued-message-down">
+                      <ChevronDown className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="edit queued message" onClick={() => beginEdit(item)} disabled={!onUpdate} testId="queued-message-edit">
+                      <Pencil className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="delete queued message" onClick={() => onDelete?.(item.id)} disabled={!onDelete} testId="queued-message-delete">
+                      <Trash2 className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                  </>
+                )}
               </span>
             </div>
           ))}
         </div>
       </ScrollArea>
     </div>
+  )
+}
+
+function QueueAction({
+  children,
+  label,
+  onClick,
+  disabled,
+  testId,
+}: {
+  children: React.ReactNode
+  label: string
+  onClick(): void
+  disabled?: boolean
+  testId: string
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+    >
+      {children}
+    </button>
   )
 }
 

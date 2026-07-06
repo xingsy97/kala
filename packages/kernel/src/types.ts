@@ -160,13 +160,14 @@ export type TodoItem = {
 }
 
 export const TODOWRITE_TOOL_NAME = 'todowrite'
+export const MEMORY_TOOL_NAME = 'memory'
 export const MEMORY_WRITE_TOOL_NAME = 'memory_write'
 export const MEMORY_DELETE_TOOL_NAME = 'memory_delete'
 
 /**
  * Session-scoped notepad the agent maintains for itself across turns of the
- * current conversation. Written via the `memory_write` executor tool with
- * `scope: 'session'`; the reducer intercepts the tool_result and lifts the
+ * current conversation. Written via the `memory` executor tool with
+ * `operation: 'write'` and `scope: 'session'`; the reducer intercepts the tool_result and lifts the
  * (key, content) into this map so future turns see it inlined in state
  * without re-hitting IO. Workspace- and global-scope memory live on disk
  * (executor writes them, dashboard fetches them lazily) and never touch

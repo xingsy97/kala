@@ -93,11 +93,18 @@ describe('loadRuntimeConfig', () => {
       expect(cfg.defaultModel).toBe('gpt-5.5')
       expect(cfg.models.map((m) => m.id)).toEqual([
         'claude-opus-4.7-1m-internal',
+        'claude-haiku-4-5',
         'gpt-5.5',
       ])
       expect(cfg.models.map((m) => m.contextWindow)).toEqual([
         1_000_000,
+        undefined,
         400_000,
+      ])
+      expect(cfg.models.map((m) => m.source)).toEqual([
+        'claude-settings',
+        'claude-settings',
+        'codex-config',
       ])
       // Model list is the sanitized DTO  -  no `apiKey` field on ModelInfo.
       for (const m of cfg.models) {

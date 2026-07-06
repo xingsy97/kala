@@ -152,6 +152,50 @@ describe('Composer', () => {
     expect(dock.textContent ?? '').toContain('Steering update')
   })
 
+  it('allows queued messages to be reordered, edited, and deleted', () => {
+    const onQueuedReorder = vi.fn()
+    const onQueuedUpdate = vi.fn()
+    const onQueuedDelete = vi.fn()
+    render(
+      <Composer
+        model=""
+        models={[]}
+        onModelChange={() => {}}
+        approvalMode="auto"
+        onApprovalModeChange={() => {}}
+        state={null}
+        config={null}
+        queuedMessages={[
+          { id: 'q1', text: 'first queued', mode: 'queue', createdAt: '2026-07-06T00:00:00.000Z' },
+          { id: 'q2', text: 'second queued', mode: 'queue', createdAt: '2026-07-06T00:00:01.000Z' },
+        ]}
+        onQueuedReorder={onQueuedReorder}
+        onQueuedUpdate={onQueuedUpdate}
+        onQueuedDelete={onQueuedDelete}
+        onSubmit={() => {}}
+        onCompact={() => {}}
+      />,
+    )
+
+    const rows = screen.getAllByTestId('queued-message-row')
+    fireEvent.click(screen.getAllByTestId('queued-message-down')[0]!)
+    expect(onQueuedReorder).toHaveBeenCalledWith('q1', null)
+
+    fireEvent.dragStart(rows[1]!, { dataTransfer: dataTransferFor('q2') })
+    fireEvent.dragOver(rows[0]!, { dataTransfer: dataTransferFor('q2') })
+    fireEvent.drop(rows[0]!, { dataTransfer: dataTransferFor('q2') })
+    expect(onQueuedReorder).toHaveBeenCalledWith('q2', 'q1')
+
+    fireEvent.click(screen.getAllByTestId('queued-message-edit')[0]!)
+    const input = screen.getByTestId('queued-message-edit-input')
+    fireEvent.change(input, { target: { value: 'edited queued' } })
+    fireEvent.click(screen.getByTestId('queued-message-save'))
+    expect(onQueuedUpdate).toHaveBeenCalledWith('q1', 'edited queued')
+
+    fireEvent.click(screen.getAllByTestId('queued-message-delete')[1]!)
+    expect(onQueuedDelete).toHaveBeenCalledWith('q2')
+  })
+
   it('renders the approval mode picker and reports selection', () => {
     const onApprovalModeChange = vi.fn()
     render(
@@ -291,3 +335,12 @@ describe('Composer', () => {
     await screen.findByTestId('composer-toast')
   })
 })
+
+function dataTransferFor(id: string): DataTransfer {
+  return {
+    effectAllowed: 'move',
+    dropEffect: 'move',
+    getData: vi.fn(() => id),
+    setData: vi.fn(),
+  } as unknown as DataTransfer
+}

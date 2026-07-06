@@ -35,6 +35,7 @@ import type { LoopBroadcast, LoopHandle } from './loop.js'
 import { runHostLoop } from './loop.js'
 import type { HookConfig, HookPayload, HookRunner } from './hooks.js'
 import { selectHooks } from './hooks.js'
+import type { SkillRegistry } from './skills.js'
 import { SessionStore, type SessionRecord } from './store/session.js'
 import {
   createExecutorRegistry,
@@ -67,8 +68,8 @@ export type HostServerOptions = {
    * list and the dashboard falls back to whatever the current session says.
    * The CLI populates this from `~/.claude/settings.json` + `~/.codex/config.toml`.
    */
-  models?: readonly ModelInfo[]
-  defaultModel?: string
+  models?: readonly ModelInfo[] | (() => readonly ModelInfo[])
+  defaultModel?: string | (() => string)
   /**
    * User-configured hooks (from `~/.config/agent-kernel/config.toml`). When
    * present the loop invokes matching hooks around every tool dispatch;
@@ -77,13 +78,16 @@ export type HostServerOptions = {
    */
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
+  skills?: SkillRegistry
   /**
    * Advertised via `GET /settings`. Read-only settings snapshot for the
    * dashboard's Settings dialog  -  providers, hooks, MCP status, config
    * file paths. Never carries API keys or command args beyond what the
    * operator already put in their config.
    */
-  settings?: ServerSettingsPayload
+  settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
+  addManualModel?: Parameters<typeof attachJsonRoutes>[1]['addManualModel']
+  deleteManualModel?: Parameters<typeof attachJsonRoutes>[1]['deleteManualModel']
 }
 
 export type HostServer = {
@@ -107,6 +111,8 @@ export async function startHostServer(
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
     ...(options.settings ? { settings: options.settings } : {}),
+    ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
+    ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
   })
 
   if (options.staticDir) {
@@ -156,6 +162,37 @@ export async function startHostServer(
       if (priority === 'front') queue.unshift(msg)
       else queue.push(msg)
       queuedMessages.set(sessionId, queue)
+      emitQueueUpdate(sessionId)
+    },
+    reorder(sessionId, id, beforeId) {
+      const queue = queuedMessages.get(sessionId) ?? []
+      const from = queue.findIndex((item) => item.id === id)
+      if (from === -1) return
+      const [item] = queue.splice(from, 1)
+      if (!item) return
+      const to = beforeId ? queue.findIndex((candidate) => candidate.id === beforeId) : -1
+      if (to === -1) queue.push(item)
+      else queue.splice(to, 0, item)
+      if (queue.length === 0) queuedMessages.delete(sessionId)
+      else queuedMessages.set(sessionId, queue)
+      emitQueueUpdate(sessionId)
+    },
+    update(sessionId, id, text) {
+      const queue = queuedMessages.get(sessionId) ?? []
+      const index = queue.findIndex((item) => item.id === id)
+      if (index === -1) return
+      const trimmed = text.trim()
+      if (trimmed.length === 0) return
+      queue[index] = { ...queue[index]!, text: trimmed }
+      queuedMessages.set(sessionId, queue)
+      emitQueueUpdate(sessionId)
+    },
+    delete(sessionId, id) {
+      const queue = queuedMessages.get(sessionId) ?? []
+      const next = queue.filter((item) => item.id !== id)
+      if (next.length === queue.length) return
+      if (next.length === 0) queuedMessages.delete(sessionId)
+      else queuedMessages.set(sessionId, next)
       emitQueueUpdate(sessionId)
     },
     pending(sessionId) {
@@ -260,17 +297,19 @@ export async function startHostServer(
     },
   }
 
-  loop = runHostLoop({
+  const loopDeps = {
     store,
     llm: options.llm,
     tools: executors,
     broadcast,
     models: {
-      get: (sessionId) => selectedModels.get(sessionId),
+      get: (sessionId: string) => selectedModels.get(sessionId),
     },
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
     ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
-  })
+    ...(options.skills !== undefined ? { skills: options.skills } : {}),
+  }
+  loop = runHostLoop(loopDeps)
 
   const fireLifecycleHook = async (
     event: 'session_start' | 'session_end',
@@ -301,6 +340,7 @@ export async function startHostServer(
   configureDashboardNamespace(dashboardNs, {
     store,
     loop,
+    loopDeps,
     executors,
     defaultConfig: options.defaultConfig,
     ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
