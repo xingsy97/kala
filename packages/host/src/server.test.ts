@@ -179,6 +179,34 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('serves custom dashboard middleware after JSON routes', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const handled: string[] = []
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      dashboardHandler(req, res) {
+        handled.push(req.url ?? '/')
+        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('dashboard middleware')
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const models = await fetch(`${url}/models`).then((r) => r.json())
+    expect(models).toEqual({ models: [], defaultModel: '' })
+
+    const dashboard = await fetch(`${url}/custom-route`).then((r) => r.text())
+    expect(dashboard).toBe('dashboard middleware')
+    expect(handled).toEqual(['/custom-route'])
+  })
+
   it('drives a full round-trip with dashboard + executor', async () => {
     const sessionId = 'wire-1'
     // Pre-materialize the session: dashboard handshakes are now lazy (they
