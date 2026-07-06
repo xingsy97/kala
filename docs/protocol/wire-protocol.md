@@ -225,8 +225,11 @@ unless the host was started with `AK_ALLOW_ALL_OK=1`.
 
 Change the session's current working directory. Host validates the path
 against the bound executor's sandbox before dispatching
-`{ kind: 'cwd_changed', cwd }`. Subsequent `tool:call` payloads carry the new
-`cwd`.
+`{ kind: 'cwd_changed', cwd }`. The session must already exist, must be at rest
+(`idle`, `done`, or `error`), and any bound workspace must have an attached
+executor so sandbox roots are known. Failures are reported with `session:error`;
+the host must not silently accept a cwd that the reducer will ignore.
+Subsequent `tool:call` payloads carry the new `cwd`.
 
 #### `client:set_model`
 

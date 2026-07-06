@@ -525,7 +525,7 @@ After removing a settled call, examine remaining `pendingCalls`:
 ### 4.10 `cwd_changed`
 
 **Preconditions**
-- None. `event.cwd` MUST be an absolute path  -  validation against the workspace sandbox is host-side.
+- State status is `idle` or `done`; other statuses ignore this event as an illegal transition. `event.cwd` MUST be an absolute path  -  validation against the workspace sandbox is host-side. Host-side `client:set_cwd` handlers must reject non-resting sessions before dispatch so users do not see a successful UI action that the reducer will ignore.
 
 **Transition**
 - `cwd  -  event.cwd`.
