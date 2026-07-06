@@ -60,7 +60,7 @@ export function InspectorPanel({
 }: Props): JSX.Element {
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
   const [historyView, setHistoryView] = useState<'timeline' | 'state-flow'>('timeline')
-  const [runtimeView, setRuntimeView] = useState<'state' | 'tools'>('state')
+  const [runtimeView, setRuntimeView] = useState<'state' | 'tools' | 'memory'>('state')
   const [selectedTimeline, setSelectedTimeline] = useState<{
     entry: TimelineEntry
     priorCallLlm: { seq: number; effect: CallLlmEffect } | null
@@ -692,12 +692,13 @@ function RuntimeSection({
   state,
   config,
 }: {
-  view: 'state' | 'tools'
-  onViewChange(view: 'state' | 'tools'): void
+  view: 'state' | 'tools' | 'memory'
+  onViewChange(view: 'state' | 'tools' | 'memory'): void
   state: AgentState | null
   config?: AgentConfig | null
 }): JSX.Element {
   const toolCount = config?.tools.length ?? 0
+  const memoryCount = state?.memory?.length ?? 0
   return (
     <div className="h-full flex flex-col border-t border-border/50">
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
@@ -705,7 +706,9 @@ function RuntimeSection({
         <span className="ml-2 normal-case tracking-normal text-muted-foreground dark:text-muted-foreground">
           {view === 'state'
             ? 'full runtime state JSON'
-            : `${toolCount} registered ${toolCount === 1 ? 'tool' : 'tools'}`}
+            : view === 'tools'
+              ? `${toolCount} registered ${toolCount === 1 ? 'tool' : 'tools'}`
+              : `${memoryCount} session ${memoryCount === 1 ? 'entry' : 'entries'}  -  workspace/global on disk`}
         </span>
         <div
           className="ml-auto inline-flex rounded border border-border/50 bg-background p-0.5"
@@ -737,10 +740,29 @@ function RuntimeSection({
           >
             Tools
           </button>
+          <button
+            type="button"
+            onClick={() => onViewChange('memory')}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px] transition-colors',
+              view === 'memory'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+            )}
+            data-testid="runtime-view-memory"
+          >
+            Memory
+          </button>
         </div>
       </div>
       <div className="flex-1 min-h-0 mx-3 mb-3">
-        {view === 'state' ? <RawStateSection state={state} /> : <ToolRegistrySection tools={config?.tools ?? []} />}
+        {view === 'state' ? (
+          <RawStateSection state={state} />
+        ) : view === 'tools' ? (
+          <ToolRegistrySection tools={config?.tools ?? []} />
+        ) : (
+          <MemorySection state={state} />
+        )}
       </div>
     </div>
   )
@@ -810,5 +832,115 @@ function ToolRegistryItem({ tool }: { tool: ToolSchema }): JSX.Element {
         />
       </div>
     </section>
+  )
+}
+
+// ============================================================================
+// Memory panel  -  three-tier scratchpad the agent maintains for itself.
+// Session memory is inlined from state.memory (lifted by the kernel reducer
+// when `memory_write { scope: 'session' }` succeeds). Workspace and global
+// memory live on disk under the executor and are shown as pointers only  - 
+// the agent reads them via the `memory_read` tool, not the dashboard.
+// ============================================================================
+
+function MemorySection({ state }: { state: AgentState | null }): JSX.Element {
+  const memory = state?.memory ?? []
+  return (
+    <ScrollArea className="h-full" data-testid="memory-section-scrollarea">
+      <div className="space-y-3 pb-1">
+        <MemoryScopeBlock
+          scope="session"
+          subtitle="Lives in kernel state  -  dies with the session unless forked  -  promoted here whenever the agent calls memory_write { scope: 'session' }"
+          entries={memory}
+        />
+        <MemoryScopeBlock
+          scope="workspace"
+          subtitle="On disk at <workspace>/.agent-kernel/memory/  -  shared across sessions in this workspace  -  the agent reads/writes via the memory_* tools"
+          entries={null}
+        />
+        <MemoryScopeBlock
+          scope="global"
+          subtitle="On disk at ~/.agent-kernel/memory/  -  shared across every workspace on this machine  -  the agent reads/writes via the memory_* tools"
+          entries={null}
+        />
+      </div>
+    </ScrollArea>
+  )
+}
+
+function MemoryScopeBlock({
+  scope,
+  subtitle,
+  entries,
+}: {
+  scope: 'session' | 'workspace' | 'global'
+  subtitle: string
+  entries: readonly { key: string; content: string; updatedAt: string }[] | null
+}): JSX.Element {
+  const scopeStyles: Record<typeof scope, string> = {
+    session:
+      'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200',
+    workspace:
+      'border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-200',
+    global:
+      'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
+  }
+  return (
+    <section
+      className="rounded border border-border/50 bg-card p-2 text-xs"
+      data-testid={`memory-scope-${scope}`}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            'flex-none rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+            scopeStyles[scope],
+          )}
+        >
+          {scope}
+        </span>
+        <span className="text-muted-foreground dark:text-muted-foreground">
+          {entries === null
+            ? 'off-kernel scope'
+            : entries.length === 0
+              ? 'no entries'
+              : `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`}
+        </span>
+      </div>
+      <p className="mt-1 text-muted-foreground dark:text-muted-foreground">
+        {subtitle}
+      </p>
+      {entries !== null && entries.length > 0 ? (
+        <ul className="mt-2 space-y-1.5">
+          {entries.map((e) => (
+            <MemoryEntryRow key={e.key} entry={e} />
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  )
+}
+
+function MemoryEntryRow({
+  entry,
+}: {
+  entry: { key: string; content: string; updatedAt: string }
+}): JSX.Element {
+  return (
+    <li className="rounded border border-border/40 bg-background p-2">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-foreground dark:text-foreground">
+          {entry.key}
+        </span>
+        {entry.updatedAt && entry.updatedAt !== '1970-01-01T00:00:00.000Z' ? (
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            {new Date(entry.updatedAt).toLocaleString()}
+          </span>
+        ) : null}
+      </div>
+      <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] text-muted-foreground dark:text-muted-foreground">
+        {entry.content}
+      </pre>
+    </li>
   )
 }

@@ -30,6 +30,7 @@ import type {
   ApprovalMode,
   ContextPressureLevel,
   Effect,
+  MemoryEntry,
   Message,
   MessageContent,
   PendingToolCall,
@@ -44,6 +45,8 @@ import type {
 import {
   DEFAULT_HARD_THRESHOLD,
   DEFAULT_SOFT_THRESHOLD,
+  MEMORY_DELETE_TOOL_NAME,
+  MEMORY_WRITE_TOOL_NAME,
   TODOWRITE_TOOL_NAME,
 } from './types.js'
 
@@ -378,7 +381,16 @@ function onToolResult(
       ? parseTodosFromInput(target.input, state.todos)
       : state.todos
 
-  return afterPendingSettled(state, messages, pendingCalls, config, nextTodos)
+  // Same pattern for session-scoped memory. `memory_write { scope: 'session', key, content }`
+  // upserts an entry; `memory_delete { scope: 'session', key }` removes one.
+  // Workspace/global scope operations touch disk in the executor and don't
+  // reach the kernel  -  this branch only fires for scope='session'.
+  const nextMemory =
+    ok && isSessionMemoryOp(target.name, target.input)
+      ? applyMemoryOp(state.memory, target.name, target.input)
+      : state.memory
+
+  return afterPendingSettled(state, messages, pendingCalls, config, nextTodos, nextMemory)
 }
 
 function onCancel(state: AgentState): StepResult {
@@ -431,6 +443,7 @@ function afterPendingSettled(
   pendingCalls: readonly PendingToolCall[],
   config: AgentConfig,
   todos: readonly TodoItem[] = state.todos,
+  memory: readonly MemoryEntry[] = state.memory,
 ): StepResult {
   if (pendingCalls.length > 0) {
     const stillAwaiting = pendingCalls.some((c) => c.status === 'awaiting_approval')
@@ -440,6 +453,7 @@ function afterPendingSettled(
         messages,
         pendingCalls,
         todos,
+        memory,
         status: stillAwaiting ? 'awaiting_approval' : 'executing_tools',
       },
       effects: [],
@@ -450,6 +464,7 @@ function afterPendingSettled(
     messages,
     pendingCalls: [],
     todos,
+    memory,
     status: 'thinking',
   }
   return {
@@ -539,4 +554,51 @@ function parseTodosFromInput(
     out.push(priority ? { content, status, priority } : { content, status })
   }
   return out
+}
+
+/**
+ * Detect a session-scope memory op. Only these round-trip through the kernel;
+ * workspace/global memory ops touch disk on the executor and produce a normal
+ * (opaque) tool_result string with no state promotion here.
+ */
+function isSessionMemoryOp(
+  toolName: string,
+  input: Record<string, unknown>,
+): boolean {
+  if (toolName !== MEMORY_WRITE_TOOL_NAME && toolName !== MEMORY_DELETE_TOOL_NAME) {
+    return false
+  }
+  return (input as { scope?: unknown }).scope === 'session'
+}
+
+/**
+ * Apply an in-kernel session memory op. Keys are unique per session; upsert
+ * (write) replaces any prior entry with the same key. `updatedAt` comes from
+ * the tool input if present, otherwise omitted  -  the reducer stays pure and
+ * refuses to touch a clock.
+ */
+function applyMemoryOp(
+  current: readonly MemoryEntry[],
+  toolName: string,
+  input: Record<string, unknown>,
+): readonly MemoryEntry[] {
+  const key = (input as { key?: unknown }).key
+  if (typeof key !== 'string' || key.length === 0) return current
+  if (toolName === MEMORY_DELETE_TOOL_NAME) {
+    return current.filter((m) => m.key !== key)
+  }
+  // memory_write
+  const content = (input as { content?: unknown }).content
+  if (typeof content !== 'string') return current
+  const updatedAt = (input as { updatedAt?: unknown }).updatedAt
+  const stamped =
+    typeof updatedAt === 'string' && updatedAt.length > 0
+      ? updatedAt
+      : '1970-01-01T00:00:00.000Z' // reducer stays pure; host stamps real time via tool input
+  const entry: MemoryEntry = { key, content, updatedAt: stamped }
+  const existing = current.findIndex((m) => m.key === key)
+  if (existing === -1) return [...current, entry]
+  const next = current.slice()
+  next[existing] = entry
+  return next
 }
