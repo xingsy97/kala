@@ -93,7 +93,6 @@ See [FEATURE-GAPS.md](FEATURE-GAPS.md)  - 3 for the concrete short list and  - 2
 - **Kernel port to Rust**: same spec, different impl language, for embedding in non-JS environments.
 - **Extension API**: a documented way to add planning / memory / subagent orchestration around the kernel, without patching it.
 - **Session sharing**: publish a session (JSONL) as a public URL, viewable but not forkable. Doubles as a bug-repro tool.
-- **Cost budget enforcement**: host-level threshold on `usage.costUsd`; auto-inject cancel if exceeded.
 
 ---
 
