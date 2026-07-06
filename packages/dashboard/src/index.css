@@ -5,77 +5,77 @@
 /**
  * Design tokens  -  shadcn/ui semantic layer.
  *
- * Every non-neutral color in the dashboard should resolve to one of these
- * variables (via tailwind.config `theme.extend.colors`). Hardcoded
- * `slate-*` / `gray-*` classes are a Phase-0 debt to burn down.
- *
- * OKLCH picked to sit close to the previous slate palette so P0 is a
- * near-visual no-op; later phases retune contrast and layering.
+ * Values are HSL triples ("H S% L%"). Tailwind wraps them via
+ * `hsl(var(--token))` in tailwind.config.js. HSL is chosen over OKLCH
+ * because HSL renders in every major browser back to 2010, while OKLCH
+ * requires Chromium  -  111 / Safari  -  15.4 / Firefox  -  113 and silently
+ * drops the declaration on older UAs  -  which surfaced as a fully white
+ * dashboard for users on lagging browsers.
  */
 @layer base {
   :root {
-    --background: 1 0 0;
-    --foreground: 0.145 0 0;
-    --card: 1 0 0;
-    --card-foreground: 0.145 0 0;
-    --popover: 1 0 0;
-    --popover-foreground: 0.145 0 0;
-    --primary: 0.58 0.16 250;
-    --primary-foreground: 0.985 0 0;
-    --secondary: 0.97 0 0;
-    --secondary-foreground: 0.205 0 0;
-    --muted: 0.97 0 0;
-    --muted-foreground: 0.556 0 0;
-    --accent: 0.97 0 0;
-    --accent-foreground: 0.205 0 0;
-    --destructive: 0.577 0.245 27.325;
-    --destructive-foreground: 0.985 0 0;
-    --border: 0.922 0 0;
-    --input: 0.922 0 0;
-    --ring: 0.58 0.16 250;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221 83% 53%;
 
-    --sidebar: 0.985 0 0;
-    --sidebar-foreground: 0.145 0 0;
-    --sidebar-primary: 0.58 0.16 250;
-    --sidebar-primary-foreground: 0.985 0 0;
-    --sidebar-accent: 0.97 0 0;
-    --sidebar-accent-foreground: 0.205 0 0;
-    --sidebar-border: 0.922 0 0;
-    --sidebar-ring: 0.708 0 0;
+    --sidebar: 0 0% 98%;
+    --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 210 40% 96.1%;
+    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+    --sidebar-border: 214.3 31.8% 91.4%;
+    --sidebar-ring: 221 83% 53%;
 
     --radius: 0.625rem;
     --font-size-base: 14px;
   }
 
   .dark {
-    --background: 0.15 0 0;
-    --foreground: 0.96 0 0;
-    --card: 0.205 0 0;
-    --card-foreground: 0.96 0 0;
-    --popover: 0.22 0 0;
-    --popover-foreground: 0.96 0 0;
-    --primary: 0.62 0.16 250;
-    --primary-foreground: 0.98 0 0;
-    --secondary: 0.26 0 0;
-    --secondary-foreground: 0.96 0 0;
-    --muted: 0.23 0 0;
-    --muted-foreground: 0.68 0 0;
-    --accent: 0.28 0 0;
-    --accent-foreground: 0.96 0 0;
-    --destructive: 0.63 0.21 25;
-    --destructive-foreground: 0.98 0 0;
-    --border: 0.32 0 0;
-    --input: 0.28 0 0;
-    --ring: 0.62 0.16 250;
+    --background: 0 0% 8%;
+    --foreground: 0 0% 96%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 96%;
+    --popover: 0 0% 14%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 221 83% 60%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 68%;
+    --accent: 0 0% 22%;
+    --accent-foreground: 0 0% 96%;
+    --destructive: 0 62.8% 55%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 25%;
+    --input: 0 0% 22%;
+    --ring: 221 83% 60%;
 
-    --sidebar: 0.175 0 0;
-    --sidebar-foreground: 0.94 0 0;
-    --sidebar-primary: 0.62 0.16 250;
-    --sidebar-primary-foreground: 0.98 0 0;
-    --sidebar-accent: 0.26 0 0;
-    --sidebar-accent-foreground: 0.96 0 0;
-    --sidebar-border: 0.3 0 0;
-    --sidebar-ring: 0.62 0.16 250;
+    --sidebar: 0 0% 10%;
+    --sidebar-foreground: 0 0% 94%;
+    --sidebar-primary: 221 83% 60%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 0 0% 18%;
+    --sidebar-accent-foreground: 0 0% 96%;
+    --sidebar-border: 0 0% 24%;
+    --sidebar-ring: 221 83% 60%;
   }
 }
 

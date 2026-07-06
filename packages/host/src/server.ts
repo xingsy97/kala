@@ -1138,7 +1138,16 @@ async function serveStatic(
     return
   }
   const mime = MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
-  res.writeHead(200, { 'content-type': mime })
+  const headers: Record<string, string> = { 'content-type': mime }
+  // Vite emits `assets/*.<hash>.<ext>`  -  safe to cache forever. Everything
+  // else (index.html, favicon, etc.) must revalidate so stale dashboard
+  // builds don't survive a redeploy in the user's browser.
+  if (/[/\\]assets[/\\][^/\\]+\.[0-9a-f]{6,}\./i.test(filePath)) {
+    headers['cache-control'] = 'public, max-age=31536000, immutable'
+  } else {
+    headers['cache-control'] = 'no-cache, must-revalidate'
+  }
+  res.writeHead(200, headers)
   if (req.method === 'HEAD') {
     res.end()
     return
