@@ -6,7 +6,7 @@ import { createInitialState } from '@agent-kernel/kernel'
 import { RuntimeMetrics } from './RuntimeMetrics.js'
 
 describe('RuntimeMetrics', () => {
-  it('shows readable metric labels with explanatory hover titles', () => {
+  it('shows only the compact context window indicator', () => {
     const state = {
       ...createInitialState({ sessionId: 'sess-runtime' }),
       cursor: 12,
@@ -18,7 +18,7 @@ describe('RuntimeMetrics', () => {
           status: 'pending_approval' as const,
         },
       ],
-      usage: { inputTokens: 1_200, outputTokens: 34, costUsd: 0 },
+      usage: { inputTokens: 1_200, outputTokens: 34 },
     }
 
     render(
@@ -31,11 +31,10 @@ describe('RuntimeMetrics', () => {
     )
 
     const indicator = screen.getByTestId('context-usage-indicator')
-    expect(indicator.textContent ?? '').toContain('30% context')
-    expect(indicator.textContent ?? '').toContain('Events')
-    expect(indicator.textContent ?? '').toContain('Tools')
-    expect(indicator.textContent ?? '').toContain('Queued')
-    expect(screen.getByText('Events').closest('[title]')?.getAttribute('title') ?? '').toContain('Event log position')
-    expect(screen.getByText('Tools').closest('[title]')?.getAttribute('title') ?? '').toContain('Pending tool calls')
+    expect(indicator.textContent ?? '').toContain('30%')
+    expect(indicator.textContent ?? '').not.toContain('Events')
+    expect(indicator.textContent ?? '').not.toContain('Tools')
+    expect(indicator.textContent ?? '').not.toContain('Tokens')
+    expect(indicator.getAttribute('title') ?? '').toContain('Context window')
   })
 })

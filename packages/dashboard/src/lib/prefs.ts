@@ -1,0 +1,74 @@
+import { useEffect, useState } from 'react'
+
+const CHANGE_EVENT = 'ak-pref-change'
+
+type PrefChangeDetail = { key: string; value: string | null }
+
+function readRaw(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeRaw(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, value)
+  } catch {}
+  window.dispatchEvent(
+    new CustomEvent<PrefChangeDetail>(CHANGE_EVENT, { detail: { key, value } }),
+  )
+}
+
+/**
+ * Read/write a boolean preference in localStorage. All hook instances mounted
+ * against the same key stay in sync via a same-tab custom event and the
+ * cross-tab `storage` event.
+ */
+export function useBooleanPref(
+  key: string,
+  defaultValue: boolean,
+): [boolean, (next: boolean) => void] {
+  const [value, setValue] = useState<boolean>(() => {
+    const raw = readRaw(key)
+    if (raw === null) return defaultValue
+    return raw === '1' || raw === 'true'
+  })
+
+  useEffect(() => {
+    const onCustom = (e: Event): void => {
+      const detail = (e as CustomEvent<PrefChangeDetail>).detail
+      if (detail.key !== key) return
+      if (detail.value === null) {
+        setValue(defaultValue)
+        return
+      }
+      setValue(detail.value === '1' || detail.value === 'true')
+    }
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key !== key) return
+      if (e.newValue === null) {
+        setValue(defaultValue)
+        return
+      }
+      setValue(e.newValue === '1' || e.newValue === 'true')
+    }
+    window.addEventListener(CHANGE_EVENT, onCustom)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(CHANGE_EVENT, onCustom)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [key, defaultValue])
+
+  const set = (next: boolean): void => {
+    writeRaw(key, next ? '1' : '0')
+    setValue(next)
+  }
+
+  return [value, set]
+}
+
+export const PREF_SHOW_TOOL_CALL_TAB = 'ak-show-tool-call-tab'

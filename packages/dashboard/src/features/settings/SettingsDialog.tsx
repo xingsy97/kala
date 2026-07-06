@@ -12,6 +12,7 @@ import {
 } from '../../components/ui/dialog.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
+import { PREF_SHOW_TOOL_CALL_TAB, useBooleanPref } from '../../lib/prefs.js'
 
 type Props = {
   open: boolean
@@ -19,13 +20,14 @@ type Props = {
   onModelsChanged?(): void
 }
 
-type SectionKey = 'runtime' | 'models' | 'approvals' | 'hooks' | 'mcp'
+type SectionKey = 'runtime' | 'models' | 'approvals' | 'hooks' | 'mcp' | 'interface'
 
 const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
   { key: 'runtime', label: 'Runtime', hint: 'Host paths and sessions' },
   { key: 'models', label: 'Models', hint: 'Providers and default' },
   { key: 'approvals', label: 'Approvals', hint: 'Per-session, not global' },
   { key: 'hooks', label: 'Hooks', hint: 'Fire on tool events' },
+  { key: 'interface', label: 'Interface', hint: 'Dashboard UI toggles' },
   { key: 'mcp', label: 'MCP servers', hint: 'Placeholder — not wired yet' },
 ]
 
@@ -106,6 +108,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
                 <ApprovalsSection />
               ) : section === 'hooks' ? (
                 <HooksSection payload={payload} />
+              ) : section === 'interface' ? (
+                <InterfaceSection />
               ) : (
                 <McpSection payload={payload} />
               )}
@@ -476,6 +480,68 @@ command = "/usr/local/bin/lint-shell.sh"`}
         </pre>
       </details>
     </div>
+  )
+}
+
+function InterfaceSection(): JSX.Element {
+  const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
+  return (
+    <div>
+      <SectionHeader
+        title="Interface"
+        subtitle="Dashboard UI toggles. Stored per-browser in localStorage — no host restart required."
+      />
+      <ul className="space-y-3 text-sm">
+        <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-medium">Show Tool Call tab in Inspector</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Adds a dedicated "Tool Call" tab beside Trace / LLM API / Status. When off, tool calls still appear inside the Trace view — use the Trace filter chips to isolate them.
+            </p>
+          </div>
+          <Toggle
+            checked={showToolCallTab}
+            onChange={setShowToolCallTab}
+            ariaLabel="Show Tool Call tab in Inspector"
+            testId="settings-toggle-tool-call-tab"
+          />
+        </li>
+      </ul>
+    </div>
+  )
+}
+
+function Toggle({
+  checked,
+  onChange,
+  ariaLabel,
+  testId,
+}: {
+  checked: boolean
+  onChange(next: boolean): void
+  ariaLabel: string
+  testId?: string
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      data-testid={testId}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'relative inline-flex h-5 w-9 flex-none items-center rounded-full transition-colors',
+        checked ? 'bg-primary' : 'bg-muted',
+      )}
+    >
+      <span
+        className={cn(
+          'inline-block h-4 w-4 transform rounded-full bg-background shadow transition-transform',
+          checked ? 'translate-x-4' : 'translate-x-0.5',
+        )}
+      />
+    </button>
   )
 }
 
