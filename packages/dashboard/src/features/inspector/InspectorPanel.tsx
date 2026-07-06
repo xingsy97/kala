@@ -65,7 +65,14 @@ type Props = {
 type TraceView = 'reducer' | 'llm' | 'tools'
 type RuntimeView = 'state' | 'tools' | 'memory'
 type SidebarView = 'debugger' | 'trace'
-type LlmDetailView = 'assembly' | 'messages' | 'payload' | 'response'
+type LlmDetailView = 'assembly' | 'context' | 'payload' | 'response'
+type ContextProportion = {
+  kind: 'system' | 'messages' | 'tools'
+  label: string
+  bytes: number
+  percent: number
+  color: string
+}
 type DetailSelection =
   | { kind: 'event'; entry: TimelineEntry; priorCallLlm: PriorCallLlm | null; flow?: StateFlowStep }
   | { kind: 'llm'; call: LlmCall }
@@ -930,17 +937,17 @@ function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
           onChange={setView}
           options={[
             ['assembly', 'Assembly'],
-            ['messages', 'Kernel Messages'],
-            ['payload', 'Provider Payload'],
+            ['context', 'Context'],
+            ['payload', 'Provider'],
             ['response', 'Response'],
           ]}
           testId="llm-detail-view-switch"
         />
       </div>
       {view === 'assembly' ? (
-        <LlmAssemblyView call={call} provider={provider} model={model} />
-      ) : view === 'messages' ? (
-        <KernelMessagesView messages={call.effect.messages} />
+        <LlmAssemblyView call={call} provider={provider} model={model} kernelRequest={kernelRequest} />
+      ) : view === 'context' ? (
+        <LlmContextView messages={call.effect.messages} tools={call.effect.tools} />
       ) : view === 'payload' ? (
         <ProviderPayloadView call={call} kernelRequest={kernelRequest} />
       ) : (
@@ -950,9 +957,10 @@ function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
   )
 }
 
-function LlmAssemblyView({ call, provider, model }: { call: LlmCall; provider: string; model: string }): JSX.Element {
+function LlmAssemblyView({ call, provider, model, kernelRequest }: { call: LlmCall; provider: string; model: string; kernelRequest: unknown }): JSX.Element {
   const systemInfo = describeSystemInjection(call)
   const toolNames = call.effect.tools.map((tool) => `${tool.name}${tool.requiresApproval ? ' gated' : ' auto'}`)
+  const proportions = contextProportions(call)
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="space-y-2 pb-1" data-testid="llm-assembly-view">
@@ -966,6 +974,12 @@ function LlmAssemblyView({ call, provider, model }: { call: LlmCall; provider: s
             ['provider trace', call.trace ? 'captured' : 'not captured in this log'],
           ]}
         />
+        {!call.trace ? (
+          <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
+            Provider HTTP trace is missing for this log entry. The kernel request below is still the exact `call_llm` input; provider request body is only available for calls recorded after trace capture or after the LLM response arrives.
+          </div>
+        ) : null}
+        <ContextProportionBar items={proportions} />
         <AssemblyStep
           index="1"
           title="System Prompt"
@@ -990,8 +1004,44 @@ function LlmAssemblyView({ call, provider, model }: { call: LlmCall; provider: s
           source="host LLM adapter"
           result={adapterTransformSummary(provider)}
         />
+        <div className="grid gap-2 xl:grid-cols-2">
+          <JsonBlock label={`Kernel Request · call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={1} className="[&>div:last-child]:max-h-80 [&_[data-radix-scroll-area-viewport]]:max-h-80" />
+          {call.trace ? (
+            <JsonBlock label="Provider Request Body" value={call.trace.request.body} collapsed={1} className="[&>div:last-child]:max-h-80 [&_[data-radix-scroll-area-viewport]]:max-h-80" />
+          ) : (
+            <div className="flex min-h-[12rem] items-center justify-center rounded bg-background/70 px-3 text-center text-xs text-muted-foreground ring-1 ring-border/30">
+              Provider request body was not captured for this call.
+            </div>
+          )}
+        </div>
       </div>
     </ScrollArea>
+  )
+}
+
+function ContextProportionBar({ items }: { items: readonly ContextProportion[] }): JSX.Element {
+  const nonZero = items.filter((item) => item.bytes > 0)
+  return (
+    <div className="rounded bg-background/70 p-3 text-xs ring-1 ring-border/30" data-testid="context-proportion-bar">
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-medium text-foreground">Context Composition</div>
+        <div className="font-mono text-[10px] text-muted-foreground">approx by serialized size</div>
+      </div>
+      <div className="mt-2 flex h-3 overflow-hidden rounded bg-muted">
+        {nonZero.length > 0 ? nonZero.map((item) => (
+          <div key={item.kind} className={item.color} style={{ width: `${item.percent}%` }} title={`${item.label}: ${item.percent}%`} />
+        )) : <div className="w-full bg-muted" />}
+      </div>
+      <div className="mt-2 grid gap-1 sm:grid-cols-3">
+        {items.map((item) => (
+          <div key={item.kind} className="flex min-w-0 items-center gap-1.5">
+            <span className={cn('h-2 w-2 flex-none rounded', item.color)} />
+            <span className="truncate text-muted-foreground">{item.label}</span>
+            <span className="ml-auto flex-none font-mono text-foreground">{item.percent}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -1008,6 +1058,29 @@ function AssemblyStep({ index, title, source, result }: { index: string; title: 
         <div className="text-muted-foreground">result</div>
         <div className="min-w-0 break-words font-mono text-foreground">{result}</div>
       </div>
+    </div>
+  )
+}
+
+function LlmContextView({ messages, tools }: { messages: readonly Message[]; tools: readonly ToolSchema[] }): JSX.Element {
+  const [kind, setKind] = useState<'messages' | 'tools'>('messages')
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="llm-context-view">
+      <div className="flex flex-none items-center gap-2">
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          Kernel context includes both conversation messages and the tool registry sent with this LLM call.
+        </div>
+        <Segmented<'messages' | 'tools'>
+          value={kind}
+          onChange={setKind}
+          options={[
+            ['messages', 'Messages'],
+            ['tools', 'Tools'],
+          ]}
+          testId="llm-context-view-switch"
+        />
+      </div>
+      {kind === 'messages' ? <KernelMessagesView messages={messages} /> : <ToolRegistryContextView tools={tools} />}
     </div>
   )
 }
@@ -1061,12 +1134,63 @@ function KernelMessagesView({ messages }: { messages: readonly Message[] }): JSX
   )
 }
 
+function ToolRegistryContextView({ tools }: { tools: readonly ToolSchema[] }): JSX.Element {
+  const [selectedName, setSelectedName] = useState<string | null>(tools[0]?.name ?? null)
+  const selected = tools.find((tool) => tool.name === selectedName) ?? tools[0]
+  if (tools.length === 0) return <EmptyBlock label="No tools were sent with this LLM request." />
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,0.85fr)_minmax(0,1.15fr)] gap-2" data-testid="tool-registry-context-view">
+      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+        <div className="p-1">
+          {tools.map((tool) => (
+            <button
+              key={tool.name}
+              type="button"
+              onClick={() => setSelectedName(tool.name)}
+              className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/70', selected?.name === tool.name ? 'bg-muted' : '')}
+              data-testid="llm-tool-row"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
+              {isSkillTool(tool) ? <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">skill</span> : null}
+              <span className={cn('flex-none text-[10px]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
+                {tool.requiresApproval ? 'gated' : 'auto'}
+              </span>
+            </button>
+          ))}
+        </div>
+      </ScrollArea>
+      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+        <div className="space-y-2 p-2 text-xs">
+          {selected ? (
+            <>
+              <KeyValueTable
+                rows={[
+                  ['tool', selected.name],
+                  ['approval', selected.requiresApproval ? 'gated' : 'auto'],
+                  ['description bytes', String(selected.description.length)],
+                ]}
+              />
+              <p className="rounded bg-muted/50 px-2 py-1.5 text-muted-foreground">{selected.description || 'No description provided.'}</p>
+              <JsonBlock label={`Tool Schema · ${selected.name}`} value={selected} collapsed={2} />
+            </>
+          ) : null}
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
 function ProviderPayloadView({ call, kernelRequest }: { call: LlmCall; kernelRequest: unknown }): JSX.Element {
   if (!call.trace) {
     return (
-      <div className="min-h-0 flex-1">
-        <EmptyBlock label="Provider HTTP trace was not captured for this LLM call." />
-      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-2 pb-1" data-testid="provider-payload-view">
+          <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
+            Provider HTTP trace was not captured for this LLM call. Showing the exact kernel request instead.
+          </div>
+          <JsonBlock label={`Kernel Request · call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={1} />
+        </div>
+      </ScrollArea>
     )
   }
   const body = call.trace.request.body
@@ -1089,6 +1213,7 @@ function ProviderPayloadView({ call, kernelRequest }: { call: LlmCall; kernelReq
           result="system/messages/tools are shown in provider-native shape below; raw kernel request remains available for comparison."
         />
         <JsonBlock label="Provider Request" value={call.trace.request} collapsed={2} />
+        <JsonBlock label="Provider Request Body" value={call.trace.request.body} collapsed={1} />
         <JsonBlock label={`Kernel Request · call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={2} />
       </div>
     </ScrollArea>
@@ -1403,6 +1528,51 @@ function roleCounts(messages: readonly Message[]): string {
   const counts = new Map<Message['role'], number>()
   for (const message of messages) counts.set(message.role, (counts.get(message.role) ?? 0) + 1)
   return [...counts.entries()].map(([role, count]) => `${role} ${count}`).join(', ') || 'none'
+}
+
+function contextProportions(call: LlmCall): readonly ContextProportion[] {
+  const systemBytes = serializedSize(systemContextFromCall(call))
+  const messageBytes = serializedSize(call.effect.messages)
+  const toolBytes = serializedSize(call.effect.tools)
+  const total = Math.max(1, systemBytes + messageBytes + toolBytes)
+  return [
+    {
+      kind: 'system',
+      label: 'system',
+      bytes: systemBytes,
+      percent: Math.round((systemBytes / total) * 100),
+      color: 'bg-amber-500',
+    },
+    {
+      kind: 'messages',
+      label: 'messages',
+      bytes: messageBytes,
+      percent: Math.round((messageBytes / total) * 100),
+      color: 'bg-sky-500',
+    },
+    {
+      kind: 'tools',
+      label: 'tools',
+      bytes: toolBytes,
+      percent: Math.round((toolBytes / total) * 100),
+      color: 'bg-emerald-500',
+    },
+  ]
+}
+
+function systemContextFromCall(call: LlmCall): unknown {
+  if (call.trace && providerBodyHasKey(call.trace.request.body, 'system')) {
+    return (call.trace.request.body as Record<string, unknown>).system
+  }
+  return call.effect.messages.filter((message) => message.role === 'system')
+}
+
+function serializedSize(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? 0
+  } catch {
+    return 0
+  }
 }
 
 function describeSystemInjection(call: LlmCall): string {
