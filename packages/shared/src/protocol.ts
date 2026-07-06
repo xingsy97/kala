@@ -302,6 +302,52 @@ export type DirListResult = {
   error?: string
 }
 
+/**
+ * Dashboard-driven fuzzy file search for the composer's `@file` mention picker.
+ * Executor walks the workspace root(s), skipping node_modules/.git/dist, and
+ * returns up to `limit` file paths (workspace-relative) that match `query`.
+ */
+export type ClientListFiles = {
+  requestId: string
+  workspaceId: string
+  query?: string
+  limit?: number
+}
+
+export type FileListEntry = {
+  path: string
+  size: number
+}
+
+export type FileListResult = {
+  requestId: string
+  workspaceId: string
+  files: readonly FileListEntry[]
+  truncated: boolean
+  error?: string
+}
+
+/**
+ * Dashboard-driven read of a single workspace file for `@file` inline expansion.
+ * Executor refuses paths outside the workspace or files above `maxBytes`
+ * (default 64 KiB) so the composer can render an inline toast.
+ */
+export type ClientReadFile = {
+  requestId: string
+  workspaceId: string
+  path: string
+  maxBytes?: number
+}
+
+export type FileContentsResult = {
+  requestId: string
+  workspaceId: string
+  path: string
+  content?: string
+  size?: number
+  error?: string
+}
+
 // ============================================================================
 // Host  -  Executor
 // ============================================================================
@@ -491,6 +537,8 @@ export type DashboardClientToServerEvents = {
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession) => void
   'client:list_dirs': (payload: ClientListDirs) => void
+  'client:list_files': (payload: ClientListFiles) => void
+  'client:read_file': (payload: ClientReadFile) => void
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
@@ -518,6 +566,8 @@ export type DashboardServerToClientEvents = {
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
   'server:sessions': (payload: ServerSessionsPayload) => void
   'server:dir_list': (payload: DirListResult) => void
+  'server:file_list': (payload: FileListResult) => void
+  'server:file_contents': (payload: FileContentsResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
 }
@@ -553,6 +603,14 @@ export type ExecutorServerToClientEvents = {
   'fs:list_dirs': (
     payload: ClientListDirs,
     ack: (result: DirListResult) => void,
+  ) => void
+  'fs:list_files': (
+    payload: ClientListFiles,
+    ack: (result: FileListResult) => void,
+  ) => void
+  'fs:read_file': (
+    payload: ClientReadFile,
+    ack: (result: FileContentsResult) => void,
   ) => void
 }
 

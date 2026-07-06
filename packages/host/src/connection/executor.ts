@@ -23,11 +23,15 @@ import type {
 import type {
   AttachedExecutor,
   ClientListDirs,
+  ClientListFiles,
+  ClientReadFile,
   DirListResult,
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
   ExecutorServerToClientEvents,
   ExecutorToolResult,
+  FileContentsResult,
+  FileListResult,
   ServerExecutorChangedPayload,
   ToolResultAck,
 } from '@agent-kernel/shared'
@@ -60,6 +64,8 @@ export type WorkspaceResolver = {
 export type ExecutorLookup = {
   executorForSession(sessionId: string): AttachedExecutor | undefined
   listDirs(workspaceId: string, path: string | undefined, requestId: string): Promise<DirListResult>
+  listFiles(payload: ClientListFiles): Promise<FileListResult>
+  readFile(payload: ClientReadFile): Promise<FileContentsResult>
 }
 
 export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
@@ -356,6 +362,58 @@ export function createExecutorRegistry(
           ...(path !== undefined ? { path } : {}),
         }
         bind.socket.emit('fs:list_dirs', payload, (result: DirListResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async listFiles(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          files: [],
+          truncated: false,
+          error: 'workspace offline',
+        }
+      }
+      return await new Promise<FileListResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({
+            requestId: payload.requestId,
+            workspaceId: payload.workspaceId,
+            files: [],
+            truncated: false,
+            error: 'file listing timed out',
+          })
+        }, toolTimeoutMs)
+        bind.socket.emit('fs:list_files', payload, (result: FileListResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async readFile(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          path: payload.path,
+          error: 'workspace offline',
+        }
+      }
+      return await new Promise<FileContentsResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({
+            requestId: payload.requestId,
+            workspaceId: payload.workspaceId,
+            path: payload.path,
+            error: 'file read timed out',
+          })
+        }, toolTimeoutMs)
+        bind.socket.emit('fs:read_file', payload, (result: FileContentsResult) => {
           clearTimeout(timer)
           resolve(result)
         })

@@ -19,9 +19,11 @@ import type {
   ClientFork,
   ClientListDirs,
   ClientListExecutors,
+  ClientListFiles,
   ClientListSessions,
   ClientLoadHistory,
   ClientDeleteSession,
+  ClientReadFile,
   ClientRenameSession,
   ClientSetApprovalMode,
   ClientSetCwd,
@@ -600,6 +602,14 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
     socket.on('client:list_dirs', async (p: ClientListDirs) => {
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
       socket.emit('server:dir_list', result)
+    })
+    socket.on('client:list_files', async (p: ClientListFiles) => {
+      const result = await deps.executors.listFiles(p)
+      socket.emit('server:file_list', result)
+    })
+    socket.on('client:read_file', async (p: ClientReadFile) => {
+      const result = await deps.executors.readFile(p)
+      socket.emit('server:file_contents', result)
     })
     socket.on('client:create_session', async (p: ClientCreateSession) => {
       try {
