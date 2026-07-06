@@ -9,10 +9,10 @@
  *      dispatch, approval request, finish, error), which may produce new
  *      events that feed back into (1).
  *
- * The loop's control flow lives inside `Session.dispatch()`. Each dispatch
- * is a single kernel step plus its side-effect fan-out; callers await it to
- * be sure the persisted log is in sync with in-memory state before returning
- * over the wire.
+ * `dispatchOne` is exported so sibling modules (`compaction.ts`,
+ * `agent-tool.ts`) can dispatch synthesised events back through the same
+ * loop without needing a public wrapper — everything downstream sees a
+ * uniform record → step → persist → broadcast → effect fan-out cycle.
  */
 
 import type {
@@ -25,14 +25,15 @@ import type {
   FinishEffect,
   RequestApprovalEffect,
   Effect,
-  Message,
 } from '@agent-kernel/kernel'
 import { step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { HookConfig, HookRunner } from './hooks.js'
-import { selectHooks } from './hooks.js'
 import type { SessionRecord, SessionStore } from './store/session.js'
+import { maybeAutoCompact, runCompact } from './compaction.js'
+import { AGENT_TOOL_NAME, runAgentTool } from './agent-tool.js'
+import { runPostToolHooks, runPreToolHooks } from './hooks-runner.js'
 
 export type LoopBroadcast = {
   onEvent(
@@ -87,18 +88,6 @@ export type LoopHandle = {
   cancelStream(sessionId: string): void
 }
 
-/**
- * Fixed instruction fed to the summarizer LLM call. The output replaces the
- * session's message list, so preserving every decision / file path / open
- * TODO matters more than prose polish.
- */
-const SUMMARIZER_PROMPT =
-  'You are a summarizer. Compress the conversation above into a single, dense summary under 800 tokens. Preserve every decision, file path, tool result, and open task. Do not add commentary. Reply with ONLY the summary text.'
-const COMPACT_TIMEOUT_MS = 60_000
-
-const AGENT_TOOL_NAME = 'agent'
-const DEFAULT_MAX_AGENT_DEPTH = 3
-
 export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   // Per-session guard so an auto-compact triggered by a hard-tier state
   // change can't fire again while the summarizer LLM call is still in flight.
@@ -127,117 +116,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   return handle
 }
 
-async function maybeAutoCompact(
-  deps: HostLoopDeps,
-  sessionId: string,
-  inFlight: Set<string>,
-  handle: LoopHandle,
-): Promise<void> {
-  const record = deps.store.get(sessionId)
-  if (!record) return
-  if (record.state.contextPressureLevel !== 'hard') return
-  // Only auto-fire when the session is at a resting point. Firing mid-turn
-  // (thinking / awaiting_approval / executing_tools) would try to compact
-  // messages the reducer refuses to drop while pending calls exist.
-  const s = record.state.status
-  if (s !== 'idle' && s !== 'done' && s !== 'error') return
-  if (inFlight.has(sessionId)) return
-  await handle.compact(sessionId, 'auto')
-}
-
-async function runCompact(
-  deps: HostLoopDeps,
-  sessionId: string,
-  trigger: 'manual' | 'auto',
-  inFlight: Set<string>,
-  aborts: Map<string, AbortController>,
-): Promise<void> {
-  if (inFlight.has(sessionId)) return
-  const record = deps.store.get(sessionId)
-  if (!record) throw new Error(`Unknown session: ${sessionId}`)
-  const s = record.state.status
-  if (s !== 'idle' && s !== 'done' && s !== 'error') {
-    throw new Error('cannot compact while the session is busy')
-  }
-  if (!hasCompactableContent(record.state.messages)) {
-    throw new Error('nothing to compact yet')
-  }
-
-  inFlight.add(sessionId)
-  try {
-    const tokensBefore = record.state.usage.inputTokens
-    const replacedCount = record.state.messages.length
-    const compact = await summarize(deps, sessionId, record.state.messages)
-    // No provider gives a reliable prompt-token count for the summary alone
-    // before it's used. Estimate cheaply: 4 chars ≈ 1 token. Refined on the
-    // next real LLM call where usage.inputTokens is reported by the provider.
-    const tokensAfter = Math.max(0, Math.round(compact.summary.length / 4))
-    await dispatchOne(
-      deps,
-      sessionId,
-      {
-        kind: 'compact_replaced',
-        trigger,
-        request: compact.request,
-        ...(compact.usage ? { responseUsage: compact.usage } : {}),
-        summary: compact.summary,
-        replacedCount,
-        tokensBefore,
-        tokensAfter,
-      },
-      aborts,
-    )
-  } finally {
-    inFlight.delete(sessionId)
-  }
-}
-
-async function summarize(
-  deps: HostLoopDeps,
-  sessionId: string,
-  messages: readonly Message[],
-): Promise<{
-  summary: string
-  request: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['request']>
-  usage?: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['responseUsage']>
-}> {
-  const model = deps.models?.get(sessionId)
-  const request = {
-    ...(model ? { model } : {}),
-    systemPrompt: SUMMARIZER_PROMPT,
-    messages,
-    tools: [],
-  }
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), COMPACT_TIMEOUT_MS)
-  let res: Awaited<ReturnType<HostLoopDeps['llm']['call']>>
-  try {
-    res = await deps.llm.call({
-      ...request,
-      signal: ctrl.signal,
-    })
-  } catch (err) {
-    if (ctrl.signal.aborted) throw new Error('compact timed out')
-    throw err
-  } finally {
-    clearTimeout(timer)
-  }
-  const text = res.message.content
-    .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-    .map((c) => c.text)
-    .join('\n')
-  return {
-    summary: text.trim() || '[compact produced empty summary]',
-    request,
-    ...(res.usage ? { usage: res.usage } : {}),
-  }
-}
-
-function hasCompactableContent(messages: readonly Message[]): boolean {
-  return messages.some((m) => m.role !== 'system')
-}
-
-async function dispatchOne(
+export async function dispatchOne(
   deps: HostLoopDeps,
   sessionId: string,
   event: AgentEvent,
@@ -432,163 +311,6 @@ async function performCallTool(
       aborts,
     )
   }
-}
-
-async function runPreToolHooks(
-  deps: HostLoopDeps,
-  sessionId: string,
-  effect: CallToolEffect,
-): Promise<string | null> {
-  const hooks = deps.hooks
-  const runner = deps.hookRunner
-  if (!hooks || !runner || hooks.length === 0) return null
-  const matching = selectHooks(hooks, 'pre_tool_use', effect.name)
-  if (matching.length === 0) return null
-  const record = deps.store.get(sessionId)
-  for (const hook of matching) {
-    const outcome = await runner.run(hook, {
-      event: 'pre_tool_use',
-      sessionId,
-      ...(record?.workspaceId !== undefined
-        ? { workspaceId: record.workspaceId }
-        : {}),
-      toolName: effect.name,
-      toolInput: effect.input,
-    })
-    if (!outcome.ok) {
-      const detail = (outcome.stdout || outcome.stderr).trim()
-      return detail.length > 0
-        ? `blocked by pre_tool_use hook (exit ${outcome.exitCode}): ${detail}`
-        : `blocked by pre_tool_use hook (exit ${outcome.exitCode})`
-    }
-  }
-  return null
-}
-
-async function runPostToolHooks(
-  deps: HostLoopDeps,
-  sessionId: string,
-  effect: CallToolEffect,
-  result: { ok: boolean; content: string },
-): Promise<void> {
-  const hooks = deps.hooks
-  const runner = deps.hookRunner
-  if (!hooks || !runner || hooks.length === 0) return
-  const matching = selectHooks(hooks, 'post_tool_use', effect.name)
-  if (matching.length === 0) return
-  const record = deps.store.get(sessionId)
-  for (const hook of matching) {
-    await runner.run(hook, {
-      event: 'post_tool_use',
-      sessionId,
-      ...(record?.workspaceId !== undefined
-        ? { workspaceId: record.workspaceId }
-        : {}),
-      toolName: effect.name,
-      toolInput: effect.input,
-      toolResult: { ok: result.ok, content: result.content },
-    })
-  }
-}
-
-async function runAgentTool(
-  deps: HostLoopDeps,
-  parentSessionId: string,
-  effect: CallToolEffect,
-  aborts: Map<string, AbortController>,
-): Promise<{ ok: boolean; content: string }> {
-  const parent = deps.store.get(parentSessionId)
-  if (!parent) return { ok: false, content: 'parent session not found' }
-  const prompt = effect.input.prompt
-  if (typeof prompt !== 'string' || prompt.trim().length === 0) {
-    return { ok: false, content: 'agent prompt is required' }
-  }
-  const depth = depthOf(deps.store, parent)
-  const maxDepth = parent.config.maxAgentDepth ?? DEFAULT_MAX_AGENT_DEPTH
-  if (depth >= maxDepth) return { ok: false, content: 'agent depth exceeded' }
-
-  const child = await deps.store.create({
-    config: filteredAgentConfig(parent.config, effect.input.tools),
-    parentSessionId,
-    parentCursor: parent.state.cursor,
-    ...(parent.workspaceId !== undefined ? { workspaceId: parent.workspaceId } : {}),
-    ...(parent.workspaceName !== undefined ? { workspaceName: parent.workspaceName } : {}),
-    ...(parent.state.cwd !== undefined ? { initialCwd: parent.state.cwd } : {}),
-    // Sub-agents run headless: no dashboard is attached to the child session,
-    // so any RequestApprovalEffect would deadlock. Force allow_all regardless
-    // of the parent's mode. See docs/adr/0014-subagent-approval-mode.md.
-    initialApprovalMode: 'allow_all',
-  })
-  const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
-  const priorModel = model ? deps.models?.get(child.sessionId) : undefined
-  if (model && isSettableModelResolver(deps.models)) {
-    deps.models.set(child.sessionId, model)
-  }
-  try {
-    await dispatchOne(
-      deps,
-      child.sessionId,
-      { kind: 'user_message', text: prompt },
-      aborts,
-    )
-  } finally {
-    if (model && isSettableModelResolver(deps.models)) {
-      if (priorModel) deps.models.set(child.sessionId, priorModel)
-      else deps.models.delete(child.sessionId)
-    }
-  }
-  const final = deps.store.get(child.sessionId)?.state
-  if (!final || final.status !== 'done') {
-    return { ok: false, content: `agent ended with status ${final?.status ?? 'unknown'}` }
-  }
-  return { ok: true, content: finalAssistantText(final) }
-}
-
-function filteredAgentConfig(
-  config: AgentConfig,
-  requestedTools: unknown,
-): AgentConfig {
-  if (!Array.isArray(requestedTools)) return config
-  const allowed = new Set(requestedTools.filter((t): t is string => typeof t === 'string'))
-  return { ...config, tools: config.tools.filter((t) => allowed.has(t.name)) }
-}
-
-function depthOf(store: SessionStore, record: SessionRecord): number {
-  let depth = 0
-  let cur: SessionRecord | undefined = record
-  while (cur?.parentSessionId) {
-    depth++
-    cur = store.get(cur.parentSessionId)
-  }
-  return depth
-}
-
-function finalAssistantText(state: AgentState): string {
-  for (let i = state.messages.length - 1; i >= 0; i--) {
-    const msg = state.messages[i]!
-    if (msg.role !== 'assistant') continue
-    return msg.content
-      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-      .map((c) => c.text)
-      .join('\n')
-      .trim()
-  }
-  return ''
-}
-
-type SettableModelResolver = ModelResolver & {
-  set(sessionId: string, model: string): void
-  delete(sessionId: string): void
-}
-
-function isSettableModelResolver(
-  models: ModelResolver | undefined,
-): models is SettableModelResolver {
-  return Boolean(
-    models &&
-      typeof (models as SettableModelResolver).set === 'function' &&
-      typeof (models as SettableModelResolver).delete === 'function',
-  )
 }
 
 function isAbortError(err: unknown): boolean {
