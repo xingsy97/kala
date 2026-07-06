@@ -38,6 +38,7 @@ function parseArgs(argv: readonly string[]): Args {
   const out: Args = { sandboxRoots: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!
+    if (a === '--') continue
     const eq = a.indexOf('=')
     const [key, inline] =
       eq === -1 ? [a, undefined] : [a.slice(0, eq), a.slice(eq + 1)]

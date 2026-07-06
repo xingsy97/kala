@@ -49,6 +49,16 @@ import { discoverSkills } from '../src/skills.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 
+function argValue(argv: readonly string[], name: string): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (arg === '--') continue
+    if (arg === name) return argv[i + 1]
+    if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)
+  }
+  return undefined
+}
+
 async function main(): Promise<void> {
   const runtime = loadRuntimeConfig()
   const registry = createModelRegistry(runtime.providers, runtime.manualModels, {
@@ -56,7 +66,7 @@ async function main(): Promise<void> {
   })
   const { llm, defaultModel } = registry
 
-  const port = Number(process.env.HOST_PORT ?? 3000)
+  const port = Number(argValue(process.argv.slice(2), '--port') ?? process.env.HOST_PORT ?? 3000)
   const sessionsDir =
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
   const dashboard = await createDashboardServing()
