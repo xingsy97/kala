@@ -54,6 +54,7 @@ export type CreateSessionParams = {
   workspaceId?: string
   workspaceName?: string
   initialCwd?: string
+  initialApprovalMode?: import('@agent-kernel/kernel').ApprovalMode
 }
 
 export class SessionStore {
@@ -86,12 +87,15 @@ export class SessionStore {
     const stateWithCwd: AgentState = params.initialCwd
       ? { ...stateForSession, cwd: params.initialCwd }
       : stateForSession
+    const stateWithApproval: AgentState = params.initialApprovalMode
+      ? { ...stateWithCwd, approvalMode: params.initialApprovalMode }
+      : stateWithCwd
     const logPath = this.pathFor(sessionId)
     await writeHeader({
       path: logPath,
       sessionId,
       config: params.config,
-      initialState: stateWithCwd,
+      initialState: stateWithApproval,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
@@ -112,7 +116,7 @@ export class SessionStore {
       sessionId,
       logPath,
       config: params.config,
-      state: stateWithCwd,
+      state: stateWithApproval,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
