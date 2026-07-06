@@ -1,12 +1,13 @@
-import { useMemo, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { CornerDownRight, ListChecks, Navigation, Send, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
+import { AtSign, CornerDownRight, ListChecks, Navigation, Send, X } from 'lucide-react'
 
-import type { ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
+import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
   AgentConfig,
   AgentState,
   ApprovalMode,
   ImageContent,
+  TextContent,
 } from '@agent-kernel/kernel'
 
 import { Button } from '../../components/ui/button.js'
@@ -24,7 +25,7 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 
 type Props = {
   disabled?: boolean
-  onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[]): void
+  onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void
   onCompact(): void
   model: string
   models: readonly ModelInfo[]
@@ -34,6 +35,9 @@ type Props = {
   state: AgentState | null
   config: AgentConfig | null
   queuedMessages: readonly QueuedMessagePreview[]
+  workspaceOnline?: boolean
+  onListFiles?(query: string): Promise<readonly FileListEntry[]>
+  onReadFile?(path: string): Promise<{ content?: string; error?: string }>
 }
 
 export type SendMode = 'steer' | 'queue'
@@ -77,10 +81,20 @@ export function Composer({
   state,
   config,
   queuedMessages,
+  workspaceOnline,
+  onListFiles,
+  onReadFile,
 }: Props): JSX.Element {
   const [text, setText] = useState('')
   const [sendMode, setSendMode] = useState<SendMode>('steer')
   const [pastedImages, setPastedImages] = useState<readonly PastedImage[]>([])
+  const [mentionState, setMentionState] = useState<MentionState | null>(null)
+  const [mentionFiles, setMentionFiles] = useState<readonly FileListEntry[]>([])
+  const [mentionActive, setMentionActive] = useState(0)
+  const [mentionLoading, setMentionLoading] = useState(false)
+  const [pendingToast, setPendingToast] = useState<string | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const mentionRequestId = useRef(0)
   const approvalModeLabel = APPROVAL_MODE_BY_VALUE.get(approvalMode)?.label ?? approvalMode
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
   const slashCommands = useMemo(
@@ -97,7 +111,67 @@ export function Composer({
     ? slashCommands.filter((c) => c.command.startsWith(slashQuery))
     : []
 
-  const submit = (): void => {
+  useEffect(() => {
+    if (!mentionState || !onListFiles) {
+      if (mentionFiles.length > 0) setMentionFiles([])
+      return
+    }
+    const rid = ++mentionRequestId.current
+    setMentionLoading(true)
+    let cancelled = false
+    const handle = setTimeout(() => {
+      onListFiles(mentionState.query)
+        .then((files) => {
+          if (cancelled || rid !== mentionRequestId.current) return
+          setMentionFiles(files)
+          setMentionActive(0)
+          setMentionLoading(false)
+        })
+        .catch(() => {
+          if (cancelled || rid !== mentionRequestId.current) return
+          setMentionFiles([])
+          setMentionLoading(false)
+        })
+    }, 80)
+    return () => {
+      cancelled = true
+      clearTimeout(handle)
+    }
+  }, [mentionState, onListFiles])
+
+  useEffect(() => {
+    if (!pendingToast) return
+    const t = setTimeout(() => setPendingToast(null), 3500)
+    return () => clearTimeout(t)
+  }, [pendingToast])
+
+  const updateText = (next: string, caret: number): void => {
+    setText(next)
+    const found = detectMention(next, caret)
+    setMentionState(found)
+    if (!found) mentionRequestId.current += 1
+  }
+
+  const applyMention = (file: FileListEntry): void => {
+    if (!mentionState) return
+    const before = text.slice(0, mentionState.start)
+    const after = text.slice(mentionState.end)
+    const inserted = `@${file.path}`
+    const next = `${before}${inserted} ${after}`
+    setText(next)
+    setMentionState(null)
+    setMentionFiles([])
+    setMentionActive(0)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      const pos = before.length + inserted.length + 1
+      el.focus()
+      el.setSelectionRange(pos, pos)
+    })
+  }
+
+  const submit = async (): Promise<void> => {
     const trimmed = text.trim()
     if (trimmed.length === 0 && pastedImages.length === 0) return
     const command = slashCommands.find(
@@ -112,9 +186,40 @@ export function Composer({
       type: 'image',
       source: { kind: 'base64', mediaType: img.mediaType, data: img.base64 },
     }))
-    onSubmit(trimmed, sendMode, images.length > 0 ? images : undefined)
+    const extraBlocks: TextContent[] = []
+    if (onReadFile) {
+      const mentions = collectMentionPaths(trimmed)
+      const seen = new Set<string>()
+      for (const path of mentions) {
+        if (seen.has(path)) continue
+        seen.add(path)
+        try {
+          const result = await onReadFile(path)
+          if (result.error) {
+            setPendingToast(`@${path}: ${result.error}`)
+            continue
+          }
+          if (typeof result.content === 'string') {
+            extraBlocks.push({
+              type: 'text',
+              text: `--- ${path} ---\n${result.content}\n---`,
+            })
+          }
+        } catch (err) {
+          setPendingToast(`@${path}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    }
+    onSubmit(
+      trimmed,
+      sendMode,
+      images.length > 0 ? images : undefined,
+      extraBlocks.length > 0 ? extraBlocks : undefined,
+    )
     setText('')
     setPastedImages([])
+    setMentionState(null)
+    setMentionFiles([])
   }
 
   async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
@@ -147,7 +252,7 @@ export function Composer({
 
   function handleSubmit(e: FormEvent<HTMLFormElement>): void {
     e.preventDefault()
-    submit()
+    void submit()
   }
 
   const canSubmit = !disabled && (text.trim().length > 0 || pastedImages.length > 0)
@@ -193,12 +298,21 @@ export function Composer({
           ) : null}
           <div className="relative">
             <Textarea
+              ref={textareaRef}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => updateText(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+              onSelect={(e) => {
+                const el = e.currentTarget
+                if (mentionState !== null || el.value.includes('@')) {
+                  const found = detectMention(el.value, el.selectionStart ?? el.value.length)
+                  setMentionState(found)
+                  if (!found) mentionRequestId.current += 1
+                }
+              }}
               rows={2}
               disabled={disabled}
               placeholder={
-                disabled ? 'waiting for host...' : 'Message the agent — paste images, use / for commands'
+                disabled ? 'waiting for host...' : 'Message the agent — @ for files, / for commands'
               }
               className="max-h-56 min-h-[56px] w-full resize-none border-0 bg-transparent px-4 py-3 text-sm leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
               data-testid="composer-input"
@@ -206,9 +320,34 @@ export function Composer({
                 void handlePaste(e)
               }}
               onKeyDown={(e) => {
+                if (mentionState && mentionFiles.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setMentionActive((i) => Math.min(mentionFiles.length - 1, i + 1))
+                    return
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setMentionActive((i) => Math.max(0, i - 1))
+                    return
+                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    const file = mentionFiles[mentionActive]
+                    if (file) {
+                      e.preventDefault()
+                      applyMention(file)
+                      return
+                    }
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setMentionState(null)
+                    return
+                  }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  submit()
+                  void submit()
                 }
               }}
             />
@@ -232,6 +371,46 @@ export function Composer({
                     <span className="text-foreground">{cmd.label}</span>
                   </button>
                 ))}
+              </div>
+            ) : null}
+            {mentionState && !disabled && onListFiles ? (
+              <div
+                className="absolute inset-x-2 bottom-2 z-10 max-h-64 overflow-hidden rounded-lg border bg-popover shadow-lg"
+                data-testid="mention-menu"
+              >
+                <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <AtSign className="h-3 w-3" aria-hidden="true" />
+                  <span>files</span>
+                  {mentionState.query ? (
+                    <span className="font-mono text-foreground">{mentionState.query}</span>
+                  ) : null}
+                  {mentionLoading ? <span className="ml-auto">…</span> : null}
+                </div>
+                <div className="max-h-56 overflow-y-auto" data-testid="mention-list">
+                  {mentionFiles.length === 0 && !mentionLoading ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      {workspaceOnline === false ? 'workspace offline' : 'no matches'}
+                    </div>
+                  ) : null}
+                  {mentionFiles.map((file, idx) => (
+                    <button
+                      key={file.path}
+                      type="button"
+                      className={cn(
+                        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs',
+                        idx === mentionActive
+                          ? 'bg-accent text-accent-foreground'
+                          : 'hover:bg-accent hover:text-accent-foreground',
+                      )}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseEnter={() => setMentionActive(idx)}
+                      onClick={() => applyMention(file)}
+                      data-testid={`mention-option-${idx}`}
+                    >
+                      <span className="font-mono truncate">{file.path}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>
@@ -325,9 +504,18 @@ export function Composer({
             <kbd className="ml-1 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">Shift + Enter</kbd> for newline
           </span>
           <span>
-            <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd> for commands
+            <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">@</kbd> files ·
+            <kbd className="ml-1 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd> commands
           </span>
         </div>
+        {pendingToast ? (
+          <div
+            className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+            data-testid="composer-toast"
+          >
+            {pendingToast}
+          </div>
+        ) : null}
       </div>
     </form>
   )
@@ -435,4 +623,47 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result ?? ''))
     reader.readAsDataURL(file)
   })
+}
+
+type MentionState = {
+  start: number
+  end: number
+  query: string
+}
+
+const MENTION_CHAR = /[A-Za-z0-9._\-\/@]/
+const MENTION_PATH = /[A-Za-z0-9._\-\/]/
+
+function detectMention(text: string, caret: number): MentionState | null {
+  const clamped = Math.min(caret, text.length)
+  let start = clamped
+  while (start > 0 && MENTION_CHAR.test(text[start - 1] ?? '')) start -= 1
+  const at = text[start]
+  if (at !== '@') return null
+  if (start > 0) {
+    const prev = text[start - 1] ?? ''
+    if (prev !== '' && !/\s/.test(prev)) return null
+  }
+  let end = clamped
+  while (end < text.length && MENTION_CHAR.test(text[end] ?? '')) end += 1
+  const raw = text.slice(start + 1, end)
+  if (/[\s@]/.test(raw)) return null
+  return { start, end, query: raw }
+}
+
+function collectMentionPaths(text: string): readonly string[] {
+  const out: string[] = []
+  const re = /(^|\s)@([A-Za-z0-9._\-\/]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const path = m[2]
+    if (path && path.length > 0 && !path.startsWith('/')) out.push(path)
+  }
+  return out
+}
+
+export const __TESTABLE__ = {
+  detectMention,
+  collectMentionPaths,
+  MENTION_PATH,
 }

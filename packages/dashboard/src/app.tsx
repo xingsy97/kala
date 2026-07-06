@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FolderOpen, Info, Moon, PanelRight, PanelRightClose, Settings, Sun } from 'lucide-react'
 
-import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
+import type {
+  FileContentsResult,
+  FileListEntry,
+  FileListResult,
+  ModelInfo,
+  ServerModelsPayload,
+} from '@agent-kernel/shared'
 
 import { Button } from './components/ui/button.js'
 import {
@@ -403,6 +409,64 @@ export function App(): JSX.Element {
     return ex.hostname ?? ex.ipAddresses?.[0]
   }, [currentSession?.workspaceId, control.executors])
 
+  const listWorkspaceFiles = useCallback(
+    async (query: string): Promise<readonly FileListEntry[]> => {
+      const socket = session.socket
+      const workspaceId = currentSession?.workspaceId
+      if (!socket || !workspaceId) return []
+      return await new Promise((resolve) => {
+        const requestId = crypto.randomUUID()
+        const timer = setTimeout(() => {
+          socket.off('server:file_list', handler)
+          resolve([])
+        }, 3000)
+        const handler = (result: FileListResult): void => {
+          if (result.requestId !== requestId) return
+          clearTimeout(timer)
+          socket.off('server:file_list', handler)
+          resolve(result.error ? [] : result.files)
+        }
+        socket.on('server:file_list', handler)
+        socket.emit('client:list_files', {
+          requestId,
+          workspaceId,
+          ...(query ? { query } : {}),
+          limit: 40,
+        })
+      })
+    },
+    [session.socket, currentSession?.workspaceId],
+  )
+
+  const readWorkspaceFile = useCallback(
+    async (path: string): Promise<{ content?: string; error?: string }> => {
+      const socket = session.socket
+      const workspaceId = currentSession?.workspaceId
+      if (!socket || !workspaceId) return { error: 'no active workspace' }
+      return await new Promise((resolve) => {
+        const requestId = crypto.randomUUID()
+        const timer = setTimeout(() => {
+          socket.off('server:file_contents', handler)
+          resolve({ error: 'timed out' })
+        }, 5000)
+        const handler = (result: FileContentsResult): void => {
+          if (result.requestId !== requestId) return
+          clearTimeout(timer)
+          socket.off('server:file_contents', handler)
+          if (result.error) resolve({ error: result.error })
+          else resolve({ content: result.content ?? '' })
+        }
+        socket.on('server:file_contents', handler)
+        socket.emit('client:read_file', {
+          requestId,
+          workspaceId,
+          path,
+        })
+      })
+    },
+    [session.socket, currentSession?.workspaceId],
+  )
+
   return (
     <div className="h-screen w-screen bg-white text-foreground dark:bg-background dark:text-foreground overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
@@ -534,13 +598,19 @@ export function App(): JSX.Element {
                       config={session.config}
                       queuedMessages={session.queuedMessages}
                       onCompact={runCompactNow}
-                      onSubmit={(text, mode, images) => {
+                      workspaceOnline={sessionWorkspaceOnline}
+                      onListFiles={listWorkspaceFiles}
+                      onReadFile={readWorkspaceFile}
+                      onSubmit={(text, mode, images, extraBlocks) => {
                         const imageBlocks = images ?? []
-                        const content = imageBlocks.length > 0
+                        const extras = extraBlocks ?? []
+                        const hasStructured = imageBlocks.length > 0 || extras.length > 0
+                        const content = hasStructured
                           ? [
                               ...(text.length > 0
                                 ? [{ type: 'text' as const, text }]
                                 : []),
+                              ...extras,
                               ...imageBlocks,
                             ]
                           : undefined
