@@ -49,6 +49,13 @@ export type EventEntry = {
   effects: readonly Effect[]
   usage?: UsageTotal
   llmTrace?: LLMTrace
+  /**
+   * Model that answered this event, when the event was produced by an LLM
+   * call (`llm_response` / `llm_error`). Recorded independently of `llmTrace`
+   * so the Inspector can display the model even when the provider trace body
+   * was suppressed or an older adapter didn't capture one.
+   */
+  model?: string
 }
 
 export type LLMTrace = {

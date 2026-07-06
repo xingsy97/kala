@@ -79,6 +79,8 @@ type EventEntry = {
   event: AgentEvent           // exactly as fed to step() (SPEC §1.5)
   effects: Effect[]           // exactly what step() returned (SPEC §1.6)
   usage?: UsageTotal          // cumulative usage after this step (only when it changed)
+  llmTrace?: LLMTrace         // provider HTTP trace metadata for LLM events, when captured
+  model?: string              // active model for llm_response / llm_error, even without llmTrace
 }
 ```
 
@@ -95,6 +97,12 @@ request/trigger/responseUsage metadata; dashboard history uses them to
 inspect the compact LLM call.
 
 **Storage of `usage`**: To keep log lines small, `usage` is written only on lines where it changed (i.e. after an `llm_response` with a delta). Consumers reconstructing running usage can pull it from these lines.
+
+**LLM metadata**: `llmTrace` and `model` are observability metadata, not kernel
+state. `llmTrace` stores the redacted provider request/response when capture is
+available. `model` stores the model selected for the call and SHOULD be present
+on `llm_response` and `llm_error` entries whenever known, including failures and
+calls where provider trace capture is unavailable.
 
 ### 2.3 Metadata (kind: 'metadata')
 

@@ -235,7 +235,7 @@ export async function startHostServer(
   }
 
   const broadcast: LoopBroadcast = {
-    onEvent(sessionId, seq, event, effects, state, llmTrace) {
+    onEvent(sessionId, seq, event, effects, state, llmTrace, model) {
       const room = `session:${sessionId}`
       io.of('/dashboard').to(room).emit('event:appended', {
         sessionId,
@@ -244,6 +244,7 @@ export async function startHostServer(
         event,
         effects,
         ...(llmTrace ? { llmTrace } : {}),
+        ...(model ? { model } : {}),
       })
       io.of('/dashboard').to(room).emit('state:changed', {
         sessionId,
@@ -257,6 +258,7 @@ export async function startHostServer(
         event,
         effects,
         ...(llmTrace ? { llmTrace } : {}),
+        ...(model ? { model } : {}),
       })
       io.of('/executor').to(room).emit('state:changed', {
         sessionId,

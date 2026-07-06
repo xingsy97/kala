@@ -189,7 +189,7 @@ Selected LLM call detail:
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-Provider Request/Response is shown only when `EventEntry.llmTrace` exists. Otherwise the view states that the current log contains kernel-level LLM I/O only.
+Provider Request/Response is shown only when `EventEntry.llmTrace` exists. Otherwise the view states that the current log contains kernel-level LLM I/O only. The selected model is read from `llmTrace.model` when present, then from `EventEntry.model`, so model labels remain available when provider HTTP capture is disabled.
 
 ### 6.3 Tool Calls
 
@@ -326,9 +326,9 @@ Memory is an object inspector for session/workspace/global scopes. Session entri
 
 ## 9. Implementation Notes
 
-- Extend dashboard `TimelineEntry` with optional `llmTrace` metadata from log entries.
+- Extend dashboard `TimelineEntry` with optional `llmTrace` and `model` metadata from log entries.
 - Add `LLMTrace` to `@agent-kernel/shared` log/protocol types.
 - Extend `LLMResponse` to optionally include `trace`. The host loop passes this to `SessionStore.record()` only for the resulting `llm_response` event.
 - Redact all authorization headers before storing traces.
 - For streaming providers, store a compact provider trace: request URL/headers/body, response status, stream event type list, assembled provider body when available. Avoid logging every token-sized raw chunk indefinitely unless the event stream is compact enough.
-- Existing logs without `llmTrace` still render kernel-level LLM I/O.
+- Existing logs without `llmTrace` still render kernel-level LLM I/O; existing logs without `model` fall back to provider request-body inference or `model unknown`.

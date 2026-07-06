@@ -46,6 +46,7 @@ export type LoopBroadcast = {
     effects: readonly Effect[],
     state: AgentState,
     llmTrace?: LLMTrace,
+    model?: string,
   ): void
   onApprovalRequired(sessionId: string, eff: RequestApprovalEffect): void
   onError(sessionId: string, message: string): void
@@ -142,6 +143,7 @@ export async function dispatchOne(
   event: AgentEvent,
   aborts: Map<string, AbortController>,
   llmTrace?: LLMTrace,
+  model?: string,
 ): Promise<void> {
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
@@ -163,10 +165,11 @@ export async function dispatchOne(
     next,
     usageChanged ? next.usage : undefined,
     llmTrace,
+    model,
   )
 
   safeBroadcast(() =>
-    deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, llmTrace),
+    deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, llmTrace, model),
   )
   if (usageChanged) {
     safeBroadcast(() => deps.broadcast.onUsageChanged(sessionId, next))
@@ -259,6 +262,7 @@ async function performCallLlm(
       },
       aborts,
       res.trace,
+      res.trace?.model ?? model,
     )
   } catch (err) {
     // AbortError from the fetch call means the user cancelled mid-stream.
@@ -277,11 +281,13 @@ async function performCallLlm(
           },
         },
         aborts,
+        undefined,
+        model,
       )
       return
     }
     const message = err instanceof Error ? err.message : String(err)
-    await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts)
+    await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts, undefined, model)
   } finally {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
   }
