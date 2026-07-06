@@ -117,10 +117,35 @@ describe('InspectorPanel', () => {
     expect(screen.getByText('Runtime Objects')).toBeTruthy()
     expect(screen.queryByText('Selected Detail')).toBeNull()
     expect(screen.getByText('No AgentState loaded.')).toBeTruthy()
+    const overview = screen.getByLabelText('debugger overview')
+    expect(overview.textContent ?? '').toContain('Status')
+    expect(overview.textContent ?? '').toContain('Events')
+    expect(overview.textContent ?? '').toContain('Context')
+    expect(overview.textContent ?? '').toContain('Pending')
+    expect(overview.textContent ?? '').not.toContain('Messages')
+    expect(overview.textContent ?? '').not.toContain('Tools')
+    expect(overview.textContent ?? '').not.toContain('Memory')
+    expect(overview.textContent ?? '').not.toContain('Approval')
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     expect(screen.getByTestId('trace-sidebar-tabpanel')).toBeTruthy()
     expect(screen.getByText('No reducer events yet.')).toBeTruthy()
+  })
+
+  it('shows compact AgentState groups and opens full JSON on demand', () => {
+    render(<InspectorPanel state={baseState} timeline={timeline} />)
+
+    const stateRuntime = screen.getByTestId('state-runtime')
+    expect(stateRuntime.textContent ?? '').toContain('Core')
+    expect(stateRuntime.textContent ?? '').toContain('Workload')
+    expect(stateRuntime.textContent ?? '').toContain('Usage')
+    expect(stateRuntime.textContent ?? '').toContain('Memory')
+    expect(screen.queryByText('Full AgentState JSON')).toBeNull()
+
+    fireEvent.click(screen.getByText('View JSON'))
+
+    expect(screen.getByTestId('agent-state-json-dialog')).toBeTruthy()
+    expect(screen.getByText('Full AgentState JSON')).toBeTruthy()
   })
 
   it('combines event timeline and state flow in Reducer Trace rows', () => {

@@ -23,6 +23,7 @@ import {
   Info,
   Loader2,
   MessageSquare,
+  Pencil,
   Plus,
   Trash2,
 } from 'lucide-react'
@@ -56,6 +57,7 @@ type Props = {
   onNewSession(): void
   onDelete(sessionId: string): void
   onRename(sessionId: string, label: string): void
+  onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
 }
 
@@ -71,6 +73,7 @@ export function Explorer({
   onNewSession,
   onDelete,
   onRename,
+  onOpenSessionInfo,
   onWorkspaceInfo,
 }: Props): JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
@@ -143,6 +146,7 @@ export function Explorer({
                     onRename(sess.sessionId, next)
                   }
                 }}
+                onOpenSessionInfo={onOpenSessionInfo}
                 onWorkspaceInfo={onWorkspaceInfo}
               />
             )}
@@ -235,6 +239,7 @@ function Row({
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
+  onOpenSessionInfo,
   onWorkspaceInfo,
 }: {
   node: NodeApi<TreeNode>
@@ -244,6 +249,7 @@ function Row({
   onStartEdit(sess: SessionNode): void
   onCancelEdit(): void
   onSubmitEdit(sess: SessionNode, label: string): void
+  onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
@@ -267,6 +273,7 @@ function Row({
       onStartEdit={onStartEdit}
       onCancelEdit={onCancelEdit}
       onSubmitEdit={onSubmitEdit}
+      onOpenSessionInfo={onOpenSessionInfo}
     />
   )
 }
@@ -368,6 +375,7 @@ function SessionRow({
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
+  onOpenSessionInfo,
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
@@ -376,6 +384,7 @@ function SessionRow({
   onStartEdit(sess: SessionNode): void
   onCancelEdit(): void
   onSubmitEdit(sess: SessionNode, label: string): void
+  onOpenSessionInfo?(sessionId: string): void
 }): JSX.Element {
   const s = node.data
   const selected = node.isSelected
@@ -390,13 +399,19 @@ function SessionRow({
         selected &&
           'bg-accent border-l-2 border-l-primary',
       )}
-      onClick={() => node.activate()}
+      onMouseDown={(e) => {
+        // Suppress the second `click` in a native double-click sequence so it
+        // doesn't reach the react-arborist row handler and re-activate the
+        // session (which unmounts our rename input mid-edit).
+        if (e.detail >= 2) e.preventDefault()
+      }}
       onDoubleClick={(e) => {
+        e.preventDefault()
         e.stopPropagation()
         onStartEdit(s)
       }}
     >
-      <div className="min-w-0 cursor-pointer px-3 py-2.5 pl-6 pr-9">
+      <div className="min-w-0 cursor-pointer px-3 py-2.5 pl-6 pr-16">
         <div className="flex min-w-0 items-center gap-2">
           <MessageSquare
             className={cn(
@@ -448,20 +463,57 @@ function SessionRow({
           </div>
         ) : null}
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={(e) => {
-          e.stopPropagation()
-          onDeleteRequest(s)
-        }}
-        data-testid="session-delete-button"
-        title="Delete this session (irreversible)"
-        aria-label={`delete session ${s.sessionId}`}
-        className="absolute right-1.5 top-1.5 h-7 w-7 rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-destructive hover:text-destructive-foreground group-hover:opacity-100"
-      >
-        <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
-      </Button>
+      {editing ? null : (
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onStartEdit(s)
+            }}
+            data-testid="session-rename-button"
+            title="Rename this session"
+            aria-label={`rename session ${s.sessionId}`}
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
+          >
+            <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
+          </Button>
+          {onOpenSessionInfo ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenSessionInfo(s.sessionId)
+              }}
+              data-testid="session-info-button"
+              title="Session info"
+              aria-label={`session info ${s.sessionId}`}
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
+            >
+              <Info className="h-3.5 w-3.5" strokeWidth={2.2} />
+            </Button>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="icon"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onDeleteRequest(s)
+            }}
+            data-testid="session-delete-button"
+            title="Delete this session (irreversible)"
+            aria-label={`delete session ${s.sessionId}`}
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

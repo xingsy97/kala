@@ -81,7 +81,7 @@ try {
   await ensureFixtureSessionSelected(page)
   await page.waitForSelector('[data-testid="activity-bar"]')
   await page.waitForSelector('[data-testid="model-picker"]')
-  await page.waitForSelector('[data-testid="json-block-scrollarea"]')
+  await page.waitForSelector('[data-testid="state-runtime"]')
 
   await verifyViewports(page)
 } catch (err) {
@@ -465,12 +465,20 @@ async function ensureFixtureSessionSelected(page) {
 
 async function verifyJsonWheelScroll(page, viewportWidth) {
   if (viewportWidth < 1024) {
-    const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="json-block-scrollarea"]')))
-    check(`narrow layout does not render inspector json viewer at ${viewportWidth}px`, found === false, String(found))
+    const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="agent-state-json-dialog"]')))
+    check(`narrow layout does not render inspector json modal at ${viewportWidth}px`, found === false, String(found))
     return
   }
+  await page.click('[data-testid="runtime-view-switch-state"]')
+  await page.waitForSelector('[data-testid="state-runtime"]', { timeout: 3_000 })
+  await page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'View JSON')
+    if (!(button instanceof HTMLButtonElement)) throw new Error('View JSON button not found')
+    button.click()
+  })
+  await page.waitForSelector('[data-testid="agent-state-json-dialog"]', { timeout: 3_000 })
   const before = await page.evaluate(() => {
-    const viewports = Array.from(document.querySelectorAll('[data-testid="inspector-panel"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
+    const viewports = Array.from(document.querySelectorAll('[data-testid="agent-state-json-dialog"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
     const viewport = viewports.find((candidate) => candidate.scrollHeight > candidate.clientHeight + 1)
     if (!viewport) return { found: false }
     viewport.scrollTop = 0
@@ -484,14 +492,14 @@ async function verifyJsonWheelScroll(page, viewportWidth) {
   })
   if (before.found) {
     await page.evaluate(() => {
-      const viewports = Array.from(document.querySelectorAll('[data-testid="inspector-panel"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
+      const viewports = Array.from(document.querySelectorAll('[data-testid="agent-state-json-dialog"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
       const viewport = viewports.find((candidate) => candidate.scrollHeight > candidate.clientHeight + 1)
       if (viewport) viewport.scrollTop = 600
     })
     await sleep(150)
   }
   const after = await page.evaluate(() => {
-    const viewports = Array.from(document.querySelectorAll('[data-testid="inspector-panel"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
+    const viewports = Array.from(document.querySelectorAll('[data-testid="agent-state-json-dialog"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
     const viewport = viewports.find((candidate) => candidate.scrollHeight > candidate.clientHeight + 1)
     if (!viewport) return { found: false }
     return {
@@ -504,8 +512,10 @@ async function verifyJsonWheelScroll(page, viewportWidth) {
   })
   const result = { before, after }
 
-  check(`json viewer has a scrollable Radix viewport at ${viewportWidth}px`, before.found && before.scrollHeight > before.clientHeight, JSON.stringify(result))
-  check(`json viewer scrollTop can change at ${viewportWidth}px`, after.found && after.scrollTop > before.scrollTop, JSON.stringify(result))
+  check(`state json modal has a scrollable Radix viewport at ${viewportWidth}px`, before.found && before.scrollHeight > before.clientHeight, JSON.stringify(result))
+  check(`state json modal scrollTop can change at ${viewportWidth}px`, after.found && after.scrollTop > before.scrollTop, JSON.stringify(result))
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="agent-state-json-dialog"]'))
 }
 
 async function verifyToolRegistry(page, viewportWidth) {
