@@ -26,18 +26,26 @@ pure reducer.
 
 1. The reducer derives `contextPressureLevel` from reported input tokens and the
    configured context limit.
-2. The host triggers compaction manually from `/compact` or automatically at the
-   hard pressure tier, only when the session is at rest.
+2. The host triggers compaction manually from `/compact`, automatically at the
+   hard pressure tier when the session is at rest, or preflight before a provider
+   request when the estimated prompt would violate the reserved headroom.
 3. The host chooses a safe pivot at a recent `user` message. Everything before
    the pivot is summarized; everything from the pivot onward is kept verbatim.
    This avoids preserving orphan `tool_result` messages without their matching
    assistant `tool_call`.
-4. The summarizer receives only the old prefix and a structured prompt. The
+4. Before the summarizer call, old oversized `tool_result` blocks are reduced to
+   a head+tail excerpt with an omission marker. This keeps decisive command
+   setup and terminal errors while preventing one stale log dump from dominating
+   the compaction request.
+5. The summarizer receives only the old prefix and a structured prompt. The
    output is a durable engineering handoff with sections for user intent,
    repository/runtime state, decisions, completed work, and open work.
-5. The host dispatches `compact_replaced` with `preserveFrom`. The reducer keeps
+6. The host dispatches `compact_replaced` with `preserveFrom`. The reducer keeps
    the leading system prompt, inserts the compacted summary as a synthetic system
    message, and appends the preserved recent tail.
+7. After compaction, a short loop guard blocks repeated identical tool calls so
+   the model is forced to re-read the compacted context and pick a different
+   next step.
 
 ## Why This Shape
 
@@ -55,10 +63,9 @@ file paths, commands, failing tests, user corrections, open tasks, and rationale
 
 - Manual focused compaction such as `/compact focus on auth bug` is not wired
   through the protocol yet.
-- Tool-output pruning before full summarization is not implemented. opencode's
-  `prune` option is a good model: old bulky tool outputs can often be replaced
-  with command/status/decisive-lines without paying for a summarizer call.
 - Startup context re-injection is limited to the leading system prompt today.
   Future skill bodies, root instructions, memory, and path-scoped rule systems
   should declare whether they survive compaction or must be reloaded later.
-
+- Preflight token estimation is deliberately approximate. It is good enough to
+  preserve headroom before provider calls, but it is not a substitute for
+  provider-reported usage after the call completes.

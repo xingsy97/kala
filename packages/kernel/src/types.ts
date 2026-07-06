@@ -275,15 +275,15 @@ export type ClearEvent = {
 
 /**
  * Replace an old prefix of state.messages with a single summary. Emitted either
- * by the user (manual `/compact`) or by the host when context pressure reaches
- * the hard tier. `preserveFrom` is a message index chosen by the host; messages
- * at or after that index are kept verbatim so the most recent user turn and
- * tool-call chain survive compaction. Use `messages.length` when no tail should
- * be preserved.
+ * by the user (manual `/compact`), by the host after a turn reaches the hard
+ * tier, or by the host immediately before an oversized provider request.
+ * `preserveFrom` is a message index chosen by the host; messages at or after
+ * that index are kept verbatim so the most recent user turn and tool-call chain
+ * survive compaction. Use `messages.length` when no tail should be preserved.
  */
 export type CompactReplacedEvent = {
   kind: 'compact_replaced'
-  trigger?: 'manual' | 'auto'
+  trigger?: 'manual' | 'auto' | 'preflight'
   preserveFrom: number
   request?: {
     model?: string

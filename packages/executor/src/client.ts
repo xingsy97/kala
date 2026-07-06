@@ -39,7 +39,14 @@ import {
 } from './tools/overflow.js'
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
-import { listDirs, listFiles, readOverflowFile, readWorkspaceFile } from './fs-handlers.js'
+import {
+  copyOverflowSession,
+  deleteOverflowSession,
+  listDirs,
+  listFiles,
+  readOverflowFile,
+  readWorkspaceFile,
+} from './fs-handlers.js'
 import { handleBgKill, handleBgList, handleBgOutput } from './bg-handlers.js'
 import { subscribeBackgroundTasks } from './tools/background-shell.js'
 
@@ -165,6 +172,14 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 
   socket.on('fs:read_overflow', async (payload, ack) => {
     ack(await readOverflowFile(payload, sandbox))
+  })
+
+  socket.on('fs:delete_overflow_session', async (payload, ack) => {
+    ack(await deleteOverflowSession(payload, sandbox))
+  })
+
+  socket.on('fs:copy_overflow_session', async (payload, ack) => {
+    ack(await copyOverflowSession(payload, sandbox))
   })
 
   socket.on('bg:list', async (payload, ack) => {
