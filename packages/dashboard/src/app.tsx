@@ -468,7 +468,7 @@ export function App(): JSX.Element {
   )
 
   return (
-    <div className="h-screen w-screen bg-white text-foreground dark:bg-background dark:text-foreground overflow-hidden">
+    <div className="h-screen w-screen bg-background text-foreground overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
@@ -477,7 +477,7 @@ export function App(): JSX.Element {
               defaultSize={20}
               minSize={17}
               maxSize={22}
-              className="min-w-[240px]"
+              className="min-w-[240px] bg-sidebar text-sidebar-foreground"
               data-testid="explorer-panel"
             >
               <div className="h-full border-r border-border dark:border-border">
@@ -498,6 +498,7 @@ export function App(): JSX.Element {
         <ResizablePanel
           defaultSize={wideLayout ? 80 : 100}
           minSize={wideLayout ? 78 : 100}
+          className="bg-background"
           data-testid="workbench-panel"
         >
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
@@ -534,7 +535,7 @@ export function App(): JSX.Element {
                     />
                   ) : null}
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                    <ScrollArea className="flex-1 min-h-0" data-testid="chat-panel">
+                    <ScrollArea className="flex-1 min-h-0 bg-background" data-testid="chat-panel">
                       <ChatPanel
                         items={chatItems}
                         highlightIndex={highlightIndex}
@@ -629,7 +630,7 @@ export function App(): JSX.Element {
               {wideLayout && inspectorOpen ? (
                 <>
                   <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={26} minSize={22} maxSize={36} data-testid="inspector-panel">
+                  <ResizablePanel defaultSize={26} minSize={22} maxSize={36} className="bg-card text-card-foreground" data-testid="inspector-panel">
                     <div className="h-full border-l border-border dark:border-border min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <InspectorPanel
                         state={session.state}
@@ -739,7 +740,7 @@ function WorkbenchToolbar({
 }): JSX.Element {
   return (
     <div
-      className="h-12 flex-none px-3 border-b border-border/60 bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/50 flex items-center gap-2 text-sm min-w-0"
+      className="h-12 flex-none px-3 border-b border-border bg-card text-card-foreground backdrop-blur-md flex items-center gap-2 text-sm min-w-0"
       data-testid="workbench-toolbar"
     >
       <span
