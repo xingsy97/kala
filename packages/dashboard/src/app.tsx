@@ -33,6 +33,7 @@ import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import {
   createSession,
   deleteSession,
+  renameSession,
   respondApproval,
   setSessionApprovalMode,
   setSessionModel,
@@ -305,6 +306,10 @@ export function App(): JSX.Element {
       }
     }
   }
+  const renameSessionAt = (sessionId: string, label: string): void => {
+    if (!session.socket) return
+    renameSession(session.socket, sessionId, label)
+  }
 
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
@@ -391,6 +396,7 @@ export function App(): JSX.Element {
                   onSelect={selectSession}
                   onNewSession={newSession}
                   onDelete={deleteSessionAt}
+                  onRename={renameSessionAt}
                 />
               </div>
             </ResizablePanel>

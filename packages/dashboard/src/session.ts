@@ -297,6 +297,14 @@ export function setSessionApprovalMode(
   socket.emit('client:set_approval_mode', { sessionId, mode })
 }
 
+export function renameSession(
+  socket: DashboardSocket,
+  sessionId: string,
+  label: string,
+): void {
+  socket.emit('client:rename_session', { sessionId, label })
+}
+
 export type ControlPlaneView = {
   executors: readonly AttachedExecutor[]
   sessions: readonly SessionSummary[]

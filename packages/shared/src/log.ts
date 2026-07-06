@@ -10,7 +10,7 @@ import type {
   UsageTotal,
 } from '@agent-kernel/kernel'
 
-export type LogEntryKind = 'header' | 'event' | 'snapshot'
+export type LogEntryKind = 'header' | 'event' | 'snapshot' | 'metadata'
 
 export type HeaderEntry = {
   kind: 'header'
@@ -57,6 +57,18 @@ export type SnapshotEntry = {
   state: AgentState
 }
 
-export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry
+/**
+ * Out-of-band metadata mutation. Currently only session label. Kept out of
+ * the kernel event stream because label has no effect on state transitions —
+ * folding it in would force every reducer test to reason about a field that
+ * exists only for display. Append-only: reading picks the most recent entry.
+ */
+export type MetadataEntry = {
+  kind: 'metadata'
+  ts: string
+  label?: string
+}
+
+export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry | MetadataEntry
 
 export const LOG_FORMAT_VERSION = 1 as const
