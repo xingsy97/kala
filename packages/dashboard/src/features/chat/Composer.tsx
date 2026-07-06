@@ -260,10 +260,10 @@ export function Composer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="border-t bg-background px-3 py-3 sm:px-4 sm:py-4"
+      className="border-t bg-background px-4 py-3 sm:px-6 sm:py-4 lg:px-8"
       data-testid="composer"
     >
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-[68rem]">
         <QueuedMessagesDock items={queuedMessages} />
         <div
           className={cn(
