@@ -12,7 +12,7 @@ export function BackgroundTerminalPanel({ tasks }: Props): JSX.Element | null {
   if (tasks.length === 0) return null
   return (
     <div
-      className="border-t border-border bg-muted"
+      className="bg-muted"
       data-testid="background-terminal-panel"
     >
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
@@ -22,7 +22,7 @@ export function BackgroundTerminalPanel({ tasks }: Props): JSX.Element | null {
           {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </span>
       </div>
-      <ScrollArea className="max-h-44 border-t border-border">
+      <ScrollArea className="max-h-44 border-t border-border/50">
         <div className="space-y-2 p-3">
           {tasks.map((task) => (
             <BackgroundTaskRow key={task.taskId} task={task} />
@@ -35,8 +35,8 @@ export function BackgroundTerminalPanel({ tasks }: Props): JSX.Element | null {
 
 function BackgroundTaskRow({ task }: { task: BackgroundTerminalTask }): JSX.Element {
   return (
-    <div className="rounded border border-border bg-card text-xs">
-      <div className="flex min-w-0 items-center gap-2 border-b border-border px-2 py-1.5">
+    <div className="rounded border border-border/50 bg-card text-xs">
+      <div className="flex min-w-0 items-center gap-2 border-b border-border/50 px-2 py-1.5">
         <span className={cn('h-2 w-2 flex-none rounded-full', statusDot(task.status))} />
         <span className="min-w-0 flex-1 truncate font-mono text-foreground">
           {task.command}
@@ -50,13 +50,13 @@ function BackgroundTaskRow({ task }: { task: BackgroundTerminalTask }): JSX.Elem
         {task.cwd ? <span className="min-w-0 truncate font-mono">cwd {task.cwd}</span> : null}
       </div>
       {task.output.length > 0 ? (
-        <ScrollArea className="max-h-24 border-t border-border bg-background text-foreground">
+        <ScrollArea className="max-h-24 border-t border-border/50 bg-background text-foreground">
           <pre className="min-w-max whitespace-pre-wrap p-2 font-mono text-[11px] leading-relaxed">
             {task.output}
           </pre>
         </ScrollArea>
       ) : (
-        <div className="border-t border-border px-2 py-2 text-[11px] text-muted-foreground">
+        <div className="border-t border-border/50 px-2 py-2 text-[11px] text-muted-foreground">
           No output captured yet. Ask the agent to call bash_output with this task id.
         </div>
       )}

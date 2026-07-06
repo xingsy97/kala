@@ -260,20 +260,20 @@ export function Composer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="border-t bg-background px-4 py-3 sm:px-6 sm:py-4 lg:px-8"
+      className="bg-card px-4 py-3 sm:px-6 sm:py-4 lg:px-8"
       data-testid="composer"
     >
       <div className="mx-auto max-w-[68rem]">
         <QueuedMessagesDock items={queuedMessages} />
         <div
           className={cn(
-            'relative rounded-2xl border bg-background shadow-sm transition-shadow',
-            'focus-within:ring-1 focus-within:ring-ring focus-within:shadow-md',
+            'relative rounded-2xl border border-border/60 bg-background/60 transition-shadow',
+            'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
           )}
         >
           {pastedImages.length > 0 ? (
             <div
-              className="flex flex-wrap gap-2 border-b px-3 py-2"
+              className="flex flex-wrap gap-2 border-b border-border/50 px-3 py-2"
               data-testid="pasted-image-tray"
             >
               {pastedImages.map((img) => (
@@ -353,7 +353,7 @@ export function Composer({
             />
             {matchingCommands.length > 0 && !disabled ? (
               <div
-                className="absolute inset-x-2 bottom-2 z-10 overflow-hidden rounded-lg border bg-popover shadow-lg"
+                className="absolute inset-x-2 bottom-2 z-10 overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
                 data-testid="slash-command-menu"
               >
                 {matchingCommands.map((cmd) => (
@@ -375,7 +375,7 @@ export function Composer({
             ) : null}
             {mentionState && !disabled && onListFiles ? (
               <div
-                className="absolute inset-x-2 bottom-2 z-10 max-h-64 overflow-hidden rounded-lg border bg-popover shadow-lg"
+                className="absolute inset-x-2 bottom-2 z-10 max-h-64 overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
                 data-testid="mention-menu"
               >
                 <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -415,7 +415,7 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-w-0 flex-wrap items-center gap-1.5 border-t px-2 py-2"
+            className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-border/50 px-2 py-2"
             data-testid="composer-footer"
           >
             <Select
@@ -500,12 +500,12 @@ export function Composer({
         </div>
         <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[10px] text-muted-foreground">
           <span>
-            <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send ·
-            <kbd className="ml-1 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">Shift + Enter</kbd> for newline
+            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send ·
+            <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-[10px]">Shift + Enter</kbd> for newline
           </span>
           <span>
-            <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">@</kbd> files ·
-            <kbd className="ml-1 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd> commands
+            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">@</kbd> files ·
+            <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd> commands
           </span>
         </div>
         {pendingToast ? (
@@ -530,7 +530,7 @@ function SendModeControl({
 }): JSX.Element {
   return (
     <div
-      className="flex flex-none rounded-md border bg-muted/40 p-0.5"
+      className="flex flex-none rounded-md border border-border/50 bg-muted/40 p-0.5"
       data-testid="send-mode-control"
       aria-label="send mode"
     >
@@ -573,7 +573,7 @@ function QueuedMessagesDock({
   if (items.length === 0) return null
   return (
     <div
-      className="mb-2 rounded-2xl border bg-muted/40 px-3 py-2 text-xs"
+      className="mb-2 rounded-2xl border border-border/50 bg-muted/40 px-3 py-2 text-xs"
       data-testid="queued-messages-dock"
     >
       <div className="mb-1.5 flex items-center justify-between gap-3">
@@ -592,7 +592,7 @@ function QueuedMessagesDock({
           {items.map((item, index) => (
             <div
               key={item.id}
-              className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-lg border bg-background px-2 py-1.5"
+              className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-lg border border-border/50 bg-background px-2 py-1.5"
               data-testid="queued-message-row"
               title={item.text}
             >

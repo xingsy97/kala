@@ -141,7 +141,7 @@ export function InspectorPanel({
         }}
       >
         <DialogContent className="max-w-5xl h-[86vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
-          <DialogHeader className="border-b border-border px-4 py-3 dark:border-border">
+          <DialogHeader className="border-b border-border/50 px-4 py-3">
             <DialogTitle className="text-base">
               Timeline event #{selectedTimeline?.entry.seq}
             </DialogTitle>
@@ -160,7 +160,7 @@ export function InspectorPanel({
             ) : null}
             </div>
           </ScrollArea>
-          <DialogFooter className="border-t border-border px-4 py-3 dark:border-border">
+          <DialogFooter className="border-t border-border/50 px-4 py-3">
             <DialogClose asChild>
               <Button variant="outline" className="mt-0">Close</Button>
             </DialogClose>
@@ -198,7 +198,7 @@ function HistorySection({
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
         <span className="font-medium">History</span>
         <div
-          className="ml-auto inline-flex rounded border border-border bg-background p-0.5"
+          className="ml-auto inline-flex rounded border border-border/50 bg-background p-0.5"
           data-testid="history-view-switch"
         >
           <button
@@ -269,7 +269,7 @@ function StateFlowRow({ step }: { step: StateFlowStep }): JSX.Element {
   const changed = step.from !== step.to
   return (
     <li
-      className="rounded border border-border px-2 py-1.5 text-xs dark:border-border"
+      className="rounded border border-border/50 px-2 py-1.5 text-xs"
       data-testid="state-flow-row"
     >
       <div className="flex items-center gap-2">
@@ -504,7 +504,7 @@ function TimelineRow({
             }}
             title={`scroll chat to message #${messageIndex}`}
             data-testid="jump-to-message-button"
-            className="inline-flex items-center gap-1 rounded border border-border dark:border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-sky-700 hover:border-sky-400 dark:hover:text-sky-300 dark:hover:border-sky-500"
+            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-sky-700 hover:border-sky-400 dark:hover:text-sky-300 dark:hover:border-sky-500"
           >
             msg #{messageIndex}
           </button>
@@ -519,7 +519,7 @@ function TimelineRow({
             title={`fork a new session at cursor ${entry.seq}`}
             aria-label={`fork at cursor ${entry.seq}`}
             data-testid="fork-button"
-            className="inline-flex items-center gap-1 rounded border border-border dark:border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-amber-700 hover:border-amber-400 dark:hover:text-amber-300 dark:hover:border-amber-500"
+            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-amber-700 hover:border-amber-400 dark:hover:text-amber-300 dark:hover:border-amber-500"
           >
             <GitBranch className="h-3 w-3" />
             fork
@@ -699,7 +699,7 @@ function RuntimeSection({
 }): JSX.Element {
   const toolCount = config?.tools.length ?? 0
   return (
-    <div className="h-full flex flex-col border-t border-border dark:border-border">
+    <div className="h-full flex flex-col border-t border-border/50">
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
         <span className="font-medium">Runtime</span>
         <span className="ml-2 normal-case tracking-normal text-muted-foreground dark:text-muted-foreground">
@@ -708,7 +708,7 @@ function RuntimeSection({
             : `${toolCount} registered ${toolCount === 1 ? 'tool' : 'tools'}`}
         </span>
         <div
-          className="ml-auto inline-flex rounded border border-border bg-background p-0.5"
+          className="ml-auto inline-flex rounded border border-border/50 bg-background p-0.5"
           data-testid="runtime-view-switch"
         >
           <button
@@ -761,7 +761,7 @@ function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {
 function ToolRegistrySection({ tools }: { tools: readonly ToolSchema[] }): JSX.Element {
   if (tools.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center rounded border border-dashed border-border px-3 text-center text-xs text-muted-foreground dark:border-border">
+      <div className="flex h-full items-center justify-center rounded border border-dashed border-border/60 px-3 text-center text-xs text-muted-foreground">
         No tools registered for this session.
       </div>
     )
@@ -780,7 +780,7 @@ function ToolRegistrySection({ tools }: { tools: readonly ToolSchema[] }): JSX.E
 function ToolRegistryItem({ tool }: { tool: ToolSchema }): JSX.Element {
   return (
     <section
-      className="rounded border border-border bg-card p-2 text-xs"
+      className="rounded border border-border/50 bg-card p-2 text-xs"
       data-testid="tool-registry-item"
     >
       <div className="flex min-w-0 items-center gap-2">
