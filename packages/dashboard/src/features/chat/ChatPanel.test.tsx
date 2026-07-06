@@ -1,11 +1,37 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { createInitialState } from '@agent-kernel/kernel'
+
+import { visibleTranscript } from '../../transcript.js'
 import { ChatPanel } from './ChatPanel.js'
 
 describe('ChatPanel', () => {
   it('renders empty state', () => {
     render(<ChatPanel messages={[]} />)
+    expect(screen.getByText(/No messages yet/i)).toBeTruthy()
+  })
+
+  it('does not render the seed system prompt as a Tool result bubble', () => {
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'system',
+            content: [
+              {
+                type: 'text',
+                text: 'You are a coding agent running via agent-kernel.',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+    expect(screen.queryByText('Tool result')).toBeNull()
+    expect(
+      screen.queryByText(/You are a coding agent running via agent-kernel\./),
+    ).toBeNull()
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
   })
 
@@ -233,5 +259,25 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('tool-call-pending-c10')).toBeNull()
     expect(screen.queryByTestId('approval-approve')).toBeNull()
     expect(screen.getByText('Assistant requested tool')).toBeTruthy()
+  })
+
+  it('renders empty state end-to-end for an ephemeral session (system prompt only, no timeline)', () => {
+    // Regression: host sends `ephemeralReadyEventFor` on connect for any
+    // unknown sessionId (including the random UUID assigned when no session
+    // is selected). That state has messages=[systemMessage] + empty timeline.
+    // The full pipeline (state  -  visibleTranscript  -  ChatPanel) must render
+    // the empty state, NOT a "Tool result" bubble containing the system
+    // prompt text.
+    const state = createInitialState({
+      sessionId: 'ephemeral',
+      systemPrompt: 'You are a coding agent running via agent-kernel.',
+    })
+    const items = visibleTranscript(state.messages, [], '')
+    render(<ChatPanel items={items} />)
+    expect(screen.getByText(/No messages yet/i)).toBeTruthy()
+    expect(screen.queryByText('Tool result')).toBeNull()
+    expect(
+      screen.queryByText(/You are a coding agent running via agent-kernel\./),
+    ).toBeNull()
   })
 })

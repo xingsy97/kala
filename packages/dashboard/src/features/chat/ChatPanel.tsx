@@ -80,10 +80,12 @@ export function ChatPanel({
   pendingApprovals,
   onApprovalDecision,
 }: Props): JSX.Element {
-  const fallbackItems: TranscriptItem[] = (messages ?? []).map((message) => ({
-    kind: 'message',
-    message,
-  }))
+  const fallbackItems: TranscriptItem[] = (messages ?? [])
+    .filter((message) => message.role !== 'system')
+    .map((message) => ({
+      kind: 'message',
+      message,
+    }))
   const transcriptItems = items ?? fallbackItems
   const toolNameByCallId = new Map<string, string>()
   for (const item of transcriptItems) {
@@ -185,7 +187,7 @@ function CompactBoundaryRow({
 }): JSX.Element {
   return (
     <div className="flex items-center gap-3 py-2" data-testid="compact-boundary">
-      <div className="h-px flex-1 bg-border" aria-hidden="true" />
+      <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
       <div className="flex min-w-0 items-center gap-2 rounded-full border bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground">
         <Archive className="h-3 w-3 flex-none" />
         <span className="font-medium text-foreground">Context compacted</span>
@@ -199,7 +201,7 @@ function CompactBoundaryRow({
           {formatTokens(boundary.tokensAfter)}
         </span>
       </div>
-      <div className="h-px flex-1 bg-border" aria-hidden="true" />
+      <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
     </div>
   )
 }
