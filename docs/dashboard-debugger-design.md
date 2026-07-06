@@ -242,7 +242,6 @@ State shows compact grouped `AgentState` fields in the sidebar. The full JSON is
 │ │ input 42180                │ session entries 2                 │ │
 │ │ output 6180                │ keys project_goal,                │ │
 │ │ cache read 32000           │ ui_debugger_preference            │ │
-│ │ cost $0.1264               │                                   │ │
 │ └────────────────────────────┴───────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘
 
