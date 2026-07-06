@@ -10,8 +10,9 @@
 
 ```
     - 
-    -   DASHBOARD  (React SPA  -  pure static, no backend)               - 
-    -      -  Chat panel        -  Inspector panel       -  Replay UI        - 
+    -   DASHBOARD  (React SPA  -  static bundle served by Host)          - 
+    -      -  Explorer (workspaces + sessions)                           - 
+    -      -  Workbench (chat, inspector, replay, settings)              - 
     - 
                                 -   Socket.IO (namespace: /dashboard)
                                 - 
@@ -27,23 +28,37 @@
     -      -  (consumes effects,    -     -   ~/.agent-kernel/     -           - 
     -      -   dispatches events)   -     -    sessions/*.jsonl    -           - 
     -      -     -           - 
+    -      -     -           - 
+    -      -  agent tool (builtin)  -     -  Compaction driver     -           - 
+    -      -  spawns child JSONL    -     -  (manual + auto,       -           - 
+    -      -  session in workspace  -     -   writes compact_replaced)  -       - 
+    -      -     -           - 
     -      -          - 
     -      -  Connection layer (Socket.IO server)               -          - 
     -      -    namespaces:  /dashboard   /executor             -          - 
     -      -    rooms:       session:<id>                       -          - 
+    -      -    routing key: workspaceId (session  -  executor)   -          - 
     -      -          - 
+    -     Also serves packages/dashboard/dist/ as static assets.       - 
     - 
                                  -   Socket.IO (namespace: /executor)
                                  -    -  executor dials OUT to host
                                  - 
     - 
-    -   EXECUTOR  (Node daemon  OR  Browser WebContainer)              - 
+    -   EXECUTOR (a WORKSPACE  -  the machine tools run on)              - 
+    -      -          - 
+    -      -  Announce: workspaceId, workspaceName, os,         -          - 
+    -      -            runtime, sandboxRoots, tool names       -          - 
+    -      -          - 
     -      -          - 
     -      -  Tool registry: read / write / edit / bash /       -          - 
-    -      -                 grep / glob / ls                   -          - 
+    -      -                 grep / glob / ls / todowrite /     -          - 
+    -      -                 web_search / bash_output /         -          - 
+    -      -                 kill_shell                         -          - 
     -      -          - 
     -      -          - 
     -      -  Sandbox (working directory whitelist)             -          - 
+    -      -  Background shell registry (bash --run-in-bg)      -          - 
     -      -          - 
     - 
 ```
@@ -65,28 +80,34 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 **Responsibilities**:
 - Own the kernel's `AgentState` for each active session (in-memory Map keyed by `sessionId`)
 - Drive the FSM: pull events off an input queue, call `step`, dispatch resulting effects, feed responses back as events
-- Talk to LLM providers via the LLM Adapter (translate `call_llm` effect  -  provider request  -  `llm_response` / `llm_error` event)
-- Persist events to a JSONL log (append per `step` result)
-- Broadcast state and events to subscribed dashboards; dispatch `call_tool` effects to a session's executor
-- Serve two Socket.IO namespaces: `/dashboard` and `/executor`, rooms `session:<id>`
+- Talk to LLM providers via the LLM Adapter (translate `call_llm` effect  -  provider request  -  `llm_response` / `llm_error` event). Stream token deltas to the dashboard as `session:token_delta`; the JSONL log only records the final `llm_response`.
+- Persist events to a JSONL log (append per `step` result). Recover on restart by folding the log and appending synthetic events for stuck pending tool calls / interrupted streams (see [event-log.md](protocol/event-log.md)  - 4.3).
+- Broadcast state and events to subscribed dashboards; dispatch `call_tool` effects to the executor announcing the session's `workspaceId` (i.e. the machine the session is bound to)
+- Serve two Socket.IO namespaces: `/dashboard` and `/executor`, rooms `session:<id>`, and serve the pre-built Dashboard bundle from `packages/dashboard/dist/`
+- Drive context compaction (both auto via `contextPressureLevel === 'hard'` and manual via `client:compact` / the `/compact` slash command). The summarizer is invoked with the LLM adapter; the resulting `compact_replaced` event carries the summarizer `request`, `trigger`, and `responseUsage` for the timeline.
+- Provide the host-side `agent` builtin tool: spawn a child JSONL session in the same workspace, inheriting the parent's `approvalMode`, and return the child's final assistant text.
+- Auto-import LLM providers from `~/.codex/config.toml` and `~/.claude/settings.json`, merge with user-added providers in `~/.agent-kernel/config.json`, and expose them to the dashboard via `server:providers`.
 
 **Non-goals**:
 - Does not implement tools directly (executor does)
-- Does not host the Dashboard (that's a static SPA)
 - Does not know about specific providers deeply  -  the LLM Adapter abstracts them
 
 ### 2.3 Executor
 
 Lives close to the files it needs to touch. Dials **out** to Host via Socket.IO. Never accepts inbound connections.
 
+**One executor per workspace, one workspace per machine.** The executor's `workspaceId` (a stable ULID persisted in `~/.agent-kernel/workspace-id`) is the routing key Host uses to dispatch tool calls; the `workspaceName` (defaults to `os.hostname()`) is the display label. Two executor processes with the same `workspaceId` are treated as replicas of the same workspace.
+
 **Two forms**:
 
-1. **Local Node daemon**: user runs `agent-kernel-executor --host wss://host.example.com --session <id>`. Has access to a whitelisted working directory. Runs `bash`, `read`, `write`, etc. against the real filesystem.
+1. **Local Node daemon**: user runs `agent-kernel-executor --host wss://host.example.com`. Has access to a whitelisted working directory. Runs `bash`, `read`, `write`, etc. against the real filesystem. Also runs background shell tasks (see below).
 2. **Browser WebContainer**: dashboard hosts an in-page executor via [WebContainer API](https://webcontainers.io/). Same tool implementations, but the filesystem is an in-memory vfs. Enables the "demo with just a URL" experience.
 
 **Responsibilities**:
-- On connect, `announce` its capabilities (which tool names it implements)
-- Wait for `call_tool` messages, execute them, reply with `tool_result` (ok + content)
+- On connect, `announce` its capabilities: `workspaceId`, `workspaceName`, `os`, `runtime`, `runtimeVersion`, `hostname`, `sandboxRoots`, and the list of tool names implemented
+- Wait for `call_tool` messages (each carrying an optional `cwd` copied from `state.cwd`), execute them against the sandbox, and reply with `tool_result` (ok + content)
+- Serve directory listings for `fs:list_dirs` requests (used by the create-session Finder-style picker)
+- Manage a per-executor background shell registry: `bash { run_in_background: true }` starts a task and returns `{ taskId, note }`; subsequent `bash_output` polls stream logs; `kill_shell` terminates. From the parent session's perspective these are just three normal tools  -  no new event kind is required.
 - Handle `cancel` messages targeting a specific `callId`
 
 **Non-goals**:
@@ -96,12 +117,17 @@ Lives close to the files it needs to touch. Dials **out** to Host via Socket.IO.
 
 ### 2.4 Dashboard
 
-React SPA. Pure static assets. Deployed to Vercel / GitHub Pages / any object storage.
+React SPA. Built to a static bundle (`packages/dashboard/dist/`) and served by Host  -  port 3000 is Host, not vite. Local `pnpm dev` still runs a vite dev server on 5288 for hot-reload during development, but the shipped experience is served from `dist`.
+
+**Layout**:
+- **Explorer** (left rail): a two-level tree of workspaces (announced executors) with their sessions grouped by time bucket. Each session row shows title, status, event count, and `currentCwd`. A workspace's Info icon opens the read-only workspace metadata dialog; a session's Info icon opens the session metadata dialog.
+- **Workbench** (right): session toolbar (title, cwd editor, theme + inspector controls), chat transcript, composer (model picker, context usage ring based on `ModelInfo.contextWindow` / `AgentConfig.contextLimit`, send button, host status), and the Inspector / History / Settings / Approvals panels.
+- **ActivityBar** (bottom): live runtime status, approval mode picker, permission banners.
 
 **Responsibilities**:
 - Connect to Host via Socket.IO (`/dashboard` namespace) with a `sessionId` and role
-- Show the chat transcript, the inspector, the event timeline, the replay/fork UI
-- Send user events (`user_message`, `user_approve`, `user_reject`, `cancel`) to Host
+- Show the chat transcript (rendering text + image blocks), the inspector, the event timeline (with a compact boundary marker when `compact_replaced` fired), the replay/fork UI, the Settings pane (providers, models, approval mode default, host)
+- Send user events (`user_message`, `user_approve`, `user_reject`, `cancel`) and control messages (`client:set_approval_mode`, `client:set_cwd`, `client:set_model`, `client:compact`, `client:rename_session`, `client:delete_session`, `client:create_session`, `client:list_dirs`) to Host
 
 **Non-goals**:
 - Never talks to Executor directly
@@ -204,11 +230,9 @@ Every effect that changes downstream state produces at least one event that feed
 - **Broadcast to Dashboard** (`state:changed`, `event:appended`): Host pushes state updates to all dashboards subscribed to a session. One-to-many.
 - **Dispatch to Executor** (`call_tool`, `cancel`): Host sends to exactly one executor for the session. Uses Socket.IO ACK to correlate the response with the `callId`.
 
-### 4.3 Multi-executor (future)
+### 4.3 One workspace per session
 
-A session may have multiple executors  -  e.g. a local daemon for `bash` and a browser vfs for `read`/`write`. Routing happens by tool name  -  executor mapping, tracked in Host.
-
-**Not in v1**. The protocol has room for it (`executorId` in `tool_call` payload), but v1 supports one executor per session.
+A session is bound to exactly one workspace (i.e. one executor / one machine) at create time. All of that session's `call_tool` effects route to the executor announcing the same `workspaceId`. Sessions whose workspace has no attached executor appear offline in the Explorer but their logs remain readable. Multi-executor per session (routing different tool names to different machines) is intentionally out of scope  -  running tools across machines within a single turn is a distributed-system problem the kernel does not want to own.
 
 ---
 
@@ -220,7 +244,7 @@ A session may have multiple executors  -  e.g. a local daemon for `bash` and a b
 | Tool execution throws | Executor | Reply with `tool_result(ok=false, content=<error>)`. Kernel treats as normal tool result |
 | Executor disconnects mid-call | Socket.IO ACK timeout | Host synthesizes `tool_result(ok=false, content="executor disconnected")` |
 | Dashboard disconnects | Socket.IO reconnect | On reconnect, Host sends the full current state + a stream of events since last-seen `cursor` |
-| Host crashes | External (systemd / process manager) | Restart. Replay from JSONL event log to reconstruct in-memory state |
+| Host crashes mid-turn | External (systemd / process manager) | Restart. Load rebuilds state from JSONL, then appends synthetic `user_approve` + failed `tool_result` for pending tool calls, or an `[interrupted]` `llm_response` for stuck LLM streams  -  see [event-log.md](protocol/event-log.md)  - 4.3 |
 | Kernel bug | Would surface as an invariant violation in tests | Fix, ship, replay is safe because event log is unchanged |
 
 **Guarantee**: as long as the event log survives, the session survives. Nothing else is authoritative.
@@ -256,10 +280,11 @@ Host keeps a `Map<sessionId, { state: AgentState, config: AgentConfig }>` for ac
 The topology is the same. What changes is **who has the public IP**.
 
 **Local dev** (everything on your laptop):
-- Host listens on `localhost:3000`
+- Host listens on `localhost:3000` and serves the dashboard bundle from `packages/dashboard/dist/`
 - Executor connects to `ws://localhost:3000/executor`
-- Dashboard served at `http://localhost:5288` (vite dev, `/socket.io` proxied to host), connects to `ws://localhost:3000/dashboard`
-- One `pnpm dev` starts all three.
+- User browses to `http://localhost:3000`  -  Host serves both the SPA and the `/socket.io` endpoint
+- For dashboard development, `pnpm --filter dashboard dev` starts vite on 5288 with hot-reload; production behavior is `dist`-served on 3000
+- One `pnpm dev` builds everything, starts Host, and attaches a local executor
 
 **Cloud + local executor** (the differentiating deployment):
 - Host deployed to Fly.io / Railway, reachable at `wss://host.example.com`
@@ -286,21 +311,10 @@ Every non-obvious topology choice above has an ADR:
 | Config separated from state | [ADR 0004](adr/0004-config-state-separation.md) |
 | Planning / memory / subagents outside kernel | [ADR 0005](adr/0005-kernel-boundary.md) |
 | No independent relay process in v1 | [ADR 0006](adr/0006-no-relay-process.md) |
-
----
-
-## 9. Implementation Update (2026-07-05)
-
-Batch A is implemented in the running codebase:
-
-- Host streams LLM deltas as `session:token_delta` and supports cancel-in-flight via `client:cancel_stream`. The log still records one final `llm_response`.
-- Host handles manual/auto compaction by summarizing with the LLM and recording `compact_replaced`; dashboard manual compaction is available from the exact `/compact` slash command. The event includes summarizer request metadata, so History can show the exact compact request and Chat can render a visible compact boundary.
-- Store load recovers stuck pending tool calls after host restart by appending synthetic failed `tool_result` events.
-- Approval mode lives in kernel state and is changed by `client:set_approval_mode`; host guards `allow_all` with `AK_ALLOW_ALL_OK=1`.
-- Image content is supported in kernel types, Anthropic/OpenAI adapters, and dashboard rendering.
-- `agent` is a host-side builtin tool that creates a child JSONL session, runs it in the same workspace, and returns the child assistant text to the parent.
-- MCP is currently a stub only: `McpServerConfig` plus `initMcp()` returning no tools.
-- New sessions are created through a Dashboard modal that binds to a workspace and chooses an initial cwd with a Finder-style directory picker. Dashboard requests directories with `client:list_dirs`; Host forwards to the selected executor as `fs:list_dirs`; Host validates the selected cwd against the executor sandbox before writing the session header and initial `state.cwd`.
-- Existing session cwd is changed by `client:set_cwd`, stored as `state.cwd`, and passed to executor tool calls.
-- Background shell is executor-owned: `bash { run_in_background: true }` starts a task, `bash_output` polls logs, and `kill_shell` stops it. Dashboard derives a background terminal panel from those normal tool events.
-- Dashboard runtime status lives in `ActivityBar`; the Composer footer keeps the model picker, host status, send button, and a context usage ring based on `ModelInfo.contextWindow` / `AgentConfig.contextLimit`. The Explorer is the top-level left rail. The right-side workbench owns the session toolbar, which shows the session title and current cwd, opens the cwd editor, and hosts theme/inspector controls without covering the Explorer.
+| MCP-compatible tool schemas | [ADR 0007](adr/0007-mcp-compatible-tools.md) |
+| Dashboard: Vite + React SPA | [ADR 0008](adr/0008-dashboard-vite-react.md) |
+| Provider adapter strategy (Anthropic / OpenAI compat) | [ADR 0009](adr/0009-provider-adapter-strategy.md) |
+| FSM dispatch table shape | [ADR 0010](adr/0010-fsm-dispatch-table.md) |
+| Naming: Host + Kernel (was Server + Core) | [ADR 0011](adr/0011-rename-host-and-core.md) |
+| Dashboard UI redesign (Explorer + Workbench) | [ADR 0012](adr/0012-dashboard-ui-redesign.md) |
+| Explorer / Finder layout | [ADR 0013](adr/0013-dashboard-finder-layout.md) |

@@ -1,13 +1,13 @@
-# v1 Tool Set
+# Tool Set
 
-**Status**: Normative for the original v1 executor core, with Batch A additions listed in  - 9.
-Every executor bundled in this repo MUST implement the seven core tools below plus the implemented additions in  - 9. Third-party executors MAY implement a subset (declared via `executor:announce.tools`  -  see [wire-protocol.md](protocol/wire-protocol.md)).
+**Status**: Normative for the executor tool surface.
+Every executor bundled in this repo MUST implement the tools below. Third-party executors MAY implement a subset (declared via `executor:announce.tools`  -  see [wire-protocol.md](protocol/wire-protocol.md)).
 
 ---
 
 ## 0. Design principles
 
-1. **Take the intersection of leading agents first.** The seven core tools below are the intersection of Claude Code / opencode / codex / pi's tool sets. Batch A adds small, explicitly documented extensions where the product now depends on them.
+1. **Take the intersection of leading agents first.** The core tools below are the intersection of Claude Code / opencode / codex / pi's tool sets, plus small explicitly-documented additions where the product depends on them.
 2. **Approval-gate only what can lose data.** Read-only tools never require approval. Write / mutate tools always require approval. This is the *default*; runtime config MAY override.
 3. **JSON Schema as the input contract.** Executor validates input against the schema before running. Failure  -  `ok: false, content: <validation error>`.
 4. **Output is always a string.** Structured data is JSON-stringified. This keeps the wire protocol dumb and the kernel string-only.
@@ -27,9 +27,12 @@ Every executor bundled in this repo MUST implement the seven core tools below pl
 | `edit` | Precise string replace |  -  | Mutating |
 | `bash` | Execute shell command; can start background tasks with `run_in_background` |  -  | Mutating |
 | `todowrite` | Replace the session todo list |  -  | Planning state |
+| `web_search` | DuckDuckGo HTML search |  -  | Network |
 | `agent` | Spawn a host-side child agent session |  -  | Host builtin |
 | `bash_output` | Poll background shell task output |  -  | Background shell |
 | `kill_shell` | Stop a background shell task |  -  | Background shell |
+
+`todowrite` is both an executor tool and a reducer special case: successful results promote `input.todos` into `state.todos`. `agent` is declared as a tool schema but runs inside Host, not Executor  -  it creates a child JSONL session in the same workspace and returns the child assistant text.
 
 ---
 
@@ -99,7 +102,7 @@ Find files by glob pattern.
 }
 ```
 
-**Output**: newline-separated absolute paths, sorted by mtime descending (newest first)  -  most useful for "what did I edit recently". If sorting by mtime is not practical, sort lexicographically and document.
+**Output**: newline-separated absolute paths, sorted by mtime descending (newest first). If sorting by mtime is not practical, sort lexicographically and document.
 
 **Cap**: at most **1000** matches returned. If more exist, append a final line: `... and <n> more (refine pattern)`.
 
@@ -168,7 +171,7 @@ Overwrite an entire file. Creates parent directories if missing.
 
 ### 2.6 `edit`
 
-Precise string replace within a file. Idempotency comes from the strictness of matching.
+Precise string replace within a file.
 
 **Schema**:
 ```json
@@ -198,7 +201,7 @@ Precise string replace within a file. Idempotency comes from the strictness of m
 
 **Errors**:
 - `ENOENT: file does not exist (use write to create): <path>`
-- `EAMBIG: old_string matches <n> times; set replace_all=true or provide more context` (when `replace_all=false` and match count  -  1)
+- `EAMBIG: old_string matches <n> times; set replace_all=true or provide more context`
 - `ENOTFOUND: old_string not found in <path>`
 - `EACCES` / `EISDIR` as usual
 
@@ -208,7 +211,7 @@ Precise string replace within a file. Idempotency comes from the strictness of m
 
 ### 2.7 `bash`
 
-Execute a shell command. Most powerful, most dangerous.
+Execute a shell command. Most powerful, most dangerous. Supports background tasks.
 
 **Schema**:
 ```json
@@ -216,122 +219,217 @@ Execute a shell command. Most powerful, most dangerous.
   "type": "object",
   "properties": {
     "command": { "type": "string" },
-    "cwd": { "type": "string", "description": "Working directory (defaults to workspace root)" },
-    "timeoutMs": { "type": "integer", "minimum": 100, "default": 30000 }
+    "cwd": { "type": "string", "description": "Working directory (defaults to session cwd, or workspace root)" },
+    "timeoutMs": { "type": "integer", "minimum": 100, "default": 30000 },
+    "run_in_background": { "type": "boolean", "default": false, "description": "If true, spawn and return a taskId immediately without waiting" }
   },
   "required": ["command"]
 }
 ```
 
-**Output**: stdout + stderr concatenated, with a trailing status line:
-
-```
-<stdout>
-<stderr>
---- exit code: <n>, duration: <ms>ms
-```
-
-If the command was killed by timeout: append `--- killed after <timeoutMs>ms (timeout)`.
+**Output**:
+- Foreground: stdout + stderr + trailing `--- exit code: <n>, duration: <ms>ms` (or `--- killed after <timeoutMs>ms (timeout)`).
+- Background: JSON `{"taskId":"...","note":"started"}`.
 
 **Errors**:
 - `EINVAL: command is empty`
 - `EACCES: cwd outside workspace`
-- Executor MUST return `ok: true` if the process ran, regardless of exit code. Non-zero exit is data, not an executor error. `ok: false` is reserved for cases where the executor could not run the command at all.
+- Executor MUST return `ok: true` if the process ran, regardless of exit code. Non-zero exit is data, not an executor error.
 
 **Approval**: `requiresApproval: true`.
 
-**Sandbox**:
-- `cwd` MUST resolve inside the workspace whitelist
-- Executor SHOULD (but MAY not, for v1) drop dangerous env vars, prevent network access, or block certain commands. v1 relies on the workspace whitelist + user approval as the safety layer.
+**Session cwd**: `CallToolEffect` includes an optional `cwd` field copied from `state.cwd`; when the tool input omits `cwd` the executor uses the session cwd, falling back to the workspace root.
+
+### 2.8 `todowrite`
+
+Replace the session's todo list.
+
+**Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "todos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "content": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
+        },
+        "required": ["id", "content", "status"]
+      }
+    }
+  },
+  "required": ["todos"]
+}
+```
+
+**Output**: `Updated <n> todos`.
+
+**Reducer behavior**: the kernel's `onToolResult` special-cases this tool name  -  when `ok: true`, it promotes `pendingCall.input.todos` into `state.todos`. No new event kind is required.
+
+### 2.9 `web_search`
+
+Search the web via DuckDuckGo. No API key required.
+
+**Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "minLength": 1 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 }
+  },
+  "required": ["query"]
+}
+```
+
+**Output**: JSON `{"results": [{"title": string, "url": string, "snippet": string}]}`. Snippets are truncated to 500 characters. If DuckDuckGo returns no results, `results` is an empty array.
+
+**Errors** (`ok: false, content: <string>`):
+- `web_search timed out after 15000ms`
+- `web_search failed: <http status>`
+- `web_search failed: <error message>`
+
+**Approval**: `requiresApproval: false`.
+
+**Implementation**: `packages/executor/src/tools/websearch.ts` hits `https://html.duckduckgo.com/html/?q=<query>` and parses the anchor/snippet HTML. No Serper / Brave / Google API key is used.
+
+### 2.10 `agent` (host builtin)
+
+Spawn a child agent session and return its final assistant text.
+
+**Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": { "type": "string" },
+    "tools": { "type": "array", "items": { "type": "string" } },
+    "model": { "type": "string" }
+  },
+  "required": ["prompt"]
+}
+```
+
+**Output**: the child session's final assistant text, or an error if the child ended in a non-`done` status.
+
+**Approval**: `requiresApproval: false`. The child inherits the parent's `approvalMode` from `AgentState.cwd`/`approvalMode`, so gated tools inside the child still respect the parent's approval settings.
+
+**Depth guard**: `AgentConfig.maxAgentDepth` (default 3) caps recursive spawning; deeper calls fail with `agent depth exceeded`.
+
+The `agent` tool is declared in the config's tool list but never dispatched to the executor  -  Host intercepts it in `performCallTool`.
+
+### 2.11 `bash_output`
+
+Poll a background shell task's logs.
+
+**Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": { "type": "string" },
+    "offset": { "type": "integer", "minimum": 0 },
+    "block": { "type": "boolean", "default": false },
+    "timeout_ms": { "type": "integer", "minimum": 100, "default": 5000 }
+  },
+  "required": ["task_id"]
+}
+```
+
+**Output**: the log slice since `offset`, plus task status trailer.
+
+### 2.12 `kill_shell`
+
+Stop a background shell task by id.
+
+**Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "task_id": { "type": "string" }
+  },
+  "required": ["task_id"]
+}
+```
+
+**Approval**: `requiresApproval: true`.
 
 ---
 
 ## 3. Sandbox and workspace whitelist
 
 Every executor starts with a **workspace whitelist**:
-- Node daemon: `--workspace <path>` (may be repeated for multiple roots)
+- Node daemon: `--workspace <path>` (may be repeated for multiple roots) or empty (trust whole machine)
 - Browser WebContainer: implicit (the in-memory vfs is the whitelist)
 
 **Path resolution rule**: For any tool that accepts a `path`, the executor MUST:
-1. If the path is not absolute, resolve it against the **first workspace root** (not `process.cwd()`). LLM-supplied relative paths like `.` or `sub/file.txt` always mean "inside the workspace".
+1. If the path is not absolute, resolve it against the **session `cwd`** if set, otherwise the **first workspace root**. LLM-supplied relative paths like `.` or `sub/file.txt` always mean "inside the workspace".
 2. Resolve to an absolute canonical path (follow symlinks).
 3. Verify the result is under one of the whitelisted roots.
 4. If not, return `EACCES: outside workspace`.
 
 Reading through symlinks that point outside the workspace is a data leak  -  the resolution MUST catch it.
 
+**Session cwd**: `state.cwd` (mutated by `cwd_changed` events, or seeded from the create-session dialog) is passed via the effect's `cwd` field to each `tool:call`. Executors merge it into the tool input as the default working directory.
+
 ---
 
 ## 4. Tool discovery
 
-Executor announces its capabilities on connect (see wire-protocol  - 5.1). The `tools` field is a subset of the seven names above. Host's `AgentConfig` for the session lists the schemas  -  Host is responsible for making sure the LLM only sees tools the executor can actually run.
+Executor announces its capabilities on connect (see wire-protocol  - 5.1). The `tools` field is a subset of the names above. Host's `AgentConfig` for the session lists the schemas  -  Host is responsible for making sure the LLM only sees tools the executor can actually run.
 
-If an executor announces a tool with a name that clashes with an existing v1 tool but different semantics, that's a bug. v1 does not support namespaced tool names; v2 may add MCP-server-style prefixes.
+If an executor announces a tool with a name that clashes with an existing tool but different semantics, that's a bug. Namespaced tool names are not supported yet.
 
 ---
 
 ## 5. MCP compatibility
 
-The tool schemas above are MCP-compatible: they follow JSON Schema draft-07, and the input surface matches the MCP `tools/call` request format. This means:
+The tool schemas above are MCP-compatible: they follow JSON Schema draft-07, and the input surface matches the MCP `tools/call` request format. An `agent-kernel` executor can be adapted into an MCP server (stdio transport) with a thin wrapper; third-party MCP tools can be adapted into an executor via the same wrapper in reverse.
 
-- An `agent-kernel` executor can be adapted into an MCP server (stdio transport) with a thin wrapper.
-- MCP tools from third parties (e.g. GitHub, Slack integrations) can be adapted **into** an `agent-kernel` executor via the same wrapper in reverse.
-
-Details of the MCP shim live in `packages/executor/src/mcp/` (planned for post-v1). The point of listing this here is: **do not design tool schemas in a way that closes the door on MCP interop.**
+The MCP shim is currently a stub: `SessionConfig.mcpServers` and `initMcp()` accept configuration but do not spawn servers or add runtime tools. The point of documenting this here is that **tool schemas are designed not to close the door on MCP interop.**
 
 ---
 
-## 6. Adding new tools (in v1)
+## 6. Adding new tools
 
 Two ways:
 
-**Executor-side (host-registered):** Executor implements the tool, adds it to `executor:announce.tools`, and provides an inputSchema out-of-band. Host does not automatically pick this up in v1  -  Host's `AgentConfig` is currently configured at session start.
+**Executor-side:** Executor implements the tool, adds it to `executor:announce.tools`, and provides an inputSchema out-of-band. Host does not automatically pick this up  -  Host's `AgentConfig` is configured at session start.
 
 **Config-side:** User provides a full `ToolSchema` in the config file used at session creation. Executor MUST already implement that tool name.
 
-**v2 plan**: dynamic tool registration via a `session:reconfig` protocol event that updates `AgentConfig` mid-session. For v1, config is immutable per session.
+Dynamic mid-session tool registration is not supported; config is immutable per session.
 
 ---
 
 ## 7. Testing tools
 
-Each tool has a test file at `packages/executor/src/tools/<name>.test.ts` with cases for:
+Each tool has a test file at `packages/executor/src/tools/<name>.test.ts` covering:
 - Happy path
 - Missing file / directory
 - Path outside workspace
 - Schema violation (missing required field, wrong type)
-- (For `write` / `edit`) Idempotency / rewrite scenarios
-- (For `bash`) Timeout, non-zero exit, killed process
+- (For `write` / `edit`) idempotency / rewrite scenarios
+- (For `bash`) timeout, non-zero exit, killed process, background start/poll/kill
+- (For `web_search`) mocked DuckDuckGo HTML fixtures
 
-Tools are pure functions of (input, filesystem)  -  (output). Tests use tmpdir fixtures. See [testing.md](testing.md) for the general strategy.
+Tools are pure functions of `(input, filesystem, network)`  -  `(output)`. Tests use tmpdir fixtures and `nock`/`msw` for HTTP. See [testing.md](testing.md) for the general strategy.
 
 ---
 
-## 8. Deliberately excluded from v1
+## 8. Deliberately excluded
 
-These are attractive but not in v1:
-
-| Tool | Why not v1 |
+| Tool | Why |
 |---|---|
-| `web_fetch` | Adds network egress concerns. Punt to v2 as an optional extension. |
-| `web_search` | Same. Also needs a provider (Brave / Serper /  - ), adds ops cost. |
-| `todo_read` | `todowrite` is implemented; a separate read tool is unnecessary because state carries `todos`. |
-| third-party `subagent` / `task` executors | `agent` is implemented as a host-side builtin, not an executor-side recursive primitive. |
-| `memory` / `remember` | Persistence layer for cross-session context, own subsystem. |
+| `web_fetch` | Adds network egress concerns beyond `web_search`. Design for SSRF/allowlist/length caps not yet done; punt to a future release. |
+| `todo_read` | `todowrite` is implemented; state already carries `todos`. |
+| third-party `subagent` / `task` executors | `agent` is a host-side builtin, not an executor-side recursive primitive. |
+| `memory` / `remember` | Persistence layer for cross-session context is a separate subsystem. |
+| Third-party MCP servers at runtime | Configuration accepted, runtime not implemented yet. |
 
-Explicit exclusion is a feature: the "seven core tools" boundary is what lets the kernel stay tiny.
-
----
-
-## 9. Implementation Update (2026-07-05)
-
-The bundled tool surface is now larger than the original seven-tool v1 document:
-
-- `todowrite` is a builtin executor tool and a reducer special case. Successful results promote `input.todos` into `state.todos`.
-- `agent` is declared as a tool schema but runs inside Host, not Executor. It creates a child session in the same workspace and returns the child assistant text.
-- `bash` accepts `run_in_background: true`. It returns `{"taskId":"...","note":"started"}` immediately.
-- `bash_output` reads background task logs by `task_id`; input supports `offset`, `block`, and `timeout_ms`.
-- `kill_shell` stops a background task by `task_id`.
-- Dashboard shows background shell tasks in a Background terminal panel by deriving task state from ordinary `bash`, `bash_output`, and `kill_shell` tool calls/results in the timeline.
-- `cwd` can be controlled at session level (`state.cwd`) and is passed to tool dispatch. Tool-level `cwd` remains supported for compatibility.
-- MCP currently has a placeholder `initMcp()` and `McpServerConfig`; it does not spawn servers or add runtime tools yet.
+Explicit exclusion is a feature: keeping the tool surface tight is what lets the kernel stay small.

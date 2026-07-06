@@ -36,6 +36,15 @@ type TextContent = {
   text: string
 }
 
+type ImageSource =
+  | { kind: 'base64'; mediaType: string; data: string }
+  | { kind: 'file'; path: string; mediaType?: string }
+
+type ImageContent = {
+  type: 'image'
+  source: ImageSource
+}
+
 type ToolCallContent = {
   type: 'tool_call'
   callId: string                    // globally unique within a session
@@ -50,7 +59,7 @@ type ToolResultContent = {
   content: string                   // stringified result; encoding is host's responsibility
 }
 
-type MessageContent = TextContent | ToolCallContent | ToolResultContent
+type MessageContent = TextContent | ImageContent | ToolCallContent | ToolResultContent
 
 type Message = {
   role: Role
@@ -60,9 +69,11 @@ type Message = {
 
 **Constraints:**
 - A message with `role: 'system'` MAY appear at most once, and only as `messages[0]`.
-- `role: 'user'` messages contain only `TextContent`.
+- `role: 'user'` messages MAY contain `TextContent` and/or `ImageContent`.
 - `role: 'assistant'` messages contain `TextContent` and/or `ToolCallContent`.
 - `role: 'tool'` messages contain only `ToolResultContent`.
+
+`ImageContent.source.kind` distinguishes inline base64 payloads (`base64`, with `data` and `mediaType`) from workspace-relative file references (`file`, with `path` and optional `mediaType`). The kernel treats image blocks as opaque: they are appended, folded, and forwarded to `call_llm` unchanged; providers that do not support vision are the host's problem.
 
 ### 1.2 ToolSchema
 
@@ -120,6 +131,18 @@ type UsageTotal = {
   readonly costUsd: number
 }
 
+type ApprovalMode = 'auto' | 'ask' | 'deny' | 'allow_all'
+
+type ContextPressureLevel = 'ok' | 'soft' | 'hard'
+
+type TodoStatus = 'pending' | 'in_progress' | 'completed'
+
+type TodoItem = {
+  readonly id: string
+  readonly content: string
+  readonly status: TodoStatus
+}
+
 type AgentState = {
   readonly sessionId: string
   readonly messages: readonly Message[]
@@ -127,11 +150,25 @@ type AgentState = {
   readonly status: AgentStatus
   readonly usage: UsageTotal
   readonly cursor: number               // event counter; increments by exactly 1 per step()
+  readonly approvalMode: ApprovalMode   // per-session gate for tools with requiresApproval
+  readonly contextPressureLevel: ContextPressureLevel  // derived from usage vs config thresholds
+  readonly todos: readonly TodoItem[]   // set by the todowrite tool
+  readonly cwd?: string                 // session working directory (absolute); mutated by cwd_changed
   readonly error?: string
 }
 ```
 
 **Cursor semantics**: `cursor` is the count of `step()` calls that have been applied. After N `step()` invocations, `cursor === N`. This gives every point-in-time a canonical name for replay/fork addressing.
+
+**Approval modes**:
+- `auto` (default): tools with `requiresApproval: true` prompt the user; approved calls are dispatched.
+- `ask`: same as `auto`. The name is a UI hint that the user wants to be prompted; the reducer treats it identically.
+- `deny`: the reducer synthesizes a failed `tool_result` (`ok: false`, content = "denied by approval policy") for every gated call, without emitting `request_approval`.
+- `allow_all`: gated calls are dispatched immediately, as if they had `requiresApproval: false`. `AgentEvent` `user_approve` / `user_reject` never fire.
+
+Approval mode is reducer-owned state, not host state; it is set by `approval_mode_changed` events and persisted in the JSONL log.
+
+**Context pressure**: `contextPressureLevel` is derived from `usage.inputTokens + usage.outputTokens` versus `config.contextLimit * config.softThreshold` (0.75 default) and `config.contextLimit * config.hardThreshold` (0.92 default). The reducer recomputes it after every `llm_response` with usage. Host consumes it to decide when to prompt the user to compact.
 
 ### 1.5 Events (kernel input)
 
@@ -142,7 +179,11 @@ type UsageDelta = {
   costUsd?: number                       // optional; not every provider reports cost
 }
 
-type UserMessageEvent   = { kind: 'user_message';   text: string }
+type UserMessageEvent   = {
+  kind: 'user_message'
+  text?: string                          // convenience path for plain text
+  content?: readonly MessageContent[]    // structured path (e.g. text + image blocks)
+}
 type LlmResponseEvent   = { kind: 'llm_response';   message: Message; usage?: UsageDelta }
 type LlmErrorEvent      = { kind: 'llm_error';      error: string }
 type UserApproveEvent   = { kind: 'user_approve';   callId: string }
@@ -164,6 +205,8 @@ type CompactReplacedEvent = {
   tokensBefore: number
   tokensAfter: number
 }
+type ApprovalModeChangedEvent = { kind: 'approval_mode_changed'; mode: ApprovalMode }
+type CwdChangedEvent          = { kind: 'cwd_changed'; cwd: string }
 
 type AgentEvent =
   | UserMessageEvent
@@ -173,6 +216,9 @@ type AgentEvent =
   | UserRejectEvent
   | ToolResultEvent
   | CancelEvent
+  | CompactReplacedEvent
+  | ApprovalModeChangedEvent
+  | CwdChangedEvent
 ```
 
 Events are the **only** input surface. Anything the host wants the kernel to know (a tool finished, the LLM answered, the user hit cancel) must be expressed as an event.
@@ -181,7 +227,13 @@ Events are the **only** input surface. Anything the host wants the kernel to kno
 
 ```ts
 type CallLlmEffect         = { kind: 'call_llm';         messages: readonly Message[]; tools: readonly ToolSchema[] }
-type CallToolEffect        = { kind: 'call_tool';        callId: string; name: string; input: Record<string, unknown> }
+type CallToolEffect        = {
+  kind: 'call_tool'
+  callId: string
+  name: string
+  input: Record<string, unknown>
+  cwd?: string                          // copied from state.cwd when the call is dispatched
+}
 type RequestApprovalEffect = { kind: 'request_approval'; callId: string; name: string; input: Record<string, unknown> }
 type FinishEffect          = { kind: 'finish' }
 type EmitErrorEffect       = { kind: 'emit_error';       error: string }
@@ -288,12 +340,15 @@ Any pair not listed below is a **no-op**.
 |---|---|---|
 | `user_message` | `idle`, `done` | Append user msg  -  `thinking`, emit `call_llm` |
 | `llm_response` (text only) | `thinking` | Append assistant msg  -  `done`, emit `finish` |
-| `llm_response` (with tool calls) | `thinking` | Append assistant msg, populate pendingCalls, emit `request_approval` / `call_tool` per call |
+| `llm_response` (with tool calls) | `thinking` | Append assistant msg, populate pendingCalls, emit `request_approval` / `call_tool` per call (respecting `approvalMode`) |
 | `llm_error` | `thinking` |  -  `error`, emit `emit_error` |
 | `user_approve` | `awaiting_approval` | Flip that call to `dispatched`, emit `call_tool`; if no more awaiting  -  `executing_tools` |
 | `user_reject` | `awaiting_approval` | Append synthetic `tool_result` (ok=false), remove from pending; if all settled  -  `thinking` + `call_llm`, else stay |
-| `tool_result` | `executing_tools`, `awaiting_approval` | Append tool_result, remove from pending; if all settled  -  `thinking` + `call_llm`, else stay |
+| `tool_result` | `executing_tools`, `awaiting_approval` | Append tool_result, remove from pending; if all settled  -  `thinking` + `call_llm`, else stay. `todowrite` also promotes `input.todos` into `state.todos`. |
 | `cancel` | any except `done`/`error` |  -  `done`, drop pendingCalls, emit `finish` |
+| `compact_replaced` | any | Replace pre-summary `messages` prefix with a single assistant summary block; usage / cursor unchanged |
+| `approval_mode_changed` | any | Set `approvalMode = event.mode`; no effects |
+| `cwd_changed` | any | Set `cwd = event.cwd`; no effects |
 
 ---
 
@@ -308,9 +363,11 @@ For each event, this section specifies:
 
 **Preconditions**
 - `state.status  -  { 'idle', 'done' }`
+- Exactly one of `event.text` or `event.content` is present.
 
 **Transition**
-- Append `{ role: 'user', content: [{ type: 'text', text: event.text }] }` to `messages`
+- Build a user message: `{ role: 'user', content: event.content ?? [{ type: 'text', text: event.text }] }`
+- Append the message to `messages`
 - `status  -  'thinking'`
 - Clear `error` (set to `undefined`)
 
@@ -334,10 +391,14 @@ For each event, this section specifies:
 
 **Case B**: `toolCalls.length > 0`
 - For each tool call, look up `requiresApproval` in `config.tools`. If tool name is unknown, treat `requiresApproval` as `true` (safe default).
-- Create `pendingCalls`: each call gets `status: 'awaiting_approval'` if `requiresApproval`, else `status: 'approved'`.
-- Emit one effect per call: `request_approval` for awaiting, `call_tool` for approved.
+- Apply `state.approvalMode`:
+  - `auto` / `ask`: gated calls (`requiresApproval: true`) start as `'awaiting_approval'`; ungated calls start as `'approved'`.
+  - `allow_all`: every call starts as `'approved'` regardless of `requiresApproval`.
+  - `deny`: every gated call is settled inline  -  the reducer appends a synthetic `tool_result` (`ok: false`, content = "denied by approval policy") for that call and does NOT put it in `pendingCalls`. Ungated calls still start as `'approved'`.
+- Emit one effect per pending call: `request_approval` for `'awaiting_approval'`, `call_tool` (with `cwd = state.cwd`) for `'approved'`.
 - After emitting `call_tool` effects, flip those pending entries from `'approved'` to `'dispatched'`.
-- `status  -  'awaiting_approval'` if any entry is awaiting, else `'executing_tools'`.
+- If every gated call was denied and no `'approved'` / `'awaiting_approval'` entries remain: apply the pending-settled transition ( - 4.6.1)  -  typically `status  -  'thinking'` with a fresh `call_llm`.
+- Otherwise: `status  -  'awaiting_approval'` if any entry is awaiting, else `'executing_tools'`.
 
 #### 4.2.1 Usage accumulation
 
@@ -411,6 +472,7 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
 **Transition**
 - Append tool_result message with `{ callId, ok, content }` from the event.
 - Remove the call from `pendingCalls`.
+- **`todowrite` special case**: if the settled call's `name === 'todowrite'` and `event.ok === true`, promote `pendingCall.input.todos` into `state.todos` (replacing the whole list). This is the only tool the reducer looks inside; every other tool result is opaque.
 - Apply pending-settled transition ( - 4.6.1).
 
 #### 4.6.1 Pending-settled transition
@@ -431,6 +493,43 @@ After removing a settled call, examine remaining `pendingCalls`:
 
 **Effects**
 - `[{ kind: 'finish' }]`
+
+### 4.8 `compact_replaced`
+
+**Preconditions**
+- None on `status`  -  compaction may be applied at any point in the log. The host is responsible for choosing a safe moment (typically `idle` / `done`).
+
+**Transition**
+- Locate the pivot: the first `messages` index that must be kept verbatim (kernel keeps the tail of the transcript from the pivot onward  -  Host chooses the pivot; the reducer only applies whatever the event says).
+- Replace everything before the pivot with a single assistant message: `{ role: 'assistant', content: [{ type: 'text', text: event.summary }] }`.
+- `usage` and `cursor` semantics for tokens: the reducer records `event.tokensBefore` / `event.tokensAfter` for observability but does not mutate `state.usage`; the host's next `llm_response` naturally re-establishes the running total against the shorter transcript.
+- `event.trigger`, `event.request`, and `event.responseUsage` are recorded in the JSONL log for the dashboard's compaction timeline; the reducer ignores them.
+
+**Effects**
+- `[]`
+
+### 4.9 `approval_mode_changed`
+
+**Preconditions**
+- None. Approval mode is a session-level control the user can flip at any time.
+
+**Transition**
+- `approvalMode  -  event.mode`.
+- Existing `pendingCalls` are NOT retroactively re-evaluated. A call that was already in `'awaiting_approval'` stays there until an explicit `user_approve` / `user_reject` arrives. Changing to `'deny'` while calls are pending does not synthesize rejections for them  -  the mode only affects future dispatches.
+
+**Effects**
+- `[]`
+
+### 4.10 `cwd_changed`
+
+**Preconditions**
+- None. `event.cwd` MUST be an absolute path  -  validation against the workspace sandbox is host-side.
+
+**Transition**
+- `cwd  -  event.cwd`.
+
+**Effects**
+- `[]`
 
 ---
 
@@ -556,8 +655,7 @@ These are all valid concerns for an agent system, but the kernel does not handle
 ## 8. Reference implementation
 
 - Source: `packages/kernel/src/`
-- Tests: `packages/kernel/src/core.test.ts`  -  43 tests covering transitions, purity, fold, fork, compaction, approval modes, todos, cwd, and image content preservation.
-- Line counts: evolved beyond the original v0.1 snapshot as Batch A landed; use the source tree as the current reference.
+- Tests: `packages/kernel/src/core.test.ts`  -  44 tests covering transitions, purity, fold, fork, compaction, approval modes, todos, cwd, and image content preservation.
 
 The reference implementation is the tie-breaker only for things this spec is silent about. Where they conflict, spec wins and the ref impl should be patched.
 
@@ -566,20 +664,3 @@ The reference implementation is the tie-breaker only for things this spec is sil
 ## 9. Versioning
 
 This spec is v0.1. Breaking changes bump the major version. The event/effect/state shapes are considered public API and any change is a breaking change. Adding a new event or effect *kind* to the union is allowed as a minor bump if it does not change existing behavior.
-
----
-
-## 10. Implementation Update (2026-07-05)
-
-The implementation has additive Batch A surface beyond the older v0.1 text:
-
-- `MessageContent` includes `{ type: 'image', source }` for base64 and file-ref images. Reducer handling is opaque and preserves blocks unchanged.
-- `UserMessageEvent` accepts legacy `text` or structured `content`.
-- `AgentState` includes `contextPressureLevel`, `approvalMode`, `todos`, and optional `cwd`.
-- `AgentConfig` includes optional `contextLimit`, `softThreshold`, `hardThreshold`, and `maxAgentDepth`.
-- New events: `compact_replaced`, `approval_mode_changed`, `cwd_changed`.
-- `CallToolEffect` includes optional `cwd`, copied from `state.cwd` when the tool is dispatched.
-- Approval mode is reducer-owned. `deny` synthesizes failed tool results for approval-requiring calls; `allow_all` dispatches without prompting.
-- `todowrite` successful results promote `target.input.todos` into `state.todos`.
-- Context compaction remains host-owned IO; the reducer only applies the deterministic `compact_replaced` event. New logs include the summarizer `request`, `trigger`, and optional `responseUsage` so the timeline can show exactly what was sent to the LLM for compaction.
-- Session creation may include an initial cwd. The host validates it against the selected workspace sandbox roots, writes it to the JSONL header as `initialCwd`, and seeds initial `AgentState.cwd`; dashboard obtains selectable directories from the real executor rather than a mock filesystem.
