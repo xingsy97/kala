@@ -18,6 +18,7 @@ import type {
 import type {
   EventEntry,
   HeaderEntry,
+  LLMTrace,
   LogEntry,
   MetadataEntry,
   SnapshotEntry,
@@ -72,6 +73,7 @@ export type AppendEventParams = {
   event: AgentEvent
   effects: readonly Effect[]
   usage?: UsageTotal
+  llmTrace?: LLMTrace
 }
 
 export async function appendEventEntry(
@@ -84,6 +86,7 @@ export async function appendEventEntry(
     event: params.event,
     effects: params.effects,
     ...(params.usage ? { usage: params.usage } : {}),
+    ...(params.llmTrace ? { llmTrace: params.llmTrace } : {}),
   }
   await appendFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
   return entry

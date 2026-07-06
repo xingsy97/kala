@@ -48,7 +48,8 @@ Codex-style direct downloads are produced by the `GitHub Release Assets`
 workflow. It runs on aggregate tags matching `v*` and component tags matching
 `host-v*`, `executor-v*`, or `dashboard-v*`. It can also be run manually with a
 target tag and component. The workflow builds, tests, typechecks, bundles
-release assets, and uploads them to the GitHub Release for that tag.
+release assets, verifies executable bits / checksums / CLI smoke behavior, and
+uploads them to the GitHub Release for that tag.
 
 Current assets:
 
@@ -83,7 +84,14 @@ Local dry run:
 
 ```bash
 pnpm run build:release-assets
+pnpm run verify:release-assets
 pnpm run build:release-assets -- --component host
+pnpm run verify:release-assets
 ls -lh release/
 (cd release && shasum -a 256 -c SHA256SUMS)
 ```
+
+The CI workflow also builds and verifies the default release asset set on every
+push / pull request, so broken executable bundles are caught before a tag is
+pushed. The release workflow uses `GITHUB_TOKEN` with `contents: write`; no
+extra GitHub secret is required for uploading GitHub Release assets.

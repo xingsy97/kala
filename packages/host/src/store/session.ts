@@ -15,6 +15,7 @@ import type {
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
+import type { LLMTrace } from '@agent-kernel/shared'
 import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
@@ -234,6 +235,7 @@ export class SessionStore {
     effects: readonly Effect[],
     nextState: AgentState,
     usageDelta?: UsageTotal,
+    llmTrace?: LLMTrace,
   ): Promise<void> {
     const rec = this.records.get(sessionId)
     if (!rec) throw new Error(`Cannot record on unknown session: ${sessionId}`)
@@ -243,6 +245,7 @@ export class SessionStore {
       event,
       effects,
       ...(usageDelta ? { usage: usageDelta } : {}),
+      ...(llmTrace ? { llmTrace } : {}),
     })
     rec.state = nextState
   }
@@ -342,9 +345,13 @@ export class SessionStore {
         // move the call into `dispatched`, then feed the failure  -  the
         // reducer will accept it and settle the pending list.
         if (pending.status === 'awaiting_approval') {
-          const { next } = step(
+          const approveEvent: AgentEvent = {
+            kind: 'user_approve',
+            callId: pending.callId,
+          }
+          const { next, effects } = step(
             finalState,
-            { kind: 'user_approve', callId: pending.callId },
+            approveEvent,
             parsed.header.config,
           )
           finalState = next
@@ -352,18 +359,18 @@ export class SessionStore {
           await appendEventEntry({
             path,
             seq: cursor,
-            event: { kind: 'user_approve', callId: pending.callId },
-            effects: [],
+            event: approveEvent,
+            effects,
           })
         }
-        const { next } = step(finalState, recoveryEvent, parsed.header.config)
+        const { next, effects } = step(finalState, recoveryEvent, parsed.header.config)
         finalState = next
         cursor = next.cursor
         await appendEventEntry({
           path,
           seq: cursor,
           event: recoveryEvent,
-          effects: [],
+          effects,
         })
       }
     }
@@ -392,14 +399,14 @@ export class SessionStore {
           content: [{ type: 'text', text: '[interrupted]' }],
         },
       }
-      const { next } = step(finalState, recoveryEvent, parsed.header.config)
+      const { next, effects } = step(finalState, recoveryEvent, parsed.header.config)
       finalState = next
       cursor = next.cursor
       await appendEventEntry({
         path,
         seq: cursor,
         event: recoveryEvent,
-        effects: [],
+        effects,
       })
     }
 

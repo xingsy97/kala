@@ -39,11 +39,11 @@ export const globTool: Tool = {
   async run(input, ctx) {
     const pattern = requireString(input, 'pattern')
     const cwdInput = optionalString(input, 'cwd')
-    const root = cwdInput ?? ctx.sandbox.roots[0]!
+    const root = cwdInput ?? ctx.cwd ?? ctx.sandbox.roots[0]!
 
     let resolvedRoot: string
     try {
-      resolvedRoot = await ctx.sandbox.resolve(root)
+      resolvedRoot = await ctx.sandbox.resolve(root, { cwd: ctx.cwd })
     } catch (err) {
       if (err instanceof SandboxError) throw new ToolError(err.code, err.message)
       throw err

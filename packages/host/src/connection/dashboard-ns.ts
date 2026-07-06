@@ -125,6 +125,62 @@ export function configureDashboardNamespace(
     const auth = socket.handshake.auth as HandshakeAuth
     // Middleware guarantees auth.sessionId is present for the dashboard role.
     const sessionId = auth.sessionId!
+
+    // Register first-paint request handlers before any awaited session load.
+    // The dashboard emits these immediately after the websocket connects or
+    // after `session:ready`; if we install handlers later, those one-shot
+    // requests can be lost and the UI stays on "no session selected".
+    socket.on('client:list_executors', (_p: ClientListExecutors) => {
+      socket.emit('server:executors', { executors: deps.executors.snapshot() })
+    })
+
+    socket.on('client:list_sessions', async (_p: ClientListSessions) => {
+      const sessions = await deps.store.listSummaries()
+      socket.emit('server:sessions', { sessions })
+    })
+
+    socket.on('client:load_history', async (p: ClientLoadHistory) => {
+      try {
+        let target: SessionRecord | undefined = deps.store.get(p.sessionId)
+        if (!target) {
+          try {
+            target = await deps.store.load(p.sessionId)
+          } catch {
+            // Session hasn't been persisted yet  -  reply with an empty
+            // history rather than broadcasting an error the dashboard would
+            // render as a red banner. This is the expected state for a
+            // freshly-connected new session.
+            const empty: ServerHistoryPayload = {
+              sessionId: p.sessionId,
+              entries: [],
+            }
+            socket.emit('server:history', empty)
+            return
+          }
+        }
+        const parsed = await readSessionLog(target.logPath)
+        const since = p.sinceCursor ?? 0
+        const entries: EventAppendedEvent[] = parsed.events
+          .filter((e) => e.seq > since)
+          .map((e) => ({
+            sessionId: p.sessionId,
+            seq: e.seq,
+            ts: e.ts,
+            event: e.event,
+            effects: e.effects,
+            ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
+          }))
+        const payload: ServerHistoryPayload = { sessionId: p.sessionId, entries }
+        socket.emit('server:history', payload)
+      } catch (err) {
+        deps.broadcastError(
+          p.sessionId,
+          'host',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
+    })
+
     // Do NOT auto-create the session on connect. A dashboard opening a fresh
     // random UUID must not materialize a JSONL file on disk  -  otherwise
     // "click New" and "delete last session" both silently resurrect an empty
@@ -384,56 +440,6 @@ export function configureDashboardNamespace(
       } catch (err) {
         deps.broadcastError(
           p.sourceSessionId,
-          'host',
-          err instanceof Error ? err.message : String(err),
-        )
-      }
-    })
-
-    socket.on('client:list_executors', (_p: ClientListExecutors) => {
-      socket.emit('server:executors', { executors: deps.executors.snapshot() })
-    })
-
-    socket.on('client:list_sessions', async (_p: ClientListSessions) => {
-      const sessions = await deps.store.listSummaries()
-      socket.emit('server:sessions', { sessions })
-    })
-
-    socket.on('client:load_history', async (p: ClientLoadHistory) => {
-      try {
-        let target: SessionRecord | undefined = deps.store.get(p.sessionId)
-        if (!target) {
-          try {
-            target = await deps.store.load(p.sessionId)
-          } catch {
-            // Session hasn't been persisted yet  -  reply with an empty
-            // history rather than broadcasting an error the dashboard would
-            // render as a red banner. This is the expected state for a
-            // freshly-connected new session.
-            const empty: ServerHistoryPayload = {
-              sessionId: p.sessionId,
-              entries: [],
-            }
-            socket.emit('server:history', empty)
-            return
-          }
-        }
-        const parsed = await readSessionLog(target.logPath)
-        const since = p.sinceCursor ?? 0
-        const entries: EventAppendedEvent[] = parsed.events
-          .filter((e) => e.seq > since)
-          .map((e) => ({
-            sessionId: p.sessionId,
-            seq: e.seq,
-            ts: e.ts,
-            event: e.event,
-            effects: e.effects,
-          }))
-        const payload: ServerHistoryPayload = { sessionId: p.sessionId, entries }
-        socket.emit('server:history', payload)
-      } catch (err) {
-        deps.broadcastError(
-          p.sessionId,
           'host',
           err instanceof Error ? err.message : String(err),
         )

@@ -18,6 +18,7 @@ import type {
   MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
+import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
 
@@ -100,6 +101,7 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
           url,
           opts.apiKey,
           body,
+          effectiveModel,
           fetchImpl,
           params.signal,
           params.onTextDelta,
@@ -119,7 +121,14 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
         throw new OpenAIHTTPError(res.status, detail)
       }
       const json = (await res.json()) as OpenAIResponseBody
-      return parseResponse(json)
+      const parsed = parseResponse(json)
+      return {
+        ...parsed,
+        trace: makeOpenAITrace(url, effectiveModel, body, {
+          status: res.status,
+          body: json,
+        }),
+      }
     },
   }
 }
@@ -145,6 +154,7 @@ async function callStreaming(
   url: string,
   apiKey: string,
   body: Record<string, unknown>,
+  model: string,
   fetchImpl: typeof fetch,
   signal: AbortSignal | undefined,
   onTextDelta: (delta: string) => void,
@@ -169,6 +179,7 @@ async function callStreaming(
   let promptTokens = 0
   let completionTokens = 0
   let cachedTokens = 0
+  const streamEventTypes: string[] = []
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -206,6 +217,7 @@ async function callStreaming(
       } catch {
         continue
       }
+      streamEventTypes.push('chat.completion.chunk')
       const choice = evt.choices?.[0]
       const delta = choice?.delta
       if (delta?.content) {
@@ -259,7 +271,47 @@ async function callStreaming(
           cacheReadTokens: cachedTokens,
         }
       : undefined
-  return { message, usage }
+  return {
+    message,
+    usage,
+    trace: makeOpenAITrace(url, model, body, {
+      status: res.status,
+      streamEventTypes,
+      body: {
+        role: 'assistant',
+        content: textBuf.length > 0 ? textBuf : null,
+        tool_calls: indices.map((idx) => {
+          const tc = toolCalls.get(idx)!
+          return {
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: tc.argsBuf },
+          }
+        }),
+      },
+    }),
+  }
+}
+
+function makeOpenAITrace(
+  url: string,
+  model: string,
+  body: Record<string, unknown>,
+  response: NonNullable<LLMTrace['response']>,
+): LLMTrace {
+  return {
+    provider: 'openai',
+    model,
+    request: {
+      url,
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer test-redacted-api-key',
+      },
+      body,
+    },
+    response,
+  }
 }
 
 export class OpenAIHTTPError extends Error {
