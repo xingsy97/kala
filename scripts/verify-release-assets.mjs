@@ -31,19 +31,30 @@ for (const asset of manifest.assets) {
       fail(`${asset} is missing bash shebang`)
     }
     accessSync(path, constants.X_OK)
+    if (asset !== 'run.sh') fail(`unexpected shell bootstrap ${asset}; use run.sh only`)
+    if (text.includes('curl')) fail(`${asset} must be wget-only and must not mention curl`)
     const syntax = spawnSync('bash', ['-n', path], { stdio: 'inherit' })
     if (syntax.status !== 0) fail(`${asset} failed bash syntax check`)
   }
 }
 
+const shellAssets = manifest.assets.filter((asset) => asset.endsWith('.sh'))
+if (shellAssets.length > 1) fail(`expected at most one shell bootstrap, got ${shellAssets.join(', ')}`)
+
 const notesPath = join(releaseDir, 'RELEASE_NOTES.md')
 if (!existsSync(notesPath)) fail('missing release/RELEASE_NOTES.md')
 const notes = readFileSync(notesPath, 'utf8')
-if (manifest.assets.includes('run-host.sh') && !notes.includes('run-host.sh | bash')) {
-  fail('release notes missing host bash one-liner')
+if (manifest.assets.includes('run.sh') && !notes.includes('run.sh | COMPONENT=')) {
+  fail('release notes missing unified bash one-liner')
 }
-if (manifest.assets.includes('run-executor.sh') && !notes.includes('run-executor.sh | HOST_URL=')) {
-  fail('release notes missing executor bash one-liner')
+if (notes.includes('curl ')) {
+  fail('release notes must not mention curl')
+}
+if (notes.includes('run-host.sh') || notes.includes('run-executor.sh')) {
+  fail('release notes must use unified run.sh only')
+}
+if (!notes.includes('sha256sum -c SHA256SUMS --ignore-missing')) {
+  fail('release notes missing checksum verification command')
 }
 if (/agent-kernel-(host|executor)\.cjs\s*\|\s*node/.test(notes)) {
   fail('release notes must not pipe Node.js assets directly to node')

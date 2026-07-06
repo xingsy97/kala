@@ -142,9 +142,9 @@ function shellQuote(value: string): string {
 
 function commandFor(tab: OsTab, hostUrl: string): string {
   if (tab === 'windows') {
-    return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:HOST_URL='${hostUrl}'; $env:SANDBOX_ROOTS=(Get-Location).Path; iwr ${RELEASE_BASE}/run-executor.sh -UseBasicParsing | %% Content | bash"`
+    return `wget -qO- ${RELEASE_BASE}/run.sh | COMPONENT=executor HOST_URL=${shellQuote(hostUrl)} SANDBOX_ROOTS="$PWD" bash`
   }
-  return `wget -qO- ${RELEASE_BASE}/run-executor.sh | HOST_URL=${shellQuote(hostUrl)} SANDBOX_ROOTS="$PWD" bash`
+  return `wget -qO- ${RELEASE_BASE}/run.sh | COMPONENT=executor HOST_URL=${shellQuote(hostUrl)} SANDBOX_ROOTS="$PWD" bash`
 }
 
 function detectCurrentOs(): OsTab {
