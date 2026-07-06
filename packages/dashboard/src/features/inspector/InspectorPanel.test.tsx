@@ -173,6 +173,8 @@ describe('InspectorPanel', () => {
     expect(detail.textContent ?? '').toContain('LLM Message Assembly')
     expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('System Prompt')
     expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('Adapter Transform')
+    expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('messages')
+    expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('tools')
 
     fireEvent.click(screen.getByTestId('llm-detail-view-switch-payload'))
     expect(screen.getByTestId('provider-payload-view').textContent ?? '').toContain('Provider Request')
@@ -238,12 +240,18 @@ describe('InspectorPanel', () => {
     fireEvent.click(screen.getByTestId('trace-view-switch-llm'))
     expect(document.body.textContent ?? '').toContain('openai / gpt-5.5')
     fireEvent.click(screen.getByTestId('llm-call-row'))
-    fireEvent.click(screen.getByTestId('llm-detail-view-switch-messages'))
+    fireEvent.click(screen.getByTestId('llm-detail-view-switch-context'))
 
+    expect(screen.getByTestId('llm-context-view')).toBeTruthy()
     expect(screen.getByTestId('kernel-messages-view')).toBeTruthy()
     expect(screen.getAllByTestId('kernel-message-row')).toHaveLength(3)
     expect(screen.getByTestId('kernel-messages-view').textContent ?? '').toContain('Use code review skill.')
     expect(screen.getByTestId('kernel-messages-view').textContent ?? '').toContain('tool_call skill')
+
+    fireEvent.click(screen.getByTestId('llm-context-view-switch-tools'))
+    expect(screen.getByTestId('tool-registry-context-view')).toBeTruthy()
+    expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('skill')
+    expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('Load a skill.')
   })
 
   it('falls back to provider request body when trace model is missing', () => {

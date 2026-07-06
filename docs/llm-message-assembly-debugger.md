@@ -36,6 +36,12 @@ The assembly explanation does not require a new structured assembly trace yet,
 but the event log and wire protocol carry optional `model` metadata so the LLM
 call list does not degrade to `unknown` when `llmTrace` is missing.
 
+If `llmTrace` is absent, the UI must still show the exact kernel `call_llm`
+request and clearly mark provider trace as missing. It must not replace the
+whole provider view with a dead-end empty state. Missing trace usually means an
+older log entry, a pending LLM call, or a call path that did not return provider
+trace.
+
 ## UI Shape
 
 When selecting an LLM row in `Trace View -> LLM`, the detail modal renders four
@@ -45,10 +51,15 @@ tabs:
    - Human-readable pipeline summary.
    - Shows system prompt handling, kernel message count, tool count, selected
      model/provider, and adapter conversion rules.
-2. `Kernel Messages`
+   - Shows a context composition bar based on serialized size for system,
+     conversation messages, and tool schemas.
+   - Shows full kernel request and provider request body side by side when
+     provider trace is available.
+2. `Context`
    - Compact list of messages from `call_llm.messages`.
-   - Selecting a row shows that message's raw JSON.
-3. `Provider Payload`
+   - Tool registry view for the `ToolSchema[]` sent with this LLM call.
+   - Selecting a message or tool shows its raw JSON.
+3. `Provider`
    - Provider URL, inferred request body sections, and raw provider request.
    - Highlights where `system`, `messages`, and `tools` live in the provider
      payload.

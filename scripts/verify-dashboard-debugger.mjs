@@ -211,7 +211,7 @@ try {
   await page.screenshot({ path: join(shotsDir, '02-debugger-llm.png'), fullPage: false })
   const llmAssemblyText = await page.$eval('[data-testid="llm-assembly-view"]', el => el.textContent || '')
   check('llm detail explains message assembly', llmAssemblyText.includes('System Prompt') && llmAssemblyText.includes('Kernel Messages') && llmAssemblyText.includes('Adapter Transform'), llmAssemblyText.slice(0, 300))
-  await page.click('[data-testid="llm-detail-view-switch-messages"]')
+  await page.click('[data-testid="llm-detail-view-switch-context"]')
   await page.waitForSelector('[data-testid="kernel-messages-view"]')
   const kernelMessagesText = await page.$eval('[data-testid="kernel-messages-view"]', el => el.textContent || '')
   check('llm detail shows kernel messages', kernelMessagesText.includes('user') && kernelMessagesText.includes(' -  executor'), kernelMessagesText.slice(0, 300))
