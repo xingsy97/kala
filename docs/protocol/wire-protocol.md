@@ -2,7 +2,7 @@
 
 **Transport**: Socket.IO 4.x
 **Serialization**: JSON (Socket.IO default)
-**Status**: Normative for v1
+**Status**: Normative.
 
 This doc specifies every message that crosses process boundaries. If a Host/Dashboard/Executor implementation matches this doc, it interoperates.
 
@@ -102,6 +102,13 @@ Emitted after every kernel `step` call, including no-ops (per SPEC I1, no-ops st
 
 Dashboards use this to draw the event timeline.
 
+**Extended event kinds**: `event.kind` may be `compact_replaced`,
+`approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union.
+`compact_replaced` events carry the summarizer `request` (`model`,
+`systemPrompt`, `messages`, `tools`), a `trigger` of `manual` or `auto`, and
+optional `responseUsage`, so history can show the exact compact LLM request
+and result side by side.
+
 ### 3.4 `session:error`
 
 Emitted when the kernel enters `status: 'error'`, or when Host's own machinery hits an unrecoverable issue.
@@ -170,7 +177,115 @@ Host → `{ kind: 'user_reject', callId, reason }`.
 { sessionId: string }
 ```
 
-Host → `{ kind: 'cancel' }`.
+Host → `{ kind: 'cancel' }`. Also aborts the in-flight LLM stream if any.
+
+#### `client:cancel_stream`
+
+```ts
+{ sessionId: string }
+```
+
+Abort the in-flight LLM call *without* leaving the FSM. Any streamed text so
+far becomes the final assistant message with a `[cancelled]` suffix, so the
+event log always sees a complete `llm_response`. No-op if nothing is
+streaming. Wired to the dashboard ESC key during a `thinking` turn.
+
+#### `client:compact`
+
+```ts
+{ sessionId: string }
+```
+
+Ask the host to summarize the current transcript with the summarizer LLM and
+replace the message list with the summary. Emitted from the exact `/compact`
+input — the dashboard does **not** append `/compact` as a `user_message`. Host
+records a `compact_replaced` event carrying the summarizer request, trigger
+(`manual`), summary text, replaced count, and token deltas.
+
+#### `client:set_approval_mode`
+
+```ts
+{ sessionId: string; mode: 'auto' | 'ask' | 'deny' | 'allow_all' }
+```
+
+Host → `{ kind: 'approval_mode_changed', mode }`. `allow_all` is refused
+unless the host was started with `AK_ALLOW_ALL_OK=1`.
+
+#### `client:set_cwd`
+
+```ts
+{ sessionId: string; cwd: string }
+```
+
+Change the session's current working directory. Host validates the path
+against the bound executor's sandbox before dispatching
+`{ kind: 'cwd_changed', cwd }`. Subsequent `tool:call` payloads carry the new
+`cwd`.
+
+#### `client:set_model`
+
+```ts
+{ sessionId: string; model: string }
+```
+
+Override the model used for this session's LLM calls. Host echoes back
+`session:model_changed` so all dashboards on the room show the new picker
+value.
+
+#### `client:rename_session`
+
+```ts
+{ sessionId: string; label: string }
+```
+
+Set (or clear, with an empty string) the operator-defined display label for
+this session. Host appends a metadata entry to the JSONL log and broadcasts a
+refreshed `server:sessions` payload so every dashboard picks up the new
+label. When cleared, `SessionSummary.label` becomes undefined and the
+Explorer falls back to `firstUserMessage`.
+
+#### `client:delete_session`
+
+```ts
+{ sessionId: string }
+```
+
+Host removes the session from its in-memory map and unlinks the JSONL log
+file. Broadcasts `server:session_deleted` and a refreshed `server:sessions`
+listing. The socket is disconnected — dashboards subscribed to the room must
+navigate away or open a new session.
+
+#### `client:create_session`
+
+```ts
+{
+  sessionId?: string          // Host generates a ULID if omitted
+  workspaceId?: string        // executor to bind to
+  workspaceName?: string      // display label snapshot
+  cwd?: string                // initial working directory
+  systemPrompt?: string
+}
+```
+
+Host creates a fresh JSONL log with the header populated. If `cwd` is
+provided it is validated against the executor's sandbox roots before it
+becomes the session's `initialCwd` / initial `state.cwd`. Responds with
+`session:ready` for the new sessionId; the dashboard MUST `emit('subscribe',
+newSessionId)` after receiving the reply.
+
+#### `client:list_dirs`
+
+```ts
+{
+  requestId: string
+  workspaceId: string         // executor to ask
+  path?: string               // directory to list; defaults to first sandbox root
+}
+```
+
+Powers the new-session Finder-style directory picker. Host forwards to the
+executor as `fs:list_dirs` (§5.2) and returns the reply as `server:dir_list`.
+Keyed by `workspaceId` because no session exists yet.
 
 #### `client:fork`
 
@@ -220,6 +335,33 @@ Request the sessions currently on this Host (JSONL logs under the Host's session
 Request the historical timeline for a session. Response: `server:history` with the log entries. Dashboard fires this on `session:ready` so the timeline survives page reloads.
 
 ### 4.2 Host → Dashboard only (not executor)
+
+#### `session:token_delta`
+
+Streaming text token forwarded straight from the LLM adapter. UI-only —
+dashboards concatenate deltas into a partial assistant row for the current
+`thinking` turn. The event log is still authoritative through the final
+`llm_response`; if a client misses deltas the timeline reconstructs the same
+message from the log.
+
+```ts
+{
+  sessionId: string
+  text: string                 // one delta chunk
+}
+```
+
+#### `session:model_changed`
+
+Broadcast after Host applies a `client:set_model`. Dashboards use it to
+sync the model picker across tabs viewing the same session.
+
+```ts
+{
+  sessionId: string
+  model: string
+}
+```
 
 #### `approval:required`
 
@@ -304,7 +446,9 @@ Broadcast (not response-scoped) whenever an executor attaches, detaches, or re-a
 
 #### `server:sessions`
 
-Response to `client:list_sessions`.
+Response to `client:list_sessions`. Also re-broadcast after
+`client:rename_session` and `client:delete_session` so every dashboard's
+Explorer stays in sync without individually re-issuing the list request.
 
 ```ts
 {
@@ -318,7 +462,9 @@ Response to `client:list_sessions`.
     workspaceName?: string     // display label captured at session-create time. Not authoritative; the live executor's `workspaceName` is what the dashboard shows when one is attached.
     executorId?: string        // reserved for v2 (Host doesn't record which executor produced a tool_result in v1)
     status?: AgentState['status']  // last snapshot's status, if a snapshot exists
-    firstUserMessage?: string  // first ~120 chars of the first user_message; used as row label
+    currentCwd?: string        // folded `state.cwd`, if any. Displayed under the session row and used as the workbench cwd fallback before the live snapshot arrives.
+    firstUserMessage?: string  // first ~120 chars of the first user_message; used as row label when no operator label is set
+    label?: string             // operator-set display label from `client:rename_session`; takes precedence over `firstUserMessage`
   }>
 }
 ```
@@ -356,6 +502,39 @@ Response-scoped reply to `client:list_dirs`. Dashboard uses this to populate the
 }
 ```
 
+#### `server:session_deleted`
+
+Fires once after `client:delete_session` completes. Dashboards watching the
+deleted session close their view and navigate away.
+
+```ts
+{ sessionId: string }
+```
+
+#### `server:providers`
+
+Sent on the Settings dialog's demand plus once at connect for dashboards
+that render provider chips. Lists the LLM providers Host currently has
+credentials for, imported from `~/.codex/config.toml` and
+`~/.claude/settings.json` at startup and merged with user-added entries.
+
+```ts
+{
+  providers: Array<{
+    id: string                // e.g. "anthropic", "openai-compat:my-gw"
+    label: string
+    kind: 'anthropic' | 'openai-compat'
+    baseUrl?: string          // openai-compat only
+    models: Array<ModelInfo>  // { id, label, provider, contextWindow? }
+    source: 'codex' | 'claude' | 'user'
+  }>
+  selected?: string           // provider id currently active for new sessions
+}
+```
+
+`ModelInfo.contextWindow` combined with `AgentConfig.contextLimit` drives the
+Composer context usage ring.
+
 ---
 
 ## 5. Executor-specific events
@@ -388,7 +567,7 @@ Sent by executor immediately after the handshake succeeds. Declares the workspac
 }
 ```
 
-A workspace is a machine, not a directory (see ADR 0014). Two executor processes with the same `workspaceId` (rare — same user, same machine, same id file) are treated as replicas. `workspaceName` is display-only and free to change; if the same executor re-announces with a new name, the Dashboard picks up the new label but existing sessions stay bound via `workspaceId`.
+A workspace is a machine, not a directory. Two executor processes with the same `workspaceId` (rare — same user, same machine, same id file) are treated as replicas. `workspaceName` is display-only and free to change; if the same executor re-announces with a new name, the Dashboard picks up the new label but existing sessions stay bound via `workspaceId`.
 
 Host stores the attach in a registry keyed by `executorId`. A second `executor:announce` from the same executorId replaces the first entry and fires `server:executor_changed { change: 'updated' }` (§4.2).
 
@@ -418,6 +597,7 @@ Sent when the kernel emits a `call_tool` effect and Host has an executor connect
   callId: string
   name: string
   input: Record<string, unknown>
+  cwd?: string                // session's current working directory, copied from state.cwd. Executor merges it into the tool input as the default cwd.
   timeoutMs?: number          // Host's soft deadline. Executor SHOULD respect it.
 }
 ```
@@ -484,15 +664,26 @@ Host forwards to Dashboard as `tool:progress`.
 | Dashboard | `client:user_approve` | Host (kernel) |
 | Dashboard | `client:user_reject` | Host (kernel) |
 | Dashboard | `client:cancel` | Host (kernel) |
+| Dashboard | `client:cancel_stream` | Host (LLM adapter) |
+| Dashboard | `client:compact` | Host (kernel) |
+| Dashboard | `client:set_approval_mode` | Host (kernel) |
+| Dashboard | `client:set_cwd` | Host (kernel) |
+| Dashboard | `client:set_model` | Host (routing) |
+| Dashboard | `client:rename_session` | Host (storage) |
+| Dashboard | `client:delete_session` | Host (storage) |
+| Dashboard | `client:create_session` | Host (storage) |
 | Dashboard | `client:fork` | Host (kernel + storage) |
 | Dashboard | `client:list_executors` | Host (routing) |
 | Dashboard | `client:list_sessions` | Host (storage) |
+| Dashboard | `client:list_dirs` | Host → Executor (`fs:list_dirs`) |
 | Dashboard | `client:load_history` | Host (storage) |
 | Dashboard | `subscribe` | Host (routing) |
 | Executor | `executor:announce` | Host (routing) |
 | Executor | ACK to `tool:call` | Host (kernel) |
 | Executor | `executor:tool_result` | Host (kernel) |
 | Host | `session:ready` | Dashboard OR Executor |
+| Host | `session:token_delta` | Dashboard only |
+| Host | `session:model_changed` | Dashboard only |
 | Host | `state:changed` | All in room |
 | Host | `event:appended` | All in room |
 | Host | `session:error` | All in room |
@@ -500,10 +691,14 @@ Host forwards to Dashboard as `tool:progress`.
 | Host | `usage:updated` | Dashboard only |
 | Host | `server:executors` | Dashboard only (response) |
 | Host | `server:executor_changed` | Dashboard only (broadcast) |
-| Host | `server:sessions` | Dashboard only (response) |
+| Host | `server:sessions` | Dashboard only (response + broadcast) |
+| Host | `server:session_deleted` | Dashboard only (broadcast) |
+| Host | `server:providers` | Dashboard only (response) |
 | Host | `server:history` | Dashboard only (response) |
+| Host | `server:dir_list` | Dashboard only (response) |
 | Host | `tool:call` | Executor only |
 | Host | `tool:cancel` | Executor only |
+| Host | `fs:list_dirs` | Executor only |
 
 ---
 
@@ -610,22 +805,3 @@ Host calls Anthropic again; plain text answer:
 ```
 
 This session yields 4 lines in the JSONL event log (see [event-log.md](event-log.md) §3).
-
----
-
-## 12. Implementation Update (2026-07-05)
-
-Current protocol includes these additive events and fields:
-
-- Dashboard → Host: `client:compact`, `client:cancel_stream`, `client:set_approval_mode`, `client:set_cwd`, `client:create_session`, `client:list_dirs`, `client:list_executors`, `client:list_sessions`, `client:load_history`, `client:delete_session`, `client:set_model`.
-- `client:create_session` includes optional `cwd`; Host validates it against the selected workspace sandbox roots and persists it as the session `initialCwd` / initial `state.cwd`.
-- Dashboard emits `client:compact` from exact `/compact` input; `/compact` is not appended as a `user_message`.
-- Host → Dashboard: `session:token_delta`, `usage:updated`, `session:model_changed`, `server:executors`, `server:executor_changed`, `server:sessions`, `server:history`, `server:dir_list`, `server:session_deleted`.
-- `GET /models` returns `ModelInfo { id, label, provider, contextWindow? }`; dashboard uses `contextWindow` plus session `config.contextLimit` for the Composer context usage ring.
-- Kernel events in `event:appended` may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
-- `compact_replaced` events may include the compact summarizer `request`, `trigger`, and `responseUsage` so history can show the compact LLM request and result side by side.
-- `ToolCallMessage` includes optional `cwd`; executor client merges it into the tool input before running the tool.
-- `SessionSummary` includes optional `currentCwd`; dashboard uses it in Explorer session rows and as a fallback for the workbench cwd label before the live session state arrives.
-- `ExecutorAnnounce` is daemon-scoped and includes stable `workspaceId`, display `workspaceName`, `sandboxRoots`, `workingDir`, runtime, host OS, pid, and start time.
-- `session:token_delta` is UI-only. The event log remains authoritative through the final `llm_response`.
-- Background shell uses normal tool calls: `bash` starts the task, `bash_output` polls it, and `kill_shell` stops it. No special background output wire event is required yet; dashboard derives its background terminal panel from normal timeline tool calls/results.
