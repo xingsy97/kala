@@ -52,6 +52,14 @@ export type SessionView = {
   config: AgentConfig | null
   timeline: readonly TimelineEntry[]
   streamingText: string
+  /**
+   * Derived from `state.pendingCalls` (status='awaiting_approval'), NOT from
+   * the transient `approval:required` socket emit. That emit fires once per
+   * request and disappears after a page reload, but `state.pendingCalls`
+   * survives every reconnect. Deriving from state guarantees "banner says
+   * awaiting approval" and "some ToolCallCard shows Approve/Reject" never
+   * disagree  -  they read the same source.
+   */
   pendingApprovals: readonly ApprovalRequiredEvent[]
   queuedMessages: readonly QueuedMessagePreview[]
   lastError: SessionErrorEvent | null
@@ -59,14 +67,6 @@ export type SessionView = {
   parentCursor: number | null
   selectedModel: string | null
   socket: DashboardSocket | null
-  /**
-   * Optimistically drop a pending approval from the local list, so the card
-   * disappears the instant the user clicks approve/reject instead of lingering
-   * until a `state:changed` roundtrip. The host will eventually emit
-   * `event:appended` for the tool_result  -  that path re-renders unrelated UI
-   * and does not re-add the approval, so the local drop is safe.
-   */
-  dismissApproval(callId: string): void
 }
 
 export type UseSessionOptions = {
@@ -87,9 +87,6 @@ export function useSession({
   const [config, setConfig] = useState<AgentConfig | null>(null)
   const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
-  const [pendingApprovals, setPendingApprovals] = useState<
-    readonly ApprovalRequiredEvent[]
-  >([])
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
   const [lastError, setLastError] = useState<SessionErrorEvent | null>(null)
   const [parentSessionId, setParentSessionId] = useState<string | null>(null)
@@ -105,7 +102,6 @@ export function useSession({
     setConfig(null)
     setTimeline([])
     setStreamingText('')
-    setPendingApprovals([])
     setQueuedMessages([])
     setLastError(null)
     setParentSessionId(null)
@@ -171,8 +167,12 @@ export function useSession({
         ]),
       )
     })
-    socket.on('approval:required', (p) => {
-      setPendingApprovals((prev) => [...prev, p])
+    socket.on('approval:required', () => {
+      // Best-effort: the reducer's next state:changed already carries the
+      // authoritative pendingCalls list, so the derived pendingApprovals
+      // updates from that. This handler is left as a hook point for
+      // logging/telemetry  -  it must NOT maintain its own list, or the
+      // banner-vs-card mismatch across reloads comes back.
     })
     socket.on('server:message_queue', (p) => {
       if (p.sessionId === sessionId) setQueuedMessages(p.items ?? [])
@@ -202,6 +202,18 @@ export function useSession({
     }
   }, [host, sessionId, token])
 
+  const pendingApprovals = useMemo<readonly ApprovalRequiredEvent[]>(() => {
+    if (!state) return []
+    return state.pendingCalls
+      .filter((c) => c.status === 'awaiting_approval')
+      .map((c) => ({
+        sessionId,
+        callId: c.callId,
+        name: c.name,
+        input: c.input,
+      }))
+  }, [state, sessionId])
+
   return useMemo(
     () => ({
       status,
@@ -216,8 +228,6 @@ export function useSession({
       parentCursor,
       selectedModel,
       socket: socketRef.current,
-      dismissApproval: (callId: string) =>
-        setPendingApprovals((prev) => prev.filter((a) => a.callId !== callId)),
     }),
     [
       status,

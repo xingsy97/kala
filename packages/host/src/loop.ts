@@ -514,6 +514,7 @@ async function runAgentTool(
     ...(parent.workspaceId !== undefined ? { workspaceId: parent.workspaceId } : {}),
     ...(parent.workspaceName !== undefined ? { workspaceName: parent.workspaceName } : {}),
     ...(parent.state.cwd !== undefined ? { initialCwd: parent.state.cwd } : {}),
+    initialApprovalMode: parent.state.approvalMode,
   })
   const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
   const priorModel = model ? deps.models?.get(child.sessionId) : undefined
