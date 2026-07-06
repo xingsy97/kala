@@ -15,6 +15,7 @@ import type {
   MessageContent,
   UsageTotal,
 } from '@agent-kernel/kernel'
+import type { LLMTrace } from './log.js'
 
 // ============================================================================
 // Handshake
@@ -68,6 +69,7 @@ export type EventAppendedEvent = {
   ts: string
   event: AgentEvent
   effects: readonly Effect[]
+  llmTrace?: LLMTrace
 }
 
 export const SESSION_ERROR_SCOPES = ['kernel', 'llm', 'executor', 'host'] as const

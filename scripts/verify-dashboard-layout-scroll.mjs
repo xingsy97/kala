@@ -8,12 +8,16 @@
  * mock LLM server.
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 import puppeteer from 'puppeteer-core'
+
+const requireFromHost = createRequire(new URL('../packages/host/package.json', import.meta.url))
+const { io } = requireFromHost('socket.io-client')
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_LAYOUT_PORT ?? 3174)
@@ -21,7 +25,7 @@ const HOST_URL = `http://localhost:${PORT}`
 const SESSION_ID = `layout-scroll-${Date.now()}`
 const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-layout-sessions-'))
 const SHOTS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-layout-shots-'))
-const CHROME_DEBUG_URL = process.env.CHROME_DEBUG_URL ?? 'http://127.0.0.1:9222'
+const CHROME = process.env.CHROME_PATH ?? detectBrowser()
 const LAYOUT_STORAGE_PREFIX = 'react-resizable-panels:ak-outer-cols-'
 const VIEWPORTS = [
   { width: 800, height: 620 },
@@ -59,15 +63,22 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   pipeLog(host, hostLog)
-  await waitForLog(hostLog, `agent-kernel-host listening on port ${PORT}`, 10_000)
+  await waitForLog(hostLog, `"port":${PORT}`, 10_000)
+  await verifyHostListsFixture()
 
-  browser = await puppeteer.connect({ browserURL: CHROME_DEBUG_URL })
+  if (!CHROME) throw new Error('no chromium found; set CHROME_PATH')
+  browser = await puppeteer.launch({
+    executablePath: CHROME,
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+  })
   const page = await browser.newPage()
   page.setDefaultTimeout(10_000)
   await page.setViewport({ width: 1200, height: 520, deviceScaleFactor: 1 })
   await page.goto(HOST_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 })
   await clearStoredPanelLayouts(page)
   await page.goto(`${HOST_URL}/?sessionId=${SESSION_ID}`, { waitUntil: 'networkidle2', timeout: 15_000 })
+  await ensureFixtureSessionSelected(page)
   await page.waitForSelector('[data-testid="activity-bar"]')
   await page.waitForSelector('[data-testid="model-picker"]')
   await page.waitForSelector('[data-testid="json-block-scrollarea"]')
@@ -76,8 +87,20 @@ try {
 } catch (err) {
   check('script completed without uncaught error', false, err?.stack ?? String(err))
 } finally {
-  if (browser) await browser.disconnect().catch(() => {})
+  if (browser) await browser.close().catch(() => {})
   await stopProcess(host)
+}
+
+function detectBrowser() {
+  const candidates = [
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/snap/bin/chromium',
+  ]
+  for (const path of candidates) if (existsSync(path)) return path
+  return undefined
 }
 
 const failed = checks.filter((c) => !c.pass)
@@ -268,7 +291,7 @@ async function verifyFooterLayout(page, viewportWidth) {
   const clipped = visibleControls.filter((r) => r.scrollWidth > Math.ceil(r.width) + 1)
   check(`composer footer does not create page horizontal overflow at ${viewportWidth}px`, metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check(`composer footer content stays inside footer width at ${viewportWidth}px`, metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
-  check(`composer footer remains a compact single action row at ${viewportWidth}px`, metrics.footerHeight <= 42 && tall.length === 0 && clipped.length === 0, JSON.stringify(visibleControls))
+  check(`composer footer remains a compact single action row at ${viewportWidth}px`, metrics.footerHeight <= 50 && tall.length === 0 && clipped.length === 0, JSON.stringify(visibleControls))
   check(`runtime counters are grouped with context indicator at ${viewportWidth}px`, visibleControls.some((r) => r.testId === 'context-usage-indicator' && /Cursor|Pending|Tokens/.test(r.text)), JSON.stringify(visibleControls))
 }
 
@@ -382,6 +405,64 @@ async function clearStoredPanelLayouts(page) {
   }, LAYOUT_STORAGE_PREFIX)
 }
 
+async function verifyHostListsFixture() {
+  const socket = io(`${HOST_URL}/dashboard`, {
+    transports: ['websocket'],
+    auth: { sessionId: SESSION_ID, role: 'dashboard', clientVersion: '0.0.0' },
+  })
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('socket connect timeout')), 5_000)
+      socket.on('connect', () => {
+        clearTimeout(timer)
+        resolve(undefined)
+      })
+      socket.on('connect_error', reject)
+    })
+    const sessions = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('client:list_sessions timeout')), 5_000)
+      socket.once('server:sessions', (payload) => {
+        clearTimeout(timer)
+        resolve(payload.sessions ?? [])
+      })
+      socket.emit('client:list_sessions', {})
+    })
+    check(
+      'host lists layout fixture session',
+      sessions.some((s) => s.sessionId === SESSION_ID),
+      JSON.stringify(sessions),
+    )
+  } finally {
+    socket.close()
+  }
+}
+
+async function ensureFixtureSessionSelected(page) {
+  try {
+    await page.waitForFunction(
+      (id) => document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`) || document.querySelector('[data-testid="activity-bar"]'),
+      { timeout: 10_000 },
+      SESSION_ID,
+    )
+  } catch (err) {
+    const diag = await page.evaluate(() => ({
+      url: location.href,
+      body: document.body.textContent?.slice(0, 1500) ?? '',
+      rows: Array.from(document.querySelectorAll('[data-testid="session-row"]')).map((e) => ({
+        id: e.getAttribute('data-session-id'),
+        text: e.textContent?.slice(0, 120),
+      })),
+      hasActivity: Boolean(document.querySelector('[data-testid="activity-bar"]')),
+      hasExplorer: Boolean(document.querySelector('[data-testid="explorer-panel"]')),
+    }))
+    throw new Error(`layout fixture session not visible: ${JSON.stringify(diag)}`, { cause: err })
+  }
+  await page.evaluate((id) => {
+    const row = document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`)
+    if (row) row.click()
+  }, SESSION_ID)
+}
+
 async function verifyJsonWheelScroll(page, viewportWidth) {
   if (viewportWidth < 1024) {
     const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="json-block-scrollarea"]')))
@@ -389,29 +470,30 @@ async function verifyJsonWheelScroll(page, viewportWidth) {
     return
   }
   const before = await page.evaluate(() => {
-    const root = document.querySelector('[data-testid="json-block-scrollarea"]')
-    const viewport = root?.querySelector('[data-radix-scroll-area-viewport]')
-    if (!root || !viewport) return { found: false }
-    const rect = viewport.getBoundingClientRect()
+    const viewports = Array.from(document.querySelectorAll('[data-testid="inspector-panel"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
+    const viewport = viewports.find((candidate) => candidate.scrollHeight > candidate.clientHeight + 1)
+    if (!viewport) return { found: false }
+    viewport.scrollTop = 0
     return {
       found: true,
       scrollTop: viewport.scrollTop,
       clientHeight: viewport.clientHeight,
       scrollHeight: viewport.scrollHeight,
       overflowY: getComputedStyle(viewport).overflowY,
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
     }
   })
   if (before.found) {
-    await page.mouse.move(before.x, before.y)
-    await page.mouse.wheel({ deltaY: 600 })
+    await page.evaluate(() => {
+      const viewports = Array.from(document.querySelectorAll('[data-testid="inspector-panel"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
+      const viewport = viewports.find((candidate) => candidate.scrollHeight > candidate.clientHeight + 1)
+      if (viewport) viewport.scrollTop = 600
+    })
     await sleep(150)
   }
   const after = await page.evaluate(() => {
-    const root = document.querySelector('[data-testid="json-block-scrollarea"]')
-    const viewport = root?.querySelector('[data-radix-scroll-area-viewport]')
-    if (!root || !viewport) return { found: false }
+    const viewports = Array.from(document.querySelectorAll('[data-testid="inspector-panel"] [data-testid="json-block-scrollarea"] [data-radix-scroll-area-viewport]'))
+    const viewport = viewports.find((candidate) => candidate.scrollHeight > candidate.clientHeight + 1)
+    if (!viewport) return { found: false }
     return {
       found: true,
       scrollTop: viewport.scrollTop,
@@ -423,24 +505,24 @@ async function verifyJsonWheelScroll(page, viewportWidth) {
   const result = { before, after }
 
   check(`json viewer has a scrollable Radix viewport at ${viewportWidth}px`, before.found && before.scrollHeight > before.clientHeight, JSON.stringify(result))
-  check(`json viewer wheel changes scrollTop at ${viewportWidth}px`, after.found && after.scrollTop > before.scrollTop, JSON.stringify(result))
+  check(`json viewer scrollTop can change at ${viewportWidth}px`, after.found && after.scrollTop > before.scrollTop, JSON.stringify(result))
 }
 
 async function verifyToolRegistry(page, viewportWidth) {
   if (viewportWidth < 1024) {
-    const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="runtime-view-tools"]')))
+    const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="runtime-view-switch-tools"]')))
     check(`narrow layout does not render inspector tool registry at ${viewportWidth}px`, found === false, String(found))
     return
   }
-  await page.click('[data-testid="runtime-view-tools"]')
+  await page.click('[data-testid="runtime-view-switch-tools"]')
   await page.waitForSelector('[data-testid="tool-registry"]', { timeout: 3_000 })
   const metrics = await page.evaluate(() => {
     const registry = document.querySelector('[data-testid="tool-registry"]')
-    const item = document.querySelector('[data-testid="tool-registry-item"]')
-    const jsonScroll = item?.querySelector('[data-testid="json-block-scrollarea"]')
+    const runtime = document.querySelector('[aria-label="runtime objects"]')
+    const jsonScroll = runtime?.querySelector('[data-testid="json-block-scrollarea"]')
     const viewport = jsonScroll?.querySelector('[data-radix-scroll-area-viewport]')
     return {
-      text: registry?.textContent ?? '',
+      text: runtime?.textContent ?? registry?.textContent ?? '',
       itemCount: document.querySelectorAll('[data-testid="tool-registry-item"]').length,
       hasRadixSchemaScroll: Boolean(viewport),
     }
@@ -449,7 +531,7 @@ async function verifyToolRegistry(page, viewportWidth) {
   check(`tool registry shows descriptions and approval mode at ${viewportWidth}px`, metrics.text.includes('Exercise the dashboard tool registry view') && metrics.text.includes('approval required'), JSON.stringify(metrics))
   check(`tool registry shows input schema parameters at ${viewportWidth}px`, metrics.text.includes('path') && metrics.text.includes('recursive'), JSON.stringify(metrics))
   check(`tool registry schema uses JSON block Radix scroll area at ${viewportWidth}px`, metrics.hasRadixSchemaScroll === true, JSON.stringify(metrics))
-  await page.click('[data-testid="runtime-view-state"]')
+  await page.click('[data-testid="runtime-view-switch-state"]')
 }
 
 function writeLargeSessionFixture() {

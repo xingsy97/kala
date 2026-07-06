@@ -26,10 +26,10 @@ export const bashTool: Tool = {
     const timeoutMs =
       optionalPositiveInt(input, 'timeoutMs', 100) ?? DEFAULT_TIMEOUT_MS
 
-    const cwd = cwdInput ?? ctx.sandbox.roots[0] ?? process.cwd()
+    const cwd = cwdInput ?? ctx.cwd ?? ctx.sandbox.roots[0] ?? process.cwd()
     let resolvedCwd: string
     try {
-      resolvedCwd = await ctx.sandbox.resolve(cwd)
+      resolvedCwd = await ctx.sandbox.resolve(cwd, { cwd: ctx.cwd })
     } catch (err) {
       if (err instanceof SandboxError) {
         throw new ToolError('EACCES', 'cwd outside workspace')

@@ -101,6 +101,7 @@ describe('Composer', () => {
     const onSubmit = vi.fn()
     renderComposer({ onSubmit })
 
+    fireEvent.click(screen.getByTestId('send-mode-toggle'))
     fireEvent.click(screen.getByTestId('send-mode-queue'))
     fireEvent.change(screen.getByTestId('composer-input'), {
       target: { value: 'later' },
@@ -139,6 +140,7 @@ describe('Composer', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('send-mode-toggle'))
     expect(screen.getByTestId('send-mode-steer').textContent ?? '').toContain('Steer active turn')
     expect(screen.getByTestId('send-mode-queue').textContent ?? '').toContain('Queue follow-up')
     expect(screen.getByTestId('send-mode-steer').getAttribute('title') ?? '').toContain('current run')

@@ -48,6 +48,22 @@ export type EventEntry = {
   event: AgentEvent
   effects: readonly Effect[]
   usage?: UsageTotal
+  llmTrace?: LLMTrace
+}
+
+export type LLMTrace = {
+  provider: 'anthropic' | 'openai' | 'unknown'
+  model: string
+  request: {
+    url: string
+    headers: Record<string, string>
+    body: unknown
+  }
+  response?: {
+    status: number
+    body?: unknown
+    streamEventTypes?: readonly string[]
+  }
 }
 
 export type SnapshotEntry = {

@@ -21,3 +21,5 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test
+      - run: pnpm run build:release-assets
+      - run: pnpm run verify:release-assets

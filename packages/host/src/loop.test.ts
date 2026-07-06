@@ -199,6 +199,75 @@ describe('host loop', () => {
     expect(reloaded.state.cursor).toBe(2)
   })
 
+  it('serializes concurrent dispatches for one session', async () => {
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'first' }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'second' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await Promise.all([
+      loop.dispatch(sessionId, { kind: 'user_message', text: 'one' }),
+      loop.dispatch(sessionId, { kind: 'user_message', text: 'two' }),
+    ])
+
+    const rec = store.get(sessionId)!
+    expect(rec.state.status).toBe('done')
+    expect(rec.state.cursor).toBe(4)
+    const parsed = await readSessionLog(rec.logPath)
+    expect(parsed.events.map((e) => e.seq)).toEqual([1, 2, 3, 4])
+    expect(parsed.events.map((e) => e.event.kind)).toEqual([
+      'user_message',
+      'llm_response',
+      'user_message',
+      'llm_response',
+    ])
+  })
+
+  it('does not let broadcast failures break persisted loop progress', async () => {
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'still persisted' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: {
+        ...silentBroadcast(),
+        onEvent() {
+          throw new Error('socket layer failed')
+        },
+      },
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+
+    const rec = store.get(sessionId)!
+    expect(rec.state.status).toBe('done')
+    const parsed = await readSessionLog(rec.logPath)
+    expect(parsed.events).toHaveLength(2)
+  })
+
   it('propagates cancel to the executor via cancelPending (SPEC §Non-goals: Host cancels IO)', async () => {
     // Scenario: LLM asked for a tool call, executor is chewing on it, user
     // hits cancel. Before this fix the kernel drops pendingCalls but the

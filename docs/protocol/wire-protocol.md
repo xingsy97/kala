@@ -97,10 +97,16 @@ Emitted after every kernel `step` call, including no-ops (per SPEC I1, no-ops st
   ts: string                  // ISO 8601 timestamp of when Host applied this event
   event: AgentEvent           // the event that was applied
   effects: Effect[]           // effects the kernel emitted for this event
+  llmTrace?: LLMTrace         // optional provider-level trace for llm_response
 }
 ```
 
-Dashboards use this to draw the event timeline.
+Dashboards use this to draw the event timeline. `llmTrace` is metadata on
+the log entry, not a kernel event and not part of `AgentState`. It is present
+only for LLM responses recorded by hosts that capture provider traces. The
+trace includes the final provider request URL, redacted headers, request body,
+response status, and either the raw response body or a compact streaming
+summary. Authorization secrets MUST be redacted before persistence.
 
 **Extended event kinds**: `event.kind` may be `compact_replaced`,
 `approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union.

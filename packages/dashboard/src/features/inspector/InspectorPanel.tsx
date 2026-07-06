@@ -1,14 +1,31 @@
-import { useState } from 'react'
-import { GitBranch } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import {
+  Activity,
+  Archive,
+  Bot,
+  Brain,
+  CheckCircle2,
+  Database,
+  GitBranch,
+  Hammer,
+  History,
+  MessageSquare,
+  SearchCode,
+  ServerCog,
+  XCircle,
+} from 'lucide-react'
 import type {
   AgentConfig,
   AgentEvent,
   AgentState,
   CallLlmEffect,
+  CallToolEffect,
   Effect,
   Message,
+  MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
+import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
@@ -22,6 +39,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../../components/ui/alert-dialog.js'
+import { Button } from '../../components/ui/button.js'
 import {
   Dialog,
   DialogClose,
@@ -31,7 +49,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog.js'
-import { Button } from '../../components/ui/button.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
 import {
   ResizableHandle,
@@ -50,6 +67,38 @@ type Props = {
   onJumpToMessage?(messageIndex: number): void
 }
 
+type TraceView = 'reducer' | 'llm' | 'tools'
+type RuntimeView = 'state' | 'tools' | 'memory'
+type DetailSelection =
+  | { kind: 'event'; entry: TimelineEntry; priorCallLlm: PriorCallLlm | null; flow?: StateFlowStep }
+  | { kind: 'llm'; call: LlmCall }
+  | { kind: 'tool'; call: ToolCallLifecycle }
+  | null
+
+type PriorCallLlm = { seq: number; effect: CallLlmEffect }
+
+type LlmCall = {
+  id: string
+  requestSeq: number
+  responseSeq?: number
+  effect: CallLlmEffect
+  response?: Extract<AgentEvent, { kind: 'llm_response' }>
+  error?: Extract<AgentEvent, { kind: 'llm_error' }>
+  trace?: LLMTrace
+}
+
+type ToolCallLifecycle = {
+  callId: string
+  name: string
+  input: Record<string, unknown>
+  requestedSeq?: number
+  approvedSeq?: number
+  rejectedSeq?: number
+  dispatchedSeq?: number
+  resultSeq?: number
+  result?: Extract<AgentEvent, { kind: 'tool_result' }>
+}
+
 export function InspectorPanel({
   state,
   config,
@@ -58,14 +107,14 @@ export function InspectorPanel({
   onFork,
   onJumpToMessage,
 }: Props): JSX.Element {
+  const [traceView, setTraceView] = useState<TraceView>('reducer')
+  const [runtimeView, setRuntimeView] = useState<RuntimeView>('state')
+  const [selected, setSelected] = useState<DetailSelection>(null)
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
-  const [historyView, setHistoryView] = useState<'timeline' | 'state-flow'>('timeline')
-  const [runtimeView, setRuntimeView] = useState<'state' | 'tools' | 'memory'>('state')
-  const [selectedTimeline, setSelectedTimeline] = useState<{
-    entry: TimelineEntry
-    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
-  } | null>(null)
-  const flow = stateFlow(timeline)
+
+  const flow = useMemo(() => stateFlow(timeline), [timeline])
+  const llmCalls = useMemo(() => buildLlmCalls(timeline), [timeline])
+  const toolCalls = useMemo(() => buildToolCalls(timeline), [timeline])
 
   const confirmFork = (): void => {
     if (pendingForkSeq !== null && onFork) onFork(pendingForkSeq)
@@ -73,35 +122,52 @@ export function InspectorPanel({
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex-1 min-h-0">
-        <ResizablePanelGroup
-          direction="vertical"
-          autoSaveId="ak-inspector-split"
-        >
-          <ResizablePanel defaultSize={65} minSize={25}>
-            <HistorySection
-              view={historyView}
-              onViewChange={setHistoryView}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar text-foreground">
+      <DebuggerHeader
+        state={state}
+        config={config}
+        timeline={timeline}
+        visibleMessagesCount={visibleMessagesCount}
+      />
+      <Overview state={state} config={config} timeline={timeline} visibleMessagesCount={visibleMessagesCount} />
+
+      <div className="min-h-0 flex-1">
+        <ResizablePanelGroup direction="vertical" autoSaveId="ak-debugger-split">
+          <ResizablePanel defaultSize={45} minSize={25}>
+            <TraceSection
+              view={traceView}
+              onViewChange={setTraceView}
               timeline={timeline}
               flow={flow}
+              llmCalls={llmCalls}
+              toolCalls={toolCalls}
               messagesCount={visibleMessagesCount ?? state?.messages.length ?? 0}
+              selected={selected}
+              onSelect={setSelected}
               onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
               onJumpToMessage={onJumpToMessage}
-              onInspect={setSelectedTimeline}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={35} minSize={10}>
+          <ResizablePanel defaultSize={55} minSize={25}>
             <RuntimeSection
               view={runtimeView}
               onViewChange={setRuntimeView}
               state={state}
               config={config}
+              toolCalls={toolCalls}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+
+      <DetailDialog
+        selection={selected}
+        timeline={timeline}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null)
+        }}
+      />
 
       <AlertDialog
         open={pendingForkSeq !== null}
@@ -114,226 +180,891 @@ export function InspectorPanel({
             <AlertDialogTitle>Fork session?</AlertDialogTitle>
             <AlertDialogDescription>
               A new session will branch at cursor{' '}
-              <span className="font-mono text-foreground dark:text-foreground">
-                {pendingForkSeq ?? ''}
-              </span>{' '}
-              — its history up to (but not including) this row is copied. You
-              can return to the parent via the &quot;go to parent&quot; link at
-              the top.
+              <span className="font-mono text-foreground">{pendingForkSeq ?? ''}</span>. Its
+              history up to this row is copied, then the new session diverges.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmFork}
-              data-testid="confirm-fork-button"
-            >
+            <AlertDialogAction onClick={confirmFork} data-testid="confirm-fork-button">
               Fork
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <Dialog
-        open={selectedTimeline !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelectedTimeline(null)
-        }}
-      >
-        <DialogContent className="max-w-5xl h-[86vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
-          <DialogHeader className="border-b border-border/50 px-4 py-3">
-            <DialogTitle className="text-base">
-              Timeline event #{selectedTimeline?.entry.seq}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedTimeline?.entry.event.kind ?? ''}
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="min-h-0">
-            <div className="p-4">
-            {selectedTimeline ? (
-              <EventDetails
-                entry={selectedTimeline.entry}
-                priorCallLlm={selectedTimeline.priorCallLlm}
-                timeline={timeline}
-              />
-            ) : null}
-            </div>
-          </ScrollArea>
-          <DialogFooter className="border-t border-border/50 px-4 py-3">
-            <DialogClose asChild>
-              <Button variant="outline" className="mt-0">Close</Button>
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
 
-function HistorySection({
+function DebuggerHeader({
+  state,
+  config,
+  timeline,
+  visibleMessagesCount,
+}: {
+  state: AgentState | null
+  config?: AgentConfig | null
+  timeline: readonly TimelineEntry[]
+  visibleMessagesCount?: number
+}): JSX.Element {
+  const model = modelFromTimeline(timeline) ?? 'model unset'
+  const cwd = state?.cwd ?? 'cwd unset'
+  return (
+    <div className="flex-none bg-card px-3 py-3">
+      <div className="flex min-w-0 items-center gap-2">
+        <ServerCog className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2 text-xs">
+            <span className="font-semibold text-foreground">Agent Kernel Debugger</span>
+            <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+              #{state?.cursor ?? timeline.at(-1)?.seq ?? 0}
+            </span>
+          </div>
+          <div className="mt-1 truncate text-[11px] text-muted-foreground">
+            {state?.status ?? 'no state'} · approval {state?.approvalMode ?? 'n/a'} · {model}
+          </div>
+          <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={cwd}>
+            cwd {cwd}
+          </div>
+        </div>
+      </div>
+      <div className="sr-only">
+        {visibleMessagesCount ?? state?.messages.length ?? 0} visible messages
+        {config?.tools.length ?? 0} tools
+      </div>
+    </div>
+  )
+}
+
+function Overview({
+  state,
+  config,
+  timeline,
+  visibleMessagesCount,
+}: {
+  state: AgentState | null
+  config?: AgentConfig | null
+  timeline: readonly TimelineEntry[]
+  visibleMessagesCount?: number
+}): JSX.Element {
+  const messages = visibleMessagesCount ?? state?.messages.length ?? 0
+  const contextLimit = config?.contextLimit
+  const context = contextLimit
+    ? `${state?.usage.inputTokens ?? 0} / ${contextLimit}`
+    : `${state?.usage.inputTokens ?? 0} input`
+  const pending = state?.pendingCalls.find((c) => c.status !== 'rejected')
+  const gated = config?.tools.filter((t) => t.requiresApproval).length ?? 0
+  return (
+    <section className="flex-none bg-card px-3 pb-3" aria-label="debugger overview">
+      <div className="grid grid-cols-2 gap-1.5 text-xs xl:grid-cols-4">
+        <Metric label="Status" value={shortStatus(state?.status)} tone={statusTone(state?.status)} />
+        <Metric label="Events" value={String(timeline.length)} />
+        <Metric label="Messages" value={String(messages)} />
+        <Metric label="Context" value={context} />
+        <Metric label="Pending" value={pending?.name ?? 'none'} tone={pending ? 'text-amber-600 dark:text-amber-300' : undefined} />
+        <Metric label="Tools" value={`${config?.tools.length ?? 0} · ${gated} gated`} />
+        <Metric label="Memory" value={`${state?.memory?.length ?? 0} session`} />
+        <Metric label="Approval" value={state?.approvalMode ?? 'n/a'} />
+      </div>
+    </section>
+  )
+}
+
+function Metric({ label, value, tone }: { label: string; value: string; tone?: string }): JSX.Element {
+  return (
+    <div className="min-w-0 rounded bg-muted/40 px-2 py-1.5">
+      <div className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn('mt-0.5 truncate font-mono text-[11px] text-foreground', tone)} title={value}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function TraceSection({
   view,
   onViewChange,
   timeline,
   flow,
+  llmCalls,
+  toolCalls,
   messagesCount,
+  selected,
+  onSelect,
   onForkRequest,
   onJumpToMessage,
-  onInspect,
 }: {
-  view: 'timeline' | 'state-flow'
-  onViewChange(view: 'timeline' | 'state-flow'): void
+  view: TraceView
+  onViewChange(view: TraceView): void
+  timeline: readonly TimelineEntry[]
+  flow: readonly StateFlowStep[]
+  llmCalls: readonly LlmCall[]
+  toolCalls: readonly ToolCallLifecycle[]
+  messagesCount: number
+  selected: DetailSelection
+  onSelect(selection: DetailSelection): void
+  onForkRequest?(cursor: number): void
+  onJumpToMessage?(messageIndex: number): void
+}): JSX.Element {
+  return (
+    <section className="flex h-full min-h-0 flex-col" aria-label="trace view">
+      <SectionHeader icon={History} title="Trace View">
+        <Segmented<TraceView>
+          value={view}
+          onChange={onViewChange}
+          options={[
+            ['reducer', 'Reducer Trace'],
+            ['llm', 'LLM Calls'],
+            ['tools', 'Tool Calls'],
+          ]}
+          testId="trace-view-switch"
+        />
+      </SectionHeader>
+      {view === 'reducer' ? (
+        <ReducerTrace
+          timeline={timeline}
+          flow={flow}
+          messagesCount={messagesCount}
+          selected={selected}
+          onSelect={onSelect}
+          onForkRequest={onForkRequest}
+          onJumpToMessage={onJumpToMessage}
+        />
+      ) : view === 'llm' ? (
+        <LlmCallsView calls={llmCalls} selected={selected} onSelect={onSelect} />
+      ) : (
+        <ToolCallsView calls={toolCalls} selected={selected} onSelect={onSelect} />
+      )}
+    </section>
+  )
+}
+
+function ReducerTrace({
+  timeline,
+  flow,
+  messagesCount,
+  selected,
+  onSelect,
+  onForkRequest,
+  onJumpToMessage,
+}: {
   timeline: readonly TimelineEntry[]
   flow: readonly StateFlowStep[]
   messagesCount: number
+  selected: DetailSelection
+  onSelect(selection: DetailSelection): void
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
-  onInspect(payload: {
-    entry: TimelineEntry
-    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
-  }): void
 }): JSX.Element {
+  if (timeline.length === 0) {
+    return <EmptyBlock label="No reducer events yet." />
+  }
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
-        <span className="font-medium">History</span>
-        <div
-          className="ml-auto inline-flex rounded border border-border/50 bg-background p-0.5"
-          data-testid="history-view-switch"
-        >
-          <button
-            type="button"
-            onClick={() => onViewChange('timeline')}
-            className={cn(
-              'rounded px-2 py-0.5 text-[11px] transition-colors',
-              view === 'timeline'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-            )}
-            data-testid="history-view-timeline"
-          >
-            Timeline
-          </button>
-          <button
-            type="button"
-            onClick={() => onViewChange('state-flow')}
-            className={cn(
-              'rounded px-2 py-0.5 text-[11px] transition-colors',
-              view === 'state-flow'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-            )}
-            data-testid="history-view-state-flow"
-          >
-            State flow
-          </button>
-        </div>
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="space-y-1 px-2 pb-3" data-testid="reducer-trace-list">
+        {timeline.map((entry, i) => {
+          const priorCallLlm = findPriorCallLlm(timeline, i)
+          const flowStep = flow.find((s) => s.seq === entry.seq)
+          const isSelected = selected?.kind === 'event' && selected.entry.seq === entry.seq
+          return (
+            <ReducerTraceRow
+              key={entry.seq}
+              entry={entry}
+              flow={flowStep}
+              priorCallLlm={priorCallLlm}
+              selected={isSelected}
+              messageIndex={messageIndexFor(timeline, i, messagesCount)}
+              onSelect={() => onSelect({ kind: 'event', entry, priorCallLlm, flow: flowStep })}
+              onForkRequest={onForkRequest}
+              onJumpToMessage={onJumpToMessage}
+            />
+          )
+        })}
       </div>
-      {view === 'timeline' ? (
-        <Timeline
-          timeline={timeline}
-          messagesCount={messagesCount}
-          onForkRequest={onForkRequest}
-          onJumpToMessage={onJumpToMessage}
-          onInspect={onInspect}
-        />
-      ) : (
-        <StateFlowSection steps={flow} />
+    </ScrollArea>
+  )
+}
+
+function ReducerTraceRow({
+  entry,
+  flow,
+  priorCallLlm,
+  selected,
+  messageIndex,
+  onSelect,
+  onForkRequest,
+  onJumpToMessage,
+}: {
+  entry: TimelineEntry
+  flow?: StateFlowStep
+  priorCallLlm: PriorCallLlm | null
+  selected: boolean
+  messageIndex: number | null
+  onSelect(): void
+  onForkRequest?(cursor: number): void
+  onJumpToMessage?(messageIndex: number): void
+}): JSX.Element {
+  const inbound = inboundOf(entry.event)
+  const jumpable = messageIndex !== null && onJumpToMessage !== undefined
+  return (
+    <div
+      className={cn(
+        'group relative rounded px-2 py-2 text-xs transition-colors',
+        selected ? 'bg-muted/70' : 'hover:bg-muted/40',
       )}
+      data-testid="timeline-row"
+    >
+      {selected ? <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded bg-primary" /> : null}
+      <button
+        type="button"
+        onClick={onSelect}
+        className="grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-x-2 text-left"
+        data-testid="timeline-row-header"
+        aria-label={`inspect timeline event ${entry.seq}`}
+      >
+        <span className="text-right font-mono text-[11px] text-muted-foreground">#{entry.seq}</span>
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className={cn('w-16 flex-none font-mono text-[11px]', inbound.tone)}>{inbound.source}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-foreground">{entry.event.kind}</span>
+            {flow ? (
+              <span className="hidden flex-none font-mono text-[11px] text-muted-foreground xl:inline">
+                {flow.from} → {flow.to}
+              </span>
+            ) : null}
+          </span>
+          <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+            {eventSummary(entry.event, priorCallLlm)}
+          </span>
+          {entry.effects.length > 0 ? (
+            <span className="mt-1 flex min-w-0 flex-wrap gap-1">
+              {entry.effects.map((eff, i) => {
+                const target = effectTarget(eff)
+                return (
+                  <span key={`${eff.kind}-${i}`} className="rounded bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                    <span className={target.tone}>{target.target}</span> · {eff.kind}
+                  </span>
+                )
+              })}
+            </span>
+          ) : null}
+        </span>
+      </button>
+      <div className="mt-1 flex justify-end gap-1 pl-11 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
+        {jumpable ? (
+          <MiniAction onClick={() => onJumpToMessage!(messageIndex!)} title={`scroll chat to message #${messageIndex}`}>
+            jump chat
+          </MiniAction>
+        ) : null}
+        {onForkRequest ? (
+          <MiniAction onClick={() => onForkRequest(entry.seq)} title={`fork a new session at cursor ${entry.seq}`} ariaLabel={`fork at cursor ${entry.seq}`}>
+            <GitBranch className="h-3 w-3" aria-hidden="true" /> fork
+          </MiniAction>
+        ) : null}
+        <MiniAction onClick={onSelect} title="inspect raw JSON">inspect json</MiniAction>
+      </div>
     </div>
   )
 }
 
-function StateFlowSection({ steps }: { steps: readonly StateFlowStep[] }): JSX.Element {
+function LlmCallsView({
+  calls,
+  selected,
+  onSelect,
+}: {
+  calls: readonly LlmCall[]
+  selected: DetailSelection
+  onSelect(selection: DetailSelection): void
+}): JSX.Element {
+  if (calls.length === 0) return <EmptyBlock label="No LLM calls emitted yet." />
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-3 pb-2 text-xs text-muted-foreground flex-none">
-        reducer status after each event
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="space-y-1 px-2 pb-3" data-testid="llm-calls-list">
+        {calls.map((call) => {
+          const isSelected = selected?.kind === 'llm' && selected.call.id === call.id
+          const usage = call.response?.usage
+          const status = call.error ? 'error' : call.response ? String(call.trace?.response?.status ?? 'ok') : 'pending'
+          return (
+            <button
+              key={call.id}
+              type="button"
+              onClick={() => onSelect({ kind: 'llm', call })}
+              className={cn('relative w-full rounded px-2 py-2 text-left text-xs transition-colors', isSelected ? 'bg-muted/70' : 'hover:bg-muted/40')}
+              data-testid="llm-call-row"
+            >
+              {isSelected ? <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded bg-primary" /> : null}
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-20 flex-none font-mono text-[11px] text-muted-foreground">#{call.requestSeq} → {call.responseSeq ? `#${call.responseSeq}` : 'pending'}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-violet-600 dark:text-violet-300">{call.trace?.provider ?? providerFromModel(call.trace?.model) ?? 'kernel'} / {call.trace?.model ?? 'model unknown'}</span>
+                <span className={cn('flex-none font-mono text-[11px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{status}</span>
+              </div>
+              <div className="mt-1 truncate pl-20 text-[11px] text-muted-foreground">
+                request {call.effect.messages.length} messages · {call.effect.tools.length} tools · response {llmResponseSummary(call)}
+              </div>
+              <div className="mt-1 truncate pl-20 font-mono text-[10px] text-muted-foreground">
+                usage {usage ? `${usage.inputTokens}/${usage.outputTokens}` : 'not reported'} · provider trace {call.trace ? 'captured' : 'not captured'}
+              </div>
+            </button>
+          )
+        })}
       </div>
-      <ScrollArea className="flex-1 min-h-0">
-        {steps.length === 0 ? (
-          <div className="px-3 pb-3 text-sm text-muted-foreground">no state transitions yet</div>
+    </ScrollArea>
+  )
+}
+
+function ToolCallsView({
+  calls,
+  selected,
+  onSelect,
+}: {
+  calls: readonly ToolCallLifecycle[]
+  selected: DetailSelection
+  onSelect(selection: DetailSelection): void
+}): JSX.Element {
+  if (calls.length === 0) return <EmptyBlock label="No tool calls emitted yet." />
+  return (
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="space-y-1 px-2 pb-3" data-testid="tool-calls-list">
+        {calls.map((call) => {
+          const isSelected = selected?.kind === 'tool' && selected.call.callId === call.callId
+          return (
+            <button
+              key={call.callId}
+              type="button"
+              onClick={() => onSelect({ kind: 'tool', call })}
+              className={cn('relative w-full rounded px-2 py-2 text-left text-xs transition-colors', isSelected ? 'bg-muted/70' : 'hover:bg-muted/40')}
+              data-testid="tool-call-row"
+            >
+              {isSelected ? <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded bg-primary" /> : null}
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-foreground">{call.callId}</span>
+                <span className="flex-none font-mono text-[11px] text-emerald-600 dark:text-emerald-300">{call.name}</span>
+                <span className={cn('flex-none font-mono text-[11px]', call.result?.ok === false ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>
+                  {toolResultLabel(call)}
+                </span>
+              </div>
+              <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                {toolLifecycleSummary(call)}
+              </div>
+              <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+                {toolInputSummary(call.input)}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </ScrollArea>
+  )
+}
+
+function RuntimeSection({
+  view,
+  onViewChange,
+  state,
+  config,
+  toolCalls,
+}: {
+  view: RuntimeView
+  onViewChange(view: RuntimeView): void
+  state: AgentState | null
+  config?: AgentConfig | null
+  toolCalls: readonly ToolCallLifecycle[]
+}): JSX.Element {
+  return (
+    <section className="flex h-full min-h-0 flex-col" aria-label="runtime objects">
+      <SectionHeader icon={Database} title="Runtime Objects">
+        <Segmented<RuntimeView>
+          value={view}
+          onChange={onViewChange}
+          options={[
+            ['state', 'State'],
+            ['tools', 'Tools'],
+            ['memory', 'Memory'],
+          ]}
+          testId="runtime-view-switch"
+        />
+      </SectionHeader>
+      <div className="min-h-0 flex-1 px-3 pb-3">
+        {view === 'state' ? (
+          <StateRuntime state={state} />
+        ) : view === 'tools' ? (
+          <ToolsRuntime tools={config?.tools ?? []} toolCalls={toolCalls} />
         ) : (
-          <ol className="px-2 pb-3 space-y-1" data-testid="state-flow-list">
-            {steps.map((step) => (
-              <StateFlowRow key={step.seq} step={step} />
-            ))}
-          </ol>
+          <MemoryRuntime state={state} />
         )}
+      </div>
+    </section>
+  )
+}
+
+function StateRuntime({ state }: { state: AgentState | null }): JSX.Element {
+  if (!state) return <EmptyBlock label="No AgentState loaded." />
+  const summary = {
+    sessionId: state.sessionId,
+    status: state.status,
+    cursor: state.cursor,
+    cwd: state.cwd ?? null,
+    approvalMode: state.approvalMode,
+    pendingCalls: state.pendingCalls.map((c) => `${c.name} · ${c.status}`),
+    messages: state.messages.length,
+    todos: state.todos.length,
+    memory: state.memory?.length ?? 0,
+    contextPressureLevel: state.contextPressureLevel,
+    usage: state.usage,
+  }
+  return (
+    <ScrollArea className="h-full">
+      <div className="space-y-2 pb-1">
+        <KeyValueTable rows={Object.entries(summary).map(([k, v]) => [k, formatValue(v)])} />
+        <JsonBlock label="Full AgentState JSON" value={state} collapsed={2} />
+      </div>
+    </ScrollArea>
+  )
+}
+
+function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; toolCalls: readonly ToolCallLifecycle[] }): JSX.Element {
+  const [selectedName, setSelectedName] = useState<string | null>(tools[0]?.name ?? null)
+  const selectedTool = tools.find((t) => t.name === selectedName) ?? tools[0]
+  if (tools.length === 0) return <EmptyBlock label="No tools registered for this session." />
+  const recent = selectedTool ? toolCalls.filter((c) => c.name === selectedTool.name).slice(-5).reverse() : []
+  return (
+    <div className="grid h-full min-h-0 grid-cols-[minmax(7rem,0.85fr)_minmax(0,1.15fr)] gap-2">
+      <ScrollArea className="min-h-0 rounded bg-muted/30" data-testid="tool-registry">
+        <div className="p-1">
+          {tools.map((tool) => (
+            <button
+              key={tool.name}
+              type="button"
+              onClick={() => setSelectedName(tool.name)}
+              className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/60', selectedTool?.name === tool.name ? 'bg-muted/70' : '')}
+              data-testid="tool-registry-item"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
+              <span className={cn('flex-none text-[10px]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
+                {tool.requiresApproval ? 'gated' : 'auto'}
+              </span>
+            </button>
+          ))}
+        </div>
+      </ScrollArea>
+      <ScrollArea className="min-h-0 rounded bg-muted/30">
+        <div className="space-y-2 p-2 text-xs">
+          {selectedTool ? (
+            <>
+              <div>
+                <div className="font-mono text-foreground">{selectedTool.name}</div>
+                <div className="mt-1 text-muted-foreground">{selectedTool.requiresApproval ? 'approval required' : 'auto allowed'}</div>
+                <p className="mt-2 text-muted-foreground">{selectedTool.description || 'No description provided.'}</p>
+              </div>
+              <div>
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Recent calls</div>
+                {recent.length > 0 ? (
+                  <ul className="space-y-1">
+                    {recent.map((call) => (
+                      <li key={`${call.callId}-${call.resultSeq ?? 'pending'}`} className="truncate rounded bg-background/60 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                        #{call.requestedSeq ?? '?'} {toolResultLabel(call)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="text-[11px] text-muted-foreground">No calls in this timeline.</div>
+                )}
+              </div>
+              <JsonBlock label={`Input schema · ${selectedTool.name}`} value={selectedTool.inputSchema} collapsed={2} className="[&>div:last-child]:max-h-56 [&_[data-radix-scroll-area-viewport]]:max-h-56" />
+            </>
+          ) : null}
+        </div>
       </ScrollArea>
     </div>
   )
 }
 
-function StateFlowRow({ step }: { step: StateFlowStep }): JSX.Element {
-  const changed = step.from !== step.to
+function MemoryRuntime({ state }: { state: AgentState | null }): JSX.Element {
+  const memory = state?.memory ?? []
+  const [scope, setScope] = useState<'session' | 'workspace' | 'global'>('session')
   return (
-    <li
-      className="rounded border border-border/50 px-2 py-1.5 text-xs"
-      data-testid="state-flow-row"
-    >
-      <div className="flex items-center gap-2">
-        <span className="w-8 flex-none text-right font-mono text-muted-foreground">#{step.seq}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-foreground dark:text-foreground">
-          {step.eventKind}
-        </span>
-        <span className={cn('font-mono', changed ? 'text-sky-700 dark:text-sky-300' : 'text-muted-foreground')}>
-          {statusLabel(step.from)} → {statusLabel(step.to)}
-        </span>
+    <div className="grid h-full min-h-0 grid-cols-[minmax(7rem,0.8fr)_minmax(0,1.2fr)] gap-2">
+      <div className="rounded bg-muted/30 p-1 text-xs">
+        {(['session', 'workspace', 'global'] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setScope(s)}
+            className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted/60', scope === s ? 'bg-muted/70' : '')}
+          >
+            <span className="min-w-0 flex-1 truncate font-mono">{s}</span>
+            <span className="flex-none text-[10px] text-muted-foreground">{s === 'session' ? `${memory.length}` : 'disk'}</span>
+          </button>
+        ))}
       </div>
-      {step.effects.length > 0 ? (
-        <div className="mt-1 truncate pl-10 font-mono text-[11px] text-muted-foreground">
-          effects: {step.effects.map((e) => e.kind).join(', ')}
+      <ScrollArea className="min-h-0 rounded bg-muted/30">
+        <div className="space-y-2 p-2 text-xs">
+          {scope === 'session' ? (
+            memory.length > 0 ? (
+              memory.map((entry) => <MemoryEntryRow key={entry.key} entry={entry} />)
+            ) : (
+              <div className="text-muted-foreground">No session memory entries.</div>
+            )
+          ) : (
+            <div className="space-y-2 text-muted-foreground">
+              <div className="font-mono text-foreground">{scope}</div>
+              <p>{scope} memory is executor-owned disk state. The kernel keeps only session memory in AgentState.</p>
+              <p className="font-mono text-[11px]">{scope === 'workspace' ? '<workspace>/.agent-kernel/memory/' : '~/.agent-kernel/memory/'}</p>
+            </div>
+          )}
         </div>
-      ) : null}
-    </li>
+      </ScrollArea>
+    </div>
   )
 }
 
-function statusLabel(status: StateFlowStep['from']): string {
-  switch (status) {
-    case 'idle':
-      return 'Ready'
-    case 'thinking':
-      return 'Waiting for LLM'
-    case 'awaiting_approval':
-      return 'Needs approval'
-    case 'executing_tools':
-      return 'Running tools'
-    case 'done':
-      return 'Done'
-    case 'error':
-      return 'Error'
+function DetailDialog({
+  selection,
+  timeline,
+  onOpenChange,
+}: {
+  selection: DetailSelection
+  timeline: readonly TimelineEntry[]
+  onOpenChange(open: boolean): void
+}): JSX.Element {
+  const title = detailTitle(selection)
+  const description = detailDescription(selection)
+  return (
+    <Dialog open={selection !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="h-[86vh] max-w-5xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
+        <DialogHeader className="bg-card px-4 py-3">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <SearchCode className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            {title}
+          </DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 bg-background p-4">
+          {selection ? (
+            selection.kind === 'llm' ? (
+              <LlmDetail call={selection.call} />
+            ) : selection.kind === 'tool' ? (
+              <ToolDetail call={selection.call} />
+            ) : selection.entry.event.kind === 'compact_replaced' ? (
+              <CompactDetail entry={selection.entry} timeline={timeline} />
+            ) : (
+              <EventDetail selection={selection} />
+            )
+          ) : null}
+        </div>
+        <DialogFooter className="bg-card px-4 py-3">
+          <DialogClose asChild>
+            <Button variant="outline" className="mt-0">Close</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function detailTitle(selection: DetailSelection): string {
+  if (!selection) return 'Selected Detail'
+  if (selection.kind === 'llm') {
+    return `LLM Call #${selection.call.requestSeq} → ${selection.call.responseSeq ? `#${selection.call.responseSeq}` : 'pending'}`
   }
+  if (selection.kind === 'tool') return `Tool Call · ${selection.call.name}`
+  return `Timeline Event #${selection.entry.seq}`
+}
+
+function detailDescription(selection: DetailSelection): string {
+  if (!selection) return 'Select a reducer event, LLM call, or tool call to inspect raw data.'
+  if (selection.kind === 'llm') {
+    return 'Kernel request, provider request/response trace, and parsed kernel response.'
+  }
+  if (selection.kind === 'tool') {
+    return `${selection.call.callId} · ${toolLifecycleSummary(selection.call)}`
+  }
+  return `${selection.entry.event.kind} · reducer input, emitted effects, and raw JSON.`
+}
+
+function EventDetail({ selection }: { selection: Extract<DetailSelection, { kind: 'event' }> }): JSX.Element {
+  const rows: readonly (readonly [string, string])[] = [
+    ['reducer input', selection.entry.event.kind],
+    ['previous status', selection.flow?.from ?? 'unknown'],
+    ['next status', selection.flow?.to ?? 'unknown'],
+    ['emitted effects', selection.entry.effects.map((e) => e.kind).join(', ') || 'none'],
+  ]
+  return (
+    <ScrollArea className="h-full">
+      <div className="space-y-2 pb-1" data-testid="timeline-row-details">
+        <KeyValueTable rows={rows} />
+        <JsonBlock label={`Event JSON · ${selection.entry.event.kind}`} value={selection.entry.event} collapsed={2} />
+        {selection.entry.effects.map((eff, i) => (
+          <JsonBlock key={i} label={`Effect JSON · ${eff.kind}`} value={eff} collapsed={2} />
+        ))}
+      </div>
+    </ScrollArea>
+  )
+}
+
+function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
+  const kernelRequest = {
+    callSeq: call.requestSeq,
+    model: call.trace?.model ?? null,
+    messages: call.effect.messages,
+    tools: call.effect.tools,
+  }
+  const parsedResponse = call.response
+    ? { responseSeq: call.responseSeq, event: call.response }
+    : call.error
+      ? { responseSeq: call.responseSeq, event: call.error }
+      : { status: 'pending' }
+  return (
+    <ScrollArea className="h-full">
+      <div className="space-y-2 pb-1" data-testid="llm-detail">
+        <KeyValueTable
+          rows={[
+            ['call', `#${call.requestSeq} → ${call.responseSeq ? `#${call.responseSeq}` : 'pending'}`],
+            ['provider', call.trace?.provider ?? 'kernel only'],
+            ['model', call.trace?.model ?? 'not captured'],
+            ['provider trace', call.trace ? 'captured' : 'not captured in this log'],
+          ]}
+        />
+        <JsonBlock label={`Kernel Request · call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={2} />
+        {call.trace ? (
+          <>
+            <JsonBlock label="Provider Request" value={call.trace.request} collapsed={2} />
+            <JsonBlock label="Provider Response" value={call.trace.response ?? null} collapsed={2} />
+          </>
+        ) : (
+          <div className="rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            This log has kernel-level LLM I/O only. Provider HTTP request/response trace is available for new calls recorded after trace capture was added.
+          </div>
+        )}
+        <JsonBlock label="Parsed Kernel Response" value={parsedResponse} collapsed={2} />
+      </div>
+    </ScrollArea>
+  )
+}
+
+function ToolDetail({ call }: { call: ToolCallLifecycle }): JSX.Element {
+  return (
+    <ScrollArea className="h-full">
+      <div className="space-y-2 pb-1" data-testid="tool-detail">
+        <KeyValueTable
+          rows={[
+            ['callId', call.callId],
+            ['tool', call.name],
+            ['requested', call.requestedSeq ? `#${call.requestedSeq}` : 'unknown'],
+            ['approved', call.approvedSeq ? `#${call.approvedSeq}` : call.rejectedSeq ? 'rejected' : 'auto/not required'],
+            ['dispatched', call.dispatchedSeq ? `#${call.dispatchedSeq}` : 'not dispatched'],
+            ['result', call.resultSeq ? `#${call.resultSeq} · ${toolResultLabel(call)}` : 'pending'],
+          ]}
+        />
+        <JsonBlock label={`Tool Input · ${call.name}`} value={call.input} collapsed={2} />
+        {call.result ? <JsonBlock label="Tool Result Event" value={call.result} collapsed={2} /> : null}
+      </div>
+    </ScrollArea>
+  )
+}
+
+function CompactDetail({ entry, timeline }: { entry: TimelineEntry; timeline: readonly TimelineEntry[] }): JSX.Element {
+  if (entry.event.kind !== 'compact_replaced') return <EmptyBlock label="Not a compaction event." />
+  const compactRequest = entry.event.request ?? compactRequestFromTimeline(timeline, entry.seq)
+  return (
+    <ScrollArea className="h-full">
+      <div className="space-y-2 pb-1" data-testid="timeline-row-details">
+        <KeyValueTable
+          rows={[
+            ['trigger', entry.event.trigger ?? 'unknown'],
+            ['replaced messages', String(entry.event.replacedCount)],
+            ['tokens', `${entry.event.tokensBefore} → ${entry.event.tokensAfter}`],
+          ]}
+        />
+        <JsonBlock label="Compaction Request" value={compactRequest} collapsed={2} />
+        <JsonBlock label="Compaction Result" value={entry.event} collapsed={2} />
+      </div>
+    </ScrollArea>
+  )
+}
+
+function SectionHeader({ icon: Icon, title, children }: { icon: typeof Activity; title: string; children?: React.ReactNode }): JSX.Element {
+  return (
+    <div className="flex flex-none items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+      <Icon className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+      <span className="font-medium text-foreground">{title}</span>
+      <div className="ml-auto min-w-0">{children}</div>
+    </div>
+  )
+}
+
+function Segmented<T extends string>({ value, onChange, options, testId }: { value: T; onChange(value: T): void; options: readonly (readonly [T, string])[]; testId: string }): JSX.Element {
+  return (
+    <div className="inline-flex rounded bg-background/80 p-0.5" data-testid={testId}>
+      {options.map(([v, label]) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          className={cn('rounded px-2 py-0.5 text-[11px] transition-colors', value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground')}
+          data-testid={`${testId}-${v}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function MiniAction({ children, onClick, title, ariaLabel }: { children: React.ReactNode; onClick(): void; title: string; ariaLabel?: string }): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      title={title}
+      aria-label={ariaLabel}
+      className="inline-flex items-center gap-1 rounded bg-background/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
+    >
+      {children}
+    </button>
+  )
+}
+
+function EmptyBlock({ label }: { label: string }): JSX.Element {
+  return (
+    <div className="flex h-full min-h-[5rem] items-center justify-center rounded bg-muted/30 px-3 text-center text-xs text-muted-foreground">
+      {label}
+    </div>
+  )
+}
+
+function KeyValueTable({ rows }: { rows: readonly (readonly [string, string])[] }): JSX.Element {
+  return (
+    <div className="overflow-hidden rounded bg-muted/30 text-xs">
+      {rows.map(([k, v]) => (
+        <div key={k} className="grid grid-cols-[8rem_minmax(0,1fr)] gap-2 px-2 py-1.5 odd:bg-background/30">
+          <div className="truncate text-muted-foreground">{k}</div>
+          <div className="min-w-0 truncate font-mono text-foreground" title={v}>{v}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function buildLlmCalls(timeline: readonly TimelineEntry[]): readonly LlmCall[] {
+  const calls: LlmCall[] = []
+  for (let i = 0; i < timeline.length; i++) {
+    const entry = timeline[i]!
+    for (const effect of entry.effects) {
+      if (effect.kind !== 'call_llm') continue
+      const call: LlmCall = {
+        id: `llm-${entry.seq}-${calls.length}`,
+        requestSeq: entry.seq,
+        effect,
+      }
+      for (let j = i + 1; j < timeline.length; j++) {
+        const candidate = timeline[j]!
+        if (candidate.event.kind === 'llm_response') {
+          call.responseSeq = candidate.seq
+          call.response = candidate.event
+          if (candidate.llmTrace) call.trace = candidate.llmTrace
+          break
+        }
+        if (candidate.event.kind === 'llm_error') {
+          call.responseSeq = candidate.seq
+          call.error = candidate.event
+          if (candidate.llmTrace) call.trace = candidate.llmTrace
+          break
+        }
+      }
+      calls.push(call)
+    }
+  }
+  return calls
+}
+
+function buildToolCalls(timeline: readonly TimelineEntry[]): readonly ToolCallLifecycle[] {
+  const byId = new Map<string, ToolCallLifecycle>()
+  const ensure = (callId: string, name: string, input: Record<string, unknown>): ToolCallLifecycle => {
+    const existing = byId.get(callId)
+    if (existing) return existing
+    const next: ToolCallLifecycle = { callId, name, input }
+    byId.set(callId, next)
+    return next
+  }
+  for (const entry of timeline) {
+    for (const effect of entry.effects) {
+      if (effect.kind === 'request_approval') {
+        const call = ensure(effect.callId, effect.name, effect.input)
+        call.requestedSeq = entry.seq
+      } else if (effect.kind === 'call_tool') {
+        const call = ensure(effect.callId, effect.name, effect.input)
+        call.dispatchedSeq = entry.seq
+      }
+    }
+    if (entry.event.kind === 'llm_response') {
+      for (const content of entry.event.message.content) {
+        if (content.type === 'tool_call') {
+          const call = ensure(content.callId, content.name, content.input)
+          call.requestedSeq ??= entry.seq
+        }
+      }
+    } else if (entry.event.kind === 'user_approve') {
+      const call = byId.get(entry.event.callId)
+      if (call) call.approvedSeq = entry.seq
+    } else if (entry.event.kind === 'user_reject') {
+      const call = byId.get(entry.event.callId)
+      if (call) call.rejectedSeq = entry.seq
+    } else if (entry.event.kind === 'tool_result') {
+      const call = byId.get(entry.event.callId) ?? ensure(entry.event.callId, 'unknown', {})
+      call.resultSeq = entry.seq
+      call.result = entry.event
+    }
+  }
+  return [...byId.values()].sort((a, b) => (a.requestedSeq ?? a.dispatchedSeq ?? 0) - (b.requestedSeq ?? b.dispatchedSeq ?? 0))
+}
+
+function findPriorCallLlm(timeline: readonly TimelineEntry[], i: number): PriorCallLlm | null {
+  if (timeline[i]?.event.kind !== 'llm_response') return null
+  for (let j = i - 1; j >= 0; j--) {
+    const entry = timeline[j]!
+    const eff = entry.effects.find((e): e is CallLlmEffect => e.kind === 'call_llm')
+    if (eff) return { seq: entry.seq, effect: eff }
+  }
+  return null
+}
+
+function messageIndexFor(timeline: readonly TimelineEntry[], currentIndex: number, messagesCount: number): number | null {
+  const t = timeline[currentIndex]
+  if (!t) return null
+  const producesMessage = t.event.kind === 'user_message' || t.event.kind === 'llm_response' || t.event.kind === 'tool_result'
+  if (!producesMessage) return null
+  let seen = -1
+  for (let i = 0; i <= currentIndex; i++) {
+    const ev = timeline[i]!.event
+    if (ev.kind === 'user_message' || ev.kind === 'llm_response' || ev.kind === 'tool_result') seen += 1
+  }
+  if (seen < 0 || seen >= messagesCount) return null
+  return seen
 }
 
 function inboundOf(event: AgentEvent): { source: string; tone: string } {
   switch (event.kind) {
     case 'user_message':
+    case 'user_approve':
+    case 'approval_mode_changed':
+    case 'cwd_changed':
       return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
     case 'llm_response':
       return { source: 'llm', tone: 'text-violet-600 dark:text-violet-300' }
     case 'llm_error':
       return { source: 'llm', tone: 'text-rose-600 dark:text-rose-300' }
-    case 'user_approve':
-      return { source: 'user', tone: 'text-emerald-600 dark:text-emerald-300' }
     case 'user_reject':
       return { source: 'user', tone: 'text-rose-600 dark:text-rose-300' }
     case 'tool_result':
-      return {
-        source: 'executor',
-        tone: event.ok
-          ? 'text-emerald-600 dark:text-emerald-300'
-          : 'text-rose-600 dark:text-rose-300',
-      }
+      return { source: 'executor', tone: event.ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300' }
     case 'cancel':
       return { source: 'user', tone: 'text-amber-600 dark:text-amber-300' }
     case 'compact_replaced':
       return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
-    case 'approval_mode_changed':
-      return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
-    case 'cwd_changed':
-      return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
   }
 }
 
@@ -352,298 +1083,108 @@ function effectTarget(e: Effect): { target: string; tone: string } {
   }
 }
 
-function messageIndexFor(
-  timeline: readonly TimelineEntry[],
-  currentIndex: number,
-  messagesCount: number,
-): number | null {
-  const t = timeline[currentIndex]
-  if (!t) return null
-  const producesMessage =
-    t.event.kind === 'user_message' ||
-    t.event.kind === 'llm_response' ||
-    t.event.kind === 'tool_result'
-  if (!producesMessage) return null
-  let seen = -1
-  for (let i = 0; i <= currentIndex; i++) {
-    const ev = timeline[i]!.event
-    if (
-      ev.kind === 'user_message' ||
-      ev.kind === 'llm_response' ||
-      ev.kind === 'tool_result'
-    ) {
-      seen += 1
-    }
+function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | null): string {
+  switch (event.kind) {
+    case 'user_message':
+      return event.text ?? summarizeContent(event.content ?? [])
+    case 'llm_response':
+      return `${summarizeContent(event.message.content)}${priorCallLlm ? ` · response to call_llm #${priorCallLlm.seq}` : ''}`
+    case 'tool_result':
+      return `${event.ok ? 'ok' : 'error'} · ${event.content.slice(0, 100)}`
+    case 'user_approve':
+      return `approved ${event.callId}`
+    case 'user_reject':
+      return `rejected ${event.callId}${event.reason ? ` · ${event.reason}` : ''}`
+    case 'llm_error':
+      return event.error
+    case 'compact_replaced':
+      return `${event.trigger ?? 'unknown'} compact · ${event.replacedCount} messages · ${event.tokensBefore} → ${event.tokensAfter}`
+    case 'approval_mode_changed':
+      return `approval mode ${event.mode}`
+    case 'cwd_changed':
+      return event.cwd
+    case 'cancel':
+      return 'cancel requested'
   }
-  if (seen < 0 || seen >= messagesCount) return null
-  return seen
 }
 
-function Timeline({
-  timeline,
-  messagesCount,
-  onForkRequest,
-  onJumpToMessage,
-  onInspect,
-}: {
-  timeline: readonly TimelineEntry[]
-  messagesCount: number
-  onForkRequest?(cursor: number): void
-  onJumpToMessage?(messageIndex: number): void
-  onInspect(payload: {
-    entry: TimelineEntry
-    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
-  }): void
-}): JSX.Element {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-3 pb-2 text-xs text-muted-foreground flex-none">
-        click any row to inspect the raw event + effects JSON
-      </div>
-      <ScrollArea className="flex-1 min-h-0">
-        {timeline.length === 0 ? (
-          <div className="px-3 pb-3 text-sm text-muted-foreground">no events yet</div>
-        ) : (
-          <ul className="px-2 pb-3 space-y-1">
-            {timeline.map((t, i) => (
-              <TimelineRow
-                key={t.seq}
-                entry={t}
-                priorCallLlm={findPriorCallLlm(timeline, i)}
-                messageIndex={messageIndexFor(timeline, i, messagesCount)}
-                onForkRequest={onForkRequest}
-                onJumpToMessage={onJumpToMessage}
-                onInspect={onInspect}
-              />
-            ))}
-          </ul>
-        )}
-      </ScrollArea>
-    </div>
-  )
+function summarizeContent(content: readonly MessageContent[]): string {
+  if (content.length === 0) return 'empty message'
+  return content.map((c) => {
+    if (c.type === 'text') return c.text.slice(0, 120)
+    if (c.type === 'tool_call') return `tool_call ${c.name}`
+    if (c.type === 'tool_result') return `tool_result ${c.ok ? 'ok' : 'error'} ${c.content.slice(0, 80)}`
+    if (c.type === 'image') return `image ${c.source.kind}`
+    if (c.type === 'thinking') return 'thinking block'
+    return 'content'
+  }).join(' · ')
 }
 
-// For an `llm_response` at index i, find the seq of the most recent
-// `call_llm` effect before it — that's the request this response answers.
-function findPriorCallLlm(
-  timeline: readonly TimelineEntry[],
-  i: number,
-): { seq: number; effect: CallLlmEffect } | null {
-  if (timeline[i]?.event.kind !== 'llm_response') return null
-  for (let j = i - 1; j >= 0; j--) {
-    const entry = timeline[j]!
-    const eff = entry.effects.find((e) => e.kind === 'call_llm')
-    if (eff) return { seq: entry.seq, effect: eff as CallLlmEffect }
+function llmResponseSummary(call: LlmCall): string {
+  if (call.error) return call.error.error
+  if (!call.response) return 'pending'
+  return summarizeContent(call.response.message.content)
+}
+
+function toolResultLabel(call: ToolCallLifecycle): string {
+  if (!call.result) return call.rejectedSeq ? 'rejected' : 'pending'
+  return `${call.result.ok ? 'ok' : 'error'} · ${call.result.content.length} bytes`
+}
+
+function toolLifecycleSummary(call: ToolCallLifecycle): string {
+  const parts: string[] = []
+  if (call.requestedSeq) parts.push(`requested #${call.requestedSeq}`)
+  if (call.approvedSeq) parts.push(`approved #${call.approvedSeq}`)
+  if (call.rejectedSeq) parts.push(`rejected #${call.rejectedSeq}`)
+  if (call.resultSeq) parts.push(`result #${call.resultSeq}`)
+  return parts.join(' · ') || 'lifecycle not recorded'
+}
+
+function toolInputSummary(input: Record<string, unknown>): string {
+  const path = typeof input.path === 'string' ? `path ${input.path}` : null
+  const cmd = typeof input.cmd === 'string' ? `cmd ${input.cmd}` : null
+  const query = typeof input.query === 'string' ? `query ${input.query}` : null
+  return path ?? cmd ?? query ?? JSON.stringify(input).slice(0, 140)
+}
+
+function shortStatus(status: AgentState['status'] | undefined): string {
+  if (!status) return 'none'
+  if (status === 'executing_tools') return 'executing'
+  if (status === 'awaiting_approval') return 'approval'
+  return status
+}
+
+function statusTone(status: AgentState['status'] | undefined): string | undefined {
+  if (status === 'error') return 'text-rose-600 dark:text-rose-300'
+  if (status === 'awaiting_approval') return 'text-amber-600 dark:text-amber-300'
+  if (status === 'executing_tools') return 'text-emerald-600 dark:text-emerald-300'
+  if (status === 'thinking') return 'text-violet-600 dark:text-violet-300'
+  return undefined
+}
+
+function formatValue(v: unknown): string {
+  if (Array.isArray(v)) return v.length > 0 ? v.join(', ') : 'none'
+  if (v === null || v === undefined) return 'none'
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+function modelFromTimeline(timeline: readonly TimelineEntry[]): string | null {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const trace = timeline[i]?.llmTrace
+    if (trace) return `${trace.provider}/${trace.model}`
   }
   return null
 }
 
-function TimelineRow({
-  entry,
-  priorCallLlm,
-  messageIndex,
-  onForkRequest,
-  onJumpToMessage,
-  onInspect,
-}: {
-  entry: TimelineEntry
-  priorCallLlm: { seq: number; effect: CallLlmEffect } | null
-  messageIndex: number | null
-  onForkRequest?(cursor: number): void
-  onJumpToMessage?(messageIndex: number): void
-  onInspect(payload: {
-    entry: TimelineEntry
-    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
-  }): void
-}): JSX.Element {
-  const inbound = inboundOf(entry.event)
-  const jumpable = messageIndex !== null && onJumpToMessage !== undefined
-  return (
-    <li className="text-xs" data-testid="timeline-row">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => onInspect({ entry, priorCallLlm })}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            onInspect({ entry, priorCallLlm })
-          }
-        }}
-        aria-label={`inspect timeline event ${entry.seq}`}
-        data-testid="timeline-row-header"
-        className={cn(
-          'group flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer select-none',
-          'hover:bg-secondary dark:hover:bg-secondary/60',
-        )}
-      >
-        <span className="text-muted-foreground w-8 text-right font-mono flex-none">
-          #{entry.seq}
-        </span>
-        <span
-          className={cn('font-mono flex-none w-16', inbound.tone)}
-          title={`inbound from ${inbound.source}`}
-        >
-          {inbound.source}
-        </span>
-        <span className="text-muted-foreground flex-none">→</span>
-        <span
-          className={cn(
-            'font-mono flex-1 min-w-0 truncate text-foreground dark:text-foreground',
-          )}
-          title={entry.event.kind}
-        >
-          {entry.event.kind}
-        </span>
-        {jumpable ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onJumpToMessage!(messageIndex!)
-            }}
-            title={`scroll chat to message #${messageIndex}`}
-            data-testid="jump-to-message-button"
-            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-sky-700 hover:border-sky-400 dark:hover:text-sky-300 dark:hover:border-sky-500"
-          >
-            msg #{messageIndex}
-          </button>
-        ) : null}
-        {onForkRequest ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onForkRequest(entry.seq)
-            }}
-            title={`fork a new session at cursor ${entry.seq}`}
-            aria-label={`fork at cursor ${entry.seq}`}
-            data-testid="fork-button"
-            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-amber-700 hover:border-amber-400 dark:hover:text-amber-300 dark:hover:border-amber-500"
-          >
-            <GitBranch className="h-3 w-3" />
-            fork
-          </button>
-        ) : null}
-      </div>
-      {entry.effects.length > 0 ? (
-        <ul className="ml-10 mt-0.5 space-y-0.5">
-          {entry.effects.map((eff, ei) => {
-            const target = effectTarget(eff)
-            return (
-              <li
-                key={ei}
-                className="flex items-center gap-1 text-[11px] text-muted-foreground font-mono"
-              >
-                <span className="text-muted-foreground">→</span>
-                <span className={target.tone}>{target.target}</span>
-                <span className="text-muted-foreground">·</span>
-                <span className="text-muted-foreground dark:text-muted-foreground truncate">
-                  {eff.kind}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
-      ) : null}
-    </li>
-  )
+function providerFromModel(model: string | undefined): string | null {
+  if (!model) return null
+  if (model.includes('claude')) return 'anthropic'
+  if (model.includes('gpt')) return 'openai'
+  return null
 }
 
-function EventDetails({
-  entry,
-  priorCallLlm,
-  timeline,
-}: {
-  entry: TimelineEntry
-  priorCallLlm: { seq: number; effect: CallLlmEffect } | null
-  timeline: readonly TimelineEntry[]
-}): JSX.Element {
-  // For an `llm_response`, split the "request JSON" (from the prior call_llm)
-  // and the "response JSON" (this event's message) so the operator can eyeball
-  // exactly what left and what came back. For everything else, show the raw
-  // event + resulting effects.
-  if (entry.event.kind === 'llm_response' && priorCallLlm) {
-    return (
-      <div
-        className="grid grid-cols-1 lg:grid-cols-2 gap-2"
-        data-testid="timeline-row-details"
-      >
-        <JsonBlock
-          label={`request to LLM · call_llm @ #${priorCallLlm.seq}`}
-          value={{
-            messages: priorCallLlm.effect.messages,
-            tools: priorCallLlm.effect.tools,
-          }}
-          collapsed={2}
-        />
-        <JsonBlock
-          label={`response from LLM · llm_response @ #${entry.seq}`}
-          value={{
-            message: entry.event.message,
-            usage: entry.event.usage,
-          }}
-          collapsed={2}
-        />
-      </div>
-    )
-  }
-  if (entry.event.kind === 'compact_replaced') {
-    const compactRequest =
-      entry.event.request ?? compactRequestFromTimeline(timeline, entry.seq)
-    return (
-      <div
-        className="grid grid-cols-1 lg:grid-cols-2 gap-2"
-        data-testid="timeline-row-details"
-      >
-        <JsonBlock
-          label={entry.event.request
-            ? `compact summarizer request · #${entry.seq}`
-            : `compact input reconstructed from history · #${entry.seq}`}
-          value={compactRequest}
-          collapsed={2}
-        />
-        <JsonBlock
-          label={`compact result · #${entry.seq}`}
-          value={{
-            trigger: entry.event.trigger,
-            summary: entry.event.summary,
-            replacedCount: entry.event.replacedCount,
-            tokensBefore: entry.event.tokensBefore,
-            tokensAfter: entry.event.tokensAfter,
-            responseUsage: entry.event.responseUsage,
-          }}
-          collapsed={2}
-        />
-      </div>
-    )
-  }
-  return (
-    <div
-      className="space-y-2"
-      data-testid="timeline-row-details"
-    >
-      <JsonBlock
-        label={`event · ${entry.event.kind}`}
-        value={entry.event}
-        collapsed={2}
-      />
-      {entry.effects.map((eff, ei) => (
-        <JsonBlock
-          key={ei}
-          label={`effect · ${eff.kind}`}
-          value={eff}
-          collapsed={2}
-        />
-      ))}
-    </div>
-  )
-}
-
-function compactRequestFromTimeline(
-  timeline: readonly TimelineEntry[],
-  compactSeq: number,
-): {
+function compactRequestFromTimeline(timeline: readonly TimelineEntry[], compactSeq: number): {
   metadataSource: 'reconstructed_from_timeline'
   note: string
   unavailable: readonly string[]
@@ -657,23 +1198,14 @@ function compactRequestFromTimeline(
     if (event.kind === 'user_message') {
       messages.push({
         role: 'user',
-        content: event.content
-          ? [...event.content]
-          : [{ type: 'text', text: event.text ?? '' }],
+        content: event.content ? [...event.content] : [{ type: 'text', text: event.text ?? '' }],
       })
     } else if (event.kind === 'llm_response') {
       messages.push(event.message)
     } else if (event.kind === 'tool_result') {
       messages.push({
         role: 'tool',
-        content: [
-          {
-            type: 'tool_result',
-            callId: event.callId,
-            ok: event.ok,
-            content: event.content,
-          },
-        ],
+        content: [{ type: 'tool_result', callId: event.callId, ok: event.ok, content: event.content }],
       })
     }
   }
@@ -686,261 +1218,16 @@ function compactRequestFromTimeline(
   }
 }
 
-function RuntimeSection({
-  view,
-  onViewChange,
-  state,
-  config,
-}: {
-  view: 'state' | 'tools' | 'memory'
-  onViewChange(view: 'state' | 'tools' | 'memory'): void
-  state: AgentState | null
-  config?: AgentConfig | null
-}): JSX.Element {
-  const toolCount = config?.tools.length ?? 0
-  const memoryCount = state?.memory?.length ?? 0
+function MemoryEntryRow({ entry }: { entry: { key: string; content: string; updatedAt: string } }): JSX.Element {
   return (
-    <div className="h-full flex flex-col border-t border-border/50">
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground flex-none">
-        <span className="font-medium">Runtime</span>
-        <span className="ml-2 normal-case tracking-normal text-muted-foreground dark:text-muted-foreground">
-          {view === 'state'
-            ? 'full runtime state JSON'
-            : view === 'tools'
-              ? `${toolCount} registered ${toolCount === 1 ? 'tool' : 'tools'}`
-              : `${memoryCount} session ${memoryCount === 1 ? 'entry' : 'entries'} · workspace/global on disk`}
-        </span>
-        <div
-          className="ml-auto inline-flex rounded border border-border/50 bg-background p-0.5"
-          data-testid="runtime-view-switch"
-        >
-          <button
-            type="button"
-            onClick={() => onViewChange('state')}
-            className={cn(
-              'rounded px-2 py-0.5 text-[11px] transition-colors',
-              view === 'state'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-            )}
-            data-testid="runtime-view-state"
-          >
-            State
-          </button>
-          <button
-            type="button"
-            onClick={() => onViewChange('tools')}
-            className={cn(
-              'rounded px-2 py-0.5 text-[11px] transition-colors',
-              view === 'tools'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-            )}
-            data-testid="runtime-view-tools"
-          >
-            Tools
-          </button>
-          <button
-            type="button"
-            onClick={() => onViewChange('memory')}
-            className={cn(
-              'rounded px-2 py-0.5 text-[11px] transition-colors',
-              view === 'memory'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-            )}
-            data-testid="runtime-view-memory"
-          >
-            Memory
-          </button>
-        </div>
-      </div>
-      <div className="flex-1 min-h-0 mx-3 mb-3">
-        {view === 'state' ? (
-          <RawStateSection state={state} />
-        ) : view === 'tools' ? (
-          <ToolRegistrySection tools={config?.tools ?? []} />
-        ) : (
-          <MemorySection state={state} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {
-  if (!state) return <div className="text-xs text-muted-foreground">—</div>
-  return (
-    <JsonBlock
-      label="AgentState"
-      value={state}
-      collapsed={2}
-      className="h-full [&>div:last-child]:max-h-none [&>div:last-child]:h-[calc(100%-2rem)]"
-    />
-  )
-}
-
-function ToolRegistrySection({ tools }: { tools: readonly ToolSchema[] }): JSX.Element {
-  if (tools.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center rounded border border-dashed border-border/60 px-3 text-center text-xs text-muted-foreground">
-        No tools registered for this session.
-      </div>
-    )
-  }
-  return (
-    <ScrollArea className="h-full" data-testid="tool-registry-scrollarea">
-      <div className="space-y-2 pb-1" data-testid="tool-registry">
-        {tools.map((tool) => (
-          <ToolRegistryItem key={tool.name} tool={tool} />
-        ))}
-      </div>
-    </ScrollArea>
-  )
-}
-
-function ToolRegistryItem({ tool }: { tool: ToolSchema }): JSX.Element {
-  return (
-    <section
-      className="rounded border border-border/50 bg-card p-2 text-xs"
-      data-testid="tool-registry-item"
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-foreground dark:text-foreground">
-          {tool.name}
-        </span>
-        <span
-          className={cn(
-            'flex-none rounded border px-1.5 py-0.5 text-[10px]',
-            tool.requiresApproval
-              ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
-              : 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200',
-          )}
-        >
-          {tool.requiresApproval ? 'approval required' : 'auto allowed'}
-        </span>
-      </div>
-      <p className="mt-1 line-clamp-3 text-muted-foreground dark:text-muted-foreground">
-        {tool.description || 'No description provided.'}
-      </p>
-      <div className="mt-2">
-        <JsonBlock
-          label={`input schema · ${tool.name}`}
-          value={tool.inputSchema}
-          collapsed={false}
-          className="[&>div:last-child]:max-h-56 [&>div:last-child]:h-56 [&_[data-radix-scroll-area-viewport]]:max-h-56"
-        />
-      </div>
-    </section>
-  )
-}
-
-// ============================================================================
-// Memory panel — three-tier scratchpad the agent maintains for itself.
-// Session memory is inlined from state.memory (lifted by the kernel reducer
-// when `memory_write { scope: 'session' }` succeeds). Workspace and global
-// memory live on disk under the executor and are shown as pointers only —
-// the agent reads them via the `memory_read` tool, not the dashboard.
-// ============================================================================
-
-function MemorySection({ state }: { state: AgentState | null }): JSX.Element {
-  const memory = state?.memory ?? []
-  return (
-    <ScrollArea className="h-full" data-testid="memory-section-scrollarea">
-      <div className="space-y-3 pb-1">
-        <MemoryScopeBlock
-          scope="session"
-          subtitle="Lives in kernel state · dies with the session unless forked · promoted here whenever the agent calls memory_write { scope: 'session' }"
-          entries={memory}
-        />
-        <MemoryScopeBlock
-          scope="workspace"
-          subtitle="On disk at <workspace>/.agent-kernel/memory/ · shared across sessions in this workspace · the agent reads/writes via the memory_* tools"
-          entries={null}
-        />
-        <MemoryScopeBlock
-          scope="global"
-          subtitle="On disk at ~/.agent-kernel/memory/ · shared across every workspace on this machine · the agent reads/writes via the memory_* tools"
-          entries={null}
-        />
-      </div>
-    </ScrollArea>
-  )
-}
-
-function MemoryScopeBlock({
-  scope,
-  subtitle,
-  entries,
-}: {
-  scope: 'session' | 'workspace' | 'global'
-  subtitle: string
-  entries: readonly { key: string; content: string; updatedAt: string }[] | null
-}): JSX.Element {
-  const scopeStyles: Record<typeof scope, string> = {
-    session:
-      'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200',
-    workspace:
-      'border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-200',
-    global:
-      'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
-  }
-  return (
-    <section
-      className="rounded border border-border/50 bg-card p-2 text-xs"
-      data-testid={`memory-scope-${scope}`}
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <span
-          className={cn(
-            'flex-none rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
-            scopeStyles[scope],
-          )}
-        >
-          {scope}
-        </span>
-        <span className="text-muted-foreground dark:text-muted-foreground">
-          {entries === null
-            ? 'off-kernel scope'
-            : entries.length === 0
-              ? 'no entries'
-              : `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`}
-        </span>
-      </div>
-      <p className="mt-1 text-muted-foreground dark:text-muted-foreground">
-        {subtitle}
-      </p>
-      {entries !== null && entries.length > 0 ? (
-        <ul className="mt-2 space-y-1.5">
-          {entries.map((e) => (
-            <MemoryEntryRow key={e.key} entry={e} />
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  )
-}
-
-function MemoryEntryRow({
-  entry,
-}: {
-  entry: { key: string; content: string; updatedAt: string }
-}): JSX.Element {
-  return (
-    <li className="rounded border border-border/40 bg-background p-2">
+    <div className="rounded bg-background/60 p-2">
       <div className="flex items-center gap-2">
-        <span className="font-mono text-foreground dark:text-foreground">
-          {entry.key}
-        </span>
+        <span className="min-w-0 flex-1 truncate font-mono text-foreground">{entry.key}</span>
         {entry.updatedAt && entry.updatedAt !== '1970-01-01T00:00:00.000Z' ? (
-          <span className="ml-auto text-[10px] text-muted-foreground">
-            {new Date(entry.updatedAt).toLocaleString()}
-          </span>
+          <span className="flex-none text-[10px] text-muted-foreground">{new Date(entry.updatedAt).toLocaleString()}</span>
         ) : null}
       </div>
-      <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] text-muted-foreground dark:text-muted-foreground">
-        {entry.content}
-      </pre>
-    </li>
+      <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] text-muted-foreground">{entry.content}</pre>
+    </div>
   )
 }

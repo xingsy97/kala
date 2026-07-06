@@ -67,10 +67,10 @@ export const grepTool: Tool = {
       )
     }
 
-    const rootInput = pathInput ?? ctx.sandbox.roots[0]!
+    const rootInput = pathInput ?? ctx.cwd ?? ctx.sandbox.roots[0]!
     let resolvedRoot: string
     try {
-      resolvedRoot = await ctx.sandbox.resolve(rootInput)
+      resolvedRoot = await ctx.sandbox.resolve(rootInput, { cwd: ctx.cwd })
     } catch (err) {
       if (err instanceof SandboxError) throw new ToolError(err.code, err.message)
       throw err

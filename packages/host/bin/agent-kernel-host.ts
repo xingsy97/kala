@@ -34,6 +34,7 @@ import { routerAdapter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
 import { builtinTools } from '../src/builtin-tools.js'
 import { createHookRunner } from '../src/hooks.js'
+import { createRuntimeLogger } from '../src/logger.js'
 import {
   knownContextWindow,
   loadHookConfigs,
@@ -42,6 +43,8 @@ import {
   type ProviderSpec,
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
+
+const logger = createRuntimeLogger('agent-kernel-host')
 
 async function main(): Promise<void> {
   const runtime = loadRuntimeConfig()
@@ -104,18 +107,26 @@ async function main(): Promise<void> {
     ...(hookRunner ? { hookRunner } : {}),
   })
 
-  console.log(`agent-kernel-host listening on port ${server.port}`)
-  console.log(`sessions dir: ${sessionsDir}`)
-  console.log(`llm: ${llm.name}`)
-  console.log(
-    `models: ${models.length === 0 ? '(none — check ~/.claude/settings.json and ~/.codex/config.toml)' : models.map((m) => m.id).join(', ')}`,
+  logger.info(
+    {
+      port: server.port,
+      sessionsDir,
+      llm: llm.name,
+      models: models.map((m) => m.id),
+      defaultModel,
+      ...(staticDir ? { staticDir } : {}),
+      hooks: hooks.length,
+    },
+    'host listening',
   )
-  if (defaultModel) console.log(`default model: ${defaultModel}`)
-  if (staticDir) console.log(`serving dashboard from ${staticDir}`)
-  if (hooks.length > 0) console.log(`hooks: ${hooks.length} loaded`)
+  if (models.length === 0) {
+    logger.warn(
+      'no models configured; check ~/.claude/settings.json and ~/.codex/config.toml',
+    )
+  }
 
   const shutdown = async (): Promise<void> => {
-    console.log('shutting down...')
+    logger.info('shutting down')
     await server.close()
     process.exit(0)
   }
@@ -237,7 +248,7 @@ function legacyEnvAdapter(models: ModelInfo[]): LLMAdapter {
 }
 
 function fail(msg: string): never {
-  console.error(msg)
+  logger.error(msg)
   process.exit(1)
 }
 
@@ -264,6 +275,6 @@ function currentModulePath(): string {
 }
 
 main().catch((err) => {
-  console.error(err)
+  logger.error({ err }, 'fatal error')
   process.exit(1)
 })

@@ -8,10 +8,12 @@
  */
 
 import type { Message, ToolSchema, UsageDelta } from '@agent-kernel/kernel'
+import type { LLMTrace } from '@agent-kernel/shared'
 
 export type LLMResponse = {
   message: Message
   usage?: UsageDelta
+  trace?: LLMTrace
 }
 
 /**

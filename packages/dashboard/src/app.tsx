@@ -748,7 +748,7 @@ function NoSessionArea({
       data-testid="no-session-placeholder"
     >
       <div className="flex max-w-md flex-col items-center gap-4 px-6 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border bg-muted/40">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted/60">
           <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">

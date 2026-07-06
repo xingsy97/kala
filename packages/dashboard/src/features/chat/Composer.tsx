@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { AtSign, CornerDownRight, ListChecks, Navigation, Send, X } from 'lucide-react'
+import { AtSign, ChevronDown, ChevronUp, CornerDownRight, ListChecks, Navigation, X } from 'lucide-react'
 
 import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
@@ -279,7 +279,7 @@ export function Composer({
               {pastedImages.map((img) => (
                 <div
                   key={img.id}
-                  className="group relative h-16 w-16 overflow-hidden rounded-lg border bg-background"
+                  className="group relative h-16 w-16 overflow-hidden rounded-lg border border-border/50 bg-background"
                   data-testid={`pasted-image-${img.id}`}
                 >
                   <img src={img.dataUrl} alt="pasted" className="h-full w-full object-cover" />
@@ -482,31 +482,12 @@ export function Composer({
               modelInfo={models.find((m) => m.id === model) ?? null}
               queuedMessages={queuedMessages.length}
             />
-            <SendModeControl value={sendMode} onChange={setSendMode} />
-            <Button
-              type="submit"
+            <SendButton
               disabled={!canSubmit}
-              data-testid="composer-send"
-              className={cn(
-                'h-8 flex-none rounded-full px-4 text-xs font-medium',
-                canSubmit ? '' : 'opacity-50',
-              )}
-              aria-label="send message"
-            >
-              <Send className="mr-1 h-3.5 w-3.5" />
-              Send
-            </Button>
+              sendMode={sendMode}
+              onSendModeChange={setSendMode}
+            />
           </div>
-        </div>
-        <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[10px] text-muted-foreground">
-          <span>
-            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send ·
-            <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-[10px]">Shift + Enter</kbd> for newline
-          </span>
-          <span>
-            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">@</kbd> files ·
-            <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd> commands
-          </span>
         </div>
         {pendingToast ? (
           <div
@@ -521,46 +502,118 @@ export function Composer({
   )
 }
 
-function SendModeControl({
-  value,
-  onChange,
+function SendButton({
+  disabled,
+  sendMode,
+  onSendModeChange,
 }: {
-  value: SendMode
-  onChange(value: SendMode): void
+  disabled: boolean
+  sendMode: SendMode
+  onSendModeChange(value: SendMode): void
 }): JSX.Element {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (e: MouseEvent): void => {
+      if (!containerRef.current) return
+      if (!containerRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [menuOpen])
+
+  const ModeIcon = sendMode === 'steer' ? Navigation : ListChecks
+  const modeLabel = sendMode === 'steer' ? 'Steer active turn' : 'Queue follow-up'
+  const modeHint =
+    sendMode === 'steer'
+      ? 'Send feedback for the current run; promoted at the next safe boundary if the agent is busy.'
+      : 'Hold this message until the current turn finishes, then send it in FIFO order.'
+
   return (
     <div
-      className="flex flex-none rounded-md border border-border/50 bg-muted/40 p-0.5"
+      className="relative flex flex-none"
+      ref={containerRef}
       data-testid="send-mode-control"
-      aria-label="send mode"
     >
-      {(['steer', 'queue'] as const).map((mode) => {
-        const selected = value === mode
-        const Icon = mode === 'steer' ? Navigation : ListChecks
-        return (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => onChange(mode)}
-            className={cn(
-              'flex h-6 items-center gap-1 rounded-sm px-2 text-[11px] transition-colors',
-              selected
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-            data-testid={`send-mode-${mode}`}
-            aria-pressed={selected}
-            title={
+      <Button
+        type="submit"
+        disabled={disabled}
+        data-testid="composer-send"
+        className={cn(
+          'h-8 rounded-r-none rounded-l-full pl-4 pr-3 text-xs font-medium',
+          disabled ? 'opacity-50' : '',
+        )}
+        aria-label={`send message (${modeLabel})`}
+        title={modeHint}
+      >
+        <ModeIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+        Send
+      </Button>
+      <button
+        type="button"
+        onClick={() => setMenuOpen((v) => !v)}
+        className={cn(
+          'flex h-8 flex-none items-center justify-center rounded-r-full border-l border-primary-foreground/30 bg-primary px-2 text-primary-foreground transition-colors hover:bg-primary/90',
+        )}
+        data-testid="send-mode-toggle"
+        aria-label="send mode"
+        aria-haspopup="listbox"
+        aria-expanded={menuOpen}
+      >
+        {menuOpen ? (
+          <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+      </button>
+      {menuOpen ? (
+        <div
+          className="absolute right-0 bottom-full z-20 mb-2 min-w-[15rem] overflow-hidden rounded-lg border border-border/60 bg-popover text-xs shadow-lg"
+          role="listbox"
+          data-testid="send-mode-menu"
+        >
+          {(['steer', 'queue'] as const).map((mode) => {
+            const Icon = mode === 'steer' ? Navigation : ListChecks
+            const selected = sendMode === mode
+            const label = mode === 'steer' ? 'Steer active turn' : 'Queue follow-up'
+            const hint =
+              mode === 'steer'
+                ? 'Send feedback for the current run.'
+                : 'Hold until the active turn finishes.'
+            const longHint =
               mode === 'steer'
                 ? 'Steer active turn: send feedback for the current run; if the agent is busy, it is promoted at the next safe boundary.'
                 : 'Queue follow-up: hold this message until the current turn finishes, then send it in FIFO order.'
-            }
-          >
-            <Icon className="h-3 w-3" aria-hidden="true" />
-            {mode === 'steer' ? 'Steer active turn' : 'Queue follow-up'}
-          </button>
-        )
-      })}
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                title={longHint}
+                onClick={() => {
+                  onSendModeChange(mode)
+                  setMenuOpen(false)
+                }}
+                className={cn(
+                  'flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground',
+                  selected ? 'bg-accent/60 text-accent-foreground' : 'text-foreground',
+                )}
+                data-testid={`send-mode-${mode}`}
+              >
+                <Icon className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{label}</span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                    {hint}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }

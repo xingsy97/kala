@@ -148,6 +148,37 @@ describe('wire protocol', () => {
     bad.close()
   })
 
+  it('answers first-paint dashboard requests sent before session:ready', async () => {
+    const sessionId = 'wire-first-paint'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+
+    const sessionsPromise = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.once('server:sessions', resolve)
+    })
+    const historyPromise = new Promise<ServerHistoryPayload>((resolve) => {
+      dashboard.once('server:history', resolve)
+    })
+    await new Promise<void>((resolve) => dashboard.once('connect', resolve))
+    dashboard.emit('client:list_sessions', {})
+    dashboard.emit('client:load_history', { sessionId })
+
+    const [sessions, history] = await Promise.all([sessionsPromise, historyPromise])
+    expect(sessions.sessions.some((s) => s.sessionId === sessionId)).toBe(true)
+    expect(history.sessionId).toBe(sessionId)
+    expect(history.entries).toEqual([])
+
+    dashboard.close()
+  })
+
   it('drives a full round-trip with dashboard + executor', async () => {
     const sessionId = 'wire-1'
     // Pre-materialize the session: dashboard handshakes are now lazy (they

@@ -224,6 +224,7 @@ describe('SessionStore crash recovery', () => {
     const parsed = await readSessionLog(path)
     const lastEvent = parsed.events[parsed.events.length - 1]!
     expect(lastEvent.event.kind).toBe('tool_result')
+    expect(lastEvent.effects.map((e) => e.kind)).toEqual(['call_llm'])
     if (lastEvent.event.kind === 'tool_result') {
       expect(lastEvent.event.ok).toBe(false)
       expect(lastEvent.event.content).toMatch(/host restarted/)
@@ -281,7 +282,9 @@ describe('SessionStore crash recovery', () => {
     // Two synthetic events appended: approve + failed tool_result.
     expect(parsed.events).toHaveLength(4)
     expect(parsed.events[2]!.event.kind).toBe('user_approve')
+    expect(parsed.events[2]!.effects.map((e) => e.kind)).toEqual(['call_tool'])
     expect(parsed.events[3]!.event.kind).toBe('tool_result')
+    expect(parsed.events[3]!.effects.map((e) => e.kind)).toEqual(['call_llm'])
   })
 
   it('closes a session that was mid-stream (thinking) when the host died', async () => {
@@ -311,6 +314,7 @@ describe('SessionStore crash recovery', () => {
 
     const parsed = await readSessionLog(path)
     expect(parsed.events).toHaveLength(2)
+    expect(parsed.events[1]!.effects.map((e) => e.kind)).toEqual(['finish'])
     const recovery = parsed.events[1]!.event
     expect(recovery.kind).toBe('llm_response')
     if (recovery.kind === 'llm_response') {
