@@ -32,6 +32,7 @@ import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
+import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { TodoDock } from './features/chat/TodoDock.js'
 import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
@@ -129,6 +130,7 @@ export function App(): JSX.Element {
   const [cwdDraft, setCwdDraft] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
+  const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
@@ -361,6 +363,20 @@ export function App(): JSX.Element {
   )
   const backgroundTasks = backgroundTerminalTasks(session.timeline)
 
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const chatItemsCount = chatItems.length
+  const streamingLen = session.streamingText.length
+  const pendingApprovalsCount = session.pendingApprovals.length
+  useEffect(() => {
+    const root = chatScrollRef.current
+    if (!root) return
+    const viewport = root.querySelector<HTMLElement>(
+      '[data-radix-scroll-area-viewport]',
+    )
+    if (!viewport) return
+    viewport.scrollTop = viewport.scrollHeight
+  }, [chatItemsCount, streamingLen, pendingApprovalsCount, config.sessionId])
+
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
   // host's sticky-map fallback, so treat them as online.
@@ -489,6 +505,7 @@ export function App(): JSX.Element {
                   onNewSession={newSession}
                   onDelete={deleteSessionAt}
                   onRename={renameSessionAt}
+                  onWorkspaceInfo={setWorkspaceInfoId}
                 />
               </div>
             </ResizablePanel>
@@ -535,7 +552,11 @@ export function App(): JSX.Element {
                     />
                   ) : null}
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                    <ScrollArea className="flex-1 min-h-0 bg-background" data-testid="chat-panel">
+                    <ScrollArea
+                      ref={chatScrollRef}
+                      className="flex-1 min-h-0 bg-background"
+                      data-testid="chat-panel"
+                    >
                       <ChatPanel
                         items={chatItems}
                         highlightIndex={highlightIndex}
@@ -543,7 +564,6 @@ export function App(): JSX.Element {
                         onApprovalDecision={(callId, decision) => {
                           if (!session.socket) return
                           respondApproval(session.socket, config.sessionId, callId, decision)
-                          session.dismissApproval(callId)
                         }}
                         onEditAndRerun={(seq, text) => {
                           if (!session.socket) return
@@ -685,6 +705,15 @@ export function App(): JSX.Element {
           pickWorkspaceForNew(workspaceId, workspaceName, cwd)
         }
         onCancel={() => setPendingWorkspacePick(null)}
+      />
+      <WorkspaceMetadataDialog
+        open={workspaceInfoId !== null}
+        onOpenChange={(open) => {
+          if (!open) setWorkspaceInfoId(null)
+        }}
+        workspaceId={workspaceInfoId ?? ''}
+        executor={control.executors.find((e) => e.workspaceId === workspaceInfoId)}
+        sessions={control.sessions.filter((s) => s.workspaceId === workspaceInfoId)}
       />
     </div>
   )
