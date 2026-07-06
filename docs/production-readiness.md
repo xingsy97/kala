@@ -61,6 +61,8 @@ Current implementation:
   file path it can read if needed.
 - The dashboard can fetch full overflow content lazily through the host.
 - The preview now preserves both head and tail.
+- Fork copies overflow artifacts and session deletion prunes them through
+  best-effort executor RPCs.
 
 Production techniques:
 
@@ -73,8 +75,9 @@ Production techniques:
 
 Remaining gap:
 
-- Session deletion and fork should own overflow lifecycle explicitly. The
-  preview remains replay-safe today, but storage hygiene is incomplete.
+- Overflow lifecycle is best-effort. If the owning executor is offline during
+  fork or deletion, JSONL replay remains correct but side artifacts can be
+  missing or stale.
 
 ## Skills
 
