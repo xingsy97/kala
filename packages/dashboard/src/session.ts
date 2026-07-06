@@ -96,6 +96,12 @@ export function useSession({
   const [parentCursor, setParentCursor] = useState<number | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
+  // Streaming smoother: token_delta events land in `streamBufferRef`, and a
+  // requestAnimationFrame loop drains a chunk per frame into React state. This
+  // collapses 60-100 setState calls/sec into ~60 frames/sec AND paces bursty
+  // deltas into a smoother visual flow. Backlog >~200 chars triggers a catch-up.
+  const streamBufferRef = useRef('')
+  const streamRafRef = useRef<number | null>(null)
   const onForkedRef = useRef(onForked)
   onForkedRef.current = onForked
 
@@ -105,11 +111,51 @@ export function useSession({
     setConfig(null)
     setTimeline([])
     setStreamingText('')
+    streamBufferRef.current = ''
+    if (streamRafRef.current !== null) {
+      cancelAnimationFrame(streamRafRef.current)
+      streamRafRef.current = null
+    }
     setQueuedMessages([])
     setLastError(null)
     setParentSessionId(null)
     setParentCursor(null)
     setSelectedModel(null)
+
+    const drainStreamBuffer = (): void => {
+      const buf = streamBufferRef.current
+      if (buf.length === 0) {
+        streamRafRef.current = null
+        return
+      }
+      // Adaptive rate: 1-2 chars per frame when idle-ish; 10% of backlog when
+      // catching up so we don't fall arbitrarily behind on long bursts. Cap by
+      // buffer length so we never read past the end.
+      const chunkSize = Math.min(
+        buf.length,
+        Math.max(2, Math.ceil(buf.length / 10)),
+      )
+      const chunk = buf.slice(0, chunkSize)
+      streamBufferRef.current = buf.slice(chunkSize)
+      setStreamingText((prev) => prev + chunk)
+      streamRafRef.current = requestAnimationFrame(drainStreamBuffer)
+    }
+
+    const pushStreamDelta = (text: string): void => {
+      streamBufferRef.current += text
+      if (streamRafRef.current === null) {
+        streamRafRef.current = requestAnimationFrame(drainStreamBuffer)
+      }
+    }
+
+    const resetStream = (): void => {
+      streamBufferRef.current = ''
+      if (streamRafRef.current !== null) {
+        cancelAnimationFrame(streamRafRef.current)
+        streamRafRef.current = null
+      }
+      setStreamingText('')
+    }
 
     const socket = io(`${host}/dashboard`, {
       transports: ['websocket'],
@@ -159,13 +205,13 @@ export function useSession({
     socket.on('state:changed', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       setState(p.state)
-      if (p.state.status !== 'thinking') setStreamingText('')
+      if (p.state.status !== 'thinking') resetStream()
     })
     socket.on('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       setLastError(null)
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
-        setStreamingText('')
+        resetStream()
       }
       setTimeline((prev) =>
         mergeBySeq(prev, [
@@ -193,12 +239,12 @@ export function useSession({
     })
     socket.on('session:error', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
-      setStreamingText('')
+      resetStream()
       setLastError(p)
     })
     socket.on('session:token_delta', (p) => {
       if (!isCurrentSocket()) return
-      if (p.sessionId === sessionId) setStreamingText((prev) => prev + p.text)
+      if (p.sessionId === sessionId) pushStreamDelta(p.text)
     })
     socket.on('session:model_changed', (p) => {
       if (!isCurrentSocket()) return
@@ -216,6 +262,11 @@ export function useSession({
     })
 
     return () => {
+      if (streamRafRef.current !== null) {
+        cancelAnimationFrame(streamRafRef.current)
+        streamRafRef.current = null
+      }
+      streamBufferRef.current = ''
       socket.close()
       socketRef.current = null
     }
@@ -301,6 +352,13 @@ export function cancelSession(
   sessionId: string,
 ): void {
   socket.emit('client:cancel', { sessionId })
+}
+
+export function clearSession(
+  socket: DashboardSocket,
+  sessionId: string,
+): void {
+  socket.emit('client:clear', { sessionId })
 }
 
 /**

@@ -13,7 +13,6 @@ const baseState: AgentState = {
   usage: {
     inputTokens: 1200,
     outputTokens: 340,
-    costUsd: 0.0123,
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
   },

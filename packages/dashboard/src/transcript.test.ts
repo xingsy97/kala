@@ -36,6 +36,7 @@ describe('visibleMessages', () => {
         ts: '2026-07-05T00:00:02.000Z',
         event: {
           kind: 'compact_replaced',
+          preserveFrom: 3,
           summary: 'hello -> hi',
           replacedCount: 2,
           tokensBefore: 100,

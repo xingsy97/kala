@@ -35,7 +35,7 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
   })
 
-  it('renders user + assistant text and a tool_call block', () => {
+  it('renders a tool call and its result as one combined row', () => {
     render(
       <ChatPanel
         messages={[
@@ -68,14 +68,14 @@ describe('ChatPanel', () => {
     )
     expect(screen.getByText('hello')).toBeTruthy()
     expect(screen.getByText('about to write')).toBeTruthy()
-    // Tool call/result headers are explicit enough to understand without opening details.
-    expect(screen.getByText('Assistant requested tool')).toBeTruthy()
-    expect(screen.getAllByText('write')).toHaveLength(2)
-    expect(screen.getAllByText('Tool result')).toHaveLength(2)
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getAllByText('write')).toHaveLength(1)
     expect(screen.getByText('Succeeded')).toBeTruthy()
-    // Body is collapsed by default  -  expanding the tool_result reveals it.
+    expect(screen.queryByText('Assistant requested tool')).toBeNull()
+    expect(screen.queryByText('Tool result')).toBeNull()
+    // Body is collapsed by default  -  expanding the grouped row reveals it.
     expect(screen.queryByText('wrote 3 bytes')).toBeNull()
-    fireEvent.click(screen.getByTestId('tool-result-toggle-c1'))
+    fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
     expect(screen.getByText('wrote 3 bytes')).toBeTruthy()
   })
 
@@ -207,14 +207,13 @@ describe('ChatPanel', () => {
     expect(onEditAndRerun).toHaveBeenCalledWith(4, 'revised text')
   })
 
-  it('renders inline approval controls on the pending tool_call', () => {
-    const onApprovalDecision = vi.fn()
+  it('flags a pending tool_call but shows no inline approve/reject buttons (they live in the composer flip)', () => {
     render(
       <ChatPanel
         pendingApprovals={[
           { sessionId: 's', callId: 'c9', name: 'write', input: { path: '/tmp/x' } },
         ]}
-        onApprovalDecision={onApprovalDecision}
+        onApprovalDecision={vi.fn()}
         messages={[
           {
             role: 'assistant',
@@ -232,10 +231,11 @@ describe('ChatPanel', () => {
     )
     expect(screen.getByTestId('tool-call-pending-c9')).toBeTruthy()
     expect(screen.getByText('Approval needed')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('approval-approve'))
-    expect(onApprovalDecision).toHaveBeenCalledWith('c9', 'approve')
-    fireEvent.click(screen.getByTestId('approval-reject'))
-    expect(onApprovalDecision).toHaveBeenCalledWith('c9', 'reject')
+    expect(screen.getByText(/Approve or reject in the composer area below/i)).toBeTruthy()
+    // The decision buttons are rendered by ApprovalCard inside the composer
+    // flip container, not inside the tool card itself.
+    expect(screen.queryByTestId('approval-approve')).toBeNull()
+    expect(screen.queryByTestId('approval-reject')).toBeNull()
   })
 
   it('leaves non-pending tool_calls as regular collapsed cards', () => {
@@ -258,7 +258,7 @@ describe('ChatPanel', () => {
     )
     expect(screen.queryByTestId('tool-call-pending-c10')).toBeNull()
     expect(screen.queryByTestId('approval-approve')).toBeNull()
-    expect(screen.getByText('Assistant requested tool')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-c10')).toBeTruthy()
   })
 
   it('renders empty state end-to-end for an ephemeral session (system prompt only, no timeline)', () => {

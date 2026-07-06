@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   Archive,
   Bot,
   Brain,
   CheckCircle2,
+  CircleDot,
   Database,
   GitBranch,
   Hammer,
@@ -51,6 +52,7 @@ import {
 import { JsonBlock } from '../../components/ui/json-block.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
+import { PREF_SHOW_TOOL_CALL_TAB, useBooleanPref } from '../../lib/prefs.js'
 
 type Props = {
   state: AgentState | null
@@ -64,6 +66,7 @@ type Props = {
 type RuntimeView = 'state' | 'tools' | 'memory'
 type InspectorView = 'trace' | 'llm' | 'tools' | 'status'
 type LlmDetailView = 'assembler' | 'api'
+type TraceCategory = 'user' | 'llm' | 'tool' | 'approval' | 'system'
 type ContextProportion = {
   kind: 'system' | 'messages' | 'tools'
   label: string
@@ -103,6 +106,27 @@ type ToolCallLifecycle = {
   result?: Extract<AgentEvent, { kind: 'tool_result' }>
 }
 
+const traceListItemClass =
+  'group relative rounded-md border border-border/55 bg-card/45 px-2 py-1 text-xs shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-colors dark:bg-card/35'
+
+const TRACE_CATEGORY_ORDER = ['user', 'llm', 'tool', 'approval', 'system'] as const
+
+const TRACE_CATEGORY_LABEL: Record<TraceCategory, string> = {
+  user: 'User',
+  llm: 'LLM',
+  tool: 'Tool',
+  approval: 'Approval',
+  system: 'System',
+}
+
+const TRACE_CATEGORY_TONE: Record<TraceCategory, string> = {
+  user: 'text-sky-600 dark:text-sky-300',
+  llm: 'text-violet-600 dark:text-violet-300',
+  tool: 'text-emerald-600 dark:text-emerald-300',
+  approval: 'text-amber-600 dark:text-amber-300',
+  system: 'text-muted-foreground',
+}
+
 export function InspectorPanel({
   state,
   config,
@@ -115,6 +139,15 @@ export function InspectorPanel({
   const [runtimeView, setRuntimeView] = useState<RuntimeView>('state')
   const [selected, setSelected] = useState<DetailSelection>(null)
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
+  const [traceFilter, setTraceFilter] = useState<ReadonlySet<TraceCategory>>(
+    () => new Set<TraceCategory>(TRACE_CATEGORY_ORDER),
+  )
+  const [showToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
+
+  useEffect(() => {
+    // Auto-migrate away from the Tool Call tab if the user just disabled it.
+    if (!showToolCallTab && inspectorView === 'tools') setInspectorView('trace')
+  }, [showToolCallTab, inspectorView])
 
   const flow = useMemo(() => stateFlow(timeline), [timeline])
   const llmCalls = useMemo(() => buildLlmCalls(timeline), [timeline])
@@ -133,7 +166,11 @@ export function InspectorPanel({
         timeline={timeline}
         visibleMessagesCount={visibleMessagesCount}
       />
-      <InspectorTabs value={inspectorView} onChange={setInspectorView} />
+      <InspectorTabs
+        value={inspectorView}
+        onChange={setInspectorView}
+        showToolCallTab={showToolCallTab}
+      />
 
       {inspectorView === 'status' ? (
         <div className="flex min-h-0 flex-1 flex-col" data-testid="inspector-view-panel-status">
@@ -161,6 +198,8 @@ export function InspectorPanel({
             onSelect={setSelected}
             onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
             onJumpToMessage={onJumpToMessage}
+            traceFilter={traceFilter}
+            onTraceFilterChange={setTraceFilter}
           />
         </div>
       )}
@@ -200,26 +239,39 @@ export function InspectorPanel({
   )
 }
 
-function InspectorTabs({ value, onChange }: { value: InspectorView; onChange(view: InspectorView): void }): JSX.Element {
-  const options: readonly (readonly [InspectorView, string])[] = [
-    ['trace', 'Trace'],
-    ['llm', 'LLM API'],
-    ['tools', 'Tool Call'],
-    ['status', 'Status'],
+function InspectorTabs({
+  value,
+  onChange,
+  showToolCallTab,
+}: {
+  value: InspectorView
+  onChange(view: InspectorView): void
+  showToolCallTab: boolean
+}): JSX.Element {
+  const options: Array<[InspectorView, string, typeof Activity]> = [
+    ['trace', 'Trace', GitBranch],
+    ['llm', 'LLM API', Bot],
   ]
+  if (showToolCallTab) options.push(['tools', 'Tool Call', Hammer])
+  options.push(['status', 'Status', Activity])
+  const cols = options.length
   return (
     <div className="flex-none bg-card px-3 pb-3" data-testid="inspector-sidebar-tabs">
-      <div className="grid grid-cols-4 rounded bg-sidebar p-0.5 text-xs">
-        {options.map(([view, label]) => (
+      <div
+        className="grid rounded bg-sidebar p-0.5 text-xs"
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+      >
+        {options.map(([view, label, Icon]) => (
           <button
             key={view}
             type="button"
             onClick={() => onChange(view)}
-            className={cn('rounded px-1.5 py-1.5 font-medium transition-colors', value === view ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+            className={cn('inline-flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1.5 font-medium transition-colors', value === view ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
             data-testid={`inspector-sidebar-tab-${view}`}
             aria-pressed={value === view}
           >
-            {label}
+            <Icon className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+            <span className="min-w-0 truncate">{label}</span>
           </button>
         ))}
       </div>
@@ -238,10 +290,8 @@ function DebuggerHeader({
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
 }): JSX.Element {
-  const model = modelFromTimeline(timeline) ?? 'model unset'
-  const cwd = state?.cwd ?? 'cwd unset'
   return (
-    <div className="flex-none bg-card px-3 py-3">
+    <div className="flex-none bg-card px-3 py-2.5">
       <div className="flex min-w-0 items-center gap-2">
         <ServerCog className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0 flex-1">
@@ -250,12 +300,6 @@ function DebuggerHeader({
             <span className="ml-auto font-mono text-[11px] text-muted-foreground">
               #{state?.cursor ?? timeline.at(-1)?.seq ?? 0}
             </span>
-          </div>
-          <div className="mt-1 truncate text-[11px] text-muted-foreground">
-            {state?.status ?? 'no state'}  -  approval {state?.approvalMode ?? 'n/a'}  -  {model}
-          </div>
-          <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={cwd}>
-            cwd {cwd}
           </div>
         </div>
       </div>
@@ -317,6 +361,8 @@ function TraceSection({
   onSelect,
   onForkRequest,
   onJumpToMessage,
+  traceFilter,
+  onTraceFilterChange,
 }: {
   view: Exclude<InspectorView, 'status'>
   timeline: readonly TimelineEntry[]
@@ -328,19 +374,25 @@ function TraceSection({
   onSelect(selection: DetailSelection): void
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
+  traceFilter: ReadonlySet<TraceCategory>
+  onTraceFilterChange(next: ReadonlySet<TraceCategory>): void
 }): JSX.Element {
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label={view}>
       {view === 'trace' ? (
-        <ReducerTrace
-          timeline={timeline}
-          flow={flow}
-          messagesCount={messagesCount}
-          selected={selected}
-          onSelect={onSelect}
-          onForkRequest={onForkRequest}
-          onJumpToMessage={onJumpToMessage}
-        />
+        <>
+          <TraceFilterBar value={traceFilter} onChange={onTraceFilterChange} />
+          <ReducerTrace
+            timeline={timeline}
+            flow={flow}
+            messagesCount={messagesCount}
+            selected={selected}
+            onSelect={onSelect}
+            onForkRequest={onForkRequest}
+            onJumpToMessage={onJumpToMessage}
+            filter={traceFilter}
+          />
+        </>
       ) : view === 'llm' ? (
         <LlmCallsView calls={llmCalls} selected={selected} onSelect={onSelect} />
       ) : (
@@ -358,6 +410,7 @@ function ReducerTrace({
   onSelect,
   onForkRequest,
   onJumpToMessage,
+  filter,
 }: {
   timeline: readonly TimelineEntry[]
   flow: readonly StateFlowStep[]
@@ -366,14 +419,20 @@ function ReducerTrace({
   onSelect(selection: DetailSelection): void
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
+  filter: ReadonlySet<TraceCategory>
 }): JSX.Element {
   if (timeline.length === 0) {
     return <EmptyBlock label="No reducer events yet." />
   }
+  const visible = timeline.filter((entry) => entryMatchesFilter(entry, filter))
+  if (visible.length === 0) {
+    return <EmptyBlock label="No events match the current filter." />
+  }
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-0.5 px-2 pb-3" data-testid="reducer-trace-list">
-        {timeline.map((entry, i) => {
+      <div className="space-y-1 px-2 pb-3 pt-1" data-testid="reducer-trace-list">
+        {visible.map((entry) => {
+          const i = timeline.indexOf(entry)
           const priorCallLlm = findPriorCallLlm(timeline, i)
           const flowStep = flow.find((s) => s.seq === entry.seq)
           const isSelected = selected?.kind === 'event' && selected.entry.seq === entry.seq
@@ -421,23 +480,23 @@ function ReducerTraceRow({
   return (
     <div
       className={cn(
-        'group relative rounded px-2 py-1.5 text-xs transition-colors',
-        selected ? 'bg-card' : 'hover:bg-card/70',
+        traceListItemClass,
+        selected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80',
       )}
       data-testid="timeline-row"
     >
-      {selected ? <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded bg-primary" /> : null}
+      {selected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
       <button
         type="button"
         onClick={onSelect}
-        className="grid w-full grid-cols-[2.55rem_minmax(0,1fr)] gap-x-1.5 text-left"
+        className="grid w-full grid-cols-[2.35rem_minmax(0,1fr)] gap-x-1.5 text-left"
         data-testid="timeline-row-header"
         aria-label={`inspect timeline event ${entry.seq}`}
       >
         <span className="pt-px text-right font-mono text-[10px] text-muted-foreground">#{entry.seq}</span>
         <span className="min-w-0">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className={cn('w-14 flex-none font-mono text-[10px]', inbound.tone)}>{inbound.source}</span>
+          <span className="flex min-w-0 items-center gap-1">
+            <span className={cn('w-12 flex-none font-mono text-[10px]', inbound.tone)}>{inbound.source}</span>
             <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{entry.event.kind}</span>
             {flow ? (
               <span className="hidden flex-none font-mono text-[10px] text-muted-foreground xl:inline">
@@ -449,9 +508,9 @@ function ReducerTraceRow({
             {eventSummary(entry.event, priorCallLlm)}
           </span>
           {effectLabels.length > 0 ? (
-            <span className="mt-0.5 flex min-w-0 flex-wrap gap-1">
+            <span className="mt-0.5 flex min-w-0 flex-wrap gap-0.5">
               {effectLabels.map(({ key, effect, target }) => (
-                <span key={key} className="rounded bg-background/80 px-1.5 py-px font-mono text-[9px] leading-4 text-muted-foreground ring-1 ring-border/30">
+                <span key={key} className="rounded bg-background/80 px-1 py-px font-mono text-[9px] leading-3 text-muted-foreground ring-1 ring-border/40">
                   <span className={target.tone}>{target.target}</span>  -  {effect.kind}
                 </span>
               ))}
@@ -488,7 +547,7 @@ function LlmCallsView({
   if (calls.length === 0) return <EmptyBlock label="No LLM calls emitted yet." />
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-1 px-2 pb-3" data-testid="llm-calls-list">
+      <div className="space-y-1 px-2 pb-3 pt-1" data-testid="llm-calls-list">
         {calls.map((call) => {
           const isSelected = selected?.kind === 'llm' && selected.call.id === call.id
           const usage = call.response?.usage
@@ -500,19 +559,19 @@ function LlmCallsView({
               key={call.id}
               type="button"
               onClick={() => onSelect({ kind: 'llm', call })}
-              className={cn('relative w-full rounded px-2 py-1.5 text-left text-xs transition-colors', isSelected ? 'bg-card' : 'hover:bg-card/70')}
+              className={cn(traceListItemClass, 'w-full text-left', isSelected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
               data-testid="llm-call-row"
             >
-              {isSelected ? <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded bg-primary" /> : null}
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="w-20 flex-none font-mono text-[11px] text-muted-foreground">#{call.requestSeq}  -  {call.responseSeq ? `#${call.responseSeq}` : 'pending'}</span>
+              {isSelected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="w-[4.75rem] flex-none font-mono text-[10px] text-muted-foreground">#{call.requestSeq}  -  {call.responseSeq ? `#${call.responseSeq}` : 'pending'}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-violet-600 dark:text-violet-300">{provider} / {model}</span>
-                <span className={cn('flex-none font-mono text-[11px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{status}</span>
+                <span className={cn('flex-none font-mono text-[10px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{status}</span>
               </div>
-              <div className="mt-1 truncate pl-20 text-[11px] text-muted-foreground">
+              <div className="mt-0.5 truncate pl-[4.75rem] text-[10px] text-muted-foreground">
                 request {call.effect.messages.length} messages  -  {call.effect.tools.length} tools  -  response {llmResponseSummary(call)}
               </div>
-              <div className="mt-1 truncate pl-20 font-mono text-[10px] text-muted-foreground">
+              <div className="mt-0.5 truncate pl-[4.75rem] font-mono text-[10px] text-muted-foreground">
                 usage {usage ? `${usage.inputTokens}/${usage.outputTokens}` : 'not reported'}  -  provider trace {call.trace ? 'captured' : 'not captured'}
               </div>
             </button>
@@ -535,7 +594,7 @@ function ToolCallsView({
   if (calls.length === 0) return <EmptyBlock label="No tool calls emitted yet." />
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-1 px-2 pb-3" data-testid="tool-calls-list">
+      <div className="space-y-1 px-2 pb-3 pt-1" data-testid="tool-calls-list">
         {calls.map((call) => {
           const isSelected = selected?.kind === 'tool' && selected.call.callId === call.callId
           return (
@@ -543,21 +602,21 @@ function ToolCallsView({
               key={call.callId}
               type="button"
               onClick={() => onSelect({ kind: 'tool', call })}
-              className={cn('relative w-full rounded px-2 py-1.5 text-left text-xs transition-colors', isSelected ? 'bg-card' : 'hover:bg-card/70')}
+              className={cn(traceListItemClass, 'w-full text-left', isSelected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
               data-testid="tool-call-row"
             >
-              {isSelected ? <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded bg-primary" /> : null}
-              <div className="flex min-w-0 items-center gap-2">
+              {isSelected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span className="min-w-0 flex-1 truncate font-mono text-foreground">{call.callId}</span>
-                <span className="flex-none font-mono text-[11px] text-emerald-600 dark:text-emerald-300">{call.name}</span>
-                <span className={cn('flex-none font-mono text-[11px]', call.result?.ok === false ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>
+                <span className="flex-none font-mono text-[10px] text-emerald-600 dark:text-emerald-300">{call.name}</span>
+                <span className={cn('flex-none font-mono text-[10px]', call.result?.ok === false ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>
                   {toolResultLabel(call)}
                 </span>
               </div>
-              <div className="mt-1 truncate text-[11px] text-muted-foreground">
+              <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                 {toolLifecycleSummary(call)}
               </div>
-              <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+              <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
                 {toolInputSummary(call.input)}
               </div>
             </button>
@@ -588,9 +647,9 @@ function RuntimeSection({
           value={view}
           onChange={onViewChange}
           options={[
-            ['state', 'State'],
-            ['tools', 'Tools'],
-            ['memory', 'Memory'],
+            ['state', 'State', CircleDot],
+            ['tools', 'Tools', Hammer],
+            ['memory', 'Memory', Brain],
           ]}
           testId="runtime-view-switch"
         />
@@ -653,7 +712,6 @@ function StateRuntime({ state }: { state: AgentState | null }): JSX.Element {
                 ['output', String(state.usage.outputTokens)],
                 ['cache create', String(state.usage.cacheCreationTokens ?? 0)],
                 ['cache read', String(state.usage.cacheReadTokens ?? 0)],
-                ['cost', state.usage.costUsd ? `$${state.usage.costUsd.toFixed(4)}` : '$0'],
               ]}
             />
             <StateGroup
@@ -1291,19 +1349,20 @@ function SectionHeader({ icon: Icon, title, children }: { icon: typeof Activity;
   )
 }
 
-function Segmented<T extends string>({ value, onChange, options, testId }: { value: T; onChange(value: T): void; options: readonly (readonly [T, string])[]; testId: string }): JSX.Element {
+function Segmented<T extends string>({ value, onChange, options, testId }: { value: T; onChange(value: T): void; options: readonly (readonly [T, string, (typeof Activity)?])[]; testId: string }): JSX.Element {
   return (
     <div className="inline-flex rounded bg-sidebar p-0.5" data-testid={testId}>
-      {options.map(([v, label]) => (
-        <button
-          key={v}
-          type="button"
-          onClick={() => onChange(v)}
-          className={cn('rounded px-2 py-0.5 text-[11px] transition-colors', value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
-          data-testid={`${testId}-${v}`}
-        >
-          {label}
-        </button>
+      {options.map(([v, label, Icon]) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => onChange(v)}
+            className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition-colors', value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+            data-testid={`${testId}-${v}`}
+          >
+            {Icon ? <Icon className="h-3 w-3 flex-none" aria-hidden="true" /> : null}
+            <span>{label}</span>
+          </button>
       ))}
     </div>
   )
@@ -1462,6 +1521,7 @@ function inboundOf(event: AgentEvent): { source: string; tone: string } {
     case 'tool_result':
       return { source: 'executor', tone: event.ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300' }
     case 'cancel':
+    case 'clear':
       return { source: 'user', tone: 'text-amber-600 dark:text-amber-300' }
     case 'compact_replaced':
       return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
@@ -1481,6 +1541,121 @@ function effectTarget(e: Effect): { target: string; tone: string } {
     case 'emit_error':
       return { target: 'error', tone: 'text-rose-600 dark:text-rose-300' }
   }
+}
+
+function eventCategories(entry: TimelineEntry): Set<TraceCategory> {
+  const categories = new Set<TraceCategory>()
+  switch (entry.event.kind) {
+    case 'user_message':
+      categories.add('user')
+      break
+    case 'user_approve':
+    case 'user_reject':
+      categories.add('user')
+      categories.add('approval')
+      break
+    case 'approval_mode_changed':
+      categories.add('user')
+      categories.add('approval')
+      break
+    case 'cwd_changed':
+    case 'cancel':
+    case 'clear':
+      categories.add('user')
+      break
+    case 'llm_response':
+    case 'llm_error':
+      categories.add('llm')
+      break
+    case 'tool_result':
+      categories.add('tool')
+      break
+    case 'compact_replaced':
+      categories.add('system')
+      break
+  }
+  for (const eff of entry.effects) {
+    if (eff.kind === 'call_llm') categories.add('llm')
+    else if (eff.kind === 'call_tool') categories.add('tool')
+    else if (eff.kind === 'request_approval') categories.add('approval')
+    else if (eff.kind === 'finish' || eff.kind === 'emit_error') categories.add('system')
+  }
+  return categories
+}
+
+function entryMatchesFilter(
+  entry: TimelineEntry,
+  filter: ReadonlySet<TraceCategory>,
+): boolean {
+  if (filter.size === 0) return true
+  for (const cat of eventCategories(entry)) {
+    if (filter.has(cat)) return true
+  }
+  return false
+}
+
+function TraceFilterBar({
+  value,
+  onChange,
+}: {
+  value: ReadonlySet<TraceCategory>
+  onChange(next: ReadonlySet<TraceCategory>): void
+}): JSX.Element {
+  const allSelected = value.size === TRACE_CATEGORY_ORDER.length
+  const toggle = (cat: TraceCategory): void => {
+    const next = new Set(value)
+    if (next.has(cat)) next.delete(cat)
+    else next.add(cat)
+    onChange(next)
+  }
+  const setAll = (): void => {
+    onChange(new Set<TraceCategory>(TRACE_CATEGORY_ORDER))
+  }
+  return (
+    <div
+      className="flex flex-none flex-wrap items-center gap-1 border-b border-border/40 bg-card/50 px-2 py-1.5"
+      data-testid="trace-filter-bar"
+    >
+      <span className="mr-1 flex-none text-[10px] uppercase tracking-wide text-muted-foreground">
+        Filter
+      </span>
+      <button
+        type="button"
+        onClick={setAll}
+        aria-pressed={allSelected}
+        data-testid="trace-filter-chip-all"
+        className={cn(
+          'rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 transition-colors',
+          allSelected
+            ? 'bg-primary/10 text-foreground ring-primary/40'
+            : 'bg-background/70 text-muted-foreground ring-border/40 hover:bg-accent hover:text-foreground',
+        )}
+      >
+        All
+      </button>
+      {TRACE_CATEGORY_ORDER.map((cat) => {
+        const active = value.has(cat)
+        return (
+          <button
+            key={cat}
+            type="button"
+            onClick={() => toggle(cat)}
+            aria-pressed={active}
+            data-testid={`trace-filter-chip-${cat}`}
+            className={cn(
+              'rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 transition-colors',
+              active
+                ? 'bg-primary/10 ring-primary/40'
+                : 'bg-background/70 ring-border/40 hover:bg-accent',
+              active ? TRACE_CATEGORY_TONE[cat] : 'text-muted-foreground',
+            )}
+          >
+            {TRACE_CATEGORY_LABEL[cat]}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | null): string {
@@ -1505,6 +1680,8 @@ function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | null): str
       return event.cwd
     case 'cancel':
       return 'cancel requested'
+    case 'clear':
+      return 'session context cleared'
   }
 }
 

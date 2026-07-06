@@ -15,6 +15,7 @@ function renderComposer(props?: {
   ) => void
   onCompact?: () => void
   onCancel?: () => void
+  onClearSession?: () => void
   onListFiles?: (query: string) => Promise<readonly FileListEntry[]>
   onReadFile?: (path: string) => Promise<{ content?: string; error?: string }>
 }) {
@@ -31,6 +32,7 @@ function renderComposer(props?: {
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
       {...(props?.onCancel ? { onCancel: props.onCancel } : {})}
+      {...(props?.onClearSession ? { onClearSession: props.onClearSession } : {})}
       {...(props?.onListFiles ? { onListFiles: props.onListFiles } : {})}
       {...(props?.onReadFile ? { onReadFile: props.onReadFile } : {})}
     />,
@@ -57,10 +59,10 @@ describe('Composer', () => {
     expect(screen.queryByTestId('composer-state-chips')).toBeNull()
     expect(screen.queryByTestId('connection-status')).toBeNull()
     const indicator = screen.getByTestId('context-usage-indicator')
-    expect(indicator.textContent ?? '').toContain('Events')
-    expect(indicator.textContent ?? '').toContain('Tools')
-    expect(screen.getByText('Events').closest('[title]')?.getAttribute('title') ?? '').toContain('Event log position')
-    expect(screen.getByText('Tools').closest('[title]')?.getAttribute('title') ?? '').toContain('Pending tool calls')
+    expect(indicator.textContent ?? '').toContain('n/a')
+    expect(indicator.textContent ?? '').not.toContain('Events')
+    expect(indicator.textContent ?? '').not.toContain('Tools')
+    expect(indicator.textContent ?? '').not.toContain('Tokens')
   })
 
   it('shows slash command suggestions for /compact', () => {
@@ -107,6 +109,24 @@ describe('Composer', () => {
     fireEvent.click(screen.getByText('/cancel'))
 
     expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
+  })
+
+  it('runs /clear as a command when fresh-session creation is available', () => {
+    const onSubmit = vi.fn()
+    const onClearSession = vi.fn()
+    renderComposer({ onSubmit, onClearSession })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/cle' },
+    })
+
+    expect(screen.getByTestId('slash-command-menu')).toBeTruthy()
+    expect(screen.getByText('/clear')).toBeTruthy()
+    fireEvent.click(screen.getByText('/clear'))
+
+    expect(onClearSession).toHaveBeenCalledTimes(1)
     expect(onSubmit).not.toHaveBeenCalled()
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
   })
@@ -236,6 +256,27 @@ describe('Composer', () => {
     expect(picker).toBeTruthy()
     expect(picker.textContent ?? '').toContain('Auto')
     expect(picker.textContent ?? '').not.toContain('ask only for tools marked unsafe')
+  })
+
+  it('keeps allow all danger copy out of the compact approval picker label', () => {
+    render(
+      <Composer
+        model=""
+        models={[]}
+        onModelChange={() => {}}
+        approvalMode="allow_all"
+        onApprovalModeChange={() => {}}
+        state={null}
+        config={null}
+        queuedMessages={[]}
+        onSubmit={() => {}}
+        onCompact={() => {}}
+      />,
+    )
+
+    const picker = screen.getByTestId('approval-mode-picker')
+    expect(picker.textContent ?? '').toContain('Allow all')
+    expect(picker.textContent ?? '').not.toContain('danger')
   })
 
   it('attaches pasted image as an image content block on submit', async () => {

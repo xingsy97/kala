@@ -18,6 +18,7 @@ import { DirectoryPicker } from './DirectoryPicker.js'
 type Props = {
   open: boolean
   workspaces: readonly AttachedExecutor[]
+  initialWorkspaceId?: string
   socket: DashboardSocket | null
   onCreate(input: {
     workspaceId: string
@@ -30,6 +31,7 @@ type Props = {
 export function NewSessionDialog({
   open,
   workspaces,
+  initialWorkspaceId,
   socket,
   onCreate,
   onCancel,
@@ -43,10 +45,11 @@ export function NewSessionDialog({
 
   useEffect(() => {
     if (!open) return
-    const first = workspaces[0]
+    const first =
+      workspaces.find((w) => w.workspaceId === initialWorkspaceId) ?? workspaces[0]
     setWorkspaceId(first?.workspaceId ?? '')
     setCwd(first ? initialPathFor(first) : '')
-  }, [open, workspaces])
+  }, [initialWorkspaceId, open, workspaces])
 
   const selectWorkspace = (id: string): void => {
     const workspace = workspaces.find((w) => w.workspaceId === id)

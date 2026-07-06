@@ -11,7 +11,6 @@ const baseState: AgentState = {
   usage: {
     inputTokens: 42180,
     outputTokens: 6180,
-    costUsd: 0,
     cacheCreationTokens: 0,
     cacheReadTokens: 32000,
   },
@@ -452,7 +451,12 @@ describe('InspectorPanel', () => {
     expect(onFork).toHaveBeenCalledWith(120)
   })
 
-  it('reconstructs compact input for legacy compact events without request metadata', () => {
+  it('shows recorded compact request metadata for compact events', () => {
+    const compactMessages = [
+      { role: 'system' as const, content: [{ type: 'text' as const, text: 'sys' }] },
+      { role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello?' }] },
+      { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Hello!' }] },
+    ]
     render(
       <InspectorPanel
         state={baseState}
@@ -467,7 +471,20 @@ describe('InspectorPanel', () => {
           {
             seq: 3,
             ts: '2026-07-04T00:00:02Z',
-            event: { kind: 'compact_replaced', summary: 'Hello!', replacedCount: 3, tokensBefore: 1008, tokensAfter: 2 },
+            event: {
+              kind: 'compact_replaced',
+              preserveFrom: 3,
+              request: {
+                model: 'gpt-test',
+                systemPrompt: 'compact prompt',
+                messages: compactMessages,
+                tools: [],
+              },
+              summary: 'Hello!',
+              replacedCount: 3,
+              tokensBefore: 1008,
+              tokensAfter: 2,
+            },
             effects: [],
           },
         ]}
@@ -478,6 +495,7 @@ describe('InspectorPanel', () => {
     fireEvent.click(screen.getAllByTestId('timeline-row-header')[2]!)
     const details = screen.getByTestId('timeline-row-details')
     expect(details.textContent ?? '').toContain('Compaction Request')
-    expect(details.textContent ?? '').toContain('reconstructed_from_timeline')
+    expect(details.textContent ?? '').toContain('compact prompt')
+    expect(details.textContent ?? '').not.toContain('reconstructed_from_timeline')
   })
 })

@@ -18,6 +18,15 @@ const wsA: AttachedExecutor = {
   attachedAt: '2026-07-05T10:00:00.000Z',
 }
 
+const wsB: AttachedExecutor = {
+  ...wsA,
+  executorId: 'ex-b',
+  workspaceId: 'ws-b',
+  workspaceName: 'linux-box',
+  sandboxRoots: ['/work/project'],
+  os: 'linux',
+}
+
 type Handler = (payload: DirListResult) => void
 
 function makeSocket(): {
@@ -135,5 +144,27 @@ describe('NewSessionDialog', () => {
       workspaceName: 'mbp',
       cwd: '/tmp/root/manual',
     })
+  })
+
+  it('preselects the requested workspace', async () => {
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA, wsB]}
+        initialWorkspaceId="ws-b"
+        socket={harness.socket as never}
+        onCreate={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(harness.socket.emit).toHaveBeenCalledWith(
+        'client:list_dirs',
+        expect.objectContaining({ workspaceId: 'ws-b', path: '/work/project' }),
+      )
+    })
+    expect(screen.getByDisplayValue('/work/project')).toBeTruthy()
   })
 })

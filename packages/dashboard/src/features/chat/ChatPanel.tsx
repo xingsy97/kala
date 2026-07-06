@@ -1,7 +1,6 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, memo, useContext, useState } from 'react'
 import {
   Archive,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -50,6 +49,7 @@ type Props = {
   pendingApprovals?: readonly ApprovalRequiredEvent[]
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   onReadOverflow?: (callId: string) => Promise<{ content?: string; error?: string }>
+  footerSlot?: JSX.Element | null
 }
 
 type OverflowReader = (callId: string) => Promise<{ content?: string; error?: string }>
@@ -91,6 +91,7 @@ export function ChatPanel({
   pendingApprovals,
   onApprovalDecision,
   onReadOverflow,
+  footerSlot,
 }: Props): JSX.Element {
   const fallbackItems: TranscriptItem[] = (messages ?? [])
     .filter((message) => message.role !== 'system')
@@ -151,6 +152,12 @@ export function ChatPanel({
             />
           )
         })}
+        {footerSlot ? (
+          // Align with the assistant-message content column: avatar (w-7) +
+          // gap-3 = 2.5rem left inset, so the running/status/approval rows sit
+          // flush under the message body above them instead of the full column.
+          <div className="pl-10">{footerSlot}</div>
+        ) : null}
       </div>
     </OverflowReaderContext.Provider>
   )
@@ -546,7 +553,7 @@ function ThinkingBlock({
   )
 }
 
-function AssistantMarkdown({ text }: { text: string }): JSX.Element {
+const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: string }): JSX.Element {
   return (
     <div
       className={cn(
@@ -579,7 +586,7 @@ function AssistantMarkdown({ text }: { text: string }): JSX.Element {
       </ReactMarkdown>
     </div>
   )
-}
+})
 
 function ToolCallBlock({
   call,
@@ -661,27 +668,9 @@ function ToolCallBlock({
             </div>
           )}
           {isPendingApproval ? (
-            <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onApprovalDecision?.(call.callId, 'reject')}
-                data-testid="approval-reject"
-                className="h-7 px-3 flex-none"
-              >
-                <X className="mr-1 h-3.5 w-3.5" />
-                Reject
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => onApprovalDecision?.(call.callId, 'approve')}
-                data-testid="approval-approve"
-                className="h-7 flex-none bg-emerald-600 px-3 text-white hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600"
-              >
-                <Check className="mr-1 h-3.5 w-3.5" />
-                Approve
-              </Button>
-            </div>
+            <p className="pt-1 text-[11px] italic text-amber-700 dark:text-amber-300">
+              Approve or reject in the composer area below.
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -692,11 +681,13 @@ function ToolCallBlock({
 function ToolResultBlock({
   result,
   toolName,
+  defaultOpen = false,
 }: {
   result: ToolResultContent
   toolName?: string
+  defaultOpen?: boolean
 }): JSX.Element {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const overflowReader = useContext(OverflowReaderContext)
   const isOverflowed = detectOverflowMarker(result.content)
   const [fullOutput, setFullOutput] = useState<
@@ -819,6 +810,43 @@ function ToolCallGroupBlock({
   const rows = renderer({ calls: group.calls, results: group.results })
   const failedCount = rows.filter((r) => !r.ok).length
   const anyPending = group.calls.some((c) => approvalByCallId.has(c.callId))
+  const singleCall = group.calls.length === 1 ? group.calls[0]! : null
+  const singleRow = singleCall ? rows.find((r) => r.callId === singleCall.callId) : null
+  const singleResult = singleCall ? group.results.get(singleCall.callId) ?? null : null
+  const singlePending = singleCall ? approvalByCallId.get(singleCall.callId) ?? null : null
+  const singleStatus = singlePending
+    ? {
+        label: 'Needs approval',
+        className:
+          'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+      }
+    : singleResult
+      ? singleResult.ok
+        ? {
+            label: 'Succeeded',
+            className:
+              'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+          }
+        : {
+            label: 'Failed',
+            className:
+              'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
+          }
+      : singleCall
+        ? {
+            label: 'Pending',
+            className:
+              'bg-background/80 text-muted-foreground',
+          }
+        : null
+
+  const toggleOpen = (): void => {
+    setOpen((v) => {
+      const next = !v
+      if (singleCall) setExpandedCallId(next ? singleCall.callId : null)
+      return next
+    })
+  }
 
   return (
     <div
@@ -833,14 +861,18 @@ function ToolCallGroupBlock({
     >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleOpen}
         className={cn(
           'flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors',
           anyPending
             ? 'hover:bg-amber-100/40 dark:hover:bg-amber-950/30'
             : 'hover:bg-muted',
         )}
-        data-testid={`tool-call-group-toggle-${group.firstCallId}`}
+        data-testid={
+          singleCall
+            ? `grouped-tool-row-${singleCall.callId}`
+            : `tool-call-group-toggle-${group.firstCallId}`
+        }
       >
         <Wrench
           className={cn(
@@ -853,15 +885,32 @@ function ToolCallGroupBlock({
         <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
           {group.toolName}
         </span>
-        <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-           -  {group.calls.length}
-        </span>
+        {singleRow?.primary ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
+            {singleRow.primary}
+          </span>
+        ) : null}
+        {group.calls.length > 1 ? (
+          <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+             -  {group.calls.length}
+          </span>
+        ) : null}
+        {singleStatus ? (
+          <span
+            className={cn(
+              'flex-none rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider',
+              singleStatus.className,
+            )}
+          >
+            {singleStatus.label}
+          </span>
+        ) : null}
         {failedCount > 0 ? (
           <span className="flex-none rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
             {failedCount} failed
           </span>
         ) : null}
-        <span className="flex-1" />
+        {singleCall ? null : <span className="flex-1" />}
         {open ? (
           <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         ) : (
@@ -874,6 +923,29 @@ function ToolCallGroupBlock({
           const result = group.results.get(row.callId)
           const expanded = expandedCallId === row.callId
           const pending = approvalByCallId.get(row.callId) ?? null
+          if (singleCall && row.callId === singleCall.callId) {
+            if (!expanded && !pending) return null
+            return (
+              <div
+                key={row.callId}
+                id={`msg-${messageIndex}-call-${row.callId}`}
+                className="mt-1 flex min-w-0 flex-col gap-2 pl-1"
+              >
+                <ToolCallBlock
+                  call={call}
+                  approval={pending}
+                  onApprovalDecision={onApprovalDecision}
+                />
+                {result ? (
+                  <ToolResultBlock
+                    result={result}
+                    toolName={group.toolName}
+                    defaultOpen
+                  />
+                ) : null}
+              </div>
+            )
+          }
           if (!open && !pending) return null
           return (
             <div

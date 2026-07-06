@@ -28,7 +28,7 @@ Five-column Finder-style shell (see [ADR 0013](../../docs/adr/0013-dashboard-fin
   - **State tree**  -  live JSON view of `AgentState`
   - **Timeline**  -  ordered event list with cursor labels; click an event to inspect it
   - **Effects**  -  per-event effect list (`call_llm`, `call_tool`, `persist`, `emit_progress`, `finish`)
-  - **Usage**  -  running token / cost totals
+  - **Usage**  -  running token totals
   - **Approvals**  -  cards with unified diff for `edit` / `write` tool calls
 - **History** (`src/features/history/`)  -  timeline scrubber + Fork button on every event; lineage bar links back to the parent session.
 - **Settings** (`src/features/settings/`)  -  provider list (auto-imported + user-added), model picker per provider, approval mode default, host / port config.

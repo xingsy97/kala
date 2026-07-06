@@ -6,9 +6,9 @@ import type {
 } from '@agent-kernel/kernel'
 
 /**
- * View-model item emitted after grouping. A "group" collapses  - 2 consecutive
- * tool_call blocks (same tool name) inside one assistant message.content, and
- * hides tool_result blocks that all belong to already-grouped calls.
+ * View-model item emitted after grouping. A "group" represents one or more
+ * consecutive tool_call blocks (same tool name) inside one assistant
+ * message.content, and hides tool_result blocks that belong to grouped calls.
  */
 export type ToolCallGroup = {
   kind: 'tool_call_group'
@@ -21,8 +21,6 @@ export type ToolCallGroup = {
 export type GroupedContentItem =
   | { kind: 'single'; content: MessageContent }
   | ToolCallGroup
-
-const MIN_GROUP_SIZE = 2
 
 export function groupConsecutiveToolCalls(
   content: readonly MessageContent[],
@@ -46,22 +44,18 @@ export function groupConsecutiveToolCalls(
       j += 1
     }
     const run = content.slice(i, j) as ToolCallContent[]
-    if (run.length >= MIN_GROUP_SIZE) {
-      const results = new Map<string, ToolResultContent>()
-      for (const call of run) {
-        const r = resultsByCallId.get(call.callId)
-        if (r) results.set(call.callId, r)
-      }
-      out.push({
-        kind: 'tool_call_group',
-        toolName: c.name,
-        calls: run,
-        results,
-        firstCallId: run[0]!.callId,
-      })
-    } else {
-      for (const call of run) out.push({ kind: 'single', content: call })
+    const results = new Map<string, ToolResultContent>()
+    for (const call of run) {
+      const r = resultsByCallId.get(call.callId)
+      if (r) results.set(call.callId, r)
     }
+    out.push({
+      kind: 'tool_call_group',
+      toolName: c.name,
+      calls: run,
+      results,
+      firstCallId: run[0]!.callId,
+    })
     i = j
   }
   return out
