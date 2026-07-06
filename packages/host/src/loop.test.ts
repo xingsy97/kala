@@ -669,6 +669,66 @@ describe('host loop', () => {
     expect(children[0]!.state.status).toBe('done')
   })
 
+  it('spawned sub-agents run with allow_all regardless of parent approval mode (ADR 0014)', async () => {
+    // Regression: parents in `auto`/`ask` used to hand their mode down to the
+    // child. But sub-agents are headless  -  no dashboard is subscribed to the
+    // child session, so a RequestApprovalEffect would deadlock forever and
+    // the parent would see `tool_result: ok=false, "agent ended with status
+    // awaiting_approval"`. See docs/adr/0014-subagent-approval-mode.md.
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-approval-parent',
+      workspaceId: 'ws-approval',
+      initialApprovalMode: 'auto',
+    })
+    expect(parent.state.approvalMode).toBe('auto')
+
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'agent-approval',
+              name: 'agent',
+              input: { prompt: 'do a thing' },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'child done' }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'parent done' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    const children = store
+      .list()
+      .filter((r) => r.parentSessionId === parent.sessionId)
+    expect(children).toHaveLength(1)
+    expect(children[0]!.state.approvalMode).toBe('allow_all')
+    // Parent's own mode is untouched.
+    expect(store.get(parent.sessionId)!.state.approvalMode).toBe('auto')
+  })
+
   it('pre_tool_use hook blocks the tool call when it fails', async () => {
     const llm = scriptedLlm([
       {
