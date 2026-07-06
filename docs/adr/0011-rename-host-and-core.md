@@ -34,7 +34,7 @@ After the renames, the three concepts have distinct, unambiguous names:
 
 **Keep the v0.1 names.**
 
-*Rejected.* The mismatch between "the package is called core" and "the docs consistently say host" is a real cognitive tax on every new reader. Fixing it now, before Phase 2 code exists, is nearly free; fixing it after Phase 2–6 code exists is a wide refactor.
+*Rejected.* The mismatch between "the package is called core" and "the docs consistently say host" is a real cognitive tax on every new reader. Fixing it early — before host / executor / dashboard code all reference the old name — was nearly free; fixing it later would have been a wide refactor.
 
 **Rename `packages/core/` to `packages/engine/`.**
 
@@ -61,7 +61,7 @@ After the renames, the three concepts have distinct, unambiguous names:
 
 **Bad**:
 - One-time doc-and-code sweep to update every reference to `packages/core/` / `@agent-kernel/core` / `reducer.ts` / `reducer.test.ts`.
-- External references (if any exist yet — currently only internal docs) need updating. Cost is bounded because Phase 2 has not started.
+- External references (if any exist yet — currently only internal docs) need updating. Cost was bounded because the rename happened before host implementation began.
 - Git history for the two renamed files will require `git log --follow` to trace back through the rename. Acceptable.
 
 ## Verification

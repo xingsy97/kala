@@ -63,6 +63,5 @@ An adapter is still free to use Vercel AI SDK internally if that's the cleanest 
 ## Verification
 
 - The interface lives in `packages/host/src/llm/types.ts`.
-- v1 ships two adapters: `anthropic.ts` (Phase 2) and `openai.ts` (Phase 2.5 or first-post-v1).
+- Host ships two adapters: `anthropic.ts` (Messages API) and `openai.ts` (Chat Completions, also handles Codex-compatible endpoints). Both stream SSE.
 - Host is imported by other packages only through `@agent-kernel/host`; provider-specific types must not appear in that public surface. If they do, the adapter is leaking and needs to be tightened.
-- See [`docs/implementation-guide.md`](../implementation-guide.md) §3.2 Step 1 for the concrete build steps.

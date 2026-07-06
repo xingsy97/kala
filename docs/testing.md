@@ -180,7 +180,7 @@ Use `@testing-library/react`. Snapshot tests are permitted but should assert use
 
 ### 5.2 E2e tests (Playwright)
 
-The minimum e2e suite (post-Phase 4):
+The minimum e2e suite for the dashboard:
 1. **Golden path**: open dashboard, create session, send "hi", verify assistant response appears
 2. **Tool call flow**: send "read /tmp/notes.md" (with a mock LLM returning a tool_call), verify approval UI or tool result renders
 3. **Cancellation**: send a long message, click cancel, verify state → done
@@ -200,7 +200,7 @@ The rule is stricter than the general Playwright suite because Playwright fixtur
 
 ---
 
-## 6. Full-system e2e (post-Phase 5)
+## 6. Full-system e2e (dashboard + host + executor + replay/fork)
 
 A single golden-path test that:
 1. Starts Host + Executor + Dashboard
