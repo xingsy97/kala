@@ -28,7 +28,7 @@ export function TodoDock({ todos }: Props): JSX.Element | null {
 
   return (
     <div
-      className="border-t border-border dark:border-border bg-muted dark:bg-card/60"
+      className="bg-muted dark:bg-card/60"
       data-testid="todo-dock"
     >
       <button

@@ -49,7 +49,7 @@ function EditDiff({ input }: { input: EditInput }): JSX.Element {
       className="mt-1.5 basis-full overflow-hidden rounded border border-amber-200 bg-card dark:border-amber-900/60"
       data-testid="diff-preview"
     >
-      <div className="flex items-center justify-between border-b border-border bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center justify-between border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
         <span className="font-mono normal-case text-foreground">{path}</span>
         <span>{replaceAll ? 'edit  -  replace_all' : 'edit'}</span>
       </div>
@@ -76,7 +76,7 @@ function WritePreview({ input }: { input: WriteInput }): JSX.Element {
       className="mt-1.5 basis-full overflow-hidden rounded border border-emerald-200 bg-card dark:border-emerald-900/60"
       data-testid="diff-preview"
     >
-      <div className="flex items-center justify-between border-b border-border bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center justify-between border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
         <span className="font-mono normal-case text-foreground">{path}</span>
         <span>
           write  -  {formatBytes(bytes)}

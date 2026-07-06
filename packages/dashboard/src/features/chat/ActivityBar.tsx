@@ -103,7 +103,7 @@ function activityFor(
       detail: compactStatus.message,
       icon: Check,
       className:
-        'border-border bg-muted text-foreground dark:border-border dark:bg-card/60 dark:text-foreground',
+        'border-border bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
     }
   }
   if (!state) {
@@ -112,7 +112,7 @@ function activityFor(
       detail: 'waiting for session state',
       icon: Clock,
       className:
-        'border-border bg-muted text-foreground dark:border-border dark:bg-card/60 dark:text-foreground',
+        'border-border bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
     }
   }
   if (state.status === 'thinking') {
@@ -151,7 +151,7 @@ function activityFor(
     label: `Agent ${agentStatusLabel(state.status)}`,
     icon: Check,
     className:
-      'border-border bg-muted text-foreground dark:border-border dark:bg-card/60 dark:text-foreground',
+      'border-border bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
   }
 }
 

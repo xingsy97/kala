@@ -46,6 +46,7 @@ Five-column Finder-style shell (see [ADR 0013](../../docs/adr/0013-dashboard-fin
 
 - Wire protocol: [`docs/protocol/wire-protocol.md`](../../docs/protocol/wire-protocol.md)  - 3.2
 - Architecture: [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md)
+- **Visual style rules**: [`STYLE.md`](STYLE.md)  -  surface/border conventions, dark-mode do's-and-don'ts. **Read this before adding any `border-*` class.**
 
 ## Test coverage
 

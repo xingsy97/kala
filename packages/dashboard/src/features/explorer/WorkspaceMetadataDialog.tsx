@@ -60,22 +60,22 @@ export function WorkspaceMetadataDialog({
         className="max-w-2xl overflow-hidden p-0 gap-0"
         data-testid="workspace-metadata-dialog"
       >
-        <DialogHeader className="border-b border-border px-5 py-4">
+        <DialogHeader className="border-b border-border/50 px-5 py-4">
           <DialogTitle>{workspaceName ?? executor?.workspaceName ?? 'Workspace'}</DialogTitle>
           <DialogDescription>
             Identity announced by the executor. Read-only  -  restart the executor to change these values.
           </DialogDescription>
         </DialogHeader>
         <div className="px-5 py-4">
-          <div className="overflow-hidden rounded-md border border-border">
+          <div className="overflow-hidden rounded-md border border-border/50">
             <table className="w-full text-sm">
               <tbody>
                 {rows.map(([label, value], i) => (
                   <tr
                     key={label}
-                    className={i !== rows.length - 1 ? 'border-b border-border' : ''}
+                    className={i !== rows.length - 1 ? 'border-b border-border/50' : ''}
                   >
-                    <th className="w-44 border-r border-border bg-muted/50 px-3 py-2 text-left font-medium">
+                    <th className="w-44 border-r border-border/50 bg-muted/50 px-3 py-2 text-left font-medium">
                       {label}
                     </th>
                     <td className="px-3 py-2 font-mono text-xs break-all">{value}</td>

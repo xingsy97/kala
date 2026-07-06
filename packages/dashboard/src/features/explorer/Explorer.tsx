@@ -208,7 +208,7 @@ function rowHeightFor(node: NodeApi<TreeNode>): number {
 
 function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
   return (
-    <div className="flex items-center justify-between border-b bg-background/80 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <div className="flex items-center justify-between bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
       <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         Explorer
       </span>
