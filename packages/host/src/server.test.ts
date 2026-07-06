@@ -1047,6 +1047,70 @@ describe('wire protocol', () => {
     executor.close()
   })
 
+  it('client:set_cwd rejects running or offline workspace sessions', async () => {
+    const runningSessionId = 'wire-set-cwd-running'
+    await server.store.ensure({
+      sessionId: runningSessionId,
+      defaultConfig: config,
+      workspaceId: 'ws-running',
+      workspaceName: 'running-box',
+    })
+    server.store.get(runningSessionId)!.state.status = 'thinking'
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: runningSessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const runningErr = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.once('session:error', resolve)
+    })
+    dashboard.emit('client:set_cwd', { sessionId: runningSessionId, cwd: '/tmp' })
+    await expect(runningErr).resolves.toMatchObject({
+      scope: 'host',
+      message: 'cannot change cwd while session status is thinking',
+    })
+    expect(server.store.get(runningSessionId)?.state.cwd).toBeUndefined()
+
+    const offlineSessionId = 'wire-set-cwd-offline'
+    await server.store.ensure({
+      sessionId: offlineSessionId,
+      defaultConfig: config,
+      workspaceId: 'ws-offline',
+      workspaceName: 'offline-box',
+    })
+    const offlineDashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: offlineSessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      offlineDashboard.on('session:ready', resolve),
+    )
+    const offlineErr = new Promise<{ scope: string; message: string }>((resolve) => {
+      offlineDashboard.once('session:error', resolve)
+    })
+    offlineDashboard.emit('client:set_cwd', { sessionId: offlineSessionId, cwd: '/tmp' })
+    await expect(offlineErr).resolves.toMatchObject({
+      scope: 'host',
+      message: 'workspace offline',
+    })
+    expect(server.store.get(offlineSessionId)?.state.cwd).toBeUndefined()
+
+    dashboard.close()
+    offlineDashboard.close()
+  })
+
   it('client:compact rejects an empty session without calling the summarizer', async () => {
     const sessionId = 'wire-empty-compact'
     let llmCalls = 0
