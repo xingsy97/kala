@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, Moon, PanelRight, PanelRightClose, Settings, Sun } from 'lucide-react'
+import { FolderOpen, Info, Moon, PanelRight, PanelRightClose, Settings, Sun } from 'lucide-react'
 
 import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
 
@@ -25,6 +25,7 @@ import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
+import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
 import { TodoDock } from './features/chat/TodoDock.js'
 import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
@@ -121,6 +122,7 @@ export function App(): JSX.Element {
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [cwdDraft, setCwdDraft] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [metadataOpen, setMetadataOpen] = useState(false)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
@@ -329,12 +331,18 @@ export function App(): JSX.Element {
   }, [config.explicit, config.sessionId, control.sessions])
 
   const currentCwd = session.state?.cwd ?? currentSession?.currentCwd ?? ''
+  const overrideLabel = currentSession?.label?.trim()
   const firstMsg = currentSession?.firstUserMessage
-  const sessionLabel = firstMsg
-    ? firstMsg.length > 40
-      ? `${firstMsg.slice(0, 40)} - `
+  const sessionLabel =
+    overrideLabel && overrideLabel.length > 0
+      ? overrideLabel.length > 40
+        ? `${overrideLabel.slice(0, 40)} - `
+        : overrideLabel
       : firstMsg
-    : 'new session'
+        ? firstMsg.length > 40
+          ? `${firstMsg.slice(0, 40)} - `
+          : firstMsg
+        : 'new session'
   const chatMessages = visibleMessages(
     session.state?.messages ?? [],
     session.timeline,
@@ -374,6 +382,26 @@ export function App(): JSX.Element {
       setConfig((prev) => ({ ...prev, explicit: true }))
     }
   }
+
+  const changeCwdInline = (cwd: string): void => {
+    if (!cwd || !session.socket) return
+    session.socket.emit('client:set_cwd', {
+      sessionId: config.sessionId,
+      cwd,
+    })
+    if (!config.explicit) {
+      setConfig((prev) => ({ ...prev, explicit: true }))
+    }
+  }
+
+  const executorHost = useMemo(() => {
+    if (!currentSession?.workspaceId) return undefined
+    const ex = control.executors.find(
+      (e) => e.workspaceId === currentSession.workspaceId,
+    )
+    if (!ex) return undefined
+    return ex.hostname ?? ex.ipAddresses?.[0]
+  }, [currentSession?.workspaceId, control.executors])
 
   return (
     <div className="h-screen w-screen bg-white text-foreground dark:bg-background dark:text-foreground overflow-hidden">
@@ -415,6 +443,7 @@ export function App(): JSX.Element {
               status={session.status}
               onChangeCwd={openCwdDialog}
               onOpenSettings={() => setSettingsOpen(true)}
+              onOpenMetadata={() => setMetadataOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
               inspectorAvailable={wideLayout}
@@ -565,6 +594,18 @@ export function App(): JSX.Element {
         onOpenChange={setCwdDialogOpen}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SessionMetadataDialog
+        open={metadataOpen}
+        onOpenChange={setMetadataOpen}
+        sessionId={config.sessionId}
+        summary={currentSession}
+        state={session.state}
+        selectedModel={session.selectedModel}
+        {...(executorHost !== undefined ? { executorHost } : {})}
+        onRename={(label) => renameSessionAt(config.sessionId, label)}
+        onChangeCwd={changeCwdInline}
+        onChangeApprovalMode={onApprovalModeChange}
+      />
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
         workspaces={control.executors}
@@ -607,6 +648,7 @@ function WorkbenchToolbar({
   status,
   onChangeCwd,
   onOpenSettings,
+  onOpenMetadata,
   onToggleInspector,
   inspectorOpen,
   inspectorAvailable,
@@ -618,6 +660,7 @@ function WorkbenchToolbar({
   status: string
   onChangeCwd(): void
   onOpenSettings(): void
+  onOpenMetadata(): void
   onToggleInspector(): void
   inspectorOpen: boolean
   inspectorAvailable: boolean
@@ -652,6 +695,16 @@ function WorkbenchToolbar({
       </Button>
       <span className="min-w-0 flex-1" />
       <ConnectionStatus status={status} />
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onOpenMetadata}
+        title="Session info"
+        aria-label="open session info"
+        data-testid="metadata-button"
+      >
+        <Info className="h-4 w-4" />
+      </Button>
       <Button
         variant="ghost"
         size="icon"
