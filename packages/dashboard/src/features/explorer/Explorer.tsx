@@ -20,6 +20,7 @@ import {
   Clock3,
   Folder,
   GitFork,
+  Info,
   Loader2,
   MessageSquare,
   Plus,
@@ -55,6 +56,7 @@ type Props = {
   onNewSession(): void
   onDelete(sessionId: string): void
   onRename(sessionId: string, label: string): void
+  onWorkspaceInfo?(workspaceId: string): void
 }
 
 const SESSION_ROW_HEIGHT = 88
@@ -69,6 +71,7 @@ export function Explorer({
   onNewSession,
   onDelete,
   onRename,
+  onWorkspaceInfo,
 }: Props): JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
@@ -140,6 +143,7 @@ export function Explorer({
                     onRename(sess.sessionId, next)
                   }
                 }}
+                onWorkspaceInfo={onWorkspaceInfo}
               />
             )}
           </Tree>
@@ -231,6 +235,7 @@ function Row({
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
+  onWorkspaceInfo,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
@@ -239,10 +244,15 @@ function Row({
   onStartEdit(sess: SessionNode): void
   onCancelEdit(): void
   onSubmitEdit(sess: SessionNode, label: string): void
+  onWorkspaceInfo?(workspaceId: string): void
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
-      <WorkspaceRow node={node as NodeApi<WorkspaceNode>} style={style} />
+      <WorkspaceRow
+        node={node as NodeApi<WorkspaceNode>}
+        style={style}
+        onWorkspaceInfo={onWorkspaceInfo}
+      />
     )
   }
   if (node.data.kind === 'bucket') {
@@ -264,9 +274,11 @@ function Row({
 function WorkspaceRow({
   node,
   style,
+  onWorkspaceInfo,
 }: {
   node: NodeApi<WorkspaceNode>
   style: React.CSSProperties
+  onWorkspaceInfo?(workspaceId: string): void
 }): JSX.Element {
   const w = node.data
   const dotCls = w.online
@@ -278,6 +290,7 @@ function WorkspaceRow({
       : [w.os, w.runtime, w.runtimeVersion, w.ip]
           .filter((s) => typeof s === 'string' && s.length > 0)
           .join(' · ') || 'offline'
+  const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
   return (
     <div
       style={style}
@@ -294,9 +307,24 @@ function WorkspaceRow({
           <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
         <span className={cn('inline-block h-2 w-2 flex-none rounded-full', dotCls)} />
-        <span className="truncate text-[13px] font-semibold text-foreground">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
           {w.name}
         </span>
+        {canShowInfo ? (
+          <button
+            type="button"
+            data-testid={`workspace-info-${w.workspaceId}`}
+            title="Workspace info"
+            aria-label="Workspace info"
+            className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/ws:opacity-100"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (w.workspaceId !== null) onWorkspaceInfo?.(w.workspaceId)
+            }}
+          >
+            <Info className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </div>
       <div className="mt-0.5 truncate pl-6 text-[11px] text-muted-foreground">
         {meta}
