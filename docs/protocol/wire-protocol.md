@@ -98,6 +98,7 @@ Emitted after every kernel `step` call, including no-ops (per SPEC I1, no-ops st
   event: AgentEvent           // the event that was applied
   effects: Effect[]           // effects the kernel emitted for this event
   llmTrace?: LLMTrace         // optional provider-level trace for llm_response
+  model?: string              // model used for llm_response / llm_error, even when llmTrace is absent
 }
 ```
 
@@ -107,6 +108,10 @@ only for LLM responses recorded by hosts that capture provider traces. The
 trace includes the final provider request URL, redacted headers, request body,
 response status, and either the raw response body or a compact streaming
 summary. Authorization secrets MUST be redacted before persistence.
+
+`model` is also event metadata. Hosts SHOULD include it on `llm_response` and
+`llm_error` events whenever the active model is known, even if provider request
+capture was disabled or the adapter did not return an `llmTrace`.
 
 **Extended event kinds**: `event.kind` may be `compact_replaced`,
 `approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union.

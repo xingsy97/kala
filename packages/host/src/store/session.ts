@@ -287,6 +287,7 @@ export class SessionStore {
     nextState: AgentState,
     usageDelta?: UsageTotal,
     llmTrace?: LLMTrace,
+    model?: string,
   ): Promise<void> {
     const rec = this.records.get(sessionId)
     if (!rec) throw new Error(`Cannot record on unknown session: ${sessionId}`)
@@ -297,6 +298,7 @@ export class SessionStore {
       effects,
       ...(usageDelta ? { usage: usageDelta } : {}),
       ...(llmTrace ? { llmTrace } : {}),
+      ...(model ? { model } : {}),
     })
     rec.state = nextState
   }

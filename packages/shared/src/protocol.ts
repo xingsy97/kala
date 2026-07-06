@@ -70,6 +70,7 @@ export type EventAppendedEvent = {
   event: AgentEvent
   effects: readonly Effect[]
   llmTrace?: LLMTrace
+  model?: string
 }
 
 export const SESSION_ERROR_SCOPES = ['kernel', 'llm', 'executor', 'host'] as const

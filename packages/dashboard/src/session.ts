@@ -39,6 +39,7 @@ export type TimelineEntry = {
   event: AgentEvent
   effects: readonly Effect[]
   llmTrace?: LLMTrace
+  model?: string
 }
 
 export type ConnectionStatus =
@@ -147,6 +148,7 @@ export function useSession({
         event: e.event,
         effects: e.effects,
         ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
+        ...(e.model ? { model: e.model } : {}),
       }))
       setTimeline((prev) => mergeBySeq(prev, entries))
     })
@@ -173,6 +175,7 @@ export function useSession({
             event: p.event,
             effects: p.effects,
             ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
+            ...(p.model ? { model: p.model } : {}),
           },
         ]),
       )

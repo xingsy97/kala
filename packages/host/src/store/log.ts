@@ -74,6 +74,7 @@ export type AppendEventParams = {
   effects: readonly Effect[]
   usage?: UsageTotal
   llmTrace?: LLMTrace
+  model?: string
 }
 
 export async function appendEventEntry(
@@ -87,6 +88,7 @@ export async function appendEventEntry(
     effects: params.effects,
     ...(params.usage ? { usage: params.usage } : {}),
     ...(params.llmTrace ? { llmTrace: params.llmTrace } : {}),
+    ...(params.model ? { model: params.model } : {}),
   }
   await appendFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
   return entry

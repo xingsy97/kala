@@ -108,6 +108,38 @@ describe('host loop', () => {
     void state
   })
 
+  it('records the active model on LLM response entries and broadcasts', async () => {
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'model captured' }],
+        },
+        usage: { inputTokens: 7, outputTokens: 4 },
+      },
+    ])
+    const seenEvents: Array<{ event: string; model?: string }> = []
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: {
+        ...silentBroadcast(),
+        onEvent(_sessionId, _seq, event, _effects, _state, _llmTrace, model) {
+          seenEvents.push({ event: event.kind, model })
+        },
+      },
+      models: { get: () => 'claude-sonnet-4-6' },
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const response = parsed.events.find((entry) => entry.event.kind === 'llm_response')
+    expect(response?.model).toBe('claude-sonnet-4-6')
+    expect(seenEvents).toContainEqual({ event: 'llm_response', model: 'claude-sonnet-4-6' })
+  })
+
   it('drives a tool call round-trip', async () => {
     const llm = scriptedLlm([
       {
