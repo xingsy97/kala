@@ -80,7 +80,7 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test
-      - run: pnpm run build:release-assets -- --component ${{ steps.release.outputs.component }}
+      - run: pnpm run build:release-assets -- --component ${{ steps.release.outputs.component }} --tag ${{ steps.release.outputs.tag }} --repo ${{ github.repository }}
       - run: pnpm run verify:release-assets
 
       - name: Create or update GitHub Release
@@ -90,9 +90,10 @@ jobs:
           COMPONENT: ${{ steps.release.outputs.component }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
             gh release upload "$TAG" release/* --clobber
           else
             gh release create "$TAG" release/* \
               --title "$TAG" \
-              --notes "agent-kernel $COMPONENT release assets. See manifest.json and SHA256SUMS."
+              --notes-file release/RELEASE_NOTES.md
           fi

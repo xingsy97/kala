@@ -58,6 +58,9 @@ Current assets:
 | `agent-kernel-host.cjs`                | Single-file Node 22 executable for the host CLI. |
 | `agent-kernel-executor.cjs`            | Single-file Node 22 executable for the executor. |
 | `agent-kernel-dashboard-dist.tar.gz`   | Static dashboard bundle served by the host.      |
+| `run-host.sh`                          | Bash bootstrap that downloads, verifies, and runs the host asset. |
+| `run-executor.sh`                      | Bash bootstrap that downloads, verifies, and runs the executor asset. |
+| `RELEASE_NOTES.md`                     | Generated GitHub Release body with one-line startup commands. |
 | `manifest.json`                        | Asset manifest and runtime notes.                |
 | `SHA256SUMS`                           | Checksums for release verification.              |
 
@@ -65,20 +68,38 @@ Tag behavior:
 
 | Tag pattern       | Uploaded assets                                      |
 | ----------------- | ---------------------------------------------------- |
-| `v*`              | Host, executor, dashboard tarball, manifest, sums.   |
-| `host-v*`         | Host, dashboard tarball, manifest, sums.             |
-| `executor-v*`     | Executor, manifest, sums.                            |
-| `dashboard-v*`    | Dashboard tarball, manifest, sums.                   |
+| `v*`              | Host, executor, dashboard tarball, host/executor bootstraps, release notes, manifest, sums. |
+| `host-v*`         | Host, dashboard tarball, host bootstrap, release notes, manifest, sums. |
+| `executor-v*`     | Executor, executor bootstrap, release notes, manifest, sums. |
+| `dashboard-v*`    | Dashboard tarball, release notes, manifest, sums.    |
 
 These are single-file Node executables, not native binaries. They require
-Node.js 22 or newer. To serve the dashboard with the host asset, unpack the
-dashboard tarball and set `DASHBOARD_DIR`:
+Node.js 22 or newer. The recommended release entrypoint is the bash bootstrap,
+not piping a Node.js file directly into `node`. The bootstrap downloads the
+matching `.cjs` asset plus `SHA256SUMS`, verifies checksums, and then starts the
+component.
+
+Example one-line commands for a full release tag:
+
+```bash
+curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.2.0/run-host.sh | bash
+curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.2.0/run-executor.sh | HOST_URL=http://localhost:3000 bash
+wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run-host.sh | bash
+wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run-executor.sh | HOST_URL=http://localhost:3000 bash
+```
+
+To serve the dashboard manually with the host asset, unpack the dashboard
+tarball and set `DASHBOARD_DIR`:
 
 ```bash
 tar -xzf agent-kernel-dashboard-dist.tar.gz -C /tmp/agent-kernel-dashboard
 DASHBOARD_DIR=/tmp/agent-kernel-dashboard node agent-kernel-host.cjs
 HOST_URL=http://localhost:3000 node agent-kernel-executor.cjs
 ```
+
+The release workflow uploads all generated assets and uses `RELEASE_NOTES.md`
+as the GitHub Release body. Updating an existing release also replaces its
+notes before uploading assets with `--clobber`.
 
 Local dry run:
 
