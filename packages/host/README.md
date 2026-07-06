@@ -13,7 +13,7 @@ Host is the only process with a public IP. It owns:
 3. **Session store** (`src/store/`)  -  in-memory session map + append-only JSONL log per session on disk. Recovers stuck sessions on load; `store/replay.ts` reconstructs state via `fold`.
 4. **Connection layer** (`src/connection/`)  -  Socket.IO server with two namespaces (`/dashboard`, `/executor`), per-session rooms, workspace-based `tool:call` routing.
 5. **Dashboard bundle server**  -  serves `packages/dashboard/dist/` from `/` so a single Host process is enough for a running product.
-6. **Provider auto-import** (`src/config.ts`)  -  merges `~/.agent-kernel/config.json` with providers auto-imported from `~/.codex/config.toml` and `~/.claude/settings.json`.
+6. **Provider/model auto-import** (`src/runtime-config.ts`)  -  reads `~/.claude/settings.json` and `~/.codex/config.toml`, then merges manual model ids from `~/.config/agent-kernel/models.json`.
 
 ## What it does NOT do
 

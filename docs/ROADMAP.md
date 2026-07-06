@@ -32,7 +32,7 @@ The single process with a public IP. LLM calls, event persistence, Socket.IO ser
 - `src/connection/server.ts`  -  Socket.IO server with two namespaces (`/dashboard`, `/executor`), per-session rooms, workspace-based `tool:call` routing.
 - `src/connection/dashboard.ts`  -  dashboard event handlers.
 - `src/connection/executor.ts`  -  executor event handlers.
-- `src/config.ts`  -  auto-imports providers from `~/.codex/config.toml` and `~/.claude/settings.json`, merged with `~/.agent-kernel/config.json`.
+- `src/runtime-config.ts`  -  auto-imports providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merged with manual model ids in `~/.config/agent-kernel/models.json`.
 - `bin/agent-kernel-host.ts`  -  CLI. Also serves `packages/dashboard/dist/`.
 
 Plus `packages/shared/src/protocol.ts`  -  wire protocol types shared across host / executor / dashboard.
@@ -41,7 +41,7 @@ Plus `packages/shared/src/protocol.ts`  -  wire protocol types shared across hos
 
 Node daemon that dials out to Host. No inbound port required (see [ADR 0002](adr/0002-reverse-websocket.md)).
 
-- `src/tools/`  -  one file per tool from [tools.md](tools.md): `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash`, `todowrite`, `web_search`, `bash_output`, `kill_shell`.
+- `src/tools/`  -  one file per tool from [tools.md](tools.md): `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash`, `todowrite`, `memory`, `web_search`, `bash_output`, `kill_shell`.
 - `src/tools/index.ts`  -  tool registry + input-schema validation (ajv).
 - `src/sandbox.ts`  -  workspace whitelist enforcement (symlink-aware).
 - `src/client.ts`  -  Socket.IO client to Host; announces `workspaceId` / `workspaceName` / `os` / `runtime` / `sandboxRoots` / tool names; handles `tool:call` / `fs:list_dirs` / cancel.
