@@ -818,6 +818,70 @@ describe('wire protocol', () => {
     executor.close()
   })
 
+  it('client:create_session backfills workspace and cwd on an existing unbound session', async () => {
+    const sessionId = 'wire-create-session-backfill-cwd'
+    const root = resolve(dir, 'backfill-root')
+    const child = resolve(root, 'child')
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', {
+      executorId: 'ex-create-backfill-cwd',
+      workspaceId: 'ws-create-backfill-cwd',
+      workspaceName: 'cwd-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+    await waitForWorkspace(dashboard, 'ws-create-backfill-cwd')
+
+    const ready = new Promise<SessionReadyEvent>((resolve) => {
+      dashboard.off('session:ready')
+      dashboard.on('session:ready', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-create-backfill-cwd',
+      workspaceName: 'cwd-box',
+      cwd: child,
+    })
+
+    const createdReady = await ready
+    expect(createdReady.workspaceId).toBe('ws-create-backfill-cwd')
+    expect(createdReady.state.cwd).toBe(child)
+    expect(server.store.get(sessionId)?.workspaceId).toBe('ws-create-backfill-cwd')
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    const reloaded = await server.store.load(sessionId)
+    expect(reloaded.workspaceId).toBe('ws-create-backfill-cwd')
+    expect(reloaded.state.cwd).toBe(child)
+
+    dashboard.close()
+    executor.close()
+  })
+
   it('client:list_dirs returns directory entries from the selected executor', async () => {
     const sessionId = 'wire-list-dirs'
     const root = resolve(dir, 'dir-root')

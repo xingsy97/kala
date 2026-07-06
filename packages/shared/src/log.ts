@@ -74,15 +74,16 @@ export type SnapshotEntry = {
 }
 
 /**
- * Out-of-band metadata mutation. Currently only session label. Kept out of
- * the kernel event stream because label has no effect on state transitions —
- * folding it in would force every reducer test to reason about a field that
- * exists only for display. Append-only: reading picks the most recent entry.
+ * Out-of-band metadata mutation. Kept out of the kernel event stream because
+ * these fields do not affect reducer transitions. Append-only: reading picks
+ * the most recent entry for each field.
  */
 export type MetadataEntry = {
   kind: 'metadata'
   ts: string
   label?: string
+  workspaceId?: string
+  workspaceName?: string
 }
 
 export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry | MetadataEntry

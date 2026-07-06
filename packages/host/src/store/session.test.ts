@@ -81,6 +81,56 @@ describe('SessionStore.ensure', () => {
     expect(readdirSync(dir).length).toBe(filesBefore)
   })
 
+  it('backfills missing workspace and initial cwd on an existing cached session', async () => {
+    const store = new SessionStore(dir)
+    const first = await store.ensure({
+      sessionId: 'sess-backfill-cached',
+      defaultConfig: config,
+    })
+
+    const backfilled = await store.ensure({
+      sessionId: 'sess-backfill-cached',
+      defaultConfig: config,
+      workspaceId: 'ws-backfill',
+      workspaceName: 'backfill-box',
+      initialCwd: '/tmp/backfill',
+    })
+
+    expect(backfilled.record).toBe(first.record)
+    expect(backfilled.created).toBe(false)
+    expect(backfilled.record.workspaceId).toBe('ws-backfill')
+    expect(backfilled.record.workspaceName).toBe('backfill-box')
+    expect(backfilled.record.state.cwd).toBe('/tmp/backfill')
+
+    const reloaded = await new SessionStore(dir).load('sess-backfill-cached')
+    expect(reloaded.workspaceId).toBe('ws-backfill')
+    expect(reloaded.workspaceName).toBe('backfill-box')
+    expect(reloaded.state.cwd).toBe('/tmp/backfill')
+  })
+
+  it('does not overwrite existing workspace or cwd during ensure backfill', async () => {
+    const store = new SessionStore(dir)
+    const first = await store.ensure({
+      sessionId: 'sess-no-overwrite',
+      defaultConfig: config,
+      workspaceId: 'ws-original',
+      workspaceName: 'original-box',
+      initialCwd: '/tmp/original',
+    })
+
+    await store.ensure({
+      sessionId: 'sess-no-overwrite',
+      defaultConfig: config,
+      workspaceId: 'ws-new',
+      workspaceName: 'new-box',
+      initialCwd: '/tmp/new',
+    })
+
+    expect(first.record.workspaceId).toBe('ws-original')
+    expect(first.record.workspaceName).toBe('original-box')
+    expect(first.record.state.cwd).toBe('/tmp/original')
+  })
+
   it('reloads a persisted session from disk instead of creating anew', async () => {
     // First instance creates the log; a fresh store rehydrates from disk.
     const store1 = new SessionStore(dir)
