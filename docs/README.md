@@ -11,7 +11,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [SPEC.md](SPEC.md) | The kernel contract — types, state machine, invariants |
 | [protocol/wire-protocol.md](protocol/wire-protocol.md) | Every Socket.IO event between Dashboard, Host, and Executor |
 | [protocol/event-log.md](protocol/event-log.md) | JSONL event log format for persistence, replay, fork |
-| [tools.md](tools.md) | The 7 v1 tools Executor ships: schemas, outputs, errors |
+| [tools.md](tools.md) | The Executor tool surface: schemas, outputs, errors |
 
 ## Design and rationale
 

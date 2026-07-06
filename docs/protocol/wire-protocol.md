@@ -751,7 +751,6 @@ Host forwards to Dashboard as `tool:progress`.
 | Host | `server:executor_changed` | Dashboard only (broadcast) |
 | Host | `server:sessions` | Dashboard only (response + broadcast) |
 | Host | `server:session_deleted` | Dashboard only (broadcast) |
-| Host | `server:providers` | Dashboard only (response) |
 | Host | `server:history` | Dashboard only (response) |
 | Host | `server:dir_list` | Dashboard only (response) |
 | Host | `tool:call` | Executor only |

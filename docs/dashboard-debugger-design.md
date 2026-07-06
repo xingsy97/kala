@@ -26,20 +26,22 @@ The UI must make that loop readable without hiding the raw internals. A learner 
 ```text
 Agent Kernel Debugger
 ├─ Overview
-│  ├─ Status, cursor, messages, context usage
-│  └─ pending tool, tool count, memory count, approval mode
-├─ Trace View
+│  └─ Status, event count, context usage, pending tool
+├─ Sidebar Tabs
+│  ├─ Debugger
+│  │  └─ Runtime Objects
+│  │     ├─ State
+│  │     ├─ Tools
+│  │     └─ Memory
+│  └─ Trace View
 │  ├─ Reducer Trace
 │  ├─ LLM Calls
 │  └─ Tool Calls
-├─ Runtime Objects
-│  ├─ State
-│  ├─ Tools
-│  └─ Memory
-└─ Selected Detail
+└─ Detail Modals
    ├─ Event summary + raw JSON
    ├─ LLM I/O for selected LLM calls/responses
    ├─ Tool lifecycle for selected tool calls
+   ├─ Full AgentState JSON
    └─ Compaction request/result for compact events
 ```
 
@@ -73,26 +75,23 @@ contextLimit: 128000
 ├────────────────────────────────────────────────────────────────────┤
 │ Overview                                                           │
 │ ┌──────────────┬──────────────┬──────────────┬───────────────────┐ │
-│ │ Status       │ Events       │ Messages     │ Context           │ │
-│ │ executing    │ 128          │ 24           │ 42180 / 128000    │ │
+│ │ Status       │ Events       │ Context      │ Pending           │ │
+│ │ executing    │ 128          │ 42180/128000 │ edit              │ │
 │ └──────────────┴──────────────┴──────────────┴───────────────────┘ │
-│ ┌──────────────┬──────────────┬──────────────┬───────────────────┐ │
-│ │ Pending      │ Tools        │ Memory       │ Approval          │ │
-│ │ edit         │ 11 · 4 gated │ 2 session    │ ask               │ │
-│ └──────────────┴──────────────┴──────────────┴───────────────────┘ │
+├────────────────────────────────────────────────────────────────────┤
+│ [Debugger] [Trace View]                                            │
+├────────────────────────────────────────────────────────────────────┤
+│ Debugger                                                           │
+│ [State] [Tools] [Memory]                                           │
+│                                                                    │
+│ current runtime object inspector                                   │
 ├────────────────────────────────────────────────────────────────────┤
 │ Trace View                                                         │
 │ [Reducer Trace] [LLM Calls] [Tool Calls]                           │
 │                                                                    │
 │ current trace view content                                         │
 ├────────────────────────────────────────────────────────────────────┤
-│ Runtime Objects                                                    │
-│ [State] [Tools] [Memory]                                           │
-│                                                                    │
-│ current object inspector                                           │
-├────────────────────────────────────────────────────────────────────┤
-│ Selected Detail                                                    │
-│ selected event, LLM call, tool call, or runtime object detail       │
+│ Detail modal opens only after selecting an event/call or View JSON  │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -222,7 +221,7 @@ Tool Calls groups tool request, approval, dispatch, and result by `callId`.
 
 ### 7.1 State
 
-State shows a compact table of important `AgentState` fields and then the complete JSON.
+State shows compact grouped `AgentState` fields in the sidebar. The full JSON is still first-class debugger data, but it opens in a modal via `View JSON` so the right rail stays readable.
 
 ```text
 ┌────────────────────────────────────────────────────────────────────┐
@@ -230,19 +229,39 @@ State shows a compact table of important `AgentState` fields and then the comple
 │ [State] [Tools] [Memory]                                           │
 ├────────────────────────────────────────────────────────────────────┤
 │ State                                                              │
-│ sessionId sess_20260706_cwd_fix                                    │
-│ status executing_tools                                             │
-│ cursor 128                                                         │
-│ cwd /workspace/project     │
-│ approvalMode ask                                                   │
-│ pendingCalls edit · dispatched                                     │
-│ messages 24                                                        │
-│ contextPressure soft                                               │
-│ usage.inputTokens 42180                                            │
-│ usage.outputTokens 6180                                            │
-│                                                                    │
+│ AgentState                                      [View JSON]        │
+│ sess_20260706_cwd_fix                                             │
+│ ┌────────────────────────────┬───────────────────────────────────┐ │
+│ │ Core                       │ Workload                          │ │
+│ │ status executing_tools     │ messages 24                       │ │
+│ │ cursor 128                 │ todos 3                           │ │
+│ │ approval ask               │ pending edit · dispatched         │ │
+│ │ cwd /workspace/...       │ context pressure soft             │ │
+│ ├────────────────────────────┼───────────────────────────────────┤ │
+│ │ Usage                      │ Memory                            │ │
+│ │ input 42180                │ session entries 2                 │ │
+│ │ output 6180                │ keys project_goal,                │ │
+│ │ cache read 32000           │ ui_debugger_preference            │ │
+│ │ cost $0.1264               │                                   │ │
+│ └────────────────────────────┴───────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────┘
+
+After clicking `View JSON`:
+
+┌────────────────────────────────────────────────────────────────────┐
+│ AgentState JSON                                             Close  │
+├────────────────────────────────────────────────────────────────────┤
 │ Full AgentState JSON                                               │
-│ { "sessionId": "sess_20260706_cwd_fix", "status": "executing_tools" }
+│ {                                                                  │
+│   "sessionId": "sess_20260706_cwd_fix",                         │
+│   "status": "executing_tools",                                  │
+│   "messages": [                                                   │
+│     { "role": "system", "content": [{ "type": "text", "text": "You are Codex..." }] },
+│     { "role": "user", "content": [{ "type": "text", "text": "Fix executor relative paths so they follow cwd." }] }
+│   ],                                                               │
+│   "pendingCalls": [{ "callId": "toolu_01J4...", "name": "edit", "status": "dispatched" }],
+│   "cwd": "/workspace/project"
+│ }                                                                  │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -302,7 +321,7 @@ Memory is an object inspector for session/workspace/global scopes. Session entri
 - Tab controls use compact segmented buttons, matching existing dashboard controls.
 - Trace rows use hover background and a 2px selected accent rail. They do not need card borders.
 - Small data tables may use `bg-muted/30` or `bg-background/60` cells and `border-border/50` internal frames.
-- Raw JSON blocks keep their existing `JsonBlock` behavior and should be collapsed by default where data is large.
+- Raw JSON blocks keep their existing `JsonBlock` behavior and should be collapsed by default where data is large. Large raw details open in modals, not inline in the already narrow sidebar.
 - Status colors are semantic only: amber for approval/waiting, emerald for success, rose for error, violet for LLM, sky for user/kernel info.
 
 ## 9. Implementation Notes
