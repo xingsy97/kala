@@ -314,7 +314,7 @@ function ModelsSection({
                   <div className="text-xs text-muted-foreground">
                     <span className="font-mono">{p.wire}</span>
                     {'  -  '}
-                    <SourceBadge source={p.source ?? 'manual'} />
+                    <SourceBadge source={p.source ?? 'unknown'} />
                     {p.baseUrl ? (
                       <>
                         {'  -  '}
@@ -342,7 +342,7 @@ function ModelsSection({
                     >
                       <span className="min-w-0 truncate font-mono">{m.id}</span>
                       <span className="flex flex-none items-center gap-2">
-                        <SourceBadge source={m.source ?? p.source ?? 'manual'} />
+                        <SourceBadge source={m.source ?? p.source ?? 'unknown'} />
                         {m.id === payload.defaultModel ? (
                           <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
                             default
@@ -379,7 +379,9 @@ function SourceBadge({ source }: { source: string }): JSX.Element {
       ? 'Codex'
       : source === 'env'
         ? 'Env'
-        : 'Manual'
+        : source === 'manual'
+          ? 'Manual'
+          : 'Unknown'
   return (
     <span className="rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
       {label}
