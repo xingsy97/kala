@@ -4,7 +4,7 @@
  * These are the primitives that show up in more than one handler cell:
  *   - `noop`                  -  no-state-change result
  *   - `extractToolCalls`      -  filter tool_call content blocks
- *   - `addUsage`              -  accumulate token counts + cost
+ *   - `addUsage`              -  accumulate token counts
  *   - `afterPendingSettled`   -  decide next status after a call finishes
  *   - `withPressure`          -  attach the derived context-pressure level
  *
@@ -42,7 +42,6 @@ export function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
   return {
     inputTokens: total.inputTokens + delta.inputTokens,
     outputTokens: total.outputTokens + delta.outputTokens,
-    costUsd: total.costUsd + (delta.costUsd ?? 0),
     cacheCreationTokens:
       (total.cacheCreationTokens ?? 0) + (delta.cacheCreationTokens ?? 0),
     cacheReadTokens:

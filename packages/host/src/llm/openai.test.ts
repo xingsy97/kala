@@ -329,7 +329,7 @@ describe('openaiAdapter', () => {
     // Reproduces the failure mode where an OpenAI-compatible gateway returns
     // `usage: {}` (or omits individual fields). Passing `undefined` through
     // to the kernel's usage accumulator would produce NaN, silently bricking
-    // the session-long cost/token counter.
+    // the session-long token counter.
     const llm = openaiAdapter({
       apiKey: 'k',
       fetchImpl: mockFetch({

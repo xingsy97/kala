@@ -124,6 +124,10 @@ export type ClientCancel = {
   sessionId: string
 }
 
+export type ClientClear = {
+  sessionId: string
+}
+
 export type ClientCompact = {
   sessionId: string
 }
@@ -384,6 +388,109 @@ export type OverflowContentsResult = {
 }
 
 /**
+ * Background-shell control plane. Runs *alongside* the three built-in tools
+ * (`bash{run_in_background}`, `bash_output`, `kill_shell`)  -  the tools remain
+ * the way the agent starts/reads/kills tasks; these RPCs are the way the
+ * dashboard operator directly observes and controls them without going
+ * through the LLM. See docs/background-shell-design.md.
+ *
+ * Routed by `workspaceId`, not `sessionId`: a background task lives in the
+ * executor, and multiple sessions on the same workspace can watch the same
+ * task.
+ */
+export type BackgroundTaskStatus = 'running' | 'exited' | 'killed' | 'signaled'
+
+export type BackgroundTaskSummary = {
+  taskId: string
+  command: string
+  cwd: string
+  /** ISO timestamp. */
+  startedAt: string
+  /** ISO timestamp; present iff status  -  'running'. */
+  endedAt?: string
+  status: BackgroundTaskStatus
+  /** null while running or when terminated by signal. */
+  exitCode: number | null
+  signal: string | null
+  /** Total stdout+stderr bytes observed (including bytes lost to ring-buffer wrap). */
+  bytesLogged: number
+  /** Bytes dropped because the on-disk log ring buffer wrapped. */
+  bytesTruncated: number
+}
+
+export type ClientListBgTasks = {
+  requestId: string
+  workspaceId: string
+}
+
+export type BgListResult = {
+  requestId: string
+  workspaceId: string
+  tasks: readonly BackgroundTaskSummary[]
+  error?: string
+}
+
+export type ClientReadBgOutput = {
+  requestId: string
+  workspaceId: string
+  taskId: string
+  /** Byte offset into `bytesLogged`. Missing  -  return the whole current buffer. */
+  offset?: number
+  /** Cap on returned slice size. Default 64 KiB, hard cap 1 MiB. */
+  maxBytes?: number
+}
+
+export type BgOutputResult = {
+  requestId: string
+  workspaceId: string
+  taskId: string
+  content: string
+  /** Offset the client should pass next time to continue tailing. */
+  nextOffset: number
+  /** True iff the task has ended (exit/kill/signal). */
+  done: boolean
+  status: BackgroundTaskStatus
+  bytesTruncated: number
+  error?: string
+}
+
+export type ClientKillBgTask = {
+  requestId: string
+  workspaceId: string
+  taskId: string
+}
+
+export type BgKillResult = {
+  requestId: string
+  workspaceId: string
+  taskId: string
+  /** False iff the task was already exited/killed at the time of the request. */
+  killed: boolean
+  error?: string
+}
+
+/**
+ * Executor-originated push. Emitted on spawn, on every ~400 ms while output
+ * is streaming (throttled), and on task end (exit/kill/signal). The optional
+ * `delta` carries the new bytes appended since the previous push so the
+ * dashboard's live tail doesn't need to poll for each chunk.
+ */
+export type ServerBgTaskUpdated = {
+  workspaceId: string
+  task: BackgroundTaskSummary
+  delta?: {
+    /** Offset within `task.bytesLogged` where this delta begins. */
+    fromOffset: number
+    content: string
+  }
+}
+
+export type ServerBgTaskEvicted = {
+  workspaceId: string
+  taskId: string
+}
+
+/**
  * User-initiated `/consolidate-memory` slash command. Host reads the
  * session's messages, runs a single LLM call to extract durable signal,
  * and writes the results into the workspace memory root via the executor's
@@ -606,6 +713,7 @@ export type DashboardClientToServerEvents = {
   'client:user_approve': (payload: ClientUserApprove) => void
   'client:user_reject': (payload: ClientUserReject) => void
   'client:cancel': (payload: ClientCancel) => void
+  'client:clear': (payload: ClientClear) => void
   'client:compact': (payload: ClientCompact) => void
   'client:cancel_stream': (payload: ClientCancelStream) => void
   'client:set_approval_mode': (payload: ClientSetApprovalMode) => void
@@ -626,6 +734,18 @@ export type DashboardClientToServerEvents = {
   'client:delete_queued_message': (payload: ClientDeleteQueuedMessage) => void
   'client:rename_session': (payload: ClientRenameSession) => void
   'client:consolidate_memory': (payload: ClientConsolidateMemory) => void
+  'bg:list': (
+    payload: ClientListBgTasks,
+    ack: (result: BgListResult) => void,
+  ) => void
+  'bg:output': (
+    payload: ClientReadBgOutput,
+    ack: (result: BgOutputResult) => void,
+  ) => void
+  'bg:kill': (
+    payload: ClientKillBgTask,
+    ack: (result: BgKillResult) => void,
+  ) => void
   subscribe: (payload: ClientSubscribe) => void
 }
 
@@ -652,6 +772,8 @@ export type DashboardServerToClientEvents = {
   'server:memory_consolidated': (payload: ConsolidateMemoryResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
+  'server:bg_task_updated': (payload: ServerBgTaskUpdated) => void
+  'server:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
 }
 
 export type ServerMessageQueueEvent = {
@@ -670,6 +792,8 @@ export type QueuedMessagePreview = {
 export type ExecutorClientToServerEvents = {
   'executor:announce': (payload: ExecutorAnnounce) => void
   'executor:tool_result': (payload: ExecutorToolResult) => void
+  'executor:bg_task_updated': (payload: ServerBgTaskUpdated) => void
+  'executor:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
 }
 
 export type ExecutorServerToClientEvents = {
@@ -697,6 +821,18 @@ export type ExecutorServerToClientEvents = {
   'fs:read_overflow': (
     payload: ClientReadOverflow,
     ack: (result: OverflowContentsResult) => void,
+  ) => void
+  'bg:list': (
+    payload: ClientListBgTasks,
+    ack: (result: BgListResult) => void,
+  ) => void
+  'bg:output': (
+    payload: ClientReadBgOutput,
+    ack: (result: BgOutputResult) => void,
+  ) => void
+  'bg:kill': (
+    payload: ClientKillBgTask,
+    ack: (result: BgKillResult) => void,
   ) => void
 }
 

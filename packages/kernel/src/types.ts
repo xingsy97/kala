@@ -145,7 +145,6 @@ export type PendingToolCall = {
 export type UsageTotal = {
   readonly inputTokens: number
   readonly outputTokens: number
-  readonly costUsd: number
   readonly cacheCreationTokens: number
   readonly cacheReadTokens: number
 }
@@ -233,7 +232,6 @@ export type UserMessageEvent = {
 export type UsageDelta = {
   inputTokens: number
   outputTokens: number
-  costUsd?: number
   cacheCreationTokens?: number
   cacheReadTokens?: number
 }
@@ -271,17 +269,22 @@ export type CancelEvent = {
   kind: 'cancel'
 }
 
+export type ClearEvent = {
+  kind: 'clear'
+}
+
 /**
- * Replace state.messages with a single summary. Emitted either by the user
- * (manual `/compact`) or by the host when `contextPressureLevel === 'hard'`.
- * The reducer keeps the initial system prompt (index 0 if role === 'system')
- * and replaces the rest with one `system` message carrying the summary.
- * `usage.inputTokens` is reset to `tokensAfter`; `outputTokens`/`costUsd` are
- * unchanged so cumulative spend stays accurate.
+ * Replace an old prefix of state.messages with a single summary. Emitted either
+ * by the user (manual `/compact`) or by the host when context pressure reaches
+ * the hard tier. `preserveFrom` is a message index chosen by the host; messages
+ * at or after that index are kept verbatim so the most recent user turn and
+ * tool-call chain survive compaction. Use `messages.length` when no tail should
+ * be preserved.
  */
 export type CompactReplacedEvent = {
   kind: 'compact_replaced'
   trigger?: 'manual' | 'auto'
+  preserveFrom: number
   request?: {
     model?: string
     systemPrompt: string
@@ -317,6 +320,7 @@ export type AgentEvent =
   | UserRejectEvent
   | ToolResultEvent
   | CancelEvent
+  | ClearEvent
   | CompactReplacedEvent
   | ApprovalModeChangedEvent
   | CwdChangedEvent

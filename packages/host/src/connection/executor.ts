@@ -22,8 +22,14 @@ import type {
 } from '@agent-kernel/kernel'
 import type {
   AttachedExecutor,
+  BgKillResult,
+  BgListResult,
+  BgOutputResult,
+  ClientKillBgTask,
+  ClientListBgTasks,
   ClientListDirs,
   ClientListFiles,
+  ClientReadBgOutput,
   ClientReadFile,
   ClientReadOverflow,
   DirListResult,
@@ -69,6 +75,9 @@ export type ExecutorLookup = {
   listFiles(payload: ClientListFiles): Promise<FileListResult>
   readFile(payload: ClientReadFile): Promise<FileContentsResult>
   readOverflow(payload: ClientReadOverflow, workspaceId: string): Promise<OverflowContentsResult>
+  listBg(payload: ClientListBgTasks): Promise<BgListResult>
+  readBg(payload: ClientReadBgOutput): Promise<BgOutputResult>
+  killBg(payload: ClientKillBgTask): Promise<BgKillResult>
 }
 
 export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
@@ -442,6 +451,93 @@ export function createExecutorRegistry(
           })
         }, toolTimeoutMs)
         bind.socket.emit('fs:read_overflow', payload, (result: OverflowContentsResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async listBg(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          tasks: [],
+          error: 'workspace offline',
+        }
+      }
+      return await new Promise<BgListResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({
+            requestId: payload.requestId,
+            workspaceId: payload.workspaceId,
+            tasks: [],
+            error: 'bg:list timed out',
+          })
+        }, toolTimeoutMs)
+        bind.socket.emit('bg:list', payload, (result: BgListResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async readBg(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          taskId: payload.taskId,
+          content: '',
+          nextOffset: 0,
+          done: true,
+          status: 'exited',
+          bytesTruncated: 0,
+          error: 'workspace offline',
+        }
+      }
+      return await new Promise<BgOutputResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({
+            requestId: payload.requestId,
+            workspaceId: payload.workspaceId,
+            taskId: payload.taskId,
+            content: '',
+            nextOffset: 0,
+            done: true,
+            status: 'exited',
+            bytesTruncated: 0,
+            error: 'bg:output timed out',
+          })
+        }, toolTimeoutMs)
+        bind.socket.emit('bg:output', payload, (result: BgOutputResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async killBg(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          taskId: payload.taskId,
+          killed: false,
+          error: 'workspace offline',
+        }
+      }
+      return await new Promise<BgKillResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({
+            requestId: payload.requestId,
+            workspaceId: payload.workspaceId,
+            taskId: payload.taskId,
+            killed: false,
+            error: 'bg:kill timed out',
+          })
+        }, toolTimeoutMs)
+        bind.socket.emit('bg:kill', payload, (result: BgKillResult) => {
           clearTimeout(timer)
           resolve(result)
         })

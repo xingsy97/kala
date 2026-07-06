@@ -14,16 +14,20 @@
 import type {
   ClientCancel,
   ClientCancelStream,
+  ClientClear,
   ClientCompact,
   ClientConsolidateMemory,
   ClientCreateSession,
   ClientDeleteSession,
   ClientFork,
+  ClientKillBgTask,
+  ClientListBgTasks,
   ClientListDirs,
   ClientListExecutors,
   ClientListFiles,
   ClientListSessions,
   ClientLoadHistory,
+  ClientReadBgOutput,
   ClientReadFile,
   ClientReadOverflow,
   ClientDeleteQueuedMessage,
@@ -258,6 +262,12 @@ export function configureDashboardNamespace(
       const evt: AgentEvent = { kind: 'cancel' }
       await safeDispatch(deps, p.sessionId, evt)
     })
+    socket.on('client:clear', async (p: ClientClear) => {
+      deps.loopDeps.tools.cancelPending(p.sessionId)
+      deps.loop.cancelStream(p.sessionId)
+      const evt: AgentEvent = { kind: 'clear' }
+      await safeDispatch(deps, p.sessionId, evt)
+    })
     socket.on('client:compact', async (p: ClientCompact) => {
       try {
         let record: SessionRecord | undefined = deps.store.get(p.sessionId)
@@ -385,6 +395,19 @@ export function configureDashboardNamespace(
       }
       const result = await deps.executors.readOverflow(p, workspaceId)
       socket.emit('server:overflow_contents', result)
+    })
+    socket.on('bg:list', async (p: ClientListBgTasks, ack) => {
+      await socket.join(`workspace:${p.workspaceId}`)
+      const result = await deps.executors.listBg(p)
+      ack(result)
+    })
+    socket.on('bg:output', async (p: ClientReadBgOutput, ack) => {
+      const result = await deps.executors.readBg(p)
+      ack(result)
+    })
+    socket.on('bg:kill', async (p: ClientKillBgTask, ack) => {
+      const result = await deps.executors.killBg(p)
+      ack(result)
     })
     socket.on('client:consolidate_memory', async (p: ClientConsolidateMemory) => {
       const outcome = await consolidateMemory(deps.loopDeps, p.sessionId).catch(

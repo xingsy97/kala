@@ -40,6 +40,8 @@ import {
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
 import { listDirs, listFiles, readOverflowFile, readWorkspaceFile } from './fs-handlers.js'
+import { handleBgKill, handleBgList, handleBgOutput } from './bg-handlers.js'
+import { subscribeBackgroundTasks } from './tools/background-shell.js'
 
 export type ExecutorOptions = {
   /** Host URL (e.g. `wss://host.example.com` or `http://localhost:3000`). */
@@ -165,6 +167,33 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     ack(await readOverflowFile(payload, sandbox))
   })
 
+  socket.on('bg:list', async (payload, ack) => {
+    ack(await handleBgList(payload))
+  })
+
+  socket.on('bg:output', async (payload, ack) => {
+    ack(await handleBgOutput(payload))
+  })
+
+  socket.on('bg:kill', async (payload, ack) => {
+    ack(await handleBgKill(payload))
+  })
+
+  const unsubscribeBg = subscribeBackgroundTasks((change) => {
+    if (change.kind === 'evicted') {
+      socket.emit('executor:bg_task_evicted', {
+        workspaceId,
+        taskId: change.taskId,
+      })
+      return
+    }
+    socket.emit('executor:bg_task_updated', {
+      workspaceId,
+      task: change.task,
+      ...(change.kind === 'output' ? { delta: change.delta } : {}),
+    })
+  })
+
   return {
     executorId,
     workspaceId,
@@ -172,6 +201,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     socket,
     ready,
     close() {
+      unsubscribeBg()
       for (const c of inFlight.values()) c.abort()
       inFlight.clear()
       socket.disconnect()
