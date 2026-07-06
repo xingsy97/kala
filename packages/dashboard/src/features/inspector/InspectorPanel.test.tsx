@@ -113,7 +113,13 @@ describe('InspectorPanel', () => {
 
     expect(screen.getByText('Agent Kernel Debugger')).toBeTruthy()
     expect(screen.getByTestId('inspector-sidebar-tabs')).toBeTruthy()
-    expect(screen.getByTestId('debugger-sidebar-tabpanel')).toBeTruthy()
+    expect(screen.getByTestId('inspector-view-panel-trace')).toBeTruthy()
+    expect(screen.getByTestId('inspector-sidebar-tab-trace').textContent ?? '').toContain('Trace')
+    expect(screen.getByTestId('inspector-sidebar-tab-llm').textContent ?? '').toContain('LLM API')
+    expect(screen.getByTestId('inspector-sidebar-tab-tools').textContent ?? '').toContain('Tool Call')
+    expect(screen.getByTestId('inspector-sidebar-tab-status').textContent ?? '').toContain('Status')
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-status'))
+    expect(screen.getByTestId('inspector-view-panel-status')).toBeTruthy()
     expect(screen.getByText('Runtime Objects')).toBeTruthy()
     expect(screen.queryByText('Selected Detail')).toBeNull()
     expect(screen.getByText('No AgentState loaded.')).toBeTruthy()
@@ -128,13 +134,14 @@ describe('InspectorPanel', () => {
     expect(overview.textContent ?? '').not.toContain('Approval')
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    expect(screen.getByTestId('trace-sidebar-tabpanel')).toBeTruthy()
+    expect(screen.getByTestId('inspector-view-panel-trace')).toBeTruthy()
     expect(screen.getByText('No reducer events yet.')).toBeTruthy()
   })
 
   it('shows compact AgentState groups and opens full JSON on demand', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-status'))
     const stateRuntime = screen.getByTestId('state-runtime')
     expect(stateRuntime.textContent ?? '').toContain('Core')
     expect(stateRuntime.textContent ?? '').toContain('Workload')
@@ -148,42 +155,45 @@ describe('InspectorPanel', () => {
     expect(screen.getByText('Full AgentState JSON')).toBeTruthy()
   })
 
-  it('combines event timeline and state flow in Reducer Trace rows', () => {
+  it('combines event timeline and state flow in Trace rows', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    expect(screen.getByTestId('trace-view-switch')).toBeTruthy()
     expect(screen.getAllByTestId('timeline-row')).toHaveLength(4)
     expect(document.body.textContent ?? '').toContain('idle  -  thinking')
     expect(document.body.textContent ?? '').toContain('thinking  -  awaiting_approval')
     expect(document.body.textContent ?? '').toContain('request_approval')
   })
 
-  it('shows LLM calls with message assembly, provider payload, and response tabs', () => {
+  it('shows LLM calls with message assembler and API call tabs', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 
-    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    fireEvent.click(screen.getByTestId('trace-view-switch-llm'))
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
     expect(screen.getAllByTestId('llm-call-row')).toHaveLength(2)
     expect(document.body.textContent ?? '').toContain('anthropic / claude-sonnet-4-6')
     expect(document.body.textContent ?? '').toContain('provider trace captured')
 
     fireEvent.click(screen.getAllByTestId('llm-call-row')[0]!)
     const detail = screen.getByTestId('llm-detail')
-    expect(detail.textContent ?? '').toContain('LLM Message Assembly')
+    expect(detail.textContent ?? '').toContain('Message Assembler')
+    expect(detail.textContent ?? '').toContain('API Call')
+    expect(screen.getByTestId('message-assembler-view')).toBeTruthy()
     expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('System Prompt')
     expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('Adapter Transform')
     expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('messages')
     expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('tools')
+    expect(screen.getByTestId('llm-context-view')).toBeTruthy()
 
-    fireEvent.click(screen.getByTestId('llm-detail-view-switch-payload'))
-    expect(screen.getByTestId('provider-payload-view').textContent ?? '').toContain('Provider Request')
-    expect(screen.getByTestId('provider-payload-view').textContent ?? '').toContain('Kernel Request')
-    expect(screen.getByTestId('provider-payload-view').textContent ?? '').toContain('test-redacted-api-key')
-
-    fireEvent.click(screen.getByTestId('llm-detail-view-switch-response'))
-    expect(screen.getByTestId('llm-response-view').textContent ?? '').toContain('Provider Response')
-    expect(screen.getByTestId('llm-response-view').textContent ?? '').toContain('Parsed Kernel Response')
+    fireEvent.click(screen.getByTestId('llm-detail-view-switch-api'))
+    const apiCall = screen.getByTestId('api-call-view').textContent ?? ''
+    expect(apiCall).toContain('Captured API Request')
+    expect(apiCall).toContain('Captured API Response')
+    expect(apiCall).toContain('Parsed Kernel Response')
+    expect(apiCall).toContain('https://<redacted>/v1/messages')
+    expect(apiCall).toContain('test-redacted-api-key')
+    expect(apiCall).not.toContain('api.anthropic.com')
+    expect(apiCall).not.toContain('API Request Body')
+    expect(apiCall).not.toContain('Kernel call_llm Effect')
   })
 
   it('shows kernel messages for a selected LLM call', () => {
@@ -236,11 +246,9 @@ describe('InspectorPanel', () => {
     ]
     render(<InspectorPanel state={baseState} timeline={messagesTimeline} />)
 
-    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    fireEvent.click(screen.getByTestId('trace-view-switch-llm'))
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
     expect(document.body.textContent ?? '').toContain('openai / gpt-5.5')
     fireEvent.click(screen.getByTestId('llm-call-row'))
-    fireEvent.click(screen.getByTestId('llm-detail-view-switch-context'))
 
     expect(screen.getByTestId('llm-context-view')).toBeTruthy()
     expect(screen.getByTestId('kernel-messages-view')).toBeTruthy()
@@ -252,6 +260,47 @@ describe('InspectorPanel', () => {
     expect(screen.getByTestId('tool-registry-context-view')).toBeTruthy()
     expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('skill')
     expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('Load a skill.')
+  })
+
+  it('does not round non-empty system context down to 0 percent', () => {
+    const largeTools = Array.from({ length: 20 }, (_, index) => ({
+      name: `tool_${index}`,
+      description: 'large tool description '.repeat(80),
+      inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
+      requiresApproval: false,
+    }))
+    const tinySystemTimeline: TimelineEntry[] = [
+      {
+        seq: 1,
+        ts: '2026-07-06T06:30:00Z',
+        event: { kind: 'user_message', text: 'hi' },
+        effects: [
+          {
+            kind: 'call_llm',
+            messages: [
+              { role: 'system', content: [{ type: 'text', text: 'system prompt' }] },
+              { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+            ],
+            tools: largeTools,
+          },
+        ],
+      },
+      {
+        seq: 2,
+        ts: '2026-07-06T06:30:01Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } },
+        effects: [],
+      },
+    ]
+    render(<InspectorPanel state={baseState} timeline={tinySystemTimeline} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
+    fireEvent.click(screen.getByTestId('llm-call-row'))
+
+    const composition = screen.getByTestId('context-proportion-bar').textContent ?? ''
+    expect(composition).toContain('system')
+    expect(composition).toContain('<1%')
+    expect(composition).not.toContain('system0%')
   })
 
   it('falls back to provider request body when trace model is missing', () => {
@@ -283,8 +332,7 @@ describe('InspectorPanel', () => {
     ]
     render(<InspectorPanel state={baseState} timeline={legacyTraceTimeline} />)
 
-    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    fireEvent.click(screen.getByTestId('trace-view-switch-llm'))
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
     expect(document.body.textContent ?? '').toContain('anthropic / claude-haiku-4-6')
 
     fireEvent.click(screen.getByTestId('llm-call-row'))
@@ -294,8 +342,7 @@ describe('InspectorPanel', () => {
   it('groups tool lifecycle events by call id', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 
-    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    fireEvent.click(screen.getByTestId('trace-view-switch-tools'))
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-tools'))
     expect(screen.getAllByTestId('tool-call-row')).toHaveLength(1)
     expect(document.body.textContent ?? '').toContain('requested #121  -  approved #122  -  result #123')
     expect(document.body.textContent ?? '').toContain('packages/executor/src/sandbox.ts')
@@ -332,6 +379,7 @@ describe('InspectorPanel', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-status'))
     fireEvent.click(screen.getByTestId('runtime-view-switch-tools'))
     expect(screen.getByTestId('tool-registry')).toBeTruthy()
     expect(screen.getAllByText('edit').length).toBeGreaterThan(0)
@@ -367,6 +415,7 @@ describe('InspectorPanel', () => {
       />,
     )
 
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-status'))
     fireEvent.click(screen.getByTestId('runtime-view-switch-tools'))
 
     expect(screen.getByTestId('tool-registry').textContent ?? '').toContain('skill')

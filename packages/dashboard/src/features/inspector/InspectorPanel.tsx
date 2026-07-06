@@ -8,7 +8,6 @@ import {
   Database,
   GitBranch,
   Hammer,
-  History,
   MessageSquare,
   SearchCode,
   ServerCog,
@@ -62,15 +61,15 @@ type Props = {
   onJumpToMessage?(messageIndex: number): void
 }
 
-type TraceView = 'reducer' | 'llm' | 'tools'
 type RuntimeView = 'state' | 'tools' | 'memory'
-type SidebarView = 'debugger' | 'trace'
-type LlmDetailView = 'assembly' | 'context' | 'payload' | 'response'
+type InspectorView = 'trace' | 'llm' | 'tools' | 'status'
+type LlmDetailView = 'assembler' | 'api'
 type ContextProportion = {
   kind: 'system' | 'messages' | 'tools'
   label: string
   bytes: number
   percent: number
+  displayPercent: string
   color: string
 }
 type DetailSelection =
@@ -112,8 +111,7 @@ export function InspectorPanel({
   onFork,
   onJumpToMessage,
 }: Props): JSX.Element {
-  const [sidebarView, setSidebarView] = useState<SidebarView>('debugger')
-  const [traceView, setTraceView] = useState<TraceView>('reducer')
+  const [inspectorView, setInspectorView] = useState<InspectorView>('trace')
   const [runtimeView, setRuntimeView] = useState<RuntimeView>('state')
   const [selected, setSelected] = useState<DetailSelection>(null)
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
@@ -135,10 +133,10 @@ export function InspectorPanel({
         timeline={timeline}
         visibleMessagesCount={visibleMessagesCount}
       />
-      <SidebarTabs value={sidebarView} onChange={setSidebarView} />
+      <InspectorTabs value={inspectorView} onChange={setInspectorView} />
 
-      {sidebarView === 'debugger' ? (
-        <div className="flex min-h-0 flex-1 flex-col" data-testid="debugger-sidebar-tabpanel">
+      {inspectorView === 'status' ? (
+        <div className="flex min-h-0 flex-1 flex-col" data-testid="inspector-view-panel-status">
           <Overview state={state} config={config} timeline={timeline} visibleMessagesCount={visibleMessagesCount} />
           <div className="min-h-0 flex-1">
             <RuntimeSection
@@ -151,10 +149,9 @@ export function InspectorPanel({
           </div>
         </div>
       ) : (
-        <div className="min-h-0 flex-1" data-testid="trace-sidebar-tabpanel">
+        <div className="min-h-0 flex-1" data-testid={`inspector-view-panel-${inspectorView}`}>
           <TraceSection
-            view={traceView}
-            onViewChange={setTraceView}
+            view={inspectorView}
             timeline={timeline}
             flow={flow}
             llmCalls={llmCalls}
@@ -203,28 +200,28 @@ export function InspectorPanel({
   )
 }
 
-function SidebarTabs({ value, onChange }: { value: SidebarView; onChange(view: SidebarView): void }): JSX.Element {
+function InspectorTabs({ value, onChange }: { value: InspectorView; onChange(view: InspectorView): void }): JSX.Element {
+  const options: readonly (readonly [InspectorView, string])[] = [
+    ['trace', 'Trace'],
+    ['llm', 'LLM API'],
+    ['tools', 'Tool Call'],
+    ['status', 'Status'],
+  ]
   return (
     <div className="flex-none bg-card px-3 pb-3" data-testid="inspector-sidebar-tabs">
-      <div className="grid grid-cols-2 rounded bg-sidebar p-0.5 text-xs">
-        <button
-          type="button"
-          onClick={() => onChange('debugger')}
-          className={cn('rounded px-2 py-1.5 font-medium transition-colors', value === 'debugger' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
-          data-testid="inspector-sidebar-tab-debugger"
-          aria-pressed={value === 'debugger'}
-        >
-          Debugger
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange('trace')}
-          className={cn('rounded px-2 py-1.5 font-medium transition-colors', value === 'trace' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
-          data-testid="inspector-sidebar-tab-trace"
-          aria-pressed={value === 'trace'}
-        >
-          Trace View
-        </button>
+      <div className="grid grid-cols-4 rounded bg-sidebar p-0.5 text-xs">
+        {options.map(([view, label]) => (
+          <button
+            key={view}
+            type="button"
+            onClick={() => onChange(view)}
+            className={cn('rounded px-1.5 py-1.5 font-medium transition-colors', value === view ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+            data-testid={`inspector-sidebar-tab-${view}`}
+            aria-pressed={value === view}
+          >
+            {label}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -311,7 +308,6 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
 
 function TraceSection({
   view,
-  onViewChange,
   timeline,
   flow,
   llmCalls,
@@ -322,8 +318,7 @@ function TraceSection({
   onForkRequest,
   onJumpToMessage,
 }: {
-  view: TraceView
-  onViewChange(view: TraceView): void
+  view: Exclude<InspectorView, 'status'>
   timeline: readonly TimelineEntry[]
   flow: readonly StateFlowStep[]
   llmCalls: readonly LlmCall[]
@@ -335,20 +330,8 @@ function TraceSection({
   onJumpToMessage?(messageIndex: number): void
 }): JSX.Element {
   return (
-    <section className="flex h-full min-h-0 flex-col" aria-label="trace view">
-      <SectionHeader icon={History} title="Trace View">
-        <Segmented<TraceView>
-          value={view}
-          onChange={onViewChange}
-          options={[
-            ['reducer', 'Reducer Trace'],
-            ['llm', 'LLM Calls'],
-            ['tools', 'Tool Calls'],
-          ]}
-          testId="trace-view-switch"
-        />
-      </SectionHeader>
-      {view === 'reducer' ? (
+    <section className="flex h-full min-h-0 flex-col" aria-label={view}>
+      {view === 'trace' ? (
         <ReducerTrace
           timeline={timeline}
           flow={flow}
@@ -837,7 +820,7 @@ function DetailDialog({
   const description = detailDescription(selection)
   return (
     <Dialog open={selection !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[86vh] max-w-5xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
+      <DialogContent className="h-[94vh] w-[96vw] max-w-[96vw] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader className="bg-card px-4 py-3">
           <DialogTitle className="flex items-center gap-2 text-base">
             <SearchCode className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -909,15 +892,10 @@ function EventDetail({ selection }: { selection: Extract<DetailSelection, { kind
 }
 
 function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
-  const [view, setView] = useState<LlmDetailView>('assembly')
+  const [view, setView] = useState<LlmDetailView>('assembler')
   const provider = llmCallProvider(call)
   const model = llmCallModel(call)
-  const kernelRequest = {
-    callSeq: call.requestSeq,
-    model: model === 'model unknown' ? null : model,
-    messages: call.effect.messages,
-    tools: call.effect.tools,
-  }
+  const kernelEffect = call.effect
   const parsedResponse = call.response
     ? { responseSeq: call.responseSeq, event: call.response }
     : call.error
@@ -925,95 +903,114 @@ function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
       : { status: 'pending' }
   return (
     <div className="flex h-full min-h-0 flex-col gap-3" data-testid="llm-detail">
-      <div className="flex flex-none items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium text-foreground">LLM Message Assembly</div>
-          <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-            {provider} / {model}
-          </div>
-        </div>
-        <Segmented<LlmDetailView>
-          value={view}
-          onChange={setView}
-          options={[
-            ['assembly', 'Assembly'],
-            ['context', 'Context'],
-            ['payload', 'Provider'],
-            ['response', 'Response'],
-          ]}
-          testId="llm-detail-view-switch"
-        />
-      </div>
-      {view === 'assembly' ? (
-        <LlmAssemblyView call={call} provider={provider} model={model} kernelRequest={kernelRequest} />
-      ) : view === 'context' ? (
-        <LlmContextView messages={call.effect.messages} tools={call.effect.tools} />
-      ) : view === 'payload' ? (
-        <ProviderPayloadView call={call} kernelRequest={kernelRequest} />
+      <PrimaryDetailTabs value={view} onChange={setView} />
+      {view === 'assembler' ? (
+        <MessageAssemblerView call={call} provider={provider} model={model} />
       ) : (
-        <LlmResponseView call={call} parsedResponse={parsedResponse} />
+        <ApiCallView call={call} kernelEffect={kernelEffect} parsedResponse={parsedResponse} />
       )}
     </div>
   )
 }
 
-function LlmAssemblyView({ call, provider, model, kernelRequest }: { call: LlmCall; provider: string; model: string; kernelRequest: unknown }): JSX.Element {
+function PrimaryDetailTabs({ value, onChange }: { value: LlmDetailView; onChange(value: LlmDetailView): void }): JSX.Element {
+  const options: readonly (readonly [LlmDetailView, string])[] = [
+    ['assembler', 'Message Assembler'],
+    ['api', 'API Call'],
+  ]
+  return (
+    <div className="grid flex-none grid-cols-2 rounded bg-card p-0.5 ring-1 ring-border/50" data-testid="llm-detail-view-switch">
+      {options.map(([tab, label]) => (
+        <button
+          key={tab}
+          type="button"
+          onClick={() => onChange(tab)}
+          className={cn(
+            'rounded px-3 py-1.5 text-xs font-medium transition-colors',
+            value === tab
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground',
+          )}
+          data-testid={`llm-detail-view-switch-${tab}`}
+          aria-pressed={value === tab}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function MessageAssemblerView({ call, provider, model }: { call: LlmCall; provider: string; model: string }): JSX.Element {
+  return (
+    <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(22rem,0.92fr)_minmax(0,1.08fr)]" data-testid="message-assembler-view">
+      <DetailPane title="Assembly Pipeline" subtitle="How kernel context is assembled before adapter conversion">
+        <LlmAssemblyView call={call} provider={provider} model={model} />
+      </DetailPane>
+      <DetailPane title="Kernel Messages & Tools" subtitle="Exact call_llm messages and tool registry sent by the kernel">
+        <LlmContextView messages={call.effect.messages} tools={call.effect.tools} />
+      </DetailPane>
+    </div>
+  )
+}
+
+function DetailPane({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden rounded bg-card ring-1 ring-border/70">
+      <div className="flex-none border-b border-border/60 bg-muted/35 px-3 py-2">
+        <div className="text-xs font-semibold text-foreground">{title}</div>
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{subtitle}</div>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col p-3">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+function LlmAssemblyView({ call, provider, model }: { call: LlmCall; provider: string; model: string }): JSX.Element {
   const systemInfo = describeSystemInjection(call)
   const toolNames = call.effect.tools.map((tool) => `${tool.name}${tool.requiresApproval ? ' gated' : ' auto'}`)
   const proportions = contextProportions(call)
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-2 pb-1" data-testid="llm-assembly-view">
-        <KeyValueTable
+    <ScrollArea className="h-full min-h-0 flex-1">
+      <div className="space-y-2" data-testid="llm-assembly-view">
+        <CompactMetricGrid
           rows={[
             ['call', `#${call.requestSeq}  -  ${call.responseSeq ? `#${call.responseSeq}` : 'pending'}`],
-            ['provider', call.trace ? provider : 'kernel only'],
             ['model', model === 'model unknown' ? 'not captured' : model],
-            ['kernel messages', String(call.effect.messages.length)],
+            ['API adapter', call.trace ? apiAdapterLabel(provider) : 'not captured'],
+            ['HTTP trace', call.trace ? 'captured' : 'not captured'],
+            ['messages', String(call.effect.messages.length)],
             ['tools', String(call.effect.tools.length)],
-            ['provider trace', call.trace ? 'captured' : 'not captured in this log'],
           ]}
         />
         {!call.trace ? (
           <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
-            Provider HTTP trace is missing for this log entry. The kernel request below is still the exact `call_llm` input; provider request body is only available for calls recorded after trace capture or after the LLM response arrives.
+            HTTP trace is missing for this log entry. The actual API request is only available when `llmTrace.request` was captured.
           </div>
         ) : null}
         <ContextProportionBar items={proportions} />
         <AssemblyStep
           index="1"
           title="System Prompt"
-          source="AgentConfig.systemPrompt or leading system message"
           result={systemInfo}
         />
         <AssemblyStep
           index="2"
           title="Kernel Messages"
-          source="call_llm.messages emitted by the kernel reducer"
           result={`${call.effect.messages.length} messages: ${roleCounts(call.effect.messages)}`}
         />
         <AssemblyStep
           index="3"
           title="Tool Registry"
-          source="AgentConfig.tools attached to the call_llm effect"
           result={toolNames.length > 0 ? toolNames.join(', ') : 'no tools sent'}
         />
         <AssemblyStep
           index="4"
           title="Adapter Transform"
-          source="host LLM adapter"
           result={adapterTransformSummary(provider)}
         />
-        <div className="grid gap-2 xl:grid-cols-2">
-          <JsonBlock label={`Kernel Request  -  call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={1} className="[&>div:last-child]:max-h-80 [&_[data-radix-scroll-area-viewport]]:max-h-80" />
-          {call.trace ? (
-            <JsonBlock label="Provider Request Body" value={call.trace.request.body} collapsed={1} className="[&>div:last-child]:max-h-80 [&_[data-radix-scroll-area-viewport]]:max-h-80" />
-          ) : (
-            <div className="flex min-h-[12rem] items-center justify-center rounded bg-background/70 px-3 text-center text-xs text-muted-foreground ring-1 ring-border/30">
-              Provider request body was not captured for this call.
-            </div>
-          )}
-        </div>
       </div>
     </ScrollArea>
   )
@@ -1029,7 +1026,7 @@ function ContextProportionBar({ items }: { items: readonly ContextProportion[] }
       </div>
       <div className="mt-2 flex h-3 overflow-hidden rounded bg-muted">
         {nonZero.length > 0 ? nonZero.map((item) => (
-          <div key={item.kind} className={item.color} style={{ width: `${item.percent}%` }} title={`${item.label}: ${item.percent}%`} />
+            <div key={item.kind} className={item.color} style={{ width: `${item.percent}%` }} title={`${item.label}: ${item.displayPercent}`} />
         )) : <div className="w-full bg-muted" />}
       </div>
       <div className="mt-2 grid gap-1 sm:grid-cols-3">
@@ -1037,7 +1034,7 @@ function ContextProportionBar({ items }: { items: readonly ContextProportion[] }
           <div key={item.kind} className="flex min-w-0 items-center gap-1.5">
             <span className={cn('h-2 w-2 flex-none rounded', item.color)} />
             <span className="truncate text-muted-foreground">{item.label}</span>
-            <span className="ml-auto flex-none font-mono text-foreground">{item.percent}%</span>
+            <span className="ml-auto flex-none font-mono text-foreground">{item.displayPercent}</span>
           </div>
         ))}
       </div>
@@ -1045,19 +1042,27 @@ function ContextProportionBar({ items }: { items: readonly ContextProportion[] }
   )
 }
 
-function AssemblyStep({ index, title, source, result }: { index: string; title: string; source: string; result: string }): JSX.Element {
+function AssemblyStep({ index, title, result }: { index: string; title: string; result: string }): JSX.Element {
   return (
     <div className="rounded bg-background/70 p-3 text-xs ring-1 ring-border/30">
       <div className="flex items-center gap-2">
         <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 font-mono text-[10px] text-primary">{index}</span>
         <span className="font-medium text-foreground">{title}</span>
       </div>
-      <div className="mt-2 grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)]">
-        <div className="text-muted-foreground">source</div>
-        <div className="min-w-0 font-mono text-foreground">{source}</div>
-        <div className="text-muted-foreground">result</div>
-        <div className="min-w-0 break-words font-mono text-foreground">{result}</div>
-      </div>
+      <div className="mt-2 min-w-0 break-words font-mono text-foreground">{result}</div>
+    </div>
+  )
+}
+
+function CompactMetricGrid({ rows }: { rows: readonly (readonly [string, string])[] }): JSX.Element {
+  return (
+    <div className="grid grid-cols-2 gap-1.5 text-xs">
+      {rows.map(([label, value]) => (
+        <div key={label} className="flex min-w-0 items-center gap-2 rounded bg-background/70 px-2 py-1 text-xs ring-1 ring-border/30">
+          <span className="flex-none text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+          <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground" title={value}>{value}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1065,7 +1070,7 @@ function AssemblyStep({ index, title, source, result }: { index: string; title: 
 function LlmContextView({ messages, tools }: { messages: readonly Message[]; tools: readonly ToolSchema[] }): JSX.Element {
   const [kind, setKind] = useState<'messages' | 'tools'>('messages')
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="llm-context-view">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-2" data-testid="llm-context-view">
       <div className="flex flex-none items-center gap-2">
         <div className="min-w-0 flex-1 text-xs text-muted-foreground">
           Kernel context includes both conversation messages and the tool registry sent with this LLM call.
@@ -1089,8 +1094,8 @@ function KernelMessagesView({ messages }: { messages: readonly Message[] }): JSX
   const [selectedIndex, setSelectedIndex] = useState(0)
   const selected = messages[selectedIndex]
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,0.95fr)_minmax(0,1.05fr)] gap-2" data-testid="kernel-messages-view">
-      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+    <div className="grid h-full min-h-0 flex-1 grid-cols-[minmax(12rem,0.95fr)_minmax(0,1.05fr)] gap-2" data-testid="kernel-messages-view">
+      <ScrollArea className="h-full min-h-0 rounded bg-background/70 ring-1 ring-border/30">
         <div className="p-1">
           {messages.map((message, index) => (
             <button
@@ -1112,7 +1117,7 @@ function KernelMessagesView({ messages }: { messages: readonly Message[] }): JSX
           ))}
         </div>
       </ScrollArea>
-      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+      <ScrollArea className="h-full min-h-0 rounded bg-background/70 ring-1 ring-border/30">
         <div className="space-y-2 p-2 text-xs">
           {selected ? (
             <>
@@ -1139,8 +1144,8 @@ function ToolRegistryContextView({ tools }: { tools: readonly ToolSchema[] }): J
   const selected = tools.find((tool) => tool.name === selectedName) ?? tools[0]
   if (tools.length === 0) return <EmptyBlock label="No tools were sent with this LLM request." />
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,0.85fr)_minmax(0,1.15fr)] gap-2" data-testid="tool-registry-context-view">
-      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+    <div className="grid h-full min-h-0 flex-1 grid-cols-[minmax(12rem,0.85fr)_minmax(0,1.15fr)] gap-2" data-testid="tool-registry-context-view">
+      <ScrollArea className="h-full min-h-0 rounded bg-background/70 ring-1 ring-border/30">
         <div className="p-1">
           {tools.map((tool) => (
             <button
@@ -1159,7 +1164,7 @@ function ToolRegistryContextView({ tools }: { tools: readonly ToolSchema[] }): J
           ))}
         </div>
       </ScrollArea>
-      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+      <ScrollArea className="h-full min-h-0 rounded bg-background/70 ring-1 ring-border/30">
         <div className="space-y-2 p-2 text-xs">
           {selected ? (
             <>
@@ -1180,60 +1185,58 @@ function ToolRegistryContextView({ tools }: { tools: readonly ToolSchema[] }): J
   )
 }
 
-function ProviderPayloadView({ call, kernelRequest }: { call: LlmCall; kernelRequest: unknown }): JSX.Element {
-  if (!call.trace) {
-    return (
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-2 pb-1" data-testid="provider-payload-view">
-          <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
-            Provider HTTP trace was not captured for this LLM call. Showing the exact kernel request instead.
-          </div>
-          <JsonBlock label={`Kernel Request  -  call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={1} />
-        </div>
-      </ScrollArea>
-    )
-  }
-  const body = call.trace.request.body
+function ApiCallView({ call, kernelEffect, parsedResponse }: { call: LlmCall; kernelEffect: CallLlmEffect; parsedResponse: unknown }): JSX.Element {
+  const request = call.trace ? redactedApiRequest(call.trace) : null
+  const body = call.trace?.request.body
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-2 pb-1" data-testid="provider-payload-view">
-        <KeyValueTable
-          rows={[
-            ['url', call.trace.request.url],
-            ['provider', providerFromTrace(call.trace)],
-            ['body.system', providerBodyHasKey(body, 'system') ? 'present' : 'not present'],
-            ['body.messages', providerArrayLength(body, 'messages')],
-            ['body.tools', providerArrayLength(body, 'tools')],
-          ]}
-        />
-        <AssemblyStep
-          index="A"
-          title="Provider Body Sections"
-          source="provider adapter output"
-          result="system/messages/tools are shown in provider-native shape below; raw kernel request remains available for comparison."
-        />
-        <JsonBlock label="Provider Request" value={call.trace.request} collapsed={2} />
-        <JsonBlock label="Provider Request Body" value={call.trace.request.body} collapsed={1} />
-        <JsonBlock label={`Kernel Request  -  call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={2} />
-      </div>
-    </ScrollArea>
-  )
-}
-
-function LlmResponseView({ call, parsedResponse }: { call: LlmCall; parsedResponse: unknown }): JSX.Element {
-  return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-2 pb-1" data-testid="llm-response-view">
-        {call.trace ? (
-          <JsonBlock label="Provider Response" value={call.trace.response ?? null} collapsed={2} />
-        ) : (
-          <div className="rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            This log has kernel-level LLM I/O only. Provider HTTP request/response trace is available for new calls recorded after trace capture was added.
+    <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-2" data-testid="api-call-view">
+      <DetailPane title="API Request" subtitle="Captured outbound HTTP request with concrete base URL redacted">
+        <ScrollArea className="h-full min-h-0 flex-1" data-testid="api-request-view">
+          <div className="space-y-2">
+            {call.trace && request ? (
+              <>
+                <KeyValueTable
+                  rows={[
+                    ['url', request.url],
+                    ['API adapter', apiAdapterLabel(providerFromTrace(call.trace))],
+                    ['body.system', providerBodyHasKey(body, 'system') ? 'present' : 'not present'],
+                    ['body.messages', providerArrayLength(body, 'messages')],
+                    ['body.tools', providerArrayLength(body, 'tools')],
+                  ]}
+                />
+                <AssemblyStep
+                  index="A"
+                  title="API Body Sections"
+                  result="system/messages/tools are in the single captured API request below; concrete base URL is redacted in the UI."
+                />
+                <JsonBlock label="Captured API Request" value={request} collapsed={2} />
+              </>
+            ) : (
+              <>
+                <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
+                  HTTP trace was not captured for this LLM call. Showing the kernel `call_llm` effect instead; this is not the actual API request body.
+                </div>
+                <JsonBlock label={`Kernel call_llm Effect @ #${call.requestSeq}`} value={kernelEffect} collapsed={1} />
+              </>
+            )}
           </div>
-        )}
-        <JsonBlock label="Parsed Kernel Response" value={parsedResponse} collapsed={2} />
-      </div>
-    </ScrollArea>
+        </ScrollArea>
+      </DetailPane>
+      <DetailPane title="API Response" subtitle="Captured provider response plus parsed kernel event">
+        <ScrollArea className="h-full min-h-0 flex-1" data-testid="api-response-view">
+          <div className="space-y-2">
+            {call.trace ? (
+              <JsonBlock label="Captured API Response" value={call.trace.response ?? null} collapsed={2} />
+            ) : (
+              <div className="rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                This log has kernel-level LLM I/O only. HTTP request/response trace is available for new calls recorded after trace capture was added.
+              </div>
+            )}
+            <JsonBlock label="Parsed Kernel Response" value={parsedResponse} collapsed={2} />
+          </div>
+        </ScrollArea>
+      </DetailPane>
+    </div>
   )
 }
 
@@ -1535,26 +1538,38 @@ function contextProportions(call: LlmCall): readonly ContextProportion[] {
   const messageBytes = serializedSize(call.effect.messages)
   const toolBytes = serializedSize(call.effect.tools)
   const total = Math.max(1, systemBytes + messageBytes + toolBytes)
+  const percentOf = (bytes: number): number => {
+    if (bytes <= 0) return 0
+    return Math.max(1, Math.round((bytes / total) * 100))
+  }
+  const displayPercentOf = (bytes: number): string => {
+    if (bytes <= 0) return '0%'
+    const exact = (bytes / total) * 100
+    return exact < 1 ? '<1%' : `${Math.round(exact)}%`
+  }
   return [
     {
       kind: 'system',
       label: 'system',
       bytes: systemBytes,
-      percent: Math.round((systemBytes / total) * 100),
+      percent: percentOf(systemBytes),
+      displayPercent: displayPercentOf(systemBytes),
       color: 'bg-amber-500',
     },
     {
       kind: 'messages',
       label: 'messages',
       bytes: messageBytes,
-      percent: Math.round((messageBytes / total) * 100),
+      percent: percentOf(messageBytes),
+      displayPercent: displayPercentOf(messageBytes),
       color: 'bg-sky-500',
     },
     {
       kind: 'tools',
       label: 'tools',
       bytes: toolBytes,
-      percent: Math.round((toolBytes / total) * 100),
+      percent: percentOf(toolBytes),
+      displayPercent: displayPercentOf(toolBytes),
       color: 'bg-emerald-500',
     },
   ]
@@ -1598,7 +1613,30 @@ function adapterTransformSummary(provider: string): string {
   if (provider === 'openai') {
     return 'systemPrompt -> system message; messages -> body.messages; tool_call/tool_result -> OpenAI-compatible tool messages; ToolSchema[] -> tools'
   }
-  return 'provider trace captured; exact adapter transform is shown in Provider Payload'
+  return 'HTTP trace captured; exact adapter output is shown in API Request'
+}
+
+function apiAdapterLabel(provider: string): string {
+  if (provider === 'anthropic') return 'Anthropic Messages API'
+  if (provider === 'openai') return 'OpenAI-compatible Chat API'
+  if (provider === 'kernel') return 'not captured'
+  return provider
+}
+
+function redactedApiRequest(trace: LLMTrace): LLMTrace['request'] {
+  return {
+    ...trace.request,
+    url: redactApiUrl(trace.request.url),
+  }
+}
+
+function redactApiUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    return `${parsed.protocol}//<redacted>${parsed.pathname}`
+  } catch {
+    return '<redacted>'
+  }
 }
 
 function providerBodyHasKey(body: unknown, key: string): boolean {
