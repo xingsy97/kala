@@ -15,7 +15,7 @@ vi.mock('node:os', async () => {
   }
 })
 
-import { memoryDeleteTool, memoryReadTool, memoryTool, memoryWriteTool } from './memory.js'
+import { memoryTool } from './memory.js'
 import { makeCtx } from './_test-helpers.js'
 import { ToolError } from './registry.js'
 
@@ -38,14 +38,14 @@ describe('memory tools', () => {
 
   it('rejects unknown scope', async () => {
     await expect(
-      memoryReadTool.run({ scope: 'private', key: 'k' }, makeCtx(workspace)),
+      memoryTool.run({ operation: 'read', scope: 'private', key: 'k' }, makeCtx(workspace)),
     ).rejects.toThrow(/scope/)
   })
 
   it('rejects invalid key characters', async () => {
     await expect(
-      memoryWriteTool.run(
-        { scope: 'workspace', key: '../etc/passwd', content: 'x' },
+      memoryTool.run(
+        { operation: 'write', scope: 'workspace', key: '../etc/passwd', content: 'x' },
         makeCtx(workspace),
       ),
     ).rejects.toThrow(/key/)
@@ -54,8 +54,8 @@ describe('memory tools', () => {
   it('rejects too-long key', async () => {
     const longKey = 'a'.repeat(65)
     await expect(
-      memoryWriteTool.run(
-        { scope: 'workspace', key: longKey, content: 'x' },
+      memoryTool.run(
+        { operation: 'write', scope: 'workspace', key: longKey, content: 'x' },
         makeCtx(workspace),
       ),
     ).rejects.toThrow(/key/)
@@ -66,8 +66,8 @@ describe('memory tools', () => {
   // ==========================================================================
 
   it('session-scope write returns an ack without touching disk', async () => {
-    const result = await memoryWriteTool.run(
-      { scope: 'session', key: 'foo', content: 'bar' },
+    const result = await memoryTool.run(
+      { operation: 'write', scope: 'session', key: 'foo', content: 'bar' },
       makeCtx(workspace),
     )
     expect(result).toMatch(/session memory upserted/)
@@ -76,8 +76,8 @@ describe('memory tools', () => {
   })
 
   it('session-scope read points to state.memory', async () => {
-    const result = await memoryReadTool.run(
-      { scope: 'session', key: 'foo' },
+    const result = await memoryTool.run(
+      { operation: 'read', scope: 'session', key: 'foo' },
       makeCtx(workspace),
     )
     expect(result).toMatch(/state\.memory/)
@@ -88,8 +88,8 @@ describe('memory tools', () => {
   // ==========================================================================
 
   it('workspace-scope write creates file and returns "created" first time', async () => {
-    const result = await memoryWriteTool.run(
-      { scope: 'workspace', key: 'build_cmd', content: 'pnpm build' },
+    const result = await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'build_cmd', content: 'pnpm build' },
       makeCtx(workspace),
     )
     expect(result).toMatch(/^created scope=workspace/)
@@ -118,12 +118,12 @@ describe('memory tools', () => {
   })
 
   it('workspace-scope write returns "updated" on second call', async () => {
-    await memoryWriteTool.run(
-      { scope: 'workspace', key: 'k', content: 'v1' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'k', content: 'v1' },
       makeCtx(workspace),
     )
-    const result = await memoryWriteTool.run(
-      { scope: 'workspace', key: 'k', content: 'v2' },
+    const result = await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'k', content: 'v2' },
       makeCtx(workspace),
     )
     expect(result).toMatch(/^updated scope=workspace/)
@@ -133,12 +133,12 @@ describe('memory tools', () => {
   })
 
   it('workspace-scope read returns the file content with metadata header', async () => {
-    await memoryWriteTool.run(
-      { scope: 'workspace', key: 'k', content: 'v' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'k', content: 'v' },
       makeCtx(workspace),
     )
-    const result = await memoryReadTool.run(
-      { scope: 'workspace', key: 'k' },
+    const result = await memoryTool.run(
+      { operation: 'read', scope: 'workspace', key: 'k' },
       makeCtx(workspace),
     )
     expect(result).toContain('scope=workspace')
@@ -148,21 +148,21 @@ describe('memory tools', () => {
 
   it('workspace-scope read of missing key throws ENOENT', async () => {
     await expect(
-      memoryReadTool.run({ scope: 'workspace', key: 'nope' }, makeCtx(workspace)),
+      memoryTool.run({ operation: 'read', scope: 'workspace', key: 'nope' }, makeCtx(workspace)),
     ).rejects.toBeInstanceOf(ToolError)
   })
 
   it('workspace-scope list returns sorted keys', async () => {
-    await memoryWriteTool.run(
-      { scope: 'workspace', key: 'zeta', content: 'z' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'zeta', content: 'z' },
       makeCtx(workspace),
     )
-    await memoryWriteTool.run(
-      { scope: 'workspace', key: 'alpha', content: 'a' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'alpha', content: 'a' },
       makeCtx(workspace),
     )
-    const result = await memoryReadTool.run(
-      { scope: 'workspace' },
+    const result = await memoryTool.run(
+      { operation: 'list', scope: 'workspace' },
       makeCtx(workspace),
     )
     const alphaIdx = result.indexOf('alpha')
@@ -173,30 +173,30 @@ describe('memory tools', () => {
   })
 
   it('workspace-scope list of empty scope returns "(empty ...)" message', async () => {
-    const result = await memoryReadTool.run(
-      { scope: 'workspace' },
+    const result = await memoryTool.run(
+      { operation: 'list', scope: 'workspace' },
       makeCtx(workspace),
     )
     expect(result).toMatch(/empty/)
   })
 
   it('workspace-scope delete removes the file', async () => {
-    await memoryWriteTool.run(
-      { scope: 'workspace', key: 'k', content: 'v' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'k', content: 'v' },
       makeCtx(workspace),
     )
     const file = join(workspace, '.agent-kernel', 'memory', 'k.md')
     expect(existsSync(file)).toBe(true)
-    await memoryDeleteTool.run(
-      { scope: 'workspace', key: 'k' },
+    await memoryTool.run(
+      { operation: 'delete', scope: 'workspace', key: 'k' },
       makeCtx(workspace),
     )
     expect(existsSync(file)).toBe(false)
   })
 
   it('workspace-scope delete of missing key is idempotent', async () => {
-    const result = await memoryDeleteTool.run(
-      { scope: 'workspace', key: 'nope' },
+    const result = await memoryTool.run(
+      { operation: 'delete', scope: 'workspace', key: 'nope' },
       makeCtx(workspace),
     )
     expect(result).toMatch(/no-op/)
@@ -207,8 +207,8 @@ describe('memory tools', () => {
   // ==========================================================================
 
   it('global-scope write lands under HOME/.agent-kernel/memory/', async () => {
-    await memoryWriteTool.run(
-      { scope: 'global', key: 'signature', content: 'zhangsan' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'global', key: 'signature', content: 'zhangsan' },
       makeCtx(workspace),
     )
     const file = join(fakeHome, '.agent-kernel', 'memory', 'signature.md')
@@ -217,12 +217,12 @@ describe('memory tools', () => {
   })
 
   it('global-scope is not the same as workspace scope', async () => {
-    await memoryWriteTool.run(
-      { scope: 'workspace', key: 'k', content: 'ws' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'workspace', key: 'k', content: 'ws' },
       makeCtx(workspace),
     )
-    await memoryWriteTool.run(
-      { scope: 'global', key: 'k', content: 'gl' },
+    await memoryTool.run(
+      { operation: 'write', scope: 'global', key: 'k', content: 'gl' },
       makeCtx(workspace),
     )
     // Two independent entries
@@ -241,8 +241,8 @@ describe('memory tools', () => {
   it('rejects content larger than 128 KB', async () => {
     const huge = 'x'.repeat(128 * 1024 + 1)
     await expect(
-      memoryWriteTool.run(
-        { scope: 'workspace', key: 'k', content: huge },
+      memoryTool.run(
+        { operation: 'write', scope: 'workspace', key: 'k', content: huge },
         makeCtx(workspace),
       ),
     ).rejects.toThrow(/E2BIG/)
@@ -257,8 +257,8 @@ describe('memory tools', () => {
     controller.abort()
     const ctx = makeCtx(workspace, controller.signal)
     await expect(
-      memoryWriteTool.run(
-        { scope: 'workspace', key: 'k', content: 'v' },
+      memoryTool.run(
+        { operation: 'write', scope: 'workspace', key: 'k', content: 'v' },
         ctx,
       ),
     ).rejects.toThrow(/ECANCELED/)

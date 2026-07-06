@@ -1019,22 +1019,10 @@ describe('step: cwd', () => {
 })
 
 // ============================================================================
-// Session-scoped memory (memory_write/memory_delete with scope='session')
+// Session-scoped memory (memory with operation=write/delete and scope=session)
 // ============================================================================
 
 describe('step: session memory', () => {
-  const MEMORY_WRITE: ToolSchema = {
-    name: 'memory_write',
-    description: 'write memory',
-    inputSchema: { type: 'object' },
-    requiresApproval: false,
-  }
-  const MEMORY_DELETE: ToolSchema = {
-    name: 'memory_delete',
-    description: 'delete memory',
-    inputSchema: { type: 'object' },
-    requiresApproval: false,
-  }
   const MEMORY: ToolSchema = {
     name: 'memory',
     description: 'unified memory',
@@ -1048,7 +1036,7 @@ describe('step: session memory', () => {
 
   function seedPending(callId: string, name: string, input: Record<string, unknown>): AgentState {
     const initial = createInitialState({ sessionId: 's1' })
-    const cfg = createConfig({ tools: [MEMORY, MEMORY_WRITE, MEMORY_DELETE] })
+    const cfg = createConfig({ tools: [MEMORY] })
     const s1 = step(initial, { kind: 'user_message', text: 'hi' }, cfg).next
     const s2 = step(
       { ...s1, status: 'thinking' },
@@ -1061,28 +1049,7 @@ describe('step: session memory', () => {
     return s2
   }
 
-  it('memory_write scope=session upserts into state.memory', () => {
-    const s = seedPending('c1', 'memory_write', {
-      scope: 'session',
-      key: 'build_cmd',
-      content: 'pnpm build',
-      updatedAt: '2026-07-06T00:00:00.000Z',
-    })
-    const r = step(
-      s,
-      { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
-      createConfig({ tools: [MEMORY_WRITE] }),
-    )
-    expect(r.next.memory).toEqual([
-      {
-        key: 'build_cmd',
-        content: 'pnpm build',
-        updatedAt: '2026-07-06T00:00:00.000Z',
-      },
-    ])
-  })
-
-  it('memory operation=write scope=session upserts into state.memory', () => {
+  it('operation=write scope=session upserts into state.memory', () => {
     const s = seedPending('c1', 'memory', {
       operation: 'write',
       scope: 'session',
@@ -1104,14 +1071,15 @@ describe('step: session memory', () => {
     ])
   })
 
-  it('memory_write replaces prior entry with same key', () => {
-    const s0 = seedPending('c1', 'memory_write', {
+  it('operation=write replaces prior entry with same key', () => {
+    const s0 = seedPending('c1', 'memory', {
+      operation: 'write',
       scope: 'session',
       key: 'k',
       content: 'v1',
       updatedAt: '2026-07-06T00:00:00.000Z',
     })
-    const cfg = createConfig({ tools: [MEMORY_WRITE] })
+    const cfg = createConfig({ tools: [MEMORY] })
     const s1 = step(
       s0,
       { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
@@ -1125,8 +1093,9 @@ describe('step: session memory', () => {
         message: asstMsg({
           type: 'tool_call',
           callId: 'c2',
-          name: 'memory_write',
+          name: 'memory',
           input: {
+            operation: 'write',
             scope: 'session',
             key: 'k',
             content: 'v2',
@@ -1146,34 +1115,7 @@ describe('step: session memory', () => {
     ])
   })
 
-  it('memory_delete scope=session removes matching entry', () => {
-    const s0 = seedPending('c1', 'memory_write', {
-      scope: 'session',
-      key: 'k',
-      content: 'v',
-      updatedAt: '2026-07-06T00:00:00.000Z',
-    })
-    const cfg = createConfig({ tools: [MEMORY_WRITE, MEMORY_DELETE] })
-    const s1 = step(s0, { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' }, cfg).next
-    expect(s1.memory.length).toBe(1)
-    const s2 = step(
-      { ...s1, status: 'thinking' },
-      {
-        kind: 'llm_response',
-        message: asstMsg({
-          type: 'tool_call',
-          callId: 'c2',
-          name: 'memory_delete',
-          input: { scope: 'session', key: 'k' },
-        }),
-      },
-      cfg,
-    ).next
-    const s3 = step(s2, { kind: 'tool_result', callId: 'c2', ok: true, content: 'ok' }, cfg).next
-    expect(s3.memory).toEqual([])
-  })
-
-  it('memory operation=delete scope=session removes matching entry', () => {
+  it('operation=delete scope=session removes matching entry', () => {
     const s0 = seedPending('c1', 'memory', {
       operation: 'write',
       scope: 'session',
@@ -1202,7 +1144,8 @@ describe('step: session memory', () => {
 
   it('workspace/global scope memory ops do NOT touch state.memory', () => {
     for (const scope of ['workspace', 'global']) {
-      const s0 = seedPending('c1', 'memory_write', {
+      const s0 = seedPending('c1', 'memory', {
+        operation: 'write',
         scope,
         key: 'k',
         content: 'v',
@@ -1211,14 +1154,15 @@ describe('step: session memory', () => {
       const s1 = step(
         s0,
         { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
-        createConfig({ tools: [MEMORY_WRITE] }),
+        createConfig({ tools: [MEMORY] }),
       ).next
       expect(s1.memory).toEqual([])
     }
   })
 
   it('failed tool_result does not touch memory', () => {
-    const s = seedPending('c1', 'memory_write', {
+    const s = seedPending('c1', 'memory', {
+      operation: 'write',
       scope: 'session',
       key: 'k',
       content: 'v',
@@ -1227,13 +1171,14 @@ describe('step: session memory', () => {
     const r = step(
       s,
       { kind: 'tool_result', callId: 'c1', ok: false, content: 'ERROR: EIO' },
-      createConfig({ tools: [MEMORY_WRITE] }),
+      createConfig({ tools: [MEMORY] }),
     )
     expect(r.next.memory).toEqual([])
   })
 
   it('malformed input silently no-ops (kernel never crashes on bad input)', () => {
-    const s = seedPending('c1', 'memory_write', {
+    const s = seedPending('c1', 'memory', {
+      operation: 'write',
       scope: 'session',
       // missing key
       content: 'v',
@@ -1241,7 +1186,7 @@ describe('step: session memory', () => {
     const r = step(
       s,
       { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
-      createConfig({ tools: [MEMORY_WRITE] }),
+      createConfig({ tools: [MEMORY] }),
     )
     expect(r.next.memory).toEqual([])
   })

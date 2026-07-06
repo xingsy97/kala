@@ -161,8 +161,6 @@ export type TodoItem = {
 
 export const TODOWRITE_TOOL_NAME = 'todowrite'
 export const MEMORY_TOOL_NAME = 'memory'
-export const MEMORY_WRITE_TOOL_NAME = 'memory_write'
-export const MEMORY_DELETE_TOOL_NAME = 'memory_delete'
 
 /**
  * Session-scoped notepad the agent maintains for itself across turns of the

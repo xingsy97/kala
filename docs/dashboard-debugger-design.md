@@ -265,8 +265,8 @@ Tools uses a list/detail object inspector. The list stays compact; the selected 
 │ │ edit        ▌ gated        │ Recent calls                       │ │
 │ │ write         gated        │ #121 requested                     │ │
 │ │ todowrite     auto         │ #122 approved                      │ │
-│ │ memory_read   auto         │ #123 result ok                     │ │
-│ │ memory_write  gated        │ Input Schema                       │ │
+│ │ memory        auto         │ #123 result ok                     │ │
+│ │ todowrite     auto         │ Input Schema                       │ │
 │ │ agent         gated        │ { "type": "object", "required": ["path"] }
 │ └────────────────────────────┴───────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────────┘
@@ -313,4 +313,3 @@ Memory is an object inspector for session/workspace/global scopes. Session entri
 - Redact all authorization headers before storing traces.
 - For streaming providers, store a compact provider trace: request URL/headers/body, response status, stream event type list, assembled provider body when available. Avoid logging every token-sized raw chunk indefinitely unless the event stream is compact enough.
 - Existing logs without `llmTrace` still render kernel-level LLM I/O.
-

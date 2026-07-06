@@ -33,7 +33,7 @@ Every executor bundled in this repo MUST implement the tools below. Third-party 
 | `bash_output` | Poll background shell task output | ❌ | Background shell |
 | `kill_shell` | Stop a background shell task | ✅ | Background shell |
 
-`todowrite` is both an executor tool and a reducer special case: successful results promote `input.todos` into `state.todos`. `memory` behaves the same way when `scope: 'session'` and `operation` is `write` or `delete` — the reducer lifts `(key, content)` into `state.memory`; workspace/global scope go to disk under the executor. Legacy `memory_write` / `memory_delete` calls are still accepted for old sessions. `agent` is declared as a tool schema but runs inside Host, not Executor — it creates a child JSONL session in the same workspace and returns the child assistant text.
+`todowrite` is both an executor tool and a reducer special case: successful results promote `input.todos` into `state.todos`. `memory` behaves the same way when `scope: 'session'` and `operation` is `write` or `delete` — the reducer lifts `(key, content)` into `state.memory`; workspace/global scope go to disk under the executor. `agent` is declared as a tool schema but runs inside Host, not Executor — it creates a child JSONL session in the same workspace and returns the child assistant text.
 
 ---
 
@@ -330,7 +330,7 @@ Use `operation: "list"` to list all keys in the scope. Reading a `session` scope
 
 **Approval**: `requiresApproval: false`. Memory writes are treated like `todowrite` — the agent is note-taking for itself, not mutating user files.
 
-**Reducer coupling**: session-scope memory is a first-class piece of `AgentState` — the reducer lifts `input.key`/`input.content` into `state.memory` when `tool_result.ok === true`, `tool.name === 'memory'`, `input.scope === 'session'`, and `input.operation === 'write'`. `operation === 'delete'` removes the matching key. Parsing from `input` (not `content`) means a broken executor cannot corrupt kernel state. Workspace/global scope round-trip normally through executor IO and produce opaque tool_result strings; kernel state is untouched. Legacy `memory_write` / `memory_delete` names are still recognized during replay and by the executor registry.
+**Reducer coupling**: session-scope memory is a first-class piece of `AgentState` — the reducer lifts `input.key`/`input.content` into `state.memory` when `tool_result.ok === true`, `tool.name === 'memory'`, `input.scope === 'session'`, and `input.operation === 'write'`. `operation === 'delete'` removes the matching key. Parsing from `input` (not `content`) means a broken executor cannot corrupt kernel state. Workspace/global scope round-trip normally through executor IO and produce opaque tool_result strings; kernel state is untouched.
 
 **Errors** (`ok: false, content: <string>`):
 - `EINVAL: field "scope" must be one of: session, workspace, global`
