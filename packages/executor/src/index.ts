@@ -15,4 +15,3 @@ export {
 export type { Tool, ToolContext, ToolRunner } from './tools/index.js'
 export { startExecutor } from './client.js'
 export type { ExecutorOptions, ExecutorHandle } from './client.js'
-export { initMcp } from './mcp.js'

@@ -18,6 +18,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Three-process topology and a full turn end-to-end |
+| [mcp.md](mcp.md) | MCP runtime integration design (planned, not yet implemented) |
 | [adr/](adr/) | Architecture Decision Records  -  one file per big call, with alternatives and consequences |
 
 ## Process

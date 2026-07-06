@@ -391,7 +391,7 @@ If an executor announces a tool with a name that clashes with an existing tool b
 
 The tool schemas above are MCP-compatible: they follow JSON Schema draft-07, and the input surface matches the MCP `tools/call` request format. An `agent-kernel` executor can be adapted into an MCP server (stdio transport) with a thin wrapper; third-party MCP tools can be adapted into an executor via the same wrapper in reverse.
 
-The MCP shim is currently a stub: `SessionConfig.mcpServers` and `initMcp()` accept configuration but do not spawn servers or add runtime tools. The point of documenting this here is that **tool schemas are designed not to close the door on MCP interop.**
+The MCP runtime is not yet implemented  -  the design and rationale live in [`mcp.md`](mcp.md). The point of noting MCP compatibility here is that **tool schemas are designed not to close the door on MCP interop.**
 
 ---
 
@@ -426,7 +426,7 @@ Tools are pure functions of `(input, filesystem, network)`  -  `(output)`. Tests
 
 | Tool | Why |
 |---|---|
-| `web_fetch` | Adds network egress concerns beyond `web_search`. Design for SSRF/allowlist/length caps not yet done; punt to a future release. |
+| `web_fetch` | Position overlaps `web_search` (agent typically discovers URLs via search; users can paste page content directly), and the SSRF / length-cap / auth-policy design cost outweighs the payoff. |
 | `todo_read` | `todowrite` is implemented; state already carries `todos`. |
 | third-party `subagent` / `task` executors | `agent` is a host-side builtin, not an executor-side recursive primitive. |
 | `memory` / `remember` | Persistence layer for cross-session context is a separate subsystem. |

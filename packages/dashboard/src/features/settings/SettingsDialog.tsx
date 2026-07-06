@@ -358,7 +358,8 @@ function McpSection({
         <p className="text-muted-foreground">{payload.mcp.note}</p>
       </div>
       <p className="mt-4 text-sm text-muted-foreground">
-        The <code className="font-mono">SessionConfig.mcpServers</code> field is reserved in the protocol so future MCP support can slot in without breaking session logs. Declaring servers today is a no-op.
+        The design is fixed (executor-side spawning, <code className="font-mono">&lt;server&gt;__&lt;tool&gt;</code> naming, approvals inherit the session's mode). Implementation is deferred  -  the ecosystem overlap with the builtin tool set is small. See{' '}
+        <code className="font-mono">docs/mcp.md</code> in the repo for the full spec.
       </p>
       <div className="mt-4 flex items-center gap-2 text-sm">
         <a

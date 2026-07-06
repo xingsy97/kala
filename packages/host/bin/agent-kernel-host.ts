@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     },
     mcp: {
       supported: false,
-      note: 'MCP runtime is not implemented yet  -  declaring servers in session config is a no-op.',
+      note: 'MCP runtime is not implemented yet  -  see docs/mcp.md for the planned design.',
     },
   }
 
