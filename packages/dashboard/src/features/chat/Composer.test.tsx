@@ -14,6 +14,7 @@ function renderComposer(props?: {
     extraBlocks?: readonly TextContent[],
   ) => void
   onCompact?: () => void
+  onCancel?: () => void
   onListFiles?: (query: string) => Promise<readonly FileListEntry[]>
   onReadFile?: (path: string) => Promise<{ content?: string; error?: string }>
 }) {
@@ -29,6 +30,7 @@ function renderComposer(props?: {
       queuedMessages={[]}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
+      {...(props?.onCancel ? { onCancel: props.onCancel } : {})}
       {...(props?.onListFiles ? { onListFiles: props.onListFiles } : {})}
       {...(props?.onReadFile ? { onReadFile: props.onReadFile } : {})}
     />,
@@ -87,6 +89,24 @@ describe('Composer', () => {
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
     expect(onCompact).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
+  })
+
+  it('runs /cancel as a command when cancellation is available', () => {
+    const onSubmit = vi.fn()
+    const onCancel = vi.fn()
+    renderComposer({ onSubmit, onCancel })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/can' },
+    })
+
+    expect(screen.getByTestId('slash-command-menu')).toBeTruthy()
+    expect(screen.getByText('/cancel')).toBeTruthy()
+    fireEvent.click(screen.getByText('/cancel'))
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
     expect(onSubmit).not.toHaveBeenCalled()
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
   })
