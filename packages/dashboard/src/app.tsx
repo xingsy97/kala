@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, Info, Moon, PanelRight, PanelRightClose, Settings, Sparkles, Sun } from 'lucide-react'
+import { FolderOpen, Moon, PanelRight, PanelRightClose, Settings, Sparkles, Sun } from 'lucide-react'
 
 import type {
   ConsolidateMemoryResult,
@@ -558,6 +558,10 @@ export function App(): JSX.Element {
                   onNewSession={newSession}
                   onDelete={deleteSessionAt}
                   onRename={renameSessionAt}
+                  onOpenSessionInfo={(sid) => {
+                    if (sid !== config.sessionId) selectSession(sid)
+                    setMetadataOpen(true)
+                  }}
                   onWorkspaceInfo={setWorkspaceInfoId}
                 />
               </div>
@@ -578,7 +582,6 @@ export function App(): JSX.Element {
               status={session.status}
               onChangeCwd={openCwdDialog}
               onOpenSettings={() => setSettingsOpen(true)}
-              onOpenMetadata={() => setMetadataOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
               inspectorAvailable={wideLayout && hasSelectedSession}
@@ -870,7 +873,6 @@ function WorkbenchToolbar({
   status,
   onChangeCwd,
   onOpenSettings,
-  onOpenMetadata,
   onToggleInspector,
   inspectorOpen,
   inspectorAvailable,
@@ -883,7 +885,6 @@ function WorkbenchToolbar({
   status: string
   onChangeCwd(): void
   onOpenSettings(): void
-  onOpenMetadata(): void
   onToggleInspector(): void
   inspectorOpen: boolean
   inspectorAvailable: boolean
@@ -921,18 +922,6 @@ function WorkbenchToolbar({
       ) : null}
       <span className="min-w-0 flex-1" />
       {sessionSelected ? <ConnectionStatus status={status} /> : null}
-      {sessionSelected ? (
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onOpenMetadata}
-        title="Session info"
-        aria-label="open session info"
-        data-testid="metadata-button"
-      >
-        <Info className="h-4 w-4" />
-      </Button>
-      ) : null}
       <Button
         variant="ghost"
         size="icon"

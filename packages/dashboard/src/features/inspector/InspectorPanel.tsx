@@ -265,31 +265,25 @@ function Overview({
   state,
   config,
   timeline,
-  visibleMessagesCount,
+  visibleMessagesCount: _visibleMessagesCount,
 }: {
   state: AgentState | null
   config?: AgentConfig | null
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
 }): JSX.Element {
-  const messages = visibleMessagesCount ?? state?.messages.length ?? 0
   const contextLimit = config?.contextLimit
   const context = contextLimit
     ? `${state?.usage.inputTokens ?? 0} / ${contextLimit}`
     : `${state?.usage.inputTokens ?? 0} input`
   const pending = state?.pendingCalls.find((c) => c.status !== 'rejected')
-  const gated = config?.tools.filter((t) => t.requiresApproval).length ?? 0
   return (
     <section className="flex-none bg-card px-3 pb-3" aria-label="debugger overview">
       <div className="grid grid-cols-2 gap-1.5 text-xs xl:grid-cols-4">
         <Metric label="Status" value={shortStatus(state?.status)} tone={statusTone(state?.status)} />
         <Metric label="Events" value={String(timeline.length)} />
-        <Metric label="Messages" value={String(messages)} />
         <Metric label="Context" value={context} />
         <Metric label="Pending" value={pending?.name ?? 'none'} tone={pending ? 'text-amber-600 dark:text-amber-300' : undefined} />
-        <Metric label="Tools" value={`${config?.tools.length ?? 0}  -  ${gated} gated`} />
-        <Metric label="Memory" value={`${state?.memory?.length ?? 0} session`} />
-        <Metric label="Approval" value={state?.approvalMode ?? 'n/a'} />
       </div>
     </section>
   )
@@ -623,27 +617,93 @@ function RuntimeSection({
 }
 
 function StateRuntime({ state }: { state: AgentState | null }): JSX.Element {
+  const [jsonOpen, setJsonOpen] = useState(false)
   if (!state) return <EmptyBlock label="No AgentState loaded." />
-  const summary = {
-    sessionId: state.sessionId,
-    status: state.status,
-    cursor: state.cursor,
-    cwd: state.cwd ?? null,
-    approvalMode: state.approvalMode,
-    pendingCalls: state.pendingCalls.map((c) => `${c.name}  -  ${c.status}`),
-    messages: state.messages.length,
-    todos: state.todos.length,
-    memory: state.memory?.length ?? 0,
-    contextPressureLevel: state.contextPressureLevel,
-    usage: state.usage,
-  }
+  const pendingCalls = state.pendingCalls.map((c) => `${c.name}  -  ${c.status}`)
+  const memoryKeys = state.memory?.map((entry) => entry.key) ?? []
   return (
-    <ScrollArea className="h-full">
-      <div className="space-y-2 pb-1">
-        <KeyValueTable rows={Object.entries(summary).map(([k, v]) => [k, formatValue(v)])} />
-        <JsonBlock label="Full AgentState JSON" value={state} collapsed={2} />
+    <>
+      <ScrollArea className="h-full">
+        <div className="space-y-2 pb-1" data-testid="state-runtime">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-foreground">AgentState</div>
+              <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={state.sessionId}>{state.sessionId}</div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setJsonOpen(true)}>
+              View JSON
+            </Button>
+          </div>
+
+          <div className="grid gap-2 xl:grid-cols-2">
+            <StateGroup
+              title="Core"
+              rows={[
+                ['status', state.status],
+                ['cursor', String(state.cursor)],
+                ['approval', state.approvalMode],
+                ['cwd', state.cwd ?? 'not set'],
+              ]}
+            />
+            <StateGroup
+              title="Workload"
+              rows={[
+                ['messages', String(state.messages.length)],
+                ['todos', String(state.todos.length)],
+                ['pending', pendingCalls.length > 0 ? pendingCalls.join(', ') : 'none'],
+                ['context pressure', state.contextPressureLevel ?? 'n/a'],
+              ]}
+            />
+            <StateGroup
+              title="Usage"
+              rows={[
+                ['input', String(state.usage.inputTokens)],
+                ['output', String(state.usage.outputTokens)],
+                ['cache create', String(state.usage.cacheCreationTokens ?? 0)],
+                ['cache read', String(state.usage.cacheReadTokens ?? 0)],
+                ['cost', state.usage.costUsd ? `$${state.usage.costUsd.toFixed(4)}` : '$0'],
+              ]}
+            />
+            <StateGroup
+              title="Memory"
+              rows={[
+                ['session entries', String(state.memory?.length ?? 0)],
+                ['keys', memoryKeys.length > 0 ? memoryKeys.join(', ') : 'none'],
+              ]}
+            />
+          </div>
+        </div>
+      </ScrollArea>
+      <Dialog open={jsonOpen} onOpenChange={setJsonOpen}>
+        <DialogContent className="h-[86vh] max-w-5xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
+          <DialogHeader className="bg-card px-4 py-3">
+            <DialogTitle className="text-base">AgentState JSON</DialogTitle>
+            <DialogDescription>Full raw runtime state for the current session.</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 bg-background p-4" data-testid="agent-state-json-dialog">
+            <ScrollArea className="h-full">
+              <JsonBlock label="Full AgentState JSON" value={state} collapsed={2} />
+            </ScrollArea>
+          </div>
+          <DialogFooter className="bg-card px-4 py-3">
+            <DialogClose asChild>
+              <Button variant="outline" className="mt-0">Close</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+function StateGroup({ title, rows }: { title: string; rows: readonly (readonly [string, string])[] }): JSX.Element {
+  return (
+    <div className="min-w-0 overflow-hidden rounded bg-background/70 ring-1 ring-border/30">
+      <div className="border-b border-border/40 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {title}
       </div>
-    </ScrollArea>
+      <KeyValueTable rows={rows} compact />
+    </div>
   )
 }
 
@@ -975,11 +1035,11 @@ function EmptyBlock({ label }: { label: string }): JSX.Element {
   )
 }
 
-function KeyValueTable({ rows }: { rows: readonly (readonly [string, string])[] }): JSX.Element {
+function KeyValueTable({ rows, compact = false }: { rows: readonly (readonly [string, string])[]; compact?: boolean }): JSX.Element {
   return (
-    <div className="overflow-hidden rounded bg-background/70 text-xs ring-1 ring-border/30">
+    <div className={cn('overflow-hidden text-xs', compact ? '' : 'rounded bg-background/70 ring-1 ring-border/30')}>
       {rows.map(([k, v]) => (
-        <div key={k} className="grid grid-cols-[8rem_minmax(0,1fr)] gap-2 px-2 py-1.5 odd:bg-muted/50">
+        <div key={k} className={cn('grid gap-2 px-2 odd:bg-muted/50', compact ? 'grid-cols-[6.5rem_minmax(0,1fr)] py-1' : 'grid-cols-[8rem_minmax(0,1fr)] py-1.5')}>
           <div className="truncate text-muted-foreground">{k}</div>
           <div className="min-w-0 truncate font-mono text-foreground" title={v}>{v}</div>
         </div>
