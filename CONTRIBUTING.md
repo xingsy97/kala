@@ -33,7 +33,7 @@ Thanks for reading this. `agent-kernel` is a pedagogical reference implementatio
 
 **Consider before opening:**
 - New wire events  -  coordinate with a maintainer first, protocol changes cascade
-- New phases beyond the 6 in [`docs/ROADMAP.md`](docs/ROADMAP.md)  -  open an issue for discussion
+- Larger deferred items in [`docs/ROADMAP.md`](docs/ROADMAP.md)  -  open an issue for discussion
 - Adding runtime deps to the kernel  -  needs a strong justification
 
 **Not welcome:**

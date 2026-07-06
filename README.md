@@ -1,6 +1,6 @@
 # agent-kernel
 
-**Status**: Kernel + Host + Executor + Dashboard + Replay/Fork all shipped end-to-end. See [ROADMAP](docs/ROADMAP.md) for phase-by-phase status and [FEATURE-GAPS](docs/FEATURE-GAPS.md) for the current feature ledger vs. reference agents.
+**Status**: Kernel + Host + Executor + Dashboard + Replay/Fork all shipped end-to-end. See [ROADMAP](docs/ROADMAP.md) for the current feature ledger and [FEATURE-GAPS](docs/FEATURE-GAPS.md) for the comparison vs. reference agents.
 
 ---
 
@@ -134,11 +134,11 @@ The docs are layered by intent  -  pick your entry point:
 
 **Want to see where the project stands vs. reference agents?**
 1. [docs/FEATURE-GAPS.md](docs/FEATURE-GAPS.md)  -  shipped features, deliberately-out items, and comparison table (pi / opencode / codex / claude-code)
-2. [docs/ROADMAP.md](docs/ROADMAP.md)  -  phase-by-phase status
+2. [docs/ROADMAP.md](docs/ROADMAP.md)  -  shipped feature ledger + deferred items
 3. [docs/testing.md](docs/testing.md)  -  test strategy at each layer, including the real-browser cross-check rule
 
 **Curious *why* a decision was made?**
-- [docs/adr/](docs/adr/)  -  one file per big decision: pure FSM, reverse-WS, Socket.IO, no relay, config/state split, kernel boundary, MCP tools, dashboard stack, provider adapters, FSM dispatch table, host/core naming, dashboard redesign, Finder layout
+- [docs/adr/](docs/adr/)  -  one file per big decision: pure FSM, reverse-WS, Socket.IO, no relay, config/state split, kernel boundary, MCP tools, dashboard stack, provider adapters, FSM dispatch table, host/core naming, Finder layout
 
 Per-package details live next to the code:
 

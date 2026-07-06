@@ -316,5 +316,4 @@ Every non-obvious topology choice above has an ADR:
 | Provider adapter strategy (Anthropic / OpenAI compat) | [ADR 0009](adr/0009-provider-adapter-strategy.md) |
 | FSM dispatch table shape | [ADR 0010](adr/0010-fsm-dispatch-table.md) |
 | Naming: Host + Kernel (was Server + Core) | [ADR 0011](adr/0011-rename-host-and-core.md) |
-| Dashboard UI redesign (Explorer + Workbench) | [ADR 0012](adr/0012-dashboard-ui-redesign.md) |
-| Explorer / Finder layout | [ADR 0013](adr/0013-dashboard-finder-layout.md) |
+| Dashboard Finder-style layout + control-plane events | [ADR 0013](adr/0013-dashboard-finder-layout.md) |

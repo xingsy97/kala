@@ -130,7 +130,7 @@ function onUserMessage(
   }
   // Defensive reset: entering a fresh turn wipes any residual pendingCalls or
   // error text so invariant I5 (status  -  pendingCalls) can't be left broken
-  // by a prior malformed transition (see docs/adversarial-review-2026-07-04).
+  // by a prior malformed transition.
   const next: AgentState = {
     ...state,
     messages: [...state.messages, userMsg],

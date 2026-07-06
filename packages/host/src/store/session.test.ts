@@ -1,7 +1,7 @@
 /**
- * SessionStore tests. Focused on the concurrent-create race that made
- * two dashboard+executor sockets land two different log files on disk for
- * the same sessionId (see docs/adversarial-review-2026-07-04.md, B8).
+ * SessionStore tests. Focused on the concurrent-create race where two
+ * dashboard+executor sockets could otherwise land two different log files on
+ * disk for the same sessionId; `ensure()` coalesces via a per-id promise map.
  */
 
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
