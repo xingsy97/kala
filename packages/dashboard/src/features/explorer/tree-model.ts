@@ -194,6 +194,10 @@ function sessionNode(s: SessionSummary): SessionNode {
 }
 
 function labelFor(s: SessionSummary): string {
+  const override = s.label?.trim()
+  if (override && override.length > 0) {
+    return override.length > 40 ? `${override.slice(0, 40)} - ` : override
+  }
   const raw = s.firstUserMessage
   if (!raw) return `new session  -  ${s.sessionId.slice(0, 6)}`
   return raw.length > 40 ? `${raw.slice(0, 40)} - ` : raw

@@ -22,6 +22,7 @@ import type {
   ClientListSessions,
   ClientLoadHistory,
   ClientDeleteSession,
+  ClientRenameSession,
   ClientSetApprovalMode,
   ClientSetCwd,
   ClientSetModel,
@@ -579,6 +580,22 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
         cwd: validation.cwd,
       })
       await broadcastSessionList(deps)
+    })
+    socket.on('client:rename_session', async (p: ClientRenameSession) => {
+      try {
+        const applied = await deps.store.rename(p.sessionId, p.label)
+        deps.dashboardNs.emit('session:renamed', {
+          sessionId: p.sessionId,
+          label: applied,
+        })
+        await broadcastSessionList(deps)
+      } catch (err) {
+        deps.broadcastError(
+          p.sessionId,
+          'host',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
     })
     socket.on('client:list_dirs', async (p: ClientListDirs) => {
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)

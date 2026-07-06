@@ -200,6 +200,21 @@ export type ClientSetCwd = {
   cwd: string
 }
 
+/**
+ * Rename a session. Empty/whitespace label clears the override, causing the
+ * dashboard to fall back to `firstUserMessage`. Host writes a metadata log
+ * entry so summaries survive host restarts.
+ */
+export type ClientRenameSession = {
+  sessionId: string
+  label: string
+}
+
+export type SessionRenamedEvent = {
+  sessionId: string
+  label: string
+}
+
 // ============================================================================
 // Host  -  Dashboard only
 // ============================================================================
@@ -372,6 +387,11 @@ export type SessionSummary = {
   status?: AgentState['status']
   currentCwd?: string
   firstUserMessage?: string
+  /**
+   * Operator-provided display label from the most recent `client:rename_session`.
+   * When unset the dashboard uses `firstUserMessage` as before.
+   */
+  label?: string
 }
 
 export type ServerSessionsPayload = {
@@ -477,6 +497,7 @@ export type DashboardClientToServerEvents = {
   'client:delete_session': (payload: ClientDeleteSession) => void
   'client:set_model': (payload: ClientSetModel) => void
   'client:set_cwd': (payload: ClientSetCwd) => void
+  'client:rename_session': (payload: ClientRenameSession) => void
   subscribe: (payload: ClientSubscribe) => void
 }
 
@@ -491,6 +512,7 @@ export type DashboardServerToClientEvents = {
   'session:model_changed': (payload: SessionModelChangedEvent) => void
   'session:token_delta': (payload: ServerTokenDeltaEvent) => void
   'session:approval_mode': (payload: SessionApprovalModeEvent) => void
+  'session:renamed': (payload: SessionRenamedEvent) => void
   'server:message_queue': (payload: ServerMessageQueueEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
