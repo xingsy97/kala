@@ -8,10 +8,7 @@
  *   - `todowrite`       -  promote `input.todos` into `state.todos`
  *   - `memory`         with `operation === 'write' | 'delete'` and
  *                      `input.scope === 'session'`
- *   - `memory_write`   with `input.scope === 'session'` (legacy alias)
- *                       -  upsert `{ key, content, updatedAt }` into `state.memory`
- *   - `memory_delete`  with `input.scope === 'session'`
- *                       -  remove matching entry from `state.memory`
+ *                       -  upsert/remove `{ key, content, updatedAt }` in `state.memory`
  *
  * Everything else is opaque  -  the reducer never inspects tool call inputs
  * for any other name. Parsing happens from `pendingCall.input` (not from the
@@ -28,7 +25,7 @@ import type {
   TodoPriority,
   TodoStatus,
 } from './types.js'
-import { MEMORY_DELETE_TOOL_NAME, MEMORY_TOOL_NAME, MEMORY_WRITE_TOOL_NAME } from './types.js'
+import { MEMORY_TOOL_NAME } from './types.js'
 
 // ============================================================================
 // todowrite
@@ -82,19 +79,10 @@ export function isSessionMemoryOp(
   toolName: string,
   input: Record<string, unknown>,
 ): boolean {
-  if (
-    toolName !== MEMORY_TOOL_NAME &&
-    toolName !== MEMORY_WRITE_TOOL_NAME &&
-    toolName !== MEMORY_DELETE_TOOL_NAME
-  ) {
-    return false
-  }
+  if (toolName !== MEMORY_TOOL_NAME) return false
   if ((input as { scope?: unknown }).scope !== 'session') return false
-  if (toolName === MEMORY_TOOL_NAME) {
-    const operation = (input as { operation?: unknown }).operation
-    return operation === 'write' || operation === 'delete'
-  }
-  return true
+  const operation = (input as { operation?: unknown }).operation
+  return operation === 'write' || operation === 'delete'
 }
 
 /**
@@ -134,8 +122,6 @@ function memoryOperation(
   toolName: string,
   input: Record<string, unknown>,
 ): 'write' | 'delete' | null {
-  if (toolName === MEMORY_WRITE_TOOL_NAME) return 'write'
-  if (toolName === MEMORY_DELETE_TOOL_NAME) return 'delete'
   if (toolName === MEMORY_TOOL_NAME) {
     const operation = (input as { operation?: unknown }).operation
     return operation === 'write' || operation === 'delete' ? operation : null

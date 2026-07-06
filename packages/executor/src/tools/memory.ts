@@ -95,47 +95,36 @@ export const memoryTool: Tool = {
   name: 'memory',
   async run(input, ctx) {
     const operation = requireOperation(input)
-    if (operation === 'read') return memoryReadTool.run(input, ctx)
-    if (operation === 'list') {
-      const scope = requireScope(input)
-      return listKeys(scope, ctx)
-    }
-    if (operation === 'write') return memoryWriteTool.run(input, ctx)
-    return memoryDeleteTool.run(input, ctx)
+    const scope = requireScope(input)
+    if (operation === 'list') return listKeys(scope, ctx)
+    if (operation === 'read') return readMemory(scope, input, ctx)
+    if (operation === 'write') return writeMemory(scope, input, ctx)
+    return deleteMemory(scope, input, ctx)
   },
 }
 
-// ----------------------------------------------------------------------------
-// memory_read
-// ----------------------------------------------------------------------------
+async function readMemory(
+  scope: Scope,
+  input: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const key = requireKey(input)
 
-export const memoryReadTool: Tool = {
-  name: 'memory_read',
-  async run(input, ctx) {
-    const scope = requireScope(input)
-    const keyRaw = input['key']
-    // key optional: undefined means "list all keys in this scope"
-    if (keyRaw === undefined) {
-      return listKeys(scope, ctx)
-    }
-    const key = requireKey(input)
+  if (scope === 'session') {
+    // Session memory lives in kernel state, not on disk. The LLM can already
+    // see state.memory inlined into messages; this branch exists so the tool
+    // surface is symmetric across scopes. Just tell the LLM to look at state.
+    return `Session-scope memory lives in state.memory (visible in the transcript). Key "${key}" is not on disk; ask the state view.`
+  }
 
-    if (scope === 'session') {
-      // Session memory lives in kernel state, not on disk. The LLM can already
-      // see state.memory inlined into messages; this branch exists so the tool
-      // surface is symmetric across scopes. Just tell the LLM to look at state.
-      return `Session-scope memory lives in state.memory (visible in the transcript). Key "${key}" is not on disk; ask the state view.`
-    }
-
-    const dir = memoryDirFor(scope, ctx)
-    const file = join(dir, `${key}.md`)
-    if (!existsSync(file)) {
-      throw new ToolError('ENOENT', `no memory entry: scope=${scope} key=${key}`)
-    }
-    const content = await readFile(file, 'utf8')
-    const s = await stat(file)
-    return `--- scope=${scope} key=${key} updated=${s.mtime.toISOString()} ---\n${content}`
-  },
+  const dir = memoryDirFor(scope, ctx)
+  const file = join(dir, `${key}.md`)
+  if (!existsSync(file)) {
+    throw new ToolError('ENOENT', `no memory entry: scope=${scope} key=${key}`)
+  }
+  const content = await readFile(file, 'utf8')
+  const s = await stat(file)
+  return `--- scope=${scope} key=${key} updated=${s.mtime.toISOString()} ---\n${content}`
 }
 
 async function listKeys(scope: Scope, ctx: ToolContext): Promise<string> {
@@ -157,66 +146,58 @@ async function listKeys(scope: Scope, ctx: ToolContext): Promise<string> {
   return `scope=${scope} keys:\n${md.map((k) => `  - ${k}`).join('\n')}`
 }
 
-// ----------------------------------------------------------------------------
-// memory_write
-// ----------------------------------------------------------------------------
+async function writeMemory(
+  scope: Scope,
+  input: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const key = requireKey(input)
+  const content = requireString(input, 'content')
+  const bytes = Buffer.byteLength(content, 'utf8')
+  if (bytes > MAX_CONTENT_BYTES) {
+    throw new ToolError(
+      'E2BIG',
+      `content exceeds memory entry cap (${bytes} bytes > ${MAX_CONTENT_BYTES})`,
+    )
+  }
 
-export const memoryWriteTool: Tool = {
-  name: 'memory_write',
-  async run(input, ctx) {
-    const scope = requireScope(input)
-    const key = requireKey(input)
-    const content = requireString(input, 'content')
-    const bytes = Buffer.byteLength(content, 'utf8')
-    if (bytes > MAX_CONTENT_BYTES) {
-      throw new ToolError(
-        'E2BIG',
-        `content exceeds memory entry cap (${bytes} bytes > ${MAX_CONTENT_BYTES})`,
-      )
-    }
+  if (scope === 'session') {
+    // Nothing to do on disk  -  the kernel reducer lifts (key, content) into
+    // state.memory when this tool_result lands with ok=true. Just ack.
+    return `session memory upserted: key="${key}" (${bytes} bytes)`
+  }
 
-    if (scope === 'session') {
-      // Nothing to do on disk  -  the kernel reducer lifts (key, content) into
-      // state.memory when this tool_result lands with ok=true. Just ack.
-      return `session memory upserted: key="${key}" (${bytes} bytes)`
-    }
-
-    throwIfAborted(ctx)
-    const dir = memoryDirFor(scope, ctx)
-    await ensureDir(dir)
-    throwIfAborted(ctx)
-    const file = join(dir, `${key}.md`)
-    const existed = existsSync(file)
-    await writeFile(file, content, 'utf8')
-    return existed
-      ? `updated scope=${scope} key=${key} (${bytes} bytes)`
-      : `created scope=${scope} key=${key} (${bytes} bytes)`
-  },
+  throwIfAborted(ctx)
+  const dir = memoryDirFor(scope, ctx)
+  await ensureDir(dir)
+  throwIfAborted(ctx)
+  const file = join(dir, `${key}.md`)
+  const existed = existsSync(file)
+  await writeFile(file, content, 'utf8')
+  return existed
+    ? `updated scope=${scope} key=${key} (${bytes} bytes)`
+    : `created scope=${scope} key=${key} (${bytes} bytes)`
 }
 
-// ----------------------------------------------------------------------------
-// memory_delete
-// ----------------------------------------------------------------------------
+async function deleteMemory(
+  scope: Scope,
+  input: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<string> {
+  const key = requireKey(input)
 
-export const memoryDeleteTool: Tool = {
-  name: 'memory_delete',
-  async run(input, ctx) {
-    const scope = requireScope(input)
-    const key = requireKey(input)
+  if (scope === 'session') {
+    // Kernel reducer removes the entry from state.memory. Ack only.
+    return `session memory removed: key="${key}"`
+  }
 
-    if (scope === 'session') {
-      // Kernel reducer removes the entry from state.memory. Ack only.
-      return `session memory removed: key="${key}"`
-    }
-
-    throwIfAborted(ctx)
-    const dir = memoryDirFor(scope, ctx)
-    const file = join(dir, `${key}.md`)
-    if (!existsSync(file)) {
-      // Idempotent delete  -  treat missing as success. LLMs sometimes retry.
-      return `no-op: scope=${scope} key=${key} did not exist`
-    }
-    await unlink(file)
-    return `deleted scope=${scope} key=${key}`
-  },
+  throwIfAborted(ctx)
+  const dir = memoryDirFor(scope, ctx)
+  const file = join(dir, `${key}.md`)
+  if (!existsSync(file)) {
+    // Idempotent delete  -  treat missing as success. LLMs sometimes retry.
+    return `no-op: scope=${scope} key=${key} did not exist`
+  }
+  await unlink(file)
+  return `deleted scope=${scope} key=${key}`
 }

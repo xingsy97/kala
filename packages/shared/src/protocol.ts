@@ -386,7 +386,7 @@ export type OverflowContentsResult = {
  * User-initiated `/consolidate-memory` slash command. Host reads the
  * session's messages, runs a single LLM call to extract durable signal,
  * and writes the results into the workspace memory root via the executor's
- * `memory_write` tool. See docs/memory-consolidation.md.
+ * `memory` tool. See docs/memory-consolidation.md.
  */
 export type ClientConsolidateMemory = {
   requestId: string

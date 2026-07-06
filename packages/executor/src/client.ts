@@ -182,8 +182,6 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 const OVERFLOW_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
   'todowrite',
   'memory',
-  'memory_write',
-  'memory_delete',
   'bash_output',
 ])
 
