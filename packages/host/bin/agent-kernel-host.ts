@@ -203,7 +203,11 @@ function createModelRegistry(
       if (!provider) throw new Error(`unknown provider: ${input.providerId}`)
       const id = input.id.trim()
       if (id.length === 0) throw new Error('model id is required')
-      if (!models.some((m) => m.providerId === provider.id && m.id === id)) {
+      const existingModel = models.find((m) => m.providerId === provider.id && m.id === id)
+      if (existingModel && existingModel.source !== 'manual') {
+        throw new Error(`model already discovered from ${existingModel.source ?? 'provider config'}: ${id}`)
+      }
+      if (!existingModel) {
         const adapter = buildSingleAdapter(provider, id)
         router.addRoute(id, adapter)
         models.push(modelInfo(id, provider.label, {

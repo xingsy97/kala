@@ -67,7 +67,10 @@ export function loadRuntimeConfig(
   const codex = loadCodexProviders(codexPath)
   providers.push(...codex.providers)
   const discoveredModels = new Map(providers.map((p) => [p.id, new Set(p.models)]))
-  const manualModels = loadManualModels(manualPath)
+  const manualModels = loadManualModels(manualPath).filter((m) => {
+    const discovered = discoveredModels.get(m.providerId)
+    return !discovered?.has(m.id)
+  })
   applyManualModels(providers, manualModels)
 
   const models: ModelInfo[] = providers.flatMap((p) =>

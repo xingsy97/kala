@@ -125,6 +125,39 @@ describe('loadRuntimeConfig', () => {
     }
   })
 
+  it('does not let manual models override auto-discovered model sources', () => {
+    const claudePath = join(dir, 'claude.json')
+    const manualPath = join(dir, 'models.json')
+    writeFileSync(
+      claudePath,
+      JSON.stringify({
+        apiKeyHelper: 'echo test-anthropic-key',
+        env: { ANTHROPIC_MODEL: 'claude-sonnet-4-6' },
+      }),
+    )
+    writeFileSync(
+      manualPath,
+      JSON.stringify({
+        models: [
+          { providerId: 'anthropic', id: 'claude-sonnet-4-6' },
+          { providerId: 'anthropic', id: 'claude-haiku-4-6' },
+        ],
+      }),
+    )
+
+    const cfg = loadRuntimeConfig({
+      claudeSettingsPath: claudePath,
+      codexConfigPath: join(dir, 'missing-codex.toml'),
+      manualModelsPath: manualPath,
+    })
+
+    expect(cfg.models.map((m) => [m.id, m.source])).toEqual([
+      ['claude-sonnet-4-6', 'claude-settings'],
+      ['claude-haiku-4-6', 'manual'],
+    ])
+    expect(cfg.manualModels).toEqual([{ providerId: 'anthropic', id: 'claude-haiku-4-6' }])
+  })
+
   it('drops providers whose env key is unset (so nothing loud fails when TK_API_KEY is missing)', () => {
     const codexPath = join(dir, 'codex.toml')
     writeFileSync(

@@ -14,7 +14,8 @@ const payload: ServerSettingsPayload = {
       baseUrl: 'http://proxy.local/v1',
       models: [
         { id: 'claude-opus-4-7', label: 'claude-opus-4-7', provider: 'Anthropic', providerId: 'anthropic', source: 'claude-settings' },
-        { id: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6', provider: 'Anthropic', providerId: 'anthropic', source: 'manual' },
+        { id: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6', provider: 'Anthropic', providerId: 'anthropic', source: 'claude-settings' },
+        { id: 'claude-haiku-4-6', label: 'claude-haiku-4-6', provider: 'Anthropic', providerId: 'anthropic', source: 'manual' },
       ],
     },
     {
@@ -85,12 +86,36 @@ describe('SettingsDialog', () => {
     expect(anthropic.textContent).toContain('Anthropic')
     expect(anthropic.textContent).toContain('claude-opus-4-7')
     expect(anthropic.textContent).toContain('claude-sonnet-4-6')
+    expect(anthropic.textContent).toContain('claude-haiku-4-6')
     expect(anthropic.textContent).toContain('default provider')
     expect(anthropic.textContent).toContain('Claude Code')
     expect(anthropic.textContent).toContain('Manual')
 
     const other = screen.getByTestId('settings-provider-openai-compat')
     expect(other.textContent).toContain('No model attached')
+  })
+
+  it('does not label missing source metadata as manual', async () => {
+    const sourceLess: ServerSettingsPayload = {
+      ...payload,
+      providers: [
+        {
+          id: 'legacy-provider',
+          label: 'legacy-provider',
+          wire: 'openai',
+          models: [{ id: 'gpt-legacy', label: 'gpt-legacy', provider: 'legacy-provider', providerId: 'legacy-provider' }],
+        },
+      ],
+    }
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(sourceLess), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await screen.findByText('<home>/.claude/settings.json')
+
+    fireEvent.click(screen.getByTestId('settings-tab-models'))
+    const provider = await screen.findByTestId('settings-provider-legacy-provider')
+    expect(provider.textContent).toContain('Unknown')
+    expect(provider.textContent).not.toContain('Manual')
+    expect(screen.queryByLabelText('delete model gpt-legacy')).toBeNull()
   })
 
   it('adds and deletes manual models', async () => {
