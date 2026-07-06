@@ -139,9 +139,13 @@ function writeFixture() {
     approvalMode: 'ask',
   }
   const callId = 'toolu_01J4Z7K9V2N8Q5M3B1C6D0E4'
+  const llmRequestMessages = [
+    ...initialState.messages,
+    { role: 'user', content: [{ type: 'text', text: ' -  executor  -  cwd  - ' }] },
+  ]
   const entries = [
     { kind: 'header', seq: 0, ts: '2026-07-06T06:00:00.000Z', sessionId, formatVersion: 1, kernelVersion: '0.0.0', config, initialState, initialCwd: repo },
-    { kind: 'event', seq: 1, ts: '2026-07-06T06:00:01.000Z', event: { kind: 'user_message', text: ' -  executor  -  cwd  - ' }, effects: [{ kind: 'call_llm', messages: initialState.messages, tools: config.tools }] },
+    { kind: 'event', seq: 1, ts: '2026-07-06T06:00:01.000Z', event: { kind: 'user_message', text: ' -  executor  -  cwd  - ' }, effects: [{ kind: 'call_llm', messages: llmRequestMessages, tools: config.tools }] },
     { kind: 'event', seq: 2, ts: '2026-07-06T06:00:02.000Z', event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId, name: 'edit', input: { path: 'packages/executor/src/sandbox.ts', oldText: 'const base = canonicalRoots[0] ?? process.cwd()', newText: 'const base = opts?.cwd ?? canonicalRoots[0] ?? process.cwd()' } }] }, usage: { inputTokens: 42180, outputTokens: 614, costUsd: 0.1264, cacheCreationTokens: 0, cacheReadTokens: 32000 } }, effects: [{ kind: 'request_approval', callId, name: 'edit', input: { path: 'packages/executor/src/sandbox.ts' } }], llmTrace: { provider: 'anthropic', model: 'claude-sonnet-4-6', request: { url: 'https://api.anthropic.com/v1/messages', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': 'test-redacted-api-key' }, body: { model: 'claude-sonnet-4-6', max_tokens: 4096, stream: true, messages: [{ role: 'user', content: [{ type: 'text', text: ' -  executor  -  cwd  - ' }] }], tools: [{ name: 'edit', description: 'Replace exact text in a workspace file.', input_schema: config.tools[0].inputSchema }] } }, response: { status: 200, streamEventTypes: ['message_start', 'content_block_start', 'content_block_delta', 'message_delta', 'message_stop'], body: { role: 'assistant', content: [{ type: 'tool_use', id: callId, name: 'edit', input: { path: 'packages/executor/src/sandbox.ts' } }] } } } },
     { kind: 'event', seq: 3, ts: '2026-07-06T06:00:03.000Z', event: { kind: 'user_approve', callId }, effects: [{ kind: 'call_tool', callId, name: 'edit', input: { path: 'packages/executor/src/sandbox.ts' } }] },
     { kind: 'event', seq: 4, ts: '2026-07-06T06:00:04.000Z', event: { kind: 'tool_result', callId, ok: true, content: 'Applied patch to packages/executor/src/sandbox.ts' }, effects: [{ kind: 'call_llm', messages: [], tools: config.tools }] },
@@ -205,8 +209,20 @@ try {
   await page.waitForSelector('[data-testid="llm-call-row"]')
   await page.click('[data-testid="llm-call-row"]')
   await page.screenshot({ path: join(shotsDir, '02-debugger-llm.png'), fullPage: false })
-  const llmText = await page.$eval('[data-testid="llm-detail"]', el => el.textContent || '')
-  check('llm detail shows provider request and response', llmText.includes('Provider Request') && llmText.includes('Provider Response') && llmText.includes('test-redacted-api-key'), llmText.slice(0, 300))
+  const llmAssemblyText = await page.$eval('[data-testid="llm-assembly-view"]', el => el.textContent || '')
+  check('llm detail explains message assembly', llmAssemblyText.includes('System Prompt') && llmAssemblyText.includes('Kernel Messages') && llmAssemblyText.includes('Adapter Transform'), llmAssemblyText.slice(0, 300))
+  await page.click('[data-testid="llm-detail-view-switch-messages"]')
+  await page.waitForSelector('[data-testid="kernel-messages-view"]')
+  const kernelMessagesText = await page.$eval('[data-testid="kernel-messages-view"]', el => el.textContent || '')
+  check('llm detail shows kernel messages', kernelMessagesText.includes('user') && kernelMessagesText.includes(' -  executor'), kernelMessagesText.slice(0, 300))
+  await page.click('[data-testid="llm-detail-view-switch-payload"]')
+  await page.waitForSelector('[data-testid="provider-payload-view"]')
+  const payloadText = await page.$eval('[data-testid="provider-payload-view"]', el => el.textContent || '')
+  check('llm detail shows provider payload', payloadText.includes('Provider Request') && payloadText.includes('Kernel Request') && payloadText.includes('test-redacted-api-key'), payloadText.slice(0, 300))
+  await page.click('[data-testid="llm-detail-view-switch-response"]')
+  await page.waitForSelector('[data-testid="llm-response-view"]')
+  const responseText = await page.$eval('[data-testid="llm-response-view"]', el => el.textContent || '')
+  check('llm detail shows provider response and parsed response', responseText.includes('Provider Response') && responseText.includes('Parsed Kernel Response'), responseText.slice(0, 300))
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="llm-detail"]'))
   await page.click('[data-testid="trace-view-switch-tools"]')
