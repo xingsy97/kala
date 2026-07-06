@@ -159,7 +159,7 @@ describe('InspectorPanel', () => {
     expect(document.body.textContent ?? '').toContain('request_approval')
   })
 
-  it('shows LLM calls with provider trace and selected request/response JSON', () => {
+  it('shows LLM calls with message assembly, provider payload, and response tabs', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
@@ -170,10 +170,80 @@ describe('InspectorPanel', () => {
 
     fireEvent.click(screen.getAllByTestId('llm-call-row')[0]!)
     const detail = screen.getByTestId('llm-detail')
-    expect(detail.textContent ?? '').toContain('Kernel Request')
-    expect(detail.textContent ?? '').toContain('Provider Request')
-    expect(detail.textContent ?? '').toContain('Provider Response')
-    expect(detail.textContent ?? '').toContain('test-redacted-api-key')
+    expect(detail.textContent ?? '').toContain('LLM Message Assembly')
+    expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('System Prompt')
+    expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('Adapter Transform')
+
+    fireEvent.click(screen.getByTestId('llm-detail-view-switch-payload'))
+    expect(screen.getByTestId('provider-payload-view').textContent ?? '').toContain('Provider Request')
+    expect(screen.getByTestId('provider-payload-view').textContent ?? '').toContain('Kernel Request')
+    expect(screen.getByTestId('provider-payload-view').textContent ?? '').toContain('test-redacted-api-key')
+
+    fireEvent.click(screen.getByTestId('llm-detail-view-switch-response'))
+    expect(screen.getByTestId('llm-response-view').textContent ?? '').toContain('Provider Response')
+    expect(screen.getByTestId('llm-response-view').textContent ?? '').toContain('Parsed Kernel Response')
+  })
+
+  it('shows kernel messages for a selected LLM call', () => {
+    const messagesTimeline: TimelineEntry[] = [
+      {
+        seq: 10,
+        ts: '2026-07-06T06:20:00Z',
+        event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'loaded skill' },
+        effects: [
+          {
+            kind: 'call_llm',
+            messages: [
+              { role: 'user', content: [{ type: 'text', text: 'Use code review skill.' }] },
+              {
+                role: 'assistant',
+                content: [{ type: 'tool_call', callId: 'c1', name: 'skill', input: { name: 'code-review' } }],
+              },
+              { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'loaded skill' }] },
+            ],
+            tools: [
+              {
+                name: 'skill',
+                description: 'Load a skill.',
+                inputSchema: { type: 'object' },
+                requiresApproval: false,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        seq: 11,
+        ts: '2026-07-06T06:20:01Z',
+        event: {
+          kind: 'llm_response',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Reviewed.' }] },
+        },
+        effects: [],
+        llmTrace: {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          request: {
+            url: 'https://api.openai.com/v1/chat/completions',
+            headers: { authorization: 'Bearer redacted' },
+            body: { model: 'gpt-5.5', messages: [{ role: 'user', content: 'Use code review skill.' }], tools: [] },
+          },
+          response: { status: 200, body: { choices: [] } },
+        },
+      },
+    ]
+    render(<InspectorPanel state={baseState} timeline={messagesTimeline} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+    fireEvent.click(screen.getByTestId('trace-view-switch-llm'))
+    expect(document.body.textContent ?? '').toContain('openai / gpt-5.5')
+    fireEvent.click(screen.getByTestId('llm-call-row'))
+    fireEvent.click(screen.getByTestId('llm-detail-view-switch-messages'))
+
+    expect(screen.getByTestId('kernel-messages-view')).toBeTruthy()
+    expect(screen.getAllByTestId('kernel-message-row')).toHaveLength(3)
+    expect(screen.getByTestId('kernel-messages-view').textContent ?? '').toContain('Use code review skill.')
+    expect(screen.getByTestId('kernel-messages-view').textContent ?? '').toContain('tool_call skill')
   })
 
   it('falls back to provider request body when trace model is missing', () => {

@@ -65,6 +65,7 @@ type Props = {
 type TraceView = 'reducer' | 'llm' | 'tools'
 type RuntimeView = 'state' | 'tools' | 'memory'
 type SidebarView = 'debugger' | 'trace'
+type LlmDetailView = 'assembly' | 'messages' | 'payload' | 'response'
 type DetailSelection =
   | { kind: 'event'; entry: TimelineEntry; priorCallLlm: PriorCallLlm | null; flow?: StateFlowStep }
   | { kind: 'llm'; call: LlmCall }
@@ -81,6 +82,7 @@ type LlmCall = {
   response?: Extract<AgentEvent, { kind: 'llm_response' }>
   error?: Extract<AgentEvent, { kind: 'llm_error' }>
   trace?: LLMTrace
+  model?: string
 }
 
 type ToolCallLifecycle = {
@@ -900,6 +902,7 @@ function EventDetail({ selection }: { selection: Extract<DetailSelection, { kind
 }
 
 function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
+  const [view, setView] = useState<LlmDetailView>('assembly')
   const provider = llmCallProvider(call)
   const model = llmCallModel(call)
   const kernelRequest = {
@@ -914,22 +917,190 @@ function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
       ? { responseSeq: call.responseSeq, event: call.error }
       : { status: 'pending' }
   return (
-    <ScrollArea className="h-full">
-      <div className="space-y-2 pb-1" data-testid="llm-detail">
+    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="llm-detail">
+      <div className="flex flex-none items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium text-foreground">LLM Message Assembly</div>
+          <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+            {provider} / {model}
+          </div>
+        </div>
+        <Segmented<LlmDetailView>
+          value={view}
+          onChange={setView}
+          options={[
+            ['assembly', 'Assembly'],
+            ['messages', 'Kernel Messages'],
+            ['payload', 'Provider Payload'],
+            ['response', 'Response'],
+          ]}
+          testId="llm-detail-view-switch"
+        />
+      </div>
+      {view === 'assembly' ? (
+        <LlmAssemblyView call={call} provider={provider} model={model} />
+      ) : view === 'messages' ? (
+        <KernelMessagesView messages={call.effect.messages} />
+      ) : view === 'payload' ? (
+        <ProviderPayloadView call={call} kernelRequest={kernelRequest} />
+      ) : (
+        <LlmResponseView call={call} parsedResponse={parsedResponse} />
+      )}
+    </div>
+  )
+}
+
+function LlmAssemblyView({ call, provider, model }: { call: LlmCall; provider: string; model: string }): JSX.Element {
+  const systemInfo = describeSystemInjection(call)
+  const toolNames = call.effect.tools.map((tool) => `${tool.name}${tool.requiresApproval ? ' gated' : ' auto'}`)
+  return (
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="space-y-2 pb-1" data-testid="llm-assembly-view">
         <KeyValueTable
           rows={[
             ['call', `#${call.requestSeq} → ${call.responseSeq ? `#${call.responseSeq}` : 'pending'}`],
             ['provider', call.trace ? provider : 'kernel only'],
             ['model', model === 'model unknown' ? 'not captured' : model],
+            ['kernel messages', String(call.effect.messages.length)],
+            ['tools', String(call.effect.tools.length)],
             ['provider trace', call.trace ? 'captured' : 'not captured in this log'],
           ]}
         />
+        <AssemblyStep
+          index="1"
+          title="System Prompt"
+          source="AgentConfig.systemPrompt or leading system message"
+          result={systemInfo}
+        />
+        <AssemblyStep
+          index="2"
+          title="Kernel Messages"
+          source="call_llm.messages emitted by the kernel reducer"
+          result={`${call.effect.messages.length} messages: ${roleCounts(call.effect.messages)}`}
+        />
+        <AssemblyStep
+          index="3"
+          title="Tool Registry"
+          source="AgentConfig.tools attached to the call_llm effect"
+          result={toolNames.length > 0 ? toolNames.join(', ') : 'no tools sent'}
+        />
+        <AssemblyStep
+          index="4"
+          title="Adapter Transform"
+          source="host LLM adapter"
+          result={adapterTransformSummary(provider)}
+        />
+      </div>
+    </ScrollArea>
+  )
+}
+
+function AssemblyStep({ index, title, source, result }: { index: string; title: string; source: string; result: string }): JSX.Element {
+  return (
+    <div className="rounded bg-background/70 p-3 text-xs ring-1 ring-border/30">
+      <div className="flex items-center gap-2">
+        <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 font-mono text-[10px] text-primary">{index}</span>
+        <span className="font-medium text-foreground">{title}</span>
+      </div>
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)]">
+        <div className="text-muted-foreground">source</div>
+        <div className="min-w-0 font-mono text-foreground">{source}</div>
+        <div className="text-muted-foreground">result</div>
+        <div className="min-w-0 break-words font-mono text-foreground">{result}</div>
+      </div>
+    </div>
+  )
+}
+
+function KernelMessagesView({ messages }: { messages: readonly Message[] }): JSX.Element {
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const selected = messages[selectedIndex]
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,0.95fr)_minmax(0,1.05fr)] gap-2" data-testid="kernel-messages-view">
+      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+        <div className="p-1">
+          {messages.map((message, index) => (
+            <button
+              key={index}
+              type="button"
+              onClick={() => setSelectedIndex(index)}
+              className={cn('flex w-full min-w-0 items-start gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/70', selectedIndex === index ? 'bg-muted' : '')}
+              data-testid="kernel-message-row"
+            >
+              <span className="w-7 flex-none font-mono text-[10px] text-muted-foreground">#{index}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className={cn('w-16 flex-none font-mono text-[10px]', messageRoleTone(message.role))}>{message.role}</span>
+                  <span className="truncate text-[10px] text-muted-foreground">{message.content.map((block) => block.type).join(', ') || 'empty'}</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] text-foreground">{summarizeContent(message.content)}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </ScrollArea>
+      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
+        <div className="space-y-2 p-2 text-xs">
+          {selected ? (
+            <>
+              <KeyValueTable
+                rows={[
+                  ['message', `#${selectedIndex}`],
+                  ['role', selected.role],
+                  ['blocks', selected.content.map((block) => block.type).join(', ') || 'empty'],
+                ]}
+              />
+              <JsonBlock label={`Kernel Message #${selectedIndex}`} value={selected} collapsed={2} />
+            </>
+          ) : (
+            <EmptyBlock label="No kernel messages in this LLM request." />
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
+function ProviderPayloadView({ call, kernelRequest }: { call: LlmCall; kernelRequest: unknown }): JSX.Element {
+  if (!call.trace) {
+    return (
+      <div className="min-h-0 flex-1">
+        <EmptyBlock label="Provider HTTP trace was not captured for this LLM call." />
+      </div>
+    )
+  }
+  const body = call.trace.request.body
+  return (
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="space-y-2 pb-1" data-testid="provider-payload-view">
+        <KeyValueTable
+          rows={[
+            ['url', call.trace.request.url],
+            ['provider', providerFromTrace(call.trace)],
+            ['body.system', providerBodyHasKey(body, 'system') ? 'present' : 'not present'],
+            ['body.messages', providerArrayLength(body, 'messages')],
+            ['body.tools', providerArrayLength(body, 'tools')],
+          ]}
+        />
+        <AssemblyStep
+          index="A"
+          title="Provider Body Sections"
+          source="provider adapter output"
+          result="system/messages/tools are shown in provider-native shape below; raw kernel request remains available for comparison."
+        />
+        <JsonBlock label="Provider Request" value={call.trace.request} collapsed={2} />
         <JsonBlock label={`Kernel Request · call_llm @ #${call.requestSeq}`} value={kernelRequest} collapsed={2} />
+      </div>
+    </ScrollArea>
+  )
+}
+
+function LlmResponseView({ call, parsedResponse }: { call: LlmCall; parsedResponse: unknown }): JSX.Element {
+  return (
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="space-y-2 pb-1" data-testid="llm-response-view">
         {call.trace ? (
-          <>
-            <JsonBlock label="Provider Request" value={call.trace.request} collapsed={2} />
-            <JsonBlock label="Provider Response" value={call.trace.response ?? null} collapsed={2} />
-          </>
+          <JsonBlock label="Provider Response" value={call.trace.response ?? null} collapsed={2} />
         ) : (
           <div className="rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             This log has kernel-level LLM I/O only. Provider HTTP request/response trace is available for new calls recorded after trace capture was added.
@@ -1065,12 +1236,14 @@ function buildLlmCalls(timeline: readonly TimelineEntry[]): readonly LlmCall[] {
           call.responseSeq = candidate.seq
           call.response = candidate.event
           if (candidate.llmTrace) call.trace = candidate.llmTrace
+          if (candidate.model) call.model = candidate.model
           break
         }
         if (candidate.event.kind === 'llm_error') {
           call.responseSeq = candidate.seq
           call.error = candidate.event
           if (candidate.llmTrace) call.trace = candidate.llmTrace
+          if (candidate.model) call.model = candidate.model
           break
         }
       }
@@ -1219,6 +1392,55 @@ function summarizeContent(content: readonly MessageContent[]): string {
   }).join(' · ')
 }
 
+function messageRoleTone(role: Message['role']): string {
+  if (role === 'user') return 'text-sky-600 dark:text-sky-300'
+  if (role === 'assistant') return 'text-violet-600 dark:text-violet-300'
+  if (role === 'tool') return 'text-emerald-600 dark:text-emerald-300'
+  return 'text-amber-600 dark:text-amber-300'
+}
+
+function roleCounts(messages: readonly Message[]): string {
+  const counts = new Map<Message['role'], number>()
+  for (const message of messages) counts.set(message.role, (counts.get(message.role) ?? 0) + 1)
+  return [...counts.entries()].map(([role, count]) => `${role} ${count}`).join(', ') || 'none'
+}
+
+function describeSystemInjection(call: LlmCall): string {
+  const provider = call.trace ? providerFromTrace(call.trace) : 'unknown'
+  const firstSystem = call.effect.messages.find((message) => message.role === 'system')
+  const hasProviderSystem = call.trace ? providerBodyHasKey(call.trace.request.body, 'system') : false
+  if (provider === 'anthropic' && hasProviderSystem) {
+    return firstSystem
+      ? 'system message or config prompt is folded into Anthropic top-level body.system'
+      : 'config prompt is sent as Anthropic top-level body.system'
+  }
+  if (provider === 'openai') {
+    return 'system prompt is sent as an OpenAI-compatible system message when configured'
+  }
+  if (firstSystem) return 'kernel request includes at least one system message'
+  return 'no system prompt visible in captured request data'
+}
+
+function adapterTransformSummary(provider: string): string {
+  if (provider === 'anthropic') {
+    return 'systemPrompt -> body.system; messages -> body.messages; tool_call -> tool_use; tool_result -> tool_result; ToolSchema[] -> body.tools'
+  }
+  if (provider === 'openai') {
+    return 'systemPrompt -> system message; messages -> body.messages; tool_call/tool_result -> OpenAI-compatible tool messages; ToolSchema[] -> tools'
+  }
+  return 'provider trace captured; exact adapter transform is shown in Provider Payload'
+}
+
+function providerBodyHasKey(body: unknown, key: string): boolean {
+  return Boolean(body && typeof body === 'object' && !Array.isArray(body) && key in body)
+}
+
+function providerArrayLength(body: unknown, key: string): string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'not present'
+  const value = (body as Record<string, unknown>)[key]
+  return Array.isArray(value) ? String(value.length) : 'not present'
+}
+
 function llmResponseSummary(call: LlmCall): string {
   if (call.error) return call.error.error
   if (!call.response) return 'pending'
@@ -1277,7 +1499,7 @@ function modelFromTimeline(timeline: readonly TimelineEntry[]): string | null {
 }
 
 function llmCallModel(call: LlmCall): string {
-  return modelFromTrace(call.trace) ?? 'model unknown'
+  return modelFromTrace(call.trace) ?? call.model ?? 'model unknown'
 }
 
 function llmCallProvider(call: LlmCall): string {
