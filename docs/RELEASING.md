@@ -58,8 +58,7 @@ Current assets:
 | `agent-kernel-host.cjs`                | Single-file Node 22 executable for the host CLI. |
 | `agent-kernel-executor.cjs`            | Single-file Node 22 executable for the executor. |
 | `agent-kernel-dashboard-dist.tar.gz`   | Static dashboard bundle served by the host.      |
-| `run-host.sh`                          | Bash bootstrap that downloads, verifies, and runs the host asset. |
-| `run-executor.sh`                      | Bash bootstrap that downloads, verifies, and runs the executor asset. |
+| `run.sh`                               | Wget-only bash bootstrap that downloads, verifies, and runs the selected component. |
 | `RELEASE_NOTES.md`                     | Generated GitHub Release body with one-line startup commands. |
 | `manifest.json`                        | Asset manifest and runtime notes.                |
 | `SHA256SUMS`                           | Checksums for release verification.              |
@@ -68,9 +67,9 @@ Tag behavior:
 
 | Tag pattern       | Uploaded assets                                      |
 | ----------------- | ---------------------------------------------------- |
-| `v*`              | Host, executor, dashboard tarball, host/executor bootstraps, release notes, manifest, sums. |
-| `host-v*`         | Host, dashboard tarball, host bootstrap, release notes, manifest, sums. |
-| `executor-v*`     | Executor, executor bootstrap, release notes, manifest, sums. |
+| `v*`              | Host, executor, dashboard tarball, unified bootstrap, release notes, manifest, sums. |
+| `host-v*`         | Host, dashboard tarball, unified bootstrap defaulting to host, release notes, manifest, sums. |
+| `executor-v*`     | Executor, unified bootstrap defaulting to executor, release notes, manifest, sums. |
 | `dashboard-v*`    | Dashboard tarball, release notes, manifest, sums.    |
 
 These are single-file Node executables, not native binaries. They require
@@ -82,10 +81,16 @@ component.
 Example one-line commands for a full release tag:
 
 ```bash
-curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.2.0/run-host.sh | bash
-curl -fsSL https://github.com/OWNER/REPO/releases/download/v0.2.0/run-executor.sh | HOST_URL=http://localhost:3000 bash
-wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run-host.sh | bash
-wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run-executor.sh | HOST_URL=http://localhost:3000 bash
+wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run.sh | COMPONENT=host bash
+wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 bash
+```
+
+Verify downloaded assets before manual execution:
+
+```bash
+wget -q https://github.com/OWNER/REPO/releases/download/v0.2.0/SHA256SUMS
+wget -q https://github.com/OWNER/REPO/releases/download/v0.2.0/agent-kernel-executor.cjs
+sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 To serve the dashboard manually with the host asset, unpack the dashboard
@@ -96,6 +101,19 @@ tar -xzf agent-kernel-dashboard-dist.tar.gz -C /tmp/agent-kernel-dashboard
 DASHBOARD_DIR=/tmp/agent-kernel-dashboard node agent-kernel-host.cjs
 HOST_URL=http://localhost:3000 node agent-kernel-executor.cjs
 ```
+
+Executors launched from `run.sh` receive `AGENT_KERNEL_RELEASE_TAG` and
+`AGENT_KERNEL_UPDATE_REPO`. The executor checks the latest GitHub Release at
+startup and logs a reminder when a newer release is available. Automatic update
+is opt-in:
+
+```bash
+wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 AGENT_KERNEL_AUTO_UPDATE=1 bash
+```
+
+`--auto-update` is equivalent when launching `agent-kernel-executor.cjs`
+directly. `--no-update-check` or `AGENT_KERNEL_NO_UPDATE_CHECK=1` disables the
+startup reminder.
 
 The release workflow uploads all generated assets and uses `RELEASE_NOTES.md`
 as the GitHub Release body. Updating an existing release also replaces its
@@ -109,7 +127,7 @@ pnpm run verify:release-assets
 pnpm run build:release-assets -- --component host
 pnpm run verify:release-assets
 ls -lh release/
-(cd release && shasum -a 256 -c SHA256SUMS)
+(cd release && sha256sum -c SHA256SUMS --ignore-missing)
 ```
 
 The CI workflow also builds and verifies the default release asset set on every

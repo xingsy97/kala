@@ -91,6 +91,8 @@ jobs:
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
+            gh release delete-asset "$TAG" run-host.sh --yes || true
+            gh release delete-asset "$TAG" run-executor.sh --yes || true
             gh release upload "$TAG" release/* --clobber
           else
             gh release create "$TAG" release/* \

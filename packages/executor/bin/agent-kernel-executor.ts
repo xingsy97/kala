@@ -13,6 +13,10 @@
  *     jail (executor trusts the whole machine).
  *   EXECUTOR_TOKEN / --token    optional; must match host's HOST_AUTH_TOKEN if set
  *   EXECUTOR_ID / --id          optional; defaults to a ULID
+ *   AGENT_KERNEL_AUTO_UPDATE / --auto-update
+ *     optional; update the release asset from the latest GitHub Release before connecting.
+ *   AGENT_KERNEL_NO_UPDATE_CHECK / --no-update-check
+ *     optional; disable the default latest-release reminder.
  *
  * The executor is a daemon: it does NOT bind to a sessionId at startup.
  * The host routes `tool:call` messages to it for any session whose
@@ -23,6 +27,7 @@ import process from 'node:process'
 
 import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
+import { checkExecutorUpdate } from '../src/update.js'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
 
@@ -32,6 +37,9 @@ type Args = {
   sandboxRoots: string[]
   token?: string
   id?: string
+  autoUpdate?: boolean
+  noUpdateCheck?: boolean
+  updateRepo?: string
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -42,24 +50,29 @@ function parseArgs(argv: readonly string[]): Args {
     const eq = a.indexOf('=')
     const [key, inline] =
       eq === -1 ? [a, undefined] : [a.slice(0, eq), a.slice(eq + 1)]
-    const value = inline ?? argv[++i]
-    if (value === undefined) continue
     switch (key) {
+      case '--auto-update':
+        out.autoUpdate = true
+        break
+      case '--no-update-check':
+        out.noUpdateCheck = true
+        break
       case '--host':
-        out.host = value
-        break
       case '--name':
-        out.name = value
-        break
       case '--sandbox-root':
-        out.sandboxRoots.push(value)
-        break
       case '--token':
-        out.token = value
-        break
       case '--id':
-        out.id = value
+      case '--update-repo': {
+        const value = inline ?? argv[++i]
+        if (value === undefined) break
+        if (key === '--host') out.host = value
+        else if (key === '--name') out.name = value
+        else if (key === '--sandbox-root') out.sandboxRoots.push(value)
+        else if (key === '--token') out.token = value
+        else if (key === '--id') out.id = value
+        else out.updateRepo = value
         break
+      }
       default:
         break
     }
@@ -77,12 +90,29 @@ async function main(): Promise<void> {
   const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : envRoots
   const token = args.token ?? process.env.EXECUTOR_TOKEN
   const executorId = args.id ?? process.env.EXECUTOR_ID
+  const autoUpdate = args.autoUpdate === true || process.env.AGENT_KERNEL_AUTO_UPDATE === '1'
+  const noUpdateCheck = args.noUpdateCheck === true || process.env.AGENT_KERNEL_NO_UPDATE_CHECK === '1'
+  const updateRepo = args.updateRepo ?? process.env.AGENT_KERNEL_UPDATE_REPO ?? 'OWNER/REPO'
 
   if (!host) {
     logger.error(
       'usage: agent-kernel-executor --host <url> [--name <workspace>] [--sandbox-root <path>]...; or set HOST_URL env var',
     )
     process.exit(1)
+  }
+
+  if (!noUpdateCheck && process.env.AGENT_KERNEL_SKIP_UPDATE_ONCE !== '1') {
+    try {
+      await checkExecutorUpdate({
+        repo: updateRepo,
+        currentTag: process.env.AGENT_KERNEL_RELEASE_TAG,
+        autoUpdate,
+        argv: process.argv.slice(2),
+        logger,
+      })
+    } catch (err) {
+      logger.warn({ err }, 'executor update check failed')
+    }
   }
 
   const handle = startExecutor({
