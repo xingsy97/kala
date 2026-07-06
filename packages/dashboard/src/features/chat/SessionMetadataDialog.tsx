@@ -43,7 +43,7 @@ type Props = {
   selectedModel: string | null
   executorHost?: string
   onRename(label: string): void
-  onChangeCwd(cwd: string): void
+  onOpenChangeCwdDialog(): void
   onChangeApprovalMode(mode: ApprovalMode): void
 }
 
@@ -63,7 +63,7 @@ export function SessionMetadataDialog({
   selectedModel,
   executorHost,
   onRename,
-  onChangeCwd,
+  onOpenChangeCwdDialog,
   onChangeApprovalMode,
 }: Props): JSX.Element {
   const initialLabel = summary?.label ?? ''
@@ -71,25 +71,17 @@ export function SessionMetadataDialog({
   const approvalMode = state?.approvalMode ?? 'auto'
 
   const [labelDraft, setLabelDraft] = useState(initialLabel)
-  const [cwdDraft, setCwdDraft] = useState(initialCwd)
 
   useEffect(() => {
     if (open) {
       setLabelDraft(initialLabel)
-      setCwdDraft(initialCwd)
     }
-  }, [open, initialLabel, initialCwd])
+  }, [open, initialLabel])
 
   const commitLabel = (): void => {
     const next = labelDraft.trim()
     if (next === (summary?.label ?? '').trim()) return
     onRename(next)
-  }
-  const commitCwd = (): void => {
-    const next = cwdDraft.trim()
-    if (next.length === 0) return
-    if (next === (state?.cwd ?? '').trim()) return
-    onChangeCwd(next)
   }
 
   return (
@@ -147,7 +139,7 @@ export function SessionMetadataDialog({
           ) : null}
         </div>
 
-        <div className="border-t pt-3" />
+        <div className="border-t border-border/50 pt-3" />
 
         <div className="grid gap-4 text-sm">
           <FieldRow label="Label" htmlFor="session-metadata-label">
@@ -167,21 +159,30 @@ export function SessionMetadataDialog({
             />
           </FieldRow>
           <FieldRow label="Working directory" htmlFor="session-metadata-cwd">
-            <Input
-              id="session-metadata-cwd"
-              data-testid="session-metadata-cwd"
-              value={cwdDraft}
-              onChange={(e) => setCwdDraft(e.target.value)}
-              onBlur={commitCwd}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  ;(e.currentTarget as HTMLInputElement).blur()
-                }
-              }}
-              placeholder="/absolute/path"
-              className="font-mono"
-            />
+            <div className="flex items-center gap-2">
+              <div
+                id="session-metadata-cwd"
+                data-testid="session-metadata-cwd"
+                className="min-w-0 flex-1 truncate rounded-md border border-input bg-muted/40 px-3 py-2 font-mono text-xs text-foreground"
+                title={initialCwd || 'no cwd set'}
+              >
+                {initialCwd || (
+                  <span className="text-muted-foreground">no cwd set</span>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onOpenChange(false)
+                  onOpenChangeCwdDialog()
+                }}
+                data-testid="session-metadata-cwd-change"
+              >
+                Change…
+              </Button>
+            </div>
           </FieldRow>
           <FieldRow label="Approvals">
             <Select
