@@ -5,7 +5,7 @@ import type { TimelineEntry } from './session.js'
 export type CompactBoundary = {
   kind: 'compact_boundary'
   seq: number
-  trigger: 'manual' | 'auto' | 'unknown'
+  trigger: 'manual' | 'auto' | 'preflight' | 'unknown'
   replacedCount: number
   tokensBefore: number
   tokensAfter: number

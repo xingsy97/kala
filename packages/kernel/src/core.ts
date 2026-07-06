@@ -75,6 +75,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     llm_error: (s, e) => onLlmError(s, e.error),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
+    compact_replaced: (s, e) => onCompactReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   awaiting_approval: {

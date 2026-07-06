@@ -32,6 +32,10 @@ import type {
   ClientReadBgOutput,
   ClientReadFile,
   ClientReadOverflow,
+  CopyOverflowSession,
+  CopyOverflowSessionResult,
+  DeleteOverflowSession,
+  DeleteOverflowSessionResult,
   DirListResult,
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
@@ -75,6 +79,8 @@ export type ExecutorLookup = {
   listFiles(payload: ClientListFiles): Promise<FileListResult>
   readFile(payload: ClientReadFile): Promise<FileContentsResult>
   readOverflow(payload: ClientReadOverflow, workspaceId: string): Promise<OverflowContentsResult>
+  copyOverflowSession(workspaceId: string, sourceSessionId: string, targetSessionId: string): Promise<CopyOverflowSessionResult>
+  deleteOverflowSession(workspaceId: string, sessionId: string): Promise<DeleteOverflowSessionResult>
   listBg(payload: ClientListBgTasks): Promise<BgListResult>
   readBg(payload: ClientReadBgOutput): Promise<BgOutputResult>
   killBg(payload: ClientKillBgTask): Promise<BgKillResult>
@@ -451,6 +457,41 @@ export function createExecutorRegistry(
           })
         }, toolTimeoutMs)
         bind.socket.emit('fs:read_overflow', payload, (result: OverflowContentsResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async copyOverflowSession(workspaceId, sourceSessionId, targetSessionId) {
+      const bind = findBindByWorkspace(workspaceId)
+      const payload: CopyOverflowSession = {
+        requestId: `${Date.now()}-${sourceSessionId}-${targetSessionId}`,
+        sourceSessionId,
+        targetSessionId,
+      }
+      if (!bind) return { ...payload, copied: false, error: 'workspace offline' }
+      return await new Promise<CopyOverflowSessionResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({ ...payload, copied: false, error: 'overflow copy timed out' })
+        }, toolTimeoutMs)
+        bind.socket.emit('fs:copy_overflow_session', payload, (result: CopyOverflowSessionResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async deleteOverflowSession(workspaceId, sessionId) {
+      const bind = findBindByWorkspace(workspaceId)
+      const payload: DeleteOverflowSession = {
+        requestId: `${Date.now()}-${sessionId}`,
+        sessionId,
+      }
+      if (!bind) return { ...payload, deleted: false, error: 'workspace offline' }
+      return await new Promise<DeleteOverflowSessionResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({ ...payload, deleted: false, error: 'overflow delete timed out' })
+        }, toolTimeoutMs)
+        bind.socket.emit('fs:delete_overflow_session', payload, (result: DeleteOverflowSessionResult) => {
           clearTimeout(timer)
           resolve(result)
         })

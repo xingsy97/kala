@@ -18,11 +18,15 @@
  * `process.cwd()` when the executor was started without a jail.
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { cp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 
 import type {
   ClientReadOverflow,
+  CopyOverflowSession,
+  CopyOverflowSessionResult,
+  DeleteOverflowSession,
+  DeleteOverflowSessionResult,
   DirListResult,
   FileContentsResult,
   FileListEntry,
@@ -246,4 +250,51 @@ export async function readOverflowFile(
   } catch (err) {
     return { ...base, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+export async function deleteOverflowSession(
+  payload: DeleteOverflowSession,
+  sandbox: Sandbox,
+): Promise<DeleteOverflowSessionResult> {
+  const { requestId, sessionId } = payload
+  const base = { requestId, sessionId }
+  if (!OVERFLOW_ID_PATTERN.test(sessionId)) {
+    return { ...base, deleted: false, error: 'EINVAL: invalid session id' }
+  }
+  try {
+    const target = await resolveOverflowSessionDir(sandbox, sessionId)
+    await rm(target, { recursive: true, force: true })
+    return { ...base, deleted: true }
+  } catch (err) {
+    return { ...base, deleted: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export async function copyOverflowSession(
+  payload: CopyOverflowSession,
+  sandbox: Sandbox,
+): Promise<CopyOverflowSessionResult> {
+  const { requestId, sourceSessionId, targetSessionId } = payload
+  const base = { requestId, sourceSessionId, targetSessionId }
+  if (!OVERFLOW_ID_PATTERN.test(sourceSessionId) || !OVERFLOW_ID_PATTERN.test(targetSessionId)) {
+    return { ...base, copied: false, error: 'EINVAL: invalid session id' }
+  }
+  try {
+    const source = await resolveOverflowSessionDir(sandbox, sourceSessionId)
+    const target = await resolveOverflowSessionDir(sandbox, targetSessionId)
+    await rm(target, { recursive: true, force: true })
+    await cp(source, target, { recursive: true, force: false, errorOnExist: false }).catch((err: unknown) => {
+      if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return
+      throw err
+    })
+    return { ...base, copied: true }
+  } catch (err) {
+    return { ...base, copied: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+async function resolveOverflowSessionDir(sandbox: Sandbox, sessionId: string): Promise<string> {
+  const roots = sandbox.roots.length > 0 ? sandbox.roots : [process.cwd()]
+  const workspaceRoot = roots[0]!
+  return await sandbox.resolve(join(workspaceRoot, '.agent-kernel', 'overflow', sessionId))
 }

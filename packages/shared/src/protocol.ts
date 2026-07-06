@@ -387,6 +387,32 @@ export type OverflowContentsResult = {
   error?: string
 }
 
+export type DeleteOverflowSession = {
+  requestId: string
+  sessionId: string
+}
+
+export type DeleteOverflowSessionResult = {
+  requestId: string
+  sessionId: string
+  deleted: boolean
+  error?: string
+}
+
+export type CopyOverflowSession = {
+  requestId: string
+  sourceSessionId: string
+  targetSessionId: string
+}
+
+export type CopyOverflowSessionResult = {
+  requestId: string
+  sourceSessionId: string
+  targetSessionId: string
+  copied: boolean
+  error?: string
+}
+
 /**
  * Background-shell control plane. Runs *alongside* the three built-in tools
  * (`bash{run_in_background}`, `bash_output`, `kill_shell`)  -  the tools remain
@@ -821,6 +847,14 @@ export type ExecutorServerToClientEvents = {
   'fs:read_overflow': (
     payload: ClientReadOverflow,
     ack: (result: OverflowContentsResult) => void,
+  ) => void
+  'fs:delete_overflow_session': (
+    payload: DeleteOverflowSession,
+    ack: (result: DeleteOverflowSessionResult) => void,
+  ) => void
+  'fs:copy_overflow_session': (
+    payload: CopyOverflowSession,
+    ack: (result: CopyOverflowSessionResult) => void,
   ) => void
   'bg:list': (
     payload: ClientListBgTasks,

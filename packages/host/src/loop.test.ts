@@ -533,11 +533,16 @@ describe('host loop', () => {
     // non-trivial. Then a manual `/compact` should send those messages to
     // the LLM with the summarizer system prompt, receive a text reply, and
     // emit a compact_replaced event that shrinks the message list.
-    const llmCalls: Array<{ sys?: string; msgs: number; model?: string }> = []
+    const llmCalls: Array<{
+      sys?: string
+      msgs: number
+      model?: string
+      messages: import('@agent-kernel/kernel').Message[]
+    }> = []
     const llm: LLMAdapter = {
       name: 'compact-mock',
       async call(p) {
-        llmCalls.push({ sys: p.systemPrompt, msgs: p.messages.length, model: p.model })
+        llmCalls.push({ sys: p.systemPrompt, msgs: p.messages.length, model: p.model, messages: [...p.messages] })
         // First call = turn's user_message  -  assistant text reply.
         // Second call = summarizer  -  summary text.
         if (llmCalls.length === 1) {
@@ -592,6 +597,67 @@ describe('host loop', () => {
     expect(compact?.request?.systemPrompt).toMatch(/compacting an agent-kernel coding-agent session/i)
     expect(compact?.request?.messages).toHaveLength(beforeCount)
     expect(compact?.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
+  })
+
+  it('manual compact() trims old oversized tool results before summarizing', async () => {
+    const toolConfig = createConfig({ tools: [READ], systemPrompt: 'sys' })
+    const rec = await store.create({ config: toolConfig, sessionId: 'sess-compact-tool-trim' })
+    const sid = rec.sessionId
+    const largeToolOutput = `${'A'.repeat(9_000)}${'Z'.repeat(7_000)}TAIL-ERROR-${'Z'.repeat(1_000)}`
+    const compactInputs: import('@agent-kernel/kernel').Message[][] = []
+    let normalCalls = 0
+    const llm: LLMAdapter = {
+      name: 'compact-trim-mock',
+      async call(p) {
+        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+          compactInputs.push([...p.messages])
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'trimmed summary' }],
+            },
+          }
+        }
+        normalCalls += 1
+        if (normalCalls > 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'done with log' }],
+            },
+          }
+        }
+        return {
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'read-big',
+                name: 'read',
+                input: { path: '/tmp/big.log' },
+              },
+            ],
+          },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({ callTool: async () => ({ ok: true, content: largeToolOutput }) }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sid, { kind: 'user_message', text: 'read big log' })
+    await loop.compact(sid)
+
+    const tool = compactInputs[0]
+      ?.flatMap((m) => m.content)
+      .find((c): c is { type: 'tool_result'; callId: string; ok: boolean; content: string } => c.type === 'tool_result')
+    expect(tool?.content.length).toBeLessThan(9_000)
+    expect(tool?.content).toContain('chars omitted from old tool result before compaction')
+    expect(tool?.content).toContain('TAIL-ERROR')
   })
 
   it('manual compact() rejects empty sessions before calling the summarizer', async () => {
@@ -787,6 +853,112 @@ describe('host loop', () => {
     })
     expect(after.state.messages[2]!.content[0]).toEqual({ type: 'text', text: 'latest task' })
     expect(after.state.messages[3]!.content[0]).toEqual({ type: 'text', text: 'answer 2' })
+  })
+
+  it('preflight compacts before an oversized follow-up LLM request', async () => {
+    const tightConfig = createConfig({
+      tools: [READ],
+      systemPrompt: 'sys',
+      contextLimit: 1_000,
+      softThreshold: 0.8,
+      hardThreshold: 0.99,
+    })
+    const rec = await store.create({ config: tightConfig, sessionId: 'sess-preflight-compact' })
+    const sid = rec.sessionId
+    const calls: Array<{ kind: 'compact' | 'normal'; messages: import('@agent-kernel/kernel').Message[] }> = []
+    let normalCalls = 0
+    const llm: LLMAdapter = {
+      name: 'preflight-mock',
+      async call(p) {
+        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+          calls.push({ kind: 'compact', messages: [...p.messages] })
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: 'preflight summary' }] },
+            usage: { inputTokens: 50, outputTokens: 10 },
+          }
+        }
+        normalCalls += 1
+        calls.push({ kind: 'normal', messages: [...p.messages] })
+        if (normalCalls === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_call', callId: 'big-read', name: 'read', input: { path: '/big' } }],
+            },
+            usage: { inputTokens: 100, outputTokens: 10 },
+          }
+        }
+        return {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'finished after compact' }] },
+          usage: { inputTokens: 120, outputTokens: 20 },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({ callTool: async () => ({ ok: true, content: 'x'.repeat(4_000) }) }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sid, { kind: 'user_message', text: 'read big output' })
+
+    expect(calls.map((c) => c.kind)).toEqual(['normal', 'compact', 'normal'])
+    expect(calls[2]!.messages.some((m) => m.role === 'system' && JSON.stringify(m).includes('preflight summary'))).toBe(true)
+    const parsed = await readSessionLog(store.get(sid)!.logPath)
+    const compact = parsed.events.find((e) => e.event.kind === 'compact_replaced')?.event
+    expect(compact).toMatchObject({ kind: 'compact_replaced', trigger: 'preflight' })
+  })
+
+  it('blocks a third identical tool call immediately after compaction', async () => {
+    const toolConfig = createConfig({ tools: [READ], systemPrompt: 'sys' })
+    const rec = await store.create({ config: toolConfig, sessionId: 'sess-loop-guard' })
+    const sid = rec.sessionId
+    let normalCalls = 0
+    let executorCalls = 0
+    const llm: LLMAdapter = {
+      name: 'loop-guard-mock',
+      async call(p) {
+        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'summary' }] } }
+        }
+        normalCalls += 1
+        if (normalCalls === 1) {
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'ready' }] } }
+        }
+        if (normalCalls <= 4) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_call', callId: `repeat-${normalCalls}`, name: 'read', input: { path: '/same' } }],
+            },
+          }
+        }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          executorCalls += 1
+          return { ok: true, content: 'same' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sid, { kind: 'user_message', text: 'start' })
+    await loop.compact(sid)
+    await loop.dispatch(sid, { kind: 'user_message', text: 'continue' })
+
+    expect(executorCalls).toBe(2)
+    const toolResults = store
+      .get(sid)!
+      .state.messages.flatMap((m) => m.content)
+      .filter((c): c is { type: 'tool_result'; callId: string; ok: boolean; content: string } => c.type === 'tool_result')
+    expect(toolResults.some((r) => !r.ok && r.content.includes('repeated identical tool call after context compaction'))).toBe(true)
   })
 
   it('pipes streaming text deltas through the broadcast', async () => {

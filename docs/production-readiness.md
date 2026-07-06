@@ -1,0 +1,263 @@
+# Production Readiness Notes
+
+This document records the major implemented agent-kernel features and the
+concrete techniques that keep them close to Claude Code / opencode quality. It
+is not a roadmap wishlist; each section names what is already in the code and
+the remaining production gap when there is one.
+
+## Reference Baseline
+
+Local references used for this pass:
+
+- `references/openclaw`: production-oriented checks around compaction settings,
+  post-compaction guards, skill exposure, permission/liveness state, hooks, and
+  subagent registries.
+- `references/claude-code-collection`: compact, skill, memory, and subagent
+  simplified implementations that show the core shape without product glue.
+- `references/codex`: public docs and source layout for sandbox, skills,
+  approval, and replay-oriented agent design.
+
+## Context Compaction
+
+Current implementation:
+
+- The kernel derives `contextPressureLevel`; the host runs manual, hard-tier
+  auto, and preflight reserve compaction.
+- The host picks a recent user-message pivot and preserves that tail verbatim.
+- The reducer applies a deterministic `compact_replaced` event with required
+  `preserveFrom`, keeping replay/fork stable.
+- The summarizer prompt emits a structured engineering handoff, not a generic
+  chat summary.
+- Old oversized `tool_result` blocks are pruned to head+tail before they enter
+  the summarizer request.
+- A short post-compaction guard blocks repeated identical tool calls so compacted
+  context does not immediately trigger the same failing action loop.
+
+Production techniques:
+
+- Preserve the active working set verbatim. A summary is allowed to replace old
+  context, not the current user request or in-progress tool chain.
+- Treat compaction as an event-sourced host side effect. The reducer never calls
+  an LLM; it only records the resulting replacement.
+- Budget the compaction request itself. Stale tool logs are compressed before
+  summarization so the summarizer can spend attention on decisions and state.
+- Use a fixed handoff schema. Production agents need durable facts: user
+  constraints, file paths, commands, failures, and open work.
+
+Remaining gap:
+
+- Token estimation for preflight compaction is approximate and should eventually
+  become adapter-aware.
+- The post-compaction loop guard is intentionally narrow. It catches repeated
+  identical tool calls, not broader semantic loops.
+
+## Tool Output Overflow
+
+Current implementation:
+
+- Executor-side overflow caps in-history tool output at 32 KiB by default.
+- Full output is written to `.agent-kernel/overflow/<sessionId>/<callId>.txt`.
+- The model receives a preview plus an `overflow://<callId>` marker and a real
+  file path it can read if needed.
+- The dashboard can fetch full overflow content lazily through the host.
+- The preview now preserves both head and tail.
+
+Production techniques:
+
+- Cap before the next model call. Compaction after the fact cannot recover the
+  cost of a giant result already sent to the LLM.
+- Keep the tail. Logs and tests often put the decisive error at the bottom;
+  head-only truncation is cheap but harms recovery.
+- Store overflow outside kernel state. JSONL replay remains deterministic even
+  if the side artifact is missing.
+
+Remaining gap:
+
+- Session deletion and fork should own overflow lifecycle explicitly. The
+  preview remains replay-safe today, but storage hygiene is incomplete.
+
+## Skills
+
+Current implementation:
+
+- Skills are exposed through an explicit `skill({ name })` host builtin tool.
+- The initial prompt contains only name and description metadata.
+- The full `SKILL.md` is loaded only after the model emits the tool call.
+- The loader validates names, deduplicates by root priority, rejects malformed
+  frontmatter, and refuses files above 256 KiB.
+
+Production techniques:
+
+- Use tool calls as the selection mechanism. This makes skill selection precise,
+  inspectable, replayable, and suitable for RL traces.
+- Keep discovery lightweight. Descriptions route the model; full instructions
+  load on demand.
+- Bound loaded instruction size. A skill is privileged context, so unbounded
+  markdown is a context-overflow and prompt-injection risk.
+
+Remaining gap:
+
+- Per-skill invocation policy is not implemented. openclaw models
+  user-invocable vs model-invocable exposure and requirement checks; this repo
+  currently has one global `skill` tool.
+- Live skill snapshot refresh is not implemented.
+
+## Sub-Agent Tool
+
+Current implementation:
+
+- `agent` is a host builtin, not an executor tool.
+- It creates a child JSONL session, inherits workspace/cwd, enforces depth, and
+  returns the child's final assistant text as the parent `tool_result`.
+- Child sessions force `allow_all` approval mode to avoid headless approval
+  deadlock.
+
+Production techniques:
+
+- Give subagents separate context. Large exploration should not pollute the
+  parent working set.
+- Persist child sessions. The result is inspectable and replayable instead of a
+  hidden nested function call.
+- Bound recursion. Agent tools without depth limits can self-spawn until the
+  host is unusable.
+
+Remaining gap:
+
+- Long-running subagent suspension/resume is not implemented. openclaw has a
+  registry for cross-process delivery and orphan recovery; agent-kernel runs
+  child agents synchronously inside the host loop.
+
+## Approval And Permissions
+
+Current implementation:
+
+- Kernel-level approval modes: `auto`, `ask`, `deny`, `allow_all`.
+- Tool schemas declare `requiresApproval`; the reducer decides ask/dispatch/
+  reject deterministically.
+- Host and dashboard expose approval state through normal events and cards.
+
+Production techniques:
+
+- Keep permission decisions in the event stream. Replays should show whether a
+  tool was approved, rejected, or auto-dispatched.
+- Never let a rejected call disappear. Rejections become synthetic tool results
+  so the model can explain or choose another path.
+
+Remaining gap:
+
+- Policy is tool-level only. There is no path-sensitive permission rule for
+  `write`/`edit` and no per-skill policy yet.
+
+## Error Handling And Recovery
+
+Current implementation:
+
+- LLM failures become `llm_error` events and move state to `error` with cleared
+  pending calls.
+- Tool exceptions become failed `tool_result` events.
+- Broadcast failures are swallowed after persistence so clients can resubscribe
+  and replay.
+- Stream cancellation emits a final assistant message with `[cancelled]`,
+  avoiding a stuck `thinking` state.
+- Session load recovers interrupted `thinking` / pending-tool states through the
+  store recovery path.
+
+Production techniques:
+
+- Persist before broadcasting. UI delivery must not be the source of truth.
+- Convert crashes into protocol-level terminal events. The state machine should
+  never depend on an in-memory promise completing after process death.
+- Keep cancellation idempotent. Cancelling with no pending work is a no-op shape
+  but still notifies the executor.
+
+Remaining gap:
+
+- Error reasons are strings. Structured categories such as auth, rate limit,
+  timeout, and context overflow would make retry and UI handling more precise.
+
+## Dashboard Debuggability
+
+Current implementation:
+
+- The inspector has flattened tabs for Trace, LLM API, Tool Call, and Status.
+- LLM API detail shows message assembly and the real provider API request /
+  response when adapter traces are captured.
+- Tool calls are grouped so a model tool-call request and executor result can be
+  viewed as one logical action.
+
+Production techniques:
+
+- Show assembled messages and provider payload separately. Kernel messages are
+  provider-neutral; API payload is adapter-specific.
+- Redact sensitive endpoints and headers in captured traces.
+- Keep raw state behind explicit detail actions. Default debugger views should
+  explain state without dumping full JSON.
+
+Remaining gap:
+
+- Trace capture depends on adapter coverage. Any new adapter must include tests
+  proving request and response traces are populated and redacted.
+
+## Memory
+
+Current implementation:
+
+- One `memory` tool supports `session`, `workspace`, and `global` scopes.
+- Session memory is lifted into kernel state from tool input after successful
+  tool results.
+- Workspace/global memory are executor-owned files.
+- Memory consolidation is manual and writes through the existing tool path.
+
+Production techniques:
+
+- Use one scoped tool rather than many nearly identical memory tools. This keeps
+  model affordances compact and avoids registry clutter.
+- Lift only session memory into reducer state. Disk-backed scopes stay outside
+  replay-critical state.
+- Consolidate explicitly. Automatic memory writes can pollute durable context
+  with transient or wrong assumptions.
+
+Remaining gap:
+
+- There is no automatic memory relevance retrieval or expiry policy.
+
+## Hooks
+
+Current implementation:
+
+- Host supports `pre_tool_use`, `post_tool_use`, `session_start`, and
+  `session_end` external commands.
+- Pre-tool hooks can block a call by returning a non-zero result.
+- Hook failures become normal blocked tool results or host errors rather than
+  kernel transitions.
+
+Production techniques:
+
+- Hooks are host policy, not reducer logic. They can inspect and block IO while
+  keeping the kernel deterministic.
+- Timeouts are required. External policy commands must not freeze the agent
+  loop indefinitely.
+
+Remaining gap:
+
+- Hook diagnostics are basic. There is no fatal-error hook aggregator like the
+  openclaw reference.
+
+## CI And Release Assets
+
+Current implementation:
+
+- GitHub Actions run install, build, typecheck, test, release-asset build, and
+  release-asset verification.
+- Tag pushes build binary artifacts and upload them to GitHub Releases.
+
+Production techniques:
+
+- Verify release artifacts in CI before uploading. A release pipeline that only
+  builds locally is not a release guarantee.
+- Keep binary packaging scripted. Manual packaging creates irreproducible
+  artifacts.
+
+Remaining gap:
+
+- No signed provenance or checksum publishing beyond the release assets.
