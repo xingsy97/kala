@@ -13,15 +13,30 @@ export type RouterOptions = {
   readonly byPrefix: ReadonlyArray<{ prefix: string; adapter: LLMAdapter }>
 }
 
-export function routerAdapter(opts: RouterOptions): LLMAdapter {
+export type MutableRouter = LLMAdapter & {
+  addRoute(prefix: string, adapter: LLMAdapter): void
+  deleteRoute(prefix: string): void
+}
+
+export function routerAdapter(opts: RouterOptions): MutableRouter {
+  const byPrefix = [...opts.byPrefix]
   return {
     name: `router(${[
       opts.defaultAdapter.name,
-      ...opts.byPrefix.map((p) => `${p.prefix}=${p.adapter.name}`),
+      ...byPrefix.map((p) => `${p.prefix}=${p.adapter.name}`),
     ].join(',')})`,
     async call(params: LLMCallParams): Promise<LLMResponse> {
-      const target = resolve(opts, params.model)
+      const target = resolve({ defaultAdapter: opts.defaultAdapter, byPrefix }, params.model)
       return target.call(params)
+    },
+    addRoute(prefix, adapter) {
+      const existing = byPrefix.findIndex((p) => p.prefix === prefix)
+      if (existing === -1) byPrefix.push({ prefix, adapter })
+      else byPrefix[existing] = { prefix, adapter }
+    },
+    deleteRoute(prefix) {
+      const index = byPrefix.findIndex((p) => p.prefix === prefix)
+      if (index !== -1) byPrefix.splice(index, 1)
     },
   }
 }

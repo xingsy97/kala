@@ -323,6 +323,36 @@ export function setSessionApprovalMode(
   socket.emit('client:set_approval_mode', { sessionId, mode })
 }
 
+export function reorderQueuedMessage(
+  socket: DashboardSocket,
+  sessionId: string,
+  id: string,
+  beforeId?: string | null,
+): void {
+  socket.emit('client:reorder_queued_message', {
+    sessionId,
+    id,
+    ...(beforeId !== undefined ? { beforeId } : {}),
+  })
+}
+
+export function updateQueuedMessage(
+  socket: DashboardSocket,
+  sessionId: string,
+  id: string,
+  text: string,
+): void {
+  socket.emit('client:update_queued_message', { sessionId, id, text })
+}
+
+export function deleteQueuedMessage(
+  socket: DashboardSocket,
+  sessionId: string,
+  id: string,
+): void {
+  socket.emit('client:delete_queued_message', { sessionId, id })
+}
+
 export function renameSession(
   socket: DashboardSocket,
   sessionId: string,

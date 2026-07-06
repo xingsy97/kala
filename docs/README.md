@@ -20,6 +20,8 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Three-process topology and a full turn end-to-end |
 | [platform.md](platform.md) | SaaS platformization design (multi-user cloud brain + local executors) — planned, not yet implemented |
 | [mcp.md](mcp.md) | MCP runtime integration design (planned, not yet implemented) |
+| [agentic-rl-integration.md](agentic-rl-integration.md) | Agentic RL rollout integration research note - adapter-first, not custom trajectory-first |
+| [skills.md](skills.md) | Skills design - OpenCode-style `skill({ name })` tool loading |
 | [adr/](adr/) | Architecture Decision Records — one file per big call, with alternatives and consequences |
 
 ## Process

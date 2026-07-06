@@ -2,7 +2,8 @@
  * HTTP request routing for the host process.
  *
  *   - `/models`     JSON, GET/HEAD    — sanitised model list for the dashboard
- *   - `/settings`   JSON, GET/HEAD    — read-only settings snapshot
+ *   - `/settings`   JSON, GET/HEAD    — settings snapshot
+ *   - `/settings/models` POST/DELETE  — manually managed model ids
  *   - everything else                 — static bundle (dashboard `dist/`),
  *                                       with SPA fallback to `index.html`
  *
@@ -18,6 +19,8 @@ import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node
 import { extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
 import type {
+  ClientAddManualModel,
+  ClientDeleteManualModel,
   ModelInfo,
   ServerModelsPayload,
   ServerSettingsPayload,
@@ -43,31 +46,69 @@ const MIME: Record<string, string> = {
 export function attachJsonRoutes(
   server: HttpServer,
   payloads: {
-    models: readonly ModelInfo[]
-    defaultModel: string
-    settings?: ServerSettingsPayload
+    models: readonly ModelInfo[] | (() => readonly ModelInfo[])
+    defaultModel: string | (() => string)
+    settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
+    addManualModel?: (input: ClientAddManualModel) => ServerSettingsPayload
+    deleteManualModel?: (input: ClientDeleteManualModel) => ServerSettingsPayload
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/'
     if (url.startsWith('/socket.io/')) return
-    if (req.method !== 'GET' && req.method !== 'HEAD') return
     // Strip query string / fragment before matching, so `/models?ts=…`
     // (cache-buster) still hits.
     const path = url.split('?')[0]!.split('#')[0]
+    if (path === '/settings/models' && req.method === 'POST' && payloads.addManualModel) {
+      void readJson(req)
+        .then((body) => sendJson(req, res, payloads.addManualModel!(body as ClientAddManualModel)))
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/settings/models' && req.method === 'DELETE' && payloads.deleteManualModel) {
+      const parsed = new URL(url, 'http://x')
+      try {
+        sendJson(
+          req,
+          res,
+          payloads.deleteManualModel({
+            providerId: parsed.searchParams.get('providerId') ?? '',
+            id: parsed.searchParams.get('id') ?? '',
+          }),
+        )
+      } catch (err: unknown) {
+        sendError(res, 400, err instanceof Error ? err.message : String(err))
+      }
+      return
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD') return
     if (path === '/models') {
       const body: ServerModelsPayload = {
-        models: payloads.models,
-        defaultModel: payloads.defaultModel,
+        models: valueOf(payloads.models),
+        defaultModel: valueOf(payloads.defaultModel),
       }
       sendJson(req, res, body)
       return
     }
     if (path === '/settings' && payloads.settings) {
-      sendJson(req, res, payloads.settings)
+      sendJson(req, res, valueOf(payloads.settings))
       return
     }
   })
+}
+
+function valueOf<T>(value: T | (() => T)): T {
+  return typeof value === 'function' ? (value as () => T)() : value
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  const raw = Buffer.concat(chunks).toString('utf8')
+  if (raw.trim().length === 0) return {}
+  return JSON.parse(raw) as unknown
 }
 
 function sendJson(req: IncomingMessage, res: ServerResponse, body: unknown): void {
@@ -81,6 +122,16 @@ function sendJson(req: IncomingMessage, res: ServerResponse, body: unknown): voi
     res.end()
     return
   }
+  res.end(json)
+}
+
+function sendError(res: ServerResponse, status: number, message: string): void {
+  const json = JSON.stringify({ error: message })
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(json).toString(),
+  })
   res.end(json)
 }
 

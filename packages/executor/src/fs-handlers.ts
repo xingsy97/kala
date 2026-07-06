@@ -8,7 +8,13 @@
  * regardless of failure so the dashboard doesn't crash on a partial
  * response.
  *
- * All three respect `sandbox.roots` if configured, falling back to
+ * A fourth endpoint — overflow file read — mirrors the same shape and
+ * serves spill files produced by `tools/overflow.ts` (executor caps
+ * in-history tool output at 32 KB; the rest lands on disk under
+ * `<workspaceRoot>/.agent-kernel/overflow/<sessionId>/<callId>.txt` and the
+ * dashboard fetches it lazily via `client:read_overflow`).
+ *
+ * All handlers respect `sandbox.roots` if configured, falling back to
  * `process.cwd()` when the executor was started without a jail.
  */
 
@@ -16,10 +22,12 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 
 import type {
+  ClientReadOverflow,
   DirListResult,
   FileContentsResult,
   FileListEntry,
   FileListResult,
+  OverflowContentsResult,
 } from '@agent-kernel/shared'
 
 import type { Sandbox } from './sandbox.js'
@@ -196,6 +204,42 @@ export async function readWorkspaceFile(
     }
     if (info.size > cap) {
       return { ...base, size: info.size, error: `EFBIG: file is ${info.size} bytes (limit ${cap})` }
+    }
+    const content = await readFile(resolved, 'utf8')
+    return { ...base, content, size: info.size }
+  } catch (err) {
+    return { ...base, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ============================================================================
+// readOverflowFile — dashboard "View full output" for spilled tool results
+// ============================================================================
+
+const OVERFLOW_READ_MAX_BYTES = 4 * 1024 * 1024
+
+const OVERFLOW_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+
+export async function readOverflowFile(
+  payload: ClientReadOverflow,
+  sandbox: Sandbox,
+): Promise<OverflowContentsResult> {
+  const { requestId, sessionId, callId } = payload
+  const base = { requestId, sessionId, callId }
+  if (!OVERFLOW_ID_PATTERN.test(sessionId) || !OVERFLOW_ID_PATTERN.test(callId)) {
+    return { ...base, error: 'EINVAL: invalid session or call id' }
+  }
+  const roots = sandbox.roots.length > 0 ? sandbox.roots : [process.cwd()]
+  const workspaceRoot = roots[0]!
+  const target = join(workspaceRoot, '.agent-kernel', 'overflow', sessionId, `${callId}.txt`)
+  try {
+    const resolved = await sandbox.resolve(target)
+    const info = await stat(resolved)
+    if (!info.isFile()) {
+      return { ...base, error: 'ENOTFILE: overflow entry is not a regular file' }
+    }
+    if (info.size > OVERFLOW_READ_MAX_BYTES) {
+      return { ...base, size: info.size, error: `EFBIG: overflow file is ${info.size} bytes (limit ${OVERFLOW_READ_MAX_BYTES})` }
     }
     const content = await readFile(resolved, 'utf8')
     return { ...base, content, size: info.size }

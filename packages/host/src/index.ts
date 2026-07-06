@@ -26,4 +26,6 @@ export { readSessionLog, appendEventEntry, writeHeader } from './store/log.js'
 export { runHostLoop } from './loop.js'
 export type { HostLoopDeps, LoopHandle } from './loop.js'
 
-export { builtinTools } from './builtin-tools.js'
+export { builtinTools, createBuiltinTools } from './builtin-tools.js'
+export { discoverSkills, skillToolSchema, SKILL_TOOL_NAME } from './skills.js'
+export type { SkillInfo, SkillRegistry } from './skills.js'

@@ -517,29 +517,81 @@ deleted session close their view and navigate away.
 { sessionId: string }
 ```
 
-#### `server:providers`
+#### HTTP `GET /models`
 
-Sent on the Settings dialog's demand plus once at connect for dashboards
-that render provider chips. Lists the LLM providers Host currently has
-credentials for, imported from `~/.codex/config.toml` and
-`~/.claude/settings.json` at startup and merged with user-added entries.
+Returns the host's current model registry. Models come from
+`~/.claude/settings.json`, `~/.codex/config.toml`, legacy env fallback, and
+manual entries in `~/.config/agent-kernel/models.json`.
+
+```ts
+type ModelInfo = {
+  id: string
+  label: string
+  provider: string
+  providerId?: string
+  source?: 'claude-settings' | 'codex-config' | 'env' | 'manual'
+  contextWindow?: number
+}
+
+{
+  models: ModelInfo[]
+  defaultModel: string
+}
+```
+
+#### HTTP `GET /settings`
+
+Returns a sanitized settings snapshot. API keys and helper command output are
+never serialized. Provider credentials are still owned by the underlying Claude
+Code / Codex / environment config; dashboard writes are limited to manual model
+ids under existing providers.
 
 ```ts
 {
   providers: Array<{
-    id: string                // e.g. "anthropic", "openai-compat:my-gw"
+    id: string                // e.g. "anthropic", "newapi"
     label: string
-    kind: 'anthropic' | 'openai-compat'
-    baseUrl?: string          // openai-compat only
-    models: Array<ModelInfo>  // { id, label, provider, contextWindow? }
-    source: 'codex' | 'claude' | 'user'
+    wire: 'anthropic' | 'openai'
+    source?: 'claude-settings' | 'codex-config' | 'env' | 'manual'
+    baseUrl?: string
+    models: ModelInfo[]
   }>
-  selected?: string           // provider id currently active for new sessions
+  defaultModel: string
+  paths: {
+    claudeSettings: string
+    codexConfig: string
+    manualModels: string
+    hooksConfig: string
+    sessionsDir: string
+  }
+  hooks: Array<{ event: string; command: string; match?: string }>
+  mcp: { supported: false; note: string }
 }
 ```
 
+#### HTTP `POST /settings/models`
+
+Adds or updates a manual model id bound to an existing provider endpoint, then
+returns the same payload as `GET /settings`.
+
+```ts
+{
+  providerId: string
+  id: string
+  label?: string
+  contextWindow?: number
+}
+```
+
+#### HTTP `DELETE /settings/models?providerId=<id>&id=<model>`
+
+Deletes a manual model entry, if present, then returns the same payload as
+`GET /settings`. Auto-discovered models from Claude Code / Codex / env config
+are read-only in this endpoint.
+
 `ModelInfo.contextWindow` combined with `AgentConfig.contextLimit` drives the
-Composer context usage ring.
+Composer context usage ring. `ModelInfo.source` lets the dashboard distinguish
+auto-discovered entries from manual ones.
 
 ---
 

@@ -202,6 +202,23 @@ export type ClientSetCwd = {
   cwd: string
 }
 
+export type ClientReorderQueuedMessage = {
+  sessionId: string
+  id: string
+  beforeId?: string | null
+}
+
+export type ClientUpdateQueuedMessage = {
+  sessionId: string
+  id: string
+  text: string
+}
+
+export type ClientDeleteQueuedMessage = {
+  sessionId: string
+  id: string
+}
+
 /**
  * Rename a session. Empty/whitespace label clears the override, causing the
  * dashboard to fall back to `firstUserMessage`. Host writes a metadata log
@@ -343,6 +360,48 @@ export type FileContentsResult = {
   error?: string
 }
 
+/**
+ * Fetch the full contents of an overflowed tool result. When a tool's output
+ * exceeds the executor's inline byte cap, the executor spills the full text
+ * to `<workspaceRoot>/.agent-kernel/overflow/<sessionId>/<callId>.txt` and
+ * emits only a preview + marker inline. The dashboard's "View full output"
+ * button issues this request to fetch the spill file.
+ */
+export type ClientReadOverflow = {
+  requestId: string
+  sessionId: string
+  callId: string
+}
+
+export type OverflowContentsResult = {
+  requestId: string
+  sessionId: string
+  callId: string
+  content?: string
+  size?: number
+  error?: string
+}
+
+/**
+ * User-initiated `/consolidate-memory` slash command. Host reads the
+ * session's messages, runs a single LLM call to extract durable signal,
+ * and writes the results into the workspace memory root via the executor's
+ * `memory_write` tool. See docs/memory-consolidation.md.
+ */
+export type ClientConsolidateMemory = {
+  requestId: string
+  sessionId: string
+}
+
+export type ConsolidateMemoryResult = {
+  requestId: string
+  sessionId: string
+  saved: readonly string[]
+  skipped: number
+  reason?: string
+  error?: string
+}
+
 // ============================================================================
 // Host → Executor
 // ============================================================================
@@ -465,7 +524,18 @@ export type ModelInfo = {
   id: string
   label: string
   provider: string
+  providerId?: string
+  source?: ModelSource
   /** Model context window in tokens, when known by the host. */
+  contextWindow?: number
+}
+
+export type ModelSource = 'claude-settings' | 'codex-config' | 'env' | 'manual'
+
+export type ManualModelInput = {
+  providerId: string
+  id: string
+  label?: string
   contextWindow?: number
 }
 
@@ -477,10 +547,10 @@ export type ServerModelsPayload = {
 /**
  * Host's advertised settings snapshot. Returned by `GET /settings`.
  *
- * Read-only: the host reads its config from local files owned by the
- * operator, and we don't (yet) let the dashboard write those files. The
- * Settings UI shows what's active, points at where to edit it, and provides
- * copy-paste config snippets for the current state.
+ * The host reads provider credentials from operator-owned files, but the
+ * dashboard may add/delete manual model ids bound to those existing provider
+ * endpoints. Manual entries live in `paths.manualModels`; credentials remain
+ * outside dashboard writes.
  *
  * Never contains API keys, hook payloads, or command args that could leak
  * env — the endpoint is served over the same socket the dashboard uses and
@@ -491,8 +561,16 @@ export type SettingsProviderSummary = {
   id: string
   label: string
   wire: 'anthropic' | 'openai'
+  source?: ModelSource
   baseUrl?: string
-  models: readonly string[]
+  models: readonly ModelInfo[]
+}
+
+export type ClientAddManualModel = ManualModelInput
+
+export type ClientDeleteManualModel = {
+  providerId: string
+  id: string
 }
 
 export type SettingsHookSummary = {
@@ -508,6 +586,7 @@ export type ServerSettingsPayload = {
   paths: {
     claudeSettings: string
     codexConfig: string
+    manualModels: string
     hooksConfig: string
     sessionsDir: string
   }
@@ -534,13 +613,18 @@ export type DashboardClientToServerEvents = {
   'client:list_dirs': (payload: ClientListDirs) => void
   'client:list_files': (payload: ClientListFiles) => void
   'client:read_file': (payload: ClientReadFile) => void
+  'client:read_overflow': (payload: ClientReadOverflow) => void
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
   'client:delete_session': (payload: ClientDeleteSession) => void
   'client:set_model': (payload: ClientSetModel) => void
   'client:set_cwd': (payload: ClientSetCwd) => void
+  'client:reorder_queued_message': (payload: ClientReorderQueuedMessage) => void
+  'client:update_queued_message': (payload: ClientUpdateQueuedMessage) => void
+  'client:delete_queued_message': (payload: ClientDeleteQueuedMessage) => void
   'client:rename_session': (payload: ClientRenameSession) => void
+  'client:consolidate_memory': (payload: ClientConsolidateMemory) => void
   subscribe: (payload: ClientSubscribe) => void
 }
 
@@ -563,6 +647,8 @@ export type DashboardServerToClientEvents = {
   'server:dir_list': (payload: DirListResult) => void
   'server:file_list': (payload: FileListResult) => void
   'server:file_contents': (payload: FileContentsResult) => void
+  'server:overflow_contents': (payload: OverflowContentsResult) => void
+  'server:memory_consolidated': (payload: ConsolidateMemoryResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
 }
@@ -606,6 +692,10 @@ export type ExecutorServerToClientEvents = {
   'fs:read_file': (
     payload: ClientReadFile,
     ack: (result: FileContentsResult) => void,
+  ) => void
+  'fs:read_overflow': (
+    payload: ClientReadOverflow,
+    ack: (result: OverflowContentsResult) => void,
   ) => void
 }
 

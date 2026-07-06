@@ -15,7 +15,7 @@ vi.mock('node:os', async () => {
   }
 })
 
-import { memoryDeleteTool, memoryReadTool, memoryWriteTool } from './memory.js'
+import { memoryDeleteTool, memoryReadTool, memoryTool, memoryWriteTool } from './memory.js'
 import { makeCtx } from './_test-helpers.js'
 import { ToolError } from './registry.js'
 
@@ -96,6 +96,25 @@ describe('memory tools', () => {
     const file = join(workspace, '.agent-kernel', 'memory', 'build_cmd.md')
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, 'utf8')).toBe('pnpm build')
+  })
+
+  it('unified memory tool writes, reads, lists, and deletes workspace entries', async () => {
+    await expect(
+      memoryTool.run(
+        { operation: 'write', scope: 'workspace', key: 'cmd', content: 'pnpm test' },
+        makeCtx(workspace),
+      ),
+    ).resolves.toMatch(/^created scope=workspace/)
+
+    await expect(
+      memoryTool.run({ operation: 'read', scope: 'workspace', key: 'cmd' }, makeCtx(workspace)),
+    ).resolves.toContain('pnpm test')
+    await expect(
+      memoryTool.run({ operation: 'list', scope: 'workspace' }, makeCtx(workspace)),
+    ).resolves.toContain('cmd')
+    await expect(
+      memoryTool.run({ operation: 'delete', scope: 'workspace', key: 'cmd' }, makeCtx(workspace)),
+    ).resolves.toContain('deleted scope=workspace key=cmd')
   })
 
   it('workspace-scope write returns "updated" on second call', async () => {

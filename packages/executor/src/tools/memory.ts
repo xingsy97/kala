@@ -33,8 +33,21 @@ import { requireString } from './schema.js'
 const KEY_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
 const MAX_CONTENT_BYTES = 128 * 1024 // 128 KB per entry — memory is notes, not files
 const VALID_SCOPES = new Set(['session', 'workspace', 'global'])
+const VALID_OPERATIONS = new Set(['read', 'list', 'write', 'delete'])
 
 type Scope = 'session' | 'workspace' | 'global'
+type MemoryOperation = 'read' | 'list' | 'write' | 'delete'
+
+function requireOperation(input: Record<string, unknown>): MemoryOperation {
+  const operation = input['operation']
+  if (typeof operation !== 'string' || !VALID_OPERATIONS.has(operation)) {
+    throw new ToolError(
+      'EINVAL',
+      `field "operation" must be one of: read, list, write, delete`,
+    )
+  }
+  return operation as MemoryOperation
+}
 
 function requireScope(input: Record<string, unknown>): Scope {
   const scope = input['scope']
@@ -72,6 +85,24 @@ async function ensureDir(dir: string): Promise<void> {
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true })
   }
+}
+
+// ----------------------------------------------------------------------------
+// memory
+// ----------------------------------------------------------------------------
+
+export const memoryTool: Tool = {
+  name: 'memory',
+  async run(input, ctx) {
+    const operation = requireOperation(input)
+    if (operation === 'read') return memoryReadTool.run(input, ctx)
+    if (operation === 'list') {
+      const scope = requireScope(input)
+      return listKeys(scope, ctx)
+    }
+    if (operation === 'write') return memoryWriteTool.run(input, ctx)
+    return memoryDeleteTool.run(input, ctx)
+  },
 }
 
 // ----------------------------------------------------------------------------

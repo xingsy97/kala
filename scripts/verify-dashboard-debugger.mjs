@@ -23,6 +23,16 @@ function check(name, pass, detail = '') {
   console.log(`${pass ? 'PASS' : 'FAIL'} ${name}${detail ? ` - ${detail}` : ''}`)
   if (!pass) throw new Error(`${name}: ${detail}`)
 }
+function rgbDistance(a, b) {
+  return Math.sqrt(
+    Math.pow(a.r - b.r, 2) +
+    Math.pow(a.g - b.g, 2) +
+    Math.pow(a.b - b.b, 2),
+  )
+}
+function describeRgb(c) {
+  return `rgb(${c.r}, ${c.g}, ${c.b})`
+}
 function pipe(proc) {
   proc.stdout.on('data', b => hostLog.push(b.toString()))
   proc.stderr.on('data', b => hostLog.push(b.toString()))
@@ -163,6 +173,8 @@ try {
   await page.evaluate(() => window.localStorage.clear())
   await page.goto(`http://localhost:${port}/?sessionId=${sessionId}`, { waitUntil: 'networkidle2', timeout: 15000 })
   await ensureFixtureSessionSelected(page)
+  await page.waitForSelector('[data-testid="inspector-sidebar-tab-trace"]', { timeout: 15000 })
+  await page.click('[data-testid="inspector-sidebar-tab-trace"]')
   try {
     await page.waitForSelector('[data-testid="trace-view-switch"]', { timeout: 15000 })
   } catch (err) {
@@ -179,9 +191,16 @@ try {
     }))
     throw new Error(`debugger selector missing: ${JSON.stringify({ ...diag, hostLog: hostLog.join('').slice(-4000) })}`, { cause: err })
   }
+  await verifySurfaceContrast(page, 'dark')
   await page.screenshot({ path: join(shotsDir, '01-debugger-reducer.png'), fullPage: false })
   const reducerText = await page.$eval('[aria-label="trace view"]', el => el.textContent || '')
   check('reducer trace shows state transition', reducerText.includes('idle → thinking') && reducerText.includes('request_approval'), reducerText.slice(0, 300))
+  await page.click('[data-testid="theme-toggle"]')
+  await page.waitForFunction(() => !document.documentElement.classList.contains('dark'))
+  await verifySurfaceContrast(page, 'light')
+  await page.screenshot({ path: join(shotsDir, '01-debugger-reducer-light.png'), fullPage: false })
+  await page.click('[data-testid="theme-toggle"]')
+  await page.waitForFunction(() => document.documentElement.classList.contains('dark'))
   await page.click('[data-testid="trace-view-switch-llm"]')
   await page.waitForSelector('[data-testid="llm-call-row"]')
   await page.click('[data-testid="llm-call-row"]')
@@ -198,6 +217,7 @@ try {
   check('tool detail shows lifecycle raw data', toolText.includes('Tool Input') && toolText.includes('Tool Result Event'), toolText.slice(0, 300))
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="tool-detail"]'))
+  await page.click('[data-testid="inspector-sidebar-tab-debugger"]')
   await page.click('[data-testid="runtime-view-switch-tools"]')
   await page.waitForSelector('[data-testid="tool-registry"]')
   await page.screenshot({ path: join(shotsDir, '04-debugger-runtime-tools.png'), fullPage: false })
@@ -223,4 +243,44 @@ async function ensureFixtureSessionSelected(page) {
       sessionId,
     )
   }
+}
+
+async function verifySurfaceContrast(page, theme) {
+  const surfaces = await page.evaluate(() => {
+    const parseRgb = (value) => {
+      const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+      if (!match) throw new Error(`cannot parse color: ${value}`)
+      return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]), raw: value }
+    }
+    const bg = (selector) => {
+      const el = document.querySelector(selector)
+      if (!el) throw new Error(`missing surface selector: ${selector}`)
+      return parseRgb(getComputedStyle(el).backgroundColor)
+    }
+    return {
+      app: bg('body'),
+      inspector: bg('[data-testid="inspector-panel"]'),
+      sidebarTabs: bg('[data-testid="inspector-sidebar-tabs"]'),
+      traceHeader: bg('[aria-label="trace view"] > div:first-child'),
+      traceSwitcher: bg('[data-testid="trace-view-switch"]'),
+    }
+  })
+  const pairs = [
+    ['app', 'inspector', 8],
+    ['inspector', 'traceSwitcher', 10],
+    ['traceHeader', 'traceSwitcher', 10],
+  ]
+  for (const [left, right, min] of pairs) {
+    const distance = rgbDistance(surfaces[left], surfaces[right])
+    check(
+      `${theme} surface contrast ${left} vs ${right}`,
+      distance >= min,
+      `${describeRgb(surfaces[left])} vs ${describeRgb(surfaces[right])}; distance ${distance.toFixed(1)}`,
+    )
+  }
+  check(
+    `${theme} sidebar tab and trace header share the same deliberate band`,
+    rgbDistance(surfaces.sidebarTabs, surfaces.traceHeader) < 2,
+    `${describeRgb(surfaces.sidebarTabs)} vs ${describeRgb(surfaces.traceHeader)}`,
+  )
 }

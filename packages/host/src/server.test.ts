@@ -1167,6 +1167,106 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('lets dashboard reorder, edit, and delete queued user messages before drain', async () => {
+    const sessionId = 'wire-message-queue-edit'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-edit-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: `answer ${seenPrompts.length}` }],
+            },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    let latestQueue: ServerMessageQueueEvent | undefined
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) latestQueue = p
+    })
+    const waitForQueue = async (count: number): Promise<ServerMessageQueueEvent> => {
+      const deadline = Date.now() + 2000
+      while (Date.now() < deadline) {
+        if (latestQueue?.pending === count) return latestQueue
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      throw new Error(`queue did not reach ${count}`)
+    }
+    const finalDone = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('edited queued turn never finished')), 4000)
+      dashboard.on('state:changed', (p) => {
+        if (p.state.status === 'done' && p.state.messages.length >= 7) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'third', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'delete me', mode: 'queue' })
+    const queued = await waitForQueue(3)
+    const second = queued.items.find((item) => item.text === 'second')!
+    const third = queued.items.find((item) => item.text === 'third')!
+    const deleteMe = queued.items.find((item) => item.text === 'delete me')!
+    dashboard.emit('client:update_queued_message', { sessionId, id: third.id, text: 'third edited' })
+    dashboard.emit('client:delete_queued_message', { sessionId, id: deleteMe.id })
+    dashboard.emit('client:reorder_queued_message', { sessionId, id: third.id, beforeId: second.id })
+    await waitForQueue(2)
+    releaseFirst()
+    await finalDone
+
+    expect(seenPrompts).toEqual(['first', 'first|third edited', 'first|third edited|second'])
+
+    dashboard.close()
+  })
+
   it('fires session_start and session_end lifecycle hooks around create/delete', async () => {
     const sessionId = 'wire-lifecycle-hooks'
     await server.close()

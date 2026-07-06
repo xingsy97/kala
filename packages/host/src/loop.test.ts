@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -11,6 +11,7 @@ import { readSessionLog } from './store/log.js'
 import { runHostLoop } from './loop.js'
 import type { LoopBroadcast, ToolDispatcher } from './loop.js'
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
+import { discoverSkills } from './skills.js'
 
 function silentBroadcast(): LoopBroadcast {
   return {
@@ -145,6 +146,89 @@ describe('host loop', () => {
     expect(rec.state.status).toBe('done')
     // user + llm(tool) + tool_result + llm(text)
     expect(rec.state.cursor).toBe(4)
+  })
+
+  it('handles the skill builtin in host without dispatching to executor', async () => {
+    const skillsRoot = join(dir, '.agents', 'skills')
+    const skillDir = join(skillsRoot, 'demo-skill')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: demo-skill',
+        'description: Use for testing host-side skill loading.',
+        '---',
+        '',
+        'DEMO SKILL BODY',
+      ].join('\n'),
+      'utf8',
+    )
+    const skills = await discoverSkills([skillsRoot])
+    const skillConfig = createConfig({
+      tools: [
+        READ,
+        {
+          name: 'skill',
+          description: 'skill loader',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+        },
+      ],
+      systemPrompt: 'sys',
+    })
+    const skillRecord = await store.create({ config: skillConfig, sessionId: 'sess-skill' })
+    let executorCalls = 0
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'skill-1',
+              name: 'skill',
+              input: { name: 'demo-skill' },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'skill loaded' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          executorCalls++
+          return { ok: false, content: 'should not dispatch' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+      skills,
+    })
+
+    await loop.dispatch(skillRecord.sessionId, { kind: 'user_message', text: 'load skill' })
+
+    expect(executorCalls).toBe(0)
+    const toolMessage = store
+      .get(skillRecord.sessionId)!
+      .state.messages.find((m) => m.role === 'tool')
+    expect(toolMessage?.content[0]).toMatchObject({
+      type: 'tool_result',
+      callId: 'skill-1',
+      ok: true,
+    })
+    expect(
+      toolMessage?.content[0]?.type === 'tool_result'
+        ? toolMessage.content[0].content
+        : '',
+    ).toContain('DEMO SKILL BODY')
   })
 
   it('translates LLM throw into llm_error event', async () => {

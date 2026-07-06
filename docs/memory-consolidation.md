@@ -1,263 +1,243 @@
-# Memory consolidation (two-phase)
+# Memory consolidation
 
 **Status**: design accepted, implementation in progress.
 **Depends on**: three-tier memory ([`tools.md`](tools.md) §2.10, [`FEATURE-GAPS.md`](FEATURE-GAPS.md) §1.22).
+**Pattern reference**: `references/claude-code-collection/memory/consolidator.py`.
 
 ## 1. Why
 
-The current memory system exposes three scopes (`session` / `workspace` / `global`) that the agent writes to *on impulse*: whatever the LLM decides is worth remembering in this turn gets a `memory_write` call. That is fine as a working notepad but has two failure modes:
+The current memory system exposes three scopes (`session` / `workspace` / `global`) that the agent writes to *on impulse*: whatever the LLM decides is worth remembering in this turn gets a `memory { operation: "write" }` call. That is fine as a working notepad but has one clear gap:
 
-1. **Duplication.** Two sessions in the same workspace independently learn the same fact and write it under two slightly different keys. Nothing prunes.
-2. **Signal decay.** A one-off observation from a wrong branch gets stored with the same weight as a stable user preference reinforced across ten sessions. Nothing consolidates.
+**Impulse writes miss the durable-signal pass.** The agent writes a memory when *the current turn* looks noteworthy, without seeing the whole session. By the time a session ends, the model has learned things — user preferences, corrections, project decisions — that were never distilled into `MEMORY.md` because no single turn was the right moment to write them.
 
-Codex's memory pipeline solves this by splitting write time from consolidation time:
-
-- **Phase 1 (per-session extract).** After a session terminates, an LLM reads the rollout and produces a *structured* record — preferences, reusable knowledge, failures, references — as one file in a staging area. Never edits earlier rollouts. Empty output is valid ("this session had no durable signal").
-- **Phase 2 (workspace consolidate).** A separate LLM reads the accumulated staging files for a workspace, merges duplicates, drops stale entries, and rewrites the workspace-scope `MEMORY.md` index + individual memory files. Runs lazily, coalesced across sessions.
-
-We ship a **reduced version** of that pipeline — one that fits agent-kernel's single-user, file-only footprint (no state DB, no leases, no consolidation git baseline). The rest of this doc defines exactly what we ship and what we deliberately drop.
+Claude Code's fix: expose a **single slash command** (`/consolidate-memory`) that reads the current session's messages, asks a lightweight LLM call to pull out durable signal, and writes results directly to the workspace memory root. No auto-trigger, no `.staging/` intermediate, no two-phase pipeline. One command, one call, done.
 
 ## 2. What we build
 
-### 2.1 Storage layout
+### 2.1 Trigger
+
+Only one path: user types `/consolidate-memory` in the dashboard composer. Nothing runs automatically — not on session-done, not on turn count, not on threshold.
+
+Skips (silent no-op returning a short toast):
+
+- Sessions shorter than **8 messages** (matches Claude Code's `MIN_MESSAGES_TO_CONSOLIDATE`). Short Q&A rarely has durable signal.
+- Sessions whose config has `memoryConsolidation: false`.
+- Sub-agent sessions — the parent is where signal accumulates; running consolidation on a helper turn double-counts.
+
+### 2.2 What it does
+
+1. Read the session's `state.messages`, filter to the last 40 (≈20 turns) — same window Claude Code uses.
+2. Build a condensed transcript: `Role: {first 600 chars of content}` per message.
+3. Fire a single host-internal LLM call — same pathway as `compaction.ts`, not a sub-agent — with:
+   - system prompt: [`ConsolidatorSystemPrompt`](#61-consolidator-system-prompt)
+   - user message: the condensed transcript
+   - tools: none (this call doesn't take actions; it emits JSON)
+   - expected output: a JSON object matching [`ConsolidatorOutput`](#62-consolidator-output-schema)
+4. Parse the JSON. Drop the whole result on parse failure. Drop individual entries missing required fields.
+5. Hard-cap at **3 memories per invocation** — matches Claude Code. Quality over quantity.
+6. For each candidate entry:
+   - Compute the target key: sanitize the `name` field against `/^[a-zA-Z0-9_-]{1,64}$/`.
+   - If a workspace memory with that key already exists and its `confidence` >= candidate's `confidence` (default 0.8 for consolidator-sourced), skip. Never downgrade a higher-trust memory with an LLM-inferred one.
+   - Otherwise write the memory file atomically (temp + rename) and update `MEMORY.md`.
+7. Emit `memory:consolidated` back to the dashboard with counts.
+
+### 2.3 Storage layout
+
+No new directories. Consolidator writes into the existing workspace memory root exactly like `memory { operation: "write" }` does today:
 
 ```
 <workspace>/.agent-kernel/memory/
-  MEMORY.md                                 ← index (existing; unchanged surface)
-  <key>.md                                  ← agent-authored files (existing)
-  .staging/
-    <session-id>.md                         ← Phase-1 output, one per rollout
-    .last-consolidated-at                   ← Phase-2 watermark (ISO-8601)
+  MEMORY.md
+  <key>.md            ← agent-authored, and now also consolidator-authored
 ```
 
-- `MEMORY.md` and `<key>.md` under `memory/` stay exactly as they are today. `memory_read` / `memory_write` / `memory_delete` continue to work.
-- `.staging/` is Phase-1's output. Phase-2 consumes and prunes it. Users can `rm -rf .staging` at any point without corrupting anything else.
-- `.last-consolidated-at` is Phase-2's opaque watermark. Missing = "never consolidated"; presence bounds "how far back Phase-2 needs to look."
+Files written by the consolidator carry an extra frontmatter field so we can tell them apart from user/agent-authored entries:
 
-Global scope (`~/.agent-kernel/memory/`) mirrors the same layout for cross-workspace memories. Session scope has no on-disk footprint and is out of scope for consolidation — session memory dies with the session.
+```markdown
+---
+name: user-prefers-terse-updates
+description: The user reinforced that end-of-turn recaps should be one sentence
+type: feedback
+source: consolidator
+confidence: 0.8
+generatedAt: 2026-07-06T14:22:00.000Z
+sessionId: 01J...
+---
 
-### 2.2 Phase 1 — per-session extract
+{body}
+```
 
-**When it runs.** Immediately after `state.status` transitions to `done` for the first time in a session that has produced at least one `tool_result` and does not already have a staging file. Never runs for:
-
-- ephemeral sub-agent sessions (they inherit the parent's memory and re-consolidating from a helper turn would double-count signal)
-- sessions with fewer than N messages (default N=4; a single Q&A rarely has durable signal)
-- sessions whose config has `memoryConsolidation: false`
-
-**What it does.** Spawns a host-internal LLM call — same pathway as `compaction.ts`, not a sub-agent — with:
-
-- system prompt: [`Phase1SystemPrompt`](#61-phase1-system-prompt) (adapted from codex)
-- messages: the session's `state.messages` (filtered to skip system-prompt echoes and image blocks)
-- tools: none (Phase-1 doesn't take actions)
-- expected output: a single JSON object matching [`Phase1Output`](#62-phase1-output-schema)
-
-The output is written to `<workspace>/.agent-kernel/memory/.staging/<session-id>.md`. The file's frontmatter carries `sessionId`, `generatedAt`, and `sourceEventsHash` (a stable hash of the rollout that produced it — lets Phase-2 detect "this session was re-forked and its rollout changed").
-
-Empty JSON (`{"raw_memory":"","rollout_summary":"","rollout_slug":""}`) is a valid outcome; we still write the file so Phase-2 knows this session was seen and skips it. The file is one line: `# empty`.
-
-**Failure handling.** If the LLM call fails, times out, or returns unparseable JSON, we log a warning and do not write a staging file. The next Phase-1 opportunity (e.g. a fork of this session that runs to done) will retry.
-
-### 2.3 Phase 2 — workspace consolidate
-
-**When it runs.** On a `client:consolidate_memory` request from the dashboard (manual button), or lazily when Phase-1 runs and detects staging file count above a threshold (default 8). Never runs mid-turn; requires the caller's session to be at rest.
-
-**Coalescing.** Only one Phase-2 job may be in flight per workspace at a time. A second request while one is running is a no-op — the running one already sees the newest staging files.
-
-**What it does.**
-
-1. Read every staging file under `.staging/`.
-2. Read every existing `<key>.md` under the workspace memory root (that isn't in `.staging/`).
-3. Load [`Phase2SystemPrompt`](#63-phase2-system-prompt) with the current memory files and staging files inlined.
-4. Ask the LLM to emit a list of *file operations* against the memory root, in the same JSON-per-op shape the executor tools already use (`write { key, content }`, `delete { key }`). No free-form text output.
-5. Apply the operations under a lock (per workspace):
-   - Every `write` writes atomically via a temp file + rename.
-   - Every `delete` unlinks.
-   - Both update `MEMORY.md`'s index automatically (see §2.4).
-6. On success: unlink every staging file that was seen, write `.last-consolidated-at`, broadcast `memory:consolidated`.
-7. On failure: leave staging files intact so the next run retries the same input.
-
-The LLM's output schema is validated (`op` is one of `write` / `delete` / `keep`; `key` matches `/^[a-zA-Z0-9_-]{1,64}$/`). Invalid ops are dropped with a warning; the rest still apply. This mirrors how we treat malformed tool inputs elsewhere — the reducer never trusts unstructured LLM output.
+The `source: consolidator` field is what enables the "don't downgrade" check on subsequent runs. If the user later explicitly runs `memory { operation: "write" }` on the same key (implicit `source: user`, `confidence: 1.0`), the consolidator will leave it alone on the next pass.
 
 ### 2.4 `MEMORY.md` maintenance
 
-Today `MEMORY.md` is agent-authored — the agent writes it directly like any other memory key. Nothing enforces that it stays in sync with `<key>.md` files.
+`MEMORY.md` stays agent-authored between runs. When consolidator writes a new file, it appends a one-line entry to `MEMORY.md` in the format the existing memory tool already uses: `- [Name](key.md) — description`. If the key already existed, replace the line in place. No index-wide rewrite.
 
-Post-consolidation, Phase-2 owns `MEMORY.md`. It:
+### 2.5 What the consolidator does not do
 
-- reads each surviving `<key>.md` file
-- extracts the `description:` frontmatter field
-- rewrites `MEMORY.md` as `- [Title](key.md) — description`, one line per key
-- keeps the file below 200 lines (truncates by dropping least-recently-updated keys)
-
-Agent-authored writes to `MEMORY.md` still work between Phase-2 runs (session-scope agents don't know consolidation is coming), and Phase-2 overwrites them. This is fine — `MEMORY.md` is an index, not memory content, so no signal is lost.
+- **No `.staging/` directory.** Direct write.
+- **No auto-fire on session-done.** Slash command only.
+- **No cross-session consolidation.** Runs against the *current* session's messages, not accumulated staged extracts.
+- **No global-scope consolidation.** Workspace only (`<workspace>/.agent-kernel/memory/`). Global memory lives at `~/.agent-kernel/memory/` and grows via explicit `memory { operation: "write" }` — cross-workspace signal is harder to reason about and out of scope.
+- **No merging into existing files.** If the LLM emits a name that collides with an existing memory, we either skip (higher confidence exists) or overwrite (equal or lower). We do not read the existing content and hand it back to the LLM for a merge pass. Simpler; matches Claude Code.
 
 ## 3. Wire protocol changes
 
-Two new events, one new client message. All additive; nothing existing changes.
+One new client message, one new host event. All additive.
 
 ```typescript
 // Dashboard → Host
 export type ClientConsolidateMemory = {
-  workspaceId: string
-}
-
-// Host → Dashboard (broadcast to all dashboard connections in a workspace)
-export type MemoryConsolidatedEvent = {
-  workspaceId: string
-  stagedConsumed: number  // how many staging files were folded in
-  filesWritten: number
-  filesDeleted: number
-  at: string  // ISO-8601
-}
-
-export type MemoryStagedEvent = {
-  workspaceId: string
+  requestId: string
   sessionId: string
-  slug: string
-  at: string
+}
+
+// Host → Dashboard (ack pattern like fs:read_file)
+export type ConsolidateMemoryResult = {
+  requestId: string
+  sessionId: string
+  saved: string[]       // memory names that were written
+  skipped: number       // candidates rejected (too-short session, conflict, invalid)
+  reason?: string       // populated when saved.length === 0 (e.g. "session too short")
+  error?: string
 }
 ```
 
-No kernel events. The kernel is unchanged — consolidation happens entirely outside the pure reducer, same way `compaction.ts` sits outside it.
+Kernel: no changes. The consolidator is host-side and writes to disk directly through the executor's memory tool path (or the equivalent host-side write helper).
 
 ## 4. Configuration
 
-Added to `~/.agent-kernel/config.json` (already exists for providers / hooks):
+Optional `~/.agent-kernel/config.json` block. Defaults if absent:
 
 ```json
 {
   "memoryConsolidation": {
     "enabled": true,
-    "minMessages": 4,
-    "phase2Threshold": 8
+    "minMessages": 8,
+    "maxPerRun": 3,
+    "defaultConfidence": 0.8
   }
 }
 ```
 
-Off-switch is `enabled: false`. Config missing = defaults above. Per-session opt-out via config knob; nothing per-tool.
+Off-switch is `enabled: false`. No per-session opt-out — if it's on, the slash command works; if it's off, the command reports "consolidation disabled in config" and does nothing.
 
-## 5. What we deliberately drop from codex's design
+## 5. Slash command wiring
 
-- **No state DB.** Filesystem is the source of truth. Watermark is a single file. Lease handling is a `.consolidating` lockfile with a PID and a timeout, not a DB row.
-- **No parallel Phase-1 workers.** One session ends, one Phase-1 call fires. Total throughput is bounded by "how often you finish sessions," which is already low.
-- **No git baseline / phase2_workspace_diff.md.** We reconcile in-place. Users who want history run `git init` in `.agent-kernel/memory/` themselves.
-- **No usage/rank scoring, no `max_unused_days` pruning.** Phase-2 asks the LLM to prune; we don't second-guess it with heuristics. If users want to force-prune, they `rm` the file.
-- **No sub-agent for Phase-2.** Direct host LLM call, same as `compaction.ts`. Sub-agents cost extra tokens and hide the operation from the event log we already have.
-- **No per-rollout `rollout_summary` file.** Codex keeps three artifacts (raw_memory, rollout_summary, rollout_slug); we keep exactly one: the raw memory extract. The summary is redundant with the JSONL log we already have.
+Follows the existing `/compact` pattern. Concrete surface:
 
-Rationale: the pipeline exists to make memory *more useful*, not to accumulate a second observability plane. Keep the surface small.
-
-## 6. Prompts
-
-### 6.1 Phase-1 system prompt
-
-Verbatim (short version of codex's stage_one_system.md):
-
-```
-You are a Memory Extraction Agent. Read the conversation above and produce
-one durable memory record that will help future sessions in the same
-workspace.
-
-Return a single JSON object with keys:
-  raw_memory (string): the memory content, in Markdown. Include:
-    - user preferences the user reinforced or corrected;
-    - reusable procedural knowledge (specific commands, file paths, fix recipes)
-      that took the agent effort to figure out;
-    - failures and how to avoid them.
-  rollout_slug (string): a filesystem-safe kebab-case slug summarising the
-    session. <= 60 chars. Example: "wire-up-vitest-alias-resolution".
-  discard (boolean): true if the session had no durable signal worth saving.
-    When true, other fields may be empty strings.
-
-Rules:
-  - Do not invent facts. Only extract what happened.
-  - Do not copy large tool outputs verbatim. Quote at most 200 chars.
-  - Redact secrets: replace tokens/keys with [REDACTED_SECRET].
-  - Prefer user quotes over agent summaries when capturing preferences.
-  - If the session was pure Q&A or exploration with no adopted conclusion,
-    set discard=true.
-
-Reply with ONLY the JSON object. No prose, no markdown fences.
-```
-
-### 6.2 Phase-1 output schema
+**Composer** (`packages/dashboard/src/features/chat/Composer.tsx`) — add to `slashCommands` array:
 
 ```typescript
-type Phase1Output = {
-  raw_memory: string
-  rollout_slug: string
-  discard: boolean
+{
+  command: '/consolidate-memory',
+  label: 'Consolidate memory',
+  run: onConsolidateMemory,
 }
 ```
 
-Written to disk as Markdown with frontmatter:
+**App** (`packages/dashboard/src/app.tsx`) — new `onConsolidateMemory` handler that emits the wire event with a fresh `requestId` and hooks the ack:
 
-```markdown
----
-sessionId: 01J...
-generatedAt: 2026-07-06T13:04:00.000Z
-sourceEventsHash: sha256-...
-slug: wire-up-vitest-alias-resolution
-discard: false
----
-
-{raw_memory}
+```typescript
+const onConsolidateMemory = () => {
+  if (!session.socket || !session.currentSession) return
+  const requestId = crypto.randomUUID()
+  session.socket.emit(
+    'client:consolidate_memory',
+    { requestId, sessionId: session.currentSession.id },
+    (result: ConsolidateMemoryResult) => {
+      // toast: "Saved N memories" | "Nothing worth saving" | error
+    },
+  )
+}
 ```
 
-### 6.3 Phase-2 system prompt
+**Host** (`packages/host/src/connection/dashboard-ns.ts`) — new handler alongside `client:compact` that resolves the session, verifies it's at rest (idle/done/error), and dispatches to `consolidateMemory(session, config)` in a new module `packages/host/src/memory-consolidation.ts`.
+
+## 6. Prompts
+
+### 6.1 Consolidator system prompt
+
+Adapted verbatim from Claude Code's `_SYSTEM`:
 
 ```
-You are a Memory Consolidation Agent. You are given:
-  1. Existing memory files for a workspace (`<key>.md` with frontmatter).
-  2. Newly-staged extracts from finished sessions (unstructured Markdown).
+You are a memory consolidation assistant. Analyze the conversation below and
+extract insights that are worth storing as persistent memories for future
+sessions.
 
-Your job: fold the staged extracts into the existing files. Merge
-duplicates, split unrelated topics into separate files, delete entries
-that have been superseded, and keep every unique durable signal.
+Focus ONLY on:
+1. New user preferences or working-style corrections revealed in this session
+2. Project decisions or facts made explicit (NOT derivable from code/git)
+3. Behavioral feedback given to the AI (what to do or avoid, and why)
 
-Output a JSON array of operations. Each operation is one of:
+Return a JSON object with key "memories" containing a list of objects, each with:
+  "name":        short kebab-case slug, matches /^[a-z0-9-]{1,64}$/,
+                 e.g. "user-prefers-concise-responses"
+  "type":        "user" | "feedback" | "project" | "reference"
+  "description": one-line description (used for search relevance)
+  "content":     memory body; for feedback/project lead with the rule/fact then
+                 **Why:** and **How to apply:** lines
+  "confidence":  float 0.0–1.0 (use ~0.8 for inferred, ~0.9 for clearly stated)
 
-  { "op": "write", "key": "<slug>", "description": "<one-line>",
-    "type": "user|feedback|project|reference", "content": "<full markdown>" }
-  { "op": "delete", "key": "<slug>" }
-  { "op": "keep", "key": "<slug>" }  // no change; opt-in explicit no-op
+Return {"memories": []} if nothing new or worth saving.
 
-Rules:
-  - Keys match /^[a-zA-Z0-9_-]{1,64}$/.
-  - Prefer editing over creating: if a staged extract adds signal to an
-    existing file, write the merged content under the existing key.
-  - Delete entries that have been contradicted by new signal, or that
-    have been split into multiple more-specific keys.
-  - Every existing file must appear in the output as `write`, `delete`,
-    or `keep`. Files without an op are treated as `keep`.
+Do NOT extract:
+- Code patterns, architecture, file paths — derivable from the codebase
+- Git history or debugging fixes — already in commits
+- Anything already obvious from CLAUDE.md
+- Ephemeral task state or tool results
 
-Reply with ONLY the JSON array. No prose.
+Keep to AT MOST 3 memories. Quality over quantity.
+Reply with ONLY the JSON object. No prose, no markdown fences.
 ```
+
+### 6.2 Consolidator output schema
+
+```typescript
+type ConsolidatorEntry = {
+  name: string          // /^[a-z0-9-]{1,64}$/ after sanitization
+  type: 'user' | 'feedback' | 'project' | 'reference'
+  description: string
+  content: string
+  confidence?: number   // default 0.8
+}
+
+type ConsolidatorOutput = {
+  memories: ConsolidatorEntry[]
+}
+```
+
+Validation drops any entry missing `name` / `type` / `description` / `content`. Truncates `memories` to `maxPerRun`.
 
 ## 7. Failure modes and recovery
 
 | Failure | Behaviour |
 |---|---|
-| Phase-1 LLM call errors | No staging file. Next session-done retries independently. |
-| Phase-1 returns malformed JSON | Log warning; skip. Same as above. |
-| Phase-2 LLM call errors | Staging files preserved; `.last-consolidated-at` unchanged. Next trigger retries the same input. |
-| Phase-2 returns an op with invalid key | That op dropped; other ops applied. Warning logged. |
-| Host crashes mid Phase-2 apply | Lockfile has stale PID; next start detects and reclaims. Some ops applied, some not — Phase-2 is idempotent (staging files not consumed until success), so the next run reconciles. |
-| Two workspaces share the same memory root | Not supported. Each workspace's `.agent-kernel/memory/` is single-writer. |
+| LLM call errors or times out | `error` field populated on the ack. Session state unchanged. |
+| LLM returns malformed JSON | `error: "consolidator returned invalid JSON"`. Nothing written. |
+| Entry missing required fields | That entry dropped, `skipped` incremented. Other entries still apply. |
+| Entry conflicts with higher-confidence existing memory | That entry dropped, `skipped` incremented. Kept memory unchanged. |
+| Session too short | `saved: []`, `reason: "session too short (N < 8 messages)"`. |
+| Session not at rest | Ack with `error: "session is running; wait for it to finish"`. |
+| Two `/consolidate-memory` invocations concurrently on the same session | Second one waits behind a per-session mutex; both run to completion in order. |
 
 ## 8. Testing plan
 
 - **Kernel:** no changes, no tests.
-- **Host:** new module `host/src/memory-consolidation.ts` with unit tests:
-  - Phase-1 fires exactly once per session-done (idempotent).
-  - Phase-1 skips ephemeral / short / opted-out sessions.
-  - Phase-2 coalescing: two concurrent triggers → one run.
-  - Phase-2 apply is atomic under lockfile.
-  - Malformed LLM output → partial apply.
+- **Host:** new module `host/src/memory-consolidation.ts`:
+  - Skips sessions shorter than `minMessages`.
+  - Skips sub-agent sessions.
+  - Respects `enabled: false`.
+  - Drops entries missing required fields.
+  - Skips entries that would overwrite higher-confidence memories.
+  - Applies at most `maxPerRun` entries.
+  - Writes atomically (temp + rename).
 - **Executor:** no changes.
-- **Dashboard:** manual "Consolidate memory" button in Inspector's Memory tab. New event surfaced as a toast.
+- **Dashboard:** new slash command shows up in the `/` autocomplete, dispatches the wire event, renders the ack as a toast.
 
-## 9. Open questions (won't block v1)
+## 9. Non-goals
 
-- Should Phase-2 run for global scope? Currently workspace-only. Global memory grows slower and cross-workspace signal is harder to reason about.
-- Should we expose Phase-1 output shape to `agent`-builtin sub-agents for structured hand-off? Deferred — Phase-1 is not on the sub-agent hot path.
+- Two-phase pipeline (per-session staging + workspace consolidate). We looked at codex's design and chose Claude Code's single-step model instead. Reason: agent-kernel is single-user, file-only, and doesn't need the staging plane. If cross-session accumulation becomes valuable later, a staging directory can be layered on top of this without breaking the current surface.
+- Structured usage/recency scoring. Confidence is the only rank signal; deletion happens when the user or the LLM says so, not on a decay schedule.
+- Global-scope consolidation. Deferred until we see cross-workspace signal that clearly belongs there.
+- Streaming progress. The call is short (single non-tool LLM call, no loop). The ack lands in one shot.

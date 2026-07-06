@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import {
   Archive,
   Check,
@@ -49,7 +49,11 @@ type Props = {
   onSuggest?: (text: string) => void
   pendingApprovals?: readonly ApprovalRequiredEvent[]
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
+  onReadOverflow?: (callId: string) => Promise<{ content?: string; error?: string }>
 }
+
+type OverflowReader = (callId: string) => Promise<{ content?: string; error?: string }>
+const OverflowReaderContext = createContext<OverflowReader | null>(null)
 
 const EMPTY_SUGGESTIONS: ReadonlyArray<{
   icon: typeof Sparkles
@@ -86,6 +90,7 @@ export function ChatPanel({
   onSuggest,
   pendingApprovals,
   onApprovalDecision,
+  onReadOverflow,
 }: Props): JSX.Element {
   const fallbackItems: TranscriptItem[] = (messages ?? [])
     .filter((message) => message.role !== 'system')
@@ -121,31 +126,33 @@ export function ChatPanel({
   let messageIndex = -1
   const isEmpty = transcriptItems.length === 0
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-[68rem] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-      {isEmpty ? <EmptyState onSuggest={onSuggest} /> : null}
-      {transcriptItems.map((item, itemIndex) => {
-        if (item.kind === 'compact_boundary') {
-          return <CompactBoundaryRow key={`compact-${item.seq}`} boundary={item} />
-        }
-        messageIndex += 1
-        const currentMessageIndex = messageIndex
-        return (
-          <MessageRow
-            key={`message-${itemIndex}`}
-            index={currentMessageIndex}
-            message={item.message}
-            highlighted={highlightIndex === currentMessageIndex}
-            toolNameByCallId={toolNameByCallId}
-            approvalByCallId={approvalByCallId}
-            onApprovalDecision={onApprovalDecision}
-            resultsByCallId={resultsByCallId}
-            groupedCallIds={groupedCallIds}
-            seq={item.seq}
-            onEditAndRerun={onEditAndRerun}
-          />
-        )
-      })}
-    </div>
+    <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
+      <div className="mx-auto flex w-full min-w-0 max-w-[68rem] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+        {isEmpty ? <EmptyState onSuggest={onSuggest} /> : null}
+        {transcriptItems.map((item, itemIndex) => {
+          if (item.kind === 'compact_boundary') {
+            return <CompactBoundaryRow key={`compact-${item.seq}`} boundary={item} />
+          }
+          messageIndex += 1
+          const currentMessageIndex = messageIndex
+          return (
+            <MessageRow
+              key={`message-${itemIndex}`}
+              index={currentMessageIndex}
+              message={item.message}
+              highlighted={highlightIndex === currentMessageIndex}
+              toolNameByCallId={toolNameByCallId}
+              approvalByCallId={approvalByCallId}
+              onApprovalDecision={onApprovalDecision}
+              resultsByCallId={resultsByCallId}
+              groupedCallIds={groupedCallIds}
+              seq={item.seq}
+              onEditAndRerun={onEditAndRerun}
+            />
+          )
+        })}
+      </div>
+    </OverflowReaderContext.Provider>
   )
 }
 
@@ -690,6 +697,11 @@ function ToolResultBlock({
   toolName?: string
 }): JSX.Element {
   const [open, setOpen] = useState(false)
+  const overflowReader = useContext(OverflowReaderContext)
+  const isOverflowed = detectOverflowMarker(result.content)
+  const [fullOutput, setFullOutput] = useState<
+    { state: 'idle' } | { state: 'loading' } | { state: 'loaded'; content: string } | { state: 'error'; error: string }
+  >({ state: 'idle' })
   const Icon = result.ok ? CheckCircle2 : XCircle
   const statusTone = result.ok
     ? 'text-emerald-600 dark:text-emerald-400'
@@ -697,6 +709,18 @@ function ToolResultBlock({
   const statusBadge = result.ok
     ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
     : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+
+  const handleViewFull = async (): Promise<void> => {
+    if (!overflowReader || fullOutput.state === 'loading') return
+    setFullOutput({ state: 'loading' })
+    const res = await overflowReader(result.callId)
+    if (res.error) setFullOutput({ state: 'error', error: res.error })
+    else setFullOutput({ state: 'loaded', content: res.content ?? '' })
+  }
+
+  const displayContent =
+    fullOutput.state === 'loaded' ? fullOutput.content : result.content
+
   return (
     <div className="min-w-0 max-w-full">
       <button
@@ -720,6 +744,11 @@ function ToolResultBlock({
         >
           {result.ok ? 'Succeeded' : 'Failed'}
         </span>
+        {isOverflowed ? (
+          <span className="flex-none rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            Truncated
+          </span>
+        ) : null}
         <span className="flex-1" />
         <span className="hidden max-w-[35%] truncate font-mono text-[11px] text-muted-foreground sm:inline">
           {result.callId}
@@ -732,15 +761,45 @@ function ToolResultBlock({
       </button>
       {open ? (
         <div className="mt-2 overflow-hidden rounded-lg bg-muted/60">
+          {isOverflowed && fullOutput.state !== 'loaded' && overflowReader ? (
+            <div className="flex items-center justify-between border-b border-border/40 px-3 py-1.5 text-[11px]">
+              <span className="text-muted-foreground">
+                Output truncated inline; full text lives on the executor's disk.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleViewFull()
+                }}
+                disabled={fullOutput.state === 'loading'}
+                className="rounded bg-primary/10 px-2 py-0.5 font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+              >
+                {fullOutput.state === 'loading' ? 'Loading…' : 'View full output'}
+              </button>
+            </div>
+          ) : null}
+          {fullOutput.state === 'error' ? (
+            <div className="border-b border-border/40 bg-rose-50/60 px-3 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+              Failed to read full output: {fullOutput.error}
+            </div>
+          ) : null}
           <ScrollArea>
             <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
-              {result.content}
+              {displayContent}
             </pre>
           </ScrollArea>
         </div>
       ) : null}
     </div>
   )
+}
+
+const OVERFLOW_MARKER_PREFIX = '--- output truncated:'
+
+function detectOverflowMarker(content: string): boolean {
+  if (content.length < OVERFLOW_MARKER_PREFIX.length) return false
+  const tail = content.slice(Math.max(0, content.length - 512))
+  return tail.includes(OVERFLOW_MARKER_PREFIX)
 }
 
 function ToolCallGroupBlock({

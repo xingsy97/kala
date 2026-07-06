@@ -50,11 +50,6 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from '../../components/ui/resizable.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 
@@ -69,6 +64,7 @@ type Props = {
 
 type TraceView = 'reducer' | 'llm' | 'tools'
 type RuntimeView = 'state' | 'tools' | 'memory'
+type SidebarView = 'debugger' | 'trace'
 type DetailSelection =
   | { kind: 'event'; entry: TimelineEntry; priorCallLlm: PriorCallLlm | null; flow?: StateFlowStep }
   | { kind: 'llm'; call: LlmCall }
@@ -107,6 +103,7 @@ export function InspectorPanel({
   onFork,
   onJumpToMessage,
 }: Props): JSX.Element {
+  const [sidebarView, setSidebarView] = useState<SidebarView>('debugger')
   const [traceView, setTraceView] = useState<TraceView>('reducer')
   const [runtimeView, setRuntimeView] = useState<RuntimeView>('state')
   const [selected, setSelected] = useState<DetailSelection>(null)
@@ -129,27 +126,12 @@ export function InspectorPanel({
         timeline={timeline}
         visibleMessagesCount={visibleMessagesCount}
       />
-      <Overview state={state} config={config} timeline={timeline} visibleMessagesCount={visibleMessagesCount} />
+      <SidebarTabs value={sidebarView} onChange={setSidebarView} />
 
-      <div className="min-h-0 flex-1">
-        <ResizablePanelGroup direction="vertical" autoSaveId="ak-debugger-split">
-          <ResizablePanel defaultSize={45} minSize={25}>
-            <TraceSection
-              view={traceView}
-              onViewChange={setTraceView}
-              timeline={timeline}
-              flow={flow}
-              llmCalls={llmCalls}
-              toolCalls={toolCalls}
-              messagesCount={visibleMessagesCount ?? state?.messages.length ?? 0}
-              selected={selected}
-              onSelect={setSelected}
-              onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
-              onJumpToMessage={onJumpToMessage}
-            />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={55} minSize={25}>
+      {sidebarView === 'debugger' ? (
+        <div className="flex min-h-0 flex-1 flex-col" data-testid="debugger-sidebar-tabpanel">
+          <Overview state={state} config={config} timeline={timeline} visibleMessagesCount={visibleMessagesCount} />
+          <div className="min-h-0 flex-1">
             <RuntimeSection
               view={runtimeView}
               onViewChange={setRuntimeView}
@@ -157,9 +139,25 @@ export function InspectorPanel({
               config={config}
               toolCalls={toolCalls}
             />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1" data-testid="trace-sidebar-tabpanel">
+          <TraceSection
+            view={traceView}
+            onViewChange={setTraceView}
+            timeline={timeline}
+            flow={flow}
+            llmCalls={llmCalls}
+            toolCalls={toolCalls}
+            messagesCount={visibleMessagesCount ?? state?.messages.length ?? 0}
+            selected={selected}
+            onSelect={setSelected}
+            onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
+            onJumpToMessage={onJumpToMessage}
+          />
+        </div>
+      )}
 
       <DetailDialog
         selection={selected}
@@ -192,6 +190,33 @@ export function InspectorPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+function SidebarTabs({ value, onChange }: { value: SidebarView; onChange(view: SidebarView): void }): JSX.Element {
+  return (
+    <div className="flex-none bg-card px-3 pb-3" data-testid="inspector-sidebar-tabs">
+      <div className="grid grid-cols-2 rounded bg-sidebar p-0.5 text-xs">
+        <button
+          type="button"
+          onClick={() => onChange('debugger')}
+          className={cn('rounded px-2 py-1.5 font-medium transition-colors', value === 'debugger' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+          data-testid="inspector-sidebar-tab-debugger"
+          aria-pressed={value === 'debugger'}
+        >
+          Debugger
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange('trace')}
+          className={cn('rounded px-2 py-1.5 font-medium transition-colors', value === 'trace' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+          data-testid="inspector-sidebar-tab-trace"
+          aria-pressed={value === 'trace'}
+        >
+          Trace View
+        </button>
+      </div>
     </div>
   )
 }
@@ -272,7 +297,7 @@ function Overview({
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }): JSX.Element {
   return (
-    <div className="min-w-0 rounded bg-muted/40 px-2 py-1.5">
+    <div className="min-w-0 rounded bg-sidebar px-2 py-1.5 ring-1 ring-border/30">
       <div className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={cn('mt-0.5 truncate font-mono text-[11px] text-foreground', tone)} title={value}>
         {value}
@@ -361,7 +386,7 @@ function ReducerTrace({
   }
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-1 px-2 pb-3" data-testid="reducer-trace-list">
+      <div className="space-y-0.5 px-2 pb-3" data-testid="reducer-trace-list">
         {timeline.map((entry, i) => {
           const priorCallLlm = findPriorCallLlm(timeline, i)
           const flowStep = flow.find((s) => s.seq === entry.seq)
@@ -406,51 +431,49 @@ function ReducerTraceRow({
 }): JSX.Element {
   const inbound = inboundOf(entry.event)
   const jumpable = messageIndex !== null && onJumpToMessage !== undefined
+  const effectLabels = entry.effects.map((eff, i) => ({ key: `${eff.kind}-${i}`, effect: eff, target: effectTarget(eff) }))
   return (
     <div
       className={cn(
-        'group relative rounded px-2 py-2 text-xs transition-colors',
-        selected ? 'bg-muted/70' : 'hover:bg-muted/40',
+        'group relative rounded px-2 py-1.5 text-xs transition-colors',
+        selected ? 'bg-card' : 'hover:bg-card/70',
       )}
       data-testid="timeline-row"
     >
-      {selected ? <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded bg-primary" /> : null}
+      {selected ? <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded bg-primary" /> : null}
       <button
         type="button"
         onClick={onSelect}
-        className="grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-x-2 text-left"
+        className="grid w-full grid-cols-[2.55rem_minmax(0,1fr)] gap-x-1.5 text-left"
         data-testid="timeline-row-header"
         aria-label={`inspect timeline event ${entry.seq}`}
       >
-        <span className="text-right font-mono text-[11px] text-muted-foreground">#{entry.seq}</span>
+        <span className="pt-px text-right font-mono text-[10px] text-muted-foreground">#{entry.seq}</span>
         <span className="min-w-0">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className={cn('w-16 flex-none font-mono text-[11px]', inbound.tone)}>{inbound.source}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-foreground">{entry.event.kind}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className={cn('w-14 flex-none font-mono text-[10px]', inbound.tone)}>{inbound.source}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{entry.event.kind}</span>
             {flow ? (
-              <span className="hidden flex-none font-mono text-[11px] text-muted-foreground xl:inline">
+              <span className="hidden flex-none font-mono text-[10px] text-muted-foreground xl:inline">
                 {flow.from} → {flow.to}
               </span>
             ) : null}
           </span>
-          <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+          <span className="mt-0.5 block truncate text-[10px] leading-4 text-muted-foreground">
             {eventSummary(entry.event, priorCallLlm)}
           </span>
-          {entry.effects.length > 0 ? (
-            <span className="mt-1 flex min-w-0 flex-wrap gap-1">
-              {entry.effects.map((eff, i) => {
-                const target = effectTarget(eff)
-                return (
-                  <span key={`${eff.kind}-${i}`} className="rounded bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                    <span className={target.tone}>{target.target}</span> · {eff.kind}
-                  </span>
-                )
-              })}
+          {effectLabels.length > 0 ? (
+            <span className="mt-0.5 flex min-w-0 flex-wrap gap-1">
+              {effectLabels.map(({ key, effect, target }) => (
+                <span key={key} className="rounded bg-background/80 px-1.5 py-px font-mono text-[9px] leading-4 text-muted-foreground ring-1 ring-border/30">
+                  <span className={target.tone}>{target.target}</span> · {effect.kind}
+                </span>
+              ))}
             </span>
           ) : null}
         </span>
       </button>
-      <div className="mt-1 flex justify-end gap-1 pl-11 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
+      <div className="mt-0.5 flex justify-end gap-1 pl-10 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
         {jumpable ? (
           <MiniAction onClick={() => onJumpToMessage!(messageIndex!)} title={`scroll chat to message #${messageIndex}`}>
             jump chat
@@ -484,18 +507,20 @@ function LlmCallsView({
           const isSelected = selected?.kind === 'llm' && selected.call.id === call.id
           const usage = call.response?.usage
           const status = call.error ? 'error' : call.response ? String(call.trace?.response?.status ?? 'ok') : 'pending'
+          const provider = llmCallProvider(call)
+          const model = llmCallModel(call)
           return (
             <button
               key={call.id}
               type="button"
               onClick={() => onSelect({ kind: 'llm', call })}
-              className={cn('relative w-full rounded px-2 py-2 text-left text-xs transition-colors', isSelected ? 'bg-muted/70' : 'hover:bg-muted/40')}
+              className={cn('relative w-full rounded px-2 py-1.5 text-left text-xs transition-colors', isSelected ? 'bg-card' : 'hover:bg-card/70')}
               data-testid="llm-call-row"
             >
-              {isSelected ? <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded bg-primary" /> : null}
+              {isSelected ? <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded bg-primary" /> : null}
               <div className="flex min-w-0 items-center gap-2">
                 <span className="w-20 flex-none font-mono text-[11px] text-muted-foreground">#{call.requestSeq} → {call.responseSeq ? `#${call.responseSeq}` : 'pending'}</span>
-                <span className="min-w-0 flex-1 truncate font-mono text-violet-600 dark:text-violet-300">{call.trace?.provider ?? providerFromModel(call.trace?.model) ?? 'kernel'} / {call.trace?.model ?? 'model unknown'}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-violet-600 dark:text-violet-300">{provider} / {model}</span>
                 <span className={cn('flex-none font-mono text-[11px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{status}</span>
               </div>
               <div className="mt-1 truncate pl-20 text-[11px] text-muted-foreground">
@@ -532,10 +557,10 @@ function ToolCallsView({
               key={call.callId}
               type="button"
               onClick={() => onSelect({ kind: 'tool', call })}
-              className={cn('relative w-full rounded px-2 py-2 text-left text-xs transition-colors', isSelected ? 'bg-muted/70' : 'hover:bg-muted/40')}
+              className={cn('relative w-full rounded px-2 py-1.5 text-left text-xs transition-colors', isSelected ? 'bg-card' : 'hover:bg-card/70')}
               data-testid="tool-call-row"
             >
-              {isSelected ? <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded bg-primary" /> : null}
+              {isSelected ? <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded bg-primary" /> : null}
               <div className="flex min-w-0 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate font-mono text-foreground">{call.callId}</span>
                 <span className="flex-none font-mono text-[11px] text-emerald-600 dark:text-emerald-300">{call.name}</span>
@@ -584,7 +609,7 @@ function RuntimeSection({
           testId="runtime-view-switch"
         />
       </SectionHeader>
-      <div className="min-h-0 flex-1 px-3 pb-3">
+      <div className="min-h-0 flex-1 bg-card px-3 pb-3 pt-1">
         {view === 'state' ? (
           <StateRuntime state={state} />
         ) : view === 'tools' ? (
@@ -629,17 +654,20 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
   const recent = selectedTool ? toolCalls.filter((c) => c.name === selectedTool.name).slice(-5).reverse() : []
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(7rem,0.85fr)_minmax(0,1.15fr)] gap-2">
-      <ScrollArea className="min-h-0 rounded bg-muted/30" data-testid="tool-registry">
+      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30" data-testid="tool-registry">
         <div className="p-1">
           {tools.map((tool) => (
             <button
               key={tool.name}
               type="button"
               onClick={() => setSelectedName(tool.name)}
-              className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/60', selectedTool?.name === tool.name ? 'bg-muted/70' : '')}
+              className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/70', selectedTool?.name === tool.name ? 'bg-muted' : '')}
               data-testid="tool-registry-item"
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
+              {isSkillTool(tool) ? (
+                <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">skill</span>
+              ) : null}
               <span className={cn('flex-none text-[10px]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
                 {tool.requiresApproval ? 'gated' : 'auto'}
               </span>
@@ -647,12 +675,17 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
           ))}
         </div>
       </ScrollArea>
-      <ScrollArea className="min-h-0 rounded bg-muted/30">
+      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
         <div className="space-y-2 p-2 text-xs">
           {selectedTool ? (
             <>
               <div>
-                <div className="font-mono text-foreground">{selectedTool.name}</div>
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="min-w-0 truncate font-mono text-foreground">{selectedTool.name}</div>
+                  {isSkillTool(selectedTool) ? (
+                    <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">Skill loader</span>
+                  ) : null}
+                </div>
                 <div className="mt-1 text-muted-foreground">{selectedTool.requiresApproval ? 'approval required' : 'auto allowed'}</div>
                 <p className="mt-2 text-muted-foreground">{selectedTool.description || 'No description provided.'}</p>
               </div>
@@ -661,7 +694,7 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
                 {recent.length > 0 ? (
                   <ul className="space-y-1">
                     {recent.map((call) => (
-                      <li key={`${call.callId}-${call.resultSeq ?? 'pending'}`} className="truncate rounded bg-background/60 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                      <li key={`${call.callId}-${call.resultSeq ?? 'pending'}`} className="truncate rounded bg-muted/60 px-2 py-1 font-mono text-[11px] text-muted-foreground">
                         #{call.requestedSeq ?? '?'} {toolResultLabel(call)}
                       </li>
                     ))}
@@ -679,25 +712,29 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
   )
 }
 
+function isSkillTool(tool: ToolSchema): boolean {
+  return tool.name === 'skill'
+}
+
 function MemoryRuntime({ state }: { state: AgentState | null }): JSX.Element {
   const memory = state?.memory ?? []
   const [scope, setScope] = useState<'session' | 'workspace' | 'global'>('session')
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(7rem,0.8fr)_minmax(0,1.2fr)] gap-2">
-      <div className="rounded bg-muted/30 p-1 text-xs">
+      <div className="rounded bg-background/70 p-1 text-xs ring-1 ring-border/30">
         {(['session', 'workspace', 'global'] as const).map((s) => (
           <button
             key={s}
             type="button"
             onClick={() => setScope(s)}
-            className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted/60', scope === s ? 'bg-muted/70' : '')}
+            className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted/70', scope === s ? 'bg-muted' : '')}
           >
             <span className="min-w-0 flex-1 truncate font-mono">{s}</span>
             <span className="flex-none text-[10px] text-muted-foreground">{s === 'session' ? `${memory.length}` : 'disk'}</span>
           </button>
         ))}
       </div>
-      <ScrollArea className="min-h-0 rounded bg-muted/30">
+      <ScrollArea className="min-h-0 rounded bg-background/70 ring-1 ring-border/30">
         <div className="space-y-2 p-2 text-xs">
           {scope === 'session' ? (
             memory.length > 0 ? (
@@ -803,9 +840,11 @@ function EventDetail({ selection }: { selection: Extract<DetailSelection, { kind
 }
 
 function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
+  const provider = llmCallProvider(call)
+  const model = llmCallModel(call)
   const kernelRequest = {
     callSeq: call.requestSeq,
-    model: call.trace?.model ?? null,
+    model: model === 'model unknown' ? null : model,
     messages: call.effect.messages,
     tools: call.effect.tools,
   }
@@ -820,8 +859,8 @@ function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
         <KeyValueTable
           rows={[
             ['call', `#${call.requestSeq} → ${call.responseSeq ? `#${call.responseSeq}` : 'pending'}`],
-            ['provider', call.trace?.provider ?? 'kernel only'],
-            ['model', call.trace?.model ?? 'not captured'],
+            ['provider', call.trace ? provider : 'kernel only'],
+            ['model', model === 'model unknown' ? 'not captured' : model],
             ['provider trace', call.trace ? 'captured' : 'not captured in this log'],
           ]}
         />
@@ -885,7 +924,7 @@ function CompactDetail({ entry, timeline }: { entry: TimelineEntry; timeline: re
 
 function SectionHeader({ icon: Icon, title, children }: { icon: typeof Activity; title: string; children?: React.ReactNode }): JSX.Element {
   return (
-    <div className="flex flex-none items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+    <div className="flex flex-none items-center gap-2 bg-card px-3 py-2 text-xs text-muted-foreground">
       <Icon className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
       <span className="font-medium text-foreground">{title}</span>
       <div className="ml-auto min-w-0">{children}</div>
@@ -895,13 +934,13 @@ function SectionHeader({ icon: Icon, title, children }: { icon: typeof Activity;
 
 function Segmented<T extends string>({ value, onChange, options, testId }: { value: T; onChange(value: T): void; options: readonly (readonly [T, string])[]; testId: string }): JSX.Element {
   return (
-    <div className="inline-flex rounded bg-background/80 p-0.5" data-testid={testId}>
+    <div className="inline-flex rounded bg-sidebar p-0.5" data-testid={testId}>
       {options.map(([v, label]) => (
         <button
           key={v}
           type="button"
           onClick={() => onChange(v)}
-          className={cn('rounded px-2 py-0.5 text-[11px] transition-colors', value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground')}
+          className={cn('rounded px-2 py-0.5 text-[11px] transition-colors', value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
           data-testid={`${testId}-${v}`}
         >
           {label}
@@ -921,7 +960,7 @@ function MiniAction({ children, onClick, title, ariaLabel }: { children: React.R
       }}
       title={title}
       aria-label={ariaLabel}
-      className="inline-flex items-center gap-1 rounded bg-background/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
+      className="inline-flex items-center gap-1 rounded bg-background/80 px-1.5 py-px text-[9px] uppercase tracking-wide text-muted-foreground ring-1 ring-border/30 hover:bg-accent hover:text-foreground"
     >
       {children}
     </button>
@@ -930,7 +969,7 @@ function MiniAction({ children, onClick, title, ariaLabel }: { children: React.R
 
 function EmptyBlock({ label }: { label: string }): JSX.Element {
   return (
-    <div className="flex h-full min-h-[5rem] items-center justify-center rounded bg-muted/30 px-3 text-center text-xs text-muted-foreground">
+    <div className="flex h-full min-h-[5rem] items-center justify-center rounded bg-card px-3 text-center text-xs text-muted-foreground ring-1 ring-border/30">
       {label}
     </div>
   )
@@ -938,9 +977,9 @@ function EmptyBlock({ label }: { label: string }): JSX.Element {
 
 function KeyValueTable({ rows }: { rows: readonly (readonly [string, string])[] }): JSX.Element {
   return (
-    <div className="overflow-hidden rounded bg-muted/30 text-xs">
+    <div className="overflow-hidden rounded bg-background/70 text-xs ring-1 ring-border/30">
       {rows.map(([k, v]) => (
-        <div key={k} className="grid grid-cols-[8rem_minmax(0,1fr)] gap-2 px-2 py-1.5 odd:bg-background/30">
+        <div key={k} className="grid grid-cols-[8rem_minmax(0,1fr)] gap-2 px-2 py-1.5 odd:bg-muted/50">
           <div className="truncate text-muted-foreground">{k}</div>
           <div className="min-w-0 truncate font-mono text-foreground" title={v}>{v}</div>
         </div>
@@ -1172,15 +1211,48 @@ function formatValue(v: unknown): string {
 function modelFromTimeline(timeline: readonly TimelineEntry[]): string | null {
   for (let i = timeline.length - 1; i >= 0; i--) {
     const trace = timeline[i]?.llmTrace
-    if (trace) return `${trace.provider}/${trace.model}`
+    if (trace) return `${providerFromTrace(trace)}/${modelFromTrace(trace) ?? 'model unknown'}`
   }
   return null
 }
 
+function llmCallModel(call: LlmCall): string {
+  return modelFromTrace(call.trace) ?? 'model unknown'
+}
+
+function llmCallProvider(call: LlmCall): string {
+  if (!call.trace) return providerFromModel(llmCallModel(call)) ?? 'kernel'
+  return providerFromTrace(call.trace)
+}
+
+function modelFromTrace(trace: LLMTrace | undefined): string | null {
+  if (!trace) return null
+  if (typeof trace.model === 'string' && trace.model.length > 0) return trace.model
+  const body = trace.request.body
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const model = (body as Record<string, unknown>).model
+    if (typeof model === 'string' && model.length > 0) return model
+  }
+  return null
+}
+
+function providerFromTrace(trace: LLMTrace): string {
+  const provider = trace.provider
+  if (provider && provider !== 'unknown') return provider
+  const model = modelFromTrace(trace)
+  const fromModel = providerFromModel(model ?? undefined)
+  if (fromModel) return fromModel
+  const url = trace.request.url.toLowerCase()
+  if (url.includes('anthropic')) return 'anthropic'
+  if (url.includes('openai')) return 'openai'
+  return 'unknown'
+}
+
 function providerFromModel(model: string | undefined): string | null {
   if (!model) return null
-  if (model.includes('claude')) return 'anthropic'
-  if (model.includes('gpt')) return 'openai'
+  const normalized = model.toLowerCase()
+  if (normalized.includes('claude')) return 'anthropic'
+  if (normalized.includes('gpt')) return 'openai'
   return null
 }
 
@@ -1220,7 +1292,7 @@ function compactRequestFromTimeline(timeline: readonly TimelineEntry[], compactS
 
 function MemoryEntryRow({ entry }: { entry: { key: string; content: string; updatedAt: string } }): JSX.Element {
   return (
-    <div className="rounded bg-background/60 p-2">
+    <div className="rounded bg-muted/60 p-2 ring-1 ring-border/30">
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-foreground">{entry.key}</span>
         {entry.updatedAt && entry.updatedAt !== '1970-01-01T00:00:00.000Z' ? (

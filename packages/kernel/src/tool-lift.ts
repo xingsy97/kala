@@ -6,7 +6,9 @@
  * for exactly these tools:
  *
  *   - `todowrite`      → promote `input.todos` into `state.todos`
- *   - `memory_write`   with `input.scope === 'session'`
+ *   - `memory`         with `operation === 'write' | 'delete'` and
+ *                      `input.scope === 'session'`
+ *   - `memory_write`   with `input.scope === 'session'` (legacy alias)
  *                      → upsert `{ key, content, updatedAt }` into `state.memory`
  *   - `memory_delete`  with `input.scope === 'session'`
  *                      → remove matching entry from `state.memory`
@@ -26,7 +28,7 @@ import type {
   TodoPriority,
   TodoStatus,
 } from './types.js'
-import { MEMORY_DELETE_TOOL_NAME, MEMORY_WRITE_TOOL_NAME } from './types.js'
+import { MEMORY_DELETE_TOOL_NAME, MEMORY_TOOL_NAME, MEMORY_WRITE_TOOL_NAME } from './types.js'
 
 // ============================================================================
 // todowrite
@@ -80,10 +82,19 @@ export function isSessionMemoryOp(
   toolName: string,
   input: Record<string, unknown>,
 ): boolean {
-  if (toolName !== MEMORY_WRITE_TOOL_NAME && toolName !== MEMORY_DELETE_TOOL_NAME) {
+  if (
+    toolName !== MEMORY_TOOL_NAME &&
+    toolName !== MEMORY_WRITE_TOOL_NAME &&
+    toolName !== MEMORY_DELETE_TOOL_NAME
+  ) {
     return false
   }
-  return (input as { scope?: unknown }).scope === 'session'
+  if ((input as { scope?: unknown }).scope !== 'session') return false
+  if (toolName === MEMORY_TOOL_NAME) {
+    const operation = (input as { operation?: unknown }).operation
+    return operation === 'write' || operation === 'delete'
+  }
+  return true
 }
 
 /**
@@ -99,10 +110,11 @@ export function applyMemoryOp(
 ): readonly MemoryEntry[] {
   const key = (input as { key?: unknown }).key
   if (typeof key !== 'string' || key.length === 0) return current
-  if (toolName === MEMORY_DELETE_TOOL_NAME) {
+  const operation = memoryOperation(toolName, input)
+  if (operation === 'delete') {
     return current.filter((m) => m.key !== key)
   }
-  // memory_write
+  if (operation !== 'write') return current
   const content = (input as { content?: unknown }).content
   if (typeof content !== 'string') return current
   const updatedAt = (input as { updatedAt?: unknown }).updatedAt
@@ -116,4 +128,17 @@ export function applyMemoryOp(
   const next = current.slice()
   next[existing] = entry
   return next
+}
+
+function memoryOperation(
+  toolName: string,
+  input: Record<string, unknown>,
+): 'write' | 'delete' | null {
+  if (toolName === MEMORY_WRITE_TOOL_NAME) return 'write'
+  if (toolName === MEMORY_DELETE_TOOL_NAME) return 'delete'
+  if (toolName === MEMORY_TOOL_NAME) {
+    const operation = (input as { operation?: unknown }).operation
+    return operation === 'write' || operation === 'delete' ? operation : null
+  }
+  return null
 }

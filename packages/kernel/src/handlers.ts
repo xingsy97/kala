@@ -299,8 +299,8 @@ export function onToolResult(
       ? parseTodosFromInput(target.input, state.todos)
       : state.todos
 
-  // Same pattern for session-scoped memory. `memory_write { scope: 'session', key, content }`
-  // upserts an entry; `memory_delete { scope: 'session', key }` removes one.
+  // Same pattern for session-scoped memory. `memory { operation: 'write', scope: 'session', key, content }`
+  // upserts an entry; `memory { operation: 'delete', scope: 'session', key }` removes one.
   // Workspace/global scope operations touch disk in the executor and don't
   // reach the kernel — this branch only fires for scope='session'.
   const nextMemory =
