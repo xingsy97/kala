@@ -166,6 +166,39 @@ the message until the current turn finishes, then promotes queued messages in
 FIFO order. Queue state is surfaced with `server:message_queue`; dashboards
 must render pending message previews instead of showing only a count.
 
+Queued messages are host-side delivery state, not kernel state. Reorder,
+edit, and delete operations below update only that queue and then rebroadcast
+`server:message_queue`.
+
+#### `client:reorder_queued_message`
+
+```ts
+{
+  sessionId: string
+  id: string
+  beforeId?: string | null
+}
+```
+
+Move an undelivered queued message before `beforeId`. If `beforeId` is null or
+omitted, move it to the end. No kernel event is emitted.
+
+#### `client:update_queued_message`
+
+```ts
+{ sessionId: string; id: string; text: string }
+```
+
+Edit an undelivered queued message. No kernel event is emitted.
+
+#### `client:delete_queued_message`
+
+```ts
+{ sessionId: string; id: string }
+```
+
+Delete an undelivered queued message. No kernel event is emitted.
+
 #### `client:user_approve`
 
 ```ts
@@ -287,11 +320,10 @@ navigate away or open a new session.
 
 ```ts
 {
-  sessionId?: string          // Host generates a ULID if omitted
-  workspaceId?: string        // executor to bind to
+  sessionId: string           // Dashboard-generated id for the new session
+  workspaceId: string         // executor workspace to bind to
   workspaceName?: string      // display label snapshot
   cwd?: string                // initial working directory
-  systemPrompt?: string
 }
 ```
 
@@ -315,6 +347,48 @@ Powers the new-session Finder-style directory picker. Host forwards to the
 executor as `fs:list_dirs` ( - 5.2) and returns the reply as `server:dir_list`.
 Keyed by `workspaceId` because no session exists yet.
 
+#### `client:list_files`
+
+```ts
+{
+  requestId: string
+  workspaceId: string
+  query?: string
+  limit?: number
+}
+```
+
+Dashboard-driven file search for composer file mentions. Host forwards to
+`fs:list_files`; response is `server:file_list`.
+
+#### `client:read_file`
+
+```ts
+{
+  requestId: string
+  workspaceId: string
+  path: string
+  maxBytes?: number
+}
+```
+
+Dashboard-driven read of a workspace file for file mention expansion or diff
+preview. Host forwards to `fs:read_file`; response is `server:file_contents`.
+
+#### `client:read_overflow`
+
+```ts
+{
+  requestId: string
+  sessionId: string
+  callId: string
+}
+```
+
+Read the spill file for a tool result whose full output exceeded the inline
+cap. Host resolves the session's `workspaceId`, forwards to
+`fs:read_overflow`, and replies with `server:overflow_contents`.
+
 #### `client:fork`
 
 ```ts
@@ -322,10 +396,15 @@ Keyed by `workspaceId` because no session exists yet.
   sourceSessionId: string
   cursor: number              // fork after this cursor
   newSessionId?: string       // if omitted, Host generates one
+  seedMessage?: string        // optional first user_message to dispatch on the child
 }
 ```
 
-Host replays the source event log up to `cursor` into a new session with `newSessionId`, then treats the new session as active. Responds with a `session:ready` for the new session (on a new room; client should `emit('subscribe', newSessionId)`).
+Host replays the source event log up to `cursor` into a new session with
+`newSessionId`, then treats the new session as active. Responds with
+`session:forked` for the new session. If `seedMessage` is present, Host
+dispatches it as the child's first `user_message` after the fork is
+materialized. This powers "edit and rerun" without a second round trip.
 
 #### `subscribe`
 
@@ -530,6 +609,50 @@ Response-scoped reply to `client:list_dirs`. Dashboard uses this to populate the
 }
 ```
 
+#### `server:file_list`
+
+Response-scoped reply to `client:list_files`.
+
+```ts
+{
+  requestId: string
+  workspaceId: string
+  files: Array<{ path: string; size: number }>
+  truncated: boolean
+  error?: string
+}
+```
+
+#### `server:file_contents`
+
+Response-scoped reply to `client:read_file`.
+
+```ts
+{
+  requestId: string
+  workspaceId: string
+  path: string
+  content?: string
+  size?: number
+  error?: string
+}
+```
+
+#### `server:overflow_contents`
+
+Response-scoped reply to `client:read_overflow`.
+
+```ts
+{
+  requestId: string
+  sessionId: string
+  callId: string
+  content?: string
+  size?: number
+  error?: string
+}
+```
+
 #### `server:session_deleted`
 
 Fires once after `client:delete_session` completes. Dashboards watching the
@@ -729,9 +852,118 @@ Sent 15 min after a task's `endedAt`. Dashboard drops the task from its map. Lat
 
 ---
 
+### 4.4 Sub-agent control plane
+
+Runs alongside the `agent` builtin tool (`packages/host/src/agent-tool.ts`). The tool is how the *parent LLM* starts a child session and receives its final assistant text back as a wrapped envelope in `tool_result.content`. The events + RPCs here are how the *dashboard operator* observes the child inline while it runs  -  otherwise the parent's chat panel would show a spinner for the full duration of the child's inner loop. See `docs/sub-agent-design.md`.
+
+Routed by `sessionId`. Push events fan into the parent's `session:<parentSessionId>` room; the dashboard uses `childSessionId` from `sub_agent_started` to open a subscription on the child's own room (using the existing `subscribe` verb) and render its `event:appended` stream inline.
+
+#### Envelope in `tool_result.content`
+
+The parent's `tool_result` from the `agent` tool is wrapped so the dashboard can render a `SubAgentCard` without heuristics and so the log line is self-describing under `less`. Wrapper is text (not JSON) so it degrades to plain text acceptably when the UI hasn't been updated:
+
+```
+<sub_agent
+  session_id="<child sessionId>"
+  agent_type="<name or general-purpose>"
+  status="completed"
+  turns="7"
+  duration_ms="42137"
+>
+<result>
+ - final assistant text (HTML-entity-escaped `<`/`>`) - 
+</result>
+</sub_agent>
+```
+
+Failure envelopes replace `<result>` with `<error> - </error>` and set `status="failed"`. Missing / malformed envelopes fall back to the plain grouped-tool-call renderer.
+
+#### `server:sub_agent_started` (Host  -  Dashboard, push)
+
+Emitted by the host at the moment `runAgentTool()` creates the child session, *before* the child's inner loop begins. Fired into the parent's room only.
+
+```ts
+{
+  parentSessionId: string
+  parentCallId: string           // the parent's `agent` tool_call callId
+  childSessionId: string
+  agentType?: string             // from the agent-type registry; undefined for anonymous spawns
+  prompt: string
+  model?: string                 // per-call override, if the parent passed one
+  startedAt: string              // ISO 8601
+}
+```
+
+Dashboards use this to (a) mark the parent's SubAgentCard as running, (b) subscribe to `session:<childSessionId>` so the inline nested transcript starts streaming immediately, and (c) show a "N sub-agents running" indicator without waiting for the envelope.
+
+#### `server:sub_agent_finished` (Host  -  Dashboard, push)
+
+Emitted just before `runAgentTool()` returns. Fired into the parent's room only.
+
+```ts
+{
+  parentSessionId: string
+  parentCallId: string
+  childSessionId: string
+  status: 'completed' | 'failed'
+  turns: number                  // child.state.cursor at finish (approximate)
+  durationMs: number
+  finishedAt: string             // ISO 8601
+  error?: string                 // present iff status === 'failed'
+}
+```
+
+The corresponding `<sub_agent>` envelope arrives shortly after inside the parent's `tool_result` `event:appended`; the finished push is what lets the dashboard freeze the card and stop the running timer even before the parent's turn advances.
+
+#### `sub_agent:list` (Dashboard  -  Host, ack)
+
+Reconstructs children for a parent session when its log is reopened. Reads from `SessionStore` by scanning records with `parentSessionId === X`.
+
+```ts
+// Request
+{ requestId: string; parentSessionId: string }
+// Ack
+{
+  requestId: string
+  parentSessionId: string
+  children: Array<{
+    childSessionId: string
+    parentCallId: string
+    agentType?: string
+    status: 'running' | 'completed' | 'failed'
+    startedAt: string
+    finishedAt?: string
+  }>
+  error?: string
+}
+```
+
+#### `agent_types:list` (Dashboard  -  Host, ack)
+
+Returns the currently-loaded agent-type registry (built-ins + workspace `.agent-kernel/agents/` + user `~/.config/agent-kernel/agents/`). Powers the Composer's `@agent-name` mention menu.
+
+```ts
+// Request
+{ requestId: string }
+// Ack
+{
+  requestId: string
+  types: Array<{
+    name: string
+    description: string
+    model?: string
+    tools?: string[]
+    systemPromptPreview?: string  // first ~200 chars of the body
+  }>
+  error?: string
+}
+```
+
+---
+
 ## 5. Executor-specific events
 
-Executor is a pure RPC responder. It receives commands from Host, executes them, and replies. It never originates state-changing events. **An executor is a daemon**: one process serves N sessions. It has no session binding at connect time; Host routes each `tool:call` to it based on the session's `workspaceName` (see  - 5.1).
+Executor is a pure RPC responder. It receives commands from Host, executes them, and replies. It never originates state-changing events. **An executor is a daemon**: one process serves N sessions. It has no session binding at connect time; Host routes each `tool:call` to it based on the session's `workspaceId` (see  - 5.1).
 
 ### 5.1 Executor  -  Host (on connect)
 
@@ -891,9 +1123,14 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Dashboard | `client:list_executors` | Host (routing) |
 | Dashboard | `client:list_sessions` | Host (storage) |
 | Dashboard | `client:list_dirs` | Host  -  Executor (`fs:list_dirs`) |
+| Dashboard | `client:list_files` | Host  -  Executor (`fs:list_files`) |
+| Dashboard | `client:read_file` | Host  -  Executor (`fs:read_file`) |
+| Dashboard | `client:read_overflow` | Host  -  Executor (`fs:read_overflow`) |
 | Dashboard | `bg:list` | Host  -  Executor (`bg:list`) |
 | Dashboard | `bg:output` | Host  -  Executor (`bg:output`) |
 | Dashboard | `bg:kill` | Host  -  Executor (`bg:kill`) |
+| Dashboard | `sub_agent:list` | Host (storage) |
+| Dashboard | `agent_types:list` | Host (registry) |
 | Dashboard | `client:load_history` | Host (storage) |
 | Dashboard | `subscribe` | Host (routing) |
 | Executor | `executor:announce` | Host (routing) |
@@ -915,8 +1152,13 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Host | `server:session_deleted` | Dashboard only (broadcast) |
 | Host | `server:history` | Dashboard only (response) |
 | Host | `server:dir_list` | Dashboard only (response) |
+| Host | `server:file_list` | Dashboard only (response) |
+| Host | `server:file_contents` | Dashboard only (response) |
+| Host | `server:overflow_contents` | Dashboard only (response) |
 | Host | `server:bg_task_updated` | Dashboard only (workspace room broadcast) |
 | Host | `server:bg_task_evicted` | Dashboard only (workspace room broadcast) |
+| Host | `server:sub_agent_started` | Dashboard only (parent session room) |
+| Host | `server:sub_agent_finished` | Dashboard only (parent session room) |
 | Host | `tool:call` | Executor only |
 | Host | `tool:cancel` | Executor only |
 | Host | `fs:list_dirs` | Executor only |

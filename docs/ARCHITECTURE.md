@@ -234,6 +234,31 @@ Every effect that changes downstream state produces at least one event that feed
 
 A session is bound to exactly one workspace (i.e. one executor / one machine) at create time. All of that session's `call_tool` effects route to the executor announcing the same `workspaceId`. Sessions whose workspace has no attached executor appear offline in the Explorer but their logs remain readable. Multi-executor per session (routing different tool names to different machines) is intentionally out of scope  -  running tools across machines within a single turn is a distributed-system problem the kernel does not want to own.
 
+### 4.4 Core boundary principle
+
+The core design rule is broader than "use React hooks" or any one framework mechanism:
+
+**Core mechanisms describe domain state and legal transitions. Peripheral mechanisms observe those transitions and perform environment-specific side effects.**
+
+In practice:
+
+- The Kernel / reducer owns `AgentState`, legal events, deterministic state transitions, and declarative effects. It must not call browser, filesystem, network, time, random, notification, audio, telemetry, or UI APIs.
+- The Host loop owns effect dispatch and external IO. It translates kernel effects into LLM calls, executor calls, approval broadcasts, compaction work, hooks, recovery events, and persisted log entries.
+- Dashboard state derivation should stay separate from browser side effects. Browser notifications, notification sounds, toasts, keyboard shortcuts, localStorage preferences, URL synchronization, focus management, and analytics-style observers belong in hooks, services, middleware, adapters, or equivalent boundary modules.
+- UI components should render state and emit user intent. They should not become hidden state machines for agent protocol semantics.
+- Integration adapters isolate unstable APIs. A browser API such as `Notification` / `AudioContext`, a provider API, a Socket.IO namespace, or a filesystem call should have a narrow wrapper so the core logic can be tested without that environment.
+
+Acceptable boundary mechanisms include hooks, observer/subscriber layers, effect handlers, middleware, actor services, plugin systems, command handlers, and small adapter modules. The exact mechanism is less important than the dependency direction: **core emits facts or declarative commands; outer layers react. Outer-layer convenience must not expand the core state machine.**
+
+Examples:
+
+- "The session has a pending approval" is core state; "show a toast", "send a desktop notification", and "play a sound" are dashboard effects.
+- "The reducer emitted `call_tool` with `cwd=/tmp`" is kernel output; "send that request to the matching executor and enforce sandbox roots" is host/executor responsibility.
+- "Context pressure is hard" is derived reducer state; "run a summarizer and append `compact_replaced`" is host orchestration.
+- "A provider HTTP request/response was captured" is trace metadata next to the event log; it is not an `AgentState` field and not a kernel event.
+
+This principle is a review gate. When a feature adds state, first ask whether it changes the agent protocol itself or whether it is an observer of protocol state. Observers must be implemented outside the core mechanism and tested at the lowest layer that owns the side effect.
+
 ---
 
 ## 5. Failure modes and recovery
