@@ -9,7 +9,12 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import { SessionStore } from './store/session.js'
 import { readSessionLog } from './store/log.js'
 import { runHostLoop } from './loop.js'
-import type { LoopBroadcast, ToolDispatcher } from './loop.js'
+import type {
+  LoopBroadcast,
+  SubAgentFinishedPayload,
+  SubAgentStartedPayload,
+  ToolDispatcher,
+} from './loop.js'
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
 import { discoverSkills } from './skills.js'
 
@@ -1120,11 +1125,15 @@ describe('host loop', () => {
     const toolResult = parentLog.events.find(
       (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-1',
     )
-    expect(toolResult?.event).toMatchObject({
-      kind: 'tool_result',
-      ok: true,
-      content: '42',
-    })
+    expect(toolResult?.event.kind).toBe('tool_result')
+    if (toolResult?.event.kind !== 'tool_result') throw new Error('unreachable')
+    expect(toolResult.event.ok).toBe(true)
+    // The child's final text ("42") is wrapped in the `<sub_agent>` envelope
+    // so the dashboard can render a SubAgentCard without heuristics.
+    expect(toolResult.event.content).toMatch(/^<sub_agent\b/)
+    expect(toolResult.event.content).toContain('status="completed"')
+    expect(toolResult.event.content).toContain('<result>\n42\n</result>')
+    expect(toolResult.event.content).toContain('</sub_agent>')
 
     const children = store
       .list()
@@ -1134,6 +1143,155 @@ describe('host loop', () => {
     const childLog = await readSessionLog(children[0]!.logPath)
     expect(childLog.header.parentSessionId).toBe(parent.sessionId)
     expect(children[0]!.state.status).toBe('done')
+  })
+
+  it('emits sub_agent_started + sub_agent_finished around the child run', async () => {
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-events-parent',
+      workspaceId: 'ws-agent-events',
+    })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'agent-events-1',
+              name: 'agent',
+              input: {
+                prompt: 'do the thing',
+                agent_type: 'Explore',
+                model: 'claude-sonnet-4-6',
+              },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'child text' }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'parent done' }],
+        },
+      },
+    ])
+    const started: SubAgentStartedPayload[] = []
+    const finished: SubAgentFinishedPayload[] = []
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          throw new Error('agent should not dispatch to executor')
+        },
+      }),
+      broadcast: {
+        ...silentBroadcast(),
+        onSubAgentStarted(p) {
+          started.push(p)
+        },
+        onSubAgentFinished(p) {
+          finished.push(p)
+        },
+      },
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    expect(started).toHaveLength(1)
+    expect(finished).toHaveLength(1)
+    const s = started[0]!
+    expect(s.parentSessionId).toBe(parent.sessionId)
+    expect(s.parentCallId).toBe('agent-events-1')
+    expect(s.agentType).toBe('Explore')
+    expect(s.model).toBe('claude-sonnet-4-6')
+    expect(s.prompt).toBe('do the thing')
+    expect(s.childSessionId).toMatch(/./)
+    const f = finished[0]!
+    expect(f.childSessionId).toBe(s.childSessionId)
+    expect(f.status).toBe('completed')
+    expect(f.turns).toBeGreaterThan(0)
+    expect(f.error).toBeUndefined()
+  })
+
+  it('failed sub-agent runs still emit start + finish (status=failed) and a failure envelope', async () => {
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-fail-parent',
+      workspaceId: 'ws-agent-fail',
+    })
+    // Child LLM immediately throws → child ends in `error` status →
+    // runAgentTool wraps the failure in a `<sub_agent status="failed">…<error>…`.
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'flaky',
+      async call() {
+        call += 1
+        if (call === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_call',
+                  callId: 'agent-fail-1',
+                  name: 'agent',
+                  input: { prompt: 'crash please' },
+                },
+              ],
+            },
+          }
+        }
+        if (call === 2) throw new Error('child llm exploded')
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'parent done' }],
+          },
+        }
+      },
+    }
+    const started: SubAgentStartedPayload[] = []
+    const finished: SubAgentFinishedPayload[] = []
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: {
+        ...silentBroadcast(),
+        onSubAgentStarted(p) {
+          started.push(p)
+        },
+        onSubAgentFinished(p) {
+          finished.push(p)
+        },
+      },
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    expect(started).toHaveLength(1)
+    expect(finished).toHaveLength(1)
+    expect(finished[0]!.status).toBe('failed')
+    expect(finished[0]!.error).toMatch(/./)
+
+    const parentLog = await readSessionLog(parent.logPath)
+    const toolResult = parentLog.events.find(
+      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-fail-1',
+    )
+    if (toolResult?.event.kind !== 'tool_result') throw new Error('unreachable')
+    expect(toolResult.event.ok).toBe(false)
+    expect(toolResult.event.content).toContain('status="failed"')
+    expect(toolResult.event.content).toContain('<error>')
   })
 
   it('spawned sub-agents run with allow_all regardless of parent approval mode (ADR 0014)', async () => {

@@ -45,7 +45,11 @@ export const bashTool: Tool = {
 
     if (runInBackground) {
       const task = await startBackgroundShell({ command, cwd: resolvedCwd })
-      return JSON.stringify({ taskId: task.taskId, note: 'started' })
+      return JSON.stringify({
+        taskId: task.taskId,
+        note: 'started',
+        ...(task.pid !== undefined ? { pid: task.pid } : {}),
+      })
     }
 
     return await new Promise<string>((resolve) => {

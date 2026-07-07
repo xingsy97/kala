@@ -47,6 +47,7 @@ export type BackgroundTaskSummary = {
   taskId: string
   command: string
   cwd: string
+  pid?: number
   startedAt: string
   endedAt?: string
   status: BackgroundTaskStatus
@@ -336,6 +337,7 @@ function summaryOf(task: Task): BackgroundTaskSummary {
     taskId: task.taskId,
     command: task.command,
     cwd: task.cwd,
+    ...(typeof task.child.pid === 'number' ? { pid: task.child.pid } : {}),
     startedAt: new Date(task.startedAt).toISOString(),
     ...(task.endedAt ? { endedAt: new Date(task.endedAt).toISOString() } : {}),
     status: task.status,
