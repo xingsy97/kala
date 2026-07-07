@@ -23,9 +23,11 @@ import {
   Info,
   Pencil,
   Plus,
+  Search,
   TriangleAlert,
   Trash2,
   Wrench,
+  X,
 } from 'lucide-react'
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
 
@@ -46,6 +48,7 @@ import type {
   SessionNode,
   TimeBucketNode,
   TreeNode,
+  WorkspaceChild,
   WorkspaceNode,
 } from './tree-model.js'
 
@@ -63,6 +66,7 @@ type Props = {
 }
 
 const SESSION_ROW_HEIGHT = 60
+const SESSION_ROW_HEIGHT_FORKED = 78
 const WORKSPACE_ROW_HEIGHT = 48
 const BUCKET_ROW_HEIGHT = 28
 
@@ -80,14 +84,17 @@ export function Explorer({
 }: Props): JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
   const data = useMemo(
     () => buildTree(executors, sessions),
     [executors, sessions],
   )
+  const visibleData = useMemo(() => filterTree(data, query), [data, query])
 
   const empty = executors.length === 0 && sessions.length === 0
+  const filteredEmpty = !empty && query.trim().length > 0 && visibleData.length === 0
   const selection = selectedSessionId ? `sess:${selectedSessionId}` : undefined
 
   const activate = (node: NodeApi<TreeNode>): void => {
@@ -96,7 +103,7 @@ export function Explorer({
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/30">
-      <Header onConnectWorkspace={onConnectWorkspace} />
+      <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} />
       <div
         ref={ref}
         className="flex-1 min-h-0"
@@ -111,9 +118,13 @@ export function Explorer({
             </code>
             .
           </div>
+        ) : filteredEmpty ? (
+          <div className="p-4 text-xs leading-relaxed text-muted-foreground" data-testid="explorer-filter-empty">
+            No sessions or workspaces match <span className="font-mono text-foreground">{query.trim()}</span>.
+          </div>
         ) : bounds.height > 0 ? (
           <Tree<TreeNode>
-            data={data as unknown as TreeNode[]}
+            data={visibleData as unknown as TreeNode[]}
             childrenAccessor={(d) =>
               d.kind === 'workspace' || d.kind === 'bucket'
                 ? d.children
@@ -151,6 +162,7 @@ export function Explorer({
                 onOpenSessionInfo={onOpenSessionInfo}
                 onWorkspaceInfo={onWorkspaceInfo}
                 onNewSession={onNewSession}
+                query={query}
               />
             )}
           </Tree>
@@ -210,12 +222,21 @@ function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>
 function rowHeightFor(node: NodeApi<TreeNode>): number {
   if (node.data.kind === 'workspace') return WORKSPACE_ROW_HEIGHT
   if (node.data.kind === 'bucket') return BUCKET_ROW_HEIGHT
-  return SESSION_ROW_HEIGHT
+  return node.data.parentSessionId ? SESSION_ROW_HEIGHT_FORKED : SESSION_ROW_HEIGHT
 }
 
-function Header({ onConnectWorkspace }: { onConnectWorkspace: () => void }): JSX.Element {
+function Header({
+  query,
+  onQueryChange,
+  onConnectWorkspace,
+}: {
+  query: string
+  onQueryChange(query: string): void
+  onConnectWorkspace: () => void
+}): JSX.Element {
   return (
-    <div className="flex items-center justify-between bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
+    <div className="flex flex-col gap-2 bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
+      <div className="flex items-center justify-between gap-2">
       <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         Explorer
       </span>
@@ -230,6 +251,23 @@ function Header({ onConnectWorkspace }: { onConnectWorkspace: () => void }): JSX
         <Cable className="h-3 w-3" />
         Workspace
       </Button>
+      </div>
+      <label className="flex h-7 min-w-0 items-center gap-1.5 rounded bg-background/70 px-2 text-xs ring-1 ring-border/50 focus-within:ring-primary/40">
+        <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+        <input
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Search sessions"
+          className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+          data-testid="explorer-search"
+          aria-label="Search sessions and workspaces"
+        />
+        {query ? (
+          <button type="button" onClick={() => onQueryChange('')} className="rounded text-muted-foreground hover:text-foreground" aria-label="Clear explorer search">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </label>
     </div>
   )
 }
@@ -245,6 +283,7 @@ function Row({
   onOpenSessionInfo,
   onWorkspaceInfo,
   onNewSession,
+  query,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
@@ -256,6 +295,7 @@ function Row({
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
   onNewSession(workspaceId?: string): void
+  query: string
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
@@ -264,11 +304,12 @@ function Row({
         style={style}
         onWorkspaceInfo={onWorkspaceInfo}
         onNewSession={onNewSession}
+        query={query}
       />
     )
   }
   if (node.data.kind === 'bucket') {
-    return <BucketRow node={node as NodeApi<TimeBucketNode>} style={style} />
+    return <BucketRow node={node as NodeApi<TimeBucketNode>} style={style} query={query} />
   }
   return (
     <SessionRow
@@ -280,6 +321,7 @@ function Row({
       onCancelEdit={onCancelEdit}
       onSubmitEdit={onSubmitEdit}
       onOpenSessionInfo={onOpenSessionInfo}
+      query={query}
     />
   )
 }
@@ -289,11 +331,13 @@ function WorkspaceRow({
   style,
   onWorkspaceInfo,
   onNewSession,
+  query,
 }: {
   node: NodeApi<WorkspaceNode>
   style: React.CSSProperties
   onWorkspaceInfo?(workspaceId: string): void
   onNewSession(workspaceId?: string): void
+  query: string
 }): JSX.Element {
   const w = node.data
   const dotCls = w.online
@@ -324,7 +368,7 @@ function WorkspaceRow({
         )}
         <span className={cn('inline-block h-2 w-2 flex-none rounded-full', dotCls)} />
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-          {w.name}
+          <HighlightText text={w.name} query={query} />
         </span>
         {canCreateSession ? (
           <button
@@ -369,9 +413,11 @@ function WorkspaceRow({
 function BucketRow({
   node,
   style,
+  query,
 }: {
   node: NodeApi<TimeBucketNode>
   style: React.CSSProperties
+  query: string
 }): JSX.Element {
   const b = node.data
   return (
@@ -387,7 +433,7 @@ function BucketRow({
       ) : (
         <ChevronRight className="h-3 w-3 flex-none opacity-60" />
       )}
-      <span className="truncate">{b.label}</span>
+      <span className="truncate"><HighlightText text={b.label} query={query} /></span>
       <span className="ml-1 tabular-nums opacity-60">{b.children.length}</span>
     </div>
   )
@@ -402,6 +448,7 @@ function SessionRow({
   onCancelEdit,
   onSubmitEdit,
   onOpenSessionInfo,
+  query,
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
@@ -411,6 +458,7 @@ function SessionRow({
   onCancelEdit(): void
   onSubmitEdit(sess: SessionNode, label: string): void
   onOpenSessionInfo?(sessionId: string): void
+  query: string
 }): JSX.Element {
   const s = node.data
   const selected = node.isSelected
@@ -454,7 +502,7 @@ function SessionRow({
               )}
               title="Double-click to rename"
             >
-              {s.label}
+              <HighlightText text={s.label} query={query} />
             </div>
           )}
         </div>
@@ -466,7 +514,7 @@ function SessionRow({
               data-testid="session-row-cwd"
             >
               <Folder className="h-3 w-3 flex-none opacity-70" />
-              <span className="min-w-0 truncate">{s.currentCwd}</span>
+              <span className="min-w-0 truncate"><HighlightText text={s.currentCwd} query={query} /></span>
             </span>
           ) : null}
           <span className="ml-auto flex-none tabular-nums opacity-70">
@@ -715,5 +763,60 @@ function RenameInput({
       spellCheck={false}
       className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-[13px] font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
     />
+  )
+}
+
+function filterTree(nodes: readonly WorkspaceNode[], query: string): WorkspaceNode[] {
+  const needle = query.trim().toLocaleLowerCase()
+  if (!needle) return [...nodes]
+  const filtered: WorkspaceNode[] = []
+  for (const workspace of nodes) {
+    const workspaceMatches = workspaceMatchesQuery(workspace, needle)
+    const children: WorkspaceChild[] = []
+    for (const child of workspace.children) {
+      if (child.kind === 'session') {
+        if (workspaceMatches || sessionMatchesQuery(child, needle)) children.push(child)
+      } else {
+        const sessions = workspaceMatches
+          ? child.children
+          : child.children.filter((session) => sessionMatchesQuery(session, needle))
+        if (sessions.length > 0 || child.label.toLocaleLowerCase().includes(needle)) {
+          children.push({ ...child, children: sessions })
+        }
+      }
+    }
+    if (workspaceMatches || children.length > 0) filtered.push({ ...workspace, children })
+  }
+  return filtered
+}
+
+function workspaceMatchesQuery(workspace: WorkspaceNode, needle: string): boolean {
+  return [workspace.name, workspace.workspaceId, workspace.os, workspace.runtime, workspace.runtimeVersion, workspace.ip, workspace.workingDir]
+    .filter((value): value is string => typeof value === 'string')
+    .some((value) => value.toLocaleLowerCase().includes(needle))
+}
+
+function sessionMatchesQuery(session: SessionNode, needle: string): boolean {
+  return [session.label, session.sessionId, session.workspaceId, session.currentCwd, session.status, session.parentSessionId]
+    .filter((value): value is string => typeof value === 'string')
+    .some((value) => value.toLocaleLowerCase().includes(needle))
+}
+
+function HighlightText({ text, query }: { text: string; query: string }): JSX.Element {
+  const needle = query.trim()
+  if (!needle) return <>{text}</>
+  const index = text.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase())
+  if (index === -1) return <>{text}</>
+  const before = text.slice(0, index)
+  const match = text.slice(index, index + needle.length)
+  const after = text.slice(index + needle.length)
+  return (
+    <>
+      {before}
+      <mark className="rounded bg-amber-200/80 px-0.5 text-foreground dark:bg-amber-500/30" data-testid="explorer-search-highlight">
+        {match}
+      </mark>
+      {after}
+    </>
   )
 }

@@ -37,7 +37,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl overflow-hidden p-0 gap-0" data-testid="connect-workspace-dialog">
+      <DialogContent className="max-h-[90dvh] max-w-2xl overflow-hidden p-0 gap-0" data-testid="connect-workspace-dialog">
         <DialogHeader className="border-b border-border/50 px-4 py-3">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Terminal className="h-4 w-4" aria-hidden="true" />

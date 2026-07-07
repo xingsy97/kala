@@ -34,6 +34,7 @@ import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
+import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import { DiffPreview } from './DiffPreview.js'
 import { pickPrimaryArg } from './InlineStatusRow.js'
@@ -215,16 +216,18 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
         </div>
 
         {detailsOpen ? (
-          <div
-            className="max-h-56 overflow-auto rounded-md border border-amber-200/60 bg-white/70 p-2 dark:border-amber-500/20 dark:bg-black/20"
+          <ScrollArea
+            className="max-h-56 rounded-md border border-amber-200/60 bg-white/70 dark:border-amber-500/20 dark:bg-black/20"
             data-testid="approval-details"
           >
-            {hasDiff ? (
-              <DiffPreview toolName={approval.name} input={approval.input} />
-            ) : (
-              <JsonBlock value={approval.input} label={approval.name} collapsed={2} />
-            )}
-          </div>
+            <div className="p-2">
+              {hasDiff ? (
+                <DiffPreview toolName={approval.name} input={approval.input} />
+              ) : (
+                <JsonBlock value={approval.input} label={approval.name} collapsed={2} />
+              )}
+            </div>
+          </ScrollArea>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">

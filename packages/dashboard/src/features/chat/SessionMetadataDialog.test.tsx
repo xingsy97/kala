@@ -16,7 +16,6 @@ const baseState: AgentState = {
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
   },
-  todos: [],
   contextPressureLevel: 'none',
   approvalMode: 'auto',
   cwd: '/tmp/current',

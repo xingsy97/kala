@@ -23,6 +23,7 @@ import type {
   QueuedMessagePreview,
   SessionErrorEvent,
   SessionForkedEvent,
+  SessionReadyEvent,
   SessionSummary,
   LLMTrace,
 } from '@agent-kernel/shared'
@@ -382,6 +383,40 @@ export function createSession(
   })
 }
 
+export function createSessionWithAck(
+  socket: DashboardSocket,
+  sessionId: string,
+  workspaceId: string,
+  workspaceName: string | undefined,
+  cwd: string | undefined,
+  timeoutMs = 10_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      window.clearTimeout(timer)
+      socket.off('session:ready', onReady)
+      socket.off('session:error', onError)
+    }
+    const onReady = (payload: SessionReadyEvent): void => {
+      if (payload.sessionId !== sessionId) return
+      cleanup()
+      resolve()
+    }
+    const onError = (payload: SessionErrorEvent): void => {
+      if (payload.sessionId !== sessionId) return
+      cleanup()
+      reject(new Error(payload.message))
+    }
+    const timer = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('session creation timed out'))
+    }, timeoutMs)
+    socket.on('session:ready', onReady)
+    socket.on('session:error', onError)
+    createSession(socket, sessionId, workspaceId, workspaceName, cwd)
+  })
+}
+
 export function setSessionModel(
   socket: DashboardSocket,
   sessionId: string,
@@ -447,10 +482,11 @@ export type ControlPlaneView = {
  * an already-open dashboard socket. Fetches an initial snapshot on socket
  * change and keeps the daemon list live via `server:executor_changed`.
  *
- * Sessions are pulled on `refreshSessions()`  -  we don't yet get a live
- * push for them (v1 keeps the wire small), so the UI polls on load and
- * after actions that mutate the on-disk set (fork completion, initial
- * connect). This is cheap because it's a single read per call.
+ * Sessions are fetched on connect and on `refreshSessions()`, and then kept
+ * coherent by host pushes such as `server:sessions` and
+ * `server:session_deleted`. The App still treats the snapshot as advisory and
+ * validates navigation targets before switching sessions, because fork/delete
+ * races can leave stale parent links in old summaries.
  */
 export function useControlPlane(
   socket: DashboardSocket | null,

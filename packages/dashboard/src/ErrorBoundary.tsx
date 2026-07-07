@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
+import { ScrollArea } from './components/ui/scroll-area.js'
+
 type Props = {
   children: ReactNode
 }
@@ -28,9 +30,11 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="text-sm text-muted-foreground">
             Reload the page to reconnect to the host. The session log is stored on the host, so a render failure does not affect the agent state.
           </div>
-          <pre className="max-h-40 overflow-auto rounded bg-muted p-3 text-xs text-muted-foreground">
-            {this.state.error.message}
-          </pre>
+          <ScrollArea className="max-h-40 rounded bg-muted">
+            <pre className="p-3 text-xs text-muted-foreground">
+              {this.state.error.message}
+            </pre>
+          </ScrollArea>
           <button
             type="button"
             className="self-start rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"

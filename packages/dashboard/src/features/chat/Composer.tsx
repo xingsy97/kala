@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, Square, Trash2, X } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
@@ -44,6 +45,11 @@ type Props = {
   workspaceOnline?: boolean
   onListFiles?(query: string): Promise<readonly FileListEntry[]>
   onReadFile?(path: string): Promise<{ content?: string; error?: string }>
+  /**
+   * Extra controls rendered inline in the footer, immediately after the
+   * approval-mode picker. Used e.g. by the background-shells trigger.
+   */
+  footerExtras?: React.ReactNode
 }
 
 export type SendMode = 'steer' | 'queue'
@@ -62,7 +68,7 @@ const IMAGE_MEDIA_TYPES = new Set<PastedImage['mediaType']>([
   'image/gif',
 ])
 
-const APPROVAL_MODES: ReadonlyArray<{
+export const APPROVAL_MODES: ReadonlyArray<{
   value: ApprovalMode
   label: string
   hint: string
@@ -96,6 +102,7 @@ export function Composer({
   workspaceOnline,
   onListFiles,
   onReadFile,
+  footerExtras,
 }: Props): JSX.Element {
   const [text, setText] = useState('')
   const [sendMode, setSendMode] = useState<SendMode>('steer')
@@ -111,31 +118,39 @@ export function Composer({
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
   const slashCommands = useMemo(
     () => {
-      const commands: { command: string; label: string; run: () => void }[] = [
+      const commands: SlashCommand[] = [
         {
           command: '/compact',
+          icon: Archive,
           label: 'Compact context',
+          description: 'Summarize older transcript context for the current session.',
           run: onCompact,
         },
       ]
       if (onCancel) {
         commands.push({
           command: '/cancel',
+          icon: Square,
           label: 'Stop the current turn',
+          description: 'Ask the host to cancel the active run.',
           run: onCancel,
         })
       }
       if (onClearSession) {
         commands.push({
           command: '/clear',
+          icon: Eraser,
           label: 'Start a fresh session',
+          description: 'Clear the current session transcript and runtime state.',
           run: onClearSession,
         })
       }
       if (onConsolidateMemory) {
         commands.push({
           command: '/consolidate-memory',
+          icon: ListChecks,
           label: 'Consolidate memory',
+          description: 'Merge durable memory notes through the existing memory flow.',
           run: onConsolidateMemory,
         })
       }
@@ -296,7 +311,7 @@ export function Composer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-card px-4 py-3 sm:px-6 sm:py-4 lg:px-8"
+      className="bg-card px-3 py-2.5 sm:px-6 sm:py-4 lg:px-8"
       data-testid="composer"
     >
       <div className="mx-auto max-w-[68rem]">
@@ -397,21 +412,30 @@ export function Composer({
                 className="absolute inset-x-2 bottom-2 z-10 overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
                 data-testid="slash-command-menu"
               >
-                {matchingCommands.map((cmd) => (
+                {matchingCommands.map((cmd, index) => {
+                  const Icon = cmd.icon
+                  return (
                   <button
                     key={cmd.command}
                     type="button"
-                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                    className="flex w-full items-start gap-3 px-3 py-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       cmd.run()
                       setText('')
                     }}
+                    data-testid={`slash-command-option-${index}`}
                   >
-                    <span className="font-mono text-primary">{cmd.command}</span>
-                    <span className="text-foreground">{cmd.label}</span>
+                    <Icon className="mt-0.5 h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="font-mono text-primary">{cmd.command}</span>
+                        <span className="truncate text-foreground">{cmd.label}</span>
+                      </span>
+                      <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{cmd.description}</span>
+                    </span>
                   </button>
-                ))}
+                )})}
               </div>
             ) : null}
             {mentionState && !disabled && onListFiles ? (
@@ -427,7 +451,7 @@ export function Composer({
                   ) : null}
                   {mentionLoading ? <span className="ml-auto"> - </span> : null}
                 </div>
-                <div className="max-h-56 overflow-y-auto" data-testid="mention-list">
+                <ScrollArea className="max-h-56" data-testid="mention-list">
                   {mentionFiles.length === 0 && !mentionLoading ? (
                     <div className="px-3 py-2 text-xs text-muted-foreground">
                       {workspaceOnline === false ? 'workspace offline' : 'no matches'}
@@ -448,10 +472,10 @@ export function Composer({
                       onClick={() => applyMention(file)}
                       data-testid={`mention-option-${idx}`}
                     >
-                      <span className="font-mono truncate">{file.path}</span>
+                      <span className="font-mono truncate"><HighlightText text={file.path} query={mentionState.query} /></span>
                     </button>
                   ))}
-                </div>
+                </ScrollArea>
               </div>
             ) : null}
           </div>
@@ -465,7 +489,7 @@ export function Composer({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-7 w-20 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent md:w-24 xl:w-40"
+                className="h-7 w-16 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:w-20 md:w-24 xl:w-40"
                 data-testid="model-picker"
                 aria-label="model"
               >
@@ -488,7 +512,7 @@ export function Composer({
             >
               <SelectTrigger
                 className={cn(
-                  'h-7 w-14 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent md:w-16 xl:w-32',
+                  'h-7 w-12 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:w-14 md:w-16 xl:w-32',
                   approvalMode === 'allow_all'
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
                     : approvalMode === 'ask'
@@ -519,7 +543,8 @@ export function Composer({
                 ))}
               </SelectContent>
             </Select>
-            <div className="ml-auto flex flex-none items-center gap-1.5">
+            {footerExtras}
+            <div className="ml-auto flex min-w-0 flex-none items-center gap-1.5 max-[420px]:basis-full max-[420px]:justify-end">
               <RuntimeMetrics
                 state={state}
                 config={config}
@@ -851,6 +876,30 @@ type MentionState = {
   start: number
   end: number
   query: string
+}
+
+type SlashCommand = {
+  command: string
+  icon: LucideIcon
+  label: string
+  description: string
+  run(): void
+}
+
+function HighlightText({ text, query }: { text: string; query: string }): JSX.Element {
+  const needle = query.trim()
+  if (!needle) return <>{text}</>
+  const index = text.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase())
+  if (index === -1) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark className="rounded bg-amber-200/80 px-0.5 text-foreground dark:bg-amber-500/30" data-testid="mention-match-highlight">
+        {text.slice(index, index + needle.length)}
+      </mark>
+      {text.slice(index + needle.length)}
+    </>
+  )
 }
 
 const MENTION_CHAR = /[A-Za-z0-9._\-\/@]/

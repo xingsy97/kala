@@ -1,9 +1,34 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState, type AgentState } from '@agent-kernel/kernel'
 import type { TimelineEntry } from '../../session.js'
 import { InspectorPanel } from './InspectorPanel.js'
+
+type Handler = (payload: unknown) => void
+
+function makeSocket(): {
+  socket: { on: ReturnType<typeof vi.fn>; off: ReturnType<typeof vi.fn>; emit: ReturnType<typeof vi.fn> }
+  emit(event: string, payload: unknown): void
+} {
+  const handlers = new Map<string, Set<Handler>>()
+  return {
+    socket: {
+      on: vi.fn((event: string, cb: Handler) => {
+        const set = handlers.get(event) ?? new Set<Handler>()
+        set.add(cb)
+        handlers.set(event, set)
+      }),
+      off: vi.fn((event: string, cb: Handler) => {
+        handlers.get(event)?.delete(cb)
+      }),
+      emit: vi.fn(),
+    },
+    emit(event, payload) {
+      for (const handler of handlers.get(event) ?? []) handler(payload)
+    },
+  }
+}
 
 const baseState: AgentState = {
   ...createInitialState({ sessionId: 'sess_20260706_cwd_fix' }),
@@ -141,7 +166,15 @@ describe('InspectorPanel', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-status'))
+    const topology = screen.getByTestId('status-topology')
+    expect(topology.textContent ?? '').toContain('Dashboard')
+    expect(topology.textContent ?? '').toContain('Host')
+    expect(topology.textContent ?? '').toContain('Executor')
+    expect(topology.textContent ?? '').toContain('LLM')
+    expect(topology.textContent ?? '').toContain('kernel / model unknown')
     const stateRuntime = screen.getByTestId('state-runtime')
+    expect(screen.getByTestId('run-health-panel')).toBeTruthy()
+    expect(screen.queryByTestId('watch-expressions')).toBeNull()
     expect(stateRuntime.textContent ?? '').toContain('Core')
     expect(stateRuntime.textContent ?? '').toContain('Workload')
     expect(stateRuntime.textContent ?? '').toContain('Usage')
@@ -159,9 +192,49 @@ describe('InspectorPanel', () => {
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     expect(screen.getAllByTestId('timeline-row')).toHaveLength(4)
+    expect(screen.getByTestId('trace-toolbar')).toBeTruthy()
+    expect(screen.getByTestId('replay-panel')).toBeTruthy()
+    expect(screen.getByTestId('state-diff-view').textContent ?? '').toContain('status')
+    expect(screen.getByTestId('timeline-minimap')).toBeTruthy()
     expect(document.body.textContent ?? '').toContain('idle  -  thinking')
     expect(document.body.textContent ?? '').toContain('thinking  -  awaiting_approval')
     expect(document.body.textContent ?? '').toContain('request_approval')
+  })
+
+  it('supports trace query, teaching mode, protocol flow, and fork compare loading state', () => {
+    render(<InspectorPanel state={baseState} timeline={timeline} parentSessionId="parent-session" parentCursor={121} />)
+
+    fireEvent.change(screen.getByTestId('trace-query-input'), { target: { value: 'kind:tool_result Applied' } })
+    expect(screen.getAllByTestId('timeline-row')).toHaveLength(1)
+    expect(document.body.textContent ?? '').toContain('tool_result')
+
+    fireEvent.click(screen.getByTestId('teaching-mode-toggle'))
+    expect(document.body.textContent ?? '').toContain('state machine moves')
+
+    fireEvent.click(screen.getByTestId('trace-mode-switch-flow'))
+    expect(screen.getByTestId('protocol-flow-view')).toBeTruthy()
+    expect(screen.getAllByTestId('protocol-flow-row')).toHaveLength(1)
+    expect(screen.getByTestId('protocol-flow-view').textContent ?? '').toContain('Input Event')
+    expect(screen.getByTestId('protocol-flow-view').textContent ?? '').toContain('State Machine')
+    expect(screen.getByTestId('protocol-flow-view').textContent ?? '').toContain('Output Actions')
+
+    fireEvent.click(screen.getByTestId('trace-mode-switch-compare'))
+    expect(document.body.textContent ?? '').toContain('Loading parent session history')
+  })
+
+  it('does not keep fork compare loading forever when parent history is unavailable', () => {
+    const harness = makeSocket()
+    render(<InspectorPanel state={baseState} timeline={timeline} parentSessionId="deleted-parent" parentCursor={121} socket={harness.socket as never} />)
+
+    fireEvent.click(screen.getByTestId('trace-mode-switch-compare'))
+    expect(harness.socket.emit).toHaveBeenCalledWith('client:load_history', { sessionId: 'deleted-parent' })
+
+    act(() => {
+      harness.emit('server:history', { sessionId: 'deleted-parent', entries: [] })
+    })
+
+    expect(document.body.textContent ?? '').toContain('Parent session history is unavailable')
+    expect(document.body.textContent ?? '').not.toContain('Loading parent session history')
   })
 
   it('shows LLM calls with message assembler and API call tabs', () => {
@@ -179,12 +252,13 @@ describe('InspectorPanel', () => {
     expect(screen.getByTestId('message-assembler-view')).toBeTruthy()
     expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('System Prompt')
     expect(screen.getByTestId('llm-assembly-view').textContent ?? '').toContain('Adapter Transform')
-    expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('messages')
-    expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('tools')
+    expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('User')
+    expect(screen.getByTestId('context-proportion-bar').textContent ?? '').toContain('Tool registry')
     expect(screen.getByTestId('llm-context-view')).toBeTruthy()
 
     fireEvent.click(screen.getByTestId('llm-detail-view-switch-api'))
     const apiCall = screen.getByTestId('api-call-view').textContent ?? ''
+    expect(screen.getByTestId('api-summary-strip')).toBeTruthy()
     expect(apiCall).toContain('Captured API Request')
     expect(apiCall).toContain('Captured API Response')
     expect(apiCall).toContain('Parsed Kernel Response')
@@ -297,9 +371,59 @@ describe('InspectorPanel', () => {
     fireEvent.click(screen.getByTestId('llm-call-row'))
 
     const composition = screen.getByTestId('context-proportion-bar').textContent ?? ''
-    expect(composition).toContain('system')
+    expect(composition).toContain('System')
     expect(composition).toContain('<1%')
-    expect(composition).not.toContain('system0%')
+    expect(composition).not.toContain('System0%')
+  })
+
+  it('links context composition sections to kernel messages and tool registry rows', () => {
+    const messagesTimeline: TimelineEntry[] = [
+      {
+        seq: 10,
+        ts: '2026-07-06T06:20:00Z',
+        event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'loaded skill' },
+        effects: [
+          {
+            kind: 'call_llm',
+            messages: [
+              { role: 'system', content: [{ type: 'text', text: 'system prompt' }] },
+              { role: 'user', content: [{ type: 'text', text: 'Use code review skill.' }] },
+              {
+                role: 'assistant',
+                content: [{ type: 'tool_call', callId: 'c1', name: 'skill', input: { name: 'code-review' } }],
+              },
+              { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'loaded skill' }] },
+            ],
+            tools: [
+              {
+                name: 'skill',
+                description: 'Load a skill.',
+                inputSchema: { type: 'object' },
+                requiresApproval: false,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        seq: 11,
+        ts: '2026-07-06T06:20:01Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'Reviewed.' }] } },
+        effects: [],
+      },
+    ]
+    render(<InspectorPanel state={baseState} timeline={messagesTimeline} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
+    fireEvent.click(screen.getByTestId('llm-call-row'))
+
+    fireEvent.click(screen.getByTestId('context-proportion-segment-user'))
+    const messageRows = screen.getAllByTestId('kernel-message-row')
+    expect(messageRows.map((row) => row.getAttribute('data-highlighted'))).toEqual(['false', 'true', 'false', 'false'])
+
+    fireEvent.click(screen.getByTestId('context-proportion-segment-tools'))
+    expect(screen.getByTestId('tool-registry-context-view')).toBeTruthy()
+    expect(screen.getByTestId('llm-tool-row').getAttribute('data-highlighted')).toBe('true')
   })
 
   it('falls back to provider request body when trace model is missing', () => {
@@ -384,6 +508,37 @@ describe('InspectorPanel', () => {
     expect(screen.getAllByText('edit').length).toBeGreaterThan(0)
     expect(screen.getByText('approval required')).toBeTruthy()
     expect(document.body.textContent ?? '').toContain('Input schema  -  edit')
+  })
+
+  it('summarizes sub-agent parent and child relations in status state', () => {
+    const agentTimeline: TimelineEntry[] = [
+      {
+        seq: 1,
+        ts: '2026-07-06T06:00:00Z',
+        event: {
+          kind: 'llm_response',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_call', callId: 'agent-1', name: 'agent', input: { prompt: 'inspect' } }],
+          },
+        },
+        effects: [{ kind: 'call_tool', callId: 'agent-1', name: 'agent', input: { prompt: 'inspect' } }],
+      },
+      {
+        seq: 2,
+        ts: '2026-07-06T06:00:01Z',
+        event: { kind: 'tool_result', callId: 'agent-1', ok: true, content: '<sub_agent>done</sub_agent>' },
+        effects: [],
+      },
+    ]
+
+    render(<InspectorPanel state={baseState} timeline={agentTimeline} parentSessionId="parent-1" parentCursor={7} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-status'))
+    const panel = screen.getByTestId('sub-agent-relation-panel')
+    expect(panel.textContent ?? '').toContain('parent-1 @7')
+    expect(panel.textContent ?? '').toContain('Children')
+    expect(panel.textContent ?? '').toContain('Completed')
   })
 
   it('marks the skill loader tool in the tools object inspector', () => {

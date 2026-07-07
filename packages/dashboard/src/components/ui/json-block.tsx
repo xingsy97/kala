@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronsDownUp, ChevronsUpDown, Copy } from 'lucide-react'
+import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Search, X } from 'lucide-react'
 import JsonView from '@uiw/react-json-view'
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark'
 import { githubLightTheme } from '@uiw/react-json-view/githubLight'
@@ -25,9 +25,13 @@ export function JsonBlock({
 }: Props): JSX.Element {
   const [copied, setCopied] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [query, setQuery] = useState('')
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark'),
   )
+  const jsonText = safeJsonStringify(value)
+  const summary = summarizeJsonValue(value)
+  const matches = query.trim() ? countMatches(jsonText, query.trim()) : 0
 
   useEffect(() => {
     const root = document.documentElement
@@ -55,6 +59,25 @@ export function JsonBlock({
     >
       <div className="flex items-center gap-2 px-2 py-1 border-b border-border/50 text-[11px] text-muted-foreground">
         <span className="flex-1 truncate">{label ?? 'json'}</span>
+        <span className="hidden flex-none rounded bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline" data-testid="json-block-summary">
+          {summary}
+        </span>
+        <label className="flex min-w-0 flex-none items-center gap-1 rounded bg-background/70 px-1.5 py-0.5 ring-1 ring-border/40 focus-within:ring-primary/40">
+          <Search className="h-3 w-3 flex-none" aria-hidden="true" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="search"
+            className="h-4 w-20 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground sm:w-28"
+            aria-label="search JSON"
+            data-testid="json-block-search"
+          />
+          {query ? (
+            <button type="button" onClick={() => setQuery('')} aria-label="clear JSON search" className="rounded hover:text-foreground">
+              <X className="h-3 w-3" />
+            </button>
+          ) : null}
+        </label>
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -92,6 +115,11 @@ export function JsonBlock({
           )}
         </button>
       </div>
+      {query.trim() ? (
+        <div className="sticky top-0 z-10 border-b border-border/40 bg-background/95 px-2 py-1 text-[11px] text-muted-foreground" data-testid="json-block-search-status">
+          {matches > 0 ? `${matches} text ${matches === 1 ? 'match' : 'matches'} in serialized JSON` : 'No serialized JSON matches'}
+        </div>
+      ) : null}
       <ScrollArea
         className="max-h-96 text-xs [&>[data-radix-scroll-area-viewport]]:max-h-96"
         data-testid="json-block-scrollarea"
@@ -111,4 +139,35 @@ export function JsonBlock({
       </ScrollArea>
     </div>
   )
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function summarizeJsonValue(value: unknown): string {
+  if (Array.isArray(value)) return `array ${value.length}`
+  if (value && typeof value === 'object') return `object ${Object.keys(value as Record<string, unknown>).length}`
+  if (typeof value === 'string') return `string ${value.length}`
+  if (typeof value === 'number' || typeof value === 'boolean') return typeof value
+  if (value === null) return 'null'
+  return 'value'
+}
+
+function countMatches(text: string, query: string): number {
+  if (!query) return 0
+  const haystack = text.toLocaleLowerCase()
+  const needle = query.toLocaleLowerCase()
+  let count = 0
+  let index = 0
+  while (true) {
+    const next = haystack.indexOf(needle, index)
+    if (next === -1) return count
+    count += 1
+    index = next + Math.max(1, needle.length)
+  }
 }

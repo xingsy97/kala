@@ -29,7 +29,7 @@ type Props = {
 export function ComposerFlipContainer({ showApproval, front, back }: Props): JSX.Element {
   const [frontRef, frontBounds] = useMeasure({ debounce: 0 })
   const [backRef, backBounds] = useMeasure({ debounce: 0 })
-  const activeHeight = showApproval ? backBounds.height : frontBounds.height
+  const activeHeight = Math.ceil(showApproval ? backBounds.height : frontBounds.height)
   return (
     <div
       className="[perspective:1600px]"
