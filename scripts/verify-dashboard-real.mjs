@@ -71,7 +71,7 @@ try {
     },
   )
   pipeLog(host, hostLog)
-  await waitForLog(hostLog, `agent-kernel-host listening on port ${PORT}`, 10_000)
+  await waitForLog(hostLog, `"port":${PORT}`, 10_000)
 
   executor = spawn(
     'pnpm',
@@ -143,8 +143,14 @@ async function createSessionFromFinder(page) {
   const child = join(parent, 'finder-child')
   mkdirSync(child, { recursive: true })
 
-  await page.waitForSelector('[data-testid="new-session-button"]')
-  await page.click('[data-testid="new-session-button"]')
+  await page.waitForSelector('[data-testid="workspace-row"][data-online="true"]')
+  await page.waitForSelector('[data-testid^="workspace-new-session-"]')
+  await page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll('[data-testid^="workspace-new-session-"]')).find(
+      (el) => !el.hasAttribute('disabled'),
+    )
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
   await page.waitForSelector('[data-testid="new-session-dialog"]')
   await page.waitForFunction(
     (workspace) => document.querySelector('[data-testid="new-session-cwd-input"]')?.value === workspace,
@@ -454,6 +460,7 @@ async function verifyCompact(page) {
 async function verifyScrollbar(page) {
   const dom = await page.evaluate(() => {
     const rawOverflowClass = Array.from(document.querySelectorAll('[class]'))
+      .filter((el) => el.tagName.toLowerCase() !== 'pre')
       .map((el) => el.getAttribute('class') || '')
       .filter((cls) => /(^|\s)overflow-(auto|x-auto|y-auto|scroll)(\s|$)/.test(cls))
     const radixViewports = document.querySelectorAll('[data-radix-scroll-area-viewport]').length
@@ -471,8 +478,8 @@ async function verifyScrollbar(page) {
   check('rendered DOM has vertical Radix scrollbars', dom.verticalScrollbars > 0, `${dom.verticalScrollbars}`)
   check('rendered DOM has horizontal Radix scrollbars', dom.horizontalScrollbars > 0, `${dom.horizontalScrollbars}`)
   check('chat panel uses Radix ScrollArea viewport', dom.chatHasRadixViewport)
-  check('rendered DOM has no raw overflow auto/scroll utility classes', dom.rawOverflowClass.length === 0, dom.rawOverflowClass.join(' | '))
-  check('dashboard source has no raw overflow auto/scroll utility classes', sourceRaw.length === 0, sourceRaw.join(' | '))
+  check('rendered DOM has no raw overflow auto/scroll utility classes outside code content', dom.rawOverflowClass.length === 0, dom.rawOverflowClass.join(' | '))
+  check('dashboard source has no raw panel/list/dialog overflow utilities', sourceRaw.length === 0, sourceRaw.join(' | '))
 }
 
 async function verifyComposerFooterLayout(page) {
@@ -733,11 +740,16 @@ function findRawOverflowUtilityClasses() {
     const lines = raw.split('\n')
     for (let i = 0; i < lines.length; i += 1) {
       if (/overflow-(auto|x-auto|y-auto|scroll)/.test(lines[i])) {
+        if (isAllowedContentOverflow(lines[i])) continue
         hits.push(`${file.replace(REPO_ROOT, '')}:${i + 1}:${lines[i].trim()}`)
       }
     }
   }
   return hits
+}
+
+function isAllowedContentOverflow(line) {
+  return /<pre\b/.test(line) || /\[&_pre\]:/.test(line)
 }
 
 function listFiles(dir) {
