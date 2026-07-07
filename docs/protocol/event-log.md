@@ -61,7 +61,7 @@ type HeaderEntry = {
   formatVersion: 1                    // bumps on breaking log-format change
   kernelVersion: string               // e.g. "@agent-kernel/kernel@0.1.0"
   config: AgentConfig                 // frozen at session start
-  initialState: AgentState            // AgentState *before* seq 1 is applied. Includes `contextPressureLevel`, `approvalMode`, `todos`, and optional `cwd`.
+  initialState: AgentState            // AgentState *before* seq 1 is applied. Includes `contextPressureLevel`, `approvalMode`, optional `cwd`, and reducer-owned runtime state only.
 }
 ```
 

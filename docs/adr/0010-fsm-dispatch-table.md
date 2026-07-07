@@ -5,7 +5,7 @@
 
 ## Context
 
-The kernel's `step(state, event, config)` function is, formally, a finite state machine: seven statuses (`idle`, `awaiting_llm`, `calling_tool`, `awaiting_approval`, `done`, `error`, `cancelled`) × seven event kinds, with a defined transition per legal `(status, event)` pair and no-op behavior everywhere else (see [`docs/SPEC.md`](../SPEC.md) §3).
+The kernel's `step(state, event, config)` function is, formally, a finite state machine: six statuses (`idle`, `thinking`, `awaiting_approval`, `executing_tools`, `done`, `error`) × the `AgentEvent['kind']` union, with a defined transition per legal `(status, event)` pair and no-op behavior everywhere else (see [`docs/SPEC.md`](../SPEC.md) §3).
 
 The v0.1 implementation expressed this as one big `switch (event.kind)` block with per-branch `if (state.status !== expected) return noop(state)` guards. That works, but it doesn't structurally mirror the legality table in SPEC — a reader has to trace the branches to reconstruct the FSM shape.
 
@@ -24,8 +24,8 @@ const transitions: Record<Status, Partial<Record<AgentEvent['kind'], Handler>>> 
     user_message: (s, e, c) => { /* ... */ },
     cancel: (s, e, c) => noop(s),
   },
-  awaiting_llm: {
-    assistant_message: (s, e, c) => { /* ... */ },
+  thinking: {
+    llm_response: (s, e, c) => { /* ... */ },
     llm_error: (s, e, c) => { /* ... */ },
     cancel: (s, e, c) => { /* ... */ },
   },
@@ -63,7 +63,7 @@ The `transitions` object **is** SPEC §3's legality table, expressed as code. Il
 
 **Good**:
 - Zero runtime deps preserved.
-- The `transitions` object *is* the SPEC table. A reader can point at row `awaiting_llm` and column `assistant_message` and see the exact code that runs. Non-obvious spec bugs become obvious.
+- The `transitions` object *is* the SPEC table. A reader can point at row `thinking` and column `llm_response` and see the exact code that runs. Non-obvious spec bugs become obvious.
 - No-op behavior for illegal pairs is a single path (`handler ?? noopAdvance`), not seven scattered guards.
 - Adding a new status or event kind is a **local** change: add a row / column and its handlers. No `switch` growth.
 - Testing story unchanged — the public API (`step`) is exactly the same, so the 23 existing tests migrate as-is.
