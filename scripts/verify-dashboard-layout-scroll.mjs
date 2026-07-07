@@ -28,6 +28,7 @@ const SHOTS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-layout-shots-'))
 const CHROME = process.env.CHROME_PATH ?? detectBrowser()
 const LAYOUT_STORAGE_PREFIX = 'react-resizable-panels:ak-outer-cols-'
 const VIEWPORTS = [
+  { width: 390, height: 740 },
   { width: 800, height: 620 },
   { width: 1200, height: 620 },
   { width: 1440, height: 780 },
@@ -79,9 +80,9 @@ try {
   await clearStoredPanelLayouts(page)
   await page.goto(`${HOST_URL}/?sessionId=${SESSION_ID}`, { waitUntil: 'networkidle2', timeout: 15_000 })
   await ensureFixtureSessionSelected(page)
-  await page.waitForSelector('[data-testid="activity-bar"]')
+  await page.waitForSelector('[data-testid="workbench-toolbar"]')
   await page.waitForSelector('[data-testid="model-picker"]')
-  await page.waitForSelector('[data-testid="state-runtime"]')
+  await page.waitForSelector('[data-testid="inspector-panel"]')
 
   await verifyViewports(page)
 } catch (err) {
@@ -114,14 +115,17 @@ async function verifyViewports(page) {
   for (const viewport of VIEWPORTS) {
     await page.setViewport({ ...viewport, deviceScaleFactor: 1 })
     await sleep(150)
-    if (viewport.width >= 1024) {
+    if (viewport.width >= 1180) {
       await page.waitForSelector('[data-testid="session-row-cwd"]', { timeout: 3_000 })
     }
     await verifyResponsivePanels(page, viewport.width)
     await verifyChatContentLayout(page, viewport.width)
     await verifyFooterLayout(page, viewport.width)
-    await verifyActivityBar(page, viewport.width)
+    await page.keyboard.press('Escape')
+    await sleep(50)
+    await verifyNavigationSurface(page, viewport.width)
     await verifyVisualIntegrity(page, viewport.width)
+    await verifyModalSizing(page, viewport.width)
     await verifyJsonWheelScroll(page, viewport.width)
     await verifyToolRegistry(page, viewport.width)
     const path = join(SHOTS_DIR, `dashboard-${viewport.width}.png`)
@@ -160,7 +164,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
       selectedSessionClientWidth: selectedSession?.clientWidth ?? 0,
     }
   })
-  if (viewportWidth < 1024) {
+  if (viewportWidth < 1180) {
     check(`narrow layout removes explorer rail at ${viewportWidth}px`, metrics.explorer === null, JSON.stringify(metrics))
     check(`narrow layout removes inspector rail at ${viewportWidth}px`, metrics.inspector === null, JSON.stringify(metrics))
     check(`narrow layout keeps main panel readable at ${viewportWidth}px`, metrics.main?.width >= viewportWidth - 24, JSON.stringify(metrics))
@@ -174,7 +178,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
   check(`wide layout keeps explorer at top level at ${viewportWidth}px`, metrics.explorer?.top === 0 && metrics.toolbar && metrics.toolbar.left >= (metrics.explorer?.right ?? 0), JSON.stringify(metrics))
   check(`wide layout keeps explorer readable at ${viewportWidth}px`, metrics.explorer?.width >= 240, JSON.stringify(metrics))
   check(`wide layout keeps session rows inside explorer at ${viewportWidth}px`, metrics.explorer && metrics.selectedSession && metrics.selectedSession.left >= metrics.explorer.left - 1 && metrics.selectedSession.right <= metrics.explorer.right + 1 && metrics.selectedSessionScrollWidth <= metrics.selectedSessionClientWidth + 1, JSON.stringify(metrics))
-  check(`wide layout shows session cwd metadata at ${viewportWidth}px`, metrics.sessionCwdText.includes('cwd /tmp') && metrics.sessionCwd && metrics.selectedSession && metrics.sessionCwd.bottom <= metrics.selectedSession.bottom + 1, JSON.stringify(metrics))
+  check(`wide layout shows session cwd metadata at ${viewportWidth}px`, metrics.sessionCwdText.includes('/tmp') && !metrics.sessionCwdText.includes('cwd ') && metrics.sessionCwd && metrics.selectedSession && metrics.sessionCwd.bottom <= metrics.selectedSession.bottom + 1, JSON.stringify(metrics))
   check(`wide layout keeps explorer rail compact at ${viewportWidth}px`, metrics.explorer?.width <= viewportWidth * 0.29, JSON.stringify(metrics))
   check(`wide layout keeps inspector rail compact at ${viewportWidth}px`, metrics.inspector?.width <= viewportWidth * 0.31, JSON.stringify(metrics))
   check(`wide layout keeps main panel usable at ${viewportWidth}px`, metrics.main?.width >= minMainWidth, JSON.stringify(metrics))
@@ -213,8 +217,10 @@ async function verifyChatContentLayout(page, viewportWidth) {
       const scrolls = /(auto|scroll)/.test(`${style.overflow}${style.overflowX}${style.overflowY}`)
       const isRadixViewport = el.hasAttribute('data-radix-scroll-area-viewport')
       const isControlledVirtualTree = Boolean(el.closest('[data-scroll-owner="react-arborist"]'))
+      const isControlledTranscript = Boolean(el.closest('[data-scroll-owner="virtuoso"]'))
       if (isRadixViewport) return false
       if (isControlledVirtualTree) return false
+      if (isControlledTranscript) return false
       if (rect.width < 20 || rect.height < 20) return false
       return scrolls && (canScrollX || canScrollY)
     }).map((el) => {
@@ -241,10 +247,10 @@ async function verifyChatContentLayout(page, viewportWidth) {
       rawScrollbarNodes: rawScrollbarNodes.slice(0, 8),
     }
   })
-  check(`chat renders message rows at ${viewportWidth}px`, metrics.rowCount >= 20, JSON.stringify(metrics))
+  check(`chat renders virtualized message rows at ${viewportWidth}px`, metrics.rowCount >= 4, JSON.stringify(metrics))
   check(`chat message rows stay inside main panel at ${viewportWidth}px`, metrics.oversized.length === 0, JSON.stringify(metrics))
   check(`page has no horizontal overflow from long chat content at ${viewportWidth}px`, metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
-  check(`scrollable regions use Radix scroll areas at ${viewportWidth}px`, metrics.rawScrollbarNodes.length === 0, JSON.stringify(metrics.rawScrollbarNodes))
+  check(`scrollable regions use controlled scroll surfaces at ${viewportWidth}px`, metrics.rawScrollbarNodes.length === 0, JSON.stringify(metrics.rawScrollbarNodes))
 }
 
 async function verifyFooterLayout(page, viewportWidth) {
@@ -269,6 +275,8 @@ async function verifyFooterLayout(page, viewportWidth) {
         height: rect.height,
         scrollWidth: el.scrollWidth,
         scrollHeight: el.scrollHeight,
+        title: el.getAttribute('title') || '',
+        ariaLabel: el.getAttribute('aria-label') || '',
         display: style.display,
         visibility: style.visibility,
         whiteSpace: style.whiteSpace,
@@ -287,12 +295,13 @@ async function verifyFooterLayout(page, viewportWidth) {
   const visibleControls = metrics.controls.filter(
     (r) => r.display !== 'none' && r.visibility !== 'hidden' && r.width > 4 && r.height > 4,
   )
-  const tall = visibleControls.filter((r) => r.height > 34)
   const clipped = visibleControls.filter((r) => r.scrollWidth > Math.ceil(r.width) + 1)
+  const contextIndicator = visibleControls.find((r) => r.testId === 'context-usage-indicator')
+  const maxFooterHeight = viewportWidth < 430 ? 88 : 56
   check(`composer footer does not create page horizontal overflow at ${viewportWidth}px`, metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check(`composer footer content stays inside footer width at ${viewportWidth}px`, metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
-  check(`composer footer remains a compact single action row at ${viewportWidth}px`, metrics.footerHeight <= 50 && tall.length === 0 && clipped.length === 0, JSON.stringify(visibleControls))
-  check(`runtime counters are grouped with context indicator at ${viewportWidth}px`, visibleControls.some((r) => r.testId === 'context-usage-indicator' && /Cursor|Pending|Tokens/.test(r.text)), JSON.stringify(visibleControls))
+  check(`composer footer remains compact without clipped controls at ${viewportWidth}px`, metrics.footerHeight <= maxFooterHeight && clipped.length === 0, JSON.stringify(visibleControls))
+  check(`runtime context indicator stays visible at ${viewportWidth}px`, Boolean(contextIndicator) && /Context window/.test(`${contextIndicator.title} ${contextIndicator.ariaLabel}`), JSON.stringify(visibleControls))
 }
 
 async function verifyVisualIntegrity(page, viewportWidth) {
@@ -301,7 +310,6 @@ async function verifyVisualIntegrity(page, viewportWidth) {
     const selectors = [
       ['toolbar', '[data-testid="workbench-toolbar"]'],
       ['chat', '[data-testid="chat-panel"]'],
-      ['activity', '[data-testid="activity-bar"]'],
       ['composer', '[data-testid="composer"]'],
       ['composerFooter', '[data-testid="composer-footer"]'],
       ['modelPicker', '[data-testid="model-picker"]'],
@@ -349,8 +357,7 @@ async function verifyVisualIntegrity(page, viewportWidth) {
     }
     const verticalOrderProblems = []
     if (rects.toolbar && rects.chat && rects.toolbar.bottom > rects.chat.top + 1) verticalOrderProblems.push('toolbar overlaps chat')
-    if (rects.chat && rects.activity && rects.chat.bottom > rects.activity.top + 1) verticalOrderProblems.push('chat overlaps activity')
-    if (rects.activity && rects.composer && rects.activity.bottom > rects.composer.top + 1) verticalOrderProblems.push('activity overlaps composer')
+    if (rects.chat && rects.composer && rects.chat.bottom > rects.composer.top + 1) verticalOrderProblems.push('chat overlaps composer')
     if (rects.composerFooter && rects.composer && (rects.composerFooter.top < rects.composer.top - 1 || rects.composerFooter.bottom > rects.composer.bottom + 1)) {
       verticalOrderProblems.push('composer footer outside composer')
     }
@@ -371,30 +378,99 @@ async function verifyVisualIntegrity(page, viewportWidth) {
   check(`main column regions keep vertical order at ${viewportWidth}px`, metrics.verticalOrderProblems.length === 0, JSON.stringify(metrics.verticalOrderProblems))
 }
 
-async function verifyActivityBar(page, viewportWidth) {
+async function verifyNavigationSurface(page, viewportWidth) {
   const metrics = await page.evaluate(() => {
-    const bar = document.querySelector('[data-testid="activity-bar"]')
-    const summary = document.querySelector('[data-testid="runtime-summary"]')
-    const label = bar?.querySelector('[data-testid="activity-label"]')
-    const detail = bar?.querySelector('[data-testid="activity-detail"]')
-    const rect = bar?.getBoundingClientRect()
-    const summaryRect = summary?.getBoundingClientRect()
-    const summaryStyle = summary ? getComputedStyle(summary) : null
+    const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
+    const explorerToggle = document.querySelector('[data-testid="explorer-toggle"]')
+    const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
+    const rect = toolbar?.getBoundingClientRect()
     return {
-      text: bar?.textContent || '',
-      visibleText: `${label?.textContent ?? ''} ${detail?.textContent ?? ''}`.trim(),
-      summaryText: summary?.textContent || '',
-      summaryDisplay: summaryStyle?.display ?? '',
-      summaryVisible: Boolean(summaryRect && summaryStyle?.display !== 'none' && summaryRect.width > 4 && summaryRect.height > 4),
+      text: toolbar?.textContent || '',
+      explorerToggle: Boolean(explorerToggle),
+      inspectorToggle: Boolean(inspectorToggle),
       width: rect?.width ?? 0,
-      scrollWidth: bar?.scrollWidth ?? 0,
+      scrollWidth: toolbar?.scrollWidth ?? 0,
       height: rect?.height ?? 0,
       viewportWidth: window.innerWidth,
     }
   })
-  check(`activity bar shows readable agent state at ${viewportWidth}px`, metrics.visibleText.includes('Agent Ready') || metrics.visibleText.includes('Agent Done'), JSON.stringify(metrics))
-  check(`activity bar does not duplicate composer runtime metrics at ${viewportWidth}px`, metrics.summaryVisible === false, JSON.stringify(metrics))
-  check(`activity bar stays inside viewport at ${viewportWidth}px`, metrics.scrollWidth <= metrics.width + 1 && metrics.height <= 42, JSON.stringify(metrics))
+  check(`toolbar stays inside viewport at ${viewportWidth}px`, metrics.scrollWidth <= metrics.width + 1, JSON.stringify(metrics))
+  if (viewportWidth < 1180) {
+    check(`narrow layout exposes explorer drawer trigger at ${viewportWidth}px`, metrics.explorerToggle === true, JSON.stringify(metrics))
+    await page.click('[data-testid="explorer-toggle"]')
+    await page.waitForSelector('[data-testid="explorer-drawer"]', { timeout: 3_000 })
+    const drawer = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="explorer-drawer"]')
+      const rect = el?.getBoundingClientRect()
+      return rect ? { width: rect.width, left: rect.left, right: rect.right, viewportWidth: window.innerWidth } : null
+    })
+    check(`narrow explorer drawer fits viewport at ${viewportWidth}px`, drawer && drawer.left >= -1 && drawer.right <= drawer.viewportWidth + 1, JSON.stringify(drawer))
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[data-testid="explorer-drawer"]'))
+  } else {
+    check(`wide layout exposes inspector toggle at ${viewportWidth}px`, metrics.inspectorToggle === true, JSON.stringify(metrics))
+  }
+}
+
+async function verifyModalSizing(page, viewportWidth) {
+  if (viewportWidth < 1180) return
+  const maxWideModalWidth = Math.min(896, viewportWidth - 16)
+  const maxMediumModalWidth = Math.min(672, viewportWidth - 16)
+  await verifyOpenedModalSize(
+    page,
+    viewportWidth,
+    'settings modal',
+    '[data-testid="settings-button"]',
+    '[data-testid="settings-dialog"]',
+    maxWideModalWidth,
+  )
+  await verifyOpenedModalSize(
+    page,
+    viewportWidth,
+    'connect workspace modal',
+    '[data-testid="new-session-button"]',
+    '[data-testid="connect-workspace-dialog"]',
+    maxMediumModalWidth,
+  )
+  await verifyOpenedModalSize(
+    page,
+    viewportWidth,
+    'change cwd modal',
+    '[data-testid="cwd-button"]',
+    '[data-testid="change-cwd-dialog"]',
+    maxWideModalWidth,
+  )
+}
+
+async function verifyOpenedModalSize(page, viewportWidth, name, triggerSelector, dialogSelector, maxWidth) {
+  const trigger = await page.$(triggerSelector)
+  if (!trigger) {
+    check(`${name} trigger exists at ${viewportWidth}px`, false, triggerSelector)
+    return
+  }
+  await trigger.click()
+  await page.waitForSelector(dialogSelector, { timeout: 3_000 })
+  const metrics = await page.evaluate((selector) => {
+    const el = document.querySelector(selector)
+    const rect = el?.getBoundingClientRect()
+    return rect
+      ? {
+          width: rect.width,
+          height: rect.height,
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+        }
+      : null
+  }, dialogSelector)
+  check(
+    `${name} keeps desktop max width at ${viewportWidth}px`,
+    Boolean(metrics) && metrics.width <= maxWidth + 1 && metrics.left >= 0 && metrics.right <= metrics.viewportWidth,
+    JSON.stringify({ metrics, maxWidth }),
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 3_000 }, dialogSelector)
 }
 
 async function clearStoredPanelLayouts(page) {
@@ -440,7 +516,7 @@ async function verifyHostListsFixture() {
 async function ensureFixtureSessionSelected(page) {
   try {
     await page.waitForFunction(
-      (id) => document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`) || document.querySelector('[data-testid="activity-bar"]'),
+      (id) => document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`) || document.querySelector('[data-testid="workbench-toolbar"]'),
       { timeout: 10_000 },
       SESSION_ID,
     )
@@ -452,7 +528,7 @@ async function ensureFixtureSessionSelected(page) {
         id: e.getAttribute('data-session-id'),
         text: e.textContent?.slice(0, 120),
       })),
-      hasActivity: Boolean(document.querySelector('[data-testid="activity-bar"]')),
+      hasToolbar: Boolean(document.querySelector('[data-testid="workbench-toolbar"]')),
       hasExplorer: Boolean(document.querySelector('[data-testid="explorer-panel"]')),
     }))
     throw new Error(`layout fixture session not visible: ${JSON.stringify(diag)}`, { cause: err })
@@ -464,12 +540,14 @@ async function ensureFixtureSessionSelected(page) {
 }
 
 async function verifyJsonWheelScroll(page, viewportWidth) {
-  if (viewportWidth < 1024) {
+  if (viewportWidth < 1180) {
     const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="agent-state-json-dialog"]')))
     check(`narrow layout does not render inspector json modal at ${viewportWidth}px`, found === false, String(found))
     return
   }
-  await page.click('[data-testid="runtime-view-switch-state"]')
+  await page.$eval('[data-testid="inspector-sidebar-tab-status"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="runtime-view-switch"]', { timeout: 3_000 })
+  await page.$eval('[data-testid="runtime-view-switch-state"]', (el) => el.click())
   await page.waitForSelector('[data-testid="state-runtime"]', { timeout: 3_000 })
   await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'View JSON')
@@ -519,16 +597,29 @@ async function verifyJsonWheelScroll(page, viewportWidth) {
 }
 
 async function verifyToolRegistry(page, viewportWidth) {
-  if (viewportWidth < 1024) {
+  if (viewportWidth < 1180) {
     const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="runtime-view-switch-tools"]')))
     check(`narrow layout does not render inspector tool registry at ${viewportWidth}px`, found === false, String(found))
     return
   }
-  await page.click('[data-testid="runtime-view-switch-tools"]')
-  await page.waitForSelector('[data-testid="tool-registry"]', { timeout: 3_000 })
+  await page.$eval('[data-testid="inspector-sidebar-tab-status"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="runtime-view-switch"]', { timeout: 3_000 })
+  await page.$eval('[data-testid="runtime-view-switch-tools"]', (el) => el.click())
+  try {
+    await page.waitForSelector('[data-testid="tool-registry"], [data-testid="tool-registry-context-view"]', { timeout: 3_000 })
+  } catch (err) {
+    const diag = await page.evaluate(() => ({
+      body: document.body.textContent?.slice(0, 1200) ?? '',
+      inspectorTabs: Array.from(document.querySelectorAll('[data-testid^="inspector-sidebar-tab-"]')).map((el) => ({ id: el.getAttribute('data-testid'), text: el.textContent, pressed: el.getAttribute('aria-pressed') })),
+      runtimeSwitch: document.querySelector('[data-testid="runtime-view-switch"]')?.textContent ?? null,
+      statusPanel: Boolean(document.querySelector('[data-testid="inspector-view-panel-status"]')),
+      stateRuntime: Boolean(document.querySelector('[data-testid="state-runtime"]')),
+    }))
+    throw new Error(`tool registry selector missing: ${JSON.stringify(diag)}`, { cause: err })
+  }
   const metrics = await page.evaluate(() => {
     const registry = document.querySelector('[data-testid="tool-registry"]')
-    const runtime = document.querySelector('[aria-label="runtime objects"]')
+    const runtime = document.querySelector('[data-testid="tool-registry-context-view"]') ?? document.querySelector('[aria-label="runtime objects"]')
     const jsonScroll = runtime?.querySelector('[data-testid="json-block-scrollarea"]')
     const viewport = jsonScroll?.querySelector('[data-radix-scroll-area-viewport]')
     return {
@@ -582,7 +673,6 @@ function writeLargeSessionFixture() {
     status: 'idle',
     usage: { inputTokens: 0, outputTokens: 0 },
     cursor: 0,
-    todos: [],
     cwd: '/tmp',
     contextPressureLevel: 'none',
     approvalMode: 'auto',

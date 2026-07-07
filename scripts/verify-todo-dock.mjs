@@ -3,15 +3,14 @@
  * REAL end-to-end verify of the todo management feature:
  *   1. Open dashboard on a fresh sessionId.
  *   2. Send a prompt that forces the LLM to call `todowrite`.
- *   3. Wait for the tool_result event on disk (llm calls todowrite → kernel
- *      promotes input.todos onto state.todos → state.changed broadcasts).
- *   4. Assert the TodoDock is visible with the right progress counter,
+ *   3. Wait for the tool_result event on disk (llm calls todowrite → normal
+ *      call_tool/tool_result events are appended to the timeline).
+ *   4. Assert the Tasks button is visible with the right progress counter,
  *      correct number of items, and correct icons per status.
  *
- * `todowrite` doesn't need an executor process for the state promotion —
- * BUT the host's loop dispatches call_tool as a websocket message and needs
- * SOMETHING to ack it. So we do spawn an executor (which has the todowrite
- * runner and returns "todos updated: N items").
+ * `todowrite` is ordinary executor protocol. The dashboard derives its task
+ * display from the timeline, so we spawn an executor to validate and ack the
+ * tool call just like every other builtin tool.
  */
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
@@ -69,9 +68,9 @@ try {
   await page.click(optionSel)
   await sleep(200)
 
-  // Empty state: TodoDock should NOT be visible before the LLM calls todowrite.
-  const dockBefore = await page.$('[data-testid="todo-dock"]')
-  check('TodoDock hidden when state.todos is empty', dockBefore === null, dockBefore ? 'visible' : 'hidden')
+  // Empty state: Tasks button should NOT be visible before the LLM calls todowrite.
+  const tasksBefore = await page.$('[data-testid="tasks-button-trigger"]')
+  check('Tasks button hidden before todowrite', tasksBefore === null, tasksBefore ? 'visible' : 'hidden')
 
   // Warm-up prompt so the session lands on disk before we spawn the executor.
   const composerSel = '[data-testid="composer-input"]'
@@ -162,17 +161,19 @@ try {
     : undefined
   check('todowrite tool returned ok:true', toolResult?.ok === true, toolResult?.content ?? '(none)')
 
-  // Now wait for the dashboard's DOM to reflect state.todos (state:changed
-  // triggers a re-render).
-  await page.waitForSelector('[data-testid="todo-dock"]', { timeout: 8_000 })
-  const dockVisible = await page.$('[data-testid="todo-dock"]')
-  check('TodoDock rendered after todowrite call', !!dockVisible)
+  // Now wait for the dashboard's DOM to reflect the timeline-derived task list.
+  await page.waitForSelector('[data-testid="tasks-button-trigger"]', { timeout: 8_000 })
+  const tasksVisible = await page.$('[data-testid="tasks-button-trigger"]')
+  check('Tasks button rendered after todowrite call', !!tasksVisible)
 
-  const progress = await page.$eval('[data-testid="todo-dock-progress"]', (n) => n.textContent?.trim() ?? '')
+  const progress = await page.$eval('[data-testid="tasks-button-trigger"]', (n) => n.textContent?.replace(/\s+/g, ' ').trim() ?? '')
   // 1 completed of 3 total.
-  check('progress counter shows "1/3 tasks"', progress === '1/3 tasks', `got=${progress}`)
+  check('progress counter shows "1/3"', progress.includes('1/3'), `got=${progress}`)
 
-  const items = await page.$$eval('[data-testid="todo-dock-item"]', (nodes) =>
+  await page.click('[data-testid="tasks-button-trigger"]')
+  await page.waitForSelector('[data-testid="tasks-popover"]', { timeout: 4_000 })
+
+  const items = await page.$$eval('[data-testid="tasks-popover-item"]', (nodes) =>
     nodes.map((n) => ({
       status: n.getAttribute('data-status') ?? '',
       content: n.textContent?.trim() ?? '',
@@ -195,27 +196,10 @@ try {
     `${items[2]?.status}: ${items[2]?.content}`,
   )
 
-  // Toggle collapse: clicking the header should hide the list and reveal the
-  // active-task preview.
-  await page.click('[data-testid="todo-dock-toggle"]')
+  await page.click('[data-testid="tasks-button-trigger"]')
   await sleep(200)
-  const listHidden = await page.$('[data-testid="todo-dock-list"]')
-  check('list hidden after collapse', listHidden === null, listHidden ? 'still visible' : 'hidden')
-  const preview = await page.$eval(
-    '[data-testid="todo-dock-active-preview"]',
-    (n) => n.textContent?.trim() ?? '',
-  ).catch(() => '(missing)')
-  check(
-    'collapsed dock shows active-task preview',
-    preview.includes('wire the backend'),
-    `preview=${preview}`,
-  )
-
-  // Re-open for good measure.
-  await page.click('[data-testid="todo-dock-toggle"]')
-  await sleep(200)
-  const listAgain = await page.$('[data-testid="todo-dock-list"]')
-  check('list visible again after re-expand', !!listAgain)
+  const popoverHidden = await page.$('[data-testid="tasks-popover"]')
+  check('tasks popover hidden after toggle', popoverHidden === null, popoverHidden ? 'still visible' : 'hidden')
 } finally {
   await browser.close()
   if (executor) {
