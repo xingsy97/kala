@@ -1,7 +1,10 @@
+import { useEffect, useRef, useState } from 'react'
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import type { ModelInfo } from '@agent-kernel/shared'
 
 import { formatTokens } from '../../lib/format.js'
+import { cn } from '../../lib/utils.js'
+import { NumberTicker } from '../../components/ui/number-ticker.js'
 
 type Props = {
   state: AgentState | null
@@ -14,9 +17,21 @@ export function RuntimeMetrics({
   state,
   config,
   modelInfo,
-  queuedMessages: _queuedMessages,
+  queuedMessages,
 }: Props): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (event: MouseEvent): void => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
   const inputTokens = state?.usage.inputTokens ?? 0
+  const outputTokens = state?.usage.outputTokens ?? 0
+  const cachedTokens = (state?.usage.cacheReadTokens ?? 0) + (state?.usage.cacheCreationTokens ?? 0)
   const totalContextWindow = modelInfo?.contextWindow ?? config?.contextLimit ?? null
   const userContextWindow = config?.contextLimit ?? totalContextWindow
   const ratio = userContextWindow && userContextWindow > 0
@@ -35,11 +50,15 @@ export function RuntimeMetrics({
     : `Context window usage unavailable. Input tokens seen: ${formatTokens(inputTokens)}.`
 
   return (
-    <div
-      className="flex h-8 flex-none items-center gap-1.5 text-[11px] text-muted-foreground"
+    <div className="relative flex-none" ref={ref}>
+    <button
+      type="button"
+      className="flex h-8 flex-none items-center gap-1.5 rounded px-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       title={title}
       aria-label={title}
+      aria-expanded={open}
       data-testid="context-usage-indicator"
+      onClick={() => setOpen((value) => !value)}
     >
       <svg viewBox="0 0 20 20" className="h-4 w-4 flex-none" aria-hidden="true">
         <circle
@@ -67,6 +86,60 @@ export function RuntimeMetrics({
       <span className="flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground">
         {userContextWindow && userContextWindow > 0 ? `${percent}%` : 'n/a'}
       </span>
+    </button>
+    {open ? (
+      <div
+        className="absolute bottom-full right-0 z-30 mb-2 w-72 rounded-lg border border-border/60 bg-popover p-3 text-xs shadow-lg"
+        data-testid="context-pressure-popover"
+      >
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="font-medium text-foreground">Context pressure</span>
+          <span className={cn('rounded px-1.5 py-0.5 font-mono text-[10px]', tone, 'bg-background/70')}>
+            {state?.contextPressureLevel ?? 'none'}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <MetricNumber label="input" value={inputTokens} format={formatTokens} />
+          <MetricNumber label="output" value={outputTokens} format={formatTokens} />
+          <Metric label="user window" value={userContextWindow ? formatTokens(userContextWindow) : 'unknown'} />
+          <Metric label="model window" value={totalContextWindow ? formatTokens(totalContextWindow) : 'unknown'} />
+          <MetricNumber label="queued" value={queuedMessages} format={(n) => String(Math.round(n))} />
+          <MetricNumber label="cached" value={cachedTokens} format={(n) => (n > 0 ? formatTokens(n) : '0')} />
+        </div>
+        <div className="mt-2 rounded bg-muted/50 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+          Contributor numbers are estimates from current runtime counters and captured request metadata when available.
+        </div>
+      </div>
+    ) : null}
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="rounded bg-background/70 px-2 py-1 ring-1 ring-border/40">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-[11px] text-foreground" title={value}>{value}</div>
+    </div>
+  )
+}
+
+function MetricNumber({
+  label,
+  value,
+  format,
+}: {
+  label: string
+  value: number
+  format: (n: number) => string
+}): JSX.Element {
+  const title = format(value)
+  return (
+    <div className="rounded bg-background/70 px-2 py-1 ring-1 ring-border/40">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-[11px] text-foreground" title={title}>
+        <NumberTicker value={value} formatValue={format} />
+      </div>
     </div>
   )
 }

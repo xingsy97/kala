@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, Folder, Loader2 } from 'lucide-react'
 import type { DirListResult } from '@agent-kernel/shared'
 
@@ -34,12 +34,15 @@ export function DirectoryPicker({
 }: Props): JSX.Element {
   const [columns, setColumns] = useState<DirColumn[]>([])
   const [loadingPath, setLoadingPath] = useState<string | null>(null)
+  const activeRequestIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     setColumns([])
+    activeRequestIdRef.current = null
     if (!socket || !workspaceId) return
     const onDirList = (result: DirListResult): void => {
       if (result.workspaceId !== workspaceId) return
+      if (result.requestId !== activeRequestIdRef.current) return
       setLoadingPath(null)
       onChange(result.path)
       setColumns((prev) => {
@@ -58,7 +61,7 @@ export function DirectoryPicker({
       })
     }
     socket.on('server:dir_list', onDirList)
-    requestDirs(socket, workspaceId, initialPath)
+    activeRequestIdRef.current = requestDirs(socket, workspaceId, initialPath)
     setLoadingPath(initialPath ?? '')
     return () => {
       socket.off('server:dir_list', onDirList)
@@ -72,7 +75,13 @@ export function DirectoryPicker({
     if (!socket || !workspaceId) return
     onChange(path)
     setLoadingPath(path)
-    requestDirs(socket, workspaceId, path)
+    activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
+  }
+
+  const updateManualPath = (next: string): void => {
+    activeRequestIdRef.current = null
+    setLoadingPath(null)
+    onChange(next)
   }
 
   return (
@@ -81,7 +90,7 @@ export function DirectoryPicker({
         <Input
           id={inputId}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => updateManualPath(e.target.value)}
           placeholder="/tmp/project"
           data-testid={inputTestId}
           className="font-mono"
@@ -159,10 +168,12 @@ function DirectoryColumn({
   )
 }
 
-function requestDirs(socket: DashboardSocket, workspaceId: string, path: string | undefined): void {
+function requestDirs(socket: DashboardSocket, workspaceId: string, path: string | undefined): string {
+  const requestId = crypto.randomUUID()
   socket.emit('client:list_dirs', {
-    requestId: crypto.randomUUID(),
+    requestId,
     workspaceId,
     ...(path !== undefined && path.length > 0 ? { path } : {}),
   })
+  return requestId
 }

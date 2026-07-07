@@ -266,4 +266,50 @@ describe('Explorer', () => {
     const sessionRow = screen.getByTestId('session-row')
     expect(sessionRow.className).toMatch(/border-l-primary/)
   })
+
+  it('filters sessions locally and highlights matched text', () => {
+    const other: SessionSummary = {
+      ...sessionSummary,
+      sessionId: '02JXXXXXXXXXXXXXXXXXXXXX',
+      firstUserMessage: 'review auth flow',
+      currentCwd: '/repo/auth',
+    }
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary, other]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByTestId('explorer-search'), { target: { value: 'auth' } })
+
+    expect(screen.getByTestId('workspace-row').textContent).toContain('my-mbp')
+    expect(screen.getAllByTestId('session-row')).toHaveLength(1)
+    expect(screen.getByTestId('session-row').textContent).toContain('review auth flow')
+    expect(screen.getAllByTestId('explorer-search-highlight').map((node) => node.textContent)).toContain('auth')
+  })
+
+  it('shows an empty filter state when nothing matches', () => {
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByTestId('explorer-search'), { target: { value: 'does-not-exist' } })
+    expect(screen.getByTestId('explorer-filter-empty').textContent).toContain('does-not-exist')
+  })
 })

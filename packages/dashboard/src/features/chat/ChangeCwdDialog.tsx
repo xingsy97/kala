@@ -48,7 +48,7 @@ export function ChangeCwdDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-4xl h-[78vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]"
+        className="h-[min(90dvh,44rem)] max-w-4xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]"
         data-testid="change-cwd-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-4 py-3">
@@ -57,8 +57,8 @@ export function ChangeCwdDialog({
             Tool calls for this session will run from the selected directory after the host accepts it.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid min-h-0 grid-cols-[220px_minmax(0,1fr)]">
-          <aside className="min-h-0 border-r border-border/50 bg-muted">
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
+          <aside className="min-h-0 border-b border-border/50 bg-muted md:border-b-0 md:border-r">
             <div className="px-3 py-2 text-xs font-medium text-muted-foreground">Workspace</div>
             <div className="px-2 pb-2">
               {workspace ? (

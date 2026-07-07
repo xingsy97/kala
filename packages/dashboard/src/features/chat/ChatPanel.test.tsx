@@ -71,12 +71,33 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
     expect(screen.getAllByText('write')).toHaveLength(1)
     expect(screen.getByText('Succeeded')).toBeTruthy()
+    expect(screen.getByText(/→ wrote 3 bytes/)).toBeTruthy()
     expect(screen.queryByText('Assistant requested tool')).toBeNull()
     expect(screen.queryByText('Tool result')).toBeNull()
     // Body is collapsed by default — expanding the grouped row reveals it.
     expect(screen.queryByText('wrote 3 bytes')).toBeNull()
     fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
     expect(screen.getByText('wrote 3 bytes')).toBeTruthy()
+  })
+
+  it('keeps the virtual transcript scroll owner full-width while constraining row content', () => {
+    render(
+      <ChatPanel
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'world' }] },
+        ]}
+      />,
+    )
+
+    const transcript = screen.getByTestId('virtual-transcript')
+    expect(transcript.className).not.toContain('max-w-[68rem]')
+
+    const row = screen.getAllByTestId('virtuoso-test-item')[0]
+    expect(row?.textContent).toContain('hello')
+    const contentWrapper = row?.querySelector('[data-virt-index]')
+    expect(contentWrapper?.className).toContain('max-w-[68rem]')
+    expect(contentWrapper?.className).toContain('mx-auto')
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
@@ -98,11 +119,13 @@ describe('ChatPanel', () => {
     )
     expect(container.querySelector('h1')?.textContent).toBe('Title')
     expect(container.querySelectorAll('li').length).toBe(2)
-    // inline `code` → <code>, and fenced block → <pre><code>
-    const codes = container.querySelectorAll('code')
-    expect(codes.length).toBeGreaterThanOrEqual(2)
+    // inline `code` still renders as <code>; fenced blocks now route through
+    // CodeBlock (which paints raw <pre data-testid="code-block-raw"> until
+    // shiki resolves — under jsdom, shiki never actually loads, so the raw
+    // fallback is what we assert).
+    expect(container.querySelectorAll('code').length).toBeGreaterThanOrEqual(1)
+    expect(container.querySelector('[data-testid="code-block-raw"]')).toBeTruthy()
     expect(container.textContent ?? '').toContain('console.log(1)')
-    expect(container.querySelector('[data-radix-scroll-area-viewport]')).toBeTruthy()
   })
 
   it('leaves user text as literal (no markdown parsing)', () => {
@@ -259,6 +282,37 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('tool-call-pending-c10')).toBeNull()
     expect(screen.queryByTestId('approval-approve')).toBeNull()
     expect(screen.getByTestId('tool-call-group-c10')).toBeTruthy()
+    expect(screen.getByText('Running')).toBeTruthy()
+  })
+
+  it('summarizes mixed grouped tool lifecycle statuses without extra protocol data', () => {
+    render(
+      <ChatPanel
+        pendingApprovals={[{ sessionId: 's', callId: 'c2', name: 'bash', input: { command: 'sleep 1' } }]}
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'bash', input: { command: 'echo ok' } },
+              { type: 'tool_call', callId: 'c2', name: 'bash', input: { command: 'sleep 1' } },
+              { type: 'tool_call', callId: 'c3', name: 'bash', input: { command: 'exit 1' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
+              { type: 'tool_result', callId: 'c3', ok: false, content: 'failed' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByText('Needs approval')).toBeTruthy()
+    expect(screen.getByText('Failed')).toBeTruthy()
+    expect(screen.getByText('Succeeded')).toBeTruthy()
   })
 
   it('renders empty state end-to-end for an ephemeral session (system prompt only, no timeline)', () => {
