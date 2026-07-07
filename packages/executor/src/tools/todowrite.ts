@@ -5,12 +5,9 @@ const STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled'])
 const PRIORITIES = new Set(['high', 'medium', 'low'])
 
 /**
- * `todowrite` is unusual: the executor doesn't do any IO. The real "effect"
- * is that the kernel reducer intercepts the tool_result for this tool name
- * and promotes `input.todos` onto `state.todos`. This runner exists so the
- * tool call still round-trips through the normal executor path (matching
- * every other builtin), and to validate the shape server-side rather than
- * trusting the LLM's JSON.
+ * `todowrite` validates a complete replacement task list and returns a short
+ * ack. It is ordinary tool protocol: the kernel records call_tool/tool_result,
+ * and dashboard task UI derives its display from the event/effect trace.
  */
 export const todowriteTool: Tool = {
   name: 'todowrite',

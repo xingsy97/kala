@@ -430,6 +430,8 @@ export type BackgroundTaskSummary = {
   taskId: string
   command: string
   cwd: string
+  /** Child process id while known. Optional for old executors / replayed data. */
+  pid?: number
   /** ISO timestamp. */
   startedAt: string
   /** ISO timestamp; present iff status  -  'running'. */
@@ -514,6 +516,107 @@ export type ServerBgTaskUpdated = {
 export type ServerBgTaskEvicted = {
   workspaceId: string
   taskId: string
+}
+
+/**
+ * Sub-agent control plane. Runs alongside the `agent` builtin tool
+ * (`packages/host/src/agent-tool.ts`): the tool remains the way the parent
+ * LLM starts a child session, receives its final assistant text back as a
+ * wrapped `<sub_agent>` envelope in `tool_result.content`, and moves on. The
+ * events + RPCs here are how the *dashboard* observes the child inline
+ * before the tool_result arrives  -  otherwise operators stare at a spinner
+ * for the duration of the child's inner loop.
+ *
+ * Both events are fanned into the parent's `session:<parentSessionId>` room.
+ * Dashboards use `sub_agent_started.childSessionId` to open a subscription
+ * to the child's own room, then render its `event:appended` stream inline
+ * via a nested read-only ChatPanel. See docs/sub-agent-design.md  - 5.
+ */
+export type ServerSubAgentStartedEvent = {
+  parentSessionId: string
+  /** The parent's `agent` tool_call callId. Ties the child to the row that spawned it. */
+  parentCallId: string
+  childSessionId: string
+  /** Named agent type from the registry (e.g. 'general-purpose'). Undefined for anonymous spawns. */
+  agentType?: string
+  prompt: string
+  /** Per-call model override, if the parent passed one. */
+  model?: string
+  /** ISO 8601 timestamp  -  the moment the host created the child session. */
+  startedAt: string
+}
+
+export type ServerSubAgentFinishedEvent = {
+  parentSessionId: string
+  parentCallId: string
+  childSessionId: string
+  status: 'completed' | 'failed'
+  /** Turn count taken from the child's `state.cursor` on finish (approximate). */
+  turns: number
+  durationMs: number
+  finishedAt: string
+  /** Failure reason. Present iff status === 'failed'. */
+  error?: string
+}
+
+/**
+ * List children of a parent session. Backs the dashboard's log-replay path:
+ * when a session is reopened from disk, the timeline's `<sub_agent>` envelopes
+ * are self-describing, but the dashboard still needs the childSessionIds to
+ * fetch on-demand. Read from `SessionStore` by scanning records with
+ * `parentSessionId === X`.
+ */
+export type ClientListSubAgents = {
+  requestId: string
+  parentSessionId: string
+}
+
+export type SubAgentSummary = {
+  childSessionId: string
+  /**
+   * The parent's `agent` tool_call callId. Present when the host can
+   * correlate the child back to a specific parent tool call (usually via
+   * an index maintained at spawn time). Undefined when the correlation is
+   * unavailable  -  e.g. the RPC only inspected the SessionStore records
+   * without walking the parent's transcript.
+   */
+  parentCallId?: string
+  agentType?: string
+  status: 'running' | 'completed' | 'failed'
+  /** ISO 8601. Optional because pre-lifecycle-events records don't carry it. */
+  startedAt?: string
+  finishedAt?: string
+}
+
+export type SubAgentListResult = {
+  requestId: string
+  parentSessionId: string
+  children: readonly SubAgentSummary[]
+  error?: string
+}
+
+/**
+ * List loaded agent-type definitions from the host's registry (built-ins +
+ * workspace `.agent-kernel/agents/` + user `~/.config/agent-kernel/agents/`).
+ * Used by the Composer's `@agent-name` mention affordance.
+ */
+export type ClientListAgentTypes = {
+  requestId: string
+}
+
+export type AgentTypeSummary = {
+  name: string
+  description: string
+  model?: string
+  tools?: readonly string[]
+  /** First ~200 chars of the system prompt for hover preview. */
+  systemPromptPreview?: string
+}
+
+export type AgentTypesResult = {
+  requestId: string
+  types: readonly AgentTypeSummary[]
+  error?: string
 }
 
 /**
@@ -772,6 +875,14 @@ export type DashboardClientToServerEvents = {
     payload: ClientKillBgTask,
     ack: (result: BgKillResult) => void,
   ) => void
+  'sub_agent:list': (
+    payload: ClientListSubAgents,
+    ack: (result: SubAgentListResult) => void,
+  ) => void
+  'agent_types:list': (
+    payload: ClientListAgentTypes,
+    ack: (result: AgentTypesResult) => void,
+  ) => void
   subscribe: (payload: ClientSubscribe) => void
 }
 
@@ -800,6 +911,8 @@ export type DashboardServerToClientEvents = {
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
   'server:bg_task_updated': (payload: ServerBgTaskUpdated) => void
   'server:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
+  'server:sub_agent_started': (payload: ServerSubAgentStartedEvent) => void
+  'server:sub_agent_finished': (payload: ServerSubAgentFinishedEvent) => void
 }
 
 export type ServerMessageQueueEvent = {

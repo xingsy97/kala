@@ -144,8 +144,9 @@ describe('bash', () => {
       { command: 'sleep 0.2; echo done', run_in_background: true },
       makeCtx(root),
     )
-    const parsed = JSON.parse(started) as { taskId: string }
+    const parsed = JSON.parse(started) as { taskId: string; pid?: number }
     expect(parsed.taskId).toBeTruthy()
+    expect(parsed.pid).toEqual(expect.any(Number))
 
     const first = JSON.parse(
       await bashOutputTool.run(

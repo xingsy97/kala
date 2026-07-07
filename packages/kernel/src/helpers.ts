@@ -21,7 +21,6 @@ import type {
   MessageContent,
   PendingToolCall,
   StepResult,
-  TodoItem,
   ToolCallContent,
   UsageDelta,
   UsageTotal,
@@ -54,7 +53,6 @@ export function afterPendingSettled(
   messages: readonly Message[],
   pendingCalls: readonly PendingToolCall[],
   config: AgentConfig,
-  todos: readonly TodoItem[] = state.todos,
   memory: readonly MemoryEntry[] = state.memory,
 ): StepResult {
   if (pendingCalls.length > 0) {
@@ -64,7 +62,6 @@ export function afterPendingSettled(
         ...state,
         messages,
         pendingCalls,
-        todos,
         memory,
         status: stillAwaiting ? 'awaiting_approval' : 'executing_tools',
       },
@@ -75,7 +72,6 @@ export function afterPendingSettled(
     ...state,
     messages,
     pendingCalls: [],
-    todos,
     memory,
     status: 'thinking',
   }
