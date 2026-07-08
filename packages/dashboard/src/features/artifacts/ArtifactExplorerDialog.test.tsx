@@ -134,6 +134,11 @@ describe('ArtifactExplorerDialog', () => {
           metrics: { durationMs: 1250, patchBytes: 42 },
         },
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/artifacts/local__repo-1/final.diff',
+        mediaType: 'text/x-diff',
+        body: 'diff --git a/file b/file\n',
+      }), { status: 200 }))
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -160,6 +165,14 @@ describe('ArtifactExplorerDialog', () => {
     )
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fswebench%2Frun1%2Ftrials%2Flocal__repo-1.json',
+      { cache: 'no-store' },
+    )
+
+    fireEvent.click(screen.getByText('artifacts/local__repo-1/final.diff'))
+
+    await screen.findByText('diff --git a/file b/file')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fartifacts%2Flocal__repo-1%2Ffinal.diff',
       { cache: 'no-store' },
     )
   })

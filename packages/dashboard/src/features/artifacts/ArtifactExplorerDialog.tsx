@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
+import { JsonBlock } from '../../components/ui/json-block.js'
 import { cn } from '../../lib/utils.js'
 
 export type ArtifactManifestEntry = {
@@ -122,6 +123,11 @@ type ProfileRow = {
   profile: SessionProfile
 }
 
+type ArtifactDetailRequest = {
+  path: string
+  label: string
+}
+
 export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Element {
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
   const [mode, setMode] = useState<ViewMode>('artifacts')
@@ -138,6 +144,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [evalTrialsError, setEvalTrialsError] = useState<string | null>(null)
   const [profileRows, setProfileRows] = useState<readonly ProfileRow[]>([])
   const [profileError, setProfileError] = useState<string | null>(null)
+  const [artifactDetail, setArtifactDetail] = useState<ArtifactDetailRequest | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -259,6 +266,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   }, [open, mode, manifest])
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(760px,86dvh)] w-[min(1040px,94vw)] max-w-none flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="border-b border-border px-4 py-3">
@@ -302,6 +310,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             trialsError={evalTrialsError}
             error={error ?? evalError}
             loading={loading}
+            onOpenArtifact={setArtifactDetail}
           />
         ) : (
           <ProfilesView
@@ -313,6 +322,8 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
         )}
       </DialogContent>
     </Dialog>
+    <ArtifactContentDialog request={artifactDetail} onOpenChange={(nextOpen) => !nextOpen && setArtifactDetail(null)} />
+    </>
   )
 }
 
@@ -407,6 +418,7 @@ function EvalRunsView({
   trialsError,
   error,
   loading,
+  onOpenArtifact,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly EvalSummaryRow[]
@@ -420,6 +432,7 @@ function EvalRunsView({
   trialsError: string | null
   error: string | null
   loading: boolean
+  onOpenArtifact(request: ArtifactDetailRequest): void
 }): JSX.Element {
   const comparisonCount = comparisons.length
   const selectedRun = rows.find((row) => row.path === selectedRunPath)
@@ -490,6 +503,7 @@ function EvalRunsView({
             onSelectTrial={onSelectTrial}
             loading={trialsLoading}
             error={trialsError}
+            onOpenArtifact={onOpenArtifact}
           />
         ) : null}
         {comparisons.length > 0 ? (
@@ -525,6 +539,7 @@ function EvalTrialDetail({
   onSelectTrial,
   loading,
   error,
+  onOpenArtifact,
 }: {
   run: EvalSummaryRow
   trials: readonly EvalTrialRow[]
@@ -533,6 +548,7 @@ function EvalTrialDetail({
   onSelectTrial(id: string): void
   loading: boolean
   error: string | null
+  onOpenArtifact(request: ArtifactDetailRequest): void
 }): JSX.Element {
   return (
     <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_280px] overflow-hidden rounded-md border border-border max-xl:grid-cols-1">
@@ -598,18 +614,27 @@ function EvalTrialDetail({
               <div className="max-h-48 overflow-auto p-2">
                 {(selectedTrial.trial.artifacts ?? []).length > 0 ? (
                   <div className="grid gap-1.5">
-                    {(selectedTrial.trial.artifacts ?? []).map((artifact, index) => (
-                      <div key={`${artifact.uri ?? 'artifact'}-${index}`} className="min-w-0 rounded border border-border bg-muted/20 px-2 py-1">
+                    {(selectedTrial.trial.artifacts ?? []).map((artifact, index) => {
+                      const uri = artifact.uri
+                      const path = uri ? resolveTrialArtifactPath(run.path, uri) : null
+                      return (
+                      <button
+                        key={`${uri ?? 'artifact'}-${index}`}
+                        type="button"
+                        disabled={!path}
+                        onClick={() => path && onOpenArtifact({ path, label: uri ?? path })}
+                        className="min-w-0 rounded border border-border bg-muted/20 px-2 py-1 text-left transition-colors hover:bg-muted/40 disabled:cursor-default disabled:hover:bg-muted/20"
+                      >
                         <div className="flex items-center gap-1.5">
                           <FileText className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
-                          <span className="truncate font-mono text-[11px]" title={artifact.uri}>{artifact.uri ?? '(inline)'}</span>
+                          <span className="truncate font-mono text-[11px]" title={uri}>{uri ?? '(inline)'}</span>
                         </div>
                         <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                           <span>{artifact.kind ?? 'artifact'}</span>
                           <span>{typeof artifact.bytes === 'number' ? formatBytes(artifact.bytes) : ''}</span>
                         </div>
-                      </div>
-                    ))}
+                      </button>
+                    )})}
                   </div>
                 ) : <div className="text-[11px] text-muted-foreground">No artifact refs in trial.</div>}
               </div>
@@ -618,6 +643,66 @@ function EvalTrialDetail({
         ) : <div className="text-xs text-muted-foreground">Select a trial to inspect artifacts.</div>}
       </aside>
     </div>
+  )
+}
+
+function ArtifactContentDialog({
+  request,
+  onOpenChange,
+}: {
+  request: ArtifactDetailRequest | null
+  onOpenChange(open: boolean): void
+}): JSX.Element {
+  const [content, setContent] = useState<ArtifactContentResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!request) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setContent(null)
+    void fetchArtifactContent(request.path)
+      .then((next) => {
+        if (!cancelled) setContent(next)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [request])
+
+  return (
+    <Dialog open={Boolean(request)} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[min(720px,86dvh)] w-[min(980px,94vw)] max-w-none flex-col overflow-hidden p-0 gap-0">
+        <DialogHeader className="border-b border-border px-4 py-3">
+          <DialogTitle>Artifact Detail</DialogTitle>
+          <DialogDescription className="truncate font-mono text-xs">{request?.label ?? ''}</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 p-3">
+          {loading ? <div className="text-xs text-muted-foreground">Loading artifact...</div> : null}
+          {error ? <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
+          {content ? <ArtifactBody content={content} /> : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ArtifactBody({ content }: { content: ArtifactContentResponse }): JSX.Element {
+  if (content.mediaType.startsWith('application/json')) {
+    return <JsonBlock label={content.path} value={content.body} collapsed={2} className="h-full [&>div:last-child]:max-h-[calc(86dvh-150px)] [&_[data-radix-scroll-area-viewport]]:max-h-[calc(86dvh-150px)]" />
+  }
+  return (
+    <ScrollArea className="h-full rounded-md border border-border bg-muted/30">
+      <pre className="whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">{String(content.body)}</pre>
+    </ScrollArea>
   )
 }
 
@@ -746,6 +831,13 @@ function formatPercent(value: unknown): string {
 
 function evalRunRoot(summaryPath: string): string {
   return summaryPath.endsWith('/summary.json') ? summaryPath.slice(0, -'/summary.json'.length) : summaryPath.replace(/\/[^/]+$/, '')
+}
+
+function resolveTrialArtifactPath(runSummaryPath: string, uri: string): string {
+  if (uri.startsWith('/') || uri.includes('://')) return uri
+  const root = evalRunRoot(runSummaryPath)
+  if (uri === root || uri.startsWith(`${root}/`)) return uri
+  return `${root}/${uri}`
 }
 
 function trialStableId(row: EvalTrialRow): string {
