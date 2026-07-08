@@ -261,7 +261,6 @@ function releaseNotes(manifest) {
     }
     if (manifest.component === 'all' || manifest.component === 'executor') {
       lines.push('Run Executor:', '', '```bash', `wget -qO- ${base}/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 bash`, '```', '')
-      lines.push('Run Executor with auto-update:', '', '```bash', `wget -qO- ${base}/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 AGENT_KERNEL_AUTO_UPDATE=1 bash`, '```', '')
     }
   }
   const verifyTargets = manifest.assets.filter((asset) => asset !== 'RELEASE_NOTES.md' && asset !== 'manifest.json' && asset !== 'SHA256SUMS')
