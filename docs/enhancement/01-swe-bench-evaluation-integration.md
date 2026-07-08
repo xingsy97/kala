@@ -106,7 +106,38 @@ agent-kernel eval swebench run \
 
 `infer` produces predictions. `grade` delegates to SWE-bench. `run` does both.
 
-Current implemented host CLI surface starts with the low-risk pieces:
+Current implemented host CLI surface starts with the reproducible local pieces:
+
+```bash
+agent-kernel-host eval swebench infer \
+  --root-dir runs/swebench \
+  --run-id smoke-001 \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --split test \
+  --model gpt-5.5 \
+  --instances-jsonl fixtures/swebench-lite.jsonl \
+  --patches-dir runs/tmp/patches \
+  --instance-ids sympy__sympy-20590
+
+agent-kernel-host eval swebench run \
+  --root-dir runs/swebench \
+  --run-id smoke-001 \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --model gpt-5.5 \
+  --instances-jsonl fixtures/swebench-lite.jsonl \
+  --patches-dir runs/tmp/patches \
+  --max-workers 8
+```
+
+`infer` currently supports an offline, CI-friendly prediction path: load local
+SWE-bench-shaped JSONL instances, read `<instance_id>.diff` or
+`<instance_id>.patch`, write official `predictions.jsonl`, per-trial JSON, diff
+artifacts, and `summary.json`. `run` performs the same inference step and then
+prints the official SWE-bench harness command. It only executes Docker grading
+when `--execute` is provided.
+
+The manual export path remains useful for turning an already-run agent session
+into a benchmark prediction:
 
 ```bash
 agent-kernel-host eval swebench export-session \
@@ -136,13 +167,13 @@ Use a stable run directory:
 
 ```text
 runs/swebench/<run_id>/
-  config.json
+  experiment.json
   instances.jsonl
   predictions.jsonl
-  sessions/
-    <instance_id>.jsonl -> ~/.agent-kernel/sessions/...jsonl or copied log
+  trials/
+    <instance_id>.json
   traces/
-    <instance_id>.otlp.jsonl
+    <instance_id>.openinference.json
   artifacts/
     <instance_id>/final.diff
     <instance_id>/workspace-metadata.json
@@ -231,15 +262,19 @@ implementation should build the CLI runner on top of these helpers rather than
 creating a separate benchmark schema.
 
 Phase 1: prediction exporter.
-Run one local fixture task through `agent-kernel`, extract diff, and write the
-official JSONL format.
+Implemented for local/offline fixtures: load instance JSONL, read patch files,
+write official JSONL, persist trial metadata and summary, and label empty
+patches without failing the whole run.
 
 Phase 2: official harness wrapper.
-Shell out to `python -m swebench.harness.run_evaluation`, capture stdout/stderr,
-and parse result files.
+Implemented command construction and optional execution through
+`python -m swebench.harness.run_evaluation`. Result ingestion remains the next
+piece because official result files depend on a real Docker harness run.
 
 Phase 3: SWE-bench Lite single-instance run.
-Support `--instance-ids`, timeouts, and run directories.
+Partially implemented through `--instance-ids`, `--limit`, and stable run
+directories. Agent-driven workspace materialization is the next adapter layer;
+the current code intentionally does not fake agent execution.
 
 Phase 4: batch scheduler.
 Add concurrency control, resume, skip-completed behavior, and per-instance

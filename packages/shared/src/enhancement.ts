@@ -2,13 +2,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import type { AgentConfig, Effect } from '@agent-kernel/kernel'
+import type { AgentConfig, Effect, Message, ToolSchema } from '@agent-kernel/kernel'
 
 import type { EventEntry, HeaderEntry, LLMTrace } from './log.js'
 
 export type ArtifactKind =
   | 'llm_request'
   | 'llm_response'
+  | 'message_assembly'
   | 'trace'
   | 'eval_score'
   | 'diff'
@@ -370,6 +371,22 @@ export type EvalTrial = {
   metrics: Record<string, number | string | boolean>
 }
 
+export type EvalRunSummary = {
+  experimentId: string
+  dataset: string
+  split?: string
+  model: string
+  trialCount: number
+  completed: number
+  failed: number
+  timedOut: number
+  resolved: number
+  unresolved: number
+  emptyPatch: number
+  failureCounts: Record<string, number>
+  metrics: Record<string, number | string | boolean>
+}
+
 export function createEvalExperiment(input: {
   dataset: string
   split?: string
@@ -408,6 +425,46 @@ export function createSweBenchPrediction(input: {
 
 export function serializeJsonl(rows: readonly unknown[]): string {
   return rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length > 0 ? '\n' : '')
+}
+
+export function summarizeEvalRun(
+  experiment: EvalExperiment,
+  trials: readonly EvalTrial[],
+): EvalRunSummary {
+  const failureCounts: Record<string, number> = {}
+  let completed = 0
+  let failed = 0
+  let timedOut = 0
+  let resolved = 0
+  let emptyPatch = 0
+  for (const trial of trials) {
+    if (trial.status === 'completed') completed += 1
+    if (trial.status === 'failed') failed += 1
+    if (trial.status === 'timed_out') timedOut += 1
+    if (trial.resolved === true) resolved += 1
+    if (trial.failureLabel) {
+      failureCounts[trial.failureLabel] = (failureCounts[trial.failureLabel] ?? 0) + 1
+      if (trial.failureLabel === 'empty_patch') emptyPatch += 1
+    }
+  }
+  const unresolved = trials.filter((trial) => trial.resolved === false).length
+  return {
+    experimentId: experiment.experimentId,
+    dataset: experiment.dataset,
+    ...(experiment.split ? { split: experiment.split } : {}),
+    model: experiment.model,
+    trialCount: trials.length,
+    completed,
+    failed,
+    timedOut,
+    resolved,
+    unresolved,
+    emptyPatch,
+    failureCounts,
+    metrics: {
+      passRate: trials.length > 0 ? resolved / trials.length : 0,
+    },
+  }
 }
 
 export function buildSweBenchEvaluationCommand(input: {
@@ -486,6 +543,95 @@ export type MessageAssemblyStage = {
   droppedItems?: number
   reasonCodes: readonly string[]
   artifactRefs: readonly ArtifactRef[]
+}
+
+export type MessageAssemblyArtifact = {
+  sessionId: string
+  eventSeq?: number
+  provider?: string
+  model?: string
+  messageCount: number
+  toolCount: number
+  estimatedTokens: number
+  parts: Array<{
+    name: 'system' | 'user' | 'assistant' | 'tool' | 'tools' | 'images' | 'thinking'
+    messages: number
+    chars: number
+    estimatedTokens: number
+  }>
+  stages: readonly MessageAssemblyStage[]
+}
+
+export function createMessageAssemblyArtifact(input: {
+  sessionId: string
+  eventSeq?: number
+  provider?: string
+  model?: string
+  messages: readonly Message[]
+  tools: readonly ToolSchema[]
+  stages?: readonly MessageAssemblyStage[]
+}): MessageAssemblyArtifact {
+  const buckets = new Map<MessageAssemblyArtifact['parts'][number]['name'], {
+    messages: number
+    chars: number
+  }>()
+  for (const message of input.messages) {
+    const existing = buckets.get(message.role) ?? { messages: 0, chars: 0 }
+    existing.messages += 1
+    existing.chars += estimateMessageChars([message])
+    buckets.set(message.role, existing)
+    for (const content of message.content) {
+      const key = content.type === 'image' ? 'images' : content.type === 'thinking' ? 'thinking' : undefined
+      if (!key) continue
+      const bucket = buckets.get(key) ?? { messages: 0, chars: 0 }
+      bucket.chars += estimateContentChars(content)
+      buckets.set(key, bucket)
+    }
+  }
+  const toolSchemaChars = input.tools.reduce((sum, tool) => sum + tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
+  buckets.set('tools', { messages: 0, chars: toolSchemaChars })
+  const parts = [...buckets.entries()]
+    .filter(([, value]) => value.messages > 0 || value.chars > 0)
+    .map(([name, value]) => ({
+      name,
+      messages: value.messages,
+      chars: value.chars,
+      estimatedTokens: estimateTokensFromChars(value.chars),
+    }))
+  const estimatedTokens = parts.reduce((sum, part) => sum + part.estimatedTokens, 0)
+  return {
+    sessionId: input.sessionId,
+    ...(input.eventSeq !== undefined ? { eventSeq: input.eventSeq } : {}),
+    ...(input.provider ? { provider: input.provider } : {}),
+    ...(input.model ? { model: input.model } : {}),
+    messageCount: input.messages.length,
+    toolCount: input.tools.length,
+    estimatedTokens,
+    parts,
+    stages: input.stages ?? [],
+  }
+}
+
+function estimateMessageChars(messages: readonly Message[]): number {
+  let chars = 0
+  for (const message of messages) {
+    chars += message.role.length + 8
+    for (const content of message.content) chars += estimateContentChars(content)
+  }
+  return chars
+}
+
+function estimateContentChars(content: Message['content'][number]): number {
+  if (content.type === 'text' || content.type === 'thinking') return content.text.length
+  if (content.type === 'tool_call') return content.name.length + content.callId.length + JSON.stringify(content.input).length
+  if (content.type === 'tool_result') return content.callId.length + content.content.length + 16
+  return content.source.kind === 'file_ref'
+    ? content.source.path.length + 64
+    : Math.round(content.source.data.length / 4)
+}
+
+function estimateTokensFromChars(chars: number): number {
+  return Math.ceil(chars / 4)
 }
 
 export type RouterDecisionArtifact = {

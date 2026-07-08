@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,7 @@ import { parseSweBenchCli } from './swebench-cli.js'
 import {
   buildSweBenchGradeCommand,
   exportSessionForSweBench,
+  inferSweBenchPatchRun,
   sweBenchRunLayout,
   writeSweBenchPredictionRun,
 } from './swebench.js'
@@ -184,6 +185,109 @@ describe('SWE-bench eval runner', () => {
       runId: 'run5',
       instanceId: 'i1',
     })
+  })
+
+  it('parses CLI infer and run commands', () => {
+    expect(
+      parseSweBenchCli([
+        'eval',
+        'swebench',
+        'infer',
+        '--run-id',
+        'run7',
+        '--dataset',
+        'princeton-nlp/SWE-bench_Lite',
+        '--model',
+        'gpt-test',
+        '--instances-jsonl',
+        'instances.jsonl',
+        '--patches-dir',
+        'patches',
+        '--limit',
+        '1',
+      ]),
+    ).toMatchObject({
+      kind: 'infer',
+      runId: 'run7',
+      instancesJsonl: 'instances.jsonl',
+      patchesDir: 'patches',
+      limit: 1,
+    })
+
+    expect(
+      parseSweBenchCli([
+        'eval',
+        'swebench',
+        'run',
+        '--run-id',
+        'run8',
+        '--dataset',
+        'princeton-nlp/SWE-bench_Lite',
+        '--model',
+        'gpt-test',
+        '--instances-jsonl',
+        'instances.jsonl',
+        '--patches-dir',
+        'patches',
+        '--execute',
+      ]),
+    ).toMatchObject({ kind: 'run', execute: true })
+  })
+
+  it('creates an offline SWE-bench prediction run from local instance and patch fixtures', async () => {
+    const instancesPath = join(dir, 'instances.jsonl')
+    const patchesDir = join(dir, 'patches')
+    mkdirSync(patchesDir)
+    await writeFile(
+      instancesPath,
+      JSON.stringify({
+        instance_id: 'sympy__sympy-20590',
+        repo: 'sympy/sympy',
+        problem_statement: 'fix bug',
+      }) + '\n' + JSON.stringify({ instance_id: 'other__repo-1' }) + '\n',
+      'utf8',
+    )
+    await writeFile(join(patchesDir, 'sympy__sympy-20590.diff'), 'diff --git a/x b/x\n', 'utf8')
+
+    const result = await inferSweBenchPatchRun({
+      rootDir: dir,
+      runId: 'run7',
+      dataset: 'princeton-nlp/SWE-bench_Lite',
+      split: 'test',
+      model: 'gpt-test',
+      instancesJsonl: instancesPath,
+      patchesDir,
+      instanceIds: ['sympy__sympy-20590'],
+    })
+
+    expect(result.predictions).toHaveLength(1)
+    expect(await readFile(result.layout.instancesPath, 'utf8')).toContain('sympy__sympy-20590')
+    expect(await readFile(result.layout.predictionsPath, 'utf8')).toContain('diff --git')
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.trialCount).toBe(1)
+    expect(summary.emptyPatch).toBe(0)
+    const trial = JSON.parse(await readFile(join(result.layout.trialsDir, 'sympy__sympy-20590.json'), 'utf8'))
+    expect(trial.artifacts[0].uri).toBe('artifacts/sympy__sympy-20590/final.diff')
+  })
+
+  it('labels missing offline patches as empty_patch without failing the whole run', async () => {
+    const instancesPath = join(dir, 'instances.jsonl')
+    const patchesDir = join(dir, 'patches')
+    mkdirSync(patchesDir)
+    await writeFile(instancesPath, JSON.stringify({ instance_id: 'missing__repo-1' }) + '\n', 'utf8')
+
+    const result = await inferSweBenchPatchRun({
+      rootDir: dir,
+      runId: 'run8',
+      dataset: 'local',
+      model: 'gpt-test',
+      instancesJsonl: instancesPath,
+      patchesDir,
+    })
+
+    expect(result.trials[0]?.failureLabel).toBe('empty_patch')
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.failureCounts.empty_patch).toBe(1)
   })
 
   it('can export a session using a patch file through the parsed command inputs', async () => {

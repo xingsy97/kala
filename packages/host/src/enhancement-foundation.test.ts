@@ -7,11 +7,14 @@ import type { EventEntry, HeaderEntry, LLMTrace } from '@agent-kernel/shared'
 import {
   buildSweBenchEvaluationCommand,
   createArtifactStore,
+  createEvalExperiment,
+  createMessageAssemblyArtifact,
   createRolloutSidecar,
   createSweBenchPrediction,
   exportSessionSpans,
   redactForPersistence,
   serializeJsonl,
+  summarizeEvalRun,
 } from '@agent-kernel/shared'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -187,5 +190,59 @@ describe('enhancement foundation', () => {
       model: 'local-policy',
       metadata: {},
     })
+  })
+
+  it('summarizes eval trials with low-cardinality failure labels', () => {
+    const experiment = createEvalExperiment({
+      experimentId: 'run1',
+      dataset: 'local',
+      model: 'gpt-test',
+      createdAt: '2026-07-09T00:00:00.000Z',
+    })
+    const summary = summarizeEvalRun(experiment, [
+      {
+        trialId: 't1',
+        experimentId: 'run1',
+        instanceId: 'i1',
+        status: 'completed',
+        resolved: true,
+        failureLabel: 'resolved',
+        artifacts: [],
+        metrics: {},
+      },
+      {
+        trialId: 't2',
+        experimentId: 'run1',
+        instanceId: 'i2',
+        status: 'completed',
+        resolved: false,
+        failureLabel: 'empty_patch',
+        artifacts: [],
+        metrics: {},
+      },
+    ])
+
+    expect(summary.trialCount).toBe(2)
+    expect(summary.resolved).toBe(1)
+    expect(summary.emptyPatch).toBe(1)
+    expect(summary.metrics.passRate).toBe(0.5)
+  })
+
+  it('builds message assembly artifacts from messages and tool schemas', () => {
+    const artifact = createMessageAssemblyArtifact({
+      sessionId: 's1',
+      model: 'gpt-test',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'sys' }] },
+        { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      ],
+      tools: [{ name: 'read', description: 'read files', inputSchema: { type: 'object' }, requiresApproval: false }],
+    })
+
+    expect(artifact.messageCount).toBe(2)
+    expect(artifact.toolCount).toBe(1)
+    expect(artifact.parts.map((part) => part.name)).toContain('system')
+    expect(artifact.parts.map((part) => part.name)).toContain('tools')
+    expect(artifact.estimatedTokens).toBeGreaterThan(0)
   })
 })

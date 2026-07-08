@@ -138,10 +138,40 @@ Recommended linkage:
   able to produce equivalent trace topology from persisted artifacts.
 
 The first implementation layer is `@agent-kernel/shared/enhancement`: it exports
-redaction helpers, artifact references, and an OpenTelemetry/OpenInference-shaped
-span projection from session log entries. Host code should use this layer when
-persisting future provider-body artifacts, so redaction happens before disk
-write and trace spans keep stable links back to `sessionId` and event `seq`.
+redaction helpers, artifact references, message-assembly summaries, and an
+OpenTelemetry/OpenInference-shaped span projection from session log entries.
+Host code uses this layer when persisting provider-body artifacts, so redaction
+happens before disk write and trace spans keep stable links back to `sessionId`
+and event `seq`.
+
+Implemented local export command:
+
+```bash
+agent-kernel-host enhancement trace export-session \
+  --root-dir runs/enhancement \
+  --session-log ~/.agent-kernel/sessions/<session>.jsonl \
+  --run-id smoke-001 \
+  --eval-instance-id sympy__sympy-20590
+```
+
+The command writes:
+
+```text
+runs/enhancement/
+  traces/<session_id>.openinference.json
+  llm/<session_id>/<seq>.request.json
+  llm/<session_id>/<seq>.response.json
+```
+
+Request and response artifacts are redacted before persistence. The trace
+artifact is derived from the JSONL ledger and does not participate in replay.
+
+The live host can also write message assembly artifacts before each LLM call
+when `artifactRootDir` is configured. The CLI enables this by default under
+`~/.agent-kernel/artifacts`; set `AGENT_KERNEL_ARTIFACTS_DIR=0` to disable it or
+set `AGENT_KERNEL_ARTIFACTS_DIR=/path` to choose another location. These files
+show message count, tool registry size, estimated token contribution by role,
+and preflight compaction stages without changing the kernel event protocol.
 
 ## Dashboard Changes
 
