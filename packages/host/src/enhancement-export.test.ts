@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -7,6 +7,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from './store/log.js'
+import { buildArtifactManifest } from './artifact-manifest.js'
 import { exportRolloutSidecar, exportSessionTraceArtifacts } from './enhancement-export.js'
 import { parseEnhancementCli } from './enhancement-cli.js'
 
@@ -107,5 +108,39 @@ describe('enhancement artifact export', () => {
       '--framework',
       'verl',
     ])).toMatchObject({ kind: 'rollout-export-session', frameworkTarget: 'verl' })
+
+    expect(parseEnhancementCli([
+      'enhancement',
+      'artifacts',
+      'manifest',
+      '--root-dir',
+      'runs/x',
+      '--output',
+      'runs/x/manifest.json',
+      '--max-hash-bytes',
+      '10',
+    ])).toMatchObject({
+      kind: 'artifacts-manifest',
+      rootDir: 'runs/x',
+      outputPath: 'runs/x/manifest.json',
+      maxHashBytes: 10,
+    })
+  })
+
+  it('builds a compact artifact manifest without reading payload content into entries', async () => {
+    await mkdir(join(dir, 'llm/s1'), { recursive: true })
+    await mkdir(join(dir, 'traces'), { recursive: true })
+    await writeFile(join(dir, 'llm/s1/1.request.json'), JSON.stringify({ body: { prompt: 'secret prompt' } }), 'utf8')
+    await writeFile(join(dir, 'traces/s1.openinference.json'), JSON.stringify({ spans: [] }), 'utf8')
+    await writeFile(join(dir, 'large.log'), '0123456789abcdef', 'utf8')
+
+    const result = await buildArtifactManifest({ rootDir: dir, maxHashBytes: 8 })
+
+    expect(result.manifest.summary.entryCount).toBe(3)
+    expect(result.manifest.summary.kinds.llm_request).toBe(1)
+    expect(result.manifest.summary.kinds.trace).toBe(1)
+    expect(result.manifest.entries.find((entry) => entry.path === 'large.log')?.hashSkippedReason).toContain('maxHashBytes')
+    expect(JSON.stringify(result.manifest.entries)).not.toContain('secret prompt')
+    expect(await readFile(result.manifestPath, 'utf8')).toContain('llm_request')
   })
 })

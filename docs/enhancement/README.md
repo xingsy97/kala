@@ -121,6 +121,8 @@ hidden state machines that compete with the host/kernel lifecycle.
 The first implementation layer shared by all enhancement themes is:
 
 - an artifact store for redacted JSON/text artifacts;
+- an artifact manifest that indexes run outputs for dashboards and cleanup jobs
+  without copying artifact payloads into a second store;
 - deterministic redaction helpers;
 - an OpenTelemetry/OpenInference-shaped span exporter derived from session logs;
 - eval run and trial metadata writers;
