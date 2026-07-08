@@ -41,7 +41,7 @@ type Props = {
   onOpenChange(open: boolean): void
 }
 
-type ViewMode = 'artifacts' | 'eval'
+type ViewMode = 'artifacts' | 'eval' | 'profiles'
 
 type ArtifactContentResponse = {
   path: string
@@ -101,6 +101,27 @@ type EvalComparisonRow = {
   comparison: EvalRunComparison
 }
 
+type SessionProfile = {
+  sessionId?: string
+  llmCalls?: number
+  toolCalls?: number
+  failedToolResults?: number
+  llmTraceMissingCalls?: number
+  totalInputTokens?: number
+  totalOutputTokens?: number
+  totalCacheReadTokens?: number
+  totalCacheCreationTokens?: number
+  costStatus?: string
+  estimatedCostUsd?: number
+  models?: readonly string[]
+  wallTimeMs?: number
+}
+
+type ProfileRow = {
+  path: string
+  profile: SessionProfile
+}
+
 export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Element {
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
   const [mode, setMode] = useState<ViewMode>('artifacts')
@@ -115,6 +136,8 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null)
   const [evalTrialsLoading, setEvalTrialsLoading] = useState(false)
   const [evalTrialsError, setEvalTrialsError] = useState<string | null>(null)
+  const [profileRows, setProfileRows] = useState<readonly ProfileRow[]>([])
+  const [profileError, setProfileError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -214,6 +237,27 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
     }
   }, [open, mode, manifest, selectedEvalRunPath])
 
+  useEffect(() => {
+    if (!open || mode !== 'profiles' || !manifest) return
+    const profiles = manifest.entries.filter((entry) => entry.kind === 'profile' || entry.path.endsWith('/profile.json'))
+    let cancelled = false
+    setProfileError(null)
+    setProfileRows([])
+    void Promise.all(profiles.map(async (entry): Promise<ProfileRow> => {
+      const content = await fetchArtifactContent(entry.path)
+      return { path: entry.path, profile: content.body as SessionProfile }
+    }))
+      .then((rows) => {
+        if (!cancelled) setProfileRows(rows.sort((a, b) => a.path.localeCompare(b.path)))
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setProfileError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, mode, manifest])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(760px,86dvh)] w-[min(1040px,94vw)] max-w-none flex-col overflow-hidden p-0 gap-0">
@@ -227,6 +271,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
                 <button type="button" className={tabClass(mode === 'artifacts')} onClick={() => setMode('artifacts')}>Artifacts</button>
                 <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')}>Eval Runs</button>
+                <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')}>Profiles</button>
               </div>
               <Button
                 type="button"
@@ -243,7 +288,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
         </DialogHeader>
         {mode === 'artifacts' ? (
           <ArtifactInventory manifest={manifest} kindRows={kindRows} error={error} loading={loading} />
-        ) : (
+        ) : mode === 'eval' ? (
           <EvalRunsView
             manifest={manifest}
             rows={evalRows}
@@ -256,6 +301,13 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             trialsLoading={evalTrialsLoading}
             trialsError={evalTrialsError}
             error={error ?? evalError}
+            loading={loading}
+          />
+        ) : (
+          <ProfilesView
+            manifest={manifest}
+            rows={profileRows}
+            error={error ?? profileError}
             loading={loading}
           />
         )}
@@ -569,6 +621,82 @@ function EvalTrialDetail({
   )
 }
 
+function ProfilesView({
+  manifest,
+  rows,
+  error,
+  loading,
+}: {
+  manifest: ArtifactManifest | null
+  rows: readonly ProfileRow[]
+  error: string | null
+  loading: boolean
+}): JSX.Element {
+  const totals = rows.reduce((acc, row) => {
+    acc.llmCalls += row.profile.llmCalls ?? 0
+    acc.toolCalls += row.profile.toolCalls ?? 0
+    acc.inputTokens += row.profile.totalInputTokens ?? 0
+    acc.outputTokens += row.profile.totalOutputTokens ?? 0
+    acc.knownCost += row.profile.costStatus === 'estimated' && typeof row.profile.estimatedCostUsd === 'number' ? row.profile.estimatedCostUsd : 0
+    acc.unknownCost += row.profile.costStatus === 'unknown' ? 1 : 0
+    return acc
+  }, { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, knownCost: 0, unknownCost: 0 })
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
+      <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
+        <div className="grid gap-2 text-xs">
+          <Stat label="Profiles" value={String(rows.length)} />
+          <Stat label="LLM calls" value={String(totals.llmCalls)} />
+          <Stat label="Tool calls" value={String(totals.toolCalls)} />
+          <Stat label="Known cost" value={formatUsd(totals.knownCost)} />
+          <Stat label="Unknown cost" value={String(totals.unknownCost)} />
+          <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
+        </div>
+      </aside>
+      <div className="min-h-0 p-3">
+        {error ? (
+          <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+            {error}
+          </div>
+        ) : null}
+        {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
+        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No profile artifacts found.</div> : null}
+        {rows.length > 0 ? (
+          <ScrollArea className="h-full rounded-md border border-border">
+            <div className="min-w-[860px] divide-y divide-border text-xs">
+              <div className="grid grid-cols-[1.25fr_95px_95px_110px_110px_105px_105px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
+                <div>Profile</div>
+                <div>LLM</div>
+                <div>Tools</div>
+                <div>Input tok</div>
+                <div>Output tok</div>
+                <div>Cost</div>
+                <div>Missing</div>
+                <div>Models</div>
+              </div>
+              {rows.map((row) => (
+                <div key={row.path} className="grid grid-cols-[1.25fr_95px_95px_110px_110px_105px_105px_1fr] gap-3 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-[11px]">{row.profile.sessionId ?? row.path}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+                  </div>
+                  <div className="font-mono text-[11px]">{row.profile.llmCalls ?? 0}</div>
+                  <div className="font-mono text-[11px]">{row.profile.toolCalls ?? 0}</div>
+                  <div className="font-mono text-[11px]">{formatInteger(row.profile.totalInputTokens)}</div>
+                  <div className="font-mono text-[11px]">{formatInteger(row.profile.totalOutputTokens)}</div>
+                  <div className="font-mono text-[11px]">{row.profile.costStatus === 'estimated' ? formatUsd(row.profile.estimatedCostUsd) : row.profile.costStatus ?? 'unknown'}</div>
+                  <div className="font-mono text-[11px] text-muted-foreground">{row.profile.llmTraceMissingCalls ?? 0}</div>
+                  <div className="truncate font-mono text-[11px] text-muted-foreground">{(row.profile.models ?? []).join(', ') || 'unknown'}</div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function ResultPill({ resolved }: { resolved: boolean | undefined }): JSX.Element {
   if (resolved === true) {
     return <div className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-300"><CheckCircle2 className="h-3 w-3" aria-hidden="true" />resolved</div>
@@ -637,6 +765,14 @@ function formatDuration(value: unknown): string {
 
 function formatBytesMetric(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? formatBytes(value) : 'n/a'
+}
+
+function formatInteger(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value).toLocaleString('en-US') : '0'
+}
+
+function formatUsd(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `$${value.toFixed(4)}` : 'unknown'
 }
 
 async function fetchArtifactContent(path: string): Promise<ArtifactContentResponse> {

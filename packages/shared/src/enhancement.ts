@@ -14,6 +14,7 @@ export type ArtifactKind =
   | 'tool_catalog'
   | 'trace'
   | 'eval_score'
+  | 'eval_judge'
   | 'diff'
   | 'log'
   | 'rl_token_segments'
@@ -360,6 +361,61 @@ export type EvalScoreResult = {
   metrics: Record<string, number | string | boolean>
   artifactRefs: readonly ArtifactRef[]
   explanation?: string
+}
+
+export type ModelJudgeTraceArtifact = {
+  schemaVersion: 1
+  scorer: string
+  judgeModel: string
+  inputRef?: string
+  prompt: string
+  response: unknown
+  parsed: {
+    score: number
+    passed: boolean
+    label?: EvalFailureLabel
+    explanation?: string
+  }
+  metadata: Record<string, unknown>
+}
+
+export function createModelJudgeTraceArtifact(input: {
+  scorer: string
+  judgeModel: string
+  inputRef?: string
+  prompt: string
+  response: unknown
+  score: number
+  threshold?: number
+  label?: EvalFailureLabel
+  explanation?: string
+  metadata?: Record<string, unknown>
+}): ModelJudgeTraceArtifact {
+  const threshold = boundedUnitValue(input.threshold ?? 0.5, 'judge threshold')
+  const score = boundedUnitValue(input.score, 'judge score')
+  return {
+    schemaVersion: 1,
+    scorer: input.scorer,
+    judgeModel: input.judgeModel,
+    ...(input.inputRef ? { inputRef: input.inputRef } : {}),
+    prompt: input.prompt,
+    response: input.response,
+    parsed: {
+      score,
+      passed: score >= threshold,
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.explanation ? { explanation: input.explanation } : {}),
+    },
+    metadata: {
+      threshold,
+      ...(input.metadata ?? {}),
+    },
+  }
+}
+
+function boundedUnitValue(value: number, name: string): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${name} must be a number between 0 and 1`)
+  return value
 }
 
 export type EvalScoreSummary = {
