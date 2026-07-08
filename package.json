@@ -17,6 +17,7 @@
     "verify:dashboard-real": "node scripts/verify-dashboard-real.mjs",
     "verify:dashboard-debugger": "node scripts/verify-dashboard-debugger.mjs",
     "verify:dashboard-layout-scroll": "node scripts/verify-dashboard-layout-scroll.mjs",
+    "verify:dashboard-enhancement-actions": "node scripts/verify-dashboard-enhancement-actions.mjs",
     "verify:dashboard-subagent-scroll": "node scripts/verify-dashboard-subagent-scroll.mjs",
     "verify:swebench-smoke": "node scripts/verify-swebench-smoke.mjs",
     "verify:tasks-button": "node scripts/verify-tasks-button.mjs",
