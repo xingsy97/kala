@@ -138,16 +138,16 @@ export function ChatPanel({
       kind: 'message',
       message,
     }))
-  const transcriptItems = items ?? fallbackItems
+  const rawItems = items ?? fallbackItems
   const toolNameByCallId = new Map<string, string>()
-  for (const item of transcriptItems) {
+  for (const item of rawItems) {
     if (item.kind !== 'message') continue
     const message = item.message
     for (const content of message.content) {
       if (content.type === 'tool_call') toolNameByCallId.set(content.callId, content.name)
     }
   }
-  const allMessages = transcriptItems
+  const allMessages = rawItems
     .filter((it): it is Extract<TranscriptItem, { kind: 'message' }> => it.kind === 'message')
     .map((it) => it.message)
   const resultsByCallId = collectAllToolResults(allMessages)
@@ -164,24 +164,37 @@ export function ChatPanel({
   const approvalByCallId = new Map<string, ApprovalRequiredEvent>()
   for (const a of pendingApprovals ?? []) approvalByCallId.set(a.callId, a)
 
-  // Map each transcript item back to the message-index a `MessageRow`
-  // expects. `messageIndex` is not the same as the item index because
-  // compact-boundary items don't consume one; we need a stable mapping
-  // so highlightIndex still refers to the Nth *message*.
-  const messageIndexByItem = useMemo(() => {
-    const arr = new Array<number>(transcriptItems.length)
+  // Drop tool messages whose every tool_result is already rendered inline in a
+  // grouped assistant tool-call card. Otherwise MessageRow returns null but
+  // Virtuoso's per-item wrapper still occupies `py-2 sm:py-3` — with 5+ tool
+  // calls per group that stacks up to a screen of blank space between groups.
+  //
+  // messageIndex (used for msg-* anchors + highlight) must still count against
+  // the ORIGINAL sequence so callers that pass a highlight seq still land on
+  // the right row.
+  const { transcriptItems, messageIndexByItem } = useMemo(() => {
+    const kept: TranscriptItem[] = []
+    const mapping: number[] = []
     let mi = -1
-    for (let i = 0; i < transcriptItems.length; i += 1) {
-      const it = transcriptItems[i]!
+    for (const it of rawItems) {
       if (it.kind === 'message') {
         mi += 1
-        arr[i] = mi
+        const m = it.message
+        if (m.role === 'tool') {
+          const hasVisible = m.content.some(
+            (c) => c.type !== 'tool_result' || !groupedCallIds.has(c.callId),
+          )
+          if (!hasVisible) continue
+        }
+        kept.push(it)
+        mapping.push(mi)
       } else {
-        arr[i] = -1
+        kept.push(it)
+        mapping.push(-1)
       }
     }
-    return arr
-  }, [transcriptItems])
+    return { transcriptItems: kept, messageIndexByItem: mapping }
+  }, [rawItems, groupedCallIds])
 
   // Translate message-index highlight into item-index so VirtualTranscript
   // can scroll to the right row. -1 means "no highlight" or unresolved.
@@ -775,7 +788,7 @@ function ToolCallBlock({
 }): JSX.Element {
   const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
   const hasDiffPreview = isPendingApproval && (call.name === 'edit' || call.name === 'write')
-  const [open, setOpen] = useState(isPendingApproval)
+  const [open, setOpen] = useState(false)
   return (
     <div
       className={cn(
@@ -1084,7 +1097,7 @@ function ToolCallGroupBlock({
           <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
       </button>
-      <div className="flex min-w-0 flex-col gap-0.5 px-2 pb-2">
+      <div className="flex min-w-0 flex-col gap-0.5 border-t border-border/40 px-3 pb-2 pt-1">
         {rows.map((row) => {
           const call = group.calls.find((c) => c.callId === row.callId)!
           const result = group.results.get(row.callId)
