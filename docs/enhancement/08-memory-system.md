@@ -79,6 +79,13 @@ bucket and a `memory.contribution` pipeline stage. This is provenance and budget
 metadata only; it does not create a hidden memory channel or mutate the kernel
 state machine.
 
+The dashboard artifact explorer includes a `Memory` tab that loads
+`memory-index.json` artifacts on demand. It summarizes active/tombstoned,
+workspace/global, and warning counts, then shows each memory key with scope,
+status, description, confidence, source session, delete timestamp, and archive
+path. This keeps memory provenance inspectable as artifact data instead of
+adding another live protocol surface.
+
 ## Testing Plan
 
 - Unit tests for scope filtering.
@@ -89,7 +96,7 @@ state machine.
   indexing.
 - Tests that benchmark mode disables cross-task memory by default.
 - Retrieval ranking tests with stale conflicting facts.
-- Browser tests for memory provenance views.
+- Implemented browser tests for memory provenance views.
 
 ## Non-Goals
 
