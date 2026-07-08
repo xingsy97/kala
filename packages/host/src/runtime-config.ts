@@ -25,7 +25,7 @@ import process from 'node:process'
 
 import type { ManualModelInput, ModelInfo, ModelSource } from '@agent-kernel/shared'
 
-import type { HookConfig, HookEvent } from './hooks.js'
+import type { HookConfig, HookEvent } from './extensions/hooks.js'
 
 export type ProviderSpec = {
   id: string

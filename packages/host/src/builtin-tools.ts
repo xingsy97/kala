@@ -9,8 +9,8 @@
 
 import type { ToolSchema } from '@agent-kernel/kernel'
 
-import { skillToolSchema } from './skills.js'
-import type { SkillInfo } from './skills.js'
+import { skillToolSchema } from './extensions/skills.js'
+import type { SkillInfo } from './extensions/skills.js'
 
 export function createBuiltinTools(
   skills: readonly SkillInfo[] = [],

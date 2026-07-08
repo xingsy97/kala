@@ -30,105 +30,32 @@ import { step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LLMTrace } from '@agent-kernel/shared'
-import type { HookConfig, HookRunner } from './hooks.js'
-import type { SessionRecord, SessionStore } from './store/session.js'
-import { maybeAutoCompact, runCompact } from './compaction.js'
-import { AGENT_TOOL_NAME, runAgentTool } from './agent-tool.js'
-import { runPostToolHooks, runPreToolHooks } from './hooks-runner.js'
-import { runSkillTool, SKILL_TOOL_NAME } from './skills.js'
-import type { SkillRegistry } from './skills.js'
+import type { SessionRecord } from './store/session.js'
+import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
+import { AGENT_TOOL_NAME, runAgentTool } from './extensions/agent-tool.js'
+import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
+import { runSkillTool, SKILL_TOOL_NAME } from './extensions/skills.js'
+import type {
+  HostLoopDeps,
+  LoopHandle,
+  LoopRuntime,
+  PostCompactionLoopGuard,
+} from './loop-types.js'
 
-export type LoopBroadcast = {
-  onEvent(
-    sessionId: string,
-    seq: number,
-    event: AgentEvent,
-    effects: readonly Effect[],
-    state: AgentState,
-    llmTrace?: LLMTrace,
-    model?: string,
-  ): void
-  onApprovalRequired(sessionId: string, eff: RequestApprovalEffect): void
-  onError(sessionId: string, message: string): void
-  /**
-   * Streaming text token from the adapter, forwarded to dashboards.
-   * Optional  -  non-streaming adapters never invoke it and the wire event
-   * simply doesn't fire.
-   */
-  onTokenDelta?(sessionId: string, text: string): void
-  /**
-   * A sub-agent (via the `agent` builtin) has just been created. Fired into
-   * the parent's dashboard room so the SubAgentCard can transition from
-   * "spawning" to "running" and open a subscription to the child's own room
-   * before the child starts streaming. Optional so hosts without a dashboard
-   * can drop it.
-   */
-  onSubAgentStarted?(payload: SubAgentStartedPayload): void
-  /**
-   * The sub-agent's inner loop returned (success or failure). Fired into the
-   * parent's dashboard room just before `runAgentTool()` returns the wrapped
-   * envelope as the tool_result  -  arrives ahead of the parent's
-   * `event:appended` for that tool_result, so the card can freeze its timer
-   * without waiting for the parent turn to advance.
-   */
-  onSubAgentFinished?(payload: SubAgentFinishedPayload): void
-}
-
-export type SubAgentStartedPayload = {
-  parentSessionId: string
-  parentCallId: string
-  childSessionId: string
-  agentType?: string
-  prompt: string
-  model?: string
-  startedAt: string
-}
-
-export type SubAgentFinishedPayload = {
-  parentSessionId: string
-  parentCallId: string
-  childSessionId: string
-  status: 'completed' | 'failed'
-  turns: number
-  durationMs: number
-  finishedAt: string
-  error?: string
-}
-
-export type ToolDispatcher = {
-  callTool(sessionId: string, eff: CallToolEffect): Promise<{
-    ok: boolean
-    content: string
-  }>
-  cancelPending(sessionId: string): void
-}
-
-export type ModelResolver = {
-  get(sessionId: string): string | undefined
-}
-
-export type HostLoopDeps = {
-  store: SessionStore
-  llm: LLMAdapter
-  tools: ToolDispatcher
-  broadcast: LoopBroadcast
-  models?: ModelResolver
-  hooks?: readonly HookConfig[]
-  hookRunner?: HookRunner
-  skills?: SkillRegistry
-}
-
-export type LoopHandle = {
-  dispatch(sessionId: string, event: AgentEvent): Promise<void>
-  compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight'): Promise<void>
-  /**
-   * Abort the in-flight LLM call for a session, if any. Any streamed text
-   * so far becomes the final assistant message with a `[cancelled]` suffix,
-   * so the event log always sees a complete `llm_response`  -  never a
-   * dangling call. No-op when nothing is streaming.
-   */
-  cancelStream(sessionId: string): void
-}
+// Re-export the loop's type surface so existing consumers that import these
+// from `./loop.js` keep resolving. The definitions live in the leaf module
+// `loop-types.ts` (see the note there) to keep extensions off `loop.ts`.
+export type {
+  HostLoopDeps,
+  LoopBroadcast,
+  LoopHandle,
+  LoopRuntime,
+  ModelResolver,
+  PostCompactionLoopGuard,
+  SubAgentFinishedPayload,
+  SubAgentStartedPayload,
+  ToolDispatcher,
+} from './loop-types.js'
 
 export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   // Per-session guard so an auto-compact triggered by a hard-tier state
@@ -422,16 +349,6 @@ async function performCallTool(
       runtime,
     )
   }
-}
-
-type LoopRuntime = {
-  handle: LoopHandle
-  loopGuard: Map<string, PostCompactionLoopGuard>
-}
-
-type PostCompactionLoopGuard = {
-  remainingCalls: number
-  seen: Map<string, number>
 }
 
 const PREFLIGHT_RESERVE_FLOOR_TOKENS = 8_000

@@ -13,7 +13,7 @@ import { ulid } from 'ulid'
 
 import type { CallToolEffect, Message } from '@agent-kernel/kernel'
 
-import type { HostLoopDeps } from './loop.js'
+import type { HostLoopDeps } from '../loop-types.js'
 
 export type ConsolidationConfig = {
   enabled: boolean

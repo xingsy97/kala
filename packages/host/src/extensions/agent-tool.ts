@@ -9,7 +9,7 @@
  * Sub-agents run headless (no dashboard is subscribed to the child) so we
  * force `allow_all` approval mode regardless of the parent's setting  - 
  * otherwise every RequestApprovalEffect deadlocks. See
- * [ADR 0014](../../../docs/adr/0014-subagent-approval-mode.md).
+ * [ADR 0014](../../../../docs/adr/0014-subagent-approval-mode.md).
  */
 
 import type {
@@ -18,9 +18,9 @@ import type {
   CallToolEffect,
 } from '@agent-kernel/kernel'
 
-import type { SessionRecord, SessionStore } from './store/session.js'
-import type { HostLoopDeps, ModelResolver } from './loop.js'
-import { dispatchOne } from './loop.js'
+import type { SessionRecord, SessionStore } from '../store/session.js'
+import type { HostLoopDeps, ModelResolver } from '../loop-types.js'
+import { dispatchOne } from '../loop.js'
 
 const DEFAULT_MAX_AGENT_DEPTH = 3
 export const AGENT_TOOL_NAME = 'agent'

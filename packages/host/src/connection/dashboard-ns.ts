@@ -66,7 +66,7 @@ import type { Namespace } from 'socket.io'
 import { ulid } from 'ulid'
 
 import type { HostLoopDeps, LoopHandle } from '../loop.js'
-import { consolidateMemory, type ConsolidationOutcome } from '../memory-consolidation.js'
+import { consolidateMemory, type ConsolidationOutcome } from '../extensions/memory-consolidation.js'
 import { readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
