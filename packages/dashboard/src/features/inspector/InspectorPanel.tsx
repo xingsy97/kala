@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
-  Archive,
   Bot,
   Brain,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -15,18 +13,15 @@ import {
   HeartPulse,
   Info,
   ListFilter,
-  MessageSquare,
   Network,
   SearchCode,
   ServerCog,
-  XCircle,
 } from 'lucide-react'
 import type {
   AgentConfig,
   AgentEvent,
   AgentState,
   CallLlmEffect,
-  CallToolEffect,
   Effect,
   Message,
   MessageContent,
@@ -2652,21 +2647,6 @@ function teachingText(entry: TimelineEntry, flow?: StateFlowStep): string {
     : 'no external effects'
   const transition = flow ? `${flow.from} -> ${flow.to}` : 'state transition not classified'
   return `${inbound.source} sends ${entry.event.kind}; state machine moves ${transition}; output actions: ${effects}.`
-}
-
-function formatValue(v: unknown): string {
-  if (Array.isArray(v)) return v.length > 0 ? v.join(', ') : 'none'
-  if (v === null || v === undefined) return 'none'
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
-}
-
-function modelFromTimeline(timeline: readonly TimelineEntry[]): string | null {
-  for (let i = timeline.length - 1; i >= 0; i--) {
-    const trace = timeline[i]?.llmTrace
-    if (trace) return `${providerFromTrace(trace)}/${modelFromTrace(trace) ?? 'model unknown'}`
-  }
-  return null
 }
 
 function llmCallModel(call: LlmCall): string {

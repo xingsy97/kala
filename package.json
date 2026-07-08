@@ -18,6 +18,7 @@
     "verify:dashboard-debugger": "node scripts/verify-dashboard-debugger.mjs",
     "verify:dashboard-layout-scroll": "node scripts/verify-dashboard-layout-scroll.mjs",
     "verify:dashboard-subagent-scroll": "node scripts/verify-dashboard-subagent-scroll.mjs",
+    "verify:tasks-button": "node scripts/verify-tasks-button.mjs",
     "executor:dev": "pnpm --filter @agent-kernel/executor dev",
     "publish:kernel": "pnpm --filter @agent-kernel/kernel run publish:npm",
     "publish:host": "pnpm --filter @agent-kernel/host run publish:npm",
