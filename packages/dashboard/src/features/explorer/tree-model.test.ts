@@ -243,4 +243,128 @@ describe('buildTree', () => {
     expect(kids[0]!.bucket).toBe('today')
     expect(kids[1]!.bucket).toBe('older')
   })
+
+  it('nests a fork under its parent instead of surfacing it as a sibling', () => {
+    const tree = buildTree(
+      [executor()],
+      [
+        session({ sessionId: 'parent', workspaceId: 'ws-1' }),
+        session({
+          sessionId: 'child',
+          workspaceId: 'ws-1',
+          parentSessionId: 'parent',
+        }),
+      ],
+    )
+    // Two sessions total but only the parent shows at the workspace level.
+    expect(tree[0]!.children).toHaveLength(1)
+    const parentNode = tree[0]!.children[0]!
+    if (parentNode.kind !== 'session') throw new Error('expected session')
+    expect(parentNode.sessionId).toBe('parent')
+    expect(parentNode.children.map((c) => c.sessionId)).toEqual(['child'])
+  })
+
+  it('nests a multi-level fork chain (fork of a fork)', () => {
+    const tree = buildTree(
+      [executor()],
+      [
+        session({ sessionId: 'root', workspaceId: 'ws-1' }),
+        session({
+          sessionId: 'child',
+          workspaceId: 'ws-1',
+          parentSessionId: 'root',
+        }),
+        session({
+          sessionId: 'grandchild',
+          workspaceId: 'ws-1',
+          parentSessionId: 'child',
+        }),
+      ],
+    )
+    expect(tree[0]!.children).toHaveLength(1)
+    const root = tree[0]!.children[0]!
+    if (root.kind !== 'session') throw new Error('expected session')
+    expect(root.sessionId).toBe('root')
+    expect(root.children).toHaveLength(1)
+    const child = root.children[0]!
+    expect(child.sessionId).toBe('child')
+    expect(child.children.map((c) => c.sessionId)).toEqual(['grandchild'])
+  })
+
+  it('treats a fork whose parent is missing as a root of its workspace', () => {
+    // Parent was deleted or lives in a workspace that has no attached
+    // executor  -  the child should still be visible, not silently hidden.
+    const tree = buildTree(
+      [executor()],
+      [
+        session({
+          sessionId: 'orphan-fork',
+          workspaceId: 'ws-1',
+          parentSessionId: 'ghost-parent',
+        }),
+      ],
+    )
+    expect(tree[0]!.children).toHaveLength(1)
+    const node = tree[0]!.children[0]!
+    if (node.kind !== 'session') throw new Error('expected session')
+    expect(node.sessionId).toBe('orphan-fork')
+    expect(node.children).toEqual([])
+  })
+
+  it('treats a fork whose parent lives in a different workspace as a root', () => {
+    // Cross-workspace forks are rare but possible if a session is moved.
+    // Keep the fork visible in its own workspace rather than nesting
+    // under a parent that isn't in the same tree.
+    const tree = buildTree(
+      [
+        executor({ workspaceId: 'ws-a', workspaceName: 'alpha' }),
+        executor({ executorId: 'ex-2', workspaceId: 'ws-b', workspaceName: 'bravo' }),
+      ],
+      [
+        session({ sessionId: 'parent', workspaceId: 'ws-a' }),
+        session({
+          sessionId: 'child',
+          workspaceId: 'ws-b',
+          parentSessionId: 'parent',
+        }),
+      ],
+    )
+    const alpha = tree.find((n) => n.workspaceId === 'ws-a')!
+    const bravo = tree.find((n) => n.workspaceId === 'ws-b')!
+    expect(alpha.children.map((c) => (c.kind === 'session' ? c.sessionId : c.bucket))).toEqual(['parent'])
+    expect(bravo.children.map((c) => (c.kind === 'session' ? c.sessionId : c.bucket))).toEqual(['child'])
+  })
+
+  it('counts only root sessions toward the bucket threshold', () => {
+    // Three sessions total, but two are forks under a single root  -  only
+    // one root, so we should NOT bucket. Parent + its forks stay flat.
+    const tree = buildTree(
+      [executor()],
+      [
+        session({
+          sessionId: 'root',
+          workspaceId: 'ws-1',
+          lastEventAt: '2026-07-05T10:00:00.000Z',
+        }),
+        session({
+          sessionId: 'fork-1',
+          workspaceId: 'ws-1',
+          parentSessionId: 'root',
+          lastEventAt: '2026-07-05T11:00:00.000Z',
+        }),
+        session({
+          sessionId: 'fork-2',
+          workspaceId: 'ws-1',
+          parentSessionId: 'root',
+          lastEventAt: '2026-07-05T12:00:00.000Z',
+        }),
+      ],
+    )
+    expect(tree[0]!.children).toHaveLength(1)
+    const node = tree[0]!.children[0]!
+    expect(node.kind).toBe('session')
+    if (node.kind !== 'session') throw new Error('unreachable')
+    // Forks under a root are sorted by activity desc.
+    expect(node.children.map((c) => c.sessionId)).toEqual(['fork-2', 'fork-1'])
+  })
 })

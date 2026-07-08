@@ -66,7 +66,6 @@ type Props = {
 }
 
 const SESSION_ROW_HEIGHT = 60
-const SESSION_ROW_HEIGHT_FORKED = 78
 const WORKSPACE_ROW_HEIGHT = 48
 const BUCKET_ROW_HEIGHT = 28
 
@@ -125,11 +124,10 @@ export function Explorer({
         ) : bounds.height > 0 ? (
           <Tree<TreeNode>
             data={visibleData as unknown as TreeNode[]}
-            childrenAccessor={(d) =>
-              d.kind === 'workspace' || d.kind === 'bucket'
-                ? d.children
-                : null
-            }
+            childrenAccessor={(d) => {
+              if (d.kind === 'workspace' || d.kind === 'bucket') return d.children
+              return d.children.length > 0 ? d.children : null
+            }}
             idAccessor="id"
             openByDefault
             disableDrag
@@ -222,7 +220,7 @@ function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>
 function rowHeightFor(node: NodeApi<TreeNode>): number {
   if (node.data.kind === 'workspace') return WORKSPACE_ROW_HEIGHT
   if (node.data.kind === 'bucket') return BUCKET_ROW_HEIGHT
-  return node.data.parentSessionId ? SESSION_ROW_HEIGHT_FORKED : SESSION_ROW_HEIGHT
+  return SESSION_ROW_HEIGHT
 }
 
 function Header({
@@ -237,20 +235,20 @@ function Header({
   return (
     <div className="flex flex-col gap-2 bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
       <div className="flex items-center justify-between gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        Explorer
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onConnectWorkspace}
-        data-testid="new-session-button"
-        title="Connect a new workspace"
-        className="h-7 gap-1 rounded-full px-2.5 text-xs"
-      >
-        <Cable className="h-3 w-3" />
-        Workspace
-      </Button>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Explorer
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onConnectWorkspace}
+          data-testid="new-session-button"
+          title="Connect a new workspace"
+          className="h-7 gap-1 rounded-full px-2.5 text-xs"
+        >
+          <Cable className="h-3 w-3" />
+          Workspace
+        </Button>
       </div>
       <label className="flex h-7 min-w-0 items-center gap-1.5 rounded bg-background/70 px-2 text-xs ring-1 ring-border/50 focus-within:ring-primary/40">
         <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
@@ -485,9 +483,15 @@ function SessionRow({
         onStartEdit(s)
       }}
     >
-      <div className="min-w-0 cursor-pointer px-3 py-2 pl-6 pr-16">
+      <div className="min-w-0 cursor-pointer px-3 py-2 pl-6 pr-24">
         <div className="flex min-w-0 items-center gap-2">
           <SessionStatusIndicator status={s.status} selected={selected} />
+          {s.parentSessionId ? (
+            <GitFork
+              className="h-3 w-3 flex-none text-amber-600 dark:text-amber-400"
+              aria-label="forked session"
+            />
+          ) : null}
           {editing ? (
             <RenameInput
               initial={s.label}
@@ -524,14 +528,6 @@ function SessionRow({
             </span>
           </span>
         </div>
-        {s.parentSessionId ? (
-          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-amber-600 dark:text-amber-400">
-            <GitFork className="h-3 w-3 flex-none" />
-            <span className="min-w-0 truncate font-mono">
-              fork of {s.parentSessionId.slice(0, 8)}...
-            </span>
-          </div>
-        ) : null}
       </div>
       {editing ? null : (
         <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -775,11 +771,14 @@ function filterTree(nodes: readonly WorkspaceNode[], query: string): WorkspaceNo
     const children: WorkspaceChild[] = []
     for (const child of workspace.children) {
       if (child.kind === 'session') {
-        if (workspaceMatches || sessionMatchesQuery(child, needle)) children.push(child)
+        const kept = filterSessionSubtree(child, needle, workspaceMatches)
+        if (kept) children.push(kept)
       } else {
-        const sessions = workspaceMatches
-          ? child.children
-          : child.children.filter((session) => sessionMatchesQuery(session, needle))
+        const sessions: SessionNode[] = []
+        for (const session of child.children) {
+          const kept = filterSessionSubtree(session, needle, workspaceMatches)
+          if (kept) sessions.push(kept)
+        }
         if (sessions.length > 0 || child.label.toLocaleLowerCase().includes(needle)) {
           children.push({ ...child, children: sessions })
         }
@@ -788,6 +787,27 @@ function filterTree(nodes: readonly WorkspaceNode[], query: string): WorkspaceNo
     if (workspaceMatches || children.length > 0) filtered.push({ ...workspace, children })
   }
   return filtered
+}
+
+/**
+ * Keeps a session if it or any descendant matches the query. When a parent
+ * only exists to house a matching child, we still return the parent so the
+ * user sees the fork relationship  -  otherwise the child would appear as
+ * an orphaned root and lose context.
+ */
+function filterSessionSubtree(
+  session: SessionNode,
+  needle: string,
+  workspaceMatches: boolean,
+): SessionNode | null {
+  const keptChildren: SessionNode[] = []
+  for (const child of session.children) {
+    const kept = filterSessionSubtree(child, needle, workspaceMatches)
+    if (kept) keptChildren.push(kept)
+  }
+  const selfMatches = workspaceMatches || sessionMatchesQuery(session, needle)
+  if (!selfMatches && keptChildren.length === 0) return null
+  return { ...session, children: keptChildren }
 }
 
 function workspaceMatchesQuery(workspace: WorkspaceNode, needle: string): boolean {
