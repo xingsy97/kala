@@ -44,17 +44,19 @@ describe('ConnectWorkspaceDialog', () => {
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-windows'))
     const windowsText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
-    expect(windowsText).toContain('wget -qO-')
-    expect(windowsText).toContain('run.sh')
-    expect(windowsText).not.toContain('powershell')
-    expect(windowsText).not.toContain('iwr')
-    expect(windowsText).not.toContain('curl')
-    expect(windowsText).not.toContain('run-executor.sh')
+    expect(windowsText).toContain('iwr')
+    expect(windowsText).toContain('agent-kernel-executor.cjs')
+    expect(windowsText).toContain('Get-FileHash')
+    expect(windowsText).toContain('$env:HOST_URL=')
+    expect(windowsText).toContain('$env:SANDBOX_ROOTS=')
+    expect(windowsText).not.toContain('wget -qO-')
+    expect(windowsText).not.toContain('COMPONENT=executor')
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-unix'))
     const unixText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
     expect(unixText).toContain('wget -qO-')
     expect(unixText).toContain('run.sh')
+    expect(unixText).not.toContain('iwr')
     expect(unixText).not.toContain('curl')
     expect(unixText).not.toContain('run-executor.sh')
   })
