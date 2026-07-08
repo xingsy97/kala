@@ -107,8 +107,46 @@ describe('SWE-bench eval runner', () => {
 
     expect(result.prediction.instance_id).toBe('sympy__sympy-20590')
     expect(result.traceArtifact.uri).toBe('traces/sympy__sympy-20590.openinference.json')
+    expect(result.trial.sessionId).toBe('s1')
+    expect(result.trial.artifacts.map((artifact) => artifact.uri)).toEqual([
+      'traces/sympy__sympy-20590.openinference.json',
+      'artifacts/sympy__sympy-20590/final.diff',
+    ])
     const trace = JSON.parse(await readFile(join(result.layout.rootDir, result.traceArtifact.uri), 'utf8'))
     expect(trace.spans.map((span: { kind: string }) => span.kind)).toEqual(['AGENT', 'LLM'])
+    const trial = JSON.parse(await readFile(join(result.layout.trialsDir, 'sympy__sympy-20590.json'), 'utf8'))
+    expect(trial.sessionId).toBe('s1')
+    expect(trial.metrics.patchBytes).toBe(Buffer.byteLength('diff --git a/x b/x\n', 'utf8'))
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.trialCount).toBe(1)
+    expect(summary.completed).toBe(1)
+  })
+
+  it('labels empty exported session patches while still linking trace artifacts', async () => {
+    const sessionLog = join(dir, 'empty-session.jsonl')
+    await writeHeader({ path: sessionLog, sessionId: 's-empty', config, initialState })
+    await appendEventEntry({
+      path: sessionLog,
+      seq: 1,
+      event: { kind: 'user_message', text: 'fix it' },
+      effects: [],
+    })
+
+    const result = await exportSessionForSweBench({
+      rootDir: dir,
+      runId: 'run-empty-export',
+      dataset: 'local',
+      model: 'gpt-test',
+      instanceId: 'local__empty-1',
+      sessionLogPath: sessionLog,
+      modelPatch: '',
+    })
+
+    expect(result.trial.status).toBe('failed')
+    expect(result.trial.failureLabel).toBe('empty_patch')
+    expect(result.trial.artifacts.map((artifact) => artifact.kind)).toEqual(['trace', 'diff'])
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.failureCounts.empty_patch).toBe(1)
   })
 
   it('builds official harness command without executing by default', () => {

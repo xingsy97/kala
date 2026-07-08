@@ -184,6 +184,14 @@ agent-kernel-host eval swebench agent-infer \
   --timeout-ms 1800000
 ```
 
+`export-session` writes the same eval-visible run artifacts as the automated
+inference paths: official `predictions.jsonl`, `experiment.json`, per-instance
+`trials/<instance_id>.json`, `summary.json`,
+`traces/<instance_id>.openinference.json`, and
+`artifacts/<instance_id>/final.diff`. The trial includes both trace and diff
+artifact refs, so the dashboard can navigate from a SWE-bench instance to the
+exported OpenInference trace and final patch without guessing paths.
+
 `grade` prints the official command by default. Add `--execute` to actually run
 the Docker harness. This avoids accidentally triggering an expensive SWE-bench
 evaluation when the operator only wants to inspect the command.
