@@ -32,13 +32,21 @@ const manifest: ArtifactManifest = {
       mtime: '2026-07-09T00:00:00.000Z',
       sha256: '123456abcdef',
     },
+    {
+      path: 'runs/eval/compare/eval-comparison.json',
+      kind: 'eval_comparison',
+      mediaType: 'application/json',
+      bytes: 300,
+      mtime: '2026-07-09T00:00:00.000Z',
+      sha256: 'fedcba654321',
+    },
   ],
   summary: {
-    entryCount: 3,
-    totalBytes: 4480,
-    hashedCount: 2,
+    entryCount: 4,
+    totalBytes: 4780,
+    hashedCount: 3,
     hashSkippedCount: 1,
-    kinds: { llm_request: 1, log: 1, eval_summary: 1 },
+    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_comparison: 1 },
   },
 }
 
@@ -64,7 +72,7 @@ describe('ArtifactExplorerDialog', () => {
     })
     await screen.findByText('llm/s1/1.request.json')
     expect(screen.getByText('large.log')).toBeTruthy()
-    expect(screen.getByText('2/3')).toBeTruthy()
+    expect(screen.getByText('3/4')).toBeTruthy()
     expect(screen.getByText('hash skipped')).toBeTruthy()
   })
 
@@ -85,6 +93,16 @@ describe('ArtifactExplorerDialog', () => {
           metrics: { passRate: 0.5 },
         },
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/compare/eval-comparison.json',
+        mediaType: 'application/json',
+        body: {
+          baseline: { experimentId: 'base', resolved: 1, failed: 1, timedOut: 0 },
+          candidate: { experimentId: 'candidate', resolved: 2, failed: 0, timedOut: 0 },
+          deltas: { resolved: 1, failed: -1, timedOut: 0, passRate: 0.5 },
+          failureDeltas: { empty_patch: -1 },
+        },
+      }), { status: 200 }))
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -95,8 +113,15 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getByText('local')).toBeTruthy()
     expect(screen.getByText('agent-test')).toBeTruthy()
     expect(screen.getByText('50%')).toBeTruthy()
+    expect(await screen.findByText('base')).toBeTruthy()
+    expect(screen.getByText('candidate')).toBeTruthy()
+    expect(screen.getByText('+50%')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fsummary.json',
+      { cache: 'no-store' },
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Feval%2Fcompare%2Feval-comparison.json',
       { cache: 'no-store' },
     )
   })
