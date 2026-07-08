@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -192,6 +192,18 @@ describe('memory tools', () => {
       makeCtx(workspace),
     )
     expect(existsSync(file)).toBe(false)
+    const tombstoneDir = join(workspace, '.agent-kernel', 'memory', '.tombstones')
+    const files = readdirSync(tombstoneDir).sort()
+    const archived = files.find((name) => name.endsWith('.md'))
+    const tombstone = files.find((name) => name.endsWith('.json'))
+    expect(archived).toBeTruthy()
+    expect(tombstone).toBeTruthy()
+    expect(readFileSync(join(tombstoneDir, archived!), 'utf8')).toBe('v')
+    expect(JSON.parse(readFileSync(join(tombstoneDir, tombstone!), 'utf8'))).toMatchObject({
+      schemaVersion: 1,
+      scope: 'workspace',
+      key: 'k',
+    })
   })
 
   it('workspace-scope delete of missing key is idempotent', async () => {

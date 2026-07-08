@@ -38,11 +38,38 @@ describe('memory index export', () => {
     expect(result.index.entries[0]).toMatchObject({
       scope: 'workspace',
       key: 'user-style',
+      status: 'active',
       description: 'User prefers concise answers',
       confidence: 0.9,
       sessionId: 's1',
     })
     expect(await readFile(result.indexPath, 'utf8')).toContain('user-style')
+  })
+
+  it('indexes tombstoned memory entries for auditability', async () => {
+    const memoryDir = join(dir, '.agent-kernel', 'memory')
+    const tombstoneDir = join(memoryDir, '.tombstones')
+    mkdirSync(tombstoneDir, { recursive: true })
+    writeFileSync(join(tombstoneDir, 'old-rule.2026-07-09T00-00-00-000Z.md'), 'prefer yarn', 'utf8')
+    writeFileSync(join(tombstoneDir, 'old-rule.2026-07-09T00-00-00-000Z.md.json'), JSON.stringify({
+      schemaVersion: 1,
+      scope: 'workspace',
+      key: 'old-rule',
+      deletedAt: '2026-07-09T00:00:00.000Z',
+      originalPath: join(memoryDir, 'old-rule.md'),
+      archivedPath: join(tombstoneDir, 'old-rule.2026-07-09T00-00-00-000Z.md'),
+    }), 'utf8')
+
+    const result = await buildMemoryIndex({ rootDir: join(dir, 'out'), workspaceRoot: dir })
+
+    expect(result.index.entries).toHaveLength(1)
+    expect(result.index.entries[0]).toMatchObject({
+      scope: 'workspace',
+      key: 'old-rule',
+      status: 'tombstoned',
+      deletedAt: '2026-07-09T00:00:00.000Z',
+    })
+    expect(result.index.entries[0]?.archivedPath).toContain('old-rule.2026-07-09T00-00-00-000Z.md')
   })
 
   it('parses memory index CLI commands', () => {
