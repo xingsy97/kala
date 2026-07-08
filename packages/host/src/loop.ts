@@ -35,6 +35,7 @@ import {
   createMessageAssemblyArtifact,
   createRouterDecisionArtifact,
   createToolCatalogArtifact,
+  type MessageAssemblyStage,
 } from '@agent-kernel/shared/enhancement'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
@@ -293,18 +294,7 @@ async function maybeWriteMessageAssemblyArtifact(
       model,
       messages,
       tools: effect.tools,
-      stages: [
-        {
-          name: 'host.preflight',
-          inputMessages: effect.messages.length,
-          outputMessages: messages.length,
-          estimatedTokens: estimateMessageTokens(messages),
-          droppedItems: Math.max(0, effect.messages.length - messages.length),
-          reasonCodes: messages === effect.messages ? ['no_preflight_compaction'] : ['preflight_compaction_applied'],
-          artifactRefs: [],
-        },
-        memoryContributionStage(effect.messages, messages),
-      ],
+      stages: messageAssemblyStages(deps.llm.name, effect.messages, messages, effect.tools),
     })
     await store.writeJson(
       'message_assembly',
@@ -332,10 +322,60 @@ async function maybeWriteMessageAssemblyArtifact(
   }
 }
 
+function messageAssemblyStages(
+  adapterName: string,
+  inputMessages: readonly import('@agent-kernel/kernel').Message[],
+  outputMessages: readonly import('@agent-kernel/kernel').Message[],
+  tools: readonly import('@agent-kernel/kernel').ToolSchema[],
+): readonly MessageAssemblyStage[] {
+  const inputTokens = estimateMessageTokens(inputMessages)
+  const outputTokens = estimateMessageTokens(outputMessages)
+  const toolTokens = estimateToolSchemaTokens(tools)
+  return [
+    {
+      name: 'kernel.messages',
+      inputMessages: inputMessages.length,
+      outputMessages: inputMessages.length,
+      estimatedTokens: inputTokens,
+      droppedItems: 0,
+      reasonCodes: ['canonical_reducer_messages'],
+      artifactRefs: [],
+    },
+    {
+      name: 'tool.registry',
+      inputMessages: outputMessages.length,
+      outputMessages: outputMessages.length,
+      estimatedTokens: toolTokens,
+      droppedItems: 0,
+      reasonCodes: tools.length > 0 ? ['tool_schemas_available'] : ['tool_registry_empty'],
+      artifactRefs: [],
+    },
+    memoryContributionStage(inputMessages, outputMessages),
+    {
+      name: 'host.preflight',
+      inputMessages: inputMessages.length,
+      outputMessages: outputMessages.length,
+      estimatedTokens: outputTokens,
+      droppedItems: Math.max(0, inputMessages.length - outputMessages.length),
+      reasonCodes: outputMessages === inputMessages ? ['no_preflight_compaction'] : ['preflight_compaction_applied'],
+      artifactRefs: [],
+    },
+    {
+      name: 'provider.adapter',
+      inputMessages: outputMessages.length,
+      outputMessages: outputMessages.length,
+      estimatedTokens: outputTokens + toolTokens,
+      droppedItems: 0,
+      reasonCodes: [`adapter:${adapterName}`],
+      artifactRefs: [],
+    },
+  ]
+}
+
 function memoryContributionStage(
   inputMessages: readonly import('@agent-kernel/kernel').Message[],
   outputMessages: readonly import('@agent-kernel/kernel').Message[],
-): import('@agent-kernel/shared/enhancement').MessageAssemblyStage {
+): MessageAssemblyStage {
   const inputMemory = countMemoryToolPairs(inputMessages)
   const outputMemory = countMemoryToolPairs(outputMessages)
   return {
@@ -347,6 +387,11 @@ function memoryContributionStage(
     reasonCodes: outputMemory > 0 ? ['memory_tool_context_present'] : ['memory_tool_context_absent'],
     artifactRefs: [],
   }
+}
+
+function estimateToolSchemaTokens(tools: readonly import('@agent-kernel/kernel').ToolSchema[]): number {
+  const chars = tools.reduce((sum, tool) => sum + tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
+  return Math.ceil(chars / 4)
 }
 
 function countMemoryToolPairs(messages: readonly import('@agent-kernel/kernel').Message[]): number {

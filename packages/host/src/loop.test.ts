@@ -156,6 +156,15 @@ describe('host loop', () => {
     expect(artifact.messageCount).toBeGreaterThan(0)
     expect(artifact.toolCount).toBe(1)
     expect(artifact.parts.map((part: { name: string }) => part.name)).toContain('tools')
+    expect(artifact.stages.map((stage: { name: string }) => stage.name)).toEqual([
+      'kernel.messages',
+      'tool.registry',
+      'memory.contribution',
+      'host.preflight',
+      'provider.adapter',
+    ])
+    expect(artifact.stages.find((stage: { name: string }) => stage.name === 'tool.registry').estimatedTokens).toBeGreaterThan(0)
+    expect(artifact.stages.find((stage: { name: string }) => stage.name === 'provider.adapter').reasonCodes[0]).toContain('adapter:')
     expect(routerDecision.reasonCodes).toContain('adapter_default_model')
     expect(toolCatalog.tools[0]).toMatchObject({ name: 'read', kind: 'executor', skillBacked: false })
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)

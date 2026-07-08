@@ -10,9 +10,10 @@ choice. The agent must assemble system instructions, user intent, recent turns,
 tool results, file excerpts, memory, skills, and compaction summaries without
 silently dropping the critical fact that would solve the task.
 
-The project already has context compaction and a message assembly debugger. The
-next step is to turn context assembly into an inspectable, testable subsystem
-with production-level policies.
+The project has context compaction, a message assembly debugger, and host-side
+message assembly artifacts. The important boundary is that assembly is now
+inspectable and testable without turning provider request formatting into kernel
+state.
 
 ## Production References
 
@@ -62,10 +63,14 @@ only from structured `memory` tool calls and matching tool results already
 present in kernel messages. The host does not infer memory from arbitrary text
 and does not inject hidden memory content.
 
-Implemented stages include `host.preflight` and `memory.contribution`. The
-memory stage records whether memory tool context is present, its estimated token
-contribution, and dropped memory tool items if preflight compaction removes
-them.
+Implemented stages include `kernel.messages`, `tool.registry`,
+`memory.contribution`, `host.preflight`, and `provider.adapter`. These stages
+make the request pipeline explicit: canonical reducer messages, available tool
+schemas, structured memory tool context, host preflight/compaction output, and
+the adapter boundary that turns normalized messages/tools into provider request
+shape. The memory stage records whether memory tool context is present, its
+estimated token contribution, and dropped memory tool items if preflight
+compaction removes them.
 
 ## Budgeting Policy
 
@@ -116,6 +121,8 @@ and `Compaction Summary`.
 - Tests that tool-call/tool-result pairs are not split incorrectly.
 - Implemented tests for structured memory tool contribution in assembly
   artifacts.
+- Implemented tests for the named assembly pipeline stages, including tool
+  registry token contribution and provider adapter boundary metadata.
 - Implemented headless browser coverage in `scripts/verify-dashboard-debugger.mjs`
   for Message Assembler contribution proportions, context segment selection,
   tool-registry visibility, API Call request/response separation, API body
