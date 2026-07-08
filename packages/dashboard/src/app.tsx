@@ -55,7 +55,6 @@ import {
   respondApproval,
   setSessionApprovalMode,
   setSessionModel,
-  type TimelineEntry,
   updateQueuedMessage,
   useControlPlane,
   useSession,
@@ -494,8 +493,6 @@ export function App(): JSX.Element {
   const backgroundTasks = backgroundTerminalTasks(session.timeline)
   const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
 
-  const chatItemsCount = chatItems.length
-  const streamingLen = session.streamingText.length
   const pendingApprovalsCount = session.pendingApprovals.length
   // Pinned-to-bottom is owned by ChatPanel/VirtualTranscript now; we mirror
   // it up here only so a session switch or a first-load reset can force a
@@ -506,23 +503,14 @@ export function App(): JSX.Element {
   useEffect(() => {
     setChatPinnedToBottom(true)
   }, [config.sessionId])
-  // Bumping this forces VirtualTranscript to jump-to-bottom. We do that on
-  // session switch and whenever new items append while the user was pinned.
-  // The pinned check happens inside VirtualTranscript so we can bump
-  // liberally without yanking the user.
+  // Bumping this forces VirtualTranscript to jump-to-bottom. Keep it for
+  // explicit jumps such as session switches and sends; ordinary appends are
+  // handled by Virtuoso's pinned `followOutput` path so the scroll container
+  // is not rebuilt or imperatively repositioned during streaming.
   const [chatScrollToBottomToken, setChatScrollToBottomToken] = useState(0)
   useEffect(() => {
     setChatScrollToBottomToken((t) => t + 1)
   }, [config.sessionId])
-  useEffect(() => {
-    if (!chatPinnedToBottom) return
-    setChatScrollToBottomToken((t) => t + 1)
-  }, [
-    chatItemsCount,
-    streamingLen,
-    pendingApprovalsCount,
-    chatPinnedToBottom,
-  ])
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
