@@ -58,6 +58,19 @@ This command folds the raw log without triggering store recovery and writes
 and last event kind. It is intended for CI checks, crash triage, and validating
 that recovered sessions no longer show impossible active work.
 
+Implemented chaos replay command:
+
+```bash
+agent-kernel-host enhancement reliability chaos-replay \
+  --root-dir runs/reliability/chaos \
+  --session-logs sessions/a.jsonl,sessions/b.jsonl
+```
+
+It writes `reliability-chaos.json` with per-session final status, dangling kind,
+recovery-event count, aggregate recoverable/dangling counts, and dangling counts
+by kind. This is a replay artifact over existing logs; it does not add crash or
+checkpoint concepts to the reducer protocol.
+
 ## Executor Reliability
 
 Background shell state should include:
