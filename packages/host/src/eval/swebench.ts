@@ -188,6 +188,8 @@ export type RunSweBenchAgentPatchInput = {
   workspaceRoot?: string
   repoCacheDir?: string
   timeoutMs?: number
+  maxWorkers?: number
+  skipCompleted?: boolean
 }
 
 export async function runSweBenchAgentPatchRun(
@@ -200,6 +202,9 @@ export async function runSweBenchAgentPatchRun(
 }> {
   const allInstances = await readSweBenchInstances(input.instancesJsonl)
   const selected = selectInstances(allInstances, input.instanceIds, input.limit)
+  const priorRun = input.skipCompleted
+    ? await readExistingSweBenchRunOutputs(sweBenchRunLayout(input.rootDir, input.runId))
+    : { predictions: [], trials: [] }
   const redactedCommand = redactForPersistence(input.agentCommand, {
     ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
   })
@@ -216,6 +221,8 @@ export async function runSweBenchAgentPatchRun(
       instanceIds: input.instanceIds ?? [],
       limit: input.limit ?? null,
       timeoutMs: input.timeoutMs ?? null,
+      maxWorkers: input.maxWorkers ?? 1,
+      skipCompleted: input.skipCompleted ?? false,
       agentCommandSha256: createHash('sha256').update(input.agentCommand).digest('hex'),
       agentCommandPreview: redactedCommand.value,
       agentCommandRedaction: redactedCommand.summary,
@@ -228,21 +235,33 @@ export async function runSweBenchAgentPatchRun(
   })
   const predictions: SweBenchPrediction[] = []
   const trials: EvalTrial[] = []
+  if (input.skipCompleted) {
+    predictions.push(...priorRun.predictions.filter((prediction) => selected.some((instance) => instance.instance_id === prediction.instance_id)))
+    trials.push(...priorRun.trials.filter((trial) => selected.some((instance) => instance.instance_id === trial.instanceId)))
+  }
+  const completedIds = new Set(trials.map((trial) => trial.instanceId))
+  const pending = selected.filter((instance) => !completedIds.has(instance.instance_id))
 
-  for (const instance of selected) {
-    const result = await runSingleSweBenchAgentInstance({ input, layout, experiment, store, instance })
+  const results = await runWithConcurrency(
+    pending,
+    input.maxWorkers ?? 1,
+    (instance) => runSingleSweBenchAgentInstance({ input, layout, experiment, store, instance }),
+  )
+  for (const result of results) {
     predictions.push(result.prediction)
     trials.push(result.trial)
     await writeFile(
-      join(layout.trialsDir, `${instance.instance_id}.json`),
+      join(layout.trialsDir, `${result.trial.instanceId}.json`),
       `${JSON.stringify(result.trial, null, 2)}\n`,
       'utf8',
     )
   }
 
-  await writeFile(layout.predictionsPath, serializeJsonl(predictions), 'utf8')
-  await writeFile(layout.summaryPath, `${JSON.stringify(summarizeEvalRun(experiment, trials), null, 2)}\n`, 'utf8')
-  return { layout, experiment, predictions, trials }
+  const orderedPredictions = orderBySelectedInstances(predictions, selected, (prediction) => prediction.instance_id)
+  const orderedTrials = orderBySelectedInstances(trials, selected, (trial) => trial.instanceId)
+  await writeFile(layout.predictionsPath, serializeJsonl(orderedPredictions), 'utf8')
+  await writeFile(layout.summaryPath, `${JSON.stringify(summarizeEvalRun(experiment, orderedTrials), null, 2)}\n`, 'utf8')
+  return { layout, experiment, predictions: orderedPredictions, trials: orderedTrials }
 }
 
 async function readSweBenchInstances(path: string): Promise<SweBenchInstance[]> {
@@ -265,6 +284,52 @@ function selectInstances(
   const wanted = ids && ids.length > 0 ? new Set(ids) : undefined
   const filtered = wanted ? instances.filter((instance) => wanted.has(instance.instance_id)) : [...instances]
   return typeof limit === 'number' ? filtered.slice(0, limit) : filtered
+}
+
+async function readExistingSweBenchRunOutputs(layout: SweBenchRunLayout): Promise<{
+  predictions: SweBenchPrediction[]
+  trials: EvalTrial[]
+}> {
+  const predictions: SweBenchPrediction[] = []
+  if (existsSync(layout.predictionsPath)) {
+    const raw = await readFile(layout.predictionsPath, 'utf8')
+    for (const line of raw.split('\n')) {
+      if (line.trim().length === 0) continue
+      predictions.push(JSON.parse(line) as SweBenchPrediction)
+    }
+  }
+  const trials: EvalTrial[] = []
+  for (const prediction of predictions) {
+    const trial = await readExistingTrial(layout, prediction.instance_id)
+    if (trial) trials.push(trial)
+  }
+  return { predictions, trials }
+}
+
+async function runWithConcurrency<T, R>(
+  items: readonly T[],
+  maxWorkers: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const width = Math.max(1, Math.floor(maxWorkers))
+  const results = new Array<R>(items.length)
+  let index = 0
+  async function runWorker(): Promise<void> {
+    while (true) {
+      const current = index
+      index += 1
+      const item = items[current]
+      if (item === undefined) return
+      results[current] = await worker(item)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, () => runWorker()))
+  return results
+}
+
+function orderBySelectedInstances<T>(items: readonly T[], selected: readonly SweBenchInstance[], idOf: (item: T) => string): T[] {
+  const order = new Map(selected.map((instance, index) => [instance.instance_id, index]))
+  return [...items].sort((a, b) => (order.get(idOf(a)) ?? Number.MAX_SAFE_INTEGER) - (order.get(idOf(b)) ?? Number.MAX_SAFE_INTEGER))
 }
 
 async function readPatchForInstance(patchesDir: string, instanceId: string): Promise<string> {

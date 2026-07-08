@@ -255,6 +255,9 @@ describe('SWE-bench eval runner', () => {
         'repos',
         '--timeout-ms',
         '1000',
+        '--max-workers',
+        '2',
+        '--skip-completed',
       ]),
     ).toMatchObject({
       kind: 'agent-infer',
@@ -262,6 +265,8 @@ describe('SWE-bench eval runner', () => {
       agentCommand: 'agent --prompt "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"',
       repoCacheDir: 'repos',
       timeoutMs: 1000,
+      maxWorkers: 2,
+      skipCompleted: true,
     })
   })
 
@@ -360,6 +365,50 @@ describe('SWE-bench eval runner', () => {
     const trial = JSON.parse(await readFile(join(result.layout.trialsDir, 'local__repo-1.json'), 'utf8'))
     expect(trial.artifacts.map((artifact: { uri: string }) => artifact.uri)).toContain('artifacts/local__repo-1/final.diff')
     expect(await readFile(result.layout.predictionsPath, 'utf8')).toContain('local__repo-1')
+  })
+
+  it('resumes agent inference by skipping completed instances', async () => {
+    const sourceRepo = join(dir, 'source-resume-repo')
+    mkdirSync(sourceRepo)
+    await writeFile(join(sourceRepo, 'bug.txt'), 'before\n', 'utf8')
+    runGit(sourceRepo, 'init')
+    runGit(sourceRepo, 'config', 'user.email', 'test@example.com')
+    runGit(sourceRepo, 'config', 'user.name', 'Test User')
+    runGit(sourceRepo, 'add', 'bug.txt')
+    runGit(sourceRepo, 'commit', '-m', 'init')
+    const baseCommit = runGit(sourceRepo, 'rev-parse', 'HEAD').trim()
+    const instancesPath = join(dir, 'resume-instances.jsonl')
+    await writeFile(instancesPath, JSON.stringify({
+      instance_id: 'local__resume-1',
+      repo_path: sourceRepo,
+      base_commit: baseCommit,
+      problem_statement: 'change bug.txt',
+    }) + '\n', 'utf8')
+
+    const first = await runSweBenchAgentPatchRun({
+      rootDir: dir,
+      runId: 'run-agent-resume',
+      dataset: 'local',
+      model: 'agent-test',
+      instancesJsonl: instancesPath,
+      agentCommand: 'printf "after\\n" > bug.txt',
+      maxWorkers: 2,
+    })
+    const second = await runSweBenchAgentPatchRun({
+      rootDir: dir,
+      runId: 'run-agent-resume',
+      dataset: 'local',
+      model: 'agent-test',
+      instancesJsonl: instancesPath,
+      agentCommand: 'exit 7',
+      skipCompleted: true,
+      maxWorkers: 2,
+    })
+
+    expect(second.predictions).toEqual(first.predictions)
+    expect(second.trials[0]?.failureLabel).toBeUndefined()
+    const predictionLines = (await readFile(second.layout.predictionsPath, 'utf8')).trim().split('\n')
+    expect(predictionLines).toHaveLength(1)
   })
 
   it('ingests official-style SWE-bench instance results into trials and summary', async () => {

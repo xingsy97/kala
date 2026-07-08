@@ -169,6 +169,8 @@ agent-kernel-host eval swebench agent-infer \
   --instances-jsonl fixtures/swebench-lite.jsonl \
   --agent-command 'agent-kernel-run --prompt-file "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"' \
   --repo-cache-dir runs/repos \
+  --max-workers 4 \
+  --skip-completed \
   --timeout-ms 1800000
 ```
 
@@ -317,8 +319,11 @@ and persist trial metadata. The next step is binding this adapter directly to a
 managed `agent-kernel` host/executor session for full dashboard replay.
 
 Phase 4: batch scheduler.
-Add concurrency control, resume, skip-completed behavior, and per-instance
-resource limits.
+Implemented first host-side scheduler controls for `agent-infer`: bounded
+`--max-workers`, stable output ordering, and `--skip-completed` resume behavior
+that reuses existing trial and prediction rows without rerunning completed
+instances. Remaining production work is per-instance resource isolation,
+distributed workers, and richer progress reporting.
 
 Phase 5: dashboard eval explorer.
 Render runs, instance results, final diffs, harness logs, and linked traces.
