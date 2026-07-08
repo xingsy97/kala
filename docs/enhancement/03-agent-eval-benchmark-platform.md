@@ -176,8 +176,11 @@ summaries, progress artifacts, failure breakdown bars, and comparison deltas
 from manifest-discovered artifacts without adding eval state to the kernel
 protocol. It also loads per-run trial artifacts from the same manifest, shows
 instance status/resolution/failure/latency/patch size, and exposes each trial's
-artifact refs. Remaining work is richer cross-run charts and dedicated eval
-navigation outside the artifact explorer.
+artifact refs. Trial artifact refs are grouped into final patch, trace, harness
+evidence, logs, prompt, and metadata sections in the dashboard, with preview
+buttons backed by the existing artifact content endpoint. Remaining work is
+richer cross-run charts and dedicated eval navigation outside the artifact
+explorer.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
 Implemented as a deterministic fixture smoke in default CI plus a manual
