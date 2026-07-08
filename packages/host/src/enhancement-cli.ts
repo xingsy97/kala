@@ -18,7 +18,7 @@ import {
   type ProfileSessionInput,
   type ScoreSessionInput,
 } from './eval/generic.js'
-import { auditSessionReliability, type AuditSessionReliabilityInput } from './reliability.js'
+import { auditSessionReliability, replayReliabilityChaos, type AuditSessionReliabilityInput, type ReliabilityChaosReplayInput } from './reliability.js'
 import { buildMemoryIndex, type BuildMemoryIndexInput } from './memory-index.js'
 import { exportSubAgentGraph, type ExportSubAgentGraphInput } from './subagent-graph.js'
 
@@ -29,6 +29,7 @@ export type EnhancementCliCommand =
   | ({ kind: 'eval-compare-runs' } & CompareEvalRunsInput)
   | ({ kind: 'profile-session' } & ProfileSessionInput)
   | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
+  | ({ kind: 'reliability-chaos-replay' } & ReliabilityChaosReplayInput)
   | ({ kind: 'memory-index' } & BuildMemoryIndexInput)
   | ({ kind: 'subagents-graph' } & ExportSubAgentGraphInput)
   | ({ kind: 'artifacts-manifest' } & BuildArtifactManifestInput)
@@ -101,6 +102,14 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       kind: 'reliability-audit-session',
       rootDir: value(rest, '--root-dir') ?? 'runs/reliability/session',
       sessionLogPath: required(rest, '--session-log'),
+    }
+  }
+  if (argv[1] === 'reliability' && argv[2] === 'chaos-replay') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'reliability-chaos-replay',
+      rootDir: value(rest, '--root-dir') ?? 'runs/reliability/chaos',
+      sessionLogPaths: listValue(rest, '--session-logs'),
     }
   }
   if (argv[1] === 'memory' && argv[2] === 'index') {
@@ -203,6 +212,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
     console.log(JSON.stringify({ auditPath: result.auditPath, audit: result.audit }, null, 2))
     return true
   }
+  if (command.kind === 'reliability-chaos-replay') {
+    const result = await replayReliabilityChaos(command)
+    console.log(JSON.stringify({ reportPath: result.reportPath, report: result.report }, null, 2))
+    return true
+  }
   if (command.kind === 'memory-index') {
     const result = await buildMemoryIndex(command)
     console.log(JSON.stringify({ indexPath: result.indexPath, entries: result.index.entries.length, warnings: result.index.warnings }, null, 2))
@@ -262,6 +276,12 @@ function numberValue(argv: readonly string[], name: string): number | undefined 
   const parsed = Number(found)
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`invalid numeric ${name}: ${found}`)
   return parsed
+}
+
+function listValue(argv: readonly string[], name: string): readonly string[] {
+  const found = value(argv, name)
+  if (!found) throw new Error(`missing required ${name}`)
+  return found.split(',').map((item) => item.trim()).filter(Boolean)
 }
 
 function frameworkTarget(value: string): ExportRolloutSidecarInput['frameworkTarget'] {
