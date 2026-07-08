@@ -109,6 +109,7 @@ export async function startHostServer(
     ...(options.settings ? { settings: options.settings } : {}),
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
+    ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
   })
 
   if (options.dashboardHandler) {
