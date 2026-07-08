@@ -39,6 +39,16 @@ Do not reimplement SWE-bench grading. `agent-kernel` should implement inference,
 patch extraction, trace capture, and result ingestion. The official Docker
 harness remains the grading source of truth.
 
+The benchmark adapter must stay above the kernel. SWE-bench does not add reducer
+states, protocol messages, or benchmark-specific effects. The host materializes
+repositories, runs an operator-provided agent command, exports official
+prediction rows, and ingests official result artifacts.
+
+Runtime boundaries are explicit: browser-safe protocol/log types stay on
+`@agent-kernel/shared`; Node-only artifact and eval helpers live on
+`@agent-kernel/shared/enhancement`. This prevents dashboard bundles from
+accidentally importing filesystem or hashing code used by benchmark exporters.
+
 ## Proposed Architecture
 
 Add a benchmark adapter package or host module, tentatively
@@ -200,6 +210,31 @@ This is intentionally an adapter, not a benchmark-specific kernel mode. The
 official harness remains responsible for grading; the adapter only prepares a
 real workspace and prediction row.
 
+## CI and Release Validation
+
+Implemented CI coverage is split into a cheap deterministic smoke path and an
+explicit manual official-harness path.
+
+The default CI job runs:
+
+```bash
+pnpm run verify:swebench-smoke
+```
+
+That script creates local SWE-bench-shaped fixture instances, generates official
+`predictions.jsonl` through `agent-kernel-host eval swebench infer`, ingests
+official-style `instance_results.jsonl` rows through `ingest-results`, compares
+baseline and candidate summaries, and verifies that `grade` builds the official
+`python -m swebench.harness.run_evaluation` command without executing Docker.
+This catches adapter, artifact, summary, and CLI drift in pull requests without
+requiring Docker image builds or a benchmark-scale runner.
+
+`.github/workflows/eval-smoke.yml` adds a scheduled/manual workflow. The
+scheduled job runs the same fixture smoke. The manual job can either print the
+official harness command or execute it with `execute_swebench_harness=true`.
+This keeps expensive external grading opt-in while still making the production
+command visible in CI logs.
+
 ## Output Layout
 
 Use a stable run directory:
@@ -299,11 +334,12 @@ SWE-bench Lite smoke runs.
 
 ## Implementation Phases
 
-Shared foundation now exists in `@agent-kernel/shared`: SWE-bench prediction
-JSONL helpers, official harness command construction, eval experiment/trial
-metadata types, artifact references, redaction, and trace span export. The next
-implementation should build the CLI runner on top of these helpers rather than
-creating a separate benchmark schema.
+Shared foundation now exists in `@agent-kernel/shared/enhancement`: SWE-bench
+prediction JSONL helpers, official harness command construction, eval
+experiment/trial metadata types, artifact references, redaction, and trace span
+export. The CLI runner builds on these helpers rather than creating a separate
+benchmark schema. The default `@agent-kernel/shared` entry remains browser-safe
+for dashboard and executor protocol imports.
 
 Phase 1: prediction exporter.
 Implemented for local/offline fixtures: load instance JSONL, read patch files,
@@ -334,6 +370,12 @@ Phase 5: dashboard eval explorer.
 Implemented first read-only summary view through the artifact explorer. Remaining
 work: dedicated navigation, instance-level result table, final diffs, official
 harness logs, linked traces, and comparison charts.
+
+Phase 6: CI eval smoke and manual official-harness workflow.
+Implemented through `scripts/verify-swebench-smoke.mjs`, default CI, and
+`.github/workflows/eval-smoke.yml`. The default path validates the adapter
+without Docker; the manual path can execute official SWE-bench grading when the
+runner has the required Docker, CPU, memory, and storage resources.
 
 ## Non-Goals
 

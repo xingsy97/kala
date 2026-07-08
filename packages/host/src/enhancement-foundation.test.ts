@@ -19,7 +19,7 @@ import {
   serializeJsonl,
   summarizeEvalRun,
   summarizeEvalScores,
-} from '@agent-kernel/shared'
+} from '@agent-kernel/shared/enhancement'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 const header: HeaderEntry = {

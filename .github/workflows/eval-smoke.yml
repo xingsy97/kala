@@ -1,0 +1,96 @@
+name: Eval Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute_swebench_harness:
+        description: 'Run the official Docker SWE-bench harness instead of dry-run command generation'
+        type: boolean
+        required: false
+        default: false
+      dataset:
+        description: 'Official SWE-bench dataset name for manual harness execution'
+        type: string
+        required: false
+        default: 'princeton-nlp/SWE-bench_Lite'
+      predictions_path:
+        description: 'Prediction JSONL path in the checked-out workspace for manual harness execution'
+        type: string
+        required: false
+        default: ''
+      run_id:
+        description: 'SWE-bench run id for manual harness execution'
+        type: string
+        required: false
+        default: 'manual-smoke'
+      max_workers:
+        description: 'SWE-bench harness worker count'
+        type: string
+        required: false
+        default: '1'
+  schedule:
+    - cron: '17 3 * * 1'
+
+jobs:
+  fixture-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run verify:swebench-smoke
+
+  official-harness-command:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Prepare one-row prediction fixture
+        run: |
+          mkdir -p runs/swebench/manual/patches
+          printf '%s\n' '{"instance_id":"local__repo-1","repo":"local/repo","problem_statement":"smoke"}' > runs/swebench/manual/instances.jsonl
+          printf 'diff --git a/a.txt b/a.txt\n+fixed\n' > runs/swebench/manual/patches/local__repo-1.diff
+          node packages/host/dist/bin/agent-kernel-host.js eval swebench infer \
+            --root-dir runs/swebench \
+            --run-id manual-smoke \
+            --dataset local/SWE-bench-smoke \
+            --model agent-kernel-smoke \
+            --instances-jsonl runs/swebench/manual/instances.jsonl \
+            --patches-dir runs/swebench/manual/patches
+      - name: Official SWE-bench harness dry-run
+        if: ${{ !inputs.execute_swebench_harness }}
+        run: |
+          node packages/host/dist/bin/agent-kernel-host.js eval swebench grade \
+            --dataset local/SWE-bench-smoke \
+            --predictions runs/swebench/manual-smoke/predictions.jsonl \
+            --run-id manual-smoke \
+            --max-workers 1
+      - name: Official SWE-bench harness execute
+        if: ${{ inputs.execute_swebench_harness }}
+        run: |
+          if [ -z "${{ inputs.predictions_path }}" ]; then
+            echo "predictions_path is required when execute_swebench_harness=true" >&2
+            exit 1
+          fi
+          node packages/host/dist/bin/agent-kernel-host.js eval swebench grade \
+            --dataset "${{ inputs.dataset }}" \
+            --predictions "${{ inputs.predictions_path }}" \
+            --run-id "${{ inputs.run_id }}" \
+            --max-workers "${{ inputs.max_workers }}" \
+            --execute

@@ -25,6 +25,13 @@ or model-router change becomes anecdotal.
 Evals should be an adapter layer over real sessions and traces. The kernel must
 not know about datasets, scoring, or benchmark names.
 
+Browser and host boundaries matter here. Eval and artifact writers use Node IO,
+hashing, and filesystem paths, so they are exported from
+`@agent-kernel/shared/enhancement`. The default `@agent-kernel/shared` entry is
+kept browser-safe for dashboard protocol types. This prevents product UI code
+from depending on evaluator internals and keeps CI able to catch accidental
+cross-boundary imports through the dashboard production build.
+
 ## Core Concepts
 
 Dataset: a versioned collection of tasks. A task has input, optional fixture
@@ -170,6 +177,12 @@ adding eval state to the kernel protocol. Remaining work is trace-linked trial
 detail and richer charts.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
+Implemented as a deterministic fixture smoke in default CI plus a manual
+`Eval Smoke` GitHub Actions workflow. The smoke test exercises the real host CLI
+for prediction export, official-style result ingestion, run comparison, and
+dry-run SWE-bench harness command construction. Full Docker grading remains
+manual/opt-in because official SWE-bench evaluation has large CPU, memory, and
+storage requirements.
 
 Phase 5: model-assisted judge evaluators with saved judge traces.
 

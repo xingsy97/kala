@@ -8,7 +8,7 @@ import {
   exportSessionSpans,
   type ArtifactRef,
   type RolloutSidecar,
-} from '@agent-kernel/shared'
+} from '@agent-kernel/shared/enhancement'
 
 import { readSessionLog } from './store/log.js'
 
