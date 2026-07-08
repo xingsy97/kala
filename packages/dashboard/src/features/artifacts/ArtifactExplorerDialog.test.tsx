@@ -515,6 +515,7 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /profiles/i }))
     await screen.findByText('s1')
     fireEvent.click(screen.getByText('Profile Artifact Actions'))
+    fireEvent.change(screen.getByLabelText('Root Dir'), { target: { value: '/tmp/custom-artifacts' } })
     fireEvent.change(screen.getByLabelText('Session ID'), { target: { value: 's2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Run Action' }))
 
@@ -522,7 +523,7 @@ describe('ArtifactExplorerDialog', () => {
     expect(fetchMock).toHaveBeenCalledWith('/enhancement/action', expect.objectContaining({ method: 'POST' }))
     const actionCall = fetchMock.mock.calls.find((call) => call[0] === '/enhancement/action')
     const body = JSON.parse(String((actionCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
-    expect(body).toEqual({ action: 'profile-session', sessionId: 's2' })
+    expect(body).toEqual({ action: 'profile-session', rootDir: '/tmp/custom-artifacts', sessionId: 's2' })
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
   })
 
