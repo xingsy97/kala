@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun } from 'lucide-react'
+import { Archive, Boxes, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun } from 'lucide-react'
 import { Toaster } from 'sonner'
 
 import type {
@@ -44,6 +44,7 @@ import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
+import { ArtifactExplorerDialog } from './features/artifacts/ArtifactExplorerDialog.js'
 import {
   cancelSession,
   clearSession,
@@ -150,6 +151,7 @@ export function App(): JSX.Element {
   const [explorerDrawerOpen, setExplorerDrawerOpen] = useState(false)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
@@ -655,6 +657,15 @@ export function App(): JSX.Element {
         icon: Settings,
         keywords: ['preferences', 'config'],
         run: () => setSettingsOpen(true),
+      },
+      {
+        id: 'view.artifacts',
+        group: 'View',
+        label: 'Open artifacts',
+        hint: 'Inspect host artifact manifests and run outputs.',
+        icon: Boxes,
+        keywords: ['manifest', 'trace', 'eval'],
+        run: () => setArtifactsOpen(true),
       },
       {
         id: 'view.toggle-theme',
@@ -1200,6 +1211,7 @@ export function App(): JSX.Element {
         onOpenChange={setCwdDialogOpen}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
+      <ArtifactExplorerDialog open={artifactsOpen} onOpenChange={setArtifactsOpen} />
       <SessionMetadataDialog
         open={metadataOpen}
         onOpenChange={setMetadataOpen}

@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -285,6 +285,41 @@ describe('wire protocol', () => {
     const dashboard = await fetch(`${url}/custom-route`).then((r) => r.text())
     expect(dashboard).toBe('dashboard middleware')
     expect(handled).toEqual(['/custom-route'])
+  })
+
+  it('exposes artifact manifests only when artifact capture is configured', async () => {
+    const missing = await fetch(`${url}/artifacts/manifest`).then(async (r) => ({
+      status: r.status,
+      body: await r.json() as { error: string },
+    }))
+    expect(missing.status).toBe(404)
+    expect(missing.body.error).toContain('artifact capture')
+
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    await mkdir(join(artifactRootDir, 'llm/s1'), { recursive: true })
+    await writeFile(join(artifactRootDir, 'llm/s1/1.request.json'), JSON.stringify({ ok: true }), 'utf8')
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const manifest = await fetch(`${url}/artifacts/manifest`).then((r) => r.json() as Promise<{
+      summary: { entryCount: number; kinds: Record<string, number> }
+      entries: Array<{ path: string; kind: string }>
+    }>)
+    expect(manifest.summary.entryCount).toBe(1)
+    expect(manifest.summary.kinds.llm_request).toBe(1)
+    expect(manifest.entries[0]).toMatchObject({ path: 'llm/s1/1.request.json', kind: 'llm_request' })
   })
 
   it('drives a full round-trip with dashboard + executor', async () => {

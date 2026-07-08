@@ -85,6 +85,12 @@ not copy request bodies, responses, prompts, logs, or diffs into manifest
 entries. Large files are retained as entries with a `hashSkippedReason`, which
 keeps dashboard indexing responsive on long production runs.
 
+The host exposes the same index to the dashboard at `GET /artifacts/manifest`
+when `artifactRootDir` is configured. The dashboard artifact explorer consumes
+that endpoint as a read-only view: it shows summary counts, kind distribution,
+file metadata, and hash status without loading artifact payload bodies into UI
+state.
+
 This is an index, not a new protocol. It gives the dashboard and cleanup tools a
 stable discovery surface while preserving the existing artifact contracts:
 OpenInference traces, SWE-bench summaries/trials, rollout sidecars, profiles,

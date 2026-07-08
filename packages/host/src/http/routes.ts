@@ -26,6 +26,8 @@ import type {
   ServerSettingsPayload,
 } from '@agent-kernel/shared'
 
+import { buildArtifactManifest } from '../artifact-manifest.js'
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -43,6 +45,8 @@ const MIME: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 }
 
+const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
+
 export function attachJsonRoutes(
   server: HttpServer,
   payloads: {
@@ -51,6 +55,7 @@ export function attachJsonRoutes(
     settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
     addManualModel?: (input: ClientAddManualModel) => ServerSettingsPayload
     deleteManualModel?: (input: ClientDeleteManualModel) => ServerSettingsPayload
+    artifactRootDir?: string | false
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -60,12 +65,14 @@ export function attachJsonRoutes(
     // (cache-buster) still hits.
     const path = url.split('?')[0]!.split('#')[0]
     if (path === '/settings/models' && req.method === 'POST' && payloads.addManualModel) {
+      claimRoute(req)
       void readJson(req)
         .then((body) => sendJson(req, res, payloads.addManualModel!(body as ClientAddManualModel)))
         .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
       return
     }
     if (path === '/settings/models' && req.method === 'DELETE' && payloads.deleteManualModel) {
+      claimRoute(req)
       const parsed = new URL(url, 'http://x')
       try {
         sendJson(
@@ -82,7 +89,19 @@ export function attachJsonRoutes(
       return
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (path === '/artifacts/manifest') {
+      claimRoute(req)
+      if (!payloads.artifactRootDir) {
+        sendError(res, 404, 'artifact capture is not configured')
+        return
+      }
+      void buildArtifactManifest({ rootDir: payloads.artifactRootDir })
+        .then((result) => sendJson(req, res, result.manifest))
+        .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
     if (path === '/models') {
+      claimRoute(req)
       const body: ServerModelsPayload = {
         models: valueOf(payloads.models),
         defaultModel: valueOf(payloads.defaultModel),
@@ -91,6 +110,7 @@ export function attachJsonRoutes(
       return
     }
     if (path === '/settings' && payloads.settings) {
+      claimRoute(req)
       sendJson(req, res, valueOf(payloads.settings))
       return
     }
@@ -99,6 +119,14 @@ export function attachJsonRoutes(
 
 function valueOf<T>(value: T | (() => T)): T {
   return typeof value === 'function' ? (value as () => T)() : value
+}
+
+function claimRoute(req: IncomingMessage): void {
+  ;(req as IncomingMessage & { [ROUTE_CLAIMED]?: true })[ROUTE_CLAIMED] = true
+}
+
+function routeClaimed(req: IncomingMessage): boolean {
+  return (req as IncomingMessage & { [ROUTE_CLAIMED]?: true })[ROUTE_CLAIMED] === true
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -144,7 +172,7 @@ export function attachStaticHandler(server: HttpServer, staticDir: string): void
     if (url.startsWith('/socket.io/')) return
     if (req.method !== 'GET' && req.method !== 'HEAD') return
     // Another handler (e.g. `/models` JSON) may have already responded.
-    if (res.headersSent || res.writableEnded) return
+    if (routeClaimed(req) || res.headersSent || res.writableEnded) return
 
     void serveStatic(root, req, res)
   })
@@ -157,7 +185,7 @@ export function attachRequestHandler(
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/'
     if (url.startsWith('/socket.io/')) return
-    if (res.headersSent || res.writableEnded) return
+    if (routeClaimed(req) || res.headersSent || res.writableEnded) return
     handler(req, res)
   })
 }
