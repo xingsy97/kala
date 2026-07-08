@@ -157,6 +157,7 @@ async function callStreaming(
   signal: AbortSignal | undefined,
   onTextDelta: (delta: string) => void,
 ): Promise<LLMResponse> {
+  const startedAt = performance.now()
   const res = await fetchImpl(apiUrl, {
     method: 'POST',
     headers: {
@@ -184,6 +185,7 @@ async function callStreaming(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let firstChunkAt: number | undefined
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -207,7 +209,13 @@ async function callStreaming(
         evt,
         blocks,
         toolInputBuf,
-        (text) => onTextDelta(text),
+        (text) => {
+          firstChunkAt ??= performance.now()
+          onTextDelta(text)
+        },
+        () => {
+          firstChunkAt ??= performance.now()
+        },
         (u) => {
           inputTokens += u.input
           outputTokens += u.output
@@ -235,6 +243,7 @@ async function callStreaming(
     trace: makeAnthropicTrace(apiUrl, model, body, {
       status: res.status,
       streamEventTypes,
+      metrics: streamMetrics(startedAt, firstChunkAt),
       body: {
         role: 'assistant',
         content: blocks,
@@ -246,6 +255,14 @@ async function callStreaming(
         },
       },
     }),
+  }
+}
+
+function streamMetrics(startedAt: number, firstChunkAt: number | undefined): NonNullable<NonNullable<LLMTrace['response']>['metrics']> {
+  const finishedAt = performance.now()
+  return {
+    durationMs: Math.max(0, Math.round(finishedAt - startedAt)),
+    ...(firstChunkAt !== undefined ? { timeToFirstChunkMs: Math.max(0, Math.round(firstChunkAt - startedAt)) } : {}),
   }
 }
 
@@ -276,6 +293,7 @@ function handleStreamEvent(
   blocks: AnthropicBlock[],
   toolBuf: string[],
   onText: (t: string) => void,
+  onFirstNonTextChunk: () => void,
   onUsage: (u: {
     input: number
     output: number
@@ -302,8 +320,10 @@ function handleStreamEvent(
       target.text += t
       if (t) onText(t)
     } else if (dtype === 'input_json_delta' && target.type === 'tool_use') {
+      onFirstNonTextChunk()
       toolBuf[idx] = (toolBuf[idx] ?? '') + ((delta.partial_json as string) ?? '')
     } else if (dtype === 'thinking_delta' && target.type === 'thinking') {
+      onFirstNonTextChunk()
       target.thinking += (delta.thinking as string) ?? ''
     } else if (dtype === 'signature_delta' && target.type === 'thinking') {
       target.signature = ((target.signature ?? '') +

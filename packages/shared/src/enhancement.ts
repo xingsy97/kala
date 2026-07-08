@@ -850,6 +850,11 @@ export type SessionProfile = {
   models: readonly string[]
   missingUsageCalls: number
   llmTraceMissingCalls: number
+  llmLatencyCalls: number
+  averageLlmDurationMs?: number
+  p95LlmDurationMs?: number
+  averageTimeToFirstChunkMs?: number
+  p95TimeToFirstChunkMs?: number
   wallTimeMs?: number
   firstEventAt?: string
   lastEventAt?: string
@@ -879,6 +884,8 @@ export function createSessionProfile(input: {
   let llmTraceMissingCalls = 0
   let estimatedCostUsd = 0
   let unknownCost = false
+  const llmDurations: number[] = []
+  const ttfts: number[] = []
   for (const entry of input.events) {
     for (const effect of entry.effects) {
       if (effect.kind === 'call_tool') toolCalls += 1
@@ -889,6 +896,13 @@ export function createSessionProfile(input: {
     if (entry.model) models.add(entry.model)
     else if (entry.llmTrace?.model) models.add(entry.llmTrace.model)
     if (!entry.llmTrace) llmTraceMissingCalls += 1
+    const metrics = entry.llmTrace?.response?.metrics
+    if (typeof metrics?.durationMs === 'number' && Number.isFinite(metrics.durationMs)) {
+      llmDurations.push(metrics.durationMs)
+    }
+    if (typeof metrics?.timeToFirstChunkMs === 'number' && Number.isFinite(metrics.timeToFirstChunkMs)) {
+      ttfts.push(metrics.timeToFirstChunkMs)
+    }
     if (!entry.usage) {
       missingUsageCalls += 1
       unknownCost = true
@@ -929,10 +943,30 @@ export function createSessionProfile(input: {
     models: [...models].sort(),
     missingUsageCalls,
     llmTraceMissingCalls,
+    llmLatencyCalls: llmDurations.length,
+    ...(llmDurations.length > 0 ? {
+      averageLlmDurationMs: average(llmDurations),
+      p95LlmDurationMs: percentile(llmDurations, 0.95),
+    } : {}),
+    ...(ttfts.length > 0 ? {
+      averageTimeToFirstChunkMs: average(ttfts),
+      p95TimeToFirstChunkMs: percentile(ttfts, 0.95),
+    } : {}),
     ...(wallTimeMs !== undefined ? { wallTimeMs } : {}),
     ...(firstEventAt ? { firstEventAt } : {}),
     ...(lastEventAt ? { lastEventAt } : {}),
   }
+}
+
+function average(values: readonly number[]): number {
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length))
+}
+
+function percentile(values: readonly number[], p: number): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))
+  return Math.round(sorted[index]!)
 }
 
 function priceForTokens(tokens: number, perMillion: number | undefined): number {

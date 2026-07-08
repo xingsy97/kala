@@ -280,6 +280,12 @@ describe('enhancement foundation', () => {
           event: { kind: 'llm_response', message: { role: 'assistant', content: [] } },
           effects: [],
           model: 'gpt-test',
+          llmTrace: {
+            provider: 'openai',
+            model: 'gpt-test',
+            request: { url: 'https://api.openai.com/v1/chat/completions', headers: {}, body: {} },
+            response: { status: 200, metrics: { durationMs: 1800, timeToFirstChunkMs: 250 } },
+          },
           usage: {
             inputTokens: 1000,
             outputTokens: 500,
@@ -296,6 +302,9 @@ describe('enhancement foundation', () => {
     })
     expect(profile.llmCalls).toBe(1)
     expect(profile.totalInputTokens).toBe(1000)
+    expect(profile.llmLatencyCalls).toBe(1)
+    expect(profile.averageLlmDurationMs).toBe(1800)
+    expect(profile.averageTimeToFirstChunkMs).toBe(250)
     expect(profile.costStatus).toBe('estimated')
     expect(profile.estimatedCostUsd).toBe(0.00201)
   })

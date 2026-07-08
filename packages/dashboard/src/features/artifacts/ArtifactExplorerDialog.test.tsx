@@ -290,6 +290,11 @@ describe('ArtifactExplorerDialog', () => {
           costStatus: 'estimated',
           estimatedCostUsd: 0.0123,
           models: ['gpt-test'],
+          llmLatencyCalls: 2,
+          averageLlmDurationMs: 2400,
+          p95LlmDurationMs: 3100,
+          averageTimeToFirstChunkMs: 320,
+          p95TimeToFirstChunkMs: 480,
         },
       }), { status: 200 }))
 
@@ -302,7 +307,11 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('1,234')).toBeTruthy()
     expect(screen.getAllByText('$0.0123').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('gpt-test')).toBeTruthy()
+    expect(document.body.textContent ?? '').toContain('gpt-test')
+    expect(screen.getByText('Latency calls')).toBeTruthy()
+    expect(screen.getByText('Avg TTFT')).toBeTruthy()
+    expect(screen.getByText('320ms')).toBeTruthy()
+    expect(screen.getByText('480ms')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fprofile%2Fsession%2Fprofile.json',
       { cache: 'no-store' },

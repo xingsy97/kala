@@ -79,6 +79,10 @@ The output `profile.json` records LLM calls, tool calls, failed tool results,
 token totals, missing usage, missing provider traces, model ids, wall time, and
 estimated cost when every model has a price entry. If usage or pricing is
 missing, `costStatus` is `unknown`; the runner does not invent cost precision.
+Streaming adapters also attach optional `llmTrace.response.metrics` with
+`durationMs` and `timeToFirstChunkMs`. Session profiles aggregate those fields
+into latency call count, average/p95 LLM duration, and average/p95 TTFT. This is
+trace/profile metadata only and does not influence reducer control flow.
 
 ## Dashboard
 
@@ -89,7 +93,7 @@ Add compact profiling views:
   explorer as a `Profiles` tab that discovers `profile.json` artifacts through
   the manifest endpoint, loads their content on demand, and shows LLM/tool
   calls, token totals, known estimated cost, unknown-cost count, missing LLM
-  traces, and model ids.
+  traces, model ids, average/p95 duration, and average/p95 TTFT.
 - Eval run cost distribution.
 - Slowest calls and largest context calls.
 - TTFT for streaming LLM calls.
@@ -100,7 +104,8 @@ Add compact profiling views:
 - Implemented for session-log profile export.
 - Browser-level component test for profile artifact rendering with missing
   provider trace counts and estimated cost.
-- Integration test that LLM spans include TTFT when streaming.
+- Implemented adapter tests that streaming OpenAI and Anthropic traces include
+  duration and TTFT metrics.
 - Browser test for cost summary with missing usage fields.
 
 ## Non-Goals
