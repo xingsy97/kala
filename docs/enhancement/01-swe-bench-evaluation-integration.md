@@ -242,7 +242,12 @@ network. The kernel should not know that a session is a SWE-bench run.
 
 ## Dashboard Integration
 
-Add an Eval Runs view after the CLI and data model exist:
+The dashboard now has a first eval explorer surface inside the Artifacts modal.
+It consumes the host artifact manifest, finds eval `summary.json` artifacts,
+loads them through the bounded `/artifacts/content` endpoint, and renders run
+level metrics without adding eval state to the kernel or Socket.IO protocol.
+
+The full Eval Runs product view should continue from this foundation:
 
 - Run table: dataset, split, model, pass rate, completed, failed, timed out,
   cost, wall time.
@@ -326,7 +331,9 @@ instances. Remaining production work is per-instance resource isolation,
 distributed workers, and richer progress reporting.
 
 Phase 5: dashboard eval explorer.
-Render runs, instance results, final diffs, harness logs, and linked traces.
+Implemented first read-only summary view through the artifact explorer. Remaining
+work: dedicated navigation, instance-level result table, final diffs, official
+harness logs, linked traces, and comparison charts.
 
 ## Non-Goals
 
