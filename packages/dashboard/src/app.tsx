@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Boxes, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun } from 'lucide-react'
+import { Archive, BarChart3, Boxes, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun } from 'lucide-react'
 import { Toaster } from 'sonner'
 
 import type {
@@ -152,6 +152,7 @@ export function App(): JSX.Element {
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
+  const [artifactInitialMode, setArtifactInitialMode] = useState<'artifacts' | 'eval' | 'profiles' | 'memory'>('artifacts')
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
@@ -549,6 +550,11 @@ export function App(): JSX.Element {
     setCwdDialogOpen(true)
   }
 
+  const openArtifacts = (mode: 'artifacts' | 'eval' | 'profiles' | 'memory' = 'artifacts'): void => {
+    setArtifactInitialMode(mode)
+    setArtifactsOpen(true)
+  }
+
   const commandPaletteCommands = useMemo<readonly CommandPaletteItem[]>(() => {
     const cmds: CommandPaletteItem[] = []
     const socket = session.socket
@@ -659,13 +665,22 @@ export function App(): JSX.Element {
         run: () => setSettingsOpen(true),
       },
       {
+        id: 'view.eval',
+        group: 'View',
+        label: 'Open eval dashboard',
+        hint: 'Inspect benchmark runs, trial evidence, and comparisons.',
+        icon: BarChart3,
+        keywords: ['swebench', 'benchmark', 'comparison', 'score'],
+        run: () => openArtifacts('eval'),
+      },
+      {
         id: 'view.artifacts',
         group: 'View',
         label: 'Open artifacts',
         hint: 'Inspect host artifact manifests and run outputs.',
         icon: Boxes,
         keywords: ['manifest', 'trace', 'eval'],
-        run: () => setArtifactsOpen(true),
+        run: () => openArtifacts('artifacts'),
       },
       {
         id: 'view.toggle-theme',
@@ -900,6 +915,8 @@ export function App(): JSX.Element {
               onOpenExplorer={() => setExplorerDrawerOpen(true)}
               explorerAvailable={!wideLayout}
               onChangeCwd={openCwdDialog}
+              onOpenEval={() => openArtifacts('eval')}
+              onOpenArtifacts={() => openArtifacts('artifacts')}
               onOpenSettings={() => setSettingsOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
@@ -1211,7 +1228,15 @@ export function App(): JSX.Element {
         onOpenChange={setCwdDialogOpen}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
-      <ArtifactExplorerDialog open={artifactsOpen} onOpenChange={setArtifactsOpen} />
+      <ArtifactExplorerDialog
+        open={artifactsOpen}
+        initialMode={artifactInitialMode}
+        onOpenChange={setArtifactsOpen}
+        onOpenSession={(sessionId) => {
+          selectSession(sessionId)
+          setArtifactsOpen(false)
+        }}
+      />
       <SessionMetadataDialog
         open={metadataOpen}
         onOpenChange={setMetadataOpen}
@@ -1354,6 +1379,8 @@ function WorkbenchToolbar({
   onOpenExplorer,
   explorerAvailable,
   onChangeCwd,
+  onOpenEval,
+  onOpenArtifacts,
   onOpenSettings,
   onToggleInspector,
   inspectorOpen,
@@ -1368,6 +1395,8 @@ function WorkbenchToolbar({
   onOpenExplorer(): void
   explorerAvailable: boolean
   onChangeCwd(): void
+  onOpenEval(): void
+  onOpenArtifacts(): void
   onOpenSettings(): void
   onToggleInspector(): void
   inspectorOpen: boolean
@@ -1419,6 +1448,26 @@ function WorkbenchToolbar({
       ) : null}
       <span className="min-w-0 flex-1" />
       {sessionSelected ? <ConnectionStatus status={status} /> : null}
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onOpenEval}
+        title="Eval dashboard"
+        aria-label="open eval dashboard"
+        data-testid="eval-dashboard-button"
+      >
+        <BarChart3 className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onOpenArtifacts}
+        title="Artifacts"
+        aria-label="open artifacts"
+        data-testid="artifacts-button"
+      >
+        <Boxes className="h-4 w-4" />
+      </Button>
       <Button
         variant="ghost"
         size="icon"

@@ -39,7 +39,9 @@ export type ArtifactManifest = {
 
 type Props = {
   open: boolean
+  initialMode?: ViewMode
   onOpenChange(open: boolean): void
+  onOpenSession?(sessionId: string): void
 }
 
 type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory'
@@ -222,9 +224,9 @@ type TrialArtifactGroup = {
   items: readonly TrialArtifactItem[]
 }
 
-export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Element {
+export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpenChange, onOpenSession }: Props): JSX.Element {
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
-  const [mode, setMode] = useState<ViewMode>('artifacts')
+  const [mode, setMode] = useState<ViewMode>(initialMode)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
@@ -244,6 +246,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
 
   useEffect(() => {
     if (!open) return
+    setMode(initialMode)
     let cancelled = false
     setLoading(true)
     setError(null)
@@ -268,7 +271,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
     return () => {
       cancelled = true
     }
-  }, [open, reloadToken])
+  }, [open, initialMode, reloadToken])
 
   const kindRows = useMemo(() => {
     if (!manifest) return []
@@ -395,8 +398,8 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
         <DialogHeader className="border-b border-border px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <DialogTitle>Artifacts</DialogTitle>
-              <DialogDescription>Run output index from the host artifact store.</DialogDescription>
+              <DialogTitle>{mode === 'eval' ? 'Eval' : mode === 'profiles' ? 'Profiles' : mode === 'memory' ? 'Memory' : 'Artifacts'}</DialogTitle>
+              <DialogDescription>{mode === 'eval' ? 'Benchmark run summaries, progress, comparisons, and trial evidence.' : 'Run output index from the host artifact store.'}</DialogDescription>
             </div>
             <div className="flex items-center gap-2">
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
@@ -435,6 +438,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             error={error ?? evalError}
             loading={loading}
             onOpenArtifact={setArtifactDetail}
+            onOpenSession={onOpenSession}
           />
         ) : mode === 'profiles' ? (
           <ProfilesView
@@ -550,6 +554,7 @@ function EvalRunsView({
   error,
   loading,
   onOpenArtifact,
+  onOpenSession,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly EvalRunRow[]
@@ -564,6 +569,7 @@ function EvalRunsView({
   error: string | null
   loading: boolean
   onOpenArtifact(request: ArtifactDetailRequest): void
+  onOpenSession?(sessionId: string): void
 }): JSX.Element {
   const comparisonCount = comparisons.length
   const selectedRun = rows.find((row) => row.key === selectedRunPath)
@@ -639,6 +645,7 @@ function EvalRunsView({
             loading={trialsLoading}
             error={trialsError}
             onOpenArtifact={onOpenArtifact}
+            onOpenSession={onOpenSession}
           />
           </div>
         ) : null}
@@ -647,23 +654,63 @@ function EvalRunsView({
             <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">Comparisons</div>
             <div className="max-h-48 divide-y divide-border overflow-auto text-xs">
               {comparisons.map((row) => (
-                <div key={row.path} className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px_minmax(150px,0.7fr)] gap-3 px-3 py-2 max-lg:grid-cols-[1fr_1fr_80px_80px]">
-                  <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px]">{row.comparison.baseline?.experimentId ?? 'baseline'}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+                <div key={row.path} className="grid gap-2 px-3 py-2">
+                  <div className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px_minmax(150px,0.7fr)] gap-3 max-lg:grid-cols-[1fr_1fr_80px_80px]">
+                    <div className="min-w-0">
+                      <div className="truncate font-mono text-[11px]">{row.comparison.baseline?.experimentId ?? 'baseline'}</div>
+                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+                    </div>
+                    <div className="truncate font-mono text-[11px]">{row.comparison.candidate?.experimentId ?? 'candidate'}</div>
+                    <Delta label="resolved" value={row.comparison.deltas?.resolved} />
+                    <Delta label="failed" value={row.comparison.deltas?.failed} invert />
+                    <Delta label="timeout" value={row.comparison.deltas?.timedOut} invert />
+                    <Delta label="pass" value={row.comparison.deltas?.passRate} percent />
+                    <FailureDeltaChips deltas={row.comparison.failureDeltas} />
                   </div>
-                  <div className="truncate font-mono text-[11px]">{row.comparison.candidate?.experimentId ?? 'candidate'}</div>
-                  <Delta label="resolved" value={row.comparison.deltas?.resolved} />
-                  <Delta label="failed" value={row.comparison.deltas?.failed} invert />
-                  <Delta label="timeout" value={row.comparison.deltas?.timedOut} invert />
-                  <Delta label="pass" value={row.comparison.deltas?.passRate} percent />
-                  <FailureDeltaChips deltas={row.comparison.failureDeltas} />
+                  <ComparisonDeltaBars comparison={row.comparison} />
                 </div>
               ))}
             </div>
           </div>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+function ComparisonDeltaBars({ comparison }: { comparison: EvalRunComparison }): JSX.Element {
+  const deltas = [
+    { label: 'resolved', value: comparison.deltas?.resolved ?? 0, invert: false, percent: false },
+    { label: 'failed', value: comparison.deltas?.failed ?? 0, invert: true, percent: false },
+    { label: 'timeout', value: comparison.deltas?.timedOut ?? 0, invert: true, percent: false },
+    { label: 'pass rate', value: comparison.deltas?.passRate ?? 0, invert: false, percent: true },
+  ]
+  const max = Math.max(0.01, ...deltas.map((delta) => Math.abs(delta.value)))
+  return (
+    <div className="grid grid-cols-4 gap-2 max-lg:grid-cols-2" aria-label="comparison delta chart">
+      {deltas.map((delta) => {
+        const good = delta.invert ? delta.value < 0 : delta.value > 0
+        const bad = delta.invert ? delta.value > 0 : delta.value < 0
+        return (
+          <div key={delta.label} className="min-w-0 rounded border border-border bg-background/60 px-2 py-1">
+            <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+              <span className="truncate">{delta.label}</span>
+              <span className={cn('font-mono', good && 'text-emerald-600 dark:text-emerald-300', bad && 'text-rose-600 dark:text-rose-300')}>
+                {formatDeltaValue(delta.value, delta.percent)}
+              </span>
+            </div>
+            <div className="relative h-1.5 overflow-hidden rounded bg-muted">
+              <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
+              <div
+                className={cn('absolute top-0 h-full', good ? 'bg-emerald-500' : bad ? 'bg-rose-500' : 'bg-muted-foreground/40')}
+                style={delta.value >= 0
+                  ? { left: '50%', width: `${Math.min(50, (Math.abs(delta.value) / max) * 50)}%` }
+                  : { right: '50%', width: `${Math.min(50, (Math.abs(delta.value) / max) * 50)}%` }}
+              />
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -716,6 +763,7 @@ function EvalTrialDetail({
   loading,
   error,
   onOpenArtifact,
+  onOpenSession,
 }: {
   run: EvalRunRow
   trials: readonly EvalTrialRow[]
@@ -725,6 +773,7 @@ function EvalTrialDetail({
   loading: boolean
   error: string | null
   onOpenArtifact(request: ArtifactDetailRequest): void
+  onOpenSession?(sessionId: string): void
 }): JSX.Element {
   const artifactGroups = selectedTrial
     ? groupTrialArtifacts(run.root, selectedTrial.trial.artifacts ?? [])
@@ -791,6 +840,17 @@ function EvalTrialDetail({
               <Stat label="Artifacts" value={String(selectedTrial.trial.artifacts?.length ?? 0)} />
               <Stat label="Session" value={selectedTrial.trial.sessionId ? 'linked' : 'none'} />
             </div>
+            {selectedTrial.trial.sessionId ? (
+              <button
+                type="button"
+                onClick={() => onOpenSession?.(selectedTrial.trial.sessionId!)}
+                disabled={!onOpenSession}
+                className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-left transition-colors hover:bg-muted/40 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-background"
+              >
+                <div className="text-[11px] font-medium uppercase text-muted-foreground">Linked Session</div>
+                <div className="truncate font-mono text-[11px]" title={selectedTrial.trial.sessionId}>{selectedTrial.trial.sessionId}</div>
+              </button>
+            ) : null}
             {primaryArtifacts.length > 0 ? (
               <div className="grid grid-cols-2 gap-1.5">
                 {primaryArtifacts.slice(0, 4).map((item) => (
@@ -1328,6 +1388,11 @@ function formatUsd(value: unknown): string {
 
 function formatDurationMetric(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}ms` : 'n/a'
+}
+
+function formatDeltaValue(value: number, percent: boolean): string {
+  const prefix = value > 0 ? '+' : ''
+  return percent ? `${prefix}${Math.round(value * 100)}%` : `${prefix}${value}`
 }
 
 function formatConfidence(value: unknown): string {
