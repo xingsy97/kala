@@ -1,15 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { globTool } from './glob.js'
-import { makeCtx } from './_test-helpers.js'
+import { makeCtx, makeTempWorkspace } from './_test-helpers.js'
 
 describe('glob', () => {
   let root: string
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'ak-glob-'))
+    root = makeTempWorkspace('ak-glob-')
     writeFileSync(join(root, 'a.ts'), '')
     writeFileSync(join(root, 'b.ts'), '')
     writeFileSync(join(root, 'c.js'), '')

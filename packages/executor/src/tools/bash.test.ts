@@ -1,17 +1,17 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { bashTool } from './bash.js'
 import { bashOutputTool } from './bash-output.js'
-import { makeCtx, makeCtxWithCwd } from './_test-helpers.js'
+import { makeCtx, makeCtxWithCwd, makeTempWorkspace, normalizePath } from './_test-helpers.js'
 import { createSandbox } from '../sandbox.js'
 
 describe('bash', () => {
   let root: string
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'ak-bash-'))
+    root = makeTempWorkspace('ak-bash-')
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
@@ -41,7 +41,7 @@ describe('bash', () => {
       makeCtxWithCwd(root, child),
     )
 
-    expect(out.split('\n')[0]).toBe(child)
+    expect(normalizePath(out.split('\n')[0]!)).toBe(normalizePath(child))
     expect(out).toContain('--- exit code: 0')
   })
 
@@ -55,8 +55,8 @@ describe('bash', () => {
       },
     )
 
-    expect(out.split('\n')[0]).toBe(root)
-    expect(out.split('\n')[0]).not.toBe(process.cwd())
+    expect(normalizePath(out.split('\n')[0]!)).toBe(normalizePath(root))
+    expect(normalizePath(out.split('\n')[0]!)).not.toBe(normalizePath(process.cwd()))
     expect(out).toContain('--- exit code: 0')
   })
 
@@ -121,7 +121,7 @@ describe('bash', () => {
         signal: new AbortController().signal,
       },
     )
-    expect(out).toContain(process.cwd())
+    expect(normalizePath(out)).toContain(normalizePath(process.cwd()))
     expect(out).toContain('--- exit code: 0')
   })
 

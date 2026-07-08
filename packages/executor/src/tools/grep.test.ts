@@ -1,15 +1,14 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { grepTool } from './grep.js'
-import { makeCtx } from './_test-helpers.js'
+import { makeCtx, makeTempWorkspace } from './_test-helpers.js'
 
 describe('grep', () => {
   let root: string
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'ak-grep-'))
+    root = makeTempWorkspace('ak-grep-')
     writeFileSync(join(root, 'a.ts'), 'hello world\nsecond hello')
     writeFileSync(join(root, 'b.ts'), 'nothing here')
     writeFileSync(join(root, 'c.js'), 'hello js')
