@@ -58,6 +58,7 @@ type EvalRunSummary = {
   resolved?: number
   failed?: number
   timedOut?: number
+  failureCounts?: Record<string, number>
   metrics?: Record<string, unknown>
 }
 
@@ -497,7 +498,7 @@ function EvalRunsView({
           <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
         </div>
       </aside>
-      <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_minmax(220px,1fr)_auto] gap-3 p-3 max-lg:grid-rows-none">
+      <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_auto_minmax(220px,1fr)_auto] gap-3 p-3 max-lg:grid-rows-none">
         {error ? (
           <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
@@ -547,6 +548,7 @@ function EvalRunsView({
         {selectedRun ? (
           <div className="contents" key={selectedRun.key}>
           <EvalProgressStrip run={selectedRun} />
+          <FailureBreakdown run={selectedRun} />
           <EvalTrialDetail
             run={selectedRun}
             trials={trials}
@@ -757,6 +759,36 @@ function ProgressBar({
         {segments.map((segment) => segment.value > 0 ? (
           <div key={segment.key} className={segment.className} style={{ width: `${Math.max(4, (segment.value / denominator) * 100)}%` }} />
         ) : null)}
+      </div>
+    </div>
+  )
+}
+
+function FailureBreakdown({ run }: { run: EvalRunRow }): JSX.Element | null {
+  const counts = run.summary?.failureCounts
+  const entries: Array<[string, number]> = counts
+    ? Object.entries(counts)
+      .filter(([, count]) => typeof count === 'number' && Number.isFinite(count) && count > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    : []
+  if (entries.length === 0) return null
+  const total = entries.reduce((sum, [, count]) => sum + count, 0)
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-2 text-xs">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="font-medium">Failure Breakdown</div>
+        <div className="font-mono text-[11px] text-muted-foreground">{total} labeled</div>
+      </div>
+      <div className="grid gap-1.5">
+        {entries.slice(0, 6).map(([label, count]) => (
+          <div key={label} className="grid grid-cols-[140px_minmax(0,1fr)_52px] items-center gap-2">
+            <div className="truncate font-mono text-[11px]" title={label}>{label}</div>
+            <div className="h-1.5 overflow-hidden rounded bg-muted">
+              <div className="h-full bg-rose-500" style={{ width: `${Math.max(5, (count / Math.max(1, total)) * 100)}%` }} />
+            </div>
+            <div className="text-right font-mono text-[11px] text-muted-foreground">{count}</div>
+          </div>
+        ))}
       </div>
     </div>
   )

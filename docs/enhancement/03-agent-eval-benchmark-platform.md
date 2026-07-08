@@ -172,11 +172,12 @@ Phase 2: SWE-bench adapter plugs into the same experiment/trial model.
 
 Phase 3: trace-aware comparison dashboard. The host now provides summary-level
 run comparison artifacts. The dashboard artifact explorer now renders eval run
-summaries and comparison deltas from manifest-discovered artifacts without
-adding eval state to the kernel protocol. It also loads per-run trial artifacts
-from the same manifest, shows instance status/resolution/failure/latency/patch
-size, and exposes each trial's artifact refs. Remaining work is direct trace
-deep links and richer charts.
+summaries, progress artifacts, failure breakdown bars, and comparison deltas
+from manifest-discovered artifacts without adding eval state to the kernel
+protocol. It also loads per-run trial artifacts from the same manifest, shows
+instance status/resolution/failure/latency/patch size, and exposes each trial's
+artifact refs. Remaining work is richer cross-run charts and dedicated eval
+navigation outside the artifact explorer.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
 Implemented as a deterministic fixture smoke in default CI plus a manual

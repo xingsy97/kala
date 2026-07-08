@@ -114,6 +114,7 @@ describe('ArtifactExplorerDialog', () => {
           resolved: 1,
           failed: 1,
           timedOut: 0,
+          failureCounts: { empty_patch: 1, test_failed: 2 },
           metrics: { passRate: 0.5 },
         },
       }), { status: 200 }))
@@ -178,6 +179,10 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getByText('agent-test')).toBeTruthy()
     expect(screen.getByText('50%')).toBeTruthy()
     expect(screen.getByText('Progress')).toBeTruthy()
+    expect(screen.getByText('Failure Breakdown')).toBeTruthy()
+    expect(screen.getByText('empty_patch')).toBeTruthy()
+    expect(screen.getByText('test_failed')).toBeTruthy()
+    expect(screen.getByText('3 labeled')).toBeTruthy()
     expect(screen.getAllByText('completed').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Workers')).toBeTruthy()
     expect(await screen.findByText('base')).toBeTruthy()
