@@ -101,6 +101,7 @@ describe('ChatPanel', () => {
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { container } = render(
       <ChatPanel
         messages={[
@@ -126,6 +127,12 @@ describe('ChatPanel', () => {
     expect(container.querySelectorAll('code').length).toBeGreaterThanOrEqual(1)
     expect(container.querySelector('[data-testid="code-block-raw"]')).toBeTruthy()
     expect(container.textContent ?? '').toContain('console.log(1)')
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('validateDOMNesting'),
+      expect.stringContaining('<pre> cannot appear as a descendant of <p>'),
+      expect.anything(),
+    )
+    errorSpy.mockRestore()
   })
 
   it('leaves user text as literal (no markdown parsing)', () => {
