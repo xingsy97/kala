@@ -192,6 +192,9 @@ step: it validates the selected instance set, shards it across workers, writes
 the benchmark, invoking Docker-based official grading, and ingesting full
 results remain explicit CLI/CI operations because they are expensive,
 environment-specific, and should be reproducible outside a browser session.
+The same dashboard surface can invoke lightweight eval artifact actions for
+session scoring and run-summary comparison through `POST /enhancement/action`;
+those actions still write the same artifacts as their CLI counterparts.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
 Implemented as a deterministic fixture smoke in default CI plus a manual

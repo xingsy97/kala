@@ -154,6 +154,17 @@ async function waitForWorkspace(
   throw new Error(`workspace wait timeout: ${workspaceId}`)
 }
 
+async function postEnhancementAction(url: string, body: Record<string, unknown>): Promise<unknown> {
+  const response = await fetch(`${url}/enhancement/action`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const payload = await response.json() as unknown
+  if (!response.ok) throw new Error(JSON.stringify(payload))
+  return payload
+}
+
 describe('wire protocol', () => {
   let server: HostServer
   let dir: string
@@ -383,6 +394,52 @@ describe('wire protocol', () => {
     expect(plan.model).toBe('agent-test')
     expect(plan.shards.flatMap((shard) => shard.instanceIds).sort()).toEqual(['repo__one-1', 'repo__three-3'])
     expect(plan.resourceHints.timeoutMs).toBe(300000)
+  })
+
+  it('runs lightweight enhancement artifact actions from dashboard routes', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const workspaceRoot = join(dir, 'workspace')
+    await mkdir(join(workspaceRoot, '.agent-kernel', 'memory'), { recursive: true })
+    await writeFile(join(workspaceRoot, '.agent-kernel', 'memory', 'style.md'), '---\nname: Style\nconfidence: 0.8\n---\nUse concise answers.\n', 'utf8')
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+    const { record } = await server.store.ensure({ sessionId: 'dash-actions-session', defaultConfig: config })
+    await server.store.record(record.sessionId, { kind: 'user_message', text: 'hi' }, [], { ...record.state, cursor: record.state.cursor + 1 })
+
+    const profile = await postEnhancementAction(url, { action: 'profile-session', sessionId: record.sessionId }) as { profilePath: string; profile: { sessionId: string } }
+    expect(profile.profilePath).toBe(join(artifactRootDir, 'profile.json'))
+    expect(profile.profile.sessionId).toBe(record.sessionId)
+
+    const audit = await postEnhancementAction(url, { action: 'reliability-audit-session', sessionId: record.sessionId }) as { auditPath: string; audit: { sessionId: string } }
+    expect(audit.auditPath).toBe(join(artifactRootDir, 'reliability-audit.json'))
+    expect(audit.audit.sessionId).toBe(record.sessionId)
+
+    const memory = await postEnhancementAction(url, { action: 'memory-index', workspaceRoot }) as { indexPath: string; entries: number }
+    expect(memory.indexPath).toBe(join(artifactRootDir, 'memory-index.json'))
+    expect(memory.entries).toBe(1)
+
+    const graph = await postEnhancementAction(url, { action: 'subagents-graph' }) as { graphPath: string; nodes: number }
+    expect(graph.graphPath).toBe(join(artifactRootDir, 'subagent-graph.json'))
+    expect(graph.nodes).toBeGreaterThanOrEqual(1)
+
+    const unsupported = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'not-real' }),
+    })
+    expect(unsupported.status).toBe(400)
   })
 
   it('drives a full round-trip with dashboard + executor', async () => {

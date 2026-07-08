@@ -498,6 +498,34 @@ describe('ArtifactExplorerDialog', () => {
     )
   })
 
+  it('runs lightweight enhancement artifact actions from dashboard tabs', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/profile/session/profile.json',
+        mediaType: 'application/json',
+        body: { sessionId: 's1', llmCalls: 1, toolCalls: 0, costStatus: 'unknown' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'profile-session', profilePath: '/tmp/artifacts/profile.json', profile: { sessionId: 's2' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
+    await screen.findByText('llm/s1/1.request.json')
+
+    fireEvent.click(screen.getByRole('button', { name: /profiles/i }))
+    await screen.findByText('s1')
+    fireEvent.click(screen.getByText('Profile Artifact Actions'))
+    fireEvent.change(screen.getByLabelText('Session ID'), { target: { value: 's2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Run Action' }))
+
+    await screen.findByText('Created /tmp/artifacts/profile.json')
+    expect(fetchMock).toHaveBeenCalledWith('/enhancement/action', expect.objectContaining({ method: 'POST' }))
+    const actionCall = fetchMock.mock.calls.find((call) => call[0] === '/enhancement/action')
+    const body = JSON.parse(String((actionCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
+    expect(body).toEqual({ action: 'profile-session', sessionId: 's2' })
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
+  })
+
   it('loads memory index artifacts in the Memory tab', async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))

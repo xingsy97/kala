@@ -207,6 +207,24 @@ type SweBenchPlanResponse = {
   warnings?: readonly string[]
 }
 
+type EnhancementActionResponse = Record<string, unknown> & { action?: string; error?: string }
+
+type EnhancementActionField = {
+  key: string
+  label: string
+  placeholder?: string
+  required?: boolean
+  defaultValue?: string
+  numeric?: boolean
+  boolean?: boolean
+}
+
+type EnhancementActionConfig = {
+  action: string
+  label: string
+  fields: readonly EnhancementActionField[]
+}
+
 type SessionProfile = {
   sessionId?: string
   llmCalls?: number
@@ -566,7 +584,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             loading={loading}
             onOpenArtifact={setArtifactDetail}
             onOpenSession={onOpenSession}
-            onPlanCreated={() => setReloadToken((token) => token + 1)}
+            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
           />
         ) : mode === 'profiles' ? (
           <ProfilesView
@@ -574,6 +592,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             rows={profileRows}
             error={error ?? profileError}
             loading={loading}
+            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
           />
         ) : mode === 'memory' ? (
           <MemoryView
@@ -581,6 +600,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             rows={memoryRows}
             error={error ?? memoryError}
             loading={loading}
+            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
           />
         ) : (
           <OpsView
@@ -589,6 +609,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             error={error ?? opsError}
             loading={loading}
             onOpenArtifact={setArtifactDetail}
+            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
           />
         )}
       </DialogContent>
@@ -694,7 +715,7 @@ function EvalRunsView({
   loading,
   onOpenArtifact,
   onOpenSession,
-  onPlanCreated,
+  onArtifactActionComplete,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly EvalRunRow[]
@@ -713,7 +734,7 @@ function EvalRunsView({
   loading: boolean
   onOpenArtifact(request: ArtifactDetailRequest): void
   onOpenSession?(sessionId: string): void
-  onPlanCreated(): void
+  onArtifactActionComplete(): void
 }): JSX.Element {
   const comparisonCount = comparisons.length
   const selectedRun = rows.find((row) => row.key === selectedRunPath)
@@ -740,7 +761,8 @@ function EvalRunsView({
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
         {manifest && rows.length === 0 && comparisons.length === 0 && !error ? <div className="text-xs text-muted-foreground">No eval summaries found.</div> : null}
         <EvalScorecard rows={rows} selectedRun={selectedRun} />
-        <SweBenchPlanPanel onCreated={onPlanCreated} />
+        <SweBenchPlanPanel onCreated={onArtifactActionComplete} />
+        <EnhancementActionPanel title="Eval Artifact Actions" actions={evalActionConfigs} onComplete={onArtifactActionComplete} />
         <div className="min-h-0 overflow-hidden rounded-md border border-border">
           {rows.length > 0 ? (
           <ScrollArea className="h-full">
@@ -936,6 +958,139 @@ function compactFormPayload(values: Record<string, string>): Record<string, unkn
   }
   return payload
 }
+
+function EnhancementActionPanel({ title, actions, onComplete }: { title: string; actions: readonly EnhancementActionConfig[]; onComplete(): void }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [selectedAction, setSelectedAction] = useState(actions[0]?.action ?? '')
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<EnhancementActionResponse | null>(null)
+  const config = actions.find((action) => action.action === selectedAction) ?? actions[0]
+  const configAction = config?.action
+
+  useEffect(() => {
+    if (!config) return
+    const next: Record<string, string> = {}
+    for (const field of config.fields) next[field.key] = field.defaultValue ?? ''
+    setValues(next)
+    setError(null)
+    setResult(null)
+  }, [configAction])
+
+  if (!config) return <></>
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    const activeConfig = config
+    if (!activeConfig) return
+    setSubmitting(true)
+    setError(null)
+    setResult(null)
+    const payload: Record<string, unknown> = { action: activeConfig.action }
+    for (const field of activeConfig.fields) {
+      const raw = values[field.key]?.trim() ?? ''
+      if (!raw) continue
+      if (field.boolean) payload[field.key] = raw === 'true'
+      else if (field.numeric) payload[field.key] = Number(raw)
+      else if (field.key === 'sessionLogPaths') payload[field.key] = raw.split(',').map((item) => item.trim()).filter(Boolean)
+      else payload[field.key] = raw
+    }
+    try {
+      const res = await fetch('/enhancement/action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const body = await res.json().catch(() => null) as EnhancementActionResponse | null
+      if (!res.ok) throw new Error(body?.error ?? `enhancement action failed: ${res.status}`)
+      setResult(body ?? {})
+      onComplete()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mb-3 rounded-md border border-border bg-background/70">
+      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30" onClick={() => setOpen((value) => !value)}>
+        <span className="font-medium">{title}</span>
+        <span className="font-mono text-[11px] text-muted-foreground">{open ? 'hide' : 'show'}</span>
+      </button>
+      {open ? (
+        <form onSubmit={(event) => void submit(event)} className="grid gap-3 border-t border-border p-3 text-xs">
+          <label className="grid gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">Action</span>
+            <select className="h-8 rounded border border-input bg-background px-2 text-sm" value={selectedAction} onChange={(event) => setSelectedAction(event.currentTarget.value)}>
+              {actions.map((action) => <option key={action.action} value={action.action}>{action.label}</option>)}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
+            {config.fields.map((field) => (
+              <LabeledInput
+                key={`${config.action}:${field.key}`}
+                label={field.label}
+                value={values[field.key] ?? field.defaultValue ?? ''}
+                onChange={(value) => setValues((current) => ({ ...current, [field.key]: value }))}
+                required={field.required}
+                placeholder={field.placeholder}
+                inputMode={field.numeric ? 'numeric' : undefined}
+              />
+            ))}
+          </div>
+          {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
+          {result ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">Created {enhancementResultLabel(result)}</div> : null}
+          <div className="flex justify-end">
+            <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Running...' : 'Run Action'}</Button>
+          </div>
+        </form>
+      ) : null}
+    </div>
+  )
+}
+
+function enhancementResultLabel(result: EnhancementActionResponse): string {
+  const keys = ['profilePath', 'auditPath', 'reportPath', 'indexPath', 'graphPath', 'comparisonPath', 'scoresPath', 'adapterPath', 'sidecarPath']
+  for (const key of keys) {
+    const value = result[key]
+    if (typeof value === 'string') return value
+  }
+  const artifact = asRecord(result.artifact)
+  if (typeof artifact.uri === 'string') return artifact.uri
+  const trace = asRecord(result.traceArtifact)
+  if (typeof trace.uri === 'string') return trace.uri
+  return result.action ?? 'artifact'
+}
+
+const sessionFields: readonly EnhancementActionField[] = [
+  { key: 'sessionId', label: 'Session ID', placeholder: 'current or target session id' },
+  { key: 'sessionLogPath', label: 'Session Log Path', placeholder: 'optional fallback path' },
+]
+
+const evalActionConfigs: readonly EnhancementActionConfig[] = [
+  { action: 'eval-score-session', label: 'Score session', fields: [...sessionFields, { key: 'instanceId', label: 'Instance ID' }, { key: 'patchPath', label: 'Patch Path' }, { key: 'requireDone', label: 'Require Done', placeholder: 'true or false', boolean: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
+  { action: 'eval-compare-runs', label: 'Compare eval runs', fields: [{ key: 'baselineSummaryPath', label: 'Baseline Summary', required: true }, { key: 'candidateSummaryPath', label: 'Candidate Summary', required: true }] },
+]
+
+const profileActionConfigs: readonly EnhancementActionConfig[] = [
+  { action: 'profile-session', label: 'Profile session', fields: [...sessionFields, { key: 'pricingPath', label: 'Pricing Path' }] },
+]
+
+const memoryActionConfigs: readonly EnhancementActionConfig[] = [
+  { action: 'memory-index', label: 'Build memory index', fields: [{ key: 'workspaceRoot', label: 'Workspace Root' }, { key: 'includeGlobal', label: 'Include Global', placeholder: 'true or false', boolean: true }] },
+]
+
+const opsActionConfigs: readonly EnhancementActionConfig[] = [
+  { action: 'reliability-audit-session', label: 'Audit session reliability', fields: sessionFields },
+  { action: 'reliability-chaos-replay', label: 'Replay reliability chaos', fields: [{ key: 'sessionLogPaths', label: 'Session Log Paths', required: true, placeholder: 'comma separated paths' }] },
+  { action: 'trace-export-session', label: 'Export trace', fields: [...sessionFields, { key: 'runId', label: 'Run ID' }, { key: 'evalInstanceId', label: 'Eval Instance ID' }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
+  { action: 'rollout-export-segments', label: 'Export rollout segments', fields: [...sessionFields, { key: 'runId', label: 'Run ID' }, { key: 'evalInstanceId', label: 'Eval Instance ID' }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
+  { action: 'rollout-export-session', label: 'Export rollout sidecar', fields: [...sessionFields, { key: 'taskId', label: 'Task ID', required: true }, { key: 'frameworkTarget', label: 'Framework', required: true, placeholder: 'slime, verl, trl, openrlhf, unknown' }, { key: 'model', label: 'Model' }, { key: 'weightVersion', label: 'Weight Version' }, { key: 'rewardPath', label: 'Reward Path' }, { key: 'tokenSegmentsPath', label: 'Token Segments Path' }] },
+  { action: 'rollout-export-adapter', label: 'Export rollout adapter', fields: [{ key: 'sidecarPath', label: 'Sidecar Path', required: true }, { key: 'frameworkTarget', label: 'Framework', placeholder: 'slime, verl, trl, openrlhf, unknown' }] },
+  { action: 'subagents-graph', label: 'Export subagent graph', fields: [{ key: 'sessionsDir', label: 'Sessions Dir', placeholder: 'defaults to host sessions dir' }] },
+]
 
 function EvalWorkerPlansPanel({ plans, onOpenArtifact }: { plans: readonly EvalWorkerPlanRow[]; onOpenArtifact(request: ArtifactDetailRequest): void }): JSX.Element {
   return (
@@ -1389,11 +1544,13 @@ function ProfilesView({
   rows,
   error,
   loading,
+  onArtifactActionComplete,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly ProfileRow[]
   error: string | null
   loading: boolean
+  onArtifactActionComplete(): void
 }): JSX.Element {
   const totals = rows.reduce((acc, row) => {
     acc.llmCalls += row.profile.llmCalls ?? 0
@@ -1425,6 +1582,7 @@ function ProfilesView({
           </div>
         ) : null}
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
+        <EnhancementActionPanel title="Profile Artifact Actions" actions={profileActionConfigs} onComplete={onArtifactActionComplete} />
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No profile artifacts found.</div> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
@@ -1471,11 +1629,13 @@ function MemoryView({
   rows,
   error,
   loading,
+  onArtifactActionComplete,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly MemoryIndexRow[]
   error: string | null
   loading: boolean
+  onArtifactActionComplete(): void
 }): JSX.Element {
   const entries = rows.flatMap((row) => (row.index.entries ?? []).map((entry) => ({ row, entry })))
   const totals = entries.reduce((acc, item) => {
@@ -1506,6 +1666,7 @@ function MemoryView({
           </div>
         ) : null}
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
+        <EnhancementActionPanel title="Memory Artifact Actions" actions={memoryActionConfigs} onComplete={onArtifactActionComplete} />
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No memory index artifacts found.</div> : null}
         {entries.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
@@ -1559,12 +1720,14 @@ function OpsView({
   error,
   loading,
   onOpenArtifact,
+  onArtifactActionComplete,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly OpsArtifactRow[]
   error: string | null
   loading: boolean
   onOpenArtifact(request: ArtifactDetailRequest): void
+  onArtifactActionComplete(): void
 }): JSX.Element {
   const groups = groupOpsRows(rows)
   const reliabilityIssues = rows.reduce((sum, row) => sum + opsIssueCount(row), 0)
@@ -1592,6 +1755,7 @@ function OpsView({
           </div>
         ) : null}
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
+        <EnhancementActionPanel title="Ops Artifact Actions" actions={opsActionConfigs} onComplete={onArtifactActionComplete} />
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No ops artifacts found.</div> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
