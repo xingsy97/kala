@@ -64,13 +64,21 @@ const manifest: ArtifactManifest = {
       mtime: '2026-07-09T00:00:00.000Z',
       sha256: 'profileabcdef',
     },
+    {
+      path: 'runs/memory/memory-index.json',
+      kind: 'memory_index',
+      mediaType: 'application/json',
+      bytes: 520,
+      mtime: '2026-07-09T00:00:00.000Z',
+      sha256: 'memoryabcdef',
+    },
   ],
   summary: {
-    entryCount: 7,
-    totalBytes: 5972,
-    hashedCount: 6,
+    entryCount: 8,
+    totalBytes: 6492,
+    hashedCount: 7,
     hashSkippedCount: 1,
-    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_progress: 1, eval_trial: 1, eval_comparison: 1, profile: 1 },
+    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_progress: 1, eval_trial: 1, eval_comparison: 1, profile: 1, memory_index: 1 },
   },
 }
 
@@ -96,7 +104,7 @@ describe('ArtifactExplorerDialog', () => {
     })
     await screen.findByText('llm/s1/1.request.json')
     expect(screen.getByText('large.log')).toBeTruthy()
-    expect(screen.getByText('6/7')).toBeTruthy()
+    expect(screen.getByText('7/8')).toBeTruthy()
     expect(screen.getByText('hash skipped')).toBeTruthy()
   })
 
@@ -178,12 +186,14 @@ describe('ArtifactExplorerDialog', () => {
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
 
-    fireEvent.click(screen.getByRole('button', { name: /eval runs/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^eval$/i }))
 
     await screen.findByText('run1')
+    expect(screen.getByText('Runs')).toBeTruthy()
+    expect(screen.getByText('Selected pass')).toBeTruthy()
     expect(screen.getByText('local')).toBeTruthy()
     expect(screen.getByText('agent-test')).toBeTruthy()
-    expect(screen.getByText('50%')).toBeTruthy()
+    expect(screen.getAllByText('50%').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Progress')).toBeTruthy()
     expect(screen.getByText('Failure Breakdown')).toBeTruthy()
     expect(screen.getByText('empty_patch')).toBeTruthy()
@@ -194,6 +204,7 @@ describe('ArtifactExplorerDialog', () => {
     expect(await screen.findByText('base')).toBeTruthy()
     expect(screen.getByText('candidate')).toBeTruthy()
     expect(screen.getByText('+50%')).toBeTruthy()
+    expect(screen.getByText('empty_patch -1')).toBeTruthy()
     await waitFor(() => expect(screen.getAllByText('local__repo-1').length).toBeGreaterThanOrEqual(1))
     expect(screen.getAllByText('resolved').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Final Patch').length).toBeGreaterThanOrEqual(1)
@@ -266,7 +277,7 @@ describe('ArtifactExplorerDialog', () => {
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
 
-    fireEvent.click(screen.getByRole('button', { name: /eval runs/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^eval$/i }))
 
     await screen.findByText('run1')
     expect(screen.getByText('running')).toBeTruthy()
@@ -314,6 +325,58 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getByText('480ms')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fprofile%2Fsession%2Fprofile.json',
+      { cache: 'no-store' },
+    )
+  })
+
+  it('loads memory index artifacts in the Memory tab', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/memory/memory-index.json',
+        mediaType: 'application/json',
+        body: {
+          generatedAt: '2026-07-09T00:00:00.000Z',
+          entries: [
+            {
+              scope: 'workspace',
+              key: 'user-style',
+              path: '/repo/.agent-kernel/memory/user-style.md',
+              bytes: 120,
+              status: 'active',
+              description: 'User prefers concise answers',
+              type: 'user',
+              source: 'consolidator',
+              confidence: 0.9,
+              sessionId: 's1',
+            },
+            {
+              scope: 'workspace',
+              key: 'old-rule',
+              path: '/repo/.agent-kernel/memory/.tombstones/old-rule.json',
+              bytes: 80,
+              status: 'tombstoned',
+              deletedAt: '2026-07-09T00:00:00.000Z',
+              archivedPath: '/repo/.agent-kernel/memory/.tombstones/old-rule.md',
+            },
+          ],
+          warnings: ['ignored malformed tombstone'],
+        },
+      }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
+    await screen.findByText('llm/s1/1.request.json')
+
+    fireEvent.click(screen.getByRole('button', { name: /memory/i }))
+
+    await screen.findByText('user-style')
+    expect(screen.getByText('old-rule')).toBeTruthy()
+    expect(screen.getByText('Tombstoned')).toBeTruthy()
+    expect(screen.getByText('90%')).toBeTruthy()
+    expect(screen.getByText('User prefers concise answers')).toBeTruthy()
+    expect(screen.getByText('2026-07-09T00:00:00.000Z')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Fmemory%2Fmemory-index.json',
       { cache: 'no-store' },
     )
   })

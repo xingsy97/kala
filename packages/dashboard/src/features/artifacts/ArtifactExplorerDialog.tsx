@@ -42,7 +42,7 @@ type Props = {
   onOpenChange(open: boolean): void
 }
 
-type ViewMode = 'artifacts' | 'eval' | 'profiles'
+type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory'
 
 type ArtifactContentResponse = {
   path: string
@@ -173,6 +173,34 @@ type ProfileRow = {
   profile: SessionProfile
 }
 
+type MemoryIndexEntry = {
+  scope?: 'workspace' | 'global'
+  key?: string
+  path?: string
+  bytes?: number
+  status?: 'active' | 'tombstoned'
+  name?: string
+  description?: string
+  type?: string
+  source?: string
+  confidence?: number
+  generatedAt?: string
+  sessionId?: string
+  deletedAt?: string
+  archivedPath?: string
+}
+
+type MemoryIndex = {
+  generatedAt?: string
+  entries?: readonly MemoryIndexEntry[]
+  warnings?: readonly string[]
+}
+
+type MemoryIndexRow = {
+  path: string
+  index: MemoryIndex
+}
+
 type ArtifactDetailRequest = {
   path: string
   label: string
@@ -210,6 +238,8 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [evalTrialsError, setEvalTrialsError] = useState<string | null>(null)
   const [profileRows, setProfileRows] = useState<readonly ProfileRow[]>([])
   const [profileError, setProfileError] = useState<string | null>(null)
+  const [memoryRows, setMemoryRows] = useState<readonly MemoryIndexRow[]>([])
+  const [memoryError, setMemoryError] = useState<string | null>(null)
   const [artifactDetail, setArtifactDetail] = useState<ArtifactDetailRequest | null>(null)
 
   useEffect(() => {
@@ -337,6 +367,27 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
     }
   }, [open, mode, manifest])
 
+  useEffect(() => {
+    if (!open || mode !== 'memory' || !manifest) return
+    const memoryIndexes = manifest.entries.filter((entry) => entry.kind === 'memory_index' || entry.path.endsWith('/memory-index.json'))
+    let cancelled = false
+    setMemoryError(null)
+    setMemoryRows([])
+    void Promise.all(memoryIndexes.map(async (entry): Promise<MemoryIndexRow> => {
+      const content = await fetchArtifactContent(entry.path)
+      return { path: entry.path, index: content.body as MemoryIndex }
+    }))
+      .then((rows) => {
+        if (!cancelled) setMemoryRows(rows.sort((a, b) => a.path.localeCompare(b.path)))
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setMemoryError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, mode, manifest])
+
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -350,8 +401,9 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             <div className="flex items-center gap-2">
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
                 <button type="button" className={tabClass(mode === 'artifacts')} onClick={() => setMode('artifacts')}>Artifacts</button>
-                <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')}>Eval Runs</button>
+                <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')}>Eval</button>
                 <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')}>Profiles</button>
+                <button type="button" className={tabClass(mode === 'memory')} onClick={() => setMode('memory')}>Memory</button>
               </div>
               <Button
                 type="button"
@@ -384,11 +436,18 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             loading={loading}
             onOpenArtifact={setArtifactDetail}
           />
-        ) : (
+        ) : mode === 'profiles' ? (
           <ProfilesView
             manifest={manifest}
             rows={profileRows}
             error={error ?? profileError}
+            loading={loading}
+          />
+        ) : (
+          <MemoryView
+            manifest={manifest}
+            rows={memoryRows}
+            error={error ?? memoryError}
             loading={loading}
           />
         )}
@@ -527,6 +586,7 @@ function EvalRunsView({
         ) : null}
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
         {manifest && rows.length === 0 && comparisons.length === 0 && !error ? <div className="text-xs text-muted-foreground">No eval summaries found.</div> : null}
+        <EvalScorecard rows={rows} selectedRun={selectedRun} />
         <div className="min-h-0 overflow-hidden rounded-md border border-border">
           {rows.length > 0 ? (
           <ScrollArea className="h-full">
@@ -583,11 +643,11 @@ function EvalRunsView({
           </div>
         ) : null}
         {comparisons.length > 0 ? (
-          <div className="rounded-md border border-border">
+          <div className="min-h-0 rounded-md border border-border">
             <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">Comparisons</div>
-            <div className="divide-y divide-border text-xs">
+            <div className="max-h-48 divide-y divide-border overflow-auto text-xs">
               {comparisons.map((row) => (
-                <div key={row.path} className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px] gap-3 px-3 py-2 max-lg:grid-cols-[1fr_1fr_80px_80px]">
+                <div key={row.path} className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px_minmax(150px,0.7fr)] gap-3 px-3 py-2 max-lg:grid-cols-[1fr_1fr_80px_80px]">
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px]">{row.comparison.baseline?.experimentId ?? 'baseline'}</div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
@@ -597,12 +657,52 @@ function EvalRunsView({
                   <Delta label="failed" value={row.comparison.deltas?.failed} invert />
                   <Delta label="timeout" value={row.comparison.deltas?.timedOut} invert />
                   <Delta label="pass" value={row.comparison.deltas?.passRate} percent />
+                  <FailureDeltaChips deltas={row.comparison.failureDeltas} />
                 </div>
               ))}
             </div>
           </div>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+function EvalScorecard({ rows, selectedRun }: { rows: readonly EvalRunRow[]; selectedRun: EvalRunRow | undefined }): JSX.Element | null {
+  if (rows.length === 0) return null
+  const totals = rows.reduce((acc, row) => {
+    acc.trials += row.summary?.trialCount ?? row.progress?.selectedCount ?? 0
+    acc.resolved += row.summary?.resolved ?? 0
+    acc.failed += row.summary?.failed ?? row.progress?.failedCount ?? 0
+    acc.timedOut += row.summary?.timedOut ?? row.progress?.timedOutCount ?? 0
+    return acc
+  }, { trials: 0, resolved: 0, failed: 0, timedOut: 0 })
+  const selectedPassRate = selectedRun ? selectedRun.summary?.metrics?.passRate : undefined
+  return (
+    <div className="grid grid-cols-5 gap-2 text-xs max-xl:grid-cols-3 max-md:grid-cols-2">
+      <Stat label="Runs" value={String(rows.length)} />
+      <Stat label="Trials" value={formatInteger(totals.trials)} />
+      <Stat label="Resolved" value={formatInteger(totals.resolved)} />
+      <Stat label="Failed" value={formatInteger(totals.failed + totals.timedOut)} />
+      <Stat label="Selected pass" value={formatPercent(selectedPassRate)} />
+    </div>
+  )
+}
+
+function FailureDeltaChips({ deltas }: { deltas: Record<string, number> | undefined }): JSX.Element {
+  const entries = deltas
+    ? Object.entries(deltas).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value !== 0)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]) || a[0].localeCompare(b[0]))
+      .slice(0, 3)
+    : []
+  if (entries.length === 0) return <div className="truncate text-[11px] text-muted-foreground">no failure deltas</div>
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {entries.map(([label, value]) => (
+        <span key={label} className={cn('max-w-full truncate rounded border px-1.5 py-0.5 font-mono text-[10px]', value < 0 ? 'border-emerald-200 text-emerald-700 dark:border-emerald-900 dark:text-emerald-300' : 'border-rose-200 text-rose-700 dark:border-rose-900 dark:text-rose-300')} title={`${label} ${value > 0 ? '+' : ''}${value}`}>
+          {label} {value > 0 ? '+' : ''}{value}
+        </span>
+      ))}
     </div>
   )
 }
@@ -986,6 +1086,93 @@ function ProfilesView({
   )
 }
 
+function MemoryView({
+  manifest,
+  rows,
+  error,
+  loading,
+}: {
+  manifest: ArtifactManifest | null
+  rows: readonly MemoryIndexRow[]
+  error: string | null
+  loading: boolean
+}): JSX.Element {
+  const entries = rows.flatMap((row) => (row.index.entries ?? []).map((entry) => ({ row, entry })))
+  const totals = entries.reduce((acc, item) => {
+    if (item.entry.scope === 'global') acc.global += 1
+    else acc.workspace += 1
+    if (item.entry.status === 'tombstoned') acc.tombstoned += 1
+    else acc.active += 1
+    return acc
+  }, { active: 0, tombstoned: 0, workspace: 0, global: 0 })
+  const warningCount = rows.reduce((sum, row) => sum + (row.index.warnings?.length ?? 0), 0)
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
+      <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
+        <div className="grid gap-2 text-xs">
+          <Stat label="Indexes" value={String(rows.length)} />
+          <Stat label="Active" value={String(totals.active)} />
+          <Stat label="Tombstoned" value={String(totals.tombstoned)} />
+          <Stat label="Workspace" value={String(totals.workspace)} />
+          <Stat label="Global" value={String(totals.global)} />
+          <Stat label="Warnings" value={String(warningCount)} />
+          <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
+        </div>
+      </aside>
+      <div className="min-h-0 p-3">
+        {error ? (
+          <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+            {error}
+          </div>
+        ) : null}
+        {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
+        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No memory index artifacts found.</div> : null}
+        {entries.length > 0 ? (
+          <ScrollArea className="h-full rounded-md border border-border">
+            <div className="min-w-[980px] divide-y divide-border text-xs">
+              <div className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
+                <div>Scope</div>
+                <div>Status</div>
+                <div>Key</div>
+                <div>Description</div>
+                <div>Confidence</div>
+                <div>Session</div>
+                <div>Provenance</div>
+              </div>
+              {entries.map(({ row, entry }, index) => (
+                <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 px-3 py-2">
+                  <div className="font-mono text-[11px]">{entry.scope ?? 'unknown'}</div>
+                  <MemoryStatus status={entry.status} />
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-[11px]" title={entry.key}>{entry.key ?? 'unknown'}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={row.path}>{row.path}</div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate" title={entry.description ?? entry.name}>{entry.description ?? entry.name ?? '-'}</div>
+                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{entry.type ?? 'memory'}</div>
+                  </div>
+                  <div className="font-mono text-[11px]">{formatConfidence(entry.confidence)}</div>
+                  <div className="truncate font-mono text-[11px] text-muted-foreground" title={entry.sessionId}>{entry.sessionId ?? '-'}</div>
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-[11px]" title={entry.path}>{entry.status === 'tombstoned' ? entry.deletedAt ?? 'deleted' : entry.source ?? 'unknown'}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={entry.archivedPath ?? entry.path}>{entry.archivedPath ?? entry.path ?? '-'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function MemoryStatus({ status }: { status: MemoryIndexEntry['status'] | undefined }): JSX.Element {
+  if (status === 'tombstoned') return <div className="font-mono text-[11px] text-amber-700 dark:text-amber-300">tombstoned</div>
+  if (status === 'active') return <div className="font-mono text-[11px] text-emerald-700 dark:text-emerald-300">active</div>
+  return <div className="font-mono text-[11px] text-muted-foreground">unknown</div>
+}
+
 function ResultPill({ resolved }: { resolved: boolean | undefined }): JSX.Element {
   if (resolved === true) {
     return <div className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-300"><CheckCircle2 className="h-3 w-3" aria-hidden="true" />resolved</div>
@@ -1141,6 +1328,10 @@ function formatUsd(value: unknown): string {
 
 function formatDurationMetric(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}ms` : 'n/a'
+}
+
+function formatConfidence(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : 'n/a'
 }
 
 async function fetchArtifactContent(path: string): Promise<ArtifactContentResponse> {
