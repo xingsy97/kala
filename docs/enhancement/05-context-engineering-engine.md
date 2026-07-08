@@ -50,6 +50,23 @@ Each stage should emit metadata:
 - reason codes
 - artifact references
 
+Implemented live message assembly artifacts are written under
+`message-assembly/<session_id>/<event_seq>.json` when artifact capture is
+enabled. They currently record final kernel messages, tool registry size,
+estimated token contribution by category, and named pipeline stages without
+changing the provider request or the replay ledger.
+
+Implemented contribution categories include system, user, assistant, tool, tool
+registry, images, thinking blocks, and memory. Memory contribution is derived
+only from structured `memory` tool calls and matching tool results already
+present in kernel messages. The host does not infer memory from arbitrary text
+and does not inject hidden memory content.
+
+Implemented stages include `host.preflight` and `memory.contribution`. The
+memory stage records whether memory tool context is present, its estimated token
+contribution, and dropped memory tool items if preflight compaction removes
+them.
+
 ## Budgeting Policy
 
 Use explicit budget partitions:
@@ -97,6 +114,8 @@ and `Compaction Summary`.
 - Unit tests for retention ordering under tight budgets.
 - Snapshot tests for assembled messages from representative sessions.
 - Tests that tool-call/tool-result pairs are not split incorrectly.
+- Implemented tests for structured memory tool contribution in assembly
+  artifacts.
 - Tests that compaction summaries preserve required fields.
 - Browser tests for token breakdown and no duplicate API body rendering.
 
@@ -105,4 +124,3 @@ and `Compaction Summary`.
 - Do not add context budget logic to the reducer.
 - Do not use ad hoc string parsing for structured messages.
 - Do not silently drop active user intent or open tool chains.
-

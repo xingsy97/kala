@@ -646,7 +646,7 @@ export type MessageAssemblyArtifact = {
   toolCount: number
   estimatedTokens: number
   parts: Array<{
-    name: 'system' | 'user' | 'assistant' | 'tool' | 'tools' | 'images' | 'thinking'
+    name: 'system' | 'user' | 'assistant' | 'tool' | 'tools' | 'images' | 'thinking' | 'memory'
     messages: number
     chars: number
     estimatedTokens: number
@@ -667,6 +667,12 @@ export function createMessageAssemblyArtifact(input: {
     messages: number
     chars: number
   }>()
+  const memoryCallIds = new Set<string>()
+  for (const message of input.messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call' && content.name === 'memory') memoryCallIds.add(content.callId)
+    }
+  }
   for (const message of input.messages) {
     const existing = buckets.get(message.role) ?? { messages: 0, chars: 0 }
     existing.messages += 1
@@ -678,6 +684,13 @@ export function createMessageAssemblyArtifact(input: {
       const bucket = buckets.get(key) ?? { messages: 0, chars: 0 }
       bucket.chars += estimateContentChars(content)
       buckets.set(key, bucket)
+    }
+    const memoryChars = estimateMemoryContributionChars(message, memoryCallIds)
+    if (memoryChars > 0) {
+      const bucket = buckets.get('memory') ?? { messages: 0, chars: 0 }
+      bucket.messages += 1
+      bucket.chars += memoryChars
+      buckets.set('memory', bucket)
     }
   }
   const toolSchemaChars = input.tools.reduce((sum, tool) => sum + tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
@@ -702,6 +715,15 @@ export function createMessageAssemblyArtifact(input: {
     parts,
     stages: input.stages ?? [],
   }
+}
+
+function estimateMemoryContributionChars(message: Message, memoryCallIds: ReadonlySet<string>): number {
+  let chars = 0
+  for (const content of message.content) {
+    if (content.type === 'tool_call' && content.name === 'memory') chars += estimateContentChars(content)
+    if (content.type === 'tool_result' && memoryCallIds.has(content.callId)) chars += estimateContentChars(content)
+  }
+  return chars
 }
 
 function estimateMessageChars(messages: readonly Message[]): number {
