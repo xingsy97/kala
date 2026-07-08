@@ -464,6 +464,10 @@ describe('wire protocol', () => {
     expect(ingested.summaryPath).toBe(join(artifactRootDir, 'dash-export', 'summary.json'))
     expect(ingested.resolved).toBe(1)
 
+    const grade = await postEnhancementAction(url, { action: 'swebench-grade-command', runId: 'dash-export', dataset: 'SWE-bench/local', predictionsPath: exported.predictionsPath, maxWorkers: 2, instanceIds: 'local__repo-1' }) as { command: string[]; shellCommand: string }
+    expect(grade.command).toContain(exported.predictionsPath)
+    expect(grade.shellCommand).toContain('dash-export')
+
     const unsupported = await fetch(`${url}/enhancement/action`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

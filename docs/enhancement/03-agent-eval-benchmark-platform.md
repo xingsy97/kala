@@ -192,11 +192,13 @@ step: it validates the selected instance set, shards it across workers, writes
 invoke lightweight eval artifact actions through `POST /enhancement/action`:
 session scoring, model-judge response parsing, run-summary comparison,
 SWE-bench offline patch inference, session-to-SWE-bench export, and official
-result ingestion. These actions only read existing files/session logs and write
-the same artifacts as their CLI counterparts.
+result ingestion. It can also construct the official SWE-bench grading command
+as a dry-run artifact action, without executing Docker. These actions only read
+existing files/session logs, derive command lines, or write the same artifacts
+as their CLI counterparts.
 
 Running the agent over a benchmark shard, cloning/materializing many workspaces,
-and invoking Docker-based official grading remain explicit CLI/CI operations.
+and executing Docker-based official grading remain explicit CLI/CI operations.
 Those jobs are long-running, environment-specific, and need reproducible process
 control outside a browser session; the dashboard is the control/readout surface
 for their artifacts, not a second benchmark scheduler.

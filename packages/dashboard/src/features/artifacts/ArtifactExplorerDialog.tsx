@@ -1062,6 +1062,7 @@ function enhancementResultLabel(result: EnhancementActionResponse): string {
   if (typeof artifact.uri === 'string') return artifact.uri
   const trace = asRecord(result.traceArtifact)
   if (typeof trace.uri === 'string') return trace.uri
+  if (typeof result.shellCommand === 'string') return result.shellCommand
   return result.action ?? 'artifact'
 }
 
@@ -1077,6 +1078,7 @@ const evalActionConfigs: readonly EnhancementActionConfig[] = [
   { action: 'swebench-infer-patches', label: 'SWE-bench infer patches', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'split', label: 'Split' }, { key: 'model', label: 'Model', required: true }, { key: 'instancesJsonl', label: 'Instances JSONL', required: true }, { key: 'patchesDir', label: 'Patches Dir', required: true }, { key: 'instanceIds', label: 'Instance IDs', placeholder: 'comma separated', list: true }, { key: 'limit', label: 'Limit', numeric: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
   { action: 'swebench-export-session', label: 'SWE-bench export session', fields: [...sessionFields, { key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'split', label: 'Split' }, { key: 'model', label: 'Model', required: true }, { key: 'instanceId', label: 'Instance ID', required: true }, { key: 'modelPatchPath', label: 'Model Patch Path', required: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
   { action: 'swebench-ingest-results', label: 'SWE-bench ingest results', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'resultsDir', label: 'Results Dir', required: true }] },
+  { action: 'swebench-grade-command', label: 'SWE-bench grade command', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'predictionsPath', label: 'Predictions Path', required: true }, { key: 'maxWorkers', label: 'Max Workers', numeric: true }, { key: 'instanceIds', label: 'Instance IDs', placeholder: 'comma separated', list: true }, { key: 'modal', label: 'Modal', placeholder: 'true or false', boolean: true }, { key: 'cwd', label: 'CWD' }] },
 ]
 
 const profileActionConfigs: readonly EnhancementActionConfig[] = [
