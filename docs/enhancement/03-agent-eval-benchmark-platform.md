@@ -145,12 +145,26 @@ low-cardinality summary label such as `resolved`, `empty_patch`, or
 `agent_error`. This is intentionally separate from official benchmark grading:
 SWE-bench pass/fail still comes from the official Docker harness.
 
+Implemented run comparison command:
+
+```bash
+agent-kernel-host enhancement eval compare-runs \
+  --root-dir runs/eval/compare \
+  --baseline-summary runs/swebench/base/summary.json \
+  --candidate-summary runs/swebench/candidate/summary.json
+```
+
+It writes `eval-comparison.json` with resolved/failed/timeout/pass-rate deltas
+and per-failure-label deltas. The command reads summaries only and does not
+mutate either run directory.
+
 Phase 1: local eval run directory and deterministic scorers over synthetic
 fixtures. Implemented for session logs and patch files.
 
 Phase 2: SWE-bench adapter plugs into the same experiment/trial model.
 
-Phase 3: trace-aware comparison dashboard.
+Phase 3: trace-aware comparison dashboard. The host now provides summary-level
+run comparison artifacts; dashboard visualization remains the UI layer.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
 

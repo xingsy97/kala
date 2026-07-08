@@ -12,6 +12,7 @@ import {
   buildSweBenchGradeCommand,
   exportSessionForSweBench,
   inferSweBenchPatchRun,
+  ingestSweBenchResults,
   sweBenchRunLayout,
   writeSweBenchPredictionRun,
 } from './swebench.js'
@@ -288,6 +289,77 @@ describe('SWE-bench eval runner', () => {
     expect(result.trials[0]?.failureLabel).toBe('empty_patch')
     const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
     expect(summary.failureCounts.empty_patch).toBe(1)
+  })
+
+  it('ingests official-style SWE-bench instance results into trials and summary', async () => {
+    const instancesPath = join(dir, 'instances.jsonl')
+    const patchesDir = join(dir, 'patches')
+    const resultsDir = join(dir, 'evaluation_results')
+    mkdirSync(patchesDir)
+    mkdirSync(resultsDir)
+    await writeFile(
+      instancesPath,
+      JSON.stringify({ instance_id: 'a__repo-1' }) + '\n' + JSON.stringify({ instance_id: 'b__repo-2' }) + '\n',
+      'utf8',
+    )
+    await writeFile(join(patchesDir, 'a__repo-1.diff'), 'diff --git a/x b/x\n', 'utf8')
+    await writeFile(join(patchesDir, 'b__repo-2.diff'), 'diff --git a/y b/y\n', 'utf8')
+    await inferSweBenchPatchRun({
+      rootDir: dir,
+      runId: 'run9',
+      dataset: 'local',
+      model: 'gpt-test',
+      instancesJsonl: instancesPath,
+      patchesDir,
+    })
+    await writeFile(
+      join(resultsDir, 'instance_results.jsonl'),
+      JSON.stringify({ instance_id: 'a__repo-1', resolved: true }) + '\n' +
+        JSON.stringify({ instance_id: 'b__repo-2', resolved: false, error: 'tests failed' }) + '\n',
+      'utf8',
+    )
+
+    const result = await ingestSweBenchResults({ rootDir: dir, runId: 'run9', resultsDir })
+
+    expect(result.results.map((row) => [row.instanceId, row.resolved])).toEqual([
+      ['a__repo-1', true],
+      ['b__repo-2', false],
+    ])
+    const summary = JSON.parse(await readFile(result.summaryPath, 'utf8'))
+    expect(summary.resolved).toBe(1)
+    expect(summary.failureCounts.test_failed).toBe(1)
+    const failedTrial = JSON.parse(await readFile(join(result.layout.trialsDir, 'b__repo-2.json'), 'utf8'))
+    expect(failedTrial.failureLabel).toBe('test_failed')
+  })
+
+  it('ingests results.json resolved id lists and parses the CLI command', async () => {
+    const run = await writeSweBenchPredictionRun({
+      rootDir: dir,
+      runId: 'run10',
+      dataset: 'local',
+      model: 'gpt-test',
+      predictions: [],
+    })
+    const resultsDir = join(dir, 'results-json')
+    mkdirSync(resultsDir)
+    await writeFile(join(resultsDir, 'results.json'), JSON.stringify({ resolved_ids: ['a__repo-1'] }), 'utf8')
+
+    const parsed = parseSweBenchCli([
+      'eval',
+      'swebench',
+      'ingest-results',
+      '--root-dir',
+      dir,
+      '--run-id',
+      'run10',
+      '--results-dir',
+      resultsDir,
+    ])
+    expect(parsed).toMatchObject({ kind: 'ingest-results', resultsDir })
+
+    const result = await ingestSweBenchResults({ rootDir: dir, runId: run.layout.runId, resultsDir })
+    expect(result.trials).toHaveLength(1)
+    expect(result.trials[0]?.resolved).toBe(true)
   })
 
   it('can export a session using a patch file through the parsed command inputs', async () => {
