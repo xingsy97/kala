@@ -27,6 +27,7 @@ export type SweBenchRunLayout = {
   rootDir: string
   predictionsPath: string
   experimentPath: string
+  progressPath: string
   instancesPath: string
   summaryPath: string
   trialsDir: string
@@ -41,6 +42,7 @@ export function sweBenchRunLayout(rootDir: string, runId: string): SweBenchRunLa
     rootDir: runRoot,
     predictionsPath: join(runRoot, 'predictions.jsonl'),
     experimentPath: join(runRoot, 'experiment.json'),
+    progressPath: join(runRoot, 'progress.json'),
     instancesPath: join(runRoot, 'instances.jsonl'),
     summaryPath: join(runRoot, 'summary.json'),
     trialsDir: join(runRoot, 'trials'),
@@ -83,6 +85,38 @@ export type SweBenchInstance = {
   problem_statement?: string
   version?: string
   [key: string]: unknown
+}
+
+export type SweBenchInstanceProgress = {
+  instanceId: string
+  status: 'queued' | 'running' | 'skipped' | 'completed' | 'failed' | 'timed_out'
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
+  failureLabel?: EvalFailureLabel
+  artifactRefs?: readonly ArtifactRef[]
+  metrics?: Record<string, number | string | boolean>
+}
+
+export type SweBenchRunProgress = {
+  schemaVersion: 1
+  runId: string
+  dataset: string
+  split?: string
+  model: string
+  status: 'running' | 'completed' | 'failed'
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  selectedCount: number
+  queuedCount: number
+  runningCount: number
+  skippedCount: number
+  completedCount: number
+  failedCount: number
+  timedOutCount: number
+  maxWorkers: number
+  instances: readonly SweBenchInstanceProgress[]
 }
 
 export type InferSweBenchPatchRunInput = {
@@ -241,11 +275,49 @@ export async function runSweBenchAgentPatchRun(
   }
   const completedIds = new Set(trials.map((trial) => trial.instanceId))
   const pending = selected.filter((instance) => !completedIds.has(instance.instance_id))
+  const startedAt = new Date().toISOString()
+  const progressByInstance = new Map<string, SweBenchInstanceProgress>()
+  for (const instance of selected) {
+    const existing = trials.find((trial) => trial.instanceId === instance.instance_id)
+    progressByInstance.set(instance.instance_id, existing
+      ? progressFromTrial(existing, 'skipped')
+      : { instanceId: instance.instance_id, status: 'queued' })
+  }
+  await writeSweBenchProgress(layout, buildSweBenchProgress({
+    input,
+    selected,
+    progressByInstance,
+    startedAt,
+    status: 'running',
+  }))
 
   const results = await runWithConcurrency(
     pending,
     input.maxWorkers ?? 1,
-    (instance) => runSingleSweBenchAgentInstance({ input, layout, experiment, store, instance }),
+    async (instance) => {
+      progressByInstance.set(instance.instance_id, {
+        instanceId: instance.instance_id,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      })
+      await writeSweBenchProgress(layout, buildSweBenchProgress({
+        input,
+        selected,
+        progressByInstance,
+        startedAt,
+        status: 'running',
+      }))
+      const result = await runSingleSweBenchAgentInstance({ input, layout, experiment, store, instance })
+      progressByInstance.set(instance.instance_id, progressFromTrial(result.trial))
+      await writeSweBenchProgress(layout, buildSweBenchProgress({
+        input,
+        selected,
+        progressByInstance,
+        startedAt,
+        status: 'running',
+      }))
+      return result
+    },
   )
   for (const result of results) {
     predictions.push(result.prediction)
@@ -261,7 +333,67 @@ export async function runSweBenchAgentPatchRun(
   const orderedTrials = orderBySelectedInstances(trials, selected, (trial) => trial.instanceId)
   await writeFile(layout.predictionsPath, serializeJsonl(orderedPredictions), 'utf8')
   await writeFile(layout.summaryPath, `${JSON.stringify(summarizeEvalRun(experiment, orderedTrials), null, 2)}\n`, 'utf8')
+  await writeSweBenchProgress(layout, buildSweBenchProgress({
+    input,
+    selected,
+    progressByInstance,
+    startedAt,
+    status: orderedTrials.some((trial) => trial.status === 'failed' || trial.status === 'timed_out') ? 'failed' : 'completed',
+    finishedAt: new Date().toISOString(),
+  }))
   return { layout, experiment, predictions: orderedPredictions, trials: orderedTrials }
+}
+
+function progressFromTrial(trial: EvalTrial, overrideStatus?: SweBenchInstanceProgress['status']): SweBenchInstanceProgress {
+  const status = overrideStatus ?? (trial.status === 'pending' ? 'queued' : trial.status)
+  return {
+    instanceId: trial.instanceId,
+    status,
+    ...(trial.failureLabel ? { failureLabel: trial.failureLabel } : {}),
+    artifactRefs: trial.artifacts,
+    metrics: trial.metrics,
+    ...(typeof trial.metrics.durationMs === 'number' ? { durationMs: trial.metrics.durationMs } : {}),
+  }
+}
+
+function buildSweBenchProgress(input: {
+  input: RunSweBenchAgentPatchInput
+  selected: readonly SweBenchInstance[]
+  progressByInstance: ReadonlyMap<string, SweBenchInstanceProgress>
+  startedAt: string
+  status: SweBenchRunProgress['status']
+  finishedAt?: string
+}): SweBenchRunProgress {
+  const instances = input.selected.map((instance) => input.progressByInstance.get(instance.instance_id) ?? {
+    instanceId: instance.instance_id,
+    status: 'queued' as const,
+  })
+  const count = (status: SweBenchInstanceProgress['status']): number => instances.filter((instance) => instance.status === status).length
+  return {
+    schemaVersion: 1,
+    runId: input.input.runId,
+    dataset: input.input.dataset,
+    ...(input.input.split ? { split: input.input.split } : {}),
+    model: input.input.model,
+    status: input.status,
+    startedAt: input.startedAt,
+    updatedAt: input.finishedAt ?? new Date().toISOString(),
+    ...(input.finishedAt ? { finishedAt: input.finishedAt } : {}),
+    selectedCount: instances.length,
+    queuedCount: count('queued'),
+    runningCount: count('running'),
+    skippedCount: count('skipped'),
+    completedCount: count('completed'),
+    failedCount: count('failed'),
+    timedOutCount: count('timed_out'),
+    maxWorkers: input.input.maxWorkers ?? 1,
+    instances,
+  }
+}
+
+async function writeSweBenchProgress(layout: SweBenchRunLayout, progress: SweBenchRunProgress): Promise<void> {
+  const redacted = redactForPersistence(progress, { workspaceRoot: dirname(layout.rootDir) })
+  await writeFile(layout.progressPath, `${JSON.stringify(redacted.value, null, 2)}\n`, 'utf8')
 }
 
 async function readSweBenchInstances(path: string): Promise<SweBenchInstance[]> {
