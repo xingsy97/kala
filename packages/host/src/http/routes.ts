@@ -39,6 +39,7 @@ import {
   inferSweBenchPatchRun,
   ingestSweBenchResults,
   planSweBenchWorkerRun,
+  runSweBenchGrade,
 } from '../eval/swebench.js'
 import { buildMemoryIndex } from '../memory-index.js'
 import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
@@ -118,6 +119,10 @@ type EnhancementActionRequest = {
   patchesDir?: string
   modelPatchPath?: string
   resultsDir?: string
+  predictionsPath?: string
+  maxWorkers?: number | string
+  modal?: boolean
+  cwd?: string
 }
 
 export function attachJsonRoutes(
@@ -333,6 +338,21 @@ async function runEnhancementAction(
     const result = await ingestSweBenchResults({ rootDir, runId: requiredString(body.runId, 'runId'), resultsDir: requiredString(body.resultsDir, 'resultsDir') })
     return { action, runId: result.layout.runId, resultsPath: result.resultsPath, summaryPath: result.summaryPath, trialCount: result.trials.length, resolved: result.trials.filter((trial) => trial.resolved).length }
   }
+  if (action === 'swebench-grade-command') {
+    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
+    const instanceIds = listInput(body.instanceIds)
+    const result = await runSweBenchGrade({
+      datasetName: requiredString(body.dataset, 'dataset'),
+      predictionsPath: requiredString(body.predictionsPath, 'predictionsPath'),
+      runId: requiredString(body.runId, 'runId'),
+      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
+      ...(instanceIds ? { instanceIds } : {}),
+      ...(body.modal === true ? { modal: true } : {}),
+      ...(cleanString(body.cwd) ? { cwd: cleanString(body.cwd) } : {}),
+      execute: false,
+    })
+    return { action, command: result.command, shellCommand: result.command.map(shellQuote).join(' ') }
+  }
   throw new HttpRouteError(400, `unsupported enhancement action: ${action}`)
 }
 
@@ -424,6 +444,11 @@ function positiveNumber(value: unknown, name: string): number | undefined {
   const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
   if (!Number.isFinite(number) || number < 0) throw new HttpRouteError(400, `${name} must be a non-negative number`)
   return number
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value
+  return `'${value.replace(/'/g, `'\''`)}'`
 }
 
 function valueOf<T>(value: T | (() => T)): T {

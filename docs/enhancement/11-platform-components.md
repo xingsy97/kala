@@ -117,8 +117,10 @@ only create artifacts and do not mutate kernel session state:
   compare two summary artifacts, infer predictions from an offline patches
   directory, export an existing session into a SWE-bench run, and ingest official
   SWE-bench result files through host actions that reuse the CLI
-  implementations. Agent batch execution and Docker grading stay CLI/CI-only;
-  their outputs are still rendered here once artifacts are written.
+  implementations. It can also build the official grading command in dry-run
+  mode for handoff to CI. Agent batch execution and Docker grading execution
+  stay CLI/CI-only; their outputs are still rendered here once artifacts are
+  written.
 - `Profiles`: session latency, token, missing-trace, and estimated-cost
   profiles. The dashboard can generate a profile artifact from a session id or
   explicit session log path.
