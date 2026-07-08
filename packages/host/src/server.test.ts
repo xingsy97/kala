@@ -434,6 +434,36 @@ describe('wire protocol', () => {
     expect(graph.graphPath).toBe(join(artifactRootDir, 'subagent-graph.json'))
     expect(graph.nodes).toBeGreaterThanOrEqual(1)
 
+    const promptPath = join(dir, 'judge-prompt.txt')
+    const responsePath = join(dir, 'judge-response.json')
+    await writeFile(promptPath, 'Judge this patch.', 'utf8')
+    await writeFile(responsePath, JSON.stringify({ score: 0.75, label: 'test_failed', explanation: 'one failing test' }), 'utf8')
+    const judge = await postEnhancementAction(url, { action: 'eval-judge-score', promptPath, responsePath, judgeModel: 'judge-test', threshold: 0.8 }) as { scoresPath: string; judgeTrace: { uri: string } }
+    expect(judge.scoresPath).toBe(join(artifactRootDir, 'scores.json'))
+    expect(judge.judgeTrace.uri).toBe('judge/model_judge.score.judge-trace.json')
+
+    const instancesJsonl = join(dir, 'instances.jsonl')
+    const patchesDir = join(dir, 'patches')
+    await mkdir(patchesDir, { recursive: true })
+    await writeFile(instancesJsonl, `${JSON.stringify({ instance_id: 'local__repo-1', repo: 'local/repo' })}\n`, 'utf8')
+    await writeFile(join(patchesDir, 'local__repo-1.diff'), 'diff --git a/a b/a\n', 'utf8')
+    const infer = await postEnhancementAction(url, { action: 'swebench-infer-patches', runId: 'dash-infer', dataset: 'SWE-bench/local', model: 'agent-test', instancesJsonl, patchesDir }) as { predictionsPath: string; trialCount: number }
+    expect(infer.predictionsPath).toBe(join(artifactRootDir, 'dash-infer', 'predictions.jsonl'))
+    expect(infer.trialCount).toBe(1)
+
+    const patchPath = join(dir, 'model.patch')
+    await writeFile(patchPath, 'diff --git a/b b/b\n', 'utf8')
+    const exported = await postEnhancementAction(url, { action: 'swebench-export-session', runId: 'dash-export', dataset: 'SWE-bench/local', model: 'agent-test', instanceId: 'local__repo-1', sessionId: record.sessionId, modelPatchPath: patchPath }) as { predictionsPath: string; traceArtifact: { uri: string } }
+    expect(exported.predictionsPath).toBe(join(artifactRootDir, 'dash-export', 'predictions.jsonl'))
+    expect(exported.traceArtifact.uri).toBe('traces/local__repo-1.openinference.json')
+
+    const resultsDir = join(dir, 'swebench-results')
+    await mkdir(resultsDir, { recursive: true })
+    await writeFile(join(resultsDir, 'instance_results.jsonl'), `${JSON.stringify({ instance_id: 'local__repo-1', resolved: true })}\n`, 'utf8')
+    const ingested = await postEnhancementAction(url, { action: 'swebench-ingest-results', runId: 'dash-export', resultsDir }) as { summaryPath: string; resolved: number }
+    expect(ingested.summaryPath).toBe(join(artifactRootDir, 'dash-export', 'summary.json'))
+    expect(ingested.resolved).toBe(1)
+
     const unsupported = await fetch(`${url}/enhancement/action`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -217,6 +217,7 @@ type EnhancementActionField = {
   defaultValue?: string
   numeric?: boolean
   boolean?: boolean
+  list?: boolean
 }
 
 type EnhancementActionConfig = {
@@ -993,7 +994,7 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
       if (!raw) continue
       if (field.boolean) payload[field.key] = raw === 'true'
       else if (field.numeric) payload[field.key] = Number(raw)
-      else if (field.key === 'sessionLogPaths') payload[field.key] = raw.split(',').map((item) => item.trim()).filter(Boolean)
+      else if (field.list) payload[field.key] = raw.split(',').map((item) => item.trim()).filter(Boolean)
       else payload[field.key] = raw
     }
     try {
@@ -1052,7 +1053,7 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
 }
 
 function enhancementResultLabel(result: EnhancementActionResponse): string {
-  const keys = ['profilePath', 'auditPath', 'reportPath', 'indexPath', 'graphPath', 'comparisonPath', 'scoresPath', 'adapterPath', 'sidecarPath']
+  const keys = ['profilePath', 'auditPath', 'reportPath', 'indexPath', 'graphPath', 'comparisonPath', 'scoresPath', 'adapterPath', 'sidecarPath', 'predictionsPath', 'experimentPath', 'summaryPath', 'resultsPath']
   for (const key of keys) {
     const value = result[key]
     if (typeof value === 'string') return value
@@ -1071,7 +1072,11 @@ const sessionFields: readonly EnhancementActionField[] = [
 
 const evalActionConfigs: readonly EnhancementActionConfig[] = [
   { action: 'eval-score-session', label: 'Score session', fields: [...sessionFields, { key: 'instanceId', label: 'Instance ID' }, { key: 'patchPath', label: 'Patch Path' }, { key: 'requireDone', label: 'Require Done', placeholder: 'true or false', boolean: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
+  { action: 'eval-judge-score', label: 'Parse judge score', fields: [{ key: 'promptPath', label: 'Prompt Path', required: true }, { key: 'responsePath', label: 'Response Path', required: true }, { key: 'judgeModel', label: 'Judge Model', required: true }, { key: 'scorer', label: 'Scorer' }, { key: 'instanceId', label: 'Instance ID' }, { key: 'threshold', label: 'Threshold', numeric: true }, { key: 'inputRef', label: 'Input Ref' }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
   { action: 'eval-compare-runs', label: 'Compare eval runs', fields: [{ key: 'baselineSummaryPath', label: 'Baseline Summary', required: true }, { key: 'candidateSummaryPath', label: 'Candidate Summary', required: true }] },
+  { action: 'swebench-infer-patches', label: 'SWE-bench infer patches', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'split', label: 'Split' }, { key: 'model', label: 'Model', required: true }, { key: 'instancesJsonl', label: 'Instances JSONL', required: true }, { key: 'patchesDir', label: 'Patches Dir', required: true }, { key: 'instanceIds', label: 'Instance IDs', placeholder: 'comma separated', list: true }, { key: 'limit', label: 'Limit', numeric: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
+  { action: 'swebench-export-session', label: 'SWE-bench export session', fields: [...sessionFields, { key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'split', label: 'Split' }, { key: 'model', label: 'Model', required: true }, { key: 'instanceId', label: 'Instance ID', required: true }, { key: 'modelPatchPath', label: 'Model Patch Path', required: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
+  { action: 'swebench-ingest-results', label: 'SWE-bench ingest results', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'resultsDir', label: 'Results Dir', required: true }] },
 ]
 
 const profileActionConfigs: readonly EnhancementActionConfig[] = [
@@ -1084,7 +1089,7 @@ const memoryActionConfigs: readonly EnhancementActionConfig[] = [
 
 const opsActionConfigs: readonly EnhancementActionConfig[] = [
   { action: 'reliability-audit-session', label: 'Audit session reliability', fields: sessionFields },
-  { action: 'reliability-chaos-replay', label: 'Replay reliability chaos', fields: [{ key: 'sessionLogPaths', label: 'Session Log Paths', required: true, placeholder: 'comma separated paths' }] },
+  { action: 'reliability-chaos-replay', label: 'Replay reliability chaos', fields: [{ key: 'sessionLogPaths', label: 'Session Log Paths', required: true, placeholder: 'comma separated paths', list: true }] },
   { action: 'trace-export-session', label: 'Export trace', fields: [...sessionFields, { key: 'runId', label: 'Run ID' }, { key: 'evalInstanceId', label: 'Eval Instance ID' }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
   { action: 'rollout-export-segments', label: 'Export rollout segments', fields: [...sessionFields, { key: 'runId', label: 'Run ID' }, { key: 'evalInstanceId', label: 'Eval Instance ID' }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
   { action: 'rollout-export-session', label: 'Export rollout sidecar', fields: [...sessionFields, { key: 'taskId', label: 'Task ID', required: true }, { key: 'frameworkTarget', label: 'Framework', required: true, placeholder: 'slime, verl, trl, openrlhf, unknown' }, { key: 'model', label: 'Model' }, { key: 'weightVersion', label: 'Weight Version' }, { key: 'rewardPath', label: 'Reward Path' }, { key: 'tokenSegmentsPath', label: 'Token Segments Path' }] },
