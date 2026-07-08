@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -13,6 +14,7 @@ import {
   exportSessionForSweBench,
   inferSweBenchPatchRun,
   ingestSweBenchResults,
+  runSweBenchAgentPatchRun,
   sweBenchRunLayout,
   writeSweBenchPredictionRun,
 } from './swebench.js'
@@ -233,6 +235,34 @@ describe('SWE-bench eval runner', () => {
         '--execute',
       ]),
     ).toMatchObject({ kind: 'run', execute: true })
+
+    expect(
+      parseSweBenchCli([
+        'eval',
+        'swebench',
+        'agent-infer',
+        '--run-id',
+        'run-agent',
+        '--dataset',
+        'local',
+        '--model',
+        'agent-test',
+        '--instances-jsonl',
+        'instances.jsonl',
+        '--agent-command',
+        'agent --prompt "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"',
+        '--repo-cache-dir',
+        'repos',
+        '--timeout-ms',
+        '1000',
+      ]),
+    ).toMatchObject({
+      kind: 'agent-infer',
+      runId: 'run-agent',
+      agentCommand: 'agent --prompt "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"',
+      repoCacheDir: 'repos',
+      timeoutMs: 1000,
+    })
   })
 
   it('creates an offline SWE-bench prediction run from local instance and patch fixtures', async () => {
@@ -289,6 +319,47 @@ describe('SWE-bench eval runner', () => {
     expect(result.trials[0]?.failureLabel).toBe('empty_patch')
     const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
     expect(summary.failureCounts.empty_patch).toBe(1)
+  })
+
+  it('runs a local agent command against a materialized repo and captures the git diff prediction', async () => {
+    const sourceRepo = join(dir, 'source-repo')
+    mkdirSync(sourceRepo)
+    await writeFile(join(sourceRepo, 'bug.txt'), 'before\n', 'utf8')
+    runGit(sourceRepo, 'init')
+    runGit(sourceRepo, 'config', 'user.email', 'test@example.com')
+    runGit(sourceRepo, 'config', 'user.name', 'Test User')
+    runGit(sourceRepo, 'add', 'bug.txt')
+    runGit(sourceRepo, 'commit', '-m', 'init')
+    const baseCommit = runGit(sourceRepo, 'rev-parse', 'HEAD').trim()
+    const instancesPath = join(dir, 'instances.jsonl')
+    await writeFile(instancesPath, JSON.stringify({
+      instance_id: 'local__repo-1',
+      repo_path: sourceRepo,
+      repo: 'local/repo',
+      base_commit: baseCommit,
+      problem_statement: 'change bug.txt',
+    }) + '\n', 'utf8')
+
+    const result = await runSweBenchAgentPatchRun({
+      rootDir: dir,
+      runId: 'run-agent',
+      dataset: 'local',
+      model: 'agent-test',
+      instancesJsonl: instancesPath,
+      agentCommand: 'printf "after\\n" > bug.txt',
+      timeoutMs: 5000,
+    })
+
+    expect(result.trials[0]?.failureLabel).toBeUndefined()
+    expect(result.predictions[0]?.model_patch).toContain('diff --git a/bug.txt b/bug.txt')
+    expect(result.predictions[0]?.model_patch).toContain('-before')
+    expect(result.predictions[0]?.model_patch).toContain('+after')
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.trialCount).toBe(1)
+    expect(summary.failureCounts).toEqual({})
+    const trial = JSON.parse(await readFile(join(result.layout.trialsDir, 'local__repo-1.json'), 'utf8'))
+    expect(trial.artifacts.map((artifact: { uri: string }) => artifact.uri)).toContain('artifacts/local__repo-1/final.diff')
+    expect(await readFile(result.layout.predictionsPath, 'utf8')).toContain('local__repo-1')
   })
 
   it('ingests official-style SWE-bench instance results into trials and summary', async () => {
@@ -392,3 +463,11 @@ describe('SWE-bench eval runner', () => {
     expect(await readFile(result.layout.predictionsPath, 'utf8')).toContain('diff --git')
   })
 })
+
+function runGit(cwd: string, ...args: string[]): string {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
+  }
+  return result.stdout
+}

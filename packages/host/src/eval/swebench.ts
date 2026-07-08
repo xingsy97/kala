@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import {
   buildSweBenchEvaluationCommand,
@@ -9,9 +10,11 @@ import {
   createEvalExperiment,
   createSweBenchPrediction,
   exportSessionSpans,
+  redactForPersistence,
   serializeJsonl,
   summarizeEvalRun,
   type ArtifactRef,
+  type EvalFailureLabel,
   type EvalExperiment,
   type EvalTrial,
   type SweBenchPrediction,
@@ -172,6 +175,76 @@ export async function inferSweBenchPatchRun(
   return { layout, experiment, predictions, trials }
 }
 
+export type RunSweBenchAgentPatchInput = {
+  rootDir: string
+  runId: string
+  dataset: string
+  split?: string
+  model: string
+  instancesJsonl: string
+  agentCommand: string
+  instanceIds?: readonly string[]
+  limit?: number
+  workspaceRoot?: string
+  repoCacheDir?: string
+  timeoutMs?: number
+}
+
+export async function runSweBenchAgentPatchRun(
+  input: RunSweBenchAgentPatchInput,
+): Promise<{
+  layout: SweBenchRunLayout
+  experiment: EvalExperiment
+  predictions: readonly SweBenchPrediction[]
+  trials: readonly EvalTrial[]
+}> {
+  const allInstances = await readSweBenchInstances(input.instancesJsonl)
+  const selected = selectInstances(allInstances, input.instanceIds, input.limit)
+  const redactedCommand = redactForPersistence(input.agentCommand, {
+    ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
+  })
+  const { layout, experiment } = await writeSweBenchPredictionRun({
+    rootDir: input.rootDir,
+    runId: input.runId,
+    dataset: input.dataset,
+    ...(input.split ? { split: input.split } : {}),
+    model: input.model,
+    predictions: [],
+    config: {
+      mode: 'agent-command-infer',
+      instancesJsonl: basename(input.instancesJsonl),
+      instanceIds: input.instanceIds ?? [],
+      limit: input.limit ?? null,
+      timeoutMs: input.timeoutMs ?? null,
+      agentCommandSha256: createHash('sha256').update(input.agentCommand).digest('hex'),
+      agentCommandPreview: redactedCommand.value,
+      agentCommandRedaction: redactedCommand.summary,
+    },
+  })
+  await mkdir(layout.trialsDir, { recursive: true })
+  await writeFile(layout.instancesPath, serializeJsonl(selected), 'utf8')
+  const store = createArtifactStore(layout.rootDir, {
+    ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
+  })
+  const predictions: SweBenchPrediction[] = []
+  const trials: EvalTrial[] = []
+
+  for (const instance of selected) {
+    const result = await runSingleSweBenchAgentInstance({ input, layout, experiment, store, instance })
+    predictions.push(result.prediction)
+    trials.push(result.trial)
+    await writeFile(
+      join(layout.trialsDir, `${instance.instance_id}.json`),
+      `${JSON.stringify(result.trial, null, 2)}\n`,
+      'utf8',
+    )
+  }
+
+  await writeFile(layout.predictionsPath, serializeJsonl(predictions), 'utf8')
+  await writeFile(layout.summaryPath, `${JSON.stringify(summarizeEvalRun(experiment, trials), null, 2)}\n`, 'utf8')
+  return { layout, experiment, predictions, trials }
+}
+
 async function readSweBenchInstances(path: string): Promise<SweBenchInstance[]> {
   const raw = await readFile(path, 'utf8')
   const out: SweBenchInstance[] = []
@@ -207,6 +280,198 @@ async function readPatchForInstance(patchesDir: string, instanceId: string): Pro
     }
   }
   return ''
+}
+
+type AgentInstanceRunInput = {
+  input: RunSweBenchAgentPatchInput
+  layout: SweBenchRunLayout
+  experiment: EvalExperiment
+  store: ReturnType<typeof createArtifactStore>
+  instance: SweBenchInstance
+}
+
+async function runSingleSweBenchAgentInstance({
+  input,
+  layout,
+  experiment,
+  store,
+  instance,
+}: AgentInstanceRunInput): Promise<{ prediction: SweBenchPrediction; trial: EvalTrial }> {
+  const startedAt = Date.now()
+  const workspaceDir = join(layout.rootDir, 'workspaces', instance.instance_id)
+  const artifacts: ArtifactRef[] = []
+  let exitCode: number | null = null
+  let timedOut = false
+  let setupError: string | undefined
+
+  try {
+    await materializeSweBenchWorkspace(instance, workspaceDir, input.repoCacheDir)
+  } catch (err) {
+    setupError = err instanceof Error ? err.message : String(err)
+  }
+
+  const prompt = createSweBenchAgentPrompt(instance, workspaceDir)
+  artifacts.push(await store.writeText('metadata', `artifacts/${instance.instance_id}/prompt.txt`, prompt))
+
+  if (!setupError) {
+    const command = await runShellCommand(input.agentCommand, {
+      cwd: workspaceDir,
+      timeoutMs: input.timeoutMs,
+      env: {
+        AGENT_KERNEL_SWEBENCH_INSTANCE_ID: instance.instance_id,
+        AGENT_KERNEL_SWEBENCH_REPO: workspaceDir,
+        AGENT_KERNEL_SWEBENCH_PROMPT: prompt,
+        AGENT_KERNEL_SWEBENCH_PROMPT_FILE: join(layout.rootDir, 'artifacts', instance.instance_id, 'prompt.txt'),
+      },
+    })
+    exitCode = command.exitCode
+    timedOut = command.timedOut
+    artifacts.push(await store.writeText('log', `artifacts/${instance.instance_id}/agent.stdout.log`, command.stdout))
+    artifacts.push(await store.writeText('log', `artifacts/${instance.instance_id}/agent.stderr.log`, command.stderr))
+  }
+
+  const diff = setupError ? '' : await captureGitDiff(workspaceDir)
+  const diffArtifact = await store.writeText('diff', `artifacts/${instance.instance_id}/final.diff`, diff)
+  artifacts.push(diffArtifact)
+  const metadataArtifact = await store.writeJson('metadata', `artifacts/${instance.instance_id}/workspace-metadata.json`, {
+    instanceId: instance.instance_id,
+    workspaceDir,
+    repo: instance.repo ?? null,
+    baseCommit: instance.base_commit ?? null,
+    setupError: setupError ?? null,
+    exitCode,
+    timedOut,
+    durationMs: Date.now() - startedAt,
+  })
+  artifacts.push(metadataArtifact)
+
+  const prediction = createSweBenchPrediction({
+    instanceId: instance.instance_id,
+    modelNameOrPath: input.model,
+    modelPatch: diff,
+  })
+  const failureLabel = trialFailureLabel({ setupError, timedOut, exitCode, diff })
+  const trial: EvalTrial = {
+    trialId: `${input.runId}:${instance.instance_id}`,
+    experimentId: experiment.experimentId,
+    instanceId: instance.instance_id,
+    status: timedOut ? 'timed_out' : failureLabel === undefined ? 'completed' : 'failed',
+    resolved: false,
+    ...(failureLabel ? { failureLabel } : {}),
+    artifacts,
+    metrics: {
+      durationMs: Date.now() - startedAt,
+      patchBytes: Buffer.byteLength(diff, 'utf8'),
+      patchLines: diff.length === 0 ? 0 : diff.split('\n').length,
+      ...(exitCode === null ? {} : { agentExitCode: exitCode }),
+    },
+  }
+  return { prediction, trial }
+}
+
+async function materializeSweBenchWorkspace(
+  instance: SweBenchInstance,
+  workspaceDir: string,
+  repoCacheDir: string | undefined,
+): Promise<void> {
+  await mkdir(dirname(workspaceDir), { recursive: true })
+  const source = typeof instance.repo_path === 'string'
+    ? instance.repo_path
+    : repoCacheDir && instance.repo
+      ? join(repoCacheDir, String(instance.repo).replace(/[\\/]/g, '__'))
+      : undefined
+  if (source) {
+    await runRequiredCommand(['git', 'clone', source, workspaceDir], process.cwd())
+  } else if (typeof instance.repo === 'string' && instance.repo.includes('/')) {
+    await runRequiredCommand(['git', 'clone', `https://github.com/${instance.repo}.git`, workspaceDir], process.cwd())
+  } else {
+    throw new Error(`instance ${instance.instance_id} has no repo_path, repoCacheDir match, or GitHub repo`)
+  }
+  if (typeof instance.base_commit === 'string' && instance.base_commit.length > 0) {
+    await runRequiredCommand(['git', 'checkout', instance.base_commit], workspaceDir)
+  }
+}
+
+function createSweBenchAgentPrompt(instance: SweBenchInstance, workspaceDir: string): string {
+  const problem = typeof instance.problem_statement === 'string'
+    ? instance.problem_statement
+    : 'No problem statement was provided.'
+  return [
+    `SWE-bench instance: ${instance.instance_id}`,
+    `Repository: ${instance.repo ?? 'unknown'}`,
+    `Workspace: ${workspaceDir}`,
+    instance.base_commit ? `Base commit: ${instance.base_commit}` : null,
+    '',
+    'Task:',
+    problem,
+    '',
+    'Edit the repository to fix the issue. Keep changes minimal. The benchmark output is the git diff left in the workspace, not the final chat answer.',
+  ].filter((line): line is string => line !== null).join('\n')
+}
+
+function trialFailureLabel(input: {
+  setupError: string | undefined
+  timedOut: boolean
+  exitCode: number | null
+  diff: string
+}): EvalFailureLabel | undefined {
+  if (input.setupError) return 'infrastructure_error'
+  if (input.timedOut) return 'agent_timeout'
+  if (input.exitCode !== null && input.exitCode !== 0) return 'agent_error'
+  if (input.diff.trim().length === 0) return 'empty_patch'
+  return undefined
+}
+
+async function captureGitDiff(workspaceDir: string): Promise<string> {
+  const result = await runShellCommand('git diff --binary', { cwd: workspaceDir })
+  return result.stdout
+}
+
+async function runRequiredCommand(args: readonly string[], cwd: string): Promise<void> {
+  const result = await runProcess(args[0]!, args.slice(1), { cwd })
+  if (result.exitCode !== 0) {
+    throw new Error(`${args.join(' ')} failed with exit code ${result.exitCode}: ${result.stderr.slice(0, 500)}`)
+  }
+}
+
+async function runShellCommand(command: string, options: {
+  cwd: string
+  timeoutMs?: number
+  env?: Record<string, string>
+}): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+  return await runProcess(process.platform === 'win32' ? 'cmd.exe' : 'sh', process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-lc', command], options)
+}
+
+async function runProcess(command: string, args: readonly string[], options: {
+  cwd: string
+  timeoutMs?: number
+  env?: Record<string, string>
+}): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: { ...process.env, ...(options.env ?? {}) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true
+          child.kill('SIGTERM')
+        }, options.timeoutMs)
+      : undefined
+    child.stdout?.setEncoding('utf8')
+    child.stderr?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
+    child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+    child.on('error', reject)
+    child.on('close', (exitCode) => {
+      if (timer) clearTimeout(timer)
+      resolve({ exitCode, stdout, stderr, timedOut })
+    })
+  })
 }
 
 export type ExportSessionForSweBenchInput = {
