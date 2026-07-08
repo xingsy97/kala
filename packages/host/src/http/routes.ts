@@ -14,7 +14,7 @@
  */
 
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
 import { extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
@@ -46,6 +46,7 @@ const MIME: Record<string, string> = {
 }
 
 const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
+const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
 
 export function attachJsonRoutes(
   server: HttpServer,
@@ -100,6 +101,17 @@ export function attachJsonRoutes(
         .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
       return
     }
+    if (path === '/artifacts/content') {
+      claimRoute(req)
+      if (!payloads.artifactRootDir) {
+        sendError(res, 404, 'artifact capture is not configured')
+        return
+      }
+      void readArtifactContent(url, payloads.artifactRootDir)
+        .then((content) => sendJson(req, res, content))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
     if (path === '/models') {
       claimRoute(req)
       const body: ServerModelsPayload = {
@@ -127,6 +139,34 @@ function claimRoute(req: IncomingMessage): void {
 
 function routeClaimed(req: IncomingMessage): boolean {
   return (req as IncomingMessage & { [ROUTE_CLAIMED]?: true })[ROUTE_CLAIMED] === true
+}
+
+class HttpRouteError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+  }
+}
+
+async function readArtifactContent(url: string, rootDir: string): Promise<{ path: string; mediaType: string; body: unknown }> {
+  const parsed = new URL(url, 'http://x')
+  const requested = parsed.searchParams.get('path') ?? ''
+  if (!requested || requested.includes('\0')) throw new HttpRouteError(400, 'missing artifact path')
+  const root = resolvePath(rootDir)
+  const rel = normalize(requested).replace(/^[/\\]+/, '')
+  const abs = join(root, rel)
+  if (!abs.startsWith(root + sep) && abs !== root) throw new HttpRouteError(403, 'artifact path escapes root')
+  const st = await stat(abs).catch((err: unknown) => {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new HttpRouteError(404, 'artifact not found')
+    throw err
+  })
+  if (!st.isFile()) throw new HttpRouteError(400, 'artifact path is not a file')
+  if (st.size > MAX_ARTIFACT_CONTENT_BYTES) throw new HttpRouteError(413, 'artifact is too large to read inline')
+  const mediaType = MIME[extname(abs).toLowerCase()] ?? 'text/plain; charset=utf-8'
+  const raw = await readFile(abs, 'utf8')
+  if (mediaType.startsWith('application/json')) {
+    return { path: rel.split(sep).join('/'), mediaType, body: JSON.parse(raw) as unknown }
+  }
+  return { path: rel.split(sep).join('/'), mediaType, body: raw }
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
