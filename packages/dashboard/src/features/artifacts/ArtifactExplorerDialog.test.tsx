@@ -33,6 +33,14 @@ const manifest: ArtifactManifest = {
       sha256: '123456abcdef',
     },
     {
+      path: 'runs/swebench/run1/trials/local__repo-1.json',
+      kind: 'eval_trial',
+      mediaType: 'application/json',
+      bytes: 512,
+      mtime: '2026-07-09T00:00:00.000Z',
+      sha256: 'trialabcdef',
+    },
+    {
       path: 'runs/eval/compare/eval-comparison.json',
       kind: 'eval_comparison',
       mediaType: 'application/json',
@@ -42,11 +50,11 @@ const manifest: ArtifactManifest = {
     },
   ],
   summary: {
-    entryCount: 4,
-    totalBytes: 4780,
-    hashedCount: 3,
+    entryCount: 5,
+    totalBytes: 5292,
+    hashedCount: 4,
     hashSkippedCount: 1,
-    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_comparison: 1 },
+    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_trial: 1, eval_comparison: 1 },
   },
 }
 
@@ -72,7 +80,7 @@ describe('ArtifactExplorerDialog', () => {
     })
     await screen.findByText('llm/s1/1.request.json')
     expect(screen.getByText('large.log')).toBeTruthy()
-    expect(screen.getByText('3/4')).toBeTruthy()
+    expect(screen.getByText('4/5')).toBeTruthy()
     expect(screen.getByText('hash skipped')).toBeTruthy()
   })
 
@@ -103,6 +111,21 @@ describe('ArtifactExplorerDialog', () => {
           failureDeltas: { empty_patch: -1 },
         },
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/trials/local__repo-1.json',
+        mediaType: 'application/json',
+        body: {
+          trialId: 'run1:local__repo-1',
+          experimentId: 'run1',
+          instanceId: 'local__repo-1',
+          status: 'completed',
+          resolved: true,
+          artifacts: [
+            { kind: 'diff', uri: 'artifacts/local__repo-1/final.diff', bytes: 42, mediaType: 'text/x-diff' },
+          ],
+          metrics: { durationMs: 1250, patchBytes: 42 },
+        },
+      }), { status: 200 }))
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -116,12 +139,19 @@ describe('ArtifactExplorerDialog', () => {
     expect(await screen.findByText('base')).toBeTruthy()
     expect(screen.getByText('candidate')).toBeTruthy()
     expect(screen.getByText('+50%')).toBeTruthy()
+    await waitFor(() => expect(screen.getAllByText('local__repo-1').length).toBeGreaterThanOrEqual(1))
+    expect(screen.getAllByText('resolved').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('artifacts/local__repo-1/final.diff')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fsummary.json',
       { cache: 'no-store' },
     )
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Feval%2Fcompare%2Feval-comparison.json',
+      { cache: 'no-store' },
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Fswebench%2Frun1%2Ftrials%2Flocal__repo-1.json',
       { cache: 'no-store' },
     )
   })
