@@ -3,9 +3,11 @@ import { readFile } from 'node:fs/promises'
 import {
   exportSessionForSweBench,
   inferSweBenchPatchRun,
+  ingestSweBenchResults,
   runSweBenchGrade,
   type ExportSessionForSweBenchInput,
   type InferSweBenchPatchRunInput,
+  type SweBenchIngestResultsInput,
   type SweBenchGradeInput,
 } from './swebench.js'
 
@@ -13,6 +15,7 @@ export type SweBenchCliCommand =
   | { kind: 'none' }
   | ({ kind: 'grade' } & SweBenchGradeInput)
   | ({ kind: 'infer' } & InferSweBenchPatchRunInput)
+  | ({ kind: 'ingest-results' } & SweBenchIngestResultsInput)
   | ({ kind: 'run' } & InferSweBenchPatchRunInput & {
       maxWorkers?: number
       modal?: boolean
@@ -52,6 +55,14 @@ export function parseSweBenchCli(argv: readonly string[]): SweBenchCliCommand {
       sessionLogPath: required(rest, '--session-log'),
       modelPatchPath: required(rest, '--model-patch'),
       workspaceRoot: value(rest, '--workspace-root'),
+    }
+  }
+  if (subcommand === 'ingest-results') {
+    return {
+      kind: 'ingest-results',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      resultsDir: required(rest, '--results-dir'),
     }
   }
   if (subcommand === 'infer' || subcommand === 'run') {
@@ -112,6 +123,17 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
       if (grade.exitCode !== undefined) process.exitCode = grade.exitCode
     }
     console.log(JSON.stringify(payload, null, 2))
+    return true
+  }
+  if (command.kind === 'ingest-results') {
+    const result = await ingestSweBenchResults(command)
+    console.log(JSON.stringify({
+      runId: result.layout.runId,
+      resultsPath: result.resultsPath,
+      summaryPath: result.summaryPath,
+      trialCount: result.trials.length,
+      resolved: result.trials.filter((trial) => trial.resolved).length,
+    }, null, 2))
     return true
   }
   const modelPatch = await readFile(command.modelPatchPath, 'utf8')

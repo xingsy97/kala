@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
@@ -273,6 +274,143 @@ export type SweBenchGradeInput = {
   modal?: boolean
   cwd?: string
   execute?: boolean
+}
+
+export type SweBenchIngestResultsInput = {
+  rootDir: string
+  runId: string
+  resultsDir: string
+}
+
+export type SweBenchIngestedResult = {
+  instanceId: string
+  resolved: boolean
+  failureLabel: 'resolved' | 'patch_apply_failed' | 'test_failed' | 'harness_error'
+  raw: unknown
+}
+
+export async function ingestSweBenchResults(
+  input: SweBenchIngestResultsInput,
+): Promise<{
+  layout: SweBenchRunLayout
+  results: readonly SweBenchIngestedResult[]
+  trials: readonly EvalTrial[]
+  resultsPath: string
+  summaryPath: string
+}> {
+  const layout = sweBenchRunLayout(input.rootDir, input.runId)
+  const experiment = JSON.parse(await readFile(layout.experimentPath, 'utf8')) as EvalExperiment
+  const results = await readSweBenchResultRows(input.resultsDir)
+  const trialByInstance = new Map<string, EvalTrial>()
+  for (const result of results) {
+    const existing = await readExistingTrial(layout, result.instanceId)
+    const trial: EvalTrial = {
+      trialId: existing?.trialId ?? `${input.runId}:${result.instanceId}`,
+      experimentId: existing?.experimentId ?? experiment.experimentId,
+      instanceId: result.instanceId,
+      sessionId: existing?.sessionId,
+      status: result.resolved ? 'completed' : 'failed',
+      resolved: result.resolved,
+      failureLabel: result.failureLabel,
+      artifacts: existing?.artifacts ?? [],
+      metrics: {
+        ...(existing?.metrics ?? {}),
+        swebenchResolved: result.resolved,
+      },
+    }
+    trialByInstance.set(result.instanceId, trial)
+  }
+  await mkdir(layout.trialsDir, { recursive: true })
+  const trials = [...trialByInstance.values()].sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+  for (const trial of trials) {
+    await writeFile(join(layout.trialsDir, `${trial.instanceId}.json`), `${JSON.stringify(trial, null, 2)}\n`, 'utf8')
+  }
+  const resultsPath = join(layout.rootDir, 'swebench-results.json')
+  await writeFile(resultsPath, `${JSON.stringify({ results }, null, 2)}\n`, 'utf8')
+  await writeFile(layout.summaryPath, `${JSON.stringify(summarizeEvalRun(experiment, trials), null, 2)}\n`, 'utf8')
+  return { layout, results, trials, resultsPath, summaryPath: layout.summaryPath }
+}
+
+async function readExistingTrial(layout: SweBenchRunLayout, instanceId: string): Promise<EvalTrial | undefined> {
+  const path = join(layout.trialsDir, `${instanceId}.json`)
+  if (!existsSync(path)) return undefined
+  return JSON.parse(await readFile(path, 'utf8')) as EvalTrial
+}
+
+async function readSweBenchResultRows(resultsDir: string): Promise<SweBenchIngestedResult[]> {
+  const instanceJsonl = join(resultsDir, 'instance_results.jsonl')
+  const instanceJson = join(resultsDir, 'instance_results.json')
+  const resultsJson = join(resultsDir, 'results.json')
+  if (existsSync(instanceJsonl)) {
+    return parseResultRows((await readFile(instanceJsonl, 'utf8')).split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line) as unknown))
+  }
+  if (existsSync(instanceJson)) return parseResultRows(JSON.parse(await readFile(instanceJson, 'utf8')) as unknown)
+  if (existsSync(resultsJson)) return parseResultRows(JSON.parse(await readFile(resultsJson, 'utf8')) as unknown)
+  throw new Error(`no SWE-bench result file found in ${resultsDir}`)
+}
+
+function parseResultRows(raw: unknown): SweBenchIngestedResult[] {
+  const rows = normalizeRows(raw)
+  return rows.map((row) => {
+    const record = row as Record<string, unknown>
+    const instanceId = stringField(record, ['instance_id', 'instanceId', 'id'])
+    if (!instanceId) throw new Error('SWE-bench result row missing instance_id')
+    const resolved = boolField(record, ['resolved', 'success', 'passed']) ?? inferResolved(record)
+    return {
+      instanceId,
+      resolved,
+      failureLabel: resolved ? 'resolved' : failureLabelFor(record),
+      raw: row,
+    }
+  })
+}
+
+function normalizeRows(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw
+  if (!raw || typeof raw !== 'object') throw new Error('SWE-bench results must be an object or array')
+  const record = raw as Record<string, unknown>
+  for (const key of ['instance_results', 'results', 'instances']) {
+    if (Array.isArray(record[key])) return record[key] as unknown[]
+  }
+  for (const key of ['resolved_ids', 'resolved', 'successes', 'passed']) {
+    if (Array.isArray(record[key])) {
+      return (record[key] as unknown[]).map((id) => ({ instance_id: id, resolved: true }))
+    }
+  }
+  const maybeRows = Object.entries(record)
+    .filter(([, value]) => value && typeof value === 'object')
+    .map(([key, value]) => ({ instance_id: key, ...(value as Record<string, unknown>) }))
+  if (maybeRows.length > 0) return maybeRows
+  throw new Error('SWE-bench results did not contain instance rows')
+}
+
+function stringField(record: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return undefined
+}
+
+function boolField(record: Record<string, unknown>, keys: readonly string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'number') return value !== 0
+  }
+  return undefined
+}
+
+function inferResolved(record: Record<string, unknown>): boolean {
+  const status = stringField(record, ['status', 'result'])?.toLowerCase()
+  return status === 'resolved' || status === 'passed' || status === 'success'
+}
+
+function failureLabelFor(record: Record<string, unknown>): SweBenchIngestedResult['failureLabel'] {
+  const text = JSON.stringify(record).toLowerCase()
+  if (text.includes('apply') || text.includes('patch')) return 'patch_apply_failed'
+  if (text.includes('harness') || text.includes('docker') || text.includes('timeout')) return 'harness_error'
+  return 'test_failed'
 }
 
 export function buildSweBenchGradeCommand(input: SweBenchGradeInput): readonly string[] {

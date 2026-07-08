@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from '../store/log.js'
 import { parseEnhancementCli } from '../enhancement-cli.js'
-import { profileSession, scoreSession } from './generic.js'
+import { compareEvalRuns, profileSession, scoreSession } from './generic.js'
 
 const config: AgentConfig = { tools: [] }
 const initialState: AgentState = {
@@ -118,6 +118,50 @@ describe('generic eval and profile runners', () => {
     expect(result.profile.estimatedCostUsd).toBe(0.003)
   })
 
+  it('compares eval run summaries without mutating either run', async () => {
+    const baselinePath = join(dir, 'baseline-summary.json')
+    const candidatePath = join(dir, 'candidate-summary.json')
+    await writeFile(baselinePath, JSON.stringify({
+      experimentId: 'base',
+      dataset: 'local',
+      model: 'm1',
+      trialCount: 2,
+      completed: 2,
+      failed: 1,
+      timedOut: 0,
+      resolved: 1,
+      unresolved: 1,
+      emptyPatch: 1,
+      failureCounts: { empty_patch: 1 },
+      metrics: { passRate: 0.5 },
+    }), 'utf8')
+    await writeFile(candidatePath, JSON.stringify({
+      experimentId: 'candidate',
+      dataset: 'local',
+      model: 'm2',
+      trialCount: 2,
+      completed: 2,
+      failed: 0,
+      timedOut: 0,
+      resolved: 2,
+      unresolved: 0,
+      emptyPatch: 0,
+      failureCounts: {},
+      metrics: { passRate: 1 },
+    }), 'utf8')
+
+    const result = await compareEvalRuns({
+      rootDir: join(dir, 'compare'),
+      baselineSummaryPath: baselinePath,
+      candidateSummaryPath: candidatePath,
+    })
+
+    expect(result.comparison.deltas.resolved).toBe(1)
+    expect(result.comparison.deltas.passRate).toBe(0.5)
+    expect(result.comparison.failureDeltas.empty_patch).toBe(-1)
+    expect(await readFile(result.comparisonPath, 'utf8')).toContain('candidate')
+  })
+
   it('parses generic eval and profile CLI commands', () => {
     expect(parseEnhancementCli([
       'enhancement',
@@ -139,5 +183,15 @@ describe('generic eval and profile runners', () => {
       '--pricing',
       'pricing.json',
     ])).toMatchObject({ kind: 'profile-session', pricingPath: 'pricing.json' })
+
+    expect(parseEnhancementCli([
+      'enhancement',
+      'eval',
+      'compare-runs',
+      '--baseline-summary',
+      'base.json',
+      '--candidate-summary',
+      'cand.json',
+    ])).toMatchObject({ kind: 'eval-compare-runs', baselineSummaryPath: 'base.json', candidateSummaryPath: 'cand.json' })
   })
 })

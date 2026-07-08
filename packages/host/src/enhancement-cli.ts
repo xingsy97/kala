@@ -4,7 +4,14 @@ import {
   type ExportRolloutSidecarInput,
   type ExportSessionTraceInput,
 } from './enhancement-export.js'
-import { profileSession, scoreSession, type ProfileSessionInput, type ScoreSessionInput } from './eval/generic.js'
+import {
+  compareEvalRuns,
+  profileSession,
+  scoreSession,
+  type CompareEvalRunsInput,
+  type ProfileSessionInput,
+  type ScoreSessionInput,
+} from './eval/generic.js'
 import { auditSessionReliability, type AuditSessionReliabilityInput } from './reliability.js'
 import { buildMemoryIndex, type BuildMemoryIndexInput } from './memory-index.js'
 import { exportSubAgentGraph, type ExportSubAgentGraphInput } from './subagent-graph.js'
@@ -12,6 +19,7 @@ import { exportSubAgentGraph, type ExportSubAgentGraphInput } from './subagent-g
 export type EnhancementCliCommand =
   | { kind: 'none' }
   | ({ kind: 'eval-score-session' } & ScoreSessionInput)
+  | ({ kind: 'eval-compare-runs' } & CompareEvalRunsInput)
   | ({ kind: 'profile-session' } & ProfileSessionInput)
   | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
   | ({ kind: 'memory-index' } & BuildMemoryIndexInput)
@@ -42,6 +50,15 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       patchPath: value(rest, '--patch'),
       requireDone: flag(rest, '--require-done'),
       workspaceRoot: value(rest, '--workspace-root'),
+    }
+  }
+  if (argv[1] === 'eval' && argv[2] === 'compare-runs') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'eval-compare-runs',
+      rootDir: value(rest, '--root-dir') ?? 'runs/eval/compare',
+      baselineSummaryPath: required(rest, '--baseline-summary'),
+      candidateSummaryPath: required(rest, '--candidate-summary'),
     }
   }
   if (argv[1] === 'profile' && argv[2] === 'session') {
@@ -108,6 +125,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
   if (command.kind === 'eval-score-session') {
     const result = await scoreSession(command)
     console.log(JSON.stringify({ scoresPath: result.scoresPath, summary: result.summary }, null, 2))
+    return true
+  }
+  if (command.kind === 'eval-compare-runs') {
+    const result = await compareEvalRuns(command)
+    console.log(JSON.stringify({ comparisonPath: result.comparisonPath, comparison: result.comparison }, null, 2))
     return true
   }
   if (command.kind === 'profile-session') {

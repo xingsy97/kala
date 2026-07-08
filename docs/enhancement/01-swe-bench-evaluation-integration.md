@@ -155,11 +155,22 @@ agent-kernel-host eval swebench grade \
   --predictions runs/swebench/smoke-001/predictions.jsonl \
   --run-id smoke-001 \
   --max-workers 8
+
+agent-kernel-host eval swebench ingest-results \
+  --root-dir runs/swebench \
+  --run-id smoke-001 \
+  --results-dir evaluation_results/smoke-001
 ```
 
 `grade` prints the official command by default. Add `--execute` to actually run
 the Docker harness. This avoids accidentally triggering an expensive SWE-bench
 evaluation when the operator only wants to inspect the command.
+
+`ingest-results` parses official harness output artifacts, currently
+`instance_results.jsonl`, `instance_results.json`, or `results.json` shapes. It
+maps official resolved/unresolved results into existing `EvalTrial` files,
+updates `summary.json`, and keeps the raw rows in `swebench-results.json`. It
+does not re-grade patches or reinterpret repository tests.
 
 ## Output Layout
 
@@ -268,8 +279,9 @@ patches without failing the whole run.
 
 Phase 2: official harness wrapper.
 Implemented command construction and optional execution through
-`python -m swebench.harness.run_evaluation`. Result ingestion remains the next
-piece because official result files depend on a real Docker harness run.
+`python -m swebench.harness.run_evaluation`. Result ingestion is implemented for
+official result files and updates per-trial/summary metadata after the harness
+has produced results.
 
 Phase 3: SWE-bench Lite single-instance run.
 Partially implemented through `--instance-ids`, `--limit`, and stable run

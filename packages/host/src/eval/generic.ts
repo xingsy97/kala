@@ -9,6 +9,7 @@ import {
   type ArtifactRef,
   type EvalScoreResult,
   type EvalScoreSummary,
+  type EvalRunSummary,
   type PricingTable,
   type SessionProfile,
 } from '@agent-kernel/shared'
@@ -110,4 +111,63 @@ export async function profileSession(
   const profilePath = join(input.rootDir, 'profile.json')
   await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`, 'utf8')
   return { profile, profilePath }
+}
+
+export type CompareEvalRunsInput = {
+  rootDir: string
+  baselineSummaryPath: string
+  candidateSummaryPath: string
+}
+
+export type EvalRunComparison = {
+  baseline: Pick<EvalRunSummary, 'experimentId' | 'trialCount' | 'resolved' | 'failed' | 'timedOut'>
+  candidate: Pick<EvalRunSummary, 'experimentId' | 'trialCount' | 'resolved' | 'failed' | 'timedOut'>
+  deltas: {
+    resolved: number
+    failed: number
+    timedOut: number
+    passRate: number
+  }
+  failureDeltas: Record<string, number>
+}
+
+export async function compareEvalRuns(
+  input: CompareEvalRunsInput,
+): Promise<{ comparison: EvalRunComparison; comparisonPath: string }> {
+  const baseline = JSON.parse(await readFile(input.baselineSummaryPath, 'utf8')) as EvalRunSummary
+  const candidate = JSON.parse(await readFile(input.candidateSummaryPath, 'utf8')) as EvalRunSummary
+  const failureLabels = new Set([...Object.keys(baseline.failureCounts), ...Object.keys(candidate.failureCounts)])
+  const failureDeltas: Record<string, number> = {}
+  for (const label of [...failureLabels].sort()) {
+    failureDeltas[label] = (candidate.failureCounts[label] ?? 0) - (baseline.failureCounts[label] ?? 0)
+  }
+  const comparison: EvalRunComparison = {
+    baseline: pickComparableSummary(baseline),
+    candidate: pickComparableSummary(candidate),
+    deltas: {
+      resolved: candidate.resolved - baseline.resolved,
+      failed: candidate.failed - baseline.failed,
+      timedOut: candidate.timedOut - baseline.timedOut,
+      passRate: numberMetric(candidate.metrics.passRate) - numberMetric(baseline.metrics.passRate),
+    },
+    failureDeltas,
+  }
+  await mkdir(input.rootDir, { recursive: true })
+  const comparisonPath = join(input.rootDir, 'eval-comparison.json')
+  await writeFile(comparisonPath, `${JSON.stringify(comparison, null, 2)}\n`, 'utf8')
+  return { comparison, comparisonPath }
+}
+
+function pickComparableSummary(summary: EvalRunSummary): EvalRunComparison['baseline'] {
+  return {
+    experimentId: summary.experimentId,
+    trialCount: summary.trialCount,
+    resolved: summary.resolved,
+    failed: summary.failed,
+    timedOut: summary.timedOut,
+  }
+}
+
+function numberMetric(value: number | string | boolean | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
