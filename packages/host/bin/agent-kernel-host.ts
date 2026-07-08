@@ -46,6 +46,7 @@ import {
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
 import { discoverSkills } from '../src/extensions/skills.js'
+import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 
@@ -60,6 +61,9 @@ function argValue(argv: readonly string[], name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
+  const sweBenchCommand = parseSweBenchCli(process.argv.slice(2))
+  if (await runSweBenchCli(sweBenchCommand)) return
+
   // Default `AK_ALLOW_ALL_OK` to "1" so the dashboard can flip a session into
   // `allow_all` approval mode without extra env plumbing. Operators who want
   // the original guard rail back can set `AK_ALLOW_ALL_OK=0` explicitly.
