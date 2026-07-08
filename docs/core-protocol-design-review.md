@@ -139,7 +139,7 @@ Routing by stable `workspaceId` is the right correction over display labels. `wo
 The protocol now has five categories:
 
 - **Kernel event injection**: `client:user_message`, approval/reject, cancel, clear, compact, approval mode, cwd.
-- **Session observation**: `session:ready`, `state:changed`, `event:appended`, `server:history`, `usage:updated`.
+- **Session observation**: `session:ready`, `state:changed`, `event:appended`, `server:history`.
 - **Host control plane**: sessions, models/settings, queue edits, fork, rename/delete.
 - **Executor RPC**: `tool:call`, `tool:cancel`, `fs:*`, background-shell RPCs.
 - **Dashboard-only observers**: token deltas, sub-agent lifecycle, desktop/toast notifications derived client-side.

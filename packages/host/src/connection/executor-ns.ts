@@ -17,6 +17,7 @@ import type {
   ServerBgTaskUpdated,
   SessionErrorScope,
 } from '@agent-kernel/shared'
+import { isCompatibleVersion } from '@agent-kernel/shared'
 import type { AgentConfig } from '@agent-kernel/kernel'
 import type { Namespace } from 'socket.io'
 
@@ -56,6 +57,10 @@ export function configureExecutorNamespace(
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'executor') {
       nextFn(new Error('role_mismatch'))
+      return
+    }
+    if (typeof auth.clientVersion !== 'string' || !isCompatibleVersion(auth.clientVersion)) {
+      nextFn(new Error('version_incompatible'))
       return
     }
     if (deps.authToken && auth.token !== deps.authToken) {

@@ -23,7 +23,6 @@ function silentBroadcast(): LoopBroadcast {
     onEvent() {},
     onApprovalRequired() {},
     onError() {},
-    onUsageChanged() {},
   }
 }
 
@@ -992,7 +991,6 @@ describe('host loop', () => {
       },
       onApprovalRequired: () => {},
       onError: () => {},
-      onUsageChanged: () => {},
       onTokenDelta: (_sid, t) => {
         deltas.push(t)
       },
@@ -1051,7 +1049,6 @@ describe('host loop', () => {
       onEvent: () => {},
       onApprovalRequired: () => {},
       onError: () => {},
-      onUsageChanged: () => {},
       onTokenDelta: () => {},
     }
     const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast })
