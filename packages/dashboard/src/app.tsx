@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, BarChart3, Boxes, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun } from 'lucide-react'
+import { Archive, BarChart3, Boxes, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
 import { Toaster } from 'sonner'
 
 import type {
@@ -152,7 +152,7 @@ export function App(): JSX.Element {
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
-  const [artifactInitialMode, setArtifactInitialMode] = useState<'artifacts' | 'eval' | 'profiles' | 'memory'>('artifacts')
+  const [artifactInitialMode, setArtifactInitialMode] = useState<'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops'>('artifacts')
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
@@ -550,7 +550,7 @@ export function App(): JSX.Element {
     setCwdDialogOpen(true)
   }
 
-  const openArtifacts = (mode: 'artifacts' | 'eval' | 'profiles' | 'memory' = 'artifacts'): void => {
+  const openArtifacts = (mode: 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops' = 'artifacts'): void => {
     setArtifactInitialMode(mode)
     setArtifactsOpen(true)
   }
@@ -681,6 +681,15 @@ export function App(): JSX.Element {
         icon: Boxes,
         keywords: ['manifest', 'trace', 'eval'],
         run: () => openArtifacts('artifacts'),
+      },
+      {
+        id: 'view.ops-artifacts',
+        group: 'View',
+        label: 'Open ops artifacts',
+        hint: 'Inspect reliability, rollout, trace, router, and sub-agent artifacts.',
+        icon: Workflow,
+        keywords: ['reliability', 'rollout', 'trace', 'router', 'subagent'],
+        run: () => openArtifacts('ops'),
       },
       {
         id: 'view.toggle-theme',
@@ -916,6 +925,7 @@ export function App(): JSX.Element {
               explorerAvailable={!wideLayout}
               onChangeCwd={openCwdDialog}
               onOpenEval={() => openArtifacts('eval')}
+              onOpenOps={() => openArtifacts('ops')}
               onOpenArtifacts={() => openArtifacts('artifacts')}
               onOpenSettings={() => setSettingsOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
@@ -1380,6 +1390,7 @@ function WorkbenchToolbar({
   explorerAvailable,
   onChangeCwd,
   onOpenEval,
+  onOpenOps,
   onOpenArtifacts,
   onOpenSettings,
   onToggleInspector,
@@ -1396,6 +1407,7 @@ function WorkbenchToolbar({
   explorerAvailable: boolean
   onChangeCwd(): void
   onOpenEval(): void
+  onOpenOps(): void
   onOpenArtifacts(): void
   onOpenSettings(): void
   onToggleInspector(): void
@@ -1457,6 +1469,16 @@ function WorkbenchToolbar({
         data-testid="eval-dashboard-button"
       >
         <BarChart3 className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onOpenOps}
+        title="Ops artifacts"
+        aria-label="open ops artifacts"
+        data-testid="ops-artifacts-button"
+      >
+        <Workflow className="h-4 w-4" />
       </Button>
       <Button
         variant="ghost"

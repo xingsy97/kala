@@ -104,6 +104,25 @@ that endpoint as a read-only view: it shows summary counts, kind distribution,
 file metadata, and hash status without loading artifact payload bodies into UI
 state.
 
+Dashboard coverage mirrors the implemented enhancement CLIs where a UI action is
+reasonable. Expensive or environment-specific jobs still run through explicit
+CLI/CI commands, but their outputs have first-class dashboard surfaces:
+
+- `Eval`: SWE-bench and generic eval summaries, worker plans, score artifacts,
+  judge traces, progress, comparisons, trials, final patches, harness evidence,
+  and linked sessions.
+- `Profiles`: session latency, token, missing-trace, and estimated-cost
+  profiles.
+- `Memory`: memory index provenance, active/tombstoned entries, confidence, and
+  source metadata.
+- `Ops`: reliability audit/chaos reports, RL rollout sidecars, token segment
+  indexes, slime/verl adapter artifacts, subagent graphs, OpenInference traces,
+  message assembly artifacts, router decisions, and tool catalogs.
+
+This gives every major CLI-generated artifact family a dashboard equivalent for
+inspection while keeping execution control explicit and reproducible in the host
+CLI or CI workflow.
+
 This is an index, not a new protocol. It gives the dashboard and cleanup tools a
 stable discovery surface while preserving the existing artifact contracts:
 OpenInference traces, SWE-bench summaries/trials, rollout sidecars, profiles,

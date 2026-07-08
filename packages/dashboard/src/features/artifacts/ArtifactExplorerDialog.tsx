@@ -44,7 +44,7 @@ type Props = {
   onOpenSession?(sessionId: string): void
 }
 
-type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory'
+type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops'
 
 type ArtifactContentResponse = {
   path: string
@@ -149,6 +149,54 @@ type EvalComparisonRow = {
   comparison: EvalRunComparison
 }
 
+type EvalScoreSummary = {
+  instanceId?: string
+  resolved?: boolean
+  failureLabel?: string
+  score?: number
+  results?: readonly { scorer?: string; passed?: boolean; label?: string; score?: number; explanation?: string }[]
+}
+
+type EvalScoreRow = {
+  path: string
+  summary: EvalScoreSummary
+}
+
+type EvalJudgeTrace = {
+  scorer?: string
+  judgeModel?: string
+  inputRef?: string
+  parsed?: { score?: number; passed?: boolean; label?: string; explanation?: string }
+}
+
+type EvalJudgeRow = {
+  path: string
+  trace: EvalJudgeTrace
+}
+
+type EvalWorkerPlan = {
+  runId?: string
+  dataset?: string
+  split?: string
+  model?: string
+  selectedCount?: number
+  maxWorkers?: number
+  shards?: readonly { workerId?: number; instanceCount?: number; instanceIds?: readonly string[] }[]
+  resourceHints?: {
+    dockerRequired?: boolean
+    workspaceIsolation?: string
+    maxConcurrentWorkspaces?: number
+    repoCacheDir?: string
+    timeoutMs?: number
+  }
+  warnings?: readonly string[]
+}
+
+type EvalWorkerPlanRow = {
+  path: string
+  plan: EvalWorkerPlan
+}
+
 type SessionProfile = {
   sessionId?: string
   llmCalls?: number
@@ -203,6 +251,24 @@ type MemoryIndexRow = {
   index: MemoryIndex
 }
 
+type OpsArtifactKind =
+  | 'reliability_audit'
+  | 'reliability_chaos'
+  | 'rl_rollout_sidecar'
+  | 'rl_token_segments'
+  | 'rl_adapter'
+  | 'subagent_graph'
+  | 'trace'
+  | 'message_assembly'
+  | 'router_decision'
+  | 'tool_catalog'
+
+type OpsArtifactRow = {
+  path: string
+  kind: OpsArtifactKind
+  body: Record<string, unknown>
+}
+
 type ArtifactDetailRequest = {
   path: string
   label: string
@@ -232,6 +298,9 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
   const [reloadToken, setReloadToken] = useState(0)
   const [evalRows, setEvalRows] = useState<readonly EvalRunRow[]>([])
   const [evalComparisons, setEvalComparisons] = useState<readonly EvalComparisonRow[]>([])
+  const [evalScores, setEvalScores] = useState<readonly EvalScoreRow[]>([])
+  const [evalJudges, setEvalJudges] = useState<readonly EvalJudgeRow[]>([])
+  const [evalWorkerPlans, setEvalWorkerPlans] = useState<readonly EvalWorkerPlanRow[]>([])
   const [evalError, setEvalError] = useState<string | null>(null)
   const [selectedEvalRunPath, setSelectedEvalRunPath] = useState<string | null>(null)
   const [evalTrials, setEvalTrials] = useState<readonly EvalTrialRow[]>([])
@@ -242,6 +311,8 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
   const [profileError, setProfileError] = useState<string | null>(null)
   const [memoryRows, setMemoryRows] = useState<readonly MemoryIndexRow[]>([])
   const [memoryError, setMemoryError] = useState<string | null>(null)
+  const [opsRows, setOpsRows] = useState<readonly OpsArtifactRow[]>([])
+  const [opsError, setOpsError] = useState<string | null>(null)
   const [artifactDetail, setArtifactDetail] = useState<ArtifactDetailRequest | null>(null)
 
   useEffect(() => {
@@ -283,10 +354,16 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
     const summaries = manifest.entries.filter((entry) => entry.kind === 'eval_summary' || entry.path.endsWith('/summary.json'))
     const progresses = manifest.entries.filter((entry) => entry.kind === 'eval_progress' || entry.path.endsWith('/progress.json'))
     const comparisons = manifest.entries.filter((entry) => entry.kind === 'eval_comparison' || entry.path.endsWith('/eval-comparison.json'))
+    const workerPlans = manifest.entries.filter((entry) => entry.kind === 'eval_worker_plan' || entry.path.endsWith('/worker-plan.json'))
+    const scores = manifest.entries.filter((entry) => entry.kind === 'eval_score' || entry.path.endsWith('/scores.json'))
+    const judges = manifest.entries.filter((entry) => entry.kind === 'eval_judge' || entry.path.endsWith('/judge-trace.json'))
     let cancelled = false
     setEvalError(null)
     setEvalRows([])
     setEvalComparisons([])
+    setEvalScores([])
+    setEvalJudges([])
+    setEvalWorkerPlans([])
     void Promise.all([
       Promise.all(summaries.map(async (entry): Promise<EvalSummaryContentRow> => {
         const content = await fetchArtifactContent(entry.path)
@@ -300,11 +377,26 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
         const content = await fetchArtifactContent(entry.path)
         return { path: entry.path, progress: content.body as EvalRunProgress }
       })),
+      Promise.all(workerPlans.map(async (entry): Promise<EvalWorkerPlanRow> => {
+        const content = await fetchArtifactContent(entry.path)
+        return { path: entry.path, plan: content.body as EvalWorkerPlan }
+      })),
+      Promise.all(scores.map(async (entry): Promise<EvalScoreRow> => {
+        const content = await fetchArtifactContent(entry.path)
+        return { path: entry.path, summary: content.body as EvalScoreSummary }
+      })),
+      Promise.all(judges.map(async (entry): Promise<EvalJudgeRow> => {
+        const content = await fetchArtifactContent(entry.path)
+        return { path: entry.path, trace: content.body as EvalJudgeTrace }
+      })),
     ])
-      .then(([summaryRows, comparisonRows, progressRows]) => {
+      .then(([summaryRows, comparisonRows, progressRows, workerPlanRows, scoreRows, judgeRows]) => {
         const rows = mergeEvalRuns(summaryRows, progressRows)
         if (!cancelled) setEvalRows(rows)
         if (!cancelled) setEvalComparisons(comparisonRows)
+        if (!cancelled) setEvalWorkerPlans(workerPlanRows.sort((a, b) => a.path.localeCompare(b.path)))
+        if (!cancelled) setEvalScores(scoreRows.sort((a, b) => a.path.localeCompare(b.path)))
+        if (!cancelled) setEvalJudges(judgeRows.sort((a, b) => a.path.localeCompare(b.path)))
         if (!cancelled) setSelectedEvalRunPath((current) => current && rows.some((row: EvalRunRow) => row.key === current) ? current : rows[0]?.key ?? null)
       })
       .catch((err: unknown) => {
@@ -391,6 +483,27 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
     }
   }, [open, mode, manifest])
 
+  useEffect(() => {
+    if (!open || mode !== 'ops' || !manifest) return
+    const opsArtifacts = manifest.entries.filter((entry) => isOpsArtifactKind(entry.kind))
+    let cancelled = false
+    setOpsError(null)
+    setOpsRows([])
+    void Promise.all(opsArtifacts.map(async (entry): Promise<OpsArtifactRow> => {
+      const content = await fetchArtifactContent(entry.path)
+      return { path: entry.path, kind: entry.kind as OpsArtifactKind, body: asRecord(content.body) }
+    }))
+      .then((rows) => {
+        if (!cancelled) setOpsRows(rows.sort((a, b) => opsKindOrder(a.kind) - opsKindOrder(b.kind) || a.path.localeCompare(b.path)))
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setOpsError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, mode, manifest])
+
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -398,8 +511,8 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
         <DialogHeader className="border-b border-border px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <DialogTitle>{mode === 'eval' ? 'Eval' : mode === 'profiles' ? 'Profiles' : mode === 'memory' ? 'Memory' : 'Artifacts'}</DialogTitle>
-              <DialogDescription>{mode === 'eval' ? 'Benchmark run summaries, progress, comparisons, and trial evidence.' : 'Run output index from the host artifact store.'}</DialogDescription>
+              <DialogTitle>{mode === 'eval' ? 'Eval' : mode === 'profiles' ? 'Profiles' : mode === 'memory' ? 'Memory' : mode === 'ops' ? 'Ops' : 'Artifacts'}</DialogTitle>
+              <DialogDescription>{mode === 'eval' ? 'Benchmark run summaries, progress, comparisons, and trial evidence.' : mode === 'ops' ? 'Reliability, rollout, trace, router, and sub-agent artifacts.' : 'Run output index from the host artifact store.'}</DialogDescription>
             </div>
             <div className="flex items-center gap-2">
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
@@ -407,6 +520,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
                 <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')}>Eval</button>
                 <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')}>Profiles</button>
                 <button type="button" className={tabClass(mode === 'memory')} onClick={() => setMode('memory')}>Memory</button>
+                <button type="button" className={tabClass(mode === 'ops')} onClick={() => setMode('ops')}>Ops</button>
               </div>
               <Button
                 type="button"
@@ -428,6 +542,9 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             manifest={manifest}
             rows={evalRows}
             comparisons={evalComparisons}
+            scores={evalScores}
+            judges={evalJudges}
+            workerPlans={evalWorkerPlans}
             selectedRunPath={selectedEvalRunPath}
             onSelectRun={setSelectedEvalRunPath}
             trials={evalTrials}
@@ -447,12 +564,20 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             error={error ?? profileError}
             loading={loading}
           />
-        ) : (
+        ) : mode === 'memory' ? (
           <MemoryView
             manifest={manifest}
             rows={memoryRows}
             error={error ?? memoryError}
             loading={loading}
+          />
+        ) : (
+          <OpsView
+            manifest={manifest}
+            rows={opsRows}
+            error={error ?? opsError}
+            loading={loading}
+            onOpenArtifact={setArtifactDetail}
           />
         )}
       </DialogContent>
@@ -544,6 +669,9 @@ function EvalRunsView({
   manifest,
   rows,
   comparisons,
+  scores,
+  judges,
+  workerPlans,
   selectedRunPath,
   onSelectRun,
   trials,
@@ -559,6 +687,9 @@ function EvalRunsView({
   manifest: ArtifactManifest | null
   rows: readonly EvalRunRow[]
   comparisons: readonly EvalComparisonRow[]
+  scores: readonly EvalScoreRow[]
+  judges: readonly EvalJudgeRow[]
+  workerPlans: readonly EvalWorkerPlanRow[]
   selectedRunPath: string | null
   onSelectRun(path: string): void
   trials: readonly EvalTrialRow[]
@@ -581,10 +712,13 @@ function EvalRunsView({
           <Stat label="Eval runs" value={String(rows.length)} />
           <Stat label="Trials" value={String(trials.length)} />
           <Stat label="Comparisons" value={String(comparisonCount)} />
+          <Stat label="Worker plans" value={String(workerPlans.length)} />
+          <Stat label="Scores" value={String(scores.length)} />
+          <Stat label="Judges" value={String(judges.length)} />
           <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
         </div>
       </aside>
-      <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_auto_minmax(220px,1fr)_auto] gap-3 p-3 max-lg:grid-rows-none">
+      <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_auto_minmax(220px,1fr)_auto_auto] gap-3 p-3 max-lg:grid-rows-none">
         {error ? (
           <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
@@ -673,6 +807,73 @@ function EvalRunsView({
             </div>
           </div>
         ) : null}
+        {workerPlans.length > 0 ? (
+          <EvalWorkerPlansPanel plans={workerPlans} onOpenArtifact={onOpenArtifact} />
+        ) : null}
+        {scores.length > 0 || judges.length > 0 ? (
+          <EvalScoresPanel scores={scores} judges={judges} onOpenArtifact={onOpenArtifact} />
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function EvalWorkerPlansPanel({ plans, onOpenArtifact }: { plans: readonly EvalWorkerPlanRow[]; onOpenArtifact(request: ArtifactDetailRequest): void }): JSX.Element {
+  return (
+    <div className="min-h-0 rounded-md border border-border">
+      <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">Worker Plans</div>
+      <div className="max-h-52 divide-y divide-border overflow-auto text-xs">
+        {plans.map((row) => {
+          const shards = row.plan.shards ?? []
+          const warnings = row.plan.warnings ?? []
+          const hints = row.plan.resourceHints ?? {}
+          return (
+            <button key={row.path} type="button" onClick={() => onOpenArtifact({ path: row.path, label: row.path })} className="grid w-full grid-cols-[1fr_110px_120px_1.1fr] gap-3 px-3 py-2 text-left hover:bg-muted/30 max-lg:grid-cols-[1fr_100px]">
+              <div className="min-w-0">
+                <div className="truncate font-mono text-[11px]">{row.plan.runId ?? row.path}</div>
+                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.plan.dataset ?? 'dataset unknown'} / {row.plan.model ?? 'model unknown'}</div>
+              </div>
+              <div className="font-mono text-[11px]">{row.plan.selectedCount ?? 0} instances</div>
+              <div className="font-mono text-[11px]">{row.plan.maxWorkers ?? shards.length} workers / {shards.length} shards</div>
+              <div className="min-w-0">
+                <div className="truncate font-mono text-[11px]">{hints.workspaceIsolation ?? 'isolation unknown'} / max {hints.maxConcurrentWorkspaces ?? '-'}</div>
+                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{warnings.length > 0 ? warnings.join(', ') : hints.dockerRequired ? 'docker required' : row.path}</div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function EvalScoresPanel({ scores, judges, onOpenArtifact }: { scores: readonly EvalScoreRow[]; judges: readonly EvalJudgeRow[]; onOpenArtifact(request: ArtifactDetailRequest): void }): JSX.Element {
+  return (
+    <div className="min-h-0 rounded-md border border-border">
+      <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">Score Artifacts</div>
+      <div className="max-h-52 divide-y divide-border overflow-auto text-xs">
+        {scores.map((row) => (
+          <button key={row.path} type="button" onClick={() => onOpenArtifact({ path: row.path, label: row.path })} className="grid w-full grid-cols-[1fr_90px_90px_1fr] gap-3 px-3 py-2 text-left hover:bg-muted/30">
+            <div className="min-w-0">
+              <div className="truncate font-mono text-[11px]">{row.summary.instanceId ?? row.path}</div>
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+            </div>
+            <ResultPill resolved={row.summary.resolved} />
+            <div className="font-mono text-[11px]">{formatPercent(row.summary.score)}</div>
+            <div className="truncate font-mono text-[11px] text-muted-foreground">{row.summary.failureLabel ?? row.summary.results?.[0]?.scorer ?? '-'}</div>
+          </button>
+        ))}
+        {judges.map((row) => (
+          <button key={row.path} type="button" onClick={() => onOpenArtifact({ path: row.path, label: row.path })} className="grid w-full grid-cols-[1fr_120px_90px_1fr] gap-3 px-3 py-2 text-left hover:bg-muted/30">
+            <div className="min-w-0">
+              <div className="truncate font-mono text-[11px]">{row.trace.scorer ?? row.path}</div>
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+            </div>
+            <div className="truncate font-mono text-[11px]">{row.trace.judgeModel ?? 'judge'}</div>
+            <div className="font-mono text-[11px]">{formatPercent(row.trace.parsed?.score)}</div>
+            <div className="truncate text-[11px] text-muted-foreground">{row.trace.parsed?.explanation ?? row.trace.inputRef ?? '-'}</div>
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -1231,6 +1432,200 @@ function MemoryStatus({ status }: { status: MemoryIndexEntry['status'] | undefin
   if (status === 'tombstoned') return <div className="font-mono text-[11px] text-amber-700 dark:text-amber-300">tombstoned</div>
   if (status === 'active') return <div className="font-mono text-[11px] text-emerald-700 dark:text-emerald-300">active</div>
   return <div className="font-mono text-[11px] text-muted-foreground">unknown</div>
+}
+
+function OpsView({
+  manifest,
+  rows,
+  error,
+  loading,
+  onOpenArtifact,
+}: {
+  manifest: ArtifactManifest | null
+  rows: readonly OpsArtifactRow[]
+  error: string | null
+  loading: boolean
+  onOpenArtifact(request: ArtifactDetailRequest): void
+}): JSX.Element {
+  const groups = groupOpsRows(rows)
+  const reliabilityIssues = rows.reduce((sum, row) => sum + opsIssueCount(row), 0)
+  const rolloutReady = rows.filter((row) => row.kind === 'rl_adapter' && stringField(row.body, 'status') === 'ready').length
+  const rolloutBlocked = rows.filter((row) => row.kind === 'rl_adapter' && stringField(row.body, 'status') === 'blocked').length
+  const traceCount = rows.filter((row) => row.kind === 'trace' || row.kind === 'message_assembly').length
+  const routerCount = rows.filter((row) => row.kind === 'router_decision' || row.kind === 'tool_catalog').length
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
+      <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
+        <div className="grid gap-2 text-xs">
+          <Stat label="Ops artifacts" value={String(rows.length)} />
+          <Stat label="Reliability issues" value={String(reliabilityIssues)} />
+          <Stat label="Rollout ready" value={String(rolloutReady)} />
+          <Stat label="Rollout blocked" value={String(rolloutBlocked)} />
+          <Stat label="Trace context" value={String(traceCount)} />
+          <Stat label="Router/tool" value={String(routerCount)} />
+          <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
+        </div>
+      </aside>
+      <div className="min-h-0 p-3">
+        {error ? (
+          <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+            {error}
+          </div>
+        ) : null}
+        {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
+        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No ops artifacts found.</div> : null}
+        {rows.length > 0 ? (
+          <ScrollArea className="h-full rounded-md border border-border">
+            <div className="min-w-[980px] divide-y divide-border text-xs">
+              {groups.map((group) => (
+                <div key={group.label} className="grid gap-2 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium">{group.label}</div>
+                    <div className="font-mono text-[11px] text-muted-foreground">{group.rows.length}</div>
+                  </div>
+                  <div className="grid gap-1.5">
+                    {group.rows.map((row) => (
+                      <button
+                        key={row.path}
+                        type="button"
+                        onClick={() => onOpenArtifact({ path: row.path, label: row.path })}
+                        className="grid grid-cols-[170px_minmax(0,1fr)_minmax(220px,0.8fr)] gap-3 rounded border border-border bg-background/70 px-2 py-2 text-left transition-colors hover:bg-muted/40"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-[11px]">{opsKindLabel(row.kind)}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={row.path}>{row.path}</div>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">{opsPrimary(row)}</div>
+                          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{opsSecondary(row)}</div>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-[11px]">{opsMetricLine(row)}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{opsStatusLine(row)}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function groupOpsRows(rows: readonly OpsArtifactRow[]): Array<{ label: string; rows: OpsArtifactRow[] }> {
+  const groups = new Map<string, OpsArtifactRow[]>()
+  for (const row of rows) {
+    const label = opsGroupLabel(row.kind)
+    const existing = groups.get(label) ?? []
+    existing.push(row)
+    groups.set(label, existing)
+  }
+  return [...groups.entries()].map(([label, groupRows]) => ({ label, rows: groupRows }))
+}
+
+function isOpsArtifactKind(kind: string): kind is OpsArtifactKind {
+  return kind === 'reliability_audit' || kind === 'reliability_chaos' || kind === 'rl_rollout_sidecar' || kind === 'rl_token_segments' || kind === 'rl_adapter' || kind === 'subagent_graph' || kind === 'trace' || kind === 'message_assembly' || kind === 'router_decision' || kind === 'tool_catalog'
+}
+
+function opsKindOrder(kind: OpsArtifactKind): number {
+  return ['reliability_audit', 'reliability_chaos', 'rl_rollout_sidecar', 'rl_token_segments', 'rl_adapter', 'subagent_graph', 'trace', 'message_assembly', 'router_decision', 'tool_catalog'].indexOf(kind)
+}
+
+function opsGroupLabel(kind: OpsArtifactKind): string {
+  if (kind === 'reliability_audit' || kind === 'reliability_chaos') return 'Reliability'
+  if (kind === 'rl_rollout_sidecar' || kind === 'rl_token_segments' || kind === 'rl_adapter') return 'Agentic RL'
+  if (kind === 'subagent_graph') return 'Subagents'
+  if (kind === 'trace' || kind === 'message_assembly') return 'Trace and Context'
+  return 'Router and Tools'
+}
+
+function opsKindLabel(kind: OpsArtifactKind): string {
+  return kind.replace(/_/g, ' ')
+}
+
+function opsPrimary(row: OpsArtifactRow): string {
+  if (row.kind === 'reliability_audit') return stringField(row.body, 'sessionId') ?? 'session audit'
+  if (row.kind === 'reliability_chaos') return `${numberField(row.body, 'sessionCount') ?? 0} sessions`
+  if (row.kind === 'rl_rollout_sidecar') return stringField(row.body, 'rollout_id') ?? 'rollout sidecar'
+  if (row.kind === 'rl_token_segments') return stringField(row.body, 'sessionId') ?? 'token segments'
+  if (row.kind === 'rl_adapter') return `${stringField(row.body, 'frameworkTarget') ?? stringField(row.body, 'framework_target') ?? 'adapter'} ${stringField(row.body, 'status') ?? ''}`.trim()
+  if (row.kind === 'subagent_graph') return `${arrayLength(row.body.nodes)} nodes / ${arrayLength(row.body.edges)} edges`
+  if (row.kind === 'message_assembly') return stringField(row.body, 'sessionId') ?? 'message assembly'
+  if (row.kind === 'router_decision') return stringField(row.body, 'selectedModel') ?? 'router decision'
+  if (row.kind === 'tool_catalog') return `${numberField(row.body, 'toolCount') ?? arrayLength(row.body.tools)} tools`
+  return stringField(row.body, 'sessionId') ?? 'trace'
+}
+
+function opsSecondary(row: OpsArtifactRow): string {
+  if (row.kind === 'reliability_audit') return `status ${stringField(row.body, 'status') ?? 'unknown'} / dangling ${booleanField(row.body, 'dangling') ? stringField(row.body, 'danglingKind') ?? 'yes' : 'no'}`
+  if (row.kind === 'reliability_chaos') return `${numberField(row.body, 'danglingCount') ?? 0} dangling / ${numberField(row.body, 'recoveryEventCount') ?? 0} recovery events`
+  if (row.kind === 'rl_rollout_sidecar') return `${stringField(row.body, 'task_id') ?? 'task'} / ${stringField(row.body, 'framework_target') ?? 'framework'}`
+  if (row.kind === 'rl_token_segments') return `${arrayLength(row.body.segments)} segments / token ids ${booleanField(row.body, 'tokenIdsCaptured') ? 'captured' : 'not captured'}`
+  if (row.kind === 'rl_adapter') return stringField(row.body, 'reason') ?? stringField(row.body, 'entrypoint') ?? 'adapter artifact'
+  if (row.kind === 'subagent_graph') return `${arrayLength(row.body.warnings)} warnings`
+  if (row.kind === 'message_assembly') return `${numberField(row.body, 'messageCount') ?? 0} messages / ${numberField(row.body, 'toolCount') ?? 0} tools`
+  if (row.kind === 'router_decision') return `${stringField(row.body, 'selectedProvider') ?? 'provider unknown'} / ${(arrayField(row.body, 'reasonCodes') ?? []).join(', ')}`
+  if (row.kind === 'tool_catalog') return `${arrayLength(row.body.tools)} registered tools`
+  return `${arrayLength(row.body.spans)} spans`
+}
+
+function opsMetricLine(row: OpsArtifactRow): string {
+  if (row.kind === 'reliability_audit') return `${opsIssueCount(row)} integrity issues`
+  if (row.kind === 'rl_token_segments') return `${numberField(asRecord(row.body.topology), 'compactionCount') ?? 0} compactions / ${numberField(asRecord(row.body.topology), 'subAgentCallCount') ?? 0} subagents`
+  if (row.kind === 'router_decision') {
+    const policy = asRecord(row.body.toolPolicy)
+    return `${numberField(policy, 'toolCount') ?? 0} tools / ${numberField(policy, 'skillBackedCount') ?? 0} skill-backed`
+  }
+  if (row.kind === 'message_assembly') return `${numberField(row.body, 'estimatedTokens') ?? 0} est tokens`
+  if (row.kind === 'tool_catalog') return `${arrayField(row.body, 'tools')?.filter((tool) => asRecord(tool).skillBacked === true).length ?? 0} skill-backed`
+  return `${formatBytesMetric(numberField(row.body, 'bytes'))}`
+}
+
+function opsStatusLine(row: OpsArtifactRow): string {
+  if (row.kind === 'rl_adapter') return stringField(row.body, 'status') ?? 'unknown'
+  if (row.kind === 'reliability_audit') return arrayLength(row.body.recoveryEventDetails) > 0 ? 'recovered' : 'no recovery events'
+  if (row.kind === 'subagent_graph') return 'derived parent-child graph'
+  if (row.kind === 'trace') return 'OpenInference trace artifact'
+  return row.path
+}
+
+function opsIssueCount(row: OpsArtifactRow): number {
+  if (row.kind === 'reliability_chaos') return numberField(row.body, 'danglingCount') ?? 0
+  if (row.kind !== 'reliability_audit') return 0
+  const integrity = asRecord(row.body.integrity)
+  return arrayLength(integrity.duplicateToolCallIds) + arrayLength(integrity.duplicateToolResultIds) + arrayLength(integrity.toolResultsWithoutCall) + arrayLength(integrity.toolCallsWithoutResult)
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function booleanField(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key]
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function arrayField(record: Record<string, unknown>, key: string): readonly unknown[] | undefined {
+  const value = record[key]
+  return Array.isArray(value) ? value : undefined
+}
+
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0
 }
 
 function ResultPill({ resolved }: { resolved: boolean | undefined }): JSX.Element {

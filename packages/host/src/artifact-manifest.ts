@@ -109,6 +109,8 @@ function inferKind(path: string): string {
   if (inPath(path, 'message-assembly')) return 'message_assembly'
   if (inPath(path, 'router-decisions')) return 'router_decision'
   if (inPath(path, 'tool-catalog')) return 'tool_catalog'
+  if (inPath(path, 'rl-token-segments')) return 'rl_token_segments'
+  if (inPath(path, 'rl-adapters')) return 'rl_adapter'
   if (inPath(path, 'rollouts')) return 'rl_rollout_sidecar'
   if (inPath(path, 'trials')) return 'eval_trial'
   if (path.endsWith('/summary.json')) return 'eval_summary'
