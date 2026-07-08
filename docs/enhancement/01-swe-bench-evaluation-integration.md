@@ -200,7 +200,12 @@ evaluation when the operator only wants to inspect the command.
 `instance_results.jsonl`, `instance_results.json`, or `results.json` shapes. It
 maps official resolved/unresolved results into existing `EvalTrial` files,
 updates `summary.json`, and keeps the raw rows in `swebench-results.json`. It
-does not re-grade patches or reinterpret repository tests.
+also writes each official per-instance result row to
+`artifacts/<instance_id>/swebench-result.json` and copies matching small harness
+text/json/log files under `artifacts/<instance_id>/harness/`. Those refs are
+attached to the trial so the dashboard can open official harness evidence from
+the same artifact store as prompts, diffs, traces, and agent logs. It does not
+re-grade patches or reinterpret repository tests.
 
 `agent-infer` is the implemented agent-driven materialization adapter. It loads
 local SWE-bench-shaped JSONL instances, clones either `repo_path`, a
@@ -382,8 +387,9 @@ patches without failing the whole run.
 Phase 2: official harness wrapper.
 Implemented command construction and optional execution through
 `python -m swebench.harness.run_evaluation`. Result ingestion is implemented for
-official result files and updates per-trial/summary metadata after the harness
-has produced results.
+official result files, updates per-trial/summary metadata after the harness has
+produced results, and preserves official result/log evidence as trial artifact
+refs.
 
 Phase 3: SWE-bench Lite single-instance run.
 Implemented for local JSONL instances and external agent commands through
