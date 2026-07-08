@@ -56,6 +56,7 @@ describe('session reliability audit', () => {
     const before = await auditSessionReliability({ rootDir: join(dir, 'audit-before'), sessionLogPath: logPath })
     expect(before.audit.danglingKind).toBe('tool_call')
     expect(before.audit.pendingCalls[0]).toMatchObject({ callId: 'c1', name: 'read' })
+    expect(before.audit.integrity.toolCallsWithoutResult).toEqual(['c1'])
 
     await appendEventEntry({
       path: logPath,
@@ -65,6 +66,40 @@ describe('session reliability audit', () => {
     })
     const after = await auditSessionReliability({ rootDir: join(dir, 'audit-after'), sessionLogPath: logPath })
     expect(after.audit.recoveryEvents).toBe(1)
+    expect(after.audit.recoveryEventDetails[0]).toMatchObject({ seq: 3, kind: 'tool_result_recovered', callId: 'c1' })
+    expect(after.audit.integrity.toolCallsWithoutResult).toEqual([])
+  })
+
+  it('reports tool-call integrity issues without mutating the log', async () => {
+    const sessionId = 's-integrity'
+    const logPath = join(dir, 'integrity.jsonl')
+    const cfg = createConfig({ tools: [READ], systemPrompt: 'sys' })
+    await writeHeader({ path: logPath, sessionId, config: cfg, initialState: createInitialState({ sessionId, systemPrompt: 'sys' }) })
+    await appendEventEntry({ path: logPath, seq: 1, event: { kind: 'user_message', text: 'read' }, effects: [] })
+    await appendEventEntry({
+      path: logPath,
+      seq: 2,
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'dup', name: 'read', input: {} }] } },
+      effects: [],
+    })
+    await appendEventEntry({
+      path: logPath,
+      seq: 3,
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'dup', name: 'read', input: {} }] } },
+      effects: [],
+    })
+    await appendEventEntry({ path: logPath, seq: 4, event: { kind: 'tool_result', callId: 'dup', ok: true, content: 'ok' }, effects: [] })
+    await appendEventEntry({ path: logPath, seq: 5, event: { kind: 'tool_result', callId: 'dup', ok: true, content: 'ok again' }, effects: [] })
+    await appendEventEntry({ path: logPath, seq: 6, event: { kind: 'tool_result', callId: 'unknown', ok: false, content: 'late result' }, effects: [] })
+
+    const result = await auditSessionReliability({ rootDir: join(dir, 'audit-integrity'), sessionLogPath: logPath })
+
+    expect(result.audit.integrity).toMatchObject({
+      duplicateToolCallIds: ['dup'],
+      duplicateToolResultIds: ['dup'],
+      toolResultsWithoutCall: ['unknown'],
+      toolCallsWithoutResult: [],
+    })
   })
 
   it('replays chaos scenarios across session logs into a compact report', async () => {

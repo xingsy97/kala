@@ -55,8 +55,11 @@ agent-kernel-host enhancement reliability audit-session \
 This command folds the raw log without triggering store recovery and writes
 `reliability-audit.json` with final status, pending calls, dangling kind
 (`llm_call`, `tool_call`, or `approval`), recovery event count, parse warnings,
-and last event kind. It is intended for CI checks, crash triage, and validating
-that recovered sessions no longer show impossible active work.
+last event kind, recovery event details, and tool-call integrity checks. The
+integrity section reports duplicate tool call ids, duplicate tool result ids,
+tool results without a matching call, and tool calls without a result. It is
+intended for CI checks, crash triage, and validating that recovered sessions no
+longer show impossible active work.
 
 Implemented chaos replay command:
 
@@ -118,6 +121,8 @@ Add tests that intentionally terminate components:
 - Resume a session with pending approvals.
 - Implemented unit tests for dangling LLM/tool audit and recovery-event
   detection.
+- Implemented unit tests for recovery event details and tool-call integrity
+  audit signals.
 
 Each test should assert that replay succeeds and the UI does not show impossible
 active counts.

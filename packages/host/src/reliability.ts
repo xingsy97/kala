@@ -17,9 +17,24 @@ export type SessionReliabilityAudit = {
   dangling: boolean
   danglingKind?: 'llm_call' | 'tool_call' | 'approval'
   recoveryEvents: number
+  recoveryEventDetails: readonly RecoveryEventDetail[]
+  integrity: ReliabilityIntegritySummary
   warnings: readonly string[]
   eventCount: number
   lastEventKind?: string
+}
+
+export type RecoveryEventDetail = {
+  seq: number
+  kind: 'llm_interrupted' | 'tool_result_recovered'
+  callId?: string
+}
+
+export type ReliabilityIntegritySummary = {
+  duplicateToolCallIds: readonly string[]
+  duplicateToolResultIds: readonly string[]
+  toolResultsWithoutCall: readonly string[]
+  toolCallsWithoutResult: readonly string[]
 }
 
 export type AuditSessionReliabilityInput = {
@@ -100,6 +115,7 @@ export async function replayReliabilityChaos(
 async function createSessionReliabilityAudit(sessionLogPath: string): Promise<SessionReliabilityAudit> {
   const parsed = await readSessionLog(sessionLogPath)
   const finalState = fold(parsed.header.initialState, parsed.events.map((entry) => entry.event), parsed.header.config)
+  const recoveryDetails = recoveryEventDetails(parsed.events)
   const pendingCalls = finalState.pendingCalls.map((call) => ({
     callId: call.callId,
     name: call.name,
@@ -112,7 +128,9 @@ async function createSessionReliabilityAudit(sessionLogPath: string): Promise<Se
     pendingCalls,
     dangling: danglingKind !== undefined,
     ...(danglingKind ? { danglingKind } : {}),
-    recoveryEvents: parsed.events.filter(isRecoveryEvent).length,
+    recoveryEvents: recoveryDetails.length,
+    recoveryEventDetails: recoveryDetails,
+    integrity: integritySummary(parsed.events),
     warnings: parsed.warnings,
     eventCount: parsed.events.length,
     ...(parsed.events[parsed.events.length - 1]?.event.kind ? { lastEventKind: parsed.events[parsed.events.length - 1]!.event.kind } : {}),
@@ -130,10 +148,43 @@ function classifyDangling(
   return undefined
 }
 
-function isRecoveryEvent(entry: EventEntry): boolean {
-  if (entry.event.kind === 'tool_result' && entry.event.content.includes('host restarted while call was pending')) return true
+function recoveryEventDetails(events: readonly EventEntry[]): readonly RecoveryEventDetail[] {
+  return events.flatMap((entry) => recoveryEventDetail(entry) ?? [])
+}
+
+function recoveryEventDetail(entry: EventEntry): RecoveryEventDetail | null {
+  if (entry.event.kind === 'tool_result' && entry.event.content.includes('host restarted while call was pending')) {
+    return { seq: entry.seq, kind: 'tool_result_recovered', callId: entry.event.callId }
+  }
   if (entry.event.kind === 'llm_response') {
     return entry.event.message.content.some((content) => content.type === 'text' && content.text === '[interrupted]')
+      ? { seq: entry.seq, kind: 'llm_interrupted' }
+      : null
   }
-  return false
+  return null
+}
+
+function integritySummary(events: readonly EventEntry[]): ReliabilityIntegritySummary {
+  const callCounts = new Map<string, number>()
+  const resultCounts = new Map<string, number>()
+  for (const entry of events) {
+    if (entry.event.kind === 'llm_response') {
+      for (const content of entry.event.message.content) {
+        if (content.type === 'tool_call') callCounts.set(content.callId, (callCounts.get(content.callId) ?? 0) + 1)
+      }
+    }
+    if (entry.event.kind === 'tool_result') resultCounts.set(entry.event.callId, (resultCounts.get(entry.event.callId) ?? 0) + 1)
+  }
+  const callIds = new Set(callCounts.keys())
+  const resultIds = new Set(resultCounts.keys())
+  return {
+    duplicateToolCallIds: duplicateIds(callCounts),
+    duplicateToolResultIds: duplicateIds(resultCounts),
+    toolResultsWithoutCall: [...resultIds].filter((callId) => !callIds.has(callId)).sort(),
+    toolCallsWithoutResult: [...callIds].filter((callId) => !resultIds.has(callId)).sort(),
+  }
+}
+
+function duplicateIds(counts: ReadonlyMap<string, number>): readonly string[] {
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([callId]) => callId).sort()
 }
