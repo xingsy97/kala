@@ -329,15 +329,21 @@ describe('enhancement artifact export', () => {
   it('builds a compact artifact manifest without reading payload content into entries', async () => {
     await mkdir(join(dir, 'llm/s1'), { recursive: true })
     await mkdir(join(dir, 'traces'), { recursive: true })
+    await mkdir(join(dir, 'rl-token-segments'), { recursive: true })
+    await mkdir(join(dir, 'rl-adapters/verl'), { recursive: true })
     await writeFile(join(dir, 'llm/s1/1.request.json'), JSON.stringify({ body: { prompt: 'secret prompt' } }), 'utf8')
     await writeFile(join(dir, 'traces/s1.openinference.json'), JSON.stringify({ spans: [] }), 'utf8')
+    await writeFile(join(dir, 'rl-token-segments/s1.json'), JSON.stringify({ tokenIdsCaptured: false }), 'utf8')
+    await writeFile(join(dir, 'rl-adapters/verl/r1.json'), JSON.stringify({ status: 'blocked' }), 'utf8')
     await writeFile(join(dir, 'large.log'), '0123456789abcdef', 'utf8')
 
     const result = await buildArtifactManifest({ rootDir: dir, maxHashBytes: 8 })
 
-    expect(result.manifest.summary.entryCount).toBe(3)
+    expect(result.manifest.summary.entryCount).toBe(5)
     expect(result.manifest.summary.kinds.llm_request).toBe(1)
     expect(result.manifest.summary.kinds.trace).toBe(1)
+    expect(result.manifest.summary.kinds.rl_token_segments).toBe(1)
+    expect(result.manifest.summary.kinds.rl_adapter).toBe(1)
     expect(result.manifest.entries.find((entry) => entry.path === 'large.log')?.hashSkippedReason).toContain('maxHashBytes')
     expect(JSON.stringify(result.manifest.entries)).not.toContain('secret prompt')
     expect(await readFile(result.manifestPath, 'utf8')).toContain('llm_request')

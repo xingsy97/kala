@@ -41,6 +41,14 @@ const manifest: ArtifactManifest = {
       sha256: 'progressabcdef',
     },
     {
+      path: 'runs/swebench/run1/worker-plan.json',
+      kind: 'eval_worker_plan',
+      mediaType: 'application/json',
+      bytes: 310,
+      mtime: '2026-07-09T00:00:00.000Z',
+      sha256: 'workerplanabcdef',
+    },
+    {
       path: 'runs/swebench/run1/trials/local__repo-1.json',
       kind: 'eval_trial',
       mediaType: 'application/json',
@@ -56,6 +64,8 @@ const manifest: ArtifactManifest = {
       mtime: '2026-07-09T00:00:00.000Z',
       sha256: 'fedcba654321',
     },
+    { path: 'runs/eval/session-score/scores.json', kind: 'eval_score', mediaType: 'application/json', bytes: 220, mtime: '2026-07-09T00:00:00.000Z', sha256: 'scoreabcdef' },
+    { path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json', kind: 'eval_judge', mediaType: 'application/json', bytes: 260, mtime: '2026-07-09T00:00:00.000Z', sha256: 'judgeabcdef' },
     {
       path: 'runs/profile/session/profile.json',
       kind: 'profile',
@@ -72,13 +82,23 @@ const manifest: ArtifactManifest = {
       mtime: '2026-07-09T00:00:00.000Z',
       sha256: 'memoryabcdef',
     },
+    { path: 'runs/reliability/session/reliability-audit.json', kind: 'reliability_audit', mediaType: 'application/json', bytes: 360, mtime: '2026-07-09T00:00:00.000Z', sha256: 'relauditabcdef' },
+    { path: 'runs/reliability/chaos/reliability-chaos.json', kind: 'reliability_chaos', mediaType: 'application/json', bytes: 300, mtime: '2026-07-09T00:00:00.000Z', sha256: 'relchaosabcdef' },
+    { path: 'runs/rollouts/rollouts/rollout_1.json', kind: 'rl_rollout_sidecar', mediaType: 'application/json', bytes: 340, mtime: '2026-07-09T00:00:00.000Z', sha256: 'rolloutabcdef' },
+    { path: 'runs/rollouts/rl-token-segments/s1.json', kind: 'rl_token_segments', mediaType: 'application/json', bytes: 480, mtime: '2026-07-09T00:00:00.000Z', sha256: 'segmentsabcdef' },
+    { path: 'runs/rollouts/rl-adapters/verl/rollout_1.json', kind: 'rl_adapter', mediaType: 'application/json', bytes: 300, mtime: '2026-07-09T00:00:00.000Z', sha256: 'adapterabcdef' },
+    { path: 'runs/subagents/subagent-graph.json', kind: 'subagent_graph', mediaType: 'application/json', bytes: 280, mtime: '2026-07-09T00:00:00.000Z', sha256: 'subgraphabcdef' },
+    { path: 'traces/s1.openinference.json', kind: 'trace', mediaType: 'application/json', bytes: 520, mtime: '2026-07-09T00:00:00.000Z', sha256: 'traceabcdef' },
+    { path: 'message-assembly/s1/1.json', kind: 'message_assembly', mediaType: 'application/json', bytes: 420, mtime: '2026-07-09T00:00:00.000Z', sha256: 'assemblyabcdef' },
+    { path: 'router-decisions/s1/1.json', kind: 'router_decision', mediaType: 'application/json', bytes: 260, mtime: '2026-07-09T00:00:00.000Z', sha256: 'routerabcdef' },
+    { path: 'tool-catalog/s1/1.json', kind: 'tool_catalog', mediaType: 'application/json', bytes: 260, mtime: '2026-07-09T00:00:00.000Z', sha256: 'toolcatalogabcdef' },
   ],
   summary: {
-    entryCount: 8,
-    totalBytes: 6492,
-    hashedCount: 7,
+    entryCount: 21,
+    totalBytes: 10802,
+    hashedCount: 20,
     hashSkippedCount: 1,
-    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_progress: 1, eval_trial: 1, eval_comparison: 1, profile: 1, memory_index: 1 },
+    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_progress: 1, eval_worker_plan: 1, eval_trial: 1, eval_comparison: 1, eval_score: 1, eval_judge: 1, profile: 1, memory_index: 1, reliability_audit: 1, reliability_chaos: 1, rl_rollout_sidecar: 1, rl_token_segments: 1, rl_adapter: 1, subagent_graph: 1, trace: 1, message_assembly: 1, router_decision: 1, tool_catalog: 1 },
   },
 }
 
@@ -104,7 +124,7 @@ describe('ArtifactExplorerDialog', () => {
     })
     await screen.findByText('llm/s1/1.request.json')
     expect(screen.getByText('large.log')).toBeTruthy()
-    expect(screen.getByText('7/8')).toBeTruthy()
+    expect(screen.getByText('20/21')).toBeTruthy()
     expect(screen.getByText('hash skipped')).toBeTruthy()
   })
 
@@ -158,6 +178,33 @@ describe('ArtifactExplorerDialog', () => {
         },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/worker-plan.json',
+        mediaType: 'application/json',
+        body: {
+          runId: 'run1',
+          dataset: 'local',
+          model: 'agent-test',
+          selectedCount: 2,
+          maxWorkers: 4,
+          shards: [
+            { workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] },
+            { workerId: 2, instanceCount: 1, instanceIds: ['local__repo-2'] },
+          ],
+          resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2, timeoutMs: 600000 },
+          warnings: ['maxWorkers exceeds selected instance count'],
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/session-score/scores.json',
+        mediaType: 'application/json',
+        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [{ scorer: 'patch.non_empty', passed: true, score: 1 }] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
+        mediaType: 'application/json',
+        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', inputRef: 'local__repo-1', parsed: { score: 0.8, passed: true, explanation: 'Looks correct' } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         path: 'runs/swebench/run1/trials/local__repo-1.json',
         mediaType: 'application/json',
         body: {
@@ -190,7 +237,7 @@ describe('ArtifactExplorerDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^eval$/i }))
 
-    await screen.findByText('run1')
+    await waitFor(() => expect(screen.getAllByText('run1').length).toBeGreaterThanOrEqual(1))
     expect(screen.getByText('Runs')).toBeTruthy()
     expect(screen.getByText('Selected pass')).toBeTruthy()
     expect(screen.getByText('local')).toBeTruthy()
@@ -208,6 +255,15 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getAllByText('+50%').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByLabelText('comparison delta chart')).toBeTruthy()
     expect(screen.getByText('empty_patch -1')).toBeTruthy()
+    expect(screen.getByText('Worker Plans')).toBeTruthy()
+    expect(screen.getByText('2 instances')).toBeTruthy()
+    expect(screen.getByText('4 workers / 2 shards')).toBeTruthy()
+    expect(screen.getByText('per-instance-git-clone / max 2')).toBeTruthy()
+    expect(screen.getByText('maxWorkers exceeds selected instance count')).toBeTruthy()
+    expect(screen.getByText('Score Artifacts')).toBeTruthy()
+    expect(screen.getByText('model_judge.score')).toBeTruthy()
+    expect(screen.getByText('judge-test')).toBeTruthy()
+    expect(screen.getByText('80%')).toBeTruthy()
     await waitFor(() => expect(screen.getAllByText('local__repo-1').length).toBeGreaterThanOrEqual(1))
     expect(screen.getAllByText('resolved').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Linked Session')).toBeTruthy()
@@ -233,6 +289,10 @@ describe('ArtifactExplorerDialog', () => {
     )
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fprogress.json',
+      { cache: 'no-store' },
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fworker-plan.json',
       { cache: 'no-store' },
     )
     expect(fetchMock).toHaveBeenCalledWith(
@@ -268,6 +328,21 @@ describe('ArtifactExplorerDialog', () => {
         body: { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 1 },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/worker-plan.json',
+        mediaType: 'application/json',
+        body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 1, maxWorkers: 1, shards: [{ workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 1 } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/session-score/scores.json',
+        mediaType: 'application/json',
+        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
+        mediaType: 'application/json',
+        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         path: 'runs/swebench/run1/trials/local__repo-1.json',
         mediaType: 'application/json',
         body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] },
@@ -276,7 +351,7 @@ describe('ArtifactExplorerDialog', () => {
     render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
 
     await screen.findByRole('heading', { name: 'Eval' })
-    await screen.findByText('run1')
+    await waitFor(() => expect(screen.getAllByText('run1').length).toBeGreaterThanOrEqual(1))
     expect(screen.queryByText('llm/s1/1.request.json')).toBeNull()
   })
 
@@ -310,13 +385,28 @@ describe('ArtifactExplorerDialog', () => {
           maxWorkers: 2,
         },
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/worker-plan.json',
+        mediaType: 'application/json',
+        body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 3, maxWorkers: 2, shards: [{ workerId: 1, instanceCount: 2, instanceIds: ['a', 'c'] }, { workerId: 2, instanceCount: 1, instanceIds: ['b'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2 } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/session-score/scores.json',
+        mediaType: 'application/json',
+        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
+        mediaType: 'application/json',
+        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } },
+      }), { status: 200 }))
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
 
     fireEvent.click(screen.getByRole('button', { name: /^eval$/i }))
 
-    await screen.findByText('run1')
+    await waitFor(() => expect(screen.getAllByText('run1').length).toBeGreaterThanOrEqual(1))
     expect(screen.getByText('running')).toBeTruthy()
     expect(screen.getByText('Workers')).toBeTruthy()
     expect(screen.getByText('No trial artifacts found for this run.')).toBeTruthy()
@@ -414,6 +504,86 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getByText('2026-07-09T00:00:00.000Z')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fmemory%2Fmemory-index.json',
+      { cache: 'no-store' },
+    )
+  })
+
+  it('loads ops artifacts for reliability, rollout, trace, router, and subagent views', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/reliability/session/reliability-audit.json',
+        mediaType: 'application/json',
+        body: {
+          sessionId: 's1',
+          status: 'done',
+          dangling: false,
+          recoveryEventDetails: [{ seq: 3, kind: 'tool_result_recovered', callId: 'c1' }],
+          integrity: { duplicateToolCallIds: ['dup'], duplicateToolResultIds: [], toolResultsWithoutCall: ['late'], toolCallsWithoutResult: [] },
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/reliability/chaos/reliability-chaos.json',
+        mediaType: 'application/json',
+        body: { sessionCount: 2, danglingCount: 1, recoveryEventCount: 1 },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/rollouts/rollouts/rollout_1.json',
+        mediaType: 'application/json',
+        body: { rollout_id: 'rollout_1', task_id: 'swebench:local__repo-1', framework_target: 'verl' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/rollouts/rl-token-segments/s1.json',
+        mediaType: 'application/json',
+        body: { sessionId: 's1', tokenIdsCaptured: false, segments: [{ segmentId: 'seg_1' }], topology: { compactionCount: 1, subAgentCallCount: 2 } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/rollouts/rl-adapters/verl/rollout_1.json',
+        mediaType: 'application/json',
+        body: { frameworkTarget: 'verl', status: 'blocked', reason: 'requires token ids' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/subagents/subagent-graph.json',
+        mediaType: 'application/json',
+        body: { nodes: [{ sessionId: 'parent' }, { sessionId: 'child' }], edges: [{ parentSessionId: 'parent', childSessionId: 'child' }], warnings: [] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'traces/s1.openinference.json',
+        mediaType: 'application/json',
+        body: { spans: [{ name: 'llm' }] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'message-assembly/s1/1.json',
+        mediaType: 'application/json',
+        body: { sessionId: 's1', messageCount: 2, toolCount: 13, estimatedTokens: 900 },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'router-decisions/s1/1.json',
+        mediaType: 'application/json',
+        body: { selectedProvider: 'openai', selectedModel: 'gpt-test', reasonCodes: ['tool_calling_enabled'], toolPolicy: { toolCount: 13, skillBackedCount: 1 } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'tool-catalog/s1/1.json',
+        mediaType: 'application/json',
+        body: { toolCount: 13, tools: [{ name: 'skill', skillBacked: true }, { name: 'read', skillBacked: false }] },
+      }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="ops" onOpenChange={() => {}} />)
+
+    await screen.findByRole('heading', { name: 'Ops' })
+    await screen.findByText('Reliability')
+    expect(screen.getByText('Agentic RL')).toBeTruthy()
+    expect(screen.getByText('Subagents')).toBeTruthy()
+    expect(screen.getByText('Trace and Context')).toBeTruthy()
+    expect(screen.getByText('Router and Tools')).toBeTruthy()
+    expect(screen.getByText('Reliability issues')).toBeTruthy()
+    expect(screen.getByText('rollout_1')).toBeTruthy()
+    expect(screen.getByText('blocked')).toBeTruthy()
+    expect(screen.getByText('2 nodes / 1 edges')).toBeTruthy()
+    expect(screen.getByText('900 est tokens')).toBeTruthy()
+    expect(screen.getByText('13 tools / 1 skill-backed')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Freliability%2Fsession%2Freliability-audit.json',
       { cache: 'no-store' },
     )
   })
