@@ -201,6 +201,47 @@ describe('InspectorPanel', () => {
     expect(document.body.textContent ?? '').toContain('request_approval')
   })
 
+  it('keeps trace minimap, state diff, and reducer rows on the same active event', () => {
+    render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+
+    const minimapItems = screen.getAllByTestId('timeline-minimap-item')
+    const rows = screen.getAllByTestId('timeline-row')
+
+    expect(minimapItems.at(-1)?.getAttribute('aria-current')).toBe('true')
+    expect(rows.at(-1)?.getAttribute('data-selected')).toBe('true')
+    expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#123')
+
+    fireEvent.click(minimapItems[0]!)
+
+    expect(minimapItems[0]?.getAttribute('aria-current')).toBe('true')
+    expect(rows[0]?.getAttribute('data-selected')).toBe('true')
+    expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#120')
+
+    fireEvent.click(rows[2]!.querySelector('[data-testid="timeline-row-header"]')!)
+
+    expect(minimapItems[2]?.getAttribute('aria-current')).toBe('true')
+    expect(rows[2]?.getAttribute('data-selected')).toBe('true')
+    expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#122')
+  })
+
+  it('collapses and expands the state diff body', () => {
+    render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+    expect(screen.getByTestId('state-diff-view')).toBeTruthy()
+
+    const toggle = screen.getByTestId('state-diff-toggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByTestId('state-diff-view')).toBeNull()
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByTestId('state-diff-view')).toBeTruthy()
+  })
+
   it('supports trace query, teaching mode, protocol flow, and fork compare loading state', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} parentSessionId="parent-session" parentCursor={121} />)
 

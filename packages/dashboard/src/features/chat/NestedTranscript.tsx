@@ -34,7 +34,7 @@ import {
   type GroupedContentItem,
   type ToolCallGroup,
 } from './grouping.js'
-import { firstLine, pickRenderer, truncate } from './toolSummaries/index.js'
+import { firstLine, pickRenderer, previewValue, truncate } from './toolSummaries/index.js'
 import { CodeBlock } from './CodeBlock.js'
 import { VirtualTranscript } from './VirtualTranscript.js'
 
@@ -269,7 +269,7 @@ function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
 function NestedToolCall({ call }: { call: ToolCallContent }): JSX.Element {
   const preview = Object.entries(call.input)
     .slice(0, 2)
-    .map(([k, v]) => `${k}=${truncate(String(v), 40)}`)
+    .map(([k, v]) => `${k}=${truncate(previewValue(v), 40)}`)
     .join('  -  ')
   return (
     <div className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground">

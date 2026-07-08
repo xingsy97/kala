@@ -21,7 +21,7 @@ export const genericRenderer: GroupedToolRenderer = ({ calls, results }) => {
     const r = results.get(c.callId)
     const preview = Object.entries(c.input)
       .slice(0, 2)
-      .map(([k, v]) => `${k}=${truncate(String(v), 40)}`)
+      .map(([k, v]) => `${k}=${truncate(previewValue(v), 40)}`)
       .join('  -  ')
     return {
       callId: c.callId,
@@ -29,6 +29,18 @@ export const genericRenderer: GroupedToolRenderer = ({ calls, results }) => {
       ok: r ? r.ok : true,
     }
   })
+}
+
+export function previewValue(v: unknown): string {
+  if (v == null) return String(v)
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  if (Array.isArray(v)) return `[${v.length} item${v.length === 1 ? '' : 's'}]`
+  if (typeof v === 'object') {
+    const keys = Object.keys(v as object)
+    return `{${keys.length} field${keys.length === 1 ? '' : 's'}}`
+  }
+  return String(v)
 }
 
 export function truncate(s: string, n: number): string {

@@ -109,6 +109,43 @@ export const globRenderer: GroupedToolRenderer = ({ calls, results }) => {
   })
 }
 
+type TodoItem = {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+}
+
+const isTodoItem = (v: unknown): v is TodoItem =>
+  !!v &&
+  typeof v === 'object' &&
+  typeof (v as Record<string, unknown>).content === 'string' &&
+  typeof (v as Record<string, unknown>).status === 'string'
+
+export const todowriteRenderer: GroupedToolRenderer = ({ calls, results }) => {
+  return calls.map((c) => {
+    const todos = Array.isArray(c.input.todos)
+      ? (c.input.todos as unknown[]).filter(isTodoItem)
+      : []
+    const inProgress = todos.find((t) => t.status === 'in_progress')
+    const completed = todos.filter((t) => t.status === 'completed').length
+    const total = todos.length
+    const label = total === 0
+      ? 'empty todo list'
+      : inProgress
+        ? truncate(firstLine(inProgress.content), 96)
+        : `${total} item${total === 1 ? '' : 's'}`
+    const r = results.get(c.callId)
+    const secondary = total === 0
+      ? undefined
+      : `${completed}/${total} done`
+    return {
+      callId: c.callId,
+      primary: label,
+      ...(secondary !== undefined ? { secondary } : {}),
+      ok: r ? r.ok : true,
+    }
+  })
+}
+
 export const lsRenderer: GroupedToolRenderer = ({ calls, results }) => {
   return calls.map((c) => {
     const path = asString(c.input.path ?? '.')
@@ -135,6 +172,7 @@ export const RENDERERS: Record<string, GroupedToolRenderer> = {
   grep: grepRenderer,
   glob: globRenderer,
   ls: lsRenderer,
+  todowrite: todowriteRenderer,
 }
 
 export function pickRenderer(toolName: string): GroupedToolRenderer {

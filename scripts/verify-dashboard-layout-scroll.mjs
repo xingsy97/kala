@@ -18,6 +18,7 @@ import puppeteer from 'puppeteer-core'
 
 const requireFromHost = createRequire(new URL('../packages/host/package.json', import.meta.url))
 const { io } = requireFromHost('socket.io-client')
+const { PROTOCOL_VERSION } = await import('../packages/shared/dist/index.js')
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_LAYOUT_PORT ?? 3174)
@@ -484,7 +485,7 @@ async function clearStoredPanelLayouts(page) {
 async function verifyHostListsFixture() {
   const socket = io(`${HOST_URL}/dashboard`, {
     transports: ['websocket'],
-    auth: { sessionId: SESSION_ID, role: 'dashboard', clientVersion: '0.0.0' },
+    auth: { sessionId: SESSION_ID, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
   })
   try {
     await new Promise((resolve, reject) => {

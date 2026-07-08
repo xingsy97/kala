@@ -3,6 +3,7 @@ import {
   Activity,
   Bot,
   Brain,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -242,6 +243,7 @@ export function InspectorPanel({
     if (replaySeq === null) return replaySnapshots.at(-1) ?? null
     return replaySnapshots.find((snapshot) => snapshot.seq === replaySeq) ?? replaySnapshots.at(-1) ?? null
   }, [replaySnapshots, replaySeq])
+  const activeTraceSeq = replaySnapshot?.seq ?? null
   const replayState = replaySeq === null ? state : (replaySnapshot?.after ?? state)
 
   useEffect(() => {
@@ -310,7 +312,7 @@ export function InspectorPanel({
             onTeachingModeChange={setTeachingMode}
             replaySnapshots={replaySnapshots}
             replaySnapshot={replaySnapshot}
-            activeReplaySeq={replaySeq}
+            activeReplaySeq={activeTraceSeq}
             onReplaySeqChange={setReplaySeq}
             parentHistory={parentHistory}
             parentSessionId={parentSessionId ?? null}
@@ -580,6 +582,8 @@ function TraceSection({
               flow={flow}
               selected={selected}
               onSelect={onSelect}
+              activeReplaySeq={activeReplaySeq}
+              onReplaySeqChange={onReplaySeqChange}
               filter={traceFilter}
               query={traceQuery}
               teachingMode={teachingMode}
@@ -659,7 +663,7 @@ function ReducerTrace({
           const i = timeline.indexOf(entry)
           const priorCallLlm = findPriorCallLlm(timeline, i)
           const flowStep = flow.find((s) => s.seq === entry.seq)
-          const isSelected = selected?.kind === 'event' && selected.entry.seq === entry.seq
+          const isSelected = activeReplaySeq === entry.seq
           return (
             <ReducerTraceRow
               key={entry.seq}
@@ -668,7 +672,10 @@ function ReducerTrace({
               priorCallLlm={priorCallLlm}
               selected={isSelected}
               messageIndex={messageIndexFor(timeline, i, messagesCount)}
-              onSelect={() => onSelect({ kind: 'event', entry, priorCallLlm, flow: flowStep })}
+              onSelect={() => {
+                onReplaySeqChange(entry.seq)
+                onSelect({ kind: 'event', entry, priorCallLlm, flow: flowStep })
+              }}
               teachingMode={teachingMode}
               onForkRequest={onForkRequest}
               onJumpToMessage={onJumpToMessage}
@@ -713,6 +720,7 @@ function ReducerTraceRow({
         selected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80',
       )}
       data-testid="timeline-row"
+      data-selected={selected ? 'true' : 'false'}
     >
       {selected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
       <button
@@ -866,6 +874,8 @@ function ProtocolFlowView({
   flow,
   selected,
   onSelect,
+  activeReplaySeq,
+  onReplaySeqChange,
   filter,
   query,
   teachingMode,
@@ -874,6 +884,8 @@ function ProtocolFlowView({
   flow: readonly StateFlowStep[]
   selected: DetailSelection
   onSelect(selection: DetailSelection): void
+  activeReplaySeq: number | null
+  onReplaySeqChange(seq: number | null): void
   filter: ReadonlySet<TraceCategory>
   query: string
   teachingMode: boolean
@@ -899,12 +911,15 @@ function ProtocolFlowView({
           const inbound = inboundOf(entry.event)
           const step = flow.find((s) => s.seq === entry.seq)
           const priorCallLlm = findPriorCallLlm(timeline, i)
-          const selectedRow = selected?.kind === 'event' && selected.entry.seq === entry.seq
+          const selectedRow = activeReplaySeq === entry.seq
           return (
             <button
               key={entry.seq}
               type="button"
-              onClick={() => onSelect({ kind: 'event', entry, priorCallLlm, flow: step })}
+              onClick={() => {
+                onReplaySeqChange(entry.seq)
+                onSelect({ kind: 'event', entry, priorCallLlm, flow: step })
+              }}
               className={cn(traceListItemClass, 'w-full text-left', selectedRow ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
               data-testid="protocol-flow-row"
             >
@@ -2285,6 +2300,7 @@ function ReplayPanel({
   selected: ReplaySnapshot | null
   onSelect(seq: number | null): void
 }): JSX.Element {
+  const [open, setOpen] = useState(true)
   if (snapshots.length === 0 || !selected) return <div className="flex-none bg-card/50 px-2 pb-1" />
   const diff = diffStates(selected.before, selected.after, 6)
   const currentIndex = snapshots.findIndex((snapshot) => snapshot.seq === selected.seq)
@@ -2294,8 +2310,18 @@ function ReplayPanel({
     <div className="flex-none bg-card/50 px-2 pb-2" data-testid="replay-panel">
       <div className="overflow-hidden rounded-md bg-background/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] ring-1 ring-border/35">
         <div className="flex min-w-0 items-center gap-2 px-2 py-1.5">
-          <Diff className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-          <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">State Diff</div>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded text-left hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
+            aria-expanded={open}
+            aria-controls="state-diff-body"
+            data-testid="state-diff-toggle"
+          >
+            <Diff className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+            <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">State Diff</div>
+            <ChevronDown className={cn('h-3.5 w-3.5 flex-none text-muted-foreground transition-transform', open ? '' : '-rotate-90')} aria-hidden="true" />
+          </button>
           <span className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/25">#{selected.seq}</span>
           <button type="button" disabled={!previous} onClick={() => previous && onSelect(previous.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title="Previous event">
             <ChevronLeft className="h-3 w-3" aria-hidden="true" />
@@ -2317,7 +2343,7 @@ function ReplayPanel({
             data-testid="replay-scrubber"
           />
         </div>
-        <div className="border-t border-border/30 bg-card/35 px-2 py-1.5">
+        {open ? <div id="state-diff-body" className="border-t border-border/30 bg-card/35 px-2 py-1.5">
           <div className="mb-1 flex min-w-0 items-center gap-2 text-[10px]">
             <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={selected.event.kind}>{selected.event.kind}</span>
             <span className="flex-none text-muted-foreground">{diff.length} changes</span>
@@ -2325,7 +2351,7 @@ function ReplayPanel({
           <div className="min-w-0 space-y-1" data-testid="state-diff-view">
             {diff.length > 0 ? diff.map((item) => <DiffRow key={`${item.path}-${item.before}-${item.after}`} item={item} />) : <div className="rounded bg-background/55 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/20">No state changes</div>}
           </div>
-        </div>
+        </div> : null}
       </div>
     </div>
   )
@@ -2357,6 +2383,8 @@ function TimelineMinimap({ entries, selectedSeq, onSelect }: { entries: readonly
             className={cn('mx-auto my-px min-h-[4px] w-1.5 flex-1 rounded-full opacity-70 transition-all hover:w-2 hover:opacity-100', minimapTone(cat), selectedSeq === entry.seq ? 'w-2 opacity-100 ring-1 ring-primary/70' : '')}
             title={`#${entry.seq} ${entry.event.kind}`}
             aria-label={`select replay cursor ${entry.seq}`}
+            aria-current={selectedSeq === entry.seq ? 'true' : undefined}
+            data-testid="timeline-minimap-item"
           />
         )
       })}
