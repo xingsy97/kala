@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 import {
@@ -9,8 +9,10 @@ import {
   createSweBenchPrediction,
   exportSessionSpans,
   serializeJsonl,
+  summarizeEvalRun,
   type ArtifactRef,
   type EvalExperiment,
+  type EvalTrial,
   type SweBenchPrediction,
 } from '@agent-kernel/shared'
 
@@ -21,6 +23,9 @@ export type SweBenchRunLayout = {
   rootDir: string
   predictionsPath: string
   experimentPath: string
+  instancesPath: string
+  summaryPath: string
+  trialsDir: string
   tracesDir: string
   artifactsDir: string
 }
@@ -32,6 +37,9 @@ export function sweBenchRunLayout(rootDir: string, runId: string): SweBenchRunLa
     rootDir: runRoot,
     predictionsPath: join(runRoot, 'predictions.jsonl'),
     experimentPath: join(runRoot, 'experiment.json'),
+    instancesPath: join(runRoot, 'instances.jsonl'),
+    summaryPath: join(runRoot, 'summary.json'),
+    trialsDir: join(runRoot, 'trials'),
     tracesDir: join(runRoot, 'traces'),
     artifactsDir: join(runRoot, 'artifacts'),
   }
@@ -62,6 +70,142 @@ export async function writeSweBenchPredictionRun(
   await writeFile(layout.experimentPath, `${JSON.stringify(experiment, null, 2)}\n`, 'utf8')
   await writeFile(layout.predictionsPath, serializeJsonl(input.predictions), 'utf8')
   return { layout, experiment }
+}
+
+export type SweBenchInstance = {
+  instance_id: string
+  repo?: string
+  base_commit?: string
+  problem_statement?: string
+  version?: string
+  [key: string]: unknown
+}
+
+export type InferSweBenchPatchRunInput = {
+  rootDir: string
+  runId: string
+  dataset: string
+  split?: string
+  model: string
+  instancesJsonl: string
+  patchesDir: string
+  instanceIds?: readonly string[]
+  limit?: number
+  workspaceRoot?: string
+}
+
+export async function inferSweBenchPatchRun(
+  input: InferSweBenchPatchRunInput,
+): Promise<{
+  layout: SweBenchRunLayout
+  experiment: EvalExperiment
+  predictions: readonly SweBenchPrediction[]
+  trials: readonly EvalTrial[]
+}> {
+  const allInstances = await readSweBenchInstances(input.instancesJsonl)
+  const selected = selectInstances(allInstances, input.instanceIds, input.limit)
+  const predictions: SweBenchPrediction[] = []
+  const trials: EvalTrial[] = []
+  const { layout, experiment } = await writeSweBenchPredictionRun({
+    rootDir: input.rootDir,
+    runId: input.runId,
+    dataset: input.dataset,
+    ...(input.split ? { split: input.split } : {}),
+    model: input.model,
+    predictions: [],
+    config: {
+      mode: 'offline-patch-infer',
+      instancesJsonl: basename(input.instancesJsonl),
+      patchesDir: basename(input.patchesDir),
+      instanceIds: input.instanceIds ?? [],
+      limit: input.limit ?? null,
+    },
+  })
+  await mkdir(layout.trialsDir, { recursive: true })
+  await writeFile(layout.instancesPath, serializeJsonl(selected), 'utf8')
+  const store = createArtifactStore(layout.rootDir, {
+    ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
+  })
+
+  for (const instance of selected) {
+    const patch = await readPatchForInstance(input.patchesDir, instance.instance_id)
+    const diffArtifact = await store.writeText(
+      'diff',
+      `artifacts/${instance.instance_id}/final.diff`,
+      patch,
+    )
+    const prediction = createSweBenchPrediction({
+      instanceId: instance.instance_id,
+      modelNameOrPath: input.model,
+      modelPatch: patch,
+    })
+    predictions.push(prediction)
+    const emptyPatch = patch.trim().length === 0
+    const trial: EvalTrial = {
+      trialId: `${input.runId}:${instance.instance_id}`,
+      experimentId: experiment.experimentId,
+      instanceId: instance.instance_id,
+      status: 'completed',
+      resolved: false,
+      ...(emptyPatch ? { failureLabel: 'empty_patch' } : {}),
+      artifacts: [diffArtifact],
+      metrics: {
+        patchBytes: Buffer.byteLength(patch, 'utf8'),
+        patchLines: patch.length === 0 ? 0 : patch.split('\n').length,
+      },
+    }
+    trials.push(trial)
+    await writeFile(
+      join(layout.trialsDir, `${instance.instance_id}.json`),
+      `${JSON.stringify(trial, null, 2)}\n`,
+      'utf8',
+    )
+  }
+
+  await writeFile(layout.predictionsPath, serializeJsonl(predictions), 'utf8')
+  await writeFile(
+    layout.summaryPath,
+    `${JSON.stringify(summarizeEvalRun(experiment, trials), null, 2)}\n`,
+    'utf8',
+  )
+  return { layout, experiment, predictions, trials }
+}
+
+async function readSweBenchInstances(path: string): Promise<SweBenchInstance[]> {
+  const raw = await readFile(path, 'utf8')
+  const out: SweBenchInstance[] = []
+  for (const [i, line] of raw.split('\n').entries()) {
+    if (line.trim().length === 0) continue
+    const parsed = JSON.parse(line) as Partial<SweBenchInstance>
+    if (!parsed.instance_id) throw new Error(`SWE-bench instance line ${i + 1} missing instance_id`)
+    out.push(parsed as SweBenchInstance)
+  }
+  return out
+}
+
+function selectInstances(
+  instances: readonly SweBenchInstance[],
+  ids: readonly string[] | undefined,
+  limit: number | undefined,
+): SweBenchInstance[] {
+  const wanted = ids && ids.length > 0 ? new Set(ids) : undefined
+  const filtered = wanted ? instances.filter((instance) => wanted.has(instance.instance_id)) : [...instances]
+  return typeof limit === 'number' ? filtered.slice(0, limit) : filtered
+}
+
+async function readPatchForInstance(patchesDir: string, instanceId: string): Promise<string> {
+  const candidates = [
+    join(patchesDir, `${instanceId}.diff`),
+    join(patchesDir, `${instanceId}.patch`),
+  ]
+  for (const candidate of candidates) {
+    try {
+      return await readFile(candidate, 'utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+    }
+  }
+  return ''
 }
 
 export type ExportSessionForSweBenchInput = {
@@ -160,4 +304,3 @@ export async function runSweBenchGrade(input: SweBenchGradeInput): Promise<{
   })
   return { command, exitCode }
 }
-

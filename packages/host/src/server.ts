@@ -74,6 +74,7 @@ export type HostServerOptions = {
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
   skills?: SkillRegistry
+  artifactRootDir?: string | false
   /**
    * Advertised via `GET /settings`. Read-only settings snapshot for the
    * dashboard's Settings dialog  -  providers, hooks, MCP status, config
@@ -317,6 +318,7 @@ export async function startHostServer(
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
     ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
     ...(options.skills !== undefined ? { skills: options.skills } : {}),
+    ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
   }
   loop = runHostLoop(loopDeps)
 

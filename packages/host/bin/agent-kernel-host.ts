@@ -47,6 +47,7 @@ import {
 import { startHostServer } from '../src/server.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench-cli.js'
+import { parseEnhancementCli, runEnhancementCli } from '../src/enhancement-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 
@@ -61,7 +62,11 @@ function argValue(argv: readonly string[], name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
-  const sweBenchCommand = parseSweBenchCli(process.argv.slice(2))
+  const argv = process.argv.slice(2)
+  const enhancementCommand = parseEnhancementCli(argv)
+  if (await runEnhancementCli(enhancementCommand)) return
+
+  const sweBenchCommand = parseSweBenchCli(argv)
   if (await runSweBenchCli(sweBenchCommand)) return
 
   // Default `AK_ALLOW_ALL_OK` to "1" so the dashboard can flip a session into
@@ -79,6 +84,9 @@ async function main(): Promise<void> {
   const port = Number(argValue(process.argv.slice(2), '--port') ?? process.env.HOST_PORT ?? 3000)
   const sessionsDir =
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
+  const artifactRootDir = process.env.AGENT_KERNEL_ARTIFACTS_DIR === '0'
+    ? false
+    : process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
   const dashboard = await createDashboardServing()
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
@@ -146,6 +154,7 @@ async function main(): Promise<void> {
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
     skills,
+    artifactRootDir,
   })
 
   logger.info(
@@ -159,6 +168,7 @@ async function main(): Promise<void> {
       ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
       hooks: hooks.length,
       skills: skills.skills.length,
+      artifactRootDir,
     },
     'host listening',
   )

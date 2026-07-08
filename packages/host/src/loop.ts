@@ -30,6 +30,7 @@ import { step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LLMTrace } from '@agent-kernel/shared'
+import { createArtifactStore, createMessageAssemblyArtifact } from '@agent-kernel/shared'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
 import { AGENT_TOOL_NAME, interruptSubAgentsForParent, runAgentTool } from './extensions/agent-tool.js'
@@ -199,6 +200,7 @@ async function performCallLlm(
 ): Promise<void> {
   const model = deps.models?.get(sessionId)
   const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
+  await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, messages, effect)
   const controller = new AbortController()
   aborts.set(sessionId, controller)
   // Only ask for token deltas when the broadcast wants them. If no consumer
@@ -264,6 +266,48 @@ async function performCallLlm(
     await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts, undefined, model, runtime)
   } finally {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
+  }
+}
+
+async function maybeWriteMessageAssemblyArtifact(
+  deps: HostLoopDeps,
+  sessionId: string,
+  model: string | undefined,
+  messages: readonly import('@agent-kernel/kernel').Message[],
+  effect: CallLlmEffect,
+): Promise<void> {
+  if (!deps.artifactRootDir) return
+  try {
+    const record = deps.store.get(sessionId)
+    const store = createArtifactStore(deps.artifactRootDir, {
+      ...(record?.state.cwd ? { workspaceRoot: record.state.cwd } : {}),
+    })
+    const artifact = createMessageAssemblyArtifact({
+      sessionId,
+      eventSeq: record?.state.cursor,
+      model,
+      messages,
+      tools: effect.tools,
+      stages: [
+        {
+          name: 'host.preflight',
+          inputMessages: effect.messages.length,
+          outputMessages: messages.length,
+          estimatedTokens: estimateMessageTokens(messages),
+          droppedItems: Math.max(0, effect.messages.length - messages.length),
+          reasonCodes: messages === effect.messages ? ['no_preflight_compaction'] : ['preflight_compaction_applied'],
+          artifactRefs: [],
+        },
+      ],
+    })
+    await store.writeJson(
+      'message_assembly',
+      `message-assembly/${sessionId}/${record?.state.cursor ?? 'unknown'}.json`,
+      artifact,
+    )
+  } catch {
+    // Assembly artifacts are observability data. Failure to write them must not
+    // affect the reducer, LLM call, or replay ledger.
   }
 }
 
