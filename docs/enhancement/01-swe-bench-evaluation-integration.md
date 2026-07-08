@@ -367,9 +367,12 @@ instances. Remaining production work is per-instance resource isolation,
 distributed workers, and richer progress reporting.
 
 Phase 5: dashboard eval explorer.
-Implemented first read-only summary view through the artifact explorer. Remaining
-work: dedicated navigation, instance-level result table, final diffs, official
-harness logs, linked traces, and comparison charts.
+Implemented read-only summary, comparison, and instance-level trial views through
+the artifact explorer. The dashboard loads run summaries, trial JSON artifacts,
+and comparison deltas through the bounded artifact content endpoint without
+adding eval state to the kernel protocol. Remaining work: dedicated navigation,
+inline final diff/log preview, official harness log grouping, linked traces, and
+comparison charts.
 
 Phase 6: CI eval smoke and manual official-harness workflow.
 Implemented through `scripts/verify-swebench-smoke.mjs`, default CI, and
