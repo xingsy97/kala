@@ -239,14 +239,20 @@ describe('enhancement foundation', () => {
       messages: [
         { role: 'system', content: [{ type: 'text', text: 'sys' }] },
         { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+        { role: 'assistant', content: [{ type: 'tool_call', callId: 'm1', name: 'memory', input: { operation: 'read', scope: 'workspace', key: 'style' } }] },
+        { role: 'tool', content: [{ type: 'tool_result', callId: 'm1', ok: true, content: 'prefer concise output' }] },
       ],
-      tools: [{ name: 'read', description: 'read files', inputSchema: { type: 'object' }, requiresApproval: false }],
+      tools: [
+        { name: 'read', description: 'read files', inputSchema: { type: 'object' }, requiresApproval: false },
+        { name: 'memory', description: 'memory', inputSchema: { type: 'object' }, requiresApproval: false },
+      ],
     })
 
-    expect(artifact.messageCount).toBe(2)
-    expect(artifact.toolCount).toBe(1)
+    expect(artifact.messageCount).toBe(4)
+    expect(artifact.toolCount).toBe(2)
     expect(artifact.parts.map((part) => part.name)).toContain('system')
     expect(artifact.parts.map((part) => part.name)).toContain('tools')
+    expect(artifact.parts.map((part) => part.name)).toContain('memory')
     expect(artifact.estimatedTokens).toBeGreaterThan(0)
   })
 

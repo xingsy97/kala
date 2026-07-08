@@ -61,6 +61,13 @@ const AGENT = {
   requiresApproval: false,
 } as const
 
+const MEMORY = {
+  name: 'memory',
+  description: 'memory',
+  inputSchema: { type: 'object' },
+  requiresApproval: false,
+} as const
+
 describe('host loop', () => {
   let dir: string
   let store: SessionStore
@@ -153,6 +160,46 @@ describe('host loop', () => {
     expect(toolCatalog.tools[0]).toMatchObject({ name: 'read', kind: 'executor', skillBacked: false })
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     expect(parsed.events).toHaveLength(2)
+  })
+
+  it('marks memory tool contribution in message assembly artifacts', async () => {
+    const artifactRootDir = join(dir, 'artifacts')
+    const memoryConfig = createConfig({ tools: [MEMORY], systemPrompt: 'sys' })
+    const memoryRecord = await store.create({ config: memoryConfig, sessionId: 'sess-memory' })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_call', callId: 'mem-1', name: 'memory', input: { operation: 'read', scope: 'workspace', key: 'style' } }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'used memory' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({ callTool: async () => ({ ok: true, content: 'prefer compact answers' }) }),
+      broadcast: silentBroadcast(),
+      artifactRootDir,
+    })
+
+    await loop.dispatch(memoryRecord.sessionId, { kind: 'user_message', text: 'remember my style' })
+
+    const artifact = JSON.parse(await readFile(
+      join(artifactRootDir, 'message-assembly', memoryRecord.sessionId, '3.json'),
+      'utf8',
+    ))
+    expect(artifact.parts.map((part: { name: string }) => part.name)).toContain('memory')
+    const memoryPart = artifact.parts.find((part: { name: string }) => part.name === 'memory')
+    expect(memoryPart.estimatedTokens).toBeGreaterThan(0)
+    const memoryStage = artifact.stages.find((stage: { name: string }) => stage.name === 'memory.contribution')
+    expect(memoryStage.reasonCodes).toContain('memory_tool_context_present')
+    expect(memoryStage.estimatedTokens).toBeGreaterThan(0)
   })
 
   it('records the active model on LLM response entries and broadcasts', async () => {

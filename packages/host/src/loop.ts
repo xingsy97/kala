@@ -303,6 +303,7 @@ async function maybeWriteMessageAssemblyArtifact(
           reasonCodes: messages === effect.messages ? ['no_preflight_compaction'] : ['preflight_compaction_applied'],
           artifactRefs: [],
         },
+        memoryContributionStage(effect.messages, messages),
       ],
     })
     await store.writeJson(
@@ -329,6 +330,50 @@ async function maybeWriteMessageAssemblyArtifact(
     // Assembly artifacts are observability data. Failure to write them must not
     // affect the reducer, LLM call, or replay ledger.
   }
+}
+
+function memoryContributionStage(
+  inputMessages: readonly import('@agent-kernel/kernel').Message[],
+  outputMessages: readonly import('@agent-kernel/kernel').Message[],
+): import('@agent-kernel/shared/enhancement').MessageAssemblyStage {
+  const inputMemory = countMemoryToolPairs(inputMessages)
+  const outputMemory = countMemoryToolPairs(outputMessages)
+  return {
+    name: 'memory.contribution',
+    inputMessages: inputMessages.length,
+    outputMessages: outputMessages.length,
+    estimatedTokens: estimateMemoryTokens(outputMessages),
+    droppedItems: Math.max(0, inputMemory - outputMemory),
+    reasonCodes: outputMemory > 0 ? ['memory_tool_context_present'] : ['memory_tool_context_absent'],
+    artifactRefs: [],
+  }
+}
+
+function countMemoryToolPairs(messages: readonly import('@agent-kernel/kernel').Message[]): number {
+  const callIds = new Set<string>()
+  let results = 0
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call' && content.name === 'memory') callIds.add(content.callId)
+      if (content.type === 'tool_result' && callIds.has(content.callId)) results += 1
+    }
+  }
+  return callIds.size + results
+}
+
+function estimateMemoryTokens(messages: readonly import('@agent-kernel/kernel').Message[]): number {
+  const callIds = new Set<string>()
+  let chars = 0
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call' && content.name === 'memory') {
+        callIds.add(content.callId)
+        chars += content.name.length + content.callId.length + JSON.stringify(content.input).length
+      }
+      if (content.type === 'tool_result' && callIds.has(content.callId)) chars += content.content.length + content.callId.length + 16
+    }
+  }
+  return Math.ceil(chars / 4)
 }
 
 async function performCallTool(
