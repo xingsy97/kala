@@ -61,9 +61,53 @@ type EvalRunSummary = {
   metrics?: Record<string, unknown>
 }
 
-type EvalSummaryRow = {
+type EvalInstanceProgress = {
+  instanceId?: string
+  status?: string
+  durationMs?: number
+  failureLabel?: string
+  artifactRefs?: readonly EvalTrialArtifactRef[]
+  metrics?: Record<string, unknown>
+}
+
+type EvalRunProgress = {
+  schemaVersion?: number
+  runId?: string
+  dataset?: string
+  split?: string
+  model?: string
+  status?: string
+  startedAt?: string
+  updatedAt?: string
+  finishedAt?: string
+  selectedCount?: number
+  queuedCount?: number
+  runningCount?: number
+  skippedCount?: number
+  completedCount?: number
+  failedCount?: number
+  timedOutCount?: number
+  maxWorkers?: number
+  instances?: readonly EvalInstanceProgress[]
+}
+
+type EvalRunRow = {
+  key: string
+  root: string
+  summaryPath?: string
+  progressPath?: string
+  summary?: EvalRunSummary
+  progress?: EvalRunProgress
+}
+
+type EvalSummaryContentRow = {
   path: string
   summary: EvalRunSummary
+}
+
+type EvalProgressContentRow = {
+  path: string
+  progress: EvalRunProgress
 }
 
 type EvalTrialArtifactRef = {
@@ -134,7 +178,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
-  const [evalRows, setEvalRows] = useState<readonly EvalSummaryRow[]>([])
+  const [evalRows, setEvalRows] = useState<readonly EvalRunRow[]>([])
   const [evalComparisons, setEvalComparisons] = useState<readonly EvalComparisonRow[]>([])
   const [evalError, setEvalError] = useState<string | null>(null)
   const [selectedEvalRunPath, setSelectedEvalRunPath] = useState<string | null>(null)
@@ -182,13 +226,14 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   useEffect(() => {
     if (!open || mode !== 'eval' || !manifest) return
     const summaries = manifest.entries.filter((entry) => entry.kind === 'eval_summary' || entry.path.endsWith('/summary.json'))
+    const progresses = manifest.entries.filter((entry) => entry.kind === 'eval_progress' || entry.path.endsWith('/progress.json'))
     const comparisons = manifest.entries.filter((entry) => entry.kind === 'eval_comparison' || entry.path.endsWith('/eval-comparison.json'))
     let cancelled = false
     setEvalError(null)
     setEvalRows([])
     setEvalComparisons([])
     void Promise.all([
-      Promise.all(summaries.map(async (entry): Promise<EvalSummaryRow> => {
+      Promise.all(summaries.map(async (entry): Promise<EvalSummaryContentRow> => {
         const content = await fetchArtifactContent(entry.path)
         return { path: entry.path, summary: content.body as EvalRunSummary }
       })),
@@ -196,11 +241,16 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
         const content = await fetchArtifactContent(entry.path)
         return { path: entry.path, comparison: content.body as EvalRunComparison }
       })),
+      Promise.all(progresses.map(async (entry): Promise<EvalProgressContentRow> => {
+        const content = await fetchArtifactContent(entry.path)
+        return { path: entry.path, progress: content.body as EvalRunProgress }
+      })),
     ])
-      .then(([rows, comparisonRows]) => {
+      .then(([summaryRows, comparisonRows, progressRows]) => {
+        const rows = mergeEvalRuns(summaryRows, progressRows)
         if (!cancelled) setEvalRows(rows)
         if (!cancelled) setEvalComparisons(comparisonRows)
-        if (!cancelled) setSelectedEvalRunPath((current) => current && rows.some((row) => row.path === current) ? current : rows[0]?.path ?? null)
+        if (!cancelled) setSelectedEvalRunPath((current) => current && rows.some((row: EvalRunRow) => row.key === current) ? current : rows[0]?.key ?? null)
       })
       .catch((err: unknown) => {
         if (!cancelled) setEvalError(err instanceof Error ? err.message : String(err))
@@ -218,7 +268,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
       setEvalTrialsLoading(false)
       return
     }
-    const root = evalRunRoot(selectedEvalRunPath)
+    const root = selectedEvalRunPath
     const trialEntries = manifest.entries.filter((entry) => entry.kind === 'eval_trial' && entry.path.startsWith(`${root}/trials/`))
     let cancelled = false
     setEvalTrialsLoading(true)
@@ -421,7 +471,7 @@ function EvalRunsView({
   onOpenArtifact,
 }: {
   manifest: ArtifactManifest | null
-  rows: readonly EvalSummaryRow[]
+  rows: readonly EvalRunRow[]
   comparisons: readonly EvalComparisonRow[]
   selectedRunPath: string | null
   onSelectRun(path: string): void
@@ -435,7 +485,7 @@ function EvalRunsView({
   onOpenArtifact(request: ArtifactDetailRequest): void
 }): JSX.Element {
   const comparisonCount = comparisons.length
-  const selectedRun = rows.find((row) => row.path === selectedRunPath)
+  const selectedRun = rows.find((row) => row.key === selectedRunPath)
   const selectedTrial = trials.find((row) => trialStableId(row) === selectedTrialId)
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
@@ -447,7 +497,7 @@ function EvalRunsView({
           <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
         </div>
       </aside>
-      <div className="grid min-h-0 grid-rows-[minmax(170px,0.8fr)_minmax(220px,1.2fr)] gap-3 p-3 max-lg:grid-rows-none">
+      <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_minmax(220px,1fr)_auto] gap-3 p-3 max-lg:grid-rows-none">
         {error ? (
           <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
@@ -470,24 +520,24 @@ function EvalRunsView({
               </div>
               {rows.map((row) => (
                 <button
-                  key={row.path}
+                  key={row.key}
                   type="button"
                   className={cn(
                     'grid w-full grid-cols-[1.15fr_1fr_120px_90px_90px_90px_90px] gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/30',
-                    selectedRunPath === row.path && 'bg-primary/10 dark:bg-primary/10',
+                    selectedRunPath === row.key && 'bg-primary/10 dark:bg-primary/10',
                   )}
-                  onClick={() => onSelectRun(row.path)}
+                  onClick={() => onSelectRun(row.key)}
                 >
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px]">{row.summary.experimentId ?? row.path}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+                    <div className="truncate font-mono text-[11px]">{row.summary?.experimentId ?? row.progress?.runId ?? row.key}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.summaryPath ?? row.progressPath ?? row.root}</div>
                   </div>
-                  <div className="truncate">{row.summary.dataset ?? 'unknown'}</div>
-                  <div className="truncate font-mono text-[11px] text-muted-foreground">{row.summary.model ?? 'unknown'}</div>
-                  <div className="font-mono text-[11px]">{row.summary.trialCount ?? 0}</div>
-                  <div className="font-mono text-[11px]">{row.summary.resolved ?? 0}</div>
-                  <div className="font-mono text-[11px]">{row.summary.failed ?? 0}</div>
-                  <div className="font-mono text-[11px]">{formatPercent(row.summary.metrics?.passRate)}</div>
+                  <div className="truncate">{row.summary?.dataset ?? row.progress?.dataset ?? 'unknown'}</div>
+                  <div className="truncate font-mono text-[11px] text-muted-foreground">{row.summary?.model ?? row.progress?.model ?? 'unknown'}</div>
+                  <div className="font-mono text-[11px]">{row.summary?.trialCount ?? row.progress?.selectedCount ?? 0}</div>
+                  <div className="font-mono text-[11px]">{row.summary?.resolved ?? 0}</div>
+                  <div className="font-mono text-[11px]">{row.summary?.failed ?? row.progress?.failedCount ?? 0}</div>
+                  <div className="font-mono text-[11px]">{formatPercent(row.summary?.metrics?.passRate)}</div>
                 </button>
               ))}
             </div>
@@ -495,6 +545,8 @@ function EvalRunsView({
           ) : null}
         </div>
         {selectedRun ? (
+          <div className="contents" key={selectedRun.key}>
+          <EvalProgressStrip run={selectedRun} />
           <EvalTrialDetail
             run={selectedRun}
             trials={trials}
@@ -505,6 +557,7 @@ function EvalRunsView({
             error={trialsError}
             onOpenArtifact={onOpenArtifact}
           />
+          </div>
         ) : null}
         {comparisons.length > 0 ? (
           <div className="rounded-md border border-border">
@@ -541,7 +594,7 @@ function EvalTrialDetail({
   error,
   onOpenArtifact,
 }: {
-  run: EvalSummaryRow
+  run: EvalRunRow
   trials: readonly EvalTrialRow[]
   selectedTrial: EvalTrialRow | undefined
   selectedTrialId: string | null
@@ -556,7 +609,7 @@ function EvalTrialDetail({
         <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs">
           <div className="min-w-0">
             <div className="font-medium">Trial detail</div>
-            <div className="truncate font-mono text-[11px] text-muted-foreground">{run.path}</div>
+            <div className="truncate font-mono text-[11px] text-muted-foreground">{run.summaryPath ?? run.progressPath ?? run.root}</div>
           </div>
           {loading ? <div className="text-[11px] text-muted-foreground">Loading...</div> : null}
         </div>
@@ -616,7 +669,7 @@ function EvalTrialDetail({
                   <div className="grid gap-1.5">
                     {(selectedTrial.trial.artifacts ?? []).map((artifact, index) => {
                       const uri = artifact.uri
-                      const path = uri ? resolveTrialArtifactPath(run.path, uri) : null
+                      const path = uri ? resolveTrialArtifactPath(run.root, uri) : null
                       return (
                       <button
                         key={`${uri ?? 'artifact'}-${index}`}
@@ -642,6 +695,69 @@ function EvalTrialDetail({
           </div>
         ) : <div className="text-xs text-muted-foreground">Select a trial to inspect artifacts.</div>}
       </aside>
+    </div>
+  )
+}
+
+function EvalProgressStrip({ run }: { run: EvalRunRow }): JSX.Element | null {
+  const progress = run.progress
+  if (!progress) return null
+  const total = progress.selectedCount ?? progress.instances?.length ?? 0
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-2 text-xs">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-medium">Progress</div>
+          <div className="truncate font-mono text-[11px] text-muted-foreground">{run.progressPath ?? run.root}</div>
+        </div>
+        <div className={cn('rounded border px-2 py-0.5 font-mono text-[11px]', progress.status === 'failed' ? 'border-rose-200 text-rose-700 dark:border-rose-900 dark:text-rose-300' : 'border-border text-muted-foreground')}>
+          {progress.status ?? 'unknown'}
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-2 max-lg:grid-cols-2">
+        <Stat label="Selected" value={String(total)} />
+        <Stat label="Running" value={String(progress.runningCount ?? 0)} />
+        <Stat label="Skipped" value={String(progress.skippedCount ?? 0)} />
+        <Stat label="Workers" value={String(progress.maxWorkers ?? 1)} />
+      </div>
+      <ProgressBar
+        total={total}
+        completed={progress.completedCount ?? 0}
+        failed={progress.failedCount ?? 0}
+        timedOut={progress.timedOutCount ?? 0}
+        skipped={progress.skippedCount ?? 0}
+      />
+    </div>
+  )
+}
+
+function ProgressBar({
+  total,
+  completed,
+  failed,
+  timedOut,
+  skipped,
+}: {
+  total: number
+  completed: number
+  failed: number
+  timedOut: number
+  skipped: number
+}): JSX.Element {
+  const denominator = Math.max(1, total)
+  const segments = [
+    { key: 'completed', value: completed, className: 'bg-emerald-500' },
+    { key: 'failed', value: failed, className: 'bg-rose-500' },
+    { key: 'timedOut', value: timedOut, className: 'bg-amber-500' },
+    { key: 'skipped', value: skipped, className: 'bg-slate-400' },
+  ]
+  return (
+    <div className="mt-2 h-2 overflow-hidden rounded bg-muted">
+      <div className="flex h-full w-full">
+        {segments.map((segment) => segment.value > 0 ? (
+          <div key={segment.key} className={segment.className} style={{ width: `${Math.max(4, (segment.value / denominator) * 100)}%` }} />
+        ) : null)}
+      </div>
     </div>
   )
 }
@@ -830,14 +946,35 @@ function formatPercent(value: unknown): string {
 }
 
 function evalRunRoot(summaryPath: string): string {
-  return summaryPath.endsWith('/summary.json') ? summaryPath.slice(0, -'/summary.json'.length) : summaryPath.replace(/\/[^/]+$/, '')
+  if (summaryPath.endsWith('/summary.json')) return summaryPath.slice(0, -'/summary.json'.length)
+  if (summaryPath.endsWith('/progress.json')) return summaryPath.slice(0, -'/progress.json'.length)
+  return summaryPath.replace(/\/[^/]+$/, '')
 }
 
-function resolveTrialArtifactPath(runSummaryPath: string, uri: string): string {
+function resolveTrialArtifactPath(runRoot: string, uri: string): string {
   if (uri.startsWith('/') || uri.includes('://')) return uri
-  const root = evalRunRoot(runSummaryPath)
-  if (uri === root || uri.startsWith(`${root}/`)) return uri
-  return `${root}/${uri}`
+  if (uri === runRoot || uri.startsWith(`${runRoot}/`)) return uri
+  return `${runRoot}/${uri}`
+}
+
+function mergeEvalRuns(
+  summaries: readonly EvalSummaryContentRow[],
+  progresses: readonly EvalProgressContentRow[],
+): EvalRunRow[] {
+  const byRoot = new Map<string, EvalRunRow>()
+  for (const row of summaries) {
+    const root = evalRunRoot(row.path)
+    byRoot.set(root, { ...(byRoot.get(root) ?? { key: root, root }), summaryPath: row.path, summary: row.summary })
+  }
+  for (const row of progresses) {
+    const root = evalRunRoot(row.path)
+    byRoot.set(root, { ...(byRoot.get(root) ?? { key: root, root }), progressPath: row.path, progress: row.progress })
+  }
+  return [...byRoot.values()].sort((a, b) => {
+    const aTime = a.progress?.updatedAt ?? a.progress?.startedAt ?? a.summaryPath ?? a.key
+    const bTime = b.progress?.updatedAt ?? b.progress?.startedAt ?? b.summaryPath ?? b.key
+    return bTime.localeCompare(aTime)
+  })
 }
 
 function trialStableId(row: EvalTrialRow): string {
