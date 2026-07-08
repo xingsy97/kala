@@ -9,9 +9,11 @@ import {
   createArtifactStore,
   createEvalExperiment,
   createMessageAssemblyArtifact,
-  createSessionProfile,
   createRolloutSidecar,
+  createRouterDecisionArtifact,
+  createSessionProfile,
   createSweBenchPrediction,
+  createToolCatalogArtifact,
   exportSessionSpans,
   redactForPersistence,
   serializeJsonl,
@@ -290,5 +292,26 @@ describe('enhancement foundation', () => {
     expect(profile.totalInputTokens).toBe(1000)
     expect(profile.costStatus).toBe('estimated')
     expect(profile.estimatedCostUsd).toBe(0.00201)
+  })
+
+  it('creates router decision and tool catalog artifacts for observability', () => {
+    const decision = createRouterDecisionArtifact({
+      requestedModel: 'gpt-test',
+      adapterName: 'router(openai:gpt-test)',
+      maxInputTokens: 128000,
+    })
+    expect(decision.selectedProvider).toBe('openai')
+    expect(decision.selectedModel).toBe('gpt-test')
+    expect(decision.budget?.maxInputTokens).toBe(128000)
+
+    const catalog = createToolCatalogArtifact([
+      { name: 'skill', description: 'Load skill', requiresApproval: false, inputSchema: { type: 'object' } },
+      { name: 'agent', description: 'Sub agent', requiresApproval: false, inputSchema: { type: 'object' } },
+      { name: 'edit', description: 'Edit file', requiresApproval: true, inputSchema: { type: 'object' } },
+    ])
+    expect(catalog.toolCount).toBe(3)
+    expect(catalog.tools[0]).toMatchObject({ name: 'skill', kind: 'skill_loader', skillBacked: true })
+    expect(catalog.tools[1]).toMatchObject({ name: 'agent', kind: 'sub_agent' })
+    expect(catalog.tools[2]).toMatchObject({ name: 'edit', kind: 'executor', requiresApproval: true })
   })
 })

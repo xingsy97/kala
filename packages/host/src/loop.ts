@@ -30,7 +30,12 @@ import { step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LLMTrace } from '@agent-kernel/shared'
-import { createArtifactStore, createMessageAssemblyArtifact } from '@agent-kernel/shared'
+import {
+  createArtifactStore,
+  createMessageAssemblyArtifact,
+  createRouterDecisionArtifact,
+  createToolCatalogArtifact,
+} from '@agent-kernel/shared'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
 import { AGENT_TOOL_NAME, interruptSubAgentsForParent, runAgentTool } from './extensions/agent-tool.js'
@@ -304,6 +309,21 @@ async function maybeWriteMessageAssemblyArtifact(
       'message_assembly',
       `message-assembly/${sessionId}/${record?.state.cursor ?? 'unknown'}.json`,
       artifact,
+    )
+    await store.writeJson(
+      'router_decision',
+      `router-decisions/${sessionId}/${record?.state.cursor ?? 'unknown'}.json`,
+      createRouterDecisionArtifact({
+        requestedModel: model,
+        selectedModel: model,
+        adapterName: deps.llm.name,
+        maxInputTokens: record?.config.contextLimit,
+      }),
+    )
+    await store.writeJson(
+      'tool_catalog',
+      `tool-catalog/${sessionId}/${record?.state.cursor ?? 'unknown'}.json`,
+      createToolCatalogArtifact(effect.tools),
     )
   } catch {
     // Assembly artifacts are observability data. Failure to write them must not
