@@ -110,6 +110,11 @@ CLI/CI commands, but their outputs have first-class dashboard surfaces. Cheap,
 deterministic planning actions can be triggered from the dashboard when they
 only create artifacts and do not mutate kernel session state:
 
+Dashboard action forms accept an optional `Root Dir` override for artifact
+outputs; when omitted, the host artifact root is used. Actions that only derive
+handoff data, such as the SWE-bench grading command dry-run, do not require
+artifact capture to be configured.
+
 - `Eval`: SWE-bench and generic eval summaries, worker plans, score artifacts,
   judge traces, progress, comparisons, trials, final patches, harness evidence,
   and linked sessions. The dashboard can create a SWE-bench worker plan, score a

@@ -476,6 +476,26 @@ describe('wire protocol', () => {
     expect(unsupported.status).toBe(400)
   })
 
+  it('builds SWE-bench grade commands without artifact capture configured', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir: false,
+    })
+    url = `http://localhost:${server.port}`
+
+    const grade = await postEnhancementAction(url, { action: 'swebench-grade-command', runId: 'dry-grade', dataset: 'SWE-bench/local', predictionsPath: '/tmp/predictions.jsonl' }) as { shellCommand: string }
+    expect(grade.shellCommand).toContain('dry-grade')
+    expect(grade.shellCommand).toContain('/tmp/predictions.jsonl')
+  })
+
   it('drives a full round-trip with dashboard + executor', async () => {
     const sessionId = 'wire-1'
     // Pre-materialize the session: dashboard handshakes are now lazy (they

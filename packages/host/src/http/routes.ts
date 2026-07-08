@@ -228,6 +228,21 @@ async function runEnhancementAction(
   payloads: { artifactRootDir?: string | false; sessions?: SessionStore },
 ): Promise<unknown> {
   const action = requiredString(body.action, 'action')
+  if (action === 'swebench-grade-command') {
+    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
+    const instanceIds = listInput(body.instanceIds)
+    const result = await runSweBenchGrade({
+      datasetName: requiredString(body.dataset, 'dataset'),
+      predictionsPath: requiredString(body.predictionsPath, 'predictionsPath'),
+      runId: requiredString(body.runId, 'runId'),
+      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
+      ...(instanceIds ? { instanceIds } : {}),
+      ...(body.modal === true ? { modal: true } : {}),
+      ...(cleanString(body.cwd) ? { cwd: cleanString(body.cwd) } : {}),
+      execute: false,
+    })
+    return { action, command: result.command, shellCommand: result.command.map(shellQuote).join(' ') }
+  }
   const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
   if (!rootDir) throw new HttpRouteError(400, 'rootDir is required when artifact capture is not configured')
   if (action === 'profile-session') {
@@ -337,21 +352,6 @@ async function runEnhancementAction(
   if (action === 'swebench-ingest-results') {
     const result = await ingestSweBenchResults({ rootDir, runId: requiredString(body.runId, 'runId'), resultsDir: requiredString(body.resultsDir, 'resultsDir') })
     return { action, runId: result.layout.runId, resultsPath: result.resultsPath, summaryPath: result.summaryPath, trialCount: result.trials.length, resolved: result.trials.filter((trial) => trial.resolved).length }
-  }
-  if (action === 'swebench-grade-command') {
-    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
-    const instanceIds = listInput(body.instanceIds)
-    const result = await runSweBenchGrade({
-      datasetName: requiredString(body.dataset, 'dataset'),
-      predictionsPath: requiredString(body.predictionsPath, 'predictionsPath'),
-      runId: requiredString(body.runId, 'runId'),
-      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
-      ...(instanceIds ? { instanceIds } : {}),
-      ...(body.modal === true ? { modal: true } : {}),
-      ...(cleanString(body.cwd) ? { cwd: cleanString(body.cwd) } : {}),
-      execute: false,
-    })
-    return { action, command: result.command, shellCommand: result.command.map(shellQuote).join(' ') }
   }
   throw new HttpRouteError(400, `unsupported enhancement action: ${action}`)
 }
