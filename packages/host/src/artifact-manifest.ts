@@ -112,6 +112,7 @@ function inferKind(path: string): string {
   if (inPath(path, 'rollouts')) return 'rl_rollout_sidecar'
   if (inPath(path, 'trials')) return 'eval_trial'
   if (path.endsWith('/summary.json')) return 'eval_summary'
+  if (path === 'progress.json' || path.endsWith('/progress.json')) return 'eval_progress'
   if (path.endsWith('/scores.json')) return 'eval_score'
   if (inPath(path, 'judge') || path.endsWith('/judge-trace.json')) return 'eval_judge'
   if (path.endsWith('/profile.json')) return 'profile'

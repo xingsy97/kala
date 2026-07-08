@@ -210,6 +210,31 @@ This is intentionally an adapter, not a benchmark-specific kernel mode. The
 official harness remains responsible for grading; the adapter only prepares a
 real workspace and prediction row.
 
+`agent-infer` also writes a run-level progress artifact:
+
+```text
+runs/swebench/<run_id>/progress.json
+```
+
+This file is the production control-plane view for long benchmark inference. It
+records schema version, run id, dataset, split, model, run status, start/update
+timestamps, selected/queued/running/skipped/completed/failed/timed-out counts,
+`maxWorkers`, and one compact record per instance. Instance records contain the
+instance id, scheduling status, optional failure label, duration, metrics, and
+artifact refs for prompt, logs, final diff, and workspace metadata.
+
+The progress artifact solves three operational problems without changing the
+kernel protocol:
+
+- interrupted runs can be inspected before `summary.json` is final;
+- `--skip-completed` is auditable because skipped instances remain visible;
+- dashboard/eval tooling can show live queue health and failure taxonomy from a
+  single small JSON document instead of walking every trial artifact.
+
+The artifact manifest classifies this file as `eval_progress`, so the dashboard
+can discover it like any other run artifact. It is derived state only; replay
+and official SWE-bench grading do not depend on it.
+
 ## CI and Release Validation
 
 Implemented CI coverage is split into a cheap deterministic smoke path and an
