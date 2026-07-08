@@ -164,7 +164,10 @@ fixtures. Implemented for session logs and patch files.
 Phase 2: SWE-bench adapter plugs into the same experiment/trial model.
 
 Phase 3: trace-aware comparison dashboard. The host now provides summary-level
-run comparison artifacts; dashboard visualization remains the UI layer.
+run comparison artifacts. The dashboard artifact explorer now renders eval run
+summaries and comparison deltas from manifest-discovered artifacts without
+adding eval state to the kernel protocol. Remaining work is trace-linked trial
+detail and richer charts.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
 

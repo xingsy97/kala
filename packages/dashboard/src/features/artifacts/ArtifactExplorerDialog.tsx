@@ -65,6 +65,18 @@ type EvalSummaryRow = {
   summary: EvalRunSummary
 }
 
+type EvalRunComparison = {
+  baseline?: { experimentId?: string; resolved?: number; failed?: number; timedOut?: number }
+  candidate?: { experimentId?: string; resolved?: number; failed?: number; timedOut?: number }
+  deltas?: { resolved?: number; failed?: number; timedOut?: number; passRate?: number }
+  failureDeltas?: Record<string, number>
+}
+
+type EvalComparisonRow = {
+  path: string
+  comparison: EvalRunComparison
+}
+
 export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Element {
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
   const [mode, setMode] = useState<ViewMode>('artifacts')
@@ -72,6 +84,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [error, setError] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [evalRows, setEvalRows] = useState<readonly EvalSummaryRow[]>([])
+  const [evalComparisons, setEvalComparisons] = useState<readonly EvalComparisonRow[]>([])
   const [evalError, setEvalError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -110,15 +123,24 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   useEffect(() => {
     if (!open || mode !== 'eval' || !manifest) return
     const summaries = manifest.entries.filter((entry) => entry.kind === 'eval_summary' || entry.path.endsWith('/summary.json'))
+    const comparisons = manifest.entries.filter((entry) => entry.kind === 'eval_comparison' || entry.path.endsWith('/eval-comparison.json'))
     let cancelled = false
     setEvalError(null)
     setEvalRows([])
-    void Promise.all(summaries.map(async (entry): Promise<EvalSummaryRow> => {
-      const content = await fetchArtifactContent(entry.path)
-      return { path: entry.path, summary: content.body as EvalRunSummary }
-    }))
-      .then((rows) => {
+    setEvalComparisons([])
+    void Promise.all([
+      Promise.all(summaries.map(async (entry): Promise<EvalSummaryRow> => {
+        const content = await fetchArtifactContent(entry.path)
+        return { path: entry.path, summary: content.body as EvalRunSummary }
+      })),
+      Promise.all(comparisons.map(async (entry): Promise<EvalComparisonRow> => {
+        const content = await fetchArtifactContent(entry.path)
+        return { path: entry.path, comparison: content.body as EvalRunComparison }
+      })),
+    ])
+      .then(([rows, comparisonRows]) => {
         if (!cancelled) setEvalRows(rows)
+        if (!cancelled) setEvalComparisons(comparisonRows)
       })
       .catch((err: unknown) => {
         if (!cancelled) setEvalError(err instanceof Error ? err.message : String(err))
@@ -155,7 +177,7 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             </div>
           </div>
         </DialogHeader>
-        {mode === 'artifacts' ? <ArtifactInventory manifest={manifest} kindRows={kindRows} error={error} loading={loading} /> : <EvalRunsView manifest={manifest} rows={evalRows} error={error ?? evalError} loading={loading} />}
+        {mode === 'artifacts' ? <ArtifactInventory manifest={manifest} kindRows={kindRows} error={error} loading={loading} /> : <EvalRunsView manifest={manifest} rows={evalRows} comparisons={evalComparisons} error={error ?? evalError} loading={loading} />}
       </DialogContent>
     </Dialog>
   )
@@ -242,15 +264,17 @@ function ArtifactInventory({
 function EvalRunsView({
   manifest,
   rows,
+  comparisons,
   error,
   loading,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly EvalSummaryRow[]
+  comparisons: readonly EvalComparisonRow[]
   error: string | null
   loading: boolean
 }): JSX.Element {
-  const comparisonCount = manifest?.entries.filter((entry) => entry.kind === 'eval_comparison').length ?? 0
+  const comparisonCount = comparisons.length
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
       <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
@@ -267,7 +291,7 @@ function EvalRunsView({
           </div>
         ) : null}
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
-        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No eval summaries found.</div> : null}
+        {manifest && rows.length === 0 && comparisons.length === 0 && !error ? <div className="text-xs text-muted-foreground">No eval summaries found.</div> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
             <div className="min-w-[760px] divide-y divide-border text-xs">
@@ -297,7 +321,38 @@ function EvalRunsView({
             </div>
           </ScrollArea>
         ) : null}
+        {comparisons.length > 0 ? (
+          <div className="mt-3 rounded-md border border-border">
+            <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">Comparisons</div>
+            <div className="divide-y divide-border text-xs">
+              {comparisons.map((row) => (
+                <div key={row.path} className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px] gap-3 px-3 py-2 max-lg:grid-cols-[1fr_1fr_80px_80px]">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-[11px]">{row.comparison.baseline?.experimentId ?? 'baseline'}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+                  </div>
+                  <div className="truncate font-mono text-[11px]">{row.comparison.candidate?.experimentId ?? 'candidate'}</div>
+                  <Delta label="resolved" value={row.comparison.deltas?.resolved} />
+                  <Delta label="failed" value={row.comparison.deltas?.failed} invert />
+                  <Delta label="timeout" value={row.comparison.deltas?.timedOut} invert />
+                  <Delta label="pass" value={row.comparison.deltas?.passRate} percent />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
+    </div>
+  )
+}
+
+function Delta({ label, value, percent, invert }: { label: string; value: number | undefined; percent?: boolean; invert?: boolean }): JSX.Element {
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  const good = invert ? numeric < 0 : numeric > 0
+  const bad = invert ? numeric > 0 : numeric < 0
+  return (
+    <div className={cn('font-mono text-[11px]', good && 'text-emerald-600 dark:text-emerald-300', bad && 'text-rose-600 dark:text-rose-300')}>
+      <span className="text-muted-foreground">{label} </span>{numeric > 0 ? '+' : ''}{percent ? `${Math.round(numeric * 100)}%` : numeric}
     </div>
   )
 }
