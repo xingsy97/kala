@@ -161,6 +161,11 @@ type SessionProfile = {
   estimatedCostUsd?: number
   models?: readonly string[]
   wallTimeMs?: number
+  llmLatencyCalls?: number
+  averageLlmDurationMs?: number
+  p95LlmDurationMs?: number
+  averageTimeToFirstChunkMs?: number
+  p95TimeToFirstChunkMs?: number
 }
 
 type ProfileRow = {
@@ -917,8 +922,9 @@ function ProfilesView({
     acc.outputTokens += row.profile.totalOutputTokens ?? 0
     acc.knownCost += row.profile.costStatus === 'estimated' && typeof row.profile.estimatedCostUsd === 'number' ? row.profile.estimatedCostUsd : 0
     acc.unknownCost += row.profile.costStatus === 'unknown' ? 1 : 0
+    acc.latencyCalls += row.profile.llmLatencyCalls ?? 0
     return acc
-  }, { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, knownCost: 0, unknownCost: 0 })
+  }, { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, knownCost: 0, unknownCost: 0, latencyCalls: 0 })
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
       <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
@@ -928,6 +934,7 @@ function ProfilesView({
           <Stat label="Tool calls" value={String(totals.toolCalls)} />
           <Stat label="Known cost" value={formatUsd(totals.knownCost)} />
           <Stat label="Unknown cost" value={String(totals.unknownCost)} />
+          <Stat label="Latency calls" value={String(totals.latencyCalls)} />
           <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
         </div>
       </aside>
@@ -941,30 +948,34 @@ function ProfilesView({
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No profile artifacts found.</div> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
-            <div className="min-w-[860px] divide-y divide-border text-xs">
-              <div className="grid grid-cols-[1.25fr_95px_95px_110px_110px_105px_105px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
+            <div className="min-w-[1120px] divide-y divide-border text-xs">
+              <div className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                 <div>Profile</div>
                 <div>LLM</div>
                 <div>Tools</div>
-                <div>Input tok</div>
-                <div>Output tok</div>
+                <div>Input</div>
+                <div>Output</div>
+                <div>Avg dur</div>
+                <div>P95 dur</div>
+                <div>Avg TTFT</div>
+                <div>P95 TTFT</div>
                 <div>Cost</div>
-                <div>Missing</div>
-                <div>Models</div>
               </div>
               {rows.map((row) => (
-                <div key={row.path} className="grid grid-cols-[1.25fr_95px_95px_110px_110px_105px_105px_1fr] gap-3 px-3 py-2">
+                <div key={row.path} className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px_1fr] gap-3 px-3 py-2">
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px]">{row.profile.sessionId ?? row.path}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path} · {(row.profile.models ?? []).join(', ') || 'unknown'} · missing {row.profile.llmTraceMissingCalls ?? 0}</div>
                   </div>
                   <div className="font-mono text-[11px]">{row.profile.llmCalls ?? 0}</div>
                   <div className="font-mono text-[11px]">{row.profile.toolCalls ?? 0}</div>
                   <div className="font-mono text-[11px]">{formatInteger(row.profile.totalInputTokens)}</div>
                   <div className="font-mono text-[11px]">{formatInteger(row.profile.totalOutputTokens)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.averageLlmDurationMs)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.p95LlmDurationMs)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.averageTimeToFirstChunkMs)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.p95TimeToFirstChunkMs)}</div>
                   <div className="font-mono text-[11px]">{row.profile.costStatus === 'estimated' ? formatUsd(row.profile.estimatedCostUsd) : row.profile.costStatus ?? 'unknown'}</div>
-                  <div className="font-mono text-[11px] text-muted-foreground">{row.profile.llmTraceMissingCalls ?? 0}</div>
-                  <div className="truncate font-mono text-[11px] text-muted-foreground">{(row.profile.models ?? []).join(', ') || 'unknown'}</div>
                 </div>
               ))}
             </div>
@@ -1126,6 +1137,10 @@ function formatInteger(value: unknown): string {
 
 function formatUsd(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `$${value.toFixed(4)}` : 'unknown'
+}
+
+function formatDurationMetric(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}ms` : 'n/a'
 }
 
 async function fetchArtifactContent(path: string): Promise<ArtifactContentResponse> {

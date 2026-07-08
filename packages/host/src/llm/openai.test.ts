@@ -21,6 +21,22 @@ function mockFetch(
   }) as unknown as typeof fetch
 }
 
+function mockSseFetch(chunks: readonly string[], opts: { sink?: FetchArgs[] } = {}): typeof fetch {
+  const encoder = new TextEncoder()
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    opts.sink?.push({ url: String(input), init: init ?? {} })
+    return new Response(new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+        controller.close()
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+  }) as unknown as typeof fetch
+}
+
 const READ_TOOL = {
   name: 'read',
   description: 'read a file',
@@ -402,5 +418,29 @@ describe('openaiAdapter', () => {
       outputTokens: 8,
       cacheReadTokens: 1024,
     })
+  })
+
+  it('records streaming duration and time to first chunk in trace metrics', async () => {
+    const deltas: string[] = []
+    const llm = openaiAdapter({
+      apiKey: 'k',
+      fetchImpl: mockSseFetch([
+        'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
+        'data: {"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    })
+
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [],
+      onTextDelta: (delta) => deltas.push(delta),
+    })
+
+    expect(deltas).toEqual(['hel', 'lo'])
+    expect(res.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(res.trace?.response?.metrics?.durationMs).toEqual(expect.any(Number))
+    expect(res.trace?.response?.metrics?.timeToFirstChunkMs).toEqual(expect.any(Number))
   })
 })
