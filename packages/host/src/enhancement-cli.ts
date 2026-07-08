@@ -1,7 +1,9 @@
 import {
+  exportRolloutFrameworkAdapter,
   exportRolloutSidecar,
   exportRolloutSegments,
   exportSessionTraceArtifacts,
+  type ExportRolloutAdapterInput,
   type ExportRolloutSidecarInput,
   type ExportSessionTraceInput,
 } from './enhancement-export.js'
@@ -30,6 +32,7 @@ export type EnhancementCliCommand =
   | ({ kind: 'trace-export-session' } & ExportSessionTraceInput)
   | ({ kind: 'rollout-export-session' } & ExportRolloutSidecarInput)
   | ({ kind: 'rollout-export-segments' } & ExportSessionTraceInput)
+  | ({ kind: 'rollout-export-adapter' } & ExportRolloutAdapterInput)
 
 export function parseEnhancementCli(argv: readonly string[]): EnhancementCliCommand {
   if (argv[0] !== 'enhancement') return { kind: 'none' }
@@ -127,6 +130,16 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       workspaceRoot: value(rest, '--workspace-root'),
     }
   }
+  if (argv[1] === 'rollout' && argv[2] === 'export-adapter') {
+    const rest = argv.slice(3)
+    const framework = value(rest, '--framework')
+    return {
+      kind: 'rollout-export-adapter',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rollouts',
+      sidecarPath: required(rest, '--sidecar'),
+      ...(framework ? { frameworkTarget: frameworkTarget(framework) } : {}),
+    }
+  }
   if (argv[1] === 'artifacts' && argv[2] === 'manifest') {
     const rest = argv.slice(3)
     const maxHashBytes = numberValue(rest, '--max-hash-bytes')
@@ -185,6 +198,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
   if (command.kind === 'rollout-export-segments') {
     const result = await exportRolloutSegments(command)
     console.log(JSON.stringify({ artifact: result.artifact, segmentCount: result.segments.segments.length }, null, 2))
+    return true
+  }
+  if (command.kind === 'rollout-export-adapter') {
+    const result = await exportRolloutFrameworkAdapter(command)
+    console.log(JSON.stringify({ adapterPath: result.adapterPath, status: result.adapter.status, frameworkTarget: result.adapter.frameworkTarget }, null, 2))
     return true
   }
   const result = await exportRolloutSidecar(command)
