@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, relative, sep } from 'node:path'
 
 import {
   buildSweBenchEvaluationCommand,
@@ -784,9 +784,12 @@ export async function ingestSweBenchResults(
   const layout = sweBenchRunLayout(input.rootDir, input.runId)
   const experiment = JSON.parse(await readFile(layout.experimentPath, 'utf8')) as EvalExperiment
   const results = await readSweBenchResultRows(input.resultsDir)
+  const store = createArtifactStore(layout.rootDir)
   const trialByInstance = new Map<string, EvalTrial>()
   for (const result of results) {
     const existing = await readExistingTrial(layout, result.instanceId)
+    const resultArtifact = await store.writeJson('metadata', `artifacts/${result.instanceId}/swebench-result.json`, result.raw)
+    const logArtifacts = await collectSweBenchResultLogs(input.resultsDir, result.instanceId, store)
     const trial: EvalTrial = {
       trialId: existing?.trialId ?? `${input.runId}:${result.instanceId}`,
       experimentId: existing?.experimentId ?? experiment.experimentId,
@@ -795,7 +798,7 @@ export async function ingestSweBenchResults(
       status: result.resolved ? 'completed' : 'failed',
       resolved: result.resolved,
       failureLabel: result.failureLabel,
-      artifacts: existing?.artifacts ?? [],
+      artifacts: mergeArtifactRefs([...(existing?.artifacts ?? []), resultArtifact, ...logArtifacts]),
       metrics: {
         ...(existing?.metrics ?? {}),
         swebenchResolved: result.resolved,
@@ -818,6 +821,73 @@ async function readExistingTrial(layout: SweBenchRunLayout, instanceId: string):
   const path = join(layout.trialsDir, `${instanceId}.json`)
   if (!existsSync(path)) return undefined
   return JSON.parse(await readFile(path, 'utf8')) as EvalTrial
+}
+
+async function collectSweBenchResultLogs(
+  resultsDir: string,
+  instanceId: string,
+  store: ReturnType<typeof createArtifactStore>,
+): Promise<ArtifactRef[]> {
+  const files = await collectMatchingFiles(resultsDir, instanceId)
+  const out: ArtifactRef[] = []
+  for (const file of files) {
+    const rel = relative(resultsDir, file).split(sep).join('/')
+    const target = `artifacts/${instanceId}/harness/${rel.replace(/[^A-Za-z0-9_./-]/g, '_')}`
+    const body = await readFile(file, 'utf8')
+    out.push(await store.writeText(inferHarnessArtifactKind(file), target, body))
+  }
+  return out
+}
+
+async function collectMatchingFiles(rootDir: string, instanceId: string): Promise<string[]> {
+  const out: string[] = []
+  const normalizedInstance = normalizeInstanceForPathMatch(instanceId)
+
+  async function visit(dir: string): Promise<void> {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw err
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        await visit(path)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const rel = relative(rootDir, path).split(sep).join('/')
+      if (!normalizeInstanceForPathMatch(rel).includes(normalizedInstance)) continue
+      if (!isTextHarnessArtifact(path)) continue
+      const fileStat = await stat(path)
+      if (fileStat.size > 2 * 1024 * 1024) continue
+      out.push(path)
+    }
+  }
+
+  await visit(rootDir)
+  return out.sort((a, b) => a.localeCompare(b))
+}
+
+function normalizeInstanceForPathMatch(value: string): string {
+  return value.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase()
+}
+
+function isTextHarnessArtifact(path: string): boolean {
+  return /\.(json|jsonl|log|txt|out|err)$/i.test(path)
+}
+
+function inferHarnessArtifactKind(path: string): ArtifactRef['kind'] {
+  if (/\.(log|txt|out|err)$/i.test(path)) return 'log'
+  return 'metadata'
+}
+
+function mergeArtifactRefs(refs: readonly ArtifactRef[]): ArtifactRef[] {
+  const byKey = new Map<string, ArtifactRef>()
+  for (const ref of refs) byKey.set(`${ref.kind}:${ref.uri}`, ref)
+  return [...byKey.values()]
 }
 
 async function readSweBenchResultRows(resultsDir: string): Promise<SweBenchIngestedResult[]> {

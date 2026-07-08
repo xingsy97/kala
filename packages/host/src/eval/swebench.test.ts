@@ -554,6 +554,8 @@ describe('SWE-bench eval runner', () => {
         JSON.stringify({ instance_id: 'b__repo-2', resolved: false, error: 'tests failed' }) + '\n',
       'utf8',
     )
+    mkdirSync(join(resultsDir, 'logs', 'b__repo-2'), { recursive: true })
+    await writeFile(join(resultsDir, 'logs', 'b__repo-2', 'test_output.log'), 'pytest failed\n', 'utf8')
 
     const result = await ingestSweBenchResults({ rootDir: dir, runId: 'run9', resultsDir })
 
@@ -566,6 +568,13 @@ describe('SWE-bench eval runner', () => {
     expect(summary.failureCounts.test_failed).toBe(1)
     const failedTrial = JSON.parse(await readFile(join(result.layout.trialsDir, 'b__repo-2.json'), 'utf8'))
     expect(failedTrial.failureLabel).toBe('test_failed')
+    expect(failedTrial.artifacts.map((artifact: { uri: string }) => artifact.uri)).toEqual(expect.arrayContaining([
+      'artifacts/b__repo-2/final.diff',
+      'artifacts/b__repo-2/swebench-result.json',
+      'artifacts/b__repo-2/harness/logs/b__repo-2/test_output.log',
+    ]))
+    expect(await readFile(join(result.layout.rootDir, 'artifacts/b__repo-2/swebench-result.json'), 'utf8')).toContain('tests failed')
+    expect(await readFile(join(result.layout.rootDir, 'artifacts/b__repo-2/harness/logs/b__repo-2/test_output.log'), 'utf8')).toContain('pytest failed')
   })
 
   it('ingests results.json resolved id lists and parses the CLI command', async () => {
