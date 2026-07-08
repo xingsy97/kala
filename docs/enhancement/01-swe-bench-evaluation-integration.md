@@ -160,6 +160,16 @@ agent-kernel-host eval swebench ingest-results \
   --root-dir runs/swebench \
   --run-id smoke-001 \
   --results-dir evaluation_results/smoke-001
+
+agent-kernel-host eval swebench agent-infer \
+  --root-dir runs/swebench \
+  --run-id smoke-001 \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --model agent-kernel-gpt-5.5 \
+  --instances-jsonl fixtures/swebench-lite.jsonl \
+  --agent-command 'agent-kernel-run --prompt-file "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"' \
+  --repo-cache-dir runs/repos \
+  --timeout-ms 1800000
 ```
 
 `grade` prints the official command by default. Add `--execute` to actually run
@@ -171,6 +181,22 @@ evaluation when the operator only wants to inspect the command.
 maps official resolved/unresolved results into existing `EvalTrial` files,
 updates `summary.json`, and keeps the raw rows in `swebench-results.json`. It
 does not re-grade patches or reinterpret repository tests.
+
+`agent-infer` is the implemented agent-driven materialization adapter. It loads
+local SWE-bench-shaped JSONL instances, clones either `repo_path`, a
+`--repo-cache-dir` match, or the GitHub `repo`, checks out `base_commit`, writes
+a versioned prompt artifact, runs an operator-provided agent command in the
+workspace, captures stdout/stderr artifacts, and extracts `git diff --binary` as
+the official prediction patch. The agent command receives:
+
+- `AGENT_KERNEL_SWEBENCH_INSTANCE_ID`
+- `AGENT_KERNEL_SWEBENCH_REPO`
+- `AGENT_KERNEL_SWEBENCH_PROMPT`
+- `AGENT_KERNEL_SWEBENCH_PROMPT_FILE`
+
+This is intentionally an adapter, not a benchmark-specific kernel mode. The
+official harness remains responsible for grading; the adapter only prepares a
+real workspace and prediction row.
 
 ## Output Layout
 
@@ -284,9 +310,11 @@ official result files and updates per-trial/summary metadata after the harness
 has produced results.
 
 Phase 3: SWE-bench Lite single-instance run.
-Partially implemented through `--instance-ids`, `--limit`, and stable run
-directories. Agent-driven workspace materialization is the next adapter layer;
-the current code intentionally does not fake agent execution.
+Implemented for local JSONL instances and external agent commands through
+`agent-infer`: materialize a git workspace, run the command with prompt/repo env
+vars, capture logs, extract `git diff --binary`, write official predictions,
+and persist trial metadata. The next step is binding this adapter directly to a
+managed `agent-kernel` host/executor session for full dashboard replay.
 
 Phase 4: batch scheduler.
 Add concurrency control, resume, skip-completed behavior, and per-instance
