@@ -45,6 +45,18 @@ The router should produce a structured decision artifact:
 This artifact is logged for observability and eval comparisons. It is not added
 to kernel state.
 
+Implemented host artifact capture writes this decision before each LLM call when
+`artifactRootDir` is enabled:
+
+```text
+<artifactRoot>/router-decisions/<session_id>/<event_seq>.json
+```
+
+The initial decision artifact records selected/requested model, inferred
+provider or router adapter, reason codes, and context budget. It is
+observability-only: the actual model call path remains the existing host router,
+and replay still comes from the JSONL event ledger.
+
 ## Tool Routing
 
 The current tool registry lives in executor/host boundaries. Production-level
@@ -69,6 +81,18 @@ For opencode-style skills exposed as tools:
 This is easier to debug than hidden natural-language skill selection because the
 LLM response contains the tool name and arguments.
 
+Implemented tool catalog artifacts make this explicit without changing
+`ToolSchema`:
+
+```text
+<artifactRoot>/tool-catalog/<session_id>/<event_seq>.json
+```
+
+Each entry records tool name, approval policy, kind (`executor`, `host`,
+`skill_loader`, `sub_agent`, or `unknown`), whether it is skill-backed, and a
+schema hash. The dashboard can consume this artifact instead of inferring
+skill-backed tools only from names or descriptions.
+
 ## Fallbacks and Retries
 
 Retries should be typed:
@@ -84,6 +108,8 @@ Retries should be typed:
 - Unit tests for routing decisions under provider outage, context overflow, and
   tool-required tasks.
 - Contract tests for skill-backed tool schemas.
+- Implemented artifact tests for router decisions and skill-backed tool catalog
+  metadata.
 - Integration test that a failed provider call records retry and fallback spans.
 - Dashboard test that skill-backed tools are visibly marked.
 
@@ -92,4 +118,3 @@ Retries should be typed:
 - Do not add router decisions to reducer state.
 - Do not let router fallback change benchmark configs silently.
 - Do not hide tool schema changes from traces.
-

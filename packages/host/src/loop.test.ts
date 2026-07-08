@@ -137,10 +137,20 @@ describe('host loop', () => {
       join(artifactRootDir, 'message-assembly', sessionId, '1.json'),
       'utf8',
     ))
+    const routerDecision = JSON.parse(await readFile(
+      join(artifactRootDir, 'router-decisions', sessionId, '1.json'),
+      'utf8',
+    ))
+    const toolCatalog = JSON.parse(await readFile(
+      join(artifactRootDir, 'tool-catalog', sessionId, '1.json'),
+      'utf8',
+    ))
     expect(artifact.sessionId).toBe(sessionId)
     expect(artifact.messageCount).toBeGreaterThan(0)
     expect(artifact.toolCount).toBe(1)
     expect(artifact.parts.map((part: { name: string }) => part.name)).toContain('tools')
+    expect(routerDecision.reasonCodes).toContain('adapter_default_model')
+    expect(toolCatalog.tools[0]).toMatchObject({ name: 'read', kind: 'executor', skillBacked: false })
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     expect(parsed.events).toHaveLength(2)
   })

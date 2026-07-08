@@ -5,11 +5,13 @@ import {
   type ExportSessionTraceInput,
 } from './enhancement-export.js'
 import { profileSession, scoreSession, type ProfileSessionInput, type ScoreSessionInput } from './eval/generic.js'
+import { auditSessionReliability, type AuditSessionReliabilityInput } from './reliability.js'
 
 export type EnhancementCliCommand =
   | { kind: 'none' }
   | ({ kind: 'eval-score-session' } & ScoreSessionInput)
   | ({ kind: 'profile-session' } & ProfileSessionInput)
+  | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
   | ({ kind: 'trace-export-session' } & ExportSessionTraceInput)
   | ({ kind: 'rollout-export-session' } & ExportRolloutSidecarInput)
 
@@ -47,6 +49,14 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       pricingPath: value(rest, '--pricing'),
     }
   }
+  if (argv[1] === 'reliability' && argv[2] === 'audit-session') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'reliability-audit-session',
+      rootDir: value(rest, '--root-dir') ?? 'runs/reliability/session',
+      sessionLogPath: required(rest, '--session-log'),
+    }
+  }
   if (argv[1] === 'rollout' && argv[2] === 'export-session') {
     const rest = argv.slice(3)
     return {
@@ -82,6 +92,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
   if (command.kind === 'profile-session') {
     const result = await profileSession(command)
     console.log(JSON.stringify({ profilePath: result.profilePath, profile: result.profile }, null, 2))
+    return true
+  }
+  if (command.kind === 'reliability-audit-session') {
+    const result = await auditSessionReliability(command)
+    console.log(JSON.stringify({ auditPath: result.auditPath, audit: result.audit }, null, 2))
     return true
   }
   const result = await exportRolloutSidecar(command)

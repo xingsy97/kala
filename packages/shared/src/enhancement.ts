@@ -10,6 +10,8 @@ export type ArtifactKind =
   | 'llm_request'
   | 'llm_response'
   | 'message_assembly'
+  | 'router_decision'
+  | 'tool_catalog'
   | 'trace'
   | 'eval_score'
   | 'diff'
@@ -677,6 +679,71 @@ export type RouterDecisionArtifact = {
     maxInputTokens?: number
     maxOutputTokens?: number
   }
+}
+
+export type ToolCatalogArtifact = {
+  toolCount: number
+  tools: Array<{
+    name: string
+    requiresApproval: boolean
+    kind: 'executor' | 'host' | 'skill_loader' | 'sub_agent' | 'unknown'
+    skillBacked: boolean
+    descriptionChars: number
+    schemaHash: string
+  }>
+}
+
+export function createRouterDecisionArtifact(input: {
+  requestedModel?: string
+  selectedModel?: string
+  adapterName?: string
+  reasonCodes?: readonly string[]
+  fallbacks?: readonly string[]
+  maxInputTokens?: number
+  maxOutputTokens?: number
+}): RouterDecisionArtifact {
+  const selectedProvider = providerFromAdapter(input.adapterName) ?? inferProvider(input.selectedModel ?? input.requestedModel)
+  return {
+    ...(selectedProvider ? { selectedProvider } : {}),
+    ...(input.selectedModel ?? input.requestedModel ? { selectedModel: input.selectedModel ?? input.requestedModel } : {}),
+    reasonCodes: input.reasonCodes ?? [input.requestedModel ? 'session_model_selected' : 'adapter_default_model'],
+    fallbacks: input.fallbacks ?? [],
+    budget: compactRecord({
+      maxInputTokens: input.maxInputTokens,
+      maxOutputTokens: input.maxOutputTokens,
+    }),
+  }
+}
+
+export function createToolCatalogArtifact(tools: readonly ToolSchema[]): ToolCatalogArtifact {
+  return {
+    toolCount: tools.length,
+    tools: tools.map((tool) => ({
+      name: tool.name,
+      requiresApproval: tool.requiresApproval,
+      kind: toolKind(tool.name),
+      skillBacked: tool.name === 'skill',
+      descriptionChars: tool.description.length,
+      schemaHash: stableId(JSON.stringify(tool.inputSchema), 16),
+    })),
+  }
+}
+
+function providerFromAdapter(adapterName: string | undefined): string | undefined {
+  if (!adapterName) return undefined
+  const lower = adapterName.toLowerCase()
+  if (lower.includes('anthropic')) return 'anthropic'
+  if (lower.includes('openai')) return 'openai'
+  if (lower.includes('router(')) return 'router'
+  return undefined
+}
+
+function toolKind(name: string): ToolCatalogArtifact['tools'][number]['kind'] {
+  if (name === 'skill') return 'skill_loader'
+  if (name === 'agent') return 'sub_agent'
+  if (name === 'memory') return 'host'
+  if (name === 'bash' || name === 'bash_output' || name === 'kill_shell' || name === 'read' || name === 'write' || name === 'edit' || name === 'ls' || name === 'glob' || name === 'grep' || name === 'todowrite' || name === 'websearch') return 'executor'
+  return 'unknown'
 }
 
 export type PricingTable = {
