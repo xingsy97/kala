@@ -137,9 +137,6 @@ async function main(): Promise<void> {
   handle.socket.on('disconnect', (reason) => {
     logger.info({ reason }, 'executor disconnected')
   })
-  handle.socket.on('session:error', (e) => {
-    logger.error({ scope: e.scope }, e.message)
-  })
 
   await handle.ready
   logger.info('executor announced; awaiting tool calls')
