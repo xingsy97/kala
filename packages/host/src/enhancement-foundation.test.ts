@@ -314,10 +314,26 @@ describe('enhancement foundation', () => {
       requestedModel: 'gpt-test',
       adapterName: 'router(openai:gpt-test)',
       maxInputTokens: 128000,
+      tools: [
+        { name: 'skill', description: 'Load skill', requiresApproval: false, inputSchema: { type: 'object' } },
+        { name: 'agent', description: 'Sub agent', requiresApproval: false, inputSchema: { type: 'object' } },
+        { name: 'edit', description: 'Edit file', requiresApproval: true, inputSchema: { type: 'object' } },
+      ],
     })
     expect(decision.selectedProvider).toBe('openai')
     expect(decision.selectedModel).toBe('gpt-test')
     expect(decision.budget?.maxInputTokens).toBe(128000)
+    expect(decision.reasonCodes).toContain('tool_calling_enabled')
+    expect(decision.reasonCodes).toContain('skill_backed_tools_visible')
+    expect(decision.reasonCodes).toContain('sub_agent_tool_visible')
+    expect(decision.reasonCodes).toContain('approval_required_tools_visible')
+    expect(decision.toolPolicy).toMatchObject({
+      toolCount: 3,
+      requiresApprovalCount: 1,
+      skillBackedCount: 1,
+      subAgentToolAvailable: true,
+      memoryToolAvailable: false,
+    })
 
     const catalog = createToolCatalogArtifact([
       { name: 'skill', description: 'Load skill', requiresApproval: false, inputSchema: { type: 'object' } },
