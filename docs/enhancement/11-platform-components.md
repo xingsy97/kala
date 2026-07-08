@@ -106,11 +106,14 @@ state.
 
 Dashboard coverage mirrors the implemented enhancement CLIs where a UI action is
 reasonable. Expensive or environment-specific jobs still run through explicit
-CLI/CI commands, but their outputs have first-class dashboard surfaces:
+CLI/CI commands, but their outputs have first-class dashboard surfaces. Cheap,
+deterministic planning actions can be triggered from the dashboard when they
+only create artifacts and do not mutate kernel session state:
 
 - `Eval`: SWE-bench and generic eval summaries, worker plans, score artifacts,
   judge traces, progress, comparisons, trials, final patches, harness evidence,
-  and linked sessions.
+  and linked sessions. The dashboard can also create a SWE-bench worker plan via
+  the host HTTP route that reuses the CLI planner.
 - `Profiles`: session latency, token, missing-trace, and estimated-cost
   profiles.
 - `Memory`: memory index provenance, active/tombstoned entries, confidence, and

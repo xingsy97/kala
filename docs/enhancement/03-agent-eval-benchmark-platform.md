@@ -178,10 +178,20 @@ protocol. It also loads per-run trial artifacts from the same manifest, shows
 instance status/resolution/failure/latency/patch size, and exposes each trial's
 artifact refs. Trial artifact refs are grouped into final patch, trace, harness
 evidence, logs, prompt, and metadata sections in the dashboard, with preview
-buttons backed by the existing artifact content endpoint. The Eval tab now also
-has an aggregate scorecard for runs/trials/resolution/pass rate and compact
-failure-delta chips for comparisons, so cross-run regression signals are visible
-without opening raw JSON.
+buttons backed by the existing artifact content endpoint. It also surfaces
+generic `scores.json`, model judge trace artifacts, and SWE-bench
+`worker-plan.json` artifacts. The Eval tab now has an aggregate scorecard for
+runs/trials/resolution/pass rate and compact failure-delta chips for
+comparisons, so cross-run regression signals are visible without opening raw
+JSON.
+
+The dashboard can create a SWE-bench worker plan through
+`POST /eval/swebench/plan`. This is intentionally limited to the cheap planning
+step: it validates the selected instance set, shards it across workers, writes
+`worker-plan.json`, and refreshes the artifact manifest. Running the agent over
+the benchmark, invoking Docker-based official grading, and ingesting full
+results remain explicit CLI/CI operations because they are expensive,
+environment-specific, and should be reproducible outside a browser session.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
 Implemented as a deterministic fixture smoke in default CI plus a manual

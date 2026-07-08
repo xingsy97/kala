@@ -331,6 +331,60 @@ describe('wire protocol', () => {
     expect(traversal.status).toBe(403)
   })
 
+  it('creates SWE-bench worker plan artifacts from the dashboard route', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const instancesJsonl = join(dir, 'instances.jsonl')
+    await writeFile(instancesJsonl, [
+      JSON.stringify({ instance_id: 'repo__one-1' }),
+      JSON.stringify({ instance_id: 'repo__two-2' }),
+      JSON.stringify({ instance_id: 'repo__three-3' }),
+    ].join('\n'), 'utf8')
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const response = await fetch(`${url}/eval/swebench/plan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId: 'dash-plan',
+        dataset: 'princeton-nlp/SWE-bench_Lite',
+        split: 'test',
+        model: 'agent-test',
+        instancesJsonl,
+        instanceIds: ['repo__one-1', 'repo__three-3'],
+        maxWorkers: 2,
+        timeoutMs: 300000,
+      }),
+    }).then((r) => r.json() as Promise<{ planPath: string; selectedCount: number; shardCount: number }>)
+
+    expect(response.selectedCount).toBe(2)
+    expect(response.shardCount).toBe(2)
+    expect(response.planPath).toBe(join(artifactRootDir, 'dash-plan', 'worker-plan.json'))
+
+    const plan = JSON.parse(await readFile(response.planPath, 'utf8')) as {
+      runId: string
+      model: string
+      shards: Array<{ instanceIds: string[] }>
+      resourceHints: { timeoutMs?: number }
+    }
+    expect(plan.runId).toBe('dash-plan')
+    expect(plan.model).toBe('agent-test')
+    expect(plan.shards.flatMap((shard) => shard.instanceIds).sort()).toEqual(['repo__one-1', 'repo__three-3'])
+    expect(plan.resourceHints.timeoutMs).toBe(300000)
+  })
+
   it('drives a full round-trip with dashboard + executor', async () => {
     const sessionId = 'wire-1'
     // Pre-materialize the session: dashboard handshakes are now lazy (they

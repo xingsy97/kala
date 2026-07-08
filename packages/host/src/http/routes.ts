@@ -27,6 +27,7 @@ import type {
 } from '@agent-kernel/shared'
 
 import { buildArtifactManifest } from '../artifact-manifest.js'
+import { planSweBenchWorkerRun } from '../eval/swebench.js'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -47,6 +48,20 @@ const MIME: Record<string, string> = {
 
 const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
 const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
+
+type CreateSweBenchPlanRequest = {
+  rootDir?: string
+  runId?: string
+  dataset?: string
+  split?: string
+  model?: string
+  instancesJsonl?: string
+  instanceIds?: readonly string[] | string
+  limit?: number
+  maxWorkers?: number
+  timeoutMs?: number
+  repoCacheDir?: string
+}
 
 export function attachJsonRoutes(
   server: HttpServer,
@@ -89,6 +104,14 @@ export function attachJsonRoutes(
       }
       return
     }
+    if (path === '/eval/swebench/plan' && req.method === 'POST') {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => createSweBenchPlan(body as CreateSweBenchPlanRequest, payloads.artifactRootDir))
+        .then((result) => sendJson(req, res, result))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') return
     if (path === '/artifacts/manifest') {
       claimRoute(req)
@@ -127,6 +150,68 @@ export function attachJsonRoutes(
       return
     }
   })
+}
+
+async function createSweBenchPlan(body: CreateSweBenchPlanRequest, artifactRootDir: string | false | undefined): Promise<unknown> {
+  const rootDir = cleanString(body.rootDir) ?? (artifactRootDir || undefined)
+  if (!rootDir) throw new HttpRouteError(400, 'rootDir is required when artifact capture is not configured')
+  const split = cleanString(body.split)
+  const instanceIds = listInput(body.instanceIds)
+  const limit = positiveInteger(body.limit, 'limit')
+  const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
+  const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+  const repoCacheDir = cleanString(body.repoCacheDir)
+  const result = await planSweBenchWorkerRun({
+    rootDir,
+    runId: requiredString(body.runId, 'runId'),
+    dataset: requiredString(body.dataset, 'dataset'),
+    ...(split ? { split } : {}),
+    model: requiredString(body.model, 'model'),
+    instancesJsonl: requiredString(body.instancesJsonl, 'instancesJsonl'),
+    ...(instanceIds ? { instanceIds } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+    ...(maxWorkers !== undefined ? { maxWorkers } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(repoCacheDir ? { repoCacheDir } : {}),
+  })
+  return {
+    planPath: result.planPath,
+    runId: result.layout.runId,
+    selectedCount: result.plan.selectedCount,
+    maxWorkers: result.plan.maxWorkers,
+    shardCount: result.plan.shards.length,
+    warnings: result.plan.warnings,
+    plan: result.plan,
+  }
+}
+
+function requiredString(value: unknown, name: string): string {
+  const cleaned = cleanString(value)
+  if (!cleaned) throw new HttpRouteError(400, `${name} is required`)
+  return cleaned
+}
+
+function cleanString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+}
+
+function listInput(value: unknown): readonly string[] | undefined {
+  if (Array.isArray(value)) {
+    const out = value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+    return out.length > 0 ? out : undefined
+  }
+  if (typeof value === 'string') {
+    const out = value.split(',').map((item) => item.trim()).filter(Boolean)
+    return out.length > 0 ? out : undefined
+  }
+  return undefined
+}
+
+function positiveInteger(value: unknown, name: string): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isInteger(number) || number <= 0) throw new HttpRouteError(400, `${name} must be a positive integer`)
+  return number
 }
 
 function valueOf<T>(value: T | (() => T)): T {

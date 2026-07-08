@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type InputHTMLAttributes } from 'react'
 import { CheckCircle2, FileText, RefreshCw, XCircle } from 'lucide-react'
 
 import { Button } from '../../components/ui/button.js'
+import { Input } from '../../components/ui/input.js'
 import {
   Dialog,
   DialogContent,
@@ -195,6 +196,15 @@ type EvalWorkerPlan = {
 type EvalWorkerPlanRow = {
   path: string
   plan: EvalWorkerPlan
+}
+
+type SweBenchPlanResponse = {
+  planPath?: string
+  runId?: string
+  selectedCount?: number
+  maxWorkers?: number
+  shardCount?: number
+  warnings?: readonly string[]
 }
 
 type SessionProfile = {
@@ -556,6 +566,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             loading={loading}
             onOpenArtifact={setArtifactDetail}
             onOpenSession={onOpenSession}
+            onPlanCreated={() => setReloadToken((token) => token + 1)}
           />
         ) : mode === 'profiles' ? (
           <ProfilesView
@@ -683,6 +694,7 @@ function EvalRunsView({
   loading,
   onOpenArtifact,
   onOpenSession,
+  onPlanCreated,
 }: {
   manifest: ArtifactManifest | null
   rows: readonly EvalRunRow[]
@@ -701,6 +713,7 @@ function EvalRunsView({
   loading: boolean
   onOpenArtifact(request: ArtifactDetailRequest): void
   onOpenSession?(sessionId: string): void
+  onPlanCreated(): void
 }): JSX.Element {
   const comparisonCount = comparisons.length
   const selectedRun = rows.find((row) => row.key === selectedRunPath)
@@ -727,6 +740,7 @@ function EvalRunsView({
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
         {manifest && rows.length === 0 && comparisons.length === 0 && !error ? <div className="text-xs text-muted-foreground">No eval summaries found.</div> : null}
         <EvalScorecard rows={rows} selectedRun={selectedRun} />
+        <SweBenchPlanPanel onCreated={onPlanCreated} />
         <div className="min-h-0 overflow-hidden rounded-md border border-border">
           {rows.length > 0 ? (
           <ScrollArea className="h-full">
@@ -816,6 +830,111 @@ function EvalRunsView({
       </div>
     </div>
   )
+}
+
+function SweBenchPlanPanel({ onCreated }: { onCreated(): void }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [runId, setRunId] = useState('')
+  const [dataset, setDataset] = useState('princeton-nlp/SWE-bench_Lite')
+  const [split, setSplit] = useState('test')
+  const [model, setModel] = useState('')
+  const [instancesJsonl, setInstancesJsonl] = useState('')
+  const [rootDir, setRootDir] = useState('')
+  const [instanceIds, setInstanceIds] = useState('')
+  const [limit, setLimit] = useState('')
+  const [maxWorkers, setMaxWorkers] = useState('1')
+  const [timeoutMs, setTimeoutMs] = useState('')
+  const [repoCacheDir, setRepoCacheDir] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<SweBenchPlanResponse | null>(null)
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    setResult(null)
+    const payload = compactFormPayload({
+      runId,
+      dataset,
+      split,
+      model,
+      instancesJsonl,
+      rootDir,
+      instanceIds,
+      limit,
+      maxWorkers,
+      timeoutMs,
+      repoCacheDir,
+    })
+    try {
+      const res = await fetch('/eval/swebench/plan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const body = await res.json().catch(() => null) as (SweBenchPlanResponse & { error?: string }) | null
+      if (!res.ok) throw new Error(body?.error ?? `SWE-bench plan failed: ${res.status}`)
+      setResult(body ?? {})
+      onCreated()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-background/70">
+      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30" onClick={() => setOpen((value) => !value)}>
+        <span className="font-medium">Create SWE-bench Worker Plan</span>
+        <span className="font-mono text-[11px] text-muted-foreground">{open ? 'hide' : 'show'}</span>
+      </button>
+      {open ? (
+        <form onSubmit={(event) => void submit(event)} className="grid gap-3 border-t border-border p-3 text-xs">
+          <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
+            <LabeledInput label="Run ID" value={runId} onChange={setRunId} required placeholder="swebench-smoke" />
+            <LabeledInput label="Model" value={model} onChange={setModel} required placeholder="gpt-5.5" />
+            <LabeledInput label="Dataset" value={dataset} onChange={setDataset} required />
+            <LabeledInput label="Split" value={split} onChange={setSplit} />
+            <LabeledInput label="Instances JSONL" value={instancesJsonl} onChange={setInstancesJsonl} required placeholder="/path/to/instances.jsonl" />
+            <LabeledInput label="Root Dir" value={rootDir} onChange={setRootDir} placeholder="uses artifact root when empty" />
+            <LabeledInput label="Instance IDs" value={instanceIds} onChange={setInstanceIds} placeholder="comma separated" />
+            <LabeledInput label="Repo Cache" value={repoCacheDir} onChange={setRepoCacheDir} placeholder="optional" />
+            <LabeledInput label="Limit" value={limit} onChange={setLimit} inputMode="numeric" placeholder="optional" />
+            <LabeledInput label="Max Workers" value={maxWorkers} onChange={setMaxWorkers} inputMode="numeric" />
+            <LabeledInput label="Timeout ms" value={timeoutMs} onChange={setTimeoutMs} inputMode="numeric" placeholder="optional" />
+          </div>
+          {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
+          {result ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">Created {result.planPath ?? result.runId} / {result.selectedCount ?? 0} instances / {result.shardCount ?? 0} shards</div> : null}
+          <div className="flex justify-end">
+            <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Creating...' : 'Create Plan'}</Button>
+          </div>
+        </form>
+      ) : null}
+    </div>
+  )
+}
+
+function LabeledInput({ label, value, onChange, ...props }: { label: string; value: string; onChange(value: string): void } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>): JSX.Element {
+  return (
+    <label className="grid gap-1">
+      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      <Input value={value} onChange={(event) => onChange(event.currentTarget.value)} {...props} />
+    </label>
+  )
+}
+
+function compactFormPayload(values: Record<string, string>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(values)) {
+    const trimmed = value.trim()
+    if (!trimmed) continue
+    if (key === 'limit' || key === 'maxWorkers' || key === 'timeoutMs') payload[key] = Number(trimmed)
+    else if (key === 'instanceIds') payload[key] = trimmed.split(',').map((item) => item.trim()).filter(Boolean)
+    else payload[key] = trimmed
+  }
+  return payload
 }
 
 function EvalWorkerPlansPanel({ plans, onOpenArtifact }: { plans: readonly EvalWorkerPlanRow[]; onOpenArtifact(request: ArtifactDetailRequest): void }): JSX.Element {

@@ -355,6 +355,48 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.queryByText('llm/s1/1.request.json')).toBeNull()
   })
 
+  it('creates SWE-bench worker plans from the Eval dashboard', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/summary.json',
+        mediaType: 'application/json',
+        body: { experimentId: 'run1', dataset: 'local', model: 'agent-test', trialCount: 1, resolved: 1, failed: 0, metrics: { passRate: 1 } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/compare/eval-comparison.json', mediaType: 'application/json', body: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/swebench/run1/progress.json', mediaType: 'application/json', body: { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 1 } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/swebench/run1/worker-plan.json', mediaType: 'application/json', body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 1, maxWorkers: 1, shards: [{ workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 1 } } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/session-score/scores.json', mediaType: 'application/json', body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json', mediaType: 'application/json', body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/swebench/run1/trials/local__repo-1.json', mediaType: 'application/json', body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ planPath: '/tmp/artifacts/dash-plan/worker-plan.json', runId: 'dash-plan', selectedCount: 2, maxWorkers: 2, shardCount: 2, warnings: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+
+    await screen.findByRole('heading', { name: 'Eval' })
+    fireEvent.click(await screen.findByText('Create SWE-bench Worker Plan'))
+    fireEvent.change(screen.getByLabelText('Run ID'), { target: { value: 'dash-plan' } })
+    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'agent-test' } })
+    fireEvent.change(screen.getByLabelText('Instances JSONL'), { target: { value: '/tmp/instances.jsonl' } })
+    fireEvent.change(screen.getByLabelText('Instance IDs'), { target: { value: 'repo__one-1, repo__two-2' } })
+    fireEvent.change(screen.getByLabelText('Limit'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Max Workers'), { target: { value: '2' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Plan' }))
+
+    await screen.findByText('Created /tmp/artifacts/dash-plan/worker-plan.json / 2 instances / 2 shards')
+    expect(fetchMock).toHaveBeenCalledWith('/eval/swebench/plan', expect.objectContaining({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    }))
+    const planCall = fetchMock.mock.calls.find((call) => call[0] === '/eval/swebench/plan')
+    const body = JSON.parse(String((planCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
+    expect(body).toMatchObject({ runId: 'dash-plan', model: 'agent-test', instancesJsonl: '/tmp/instances.jsonl', limit: 2, maxWorkers: 2 })
+    expect(body.instanceIds).toEqual(['repo__one-1', 'repo__two-2'])
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
+  })
+
   it('shows progress-only eval runs before summaries are written', async () => {
     const progressOnlyManifest: ArtifactManifest = {
       ...manifest,
