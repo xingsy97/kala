@@ -1,6 +1,6 @@
 # Sub-agents  -  Design v2
 
-Status: implementation-in-progress
+Status: live inline observability implemented; interruption implemented; agent-type registry still planned
 Owner: host + dashboard
 Related: [tools.md](./tools.md), [protocol/wire-protocol.md](./protocol/wire-protocol.md), [ARCHITECTURE.md](./ARCHITECTURE.md), [adr/0014-subagent-approval-mode.md](./adr/0014-subagent-approval-mode.md)
 
@@ -9,17 +9,17 @@ Related: [tools.md](./tools.md), [protocol/wire-protocol.md](./protocol/wire-pro
 A minimum-viable sub-agent stack has been in-tree for a while:
 
 - **Tool schema**  -  `agent` tool in `packages/executor/src/tools/agent.ts`. Fields: `prompt` (required), `model`, `tools` (allowlist).
-- **Host-side handler**  -  `packages/host/src/agent-tool.ts`. Creates a *child JSONL session* via `SessionStore.create()` with `parentSessionId` + `parentCursor` set, inherits `workspaceId`/`workspaceName`/`cwd`, forces `initialApprovalMode: 'allow_all'` (see [ADR 0014](./adr/0014-subagent-approval-mode.md)), then drives the child with `dispatchOne({ kind: 'user_message', text: prompt })` and returns the last assistant text.
+- **Host-side handler**  -  `packages/host/src/extensions/agent-tool.ts`. Creates a *child JSONL session* via `SessionStore.create()` with `parentSessionId` + `parentCursor` set, inherits `workspaceId`/`workspaceName`/`cwd`, forces `initialApprovalMode: 'allow_all'` (see [ADR 0014](./adr/0014-subagent-approval-mode.md)), then drives the child through the host loop and returns an enveloped result.
 - **Depth limit**  -  `AgentConfig.maxAgentDepth` (default 3) counted by walking `parentSessionId` links.
 - **Loop dispatch**  -  `packages/host/src/loop.ts:317` special-cases `AGENT_TOOL_NAME`, so a `call_tool` effect for `agent` invokes `runAgentTool()` instead of the executor bridge.
 - **Store parent-child links**  -  `SessionRecord` carries `parentSessionId` + `parentCursor` (`packages/host/src/store/session.ts`). `SessionReadyEvent` in `packages/shared/src/protocol.ts` propagates them to clients.
 - **Explorer + metadata dialog**  -  the dashboard shows "fork of `<sha> - `" in the session list and a "Parent" jump in `SessionMetadataDialog`.
 
-This works: the sub-agent runs, the parent gets its final text back as a `tool_result`, and the operator can navigate to the child by session id after the fact. But three real gaps make it unusable day-to-day:
+This works: the sub-agent runs, the parent gets its final text back as a `tool_result`, the operator can watch the child inline, and an active child can be interrupted from the parent card. The remaining product gaps are:
 
-1. **The child transcript is invisible inline.** The parent's `tool_result` says nothing about what the child did  -  no tool calls, no reasoning traces, no partial progress. If a sub-agent takes 90 seconds, the operator stares at a spinner and then gets a paragraph of prose, with no way to see what happened without hunting the child session in Explorer.
-2. **No live progress.** Even after finding the child session, the operator has to wait for it to complete before anything renders  -  there's no incremental broadcast to the parent's viewer.
-3. **The tool is undiscoverable.** The `agent` tool is in the schema but nothing in the UI hints that it exists, no built-in agent "types" ship (in the codex/claude-code sense), and there's no way to define custom ones.
+1. **The tool is still under-discoverable.** The `agent` tool is in the schema, but no built-in agent "types" ship yet in the Codex/Claude Code sense, and there is no authoring UI for custom types.
+2. **The registry is still a planned config layer.** The runtime path is intentionally isolated child sessions today; named agent types are the next ergonomic layer, not a different execution model.
+3. **Background sub-agents remain out of scope.** Children still block the parent tool call until they complete, fail, or are interrupted.
 
 We are keeping the backend architecture  -  it is quietly solid. This document specifies (a) the wire events + dashboard rendering to make sub-agent runs observable inline, and (b) a minimal "agent types" facility so users can define reusable prompts + tool policies.
 
@@ -70,7 +70,7 @@ We are keeping the backend architecture  -  it is quietly solid. This document s
 
 ```
 packages/executor/src/tools/agent.ts              schema  -  extend with agent_type, description
-packages/host/src/agent-tool.ts                   spawn handler  -  extend to resolve agent types
+packages/host/src/extensions/agent-tool.ts        spawn handler  -  active registry, interruption, envelope, future agent-type resolution
 packages/host/src/agent-registry.ts               NEW  -  load + hot-reload agent type definitions
 packages/host/src/loop.ts                         no change to dispatch, add child-session subscription hint
 packages/shared/src/protocol.ts                   NEW event types: server:sub_agent_started, server:sub_agent_finished
@@ -102,7 +102,7 @@ The parent's `tool_result` today is the child's last-assistant text. We wrap it 
 
 The wrapper is text (not JSON) so it renders acceptably even without special-case UI, and so it survives log compaction. The dashboard parses the opening tag with a permissive regex and, on match, renders `<SubAgentCard>` instead of the raw text. If the tag is malformed or missing, we fall back to the plain grouped-tool-call renderer  -  so the feature degrades to "just text" cleanly.
 
-For failures (`{ ok: false }`), the envelope is `status="failed"` with a `<error> - </error>` block instead of `<result>`.
+For failures (`{ ok: false }`), the envelope is `status="failed"` with a `<error> - </error>` block instead of `<result>`. User interruption and parent-cancel cascade use `status="cancelled"` with the cancellation reason in `<error>`.
 
 ### New push events
 
@@ -126,11 +126,11 @@ Two events, on the `/dashboard` namespace only:
     parentSessionId: string
     parentCallId: string
     childSessionId: string
-    status: 'completed' | 'failed'
+    status: 'completed' | 'failed' | 'cancelled'
     turns: number                  // child.state.cursor (approximate)
     durationMs: number
     finishedAt: string
-    error?: string                 // present when status === 'failed'
+    error?: string                 // present when status !== 'completed'
   }
   ```
 
@@ -141,6 +141,22 @@ Both events are fanned into the parent's `session:<parentSessionId>` room. The d
 The dashboard, upon receiving `server:sub_agent_started`, calls the existing `session:subscribe` (or equivalent  -  the room-join pattern used for regular sessions) with `childSessionId`. From that point it receives all `event:appended` / `state:changed` events for the child, exactly the same as if the child were the active session. The parent view multiplexes them by session id.
 
 We do NOT add a new "subscribe to child from within parent" RPC  -  the existing per-session room infrastructure is sufficient.
+
+### Client interruption
+
+The dashboard can interrupt a live child from the inline `SubAgentCard` without opening the child session:
+
+```ts
+socket.emit('client:interrupt_sub_agent', {
+  parentSessionId,
+  parentCallId,
+  childSessionId, // optional guard against stale UI rows
+})
+```
+
+The host marks the active sub-agent entry as cancelled, then dispatches `cancel` to the child session through the same loop path used by normal session cancellation. That keeps LLM stream aborts and executor tool cancellation in the loop-owned abort registry instead of creating a second cancellation channel.
+
+If the child already finished, the host broadcasts a `session:error` to the parent session with `scope: 'host'` and leaves the finished envelope unchanged.
 
 ### RPC additions
 
@@ -204,7 +220,7 @@ When the parent's timeline contains a `tool_call` for `agent`, the chat panel re
 
 - **Pending**  -  before `server:sub_agent_started` arrives (rare  -  usually milliseconds). Shows spinner + "Spawning sub-agent - ".
 - **Running**  -  after started, before finished. Header shows `agent_type` badge, elapsed time (live), turn count (live from `state:changed`), and a "View full session  - " jump to the child tab. Body is collapsed by default; expanding reveals a lightweight inline transcript of the child (same `ChatPanel` component in read-only mode, height-capped).
-- **Completed / Failed**  -  after `server:sub_agent_finished`. Header shows final status + duration + turn count. Body still collapsible.
+- **Completed / Failed / Cancelled**  -  after `server:sub_agent_finished`. Header shows final status + duration + turn count. Body still collapsible; failed and cancelled cards open by default so the reason is visible.
 
 Design constraint: the inline child transcript uses the **same** `ChatPanel` component (recursion). This keeps rendering consistent  -  if the child itself spawns a sub-agent, it renders the same way. We already have the messages via the child's `state:changed` events.
 
@@ -230,7 +246,7 @@ Sessions with `parentSessionId !== null` already appear indented under their par
    d. **Emit `server:sub_agent_started`** into the parent's room (new).
    e. `dispatchOne(child, { user_message, text: prompt })`. This runs a full inner loop, emitting `event:appended` / `state:changed` events into the child's own room, which the dashboard is already subscribed to.
    f. On completion, wrap the child's final text in the `<sub_agent>` envelope.
-   g. **Emit `server:sub_agent_finished`** into the parent's room (new).
+   g. **Emit `server:sub_agent_finished`** into the parent's room (new). Interrupted children use `status: 'cancelled'`.
    h. Return the envelope as `{ ok, content }`.
 4. **Loop** feeds the tool_result back into the parent's kernel as a normal `tool_result` event. Parent LLM receives the enveloped text on the next `call_llm` effect.
 5. **Dashboard**:
@@ -243,9 +259,10 @@ Sessions with `parentSessionId !== null` already appear indented under their par
 
 - **Child times out or errors**  -  `runAgentTool()` returns `{ ok: false, content }` with a failed envelope. The parent kernel treats it as a normal tool failure. The dashboard shows the card in `failed` state.
 - **Depth exceeded**  -  same, immediate failure envelope. No child session created (so no `sub_agent_started` event). This is the only path where the card renders "immediately failed" without any live-run state.
+- **User interrupts child from the parent card**  -  the host marks the active sub-agent as cancelled, dispatches `cancel` to the child session, emits `server:sub_agent_finished` with `status: 'cancelled'`, and returns a cancelled envelope to the parent as a normal failed tool result.
 - **Host restart mid-child**  -  child's JSONL log exists; on rehydrate we replay it as a normal session. If it was mid-tool-call, the fold's crash-recovery synthesizes a `tool_error` event, and the child ends up in `error` state. The parent's `agent` tool_call is still pending in the parent's log; on rehydrate the parent kernel synthesizes a matching `tool_error` and the parent LLM gets a failure envelope on its next turn.
 - **User rewinds child via `session:fork`**  -  normal fork behavior. The parent's `tool_result` still points to the pre-fork session id via the envelope; the forked session gets a new id and does not affect the parent's log.
-- **User cancels parent while child is running**  -  parent's cancel signal aborts the *parent's* stream. The child continues (it's a separate session with its own loop). We keep this behavior; killing children on parent cancel is an easy follow-up if it turns out to be surprising.
+- **User cancels parent while child is running**  -  parent cancellation cascades to active child sessions owned by that parent. Each child receives a normal loop `cancel`, so in-flight LLM/tool work is aborted by the same machinery as top-level cancellation. The parent receives a cancelled sub-agent envelope.
 
 ## 10. Testing plan
 
@@ -253,9 +270,9 @@ Sessions with `parentSessionId !== null` already appear indented under their par
 - **Host**:
   - `agent-tool.test.ts` extension: agent-type resolution merges correctly (type + per-call `tools` = intersection).
   - `agent-registry.test.ts`: loading from disk, precedence order, hot reload.
-  - `agent-tool.test.ts`: emits `sub_agent_started` and `sub_agent_finished` in the right order with the right payloads.
+  - `agent-tool.test.ts`: emits `sub_agent_started` and `sub_agent_finished` in the right order with the right payloads, including `cancelled` for parent-cancel cascade.
 - **Dashboard**:
-  - `SubAgentCard.test.tsx`: renders pending/running/completed/failed states from prop inputs.
+  - `SubAgentCard.test.tsx`: renders pending/running/completed/failed/cancelled states from prop inputs and emits `client:interrupt_sub_agent` for a running child.
   - `useSubAgentSession.test.tsx`: subscribes on `sub_agent_started`, unsubscribes on `sub_agent_finished`, matches inline transcript to the child's `event:appended` stream.
   - Envelope parser: handles happy path, malformed envelopes, and legacy pre-envelope tool_results (fall back to plain text).
 - **Integration**: an end-to-end test in the host suite spawns a mock child, drives one tool_call turn, asserts both events land and the envelope round-trips.
@@ -265,7 +282,7 @@ Sessions with `parentSessionId !== null` already appear indented under their par
 - **Background sub-agents** (Codex-style `spawn_agent` returning immediately). Nice-to-have; not now.
 - **Custom sub-agent tool schemas** (Claude Code exposes each agent type as its own tool with tailored input). We keep a single `agent` tool with `agent_type` as an argument. Simpler prompt for the parent.
 - **Per-agent-type MCP server allowlisting.** MCP integration is TBD project-wide.
-- **Sub-agent chat interruption from the parent** (Codex `interrupt_agent`). If the parent cancels, the child keeps running; you can cancel it from its own tab.
+- **Background sub-agent resume/follow-up** (Codex `send_message`/`wait_agent`). Current children are foreground tool calls with live observation and interruption only.
 
 ## 12. Open questions
 

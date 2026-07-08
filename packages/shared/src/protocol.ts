@@ -234,6 +234,12 @@ export type ClientCancelStream = {
   sessionId: string
 }
 
+export type ClientInterruptSubAgent = {
+  parentSessionId: string
+  parentCallId: string
+  childSessionId?: string
+}
+
 export type ServerTokenDeltaEvent = {
   sessionId: string
   /** UTF-8 text delta appended to the current assistant message. */
@@ -601,7 +607,7 @@ export type ServerBgTaskEvicted = {
 
 /**
  * Sub-agent control plane. Runs alongside the `agent` builtin tool
- * (`packages/host/src/agent-tool.ts`): the tool remains the way the parent
+ * (`packages/host/src/extensions/agent-tool.ts`): the tool remains the way the parent
  * LLM starts a child session, receives its final assistant text back as a
  * wrapped `<sub_agent>` envelope in `tool_result.content`, and moves on. The
  * events + RPCs here are how the *dashboard* observes the child inline
@@ -631,12 +637,12 @@ export type ServerSubAgentFinishedEvent = {
   parentSessionId: string
   parentCallId: string
   childSessionId: string
-  status: 'completed' | 'failed'
+  status: 'completed' | 'failed' | 'cancelled'
   /** Turn count taken from the child's `state.cursor` on finish (approximate). */
   turns: number
   durationMs: number
   finishedAt: string
-  /** Failure reason. Present iff status === 'failed'. */
+  /** Failure/cancellation reason. Present iff status !== 'completed'. */
   error?: string
 }
 
@@ -663,7 +669,7 @@ export type SubAgentSummary = {
    */
   parentCallId?: string
   agentType?: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
   /** ISO 8601. Optional because pre-lifecycle-events records don't carry it. */
   startedAt?: string
   finishedAt?: string
@@ -939,6 +945,7 @@ export type DashboardClientToServerEvents = {
   'client:user_approve': (payload: ClientUserApprove) => void
   'client:user_reject': (payload: ClientUserReject) => void
   'client:cancel': (payload: ClientCancel) => void
+  'client:interrupt_sub_agent': (payload: ClientInterruptSubAgent) => void
   'client:clear': (payload: ClientClear) => void
   'client:compact': (payload: ClientCompact) => void
   'client:cancel_stream': (payload: ClientCancelStream) => void
@@ -1107,4 +1114,3 @@ export function isCompatibleVersion(clientVersion: string): boolean {
   const server = parseMajor(PROTOCOL_VERSION)
   return client !== null && server !== null && client === server
 }
-

@@ -25,6 +25,74 @@ import { dispatchOne } from '../loop.js'
 const DEFAULT_MAX_AGENT_DEPTH = 3
 export const AGENT_TOOL_NAME = 'agent'
 
+type ActiveSubAgent = {
+  parentSessionId: string
+  parentCallId: string
+  childSessionId: string
+  agentType?: string
+  startedAt: Date
+  cancelled: boolean
+  cancelReason?: string
+}
+
+const activeSubAgents = new Map<string, ActiveSubAgent>()
+
+function activeKey(parentSessionId: string, parentCallId: string): string {
+  return `${parentSessionId}\u0000${parentCallId}`
+}
+
+export function activeSubAgentFor(
+  parentSessionId: string,
+  parentCallId: string,
+): ActiveSubAgent | null {
+  return activeSubAgents.get(activeKey(parentSessionId, parentCallId)) ?? null
+}
+
+export function activeSubAgentsForParent(parentSessionId: string): readonly ActiveSubAgent[] {
+  return [...activeSubAgents.values()].filter((entry) => entry.parentSessionId === parentSessionId)
+}
+
+export async function interruptSubAgent(
+  deps: HostLoopDeps,
+  aborts: Map<string, AbortController>,
+  parentSessionId: string,
+  parentCallId: string,
+  childSessionId?: string,
+  reason = 'sub-agent interrupted by user',
+): Promise<{ ok: boolean; childSessionId?: string; error?: string }> {
+  const marked = markSubAgentInterrupted(parentSessionId, parentCallId, childSessionId, reason)
+  if (!marked.ok) return marked
+  await dispatchOne(deps, marked.childSessionId, { kind: 'cancel' }, aborts)
+  return { ok: true, childSessionId: marked.childSessionId }
+}
+
+export function markSubAgentInterrupted(
+  parentSessionId: string,
+  parentCallId: string,
+  childSessionId?: string,
+  reason = 'sub-agent interrupted by user',
+): { ok: true; childSessionId: string } | { ok: false; error: string } {
+  const active = activeSubAgentFor(parentSessionId, parentCallId)
+  if (!active) return { ok: false, error: 'sub-agent is not running' }
+  if (childSessionId && active.childSessionId !== childSessionId) {
+    return { ok: false, error: 'sub-agent child session mismatch' }
+  }
+  active.cancelled = true
+  active.cancelReason = reason
+  return { ok: true, childSessionId: active.childSessionId }
+}
+
+export async function interruptSubAgentsForParent(
+  deps: HostLoopDeps,
+  aborts: Map<string, AbortController>,
+  parentSessionId: string,
+  reason = 'parent session cancelled',
+): Promise<void> {
+  for (const active of activeSubAgentsForParent(parentSessionId)) {
+    await interruptSubAgent(deps, aborts, active.parentSessionId, active.parentCallId, active.childSessionId, reason)
+  }
+}
+
 export async function runAgentTool(
   deps: HostLoopDeps,
   parentSessionId: string,
@@ -72,30 +140,59 @@ export async function runAgentTool(
     startedAt: startedAt.toISOString(),
   })
 
+  const active: ActiveSubAgent = {
+    parentSessionId,
+    parentCallId: effect.callId,
+    childSessionId: child.sessionId,
+    ...(agentType !== undefined ? { agentType } : {}),
+    startedAt,
+    cancelled: false,
+  }
+  activeSubAgents.set(activeKey(parentSessionId, effect.callId), active)
+
   const priorModel = model ? deps.models?.get(child.sessionId) : undefined
   if (model && isSettableModelResolver(deps.models)) {
     deps.models.set(child.sessionId, model)
   }
   let dispatchError: string | undefined
   try {
-    await dispatchOne(
-      deps,
-      child.sessionId,
-      { kind: 'user_message', text: prompt },
-      aborts,
-    )
-  } catch (err) {
-    dispatchError = err instanceof Error ? err.message : String(err)
-  } finally {
-    if (model && isSettableModelResolver(deps.models)) {
-      if (priorModel) deps.models.set(child.sessionId, priorModel)
-      else deps.models.delete(child.sessionId)
+    try {
+      await dispatchOne(
+        deps,
+        child.sessionId,
+        { kind: 'user_message', text: prompt },
+        aborts,
+      )
+    } catch (err) {
+      dispatchError = err instanceof Error ? err.message : String(err)
+    } finally {
+      if (model && isSettableModelResolver(deps.models)) {
+        if (priorModel) deps.models.set(child.sessionId, priorModel)
+        else deps.models.delete(child.sessionId)
+      }
     }
+  } finally {
+    activeSubAgents.delete(activeKey(parentSessionId, effect.callId))
   }
   const finishedAt = new Date()
   const durationMs = finishedAt.getTime() - startedAt.getTime()
   const final = deps.store.get(child.sessionId)?.state
   const turns = final?.cursor ?? 0
+
+  if (active.cancelled) {
+    const error = active.cancelReason ?? 'sub-agent interrupted'
+    deps.broadcast.onSubAgentFinished?.({
+      parentSessionId,
+      parentCallId: effect.callId,
+      childSessionId: child.sessionId,
+      status: 'cancelled',
+      turns,
+      durationMs,
+      finishedAt: finishedAt.toISOString(),
+      error,
+    })
+    return cancelEnvelope(child.sessionId, agentType, error, turns, durationMs)
+  }
 
   if (dispatchError || !final || final.status !== 'done') {
     const error = dispatchError ?? `agent ended with status ${final?.status ?? 'unknown'}`
@@ -157,10 +254,24 @@ function failEnvelope(
   }
 }
 
+function cancelEnvelope(
+  childSessionId: string,
+  agentType: string | undefined,
+  reason: string,
+  turns: number,
+  durationMs: number,
+): { ok: false; content: string } {
+  const header = envelopeHeader(childSessionId, agentType, 'cancelled', turns, durationMs)
+  return {
+    ok: false,
+    content: `${header}\n<error>\n${escapeEnvelopeBody(reason)}\n</error>\n</sub_agent>`,
+  }
+}
+
 function envelopeHeader(
   childSessionId: string,
   agentType: string | undefined,
-  status: 'completed' | 'failed',
+  status: 'completed' | 'failed' | 'cancelled',
   turns: number,
   durationMs: number,
 ): string {

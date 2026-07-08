@@ -20,11 +20,12 @@ import type {
   ServerExecutorsPayload,
   ServerHistoryPayload,
   ServerSessionsPayload,
+  ServerSubAgentFinishedEvent,
+  ServerSubAgentStartedEvent,
   SessionForkedEvent,
   SessionReadyEvent,
   ToolResultAck,
   ToolCallMessage,
-  ToolResultAck,
 } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { SESSION_ERROR_SCOPES } from '@agent-kernel/shared'
@@ -38,6 +39,17 @@ const WRITE = {
   name: 'write',
   description: 'write',
   inputSchema: { type: 'object' },
+  requiresApproval: false,
+} as const
+
+const AGENT = {
+  name: 'agent',
+  description: 'spawn a sub-agent',
+  inputSchema: {
+    type: 'object',
+    properties: { prompt: { type: 'string' } },
+    required: ['prompt'],
+  },
   requiresApproval: false,
 } as const
 
@@ -528,6 +540,115 @@ describe('wire protocol', () => {
 
     dashboard.close()
     executor.close()
+  })
+
+  it('lets the dashboard interrupt a running sub-agent inline', async () => {
+    await server.close()
+    const sessionId = 'wire-subagent-interrupt-parent'
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'subagent-interrupt-test',
+      async call(params) {
+        call += 1
+        if (call === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_call',
+                  callId: 'agent-wire-1',
+                  name: 'agent',
+                  input: { prompt: 'long child task' },
+                },
+              ],
+            },
+          }
+        }
+        if (call === 2) {
+          await new Promise<void>((_resolve, reject) => {
+            const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            if (params.signal?.aborted) abort()
+            params.signal?.addEventListener('abort', abort, { once: true })
+          })
+        }
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'parent observed cancellation' }],
+          },
+        }
+      },
+    }
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const agentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm,
+      defaultConfig: agentConfig,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: agentConfig })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const started = new Promise<ServerSubAgentStartedEvent>((resolve) => {
+      dashboard.once('server:sub_agent_started', resolve)
+    })
+    const finished = new Promise<ServerSubAgentFinishedEvent>((resolve) => {
+      dashboard.once('server:sub_agent_finished', resolve)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'go' })
+
+    const start = await started
+    expect(start.parentSessionId).toBe(sessionId)
+    expect(start.parentCallId).toBe('agent-wire-1')
+    dashboard.emit('client:interrupt_sub_agent', {
+      parentSessionId: sessionId,
+      parentCallId: 'agent-wire-1',
+      childSessionId: start.childSessionId,
+    })
+
+    const finish = await finished
+    expect(finish.childSessionId).toBe(start.childSessionId)
+    expect(finish.status).toBe('cancelled')
+    expect(finish.error).toContain('sub-agent interrupted by user')
+
+    const deadline = Date.now() + 2000
+    let toolResultContent = ''
+    while (Date.now() < deadline) {
+      const rec = server.store.get(sessionId)
+      if (rec?.state.status === 'done') {
+        const log = await readSessionLog(rec.logPath)
+        const toolResult = log.events.find(
+          (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-wire-1',
+        )
+        if (toolResult?.event.kind === 'tool_result') {
+          toolResultContent = toolResult.event.content
+          break
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(toolResultContent).toContain('status="cancelled"')
+    expect(toolResultContent).toContain('sub-agent interrupted by user')
+
+    dashboard.close()
   })
 
   it('accepts an executor handshake with no sessionId (daemon model)', async () => {

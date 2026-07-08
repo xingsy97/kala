@@ -136,7 +136,7 @@ export function useSubAgentToasts(socket: DashboardSocket | null): void {
     }
     const onFinished = (payload: {
       childSessionId: string
-      status: 'completed' | 'failed'
+      status: 'completed' | 'failed' | 'cancelled'
       durationMs: number
       error?: string
     }): void => {
@@ -148,6 +148,11 @@ export function useSubAgentToasts(socket: DashboardSocket | null): void {
         notify.success(`Sub-agent done  -  ${label}`, {
           id: `subagent-${payload.childSessionId}`,
           description: durationLabel ? `Finished in ${durationLabel}` : 'Finished',
+        })
+      } else if (payload.status === 'cancelled') {
+        notify.info(`Sub-agent interrupted  -  ${label}`, {
+          id: `subagent-${payload.childSessionId}`,
+          description: payload.error ?? 'Cancelled',
         })
       } else {
         notify.error(`Sub-agent failed  -  ${label}`, {

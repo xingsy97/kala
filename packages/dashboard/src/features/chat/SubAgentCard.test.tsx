@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { Message, ToolCallContent, ToolResultContent } from '@agent-kernel/kernel'
 
@@ -163,6 +163,76 @@ describe('SubAgentCard', () => {
     expect(row.getAttribute('data-sub-agent-status')).toBe('failed')
   })
 
+  it('renders the cancelled state from a parsed envelope', () => {
+    const call = makeCall('c1', { prompt: 'noop' })
+    const envelope = [
+      '<sub_agent',
+      '  session_id="child-cancelled"',
+      '  status="cancelled"',
+      '  turns="2"',
+      '  duration_ms="300"',
+      '>',
+      '<error>',
+      'interrupted by user',
+      '</error>',
+      '</sub_agent>',
+    ].join('\n')
+    const result: ToolResultContent = {
+      type: 'tool_result',
+      callId: 'c1',
+      content: envelope,
+      isError: true,
+    }
+    const group = makeGroup([call], [['c1', result]])
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={null}
+        group={group}
+        approvalByCallId={new Map()}
+      />,
+    )
+    const badge = screen.getByTestId('sub-agent-status-badge')
+    expect(badge.textContent).toContain('Cancelled')
+    expect(screen.getByText(/interrupted by user/)).toBeTruthy()
+    const row = screen.getByTestId('sub-agent-row-c1')
+    expect(row.getAttribute('data-sub-agent-status')).toBe('cancelled')
+  })
+
+  it('emits client:interrupt_sub_agent for a running child', async () => {
+    const call = makeCall('c1', { prompt: 'search', agent_type: 'Explore' })
+    const group = makeGroup([call])
+    const socket = makeControlledSocket()
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={socket.socket}
+        group={group}
+        approvalByCallId={new Map()}
+      />,
+    )
+
+    act(() => {
+      socket.emitStarted({
+        parentSessionId: 'parent-1',
+        parentCallId: 'c1',
+        childSessionId: 'child-1',
+        agentType: 'Explore',
+        prompt: 'search',
+        startedAt: new Date().toISOString(),
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('sub-agent-interrupt-c1')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('sub-agent-interrupt-c1'))
+
+    expect(socket.emit).toHaveBeenCalledWith('client:interrupt_sub_agent', {
+      parentSessionId: 'parent-1',
+      parentCallId: 'c1',
+      childSessionId: 'child-1',
+    })
+  })
+
   it('falls back to pending when the tool_result content is a legacy pre-envelope string', () => {
     const call = makeCall('c1', { prompt: 'noop' })
     const legacy: ToolResultContent = {
@@ -303,10 +373,14 @@ describe('ChatPanel sub-agent dispatch', () => {
 
 function makeControlledSocket(): {
   socket: DashboardSocket
+  emit: ReturnType<typeof vi.fn>
   emitStarted: (payload: Record<string, unknown>) => void
   emitFinished: (payload: Record<string, unknown>) => void
 } {
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
+  const emit = vi.fn(function emit() {
+    return socket
+  })
   const socket = {
     on(event: string, listener: (payload: unknown) => void) {
       const set = listeners.get(event) ?? new Set()
@@ -318,12 +392,11 @@ function makeControlledSocket(): {
       listeners.get(event)?.delete(listener)
       return this
     },
-    emit() {
-      return this
-    },
+    emit,
   } as unknown as DashboardSocket
   return {
     socket,
+    emit,
     emitStarted(payload) {
       for (const listener of listeners.get('server:sub_agent_started') ?? []) listener(payload)
     },

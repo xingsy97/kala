@@ -1219,6 +1219,85 @@ describe('host loop', () => {
     expect(f.error).toBeUndefined()
   })
 
+  it('cancels a running sub-agent when the parent session is cancelled', async () => {
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-cancel-parent',
+      workspaceId: 'ws-agent-cancel',
+    })
+    const started: SubAgentStartedPayload[] = []
+    const finished: SubAgentFinishedPayload[] = []
+    let call = 0
+    let childAbort: (() => void) | null = null
+    const llm: LLMAdapter = {
+      name: 'cancel-aware',
+      async call(params) {
+        call += 1
+        if (call === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_call',
+                  callId: 'agent-cancel-1',
+                  name: 'agent',
+                  input: { prompt: 'long child work' },
+                },
+              ],
+            },
+          }
+        }
+        if (call === 2) {
+          await new Promise<void>((_resolve, reject) => {
+            childAbort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            params.signal?.addEventListener('abort', () => childAbort?.(), { once: true })
+          })
+        }
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'parent done' }],
+          },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: {
+        ...silentBroadcast(),
+        onSubAgentStarted(p) {
+          started.push(p)
+        },
+        onSubAgentFinished(p) {
+          finished.push(p)
+        },
+      },
+    })
+
+    const run = loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+    while (started.length === 0) await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await loop.dispatch(parent.sessionId, { kind: 'cancel' })
+    await run
+
+    expect(finished).toHaveLength(1)
+    expect(finished[0]!.status).toBe('cancelled')
+    expect(finished[0]!.error).toContain('parent session cancelled')
+
+    const parentLog = await readSessionLog(parent.logPath)
+    const toolResult = parentLog.events.find(
+      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-cancel-1',
+    )
+    if (toolResult?.event.kind !== 'tool_result') throw new Error('unreachable')
+    expect(toolResult.event.ok).toBe(false)
+    expect(toolResult.event.content).toContain('status="cancelled"')
+    expect(toolResult.event.content).toContain('parent session cancelled')
+  })
+
   it('failed sub-agent runs still emit start + finish (status=failed) and a failure envelope', async () => {
     const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
     const parent = await store.create({

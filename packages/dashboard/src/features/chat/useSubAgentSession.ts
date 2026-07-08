@@ -49,6 +49,15 @@ export type SubAgentLifecycle =
       finishedAt: string
       startedAt?: string
     }
+  | {
+      status: 'cancelled'
+      childSessionId: string
+      error: string
+      turns: number
+      durationMs: number
+      finishedAt: string
+      startedAt?: string
+    }
 
 export type SubAgentView = {
   lifecycle: SubAgentLifecycle
@@ -119,9 +128,9 @@ export function useSubAgentSession({
       if (payload.parentCallId !== parentCallId) return
       setLifecycle((prev) => {
         const startedAt = prev.status === 'running' ? prev.startedAt : undefined
-        if (payload.status === 'failed') {
+        if (payload.status === 'failed' || payload.status === 'cancelled') {
           return {
-            status: 'failed',
+            status: payload.status,
             childSessionId: payload.childSessionId,
             error: payload.error ?? 'unknown error',
             turns: payload.turns,

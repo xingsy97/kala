@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Cpu,
   Loader2,
+  Square,
 } from 'lucide-react'
 
 import type { ToolCallContent } from '@agent-kernel/kernel'
@@ -122,7 +123,7 @@ const SubAgentRow = memo(function SubAgentRow({
           finishedAt: '',
         }
       : {
-          status: 'failed',
+          status: envelope.status,
           childSessionId: envelope.sessionId,
           error: envelope.body || 'sub-agent failed',
           turns: envelope.turns,
@@ -141,6 +142,7 @@ const SubAgentRow = memo(function SubAgentRow({
   })
 
   const status = view.lifecycle.status
+  const runningChildSessionId = view.lifecycle.status === 'running' ? view.lifecycle.childSessionId : null
   const agentType = view.agentType ?? agentTypeInput
   const prompt = view.prompt ?? promptInput
   const model = view.model ?? modelInput
@@ -153,7 +155,11 @@ const SubAgentRow = memo(function SubAgentRow({
     status === 'completed' || status === 'failed' ? view.lifecycle.turns : view.messages.length
 
   const failureText =
-    status === 'failed' ? view.lifecycle.error : envelope?.status === 'failed' ? envelope.body : null
+    status === 'failed' || status === 'cancelled'
+      ? view.lifecycle.error
+      : envelope?.status === 'failed' || envelope?.status === 'cancelled'
+        ? envelope.body
+        : null
 
   // Default open for live rows and for failed ones (so the error is
   // visible without a click). Completed rows collapse to the header to
@@ -163,10 +169,10 @@ const SubAgentRow = memo(function SubAgentRow({
   const [open, setOpen] = useState(
     compact
       ? status === 'running' || status === 'idle'
-      : status === 'running' || status === 'idle' || status === 'failed',
+      : status === 'running' || status === 'idle' || status === 'failed' || status === 'cancelled',
   )
   useEffect(() => {
-    if (!compact && (status === 'running' || status === 'failed')) setOpen(true)
+    if (!compact && (status === 'running' || status === 'failed' || status === 'cancelled')) setOpen(true)
     if (compact && status === 'running') setOpen(true)
   }, [status, compact])
 
@@ -186,46 +192,69 @@ const SubAgentRow = memo(function SubAgentRow({
       data-sub-agent-status={status}
     >
       {status === 'running' ? <BorderBeam /> : null}
-      <button
-        type="button"
-        onClick={() => withViewTransition(() => setOpen((v) => !v))}
-        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-muted/60"
-        data-testid={`sub-agent-toggle-${call.callId}`}
-      >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-        )}
-        <StatusIcon status={status} />
-        <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-          sub-agent
-        </span>
-        {agentType ? (
-          <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
-            {agentType}
+      <div className="flex min-w-0 items-center rounded-lg text-xs text-foreground transition-colors hover:bg-muted/60">
+        <button
+          type="button"
+          onClick={() => withViewTransition(() => setOpen((v) => !v))}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
+          data-testid={`sub-agent-toggle-${call.callId}`}
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+          )}
+          <StatusIcon status={status} />
+          <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            sub-agent
           </span>
-        ) : null}
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
-          {prompt ?? '(no prompt)'}
-        </span>
-        {model ? (
-          <span
-            className="hidden flex-none items-center gap-1 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:flex"
-            title={`model=${model}`}
+          {agentType ? (
+            <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
+              {agentType}
+            </span>
+          ) : null}
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+            {prompt ?? '(no prompt)'}
+          </span>
+          {model ? (
+            <span
+              className="hidden flex-none items-center gap-1 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:flex"
+              title={`model=${model}`}
+            >
+              <Cpu className="h-3 w-3" aria-hidden="true" />
+              {model}
+            </span>
+          ) : null}
+        </button>
+        {runningChildSessionId && socket ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              socket.emit('client:interrupt_sub_agent', {
+                parentSessionId,
+                parentCallId: call.callId,
+                childSessionId: runningChildSessionId,
+              })
+            }}
+            className="mr-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded bg-background/80 text-muted-foreground ring-1 ring-border/50 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
+            title="Interrupt sub-agent"
+            aria-label="interrupt sub-agent"
+            data-testid={`sub-agent-interrupt-${call.callId}`}
           >
-            <Cpu className="h-3 w-3" aria-hidden="true" />
-            {model}
-          </span>
+            <Square className="h-3 w-3" aria-hidden="true" />
+          </button>
         ) : null}
-        <StatusBadge status={status} turns={turns} durationMs={totalMs} />
-      </button>
+        <div className="pr-3">
+          <StatusBadge status={status} turns={turns} durationMs={totalMs} />
+        </div>
+      </div>
 
       {open ? (
         <div className="border-t border-border/50 bg-background/60">
           {failureText ? (
             <div className="border-b border-rose-200/60 bg-rose-50/60 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/30 dark:text-rose-200">
-              <strong className="font-semibold">Failed:</strong> {failureText}
+              <strong className="font-semibold">{status === 'cancelled' ? 'Cancelled:' : 'Failed:'}</strong> {failureText}
             </div>
           ) : null}
           {view.messages.length > 0 ? (
@@ -314,6 +343,8 @@ function badgeClassFor(status: SubAgentLifecycle['status']): string {
       return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
     case 'failed':
       return 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+    case 'cancelled':
+      return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
     case 'running':
       return 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300'
     default:
@@ -327,6 +358,8 @@ function statusLabel(status: SubAgentLifecycle['status']): string {
       return 'Completed'
     case 'failed':
       return 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
     case 'running':
       return 'Running'
     default:

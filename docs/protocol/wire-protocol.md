@@ -876,7 +876,7 @@ Sent 15 min after a task's `endedAt`. Dashboard drops the task from its map. Lat
 
 ### 4.4 Sub-agent control plane
 
-Runs alongside the `agent` builtin tool (`packages/host/src/agent-tool.ts`). The tool is how the *parent LLM* starts a child session and receives its final assistant text back as a wrapped envelope in `tool_result.content`. The events + RPCs here are how the *dashboard operator* observes the child inline while it runs  -  otherwise the parent's chat panel would show a spinner for the full duration of the child's inner loop. See `docs/sub-agent-design.md`.
+Runs alongside the `agent` builtin tool (`packages/host/src/extensions/agent-tool.ts`). The tool is how the *parent LLM* starts a child session and receives its final assistant text back as a wrapped envelope in `tool_result.content`. The events + RPCs here are how the *dashboard operator* observes and interrupts the child inline while it runs  -  otherwise the parent's chat panel would show a spinner for the full duration of the child's inner loop. See `docs/sub-agent-design.md`.
 
 Routed by `sessionId`. Push events fan into the parent's `session:<parentSessionId>` room; the dashboard uses `childSessionId` from `sub_agent_started` to open a subscription on the child's own room (using the existing `subscribe` verb) and render its `event:appended` stream inline.
 
@@ -898,7 +898,7 @@ The parent's `tool_result` from the `agent` tool is wrapped so the dashboard can
 </sub_agent>
 ```
 
-Failure envelopes replace `<result>` with `<error> - </error>` and set `status="failed"`. Missing / malformed envelopes fall back to the plain grouped-tool-call renderer.
+Failure envelopes replace `<result>` with `<error> - </error>` and set `status="failed"`. Interrupted children use `status="cancelled"` with the cancellation reason in `<error>`. Missing / malformed envelopes fall back to the plain grouped-tool-call renderer.
 
 #### `server:sub_agent_started` (Host  -  Dashboard, push)
 
@@ -927,15 +927,29 @@ Emitted just before `runAgentTool()` returns. Fired into the parent's room only.
   parentSessionId: string
   parentCallId: string
   childSessionId: string
-  status: 'completed' | 'failed'
+  status: 'completed' | 'failed' | 'cancelled'
   turns: number                  // child.state.cursor at finish (approximate)
   durationMs: number
   finishedAt: string             // ISO 8601
-  error?: string                 // present iff status === 'failed'
+  error?: string                 // present iff status !== 'completed'
 }
 ```
 
 The corresponding `<sub_agent>` envelope arrives shortly after inside the parent's `tool_result` `event:appended`; the finished push is what lets the dashboard freeze the card and stop the running timer even before the parent's turn advances.
+
+#### `client:interrupt_sub_agent` (Dashboard  -  Host, push)
+
+Interrupts one active child from the parent's inline `SubAgentCard`. The host marks the active child as cancelled, then dispatches a normal `cancel` event to the child session through the host loop so LLM stream abort and executor `tool:cancel` behavior reuse the same cancellation path as top-level sessions.
+
+```ts
+{
+  parentSessionId: string
+  parentCallId: string           // the parent `agent` tool_call callId
+  childSessionId?: string        // optional stale-row guard
+}
+```
+
+If the child is still active, the parent room receives `server:sub_agent_finished` with `status: 'cancelled'`, and the parent later receives a `<sub_agent status="cancelled">` envelope in the `tool_result`. If the child has already finished or the `childSessionId` guard does not match, the host emits `session:error` to the parent session and leaves the already-finished result unchanged.
 
 #### `sub_agent:list` (Dashboard  -  Host, ack)
 
@@ -952,7 +966,7 @@ Reconstructs children for a parent session when its log is reopened. Reads from 
     childSessionId: string
     parentCallId: string
     agentType?: string
-    status: 'running' | 'completed' | 'failed'
+    status: 'running' | 'completed' | 'failed' | 'cancelled'
     startedAt: string
     finishedAt?: string
   }>
@@ -1120,6 +1134,7 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Dashboard | `client:cancel` | Host (kernel) |
 | Dashboard | `client:clear` | Host (kernel) |
 | Dashboard | `client:cancel_stream` | Host (LLM adapter) |
+| Dashboard | `client:interrupt_sub_agent` | Host (sub-agent control plane) |
 | Dashboard | `client:compact` | Host (kernel) |
 | Dashboard | `client:set_approval_mode` | Host (kernel) |
 | Dashboard | `client:set_cwd` | Host (kernel) |

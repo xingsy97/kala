@@ -51,6 +51,29 @@ describe('parseSubAgentEnvelope', () => {
     })
   })
 
+  it('parses a cancelled envelope with an <error> body', () => {
+    const raw = [
+      '<sub_agent',
+      '  session_id="child-cancelled"',
+      '  status="cancelled"',
+      '  turns="2"',
+      '  duration_ms="300"',
+      '>',
+      '<error>',
+      'interrupted by user',
+      '</error>',
+      '</sub_agent>',
+    ].join('\n')
+    const parsed = parseSubAgentEnvelope(raw)
+    expect(parsed).toEqual({
+      sessionId: 'child-cancelled',
+      status: 'cancelled',
+      turns: 2,
+      durationMs: 300,
+      body: 'interrupted by user',
+    })
+  })
+
   it('un-escapes < and > inside the body', () => {
     const raw =
       '<sub_agent session_id="c" status="completed" turns="1" duration_ms="1">\n' +
