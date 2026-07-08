@@ -526,6 +526,46 @@ describe('ArtifactExplorerDialog', () => {
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
   })
 
+  it('runs SWE-bench artifact conversion actions from the Eval tab', async () => {
+    const emptyManifest: ArtifactManifest = {
+      schemaVersion: 1,
+      generatedAt: '2026-07-09T00:00:00.000Z',
+      rootDir: '/tmp/artifacts',
+      entries: [],
+      summary: { entryCount: 0, totalBytes: 0, hashedCount: 0, hashSkippedCount: 0, kinds: {} },
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'swebench-infer-patches', predictionsPath: '/tmp/artifacts/dash/predictions.jsonl', trialCount: 1 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    await screen.findByText('No eval summaries found.')
+
+    fireEvent.click(screen.getByText('Eval Artifact Actions'))
+    fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'swebench-infer-patches' } })
+    fireEvent.change(screen.getByLabelText('Run ID'), { target: { value: 'dash-infer' } })
+    fireEvent.change(screen.getByLabelText('Dataset'), { target: { value: 'SWE-bench/local' } })
+    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'agent-test' } })
+    fireEvent.change(screen.getByLabelText('Instances JSONL'), { target: { value: '/tmp/instances.jsonl' } })
+    fireEvent.change(screen.getByLabelText('Patches Dir'), { target: { value: '/tmp/patches' } })
+    fireEvent.change(screen.getByLabelText('Instance IDs'), { target: { value: 'a__b-1, c__d-2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Run Action' }))
+
+    await screen.findByText('Created /tmp/artifacts/dash/predictions.jsonl')
+    const actionCall = fetchMock.mock.calls.find((call) => call[0] === '/enhancement/action')
+    const body = JSON.parse(String((actionCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
+    expect(body).toMatchObject({
+      action: 'swebench-infer-patches',
+      runId: 'dash-infer',
+      dataset: 'SWE-bench/local',
+      model: 'agent-test',
+      instancesJsonl: '/tmp/instances.jsonl',
+      patchesDir: '/tmp/patches',
+    })
+    expect(body.instanceIds).toEqual(['a__b-1', 'c__d-2'])
+  })
+
   it('loads memory index artifacts in the Memory tab', async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))

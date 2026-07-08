@@ -33,8 +33,13 @@ import {
   exportRolloutSidecar,
   exportSessionTraceArtifacts,
 } from '../enhancement-export.js'
-import { compareEvalRuns, profileSession, scoreSession } from '../eval/generic.js'
-import { planSweBenchWorkerRun } from '../eval/swebench.js'
+import { compareEvalRuns, judgeScore, profileSession, scoreSession } from '../eval/generic.js'
+import {
+  exportSessionForSweBench,
+  inferSweBenchPatchRun,
+  ingestSweBenchResults,
+  planSweBenchWorkerRun,
+} from '../eval/swebench.js'
 import { buildMemoryIndex } from '../memory-index.js'
 import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
 import type { SessionStore } from '../store/session.js'
@@ -89,6 +94,12 @@ type EnhancementActionRequest = {
   pricingPath?: string
   baselineSummaryPath?: string
   candidateSummaryPath?: string
+  promptPath?: string
+  responsePath?: string
+  judgeModel?: string
+  scorer?: string
+  threshold?: number | string
+  inputRef?: string
   includeGlobal?: boolean
   sessionsDir?: string
   taskId?: string
@@ -99,6 +110,14 @@ type EnhancementActionRequest = {
   rewardPath?: string
   tokenSegmentsPath?: string
   sidecarPath?: string
+  dataset?: string
+  split?: string
+  instancesJsonl?: string
+  instanceIds?: readonly string[] | string
+  limit?: number | string
+  patchesDir?: string
+  modelPatchPath?: string
+  resultsDir?: string
 }
 
 export function attachJsonRoutes(
@@ -259,9 +278,60 @@ async function runEnhancementAction(
     const result = await scoreSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}), ...(cleanString(body.patchPath) ? { patchPath: cleanString(body.patchPath) } : {}), ...(body.requireDone === true ? { requireDone: true } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
     return { action, scoresPath: result.scoresPath, summary: result.summary }
   }
+  if (action === 'eval-judge-score') {
+    const threshold = positiveNumber(body.threshold, 'threshold')
+    const result = await judgeScore({
+      rootDir,
+      promptPath: requiredString(body.promptPath, 'promptPath'),
+      responsePath: requiredString(body.responsePath, 'responsePath'),
+      judgeModel: requiredString(body.judgeModel, 'judgeModel'),
+      ...(cleanString(body.scorer) ? { scorer: cleanString(body.scorer) } : {}),
+      ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}),
+      ...(threshold !== undefined ? { threshold } : {}),
+      ...(cleanString(body.inputRef) ? { inputRef: cleanString(body.inputRef) } : {}),
+      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
+    })
+    return { action, scoresPath: result.scoresPath, judgeTrace: result.judgeTrace, summary: result.summary }
+  }
   if (action === 'eval-compare-runs') {
     const result = await compareEvalRuns({ rootDir, baselineSummaryPath: requiredString(body.baselineSummaryPath, 'baselineSummaryPath'), candidateSummaryPath: requiredString(body.candidateSummaryPath, 'candidateSummaryPath') })
     return { action, comparisonPath: result.comparisonPath, comparison: result.comparison }
+  }
+  if (action === 'swebench-infer-patches') {
+    const instanceIds = listInput(body.instanceIds)
+    const limit = positiveInteger(body.limit, 'limit')
+    const result = await inferSweBenchPatchRun({
+      rootDir,
+      runId: requiredString(body.runId, 'runId'),
+      dataset: requiredString(body.dataset, 'dataset'),
+      ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
+      model: requiredString(body.model, 'model'),
+      instancesJsonl: requiredString(body.instancesJsonl, 'instancesJsonl'),
+      patchesDir: requiredString(body.patchesDir, 'patchesDir'),
+      ...(instanceIds ? { instanceIds } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
+    })
+    return { action, runId: result.layout.runId, predictionsPath: result.layout.predictionsPath, experimentPath: result.layout.experimentPath, summaryPath: result.layout.summaryPath, trialCount: result.trials.length }
+  }
+  if (action === 'swebench-export-session') {
+    const modelPatch = await readFile(requiredString(body.modelPatchPath ?? body.patchPath, 'modelPatchPath'), 'utf8')
+    const result = await exportSessionForSweBench({
+      rootDir,
+      runId: requiredString(body.runId, 'runId'),
+      dataset: requiredString(body.dataset, 'dataset'),
+      ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
+      model: requiredString(body.model, 'model'),
+      instanceId: requiredString(body.instanceId, 'instanceId'),
+      sessionLogPath: await sessionLogPath(body, payloads.sessions),
+      modelPatch,
+      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
+    })
+    return { action, runId: result.layout.runId, predictionsPath: result.layout.predictionsPath, experimentPath: result.layout.experimentPath, traceArtifact: result.traceArtifact }
+  }
+  if (action === 'swebench-ingest-results') {
+    const result = await ingestSweBenchResults({ rootDir, runId: requiredString(body.runId, 'runId'), resultsDir: requiredString(body.resultsDir, 'resultsDir') })
+    return { action, runId: result.layout.runId, resultsPath: result.resultsPath, summaryPath: result.summaryPath, trialCount: result.trials.length, resolved: result.trials.filter((trial) => trial.resolved).length }
   }
   throw new HttpRouteError(400, `unsupported enhancement action: ${action}`)
 }
@@ -346,6 +416,13 @@ function positiveInteger(value: unknown, name: string): number | undefined {
   if (value === undefined || value === null || value === '') return undefined
   const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
   if (!Number.isInteger(number) || number <= 0) throw new HttpRouteError(400, `${name} must be a positive integer`)
+  return number
+}
+
+function positiveNumber(value: unknown, name: string): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(number) || number < 0) throw new HttpRouteError(400, `${name} must be a non-negative number`)
   return number
 }
 
