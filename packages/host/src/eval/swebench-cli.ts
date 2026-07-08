@@ -106,6 +106,8 @@ export function parseSweBenchCli(argv: readonly string[]): SweBenchCliCommand {
       workspaceRoot: value(rest, '--workspace-root'),
       repoCacheDir: value(rest, '--repo-cache-dir'),
       timeoutMs: numberArg(rest, '--timeout-ms'),
+      maxWorkers: numberArg(rest, '--max-workers'),
+      skipCompleted: flag(rest, '--skip-completed'),
     }
   }
   throw new Error(`unknown swebench subcommand: ${subcommand ?? '<missing>'}`)
