@@ -15,6 +15,7 @@ import {
   exportSessionForSweBench,
   inferSweBenchPatchRun,
   ingestSweBenchResults,
+  planSweBenchWorkerRun,
   runSweBenchAgentPatchRun,
   sweBenchRunLayout,
   writeSweBenchPredictionRun,
@@ -279,6 +280,24 @@ describe('SWE-bench eval runner', () => {
       parseSweBenchCli([
         'eval',
         'swebench',
+        'plan',
+        '--run-id',
+        'run-plan',
+        '--dataset',
+        'local',
+        '--model',
+        'agent-test',
+        '--instances-jsonl',
+        'instances.jsonl',
+        '--max-workers',
+        '4',
+      ]),
+    ).toMatchObject({ kind: 'plan', runId: 'run-plan', maxWorkers: 4 })
+
+    expect(
+      parseSweBenchCli([
+        'eval',
+        'swebench',
         'agent-infer',
         '--run-id',
         'run-agent',
@@ -343,6 +362,41 @@ describe('SWE-bench eval runner', () => {
     expect(summary.emptyPatch).toBe(0)
     const trial = JSON.parse(await readFile(join(result.layout.trialsDir, 'sympy__sympy-20590.json'), 'utf8'))
     expect(trial.artifacts[0].uri).toBe('artifacts/sympy__sympy-20590/final.diff')
+  })
+
+  it('writes a worker plan artifact for resource-isolated SWE-bench runs', async () => {
+    const instancesPath = join(dir, 'instances.jsonl')
+    await writeFile(instancesPath, [
+      JSON.stringify({ instance_id: 'repo__a-1', repo: 'local/repo' }),
+      JSON.stringify({ instance_id: 'repo__b-1', repo: 'local/repo' }),
+      JSON.stringify({ instance_id: 'repo__c-1', repo: 'local/repo' }),
+    ].join('\n') + '\n', 'utf8')
+
+    const result = await planSweBenchWorkerRun({
+      rootDir: join(dir, 'runs'),
+      runId: 'plan-run',
+      dataset: 'princeton-nlp/SWE-bench_Lite',
+      model: 'agent-test',
+      instancesJsonl: instancesPath,
+      maxWorkers: 2,
+      timeoutMs: 60000,
+      repoCacheDir: join(dir, 'repo-cache'),
+    })
+
+    expect(result.plan.selectedCount).toBe(3)
+    expect(result.plan.shards).toEqual([
+      { workerId: 1, instanceCount: 2, instanceIds: ['repo__a-1', 'repo__c-1'] },
+      { workerId: 2, instanceCount: 1, instanceIds: ['repo__b-1'] },
+    ])
+    expect(result.plan.resourceHints).toMatchObject({
+      dockerRequired: true,
+      workspaceIsolation: 'per-instance-git-clone',
+      maxConcurrentWorkspaces: 2,
+      timeoutMs: 60000,
+    })
+    expect(await readFile(result.planPath, 'utf8')).toContain('workerId')
+    const manifest = await buildArtifactManifest({ rootDir: result.layout.rootDir })
+    expect(manifest.manifest.entries.find((entry) => entry.path === 'worker-plan.json')?.kind).toBe('eval_worker_plan')
   })
 
   it('labels missing offline patches as empty_patch without failing the whole run', async () => {

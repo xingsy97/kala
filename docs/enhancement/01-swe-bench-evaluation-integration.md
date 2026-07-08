@@ -248,6 +248,27 @@ The artifact manifest classifies this file as `eval_progress`, so the dashboard
 can discover it like any other run artifact. It is derived state only; replay
 and official SWE-bench grading do not depend on it.
 
+`plan` is the implemented resource planning command:
+
+```bash
+agent-kernel-host eval swebench plan \
+  --root-dir runs/swebench \
+  --run-id lite-plan \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --model agent-kernel \
+  --instances-jsonl data/swebench-lite.jsonl \
+  --max-workers 8 \
+  --timeout-ms 900000 \
+  --repo-cache-dir runs/repo-cache
+```
+
+It writes `runs/swebench/<run_id>/worker-plan.json` with selected instance
+count, deterministic round-robin worker shards, Docker and per-instance git
+workspace isolation hints, timeout, optional repo cache location, and warnings
+such as empty selection or over-provisioned workers. The plan is an artifact for
+CI/manual orchestration and future distributed workers; it does not add
+SWE-bench scheduling state to the kernel protocol.
+
 ## CI and Release Validation
 
 Implemented CI coverage is split into a cheap deterministic smoke path and an
@@ -402,8 +423,9 @@ Phase 4: batch scheduler.
 Implemented first host-side scheduler controls for `agent-infer`: bounded
 `--max-workers`, stable output ordering, and `--skip-completed` resume behavior
 that reuses existing trial and prediction rows without rerunning completed
-instances. Remaining production work is per-instance resource isolation,
-distributed workers, and richer progress reporting.
+instances. The adapter also emits `progress.json` for live queue visibility and
+`worker-plan.json` for resource-aware sharding. Actual distributed execution can
+consume that plan outside the kernel.
 
 Phase 5: dashboard eval explorer.
 Implemented read-only summary, comparison, and instance-level trial views through
