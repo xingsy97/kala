@@ -184,11 +184,14 @@ The checked-in browser scripts are intentionally narrow and production-shaped:
 
 - `pnpm run verify:dashboard-debugger`: debugger tabs, trace teaching mode, LLM API detail modal, runtime state/tools, theme contrast screenshots.
 - `pnpm run verify:dashboard-layout-scroll`: responsive layout, drawer sizing, controlled scroll surfaces, modal sizing, screenshot coverage.
+- `pnpm run verify:dashboard-enhancement-actions`: production dashboard bundle + real Host + headless Chromium coverage for every enhancement action. It drives the Eval/SWE-bench UI forms for plan/infer/export/ingest/grade/score/judge/compare, then uses browser-origin `fetch('/enhancement/action')` for the remaining dashboard-equivalent actions: profile, memory index, reliability audit/chaos replay, trace export, RL rollout segments/sidecar/adapter, and sub-agent graph. Each check validates both the HTTP response and real artifact files on disk, then reopens Eval/Profile/Memory/Ops artifact views to verify generated artifacts render through the dashboard.
 - `pnpm run verify:dashboard-subagent-scroll`: nested sub-agent transcript layout and virtual scroller width.
 - `pnpm run verify:tasks-button`: real `todowrite` tool call round-trip and derived Tasks button state. This script may use a real configured LLM.
 - `pnpm run verify:dashboard-real`: full real-host / real-executor / real-provider smoke. This is the broadest and slowest check.
 
 The default browser automation stack is `puppeteer-core` against a local Chrome/Chromium. Scripts that need real LLM output must say so in their header and should stay out of routine fast CI unless credentials and cost policy are explicit.
+
+Enhancement e2e deliberately does not execute Docker SWE-bench grading or call an external judge model. Those remain CLI/CI integration concerns. The dashboard e2e covers the production boundary the browser owns: forms, same-origin HTTP, host action routing, artifact writes, manifest reload, and artifact explorer rendering.
 
 ### 5.3 Real-browser cross-check for UI changes
 

@@ -3,14 +3,15 @@
  * Real dashboard E2E for enhancement artifact actions.
  *
  * This starts the production dashboard bundle behind a real host process and
- * drives it through Chromium. It verifies both UI behavior and the files
- * produced by the host action endpoints; no fetch mocks or component harnesses
- * are involved.
+ * drives it through Chromium. It covers the dashboard equivalent of every
+ * enhancement action with real HTTP calls and real artifact files. Heavy
+ * external systems stay out of this CI-safe test: Docker SWE-bench grading is
+ * verified as a generated official command, not executed.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
@@ -24,17 +25,26 @@ const TMP_ROOT = mkdtempSync(join(tmpdir(), 'ak-dashboard-enhancement-e2e-'))
 const SESSIONS_DIR = join(TMP_ROOT, 'sessions')
 const ARTIFACT_ROOT = join(TMP_ROOT, 'artifacts')
 const FIXTURE_ROOT = join(TMP_ROOT, 'fixtures')
+const RELIABILITY_LOG_DIR = join(FIXTURE_ROOT, 'reliability-logs')
+const WORKSPACE_ROOT = join(TMP_ROOT, 'workspace')
 const RUN_ID = 'dashboard-e2e'
+const EXPORT_RUN_ID = 'dashboard-export-e2e'
+const COMPARE_ROOT = join(ARTIFACT_ROOT, 'compare')
+const PROFILE_ROOT = join(ARTIFACT_ROOT, 'profile')
+const MEMORY_ROOT = join(ARTIFACT_ROOT, 'memory')
+const OPS_ROOT = join(ARTIFACT_ROOT, 'ops')
 
 const checks = []
 const hostLog = []
 let host
 let browser
+let page
+let actionPrefix = 'enhancement-action-eval-artifact-actions'
 
 try {
   mkdirSync(SESSIONS_DIR, { recursive: true })
   mkdirSync(ARTIFACT_ROOT, { recursive: true })
-  const fixture = writeSweBenchFixture()
+  const fixture = writeFixtures()
 
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], {
     name: 'dashboard build',
@@ -62,7 +72,7 @@ try {
     headless: 'new',
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })
-  const page = await browser.newPage()
+  page = await browser.newPage()
   page.setDefaultTimeout(12_000)
   await page.setViewport({ width: 1440, height: 940, deviceScaleFactor: 1 })
 
@@ -73,18 +83,16 @@ try {
   })
 
   await page.goto(HOST_URL, { waitUntil: 'networkidle2', timeout: 15_000 })
-  await page.waitForSelector('[data-testid="eval-dashboard-button"]')
-  await page.click('[data-testid="eval-dashboard-button"]')
-  await page.waitForSelector('[data-testid="swebench-plan-panel"]')
+  await openArtifactMode('eval')
+  await verifySweBenchPlanFailure(fixture)
+  await verifySweBenchPlanSuccess(fixture)
+  await verifyEvalActions(fixture)
+  await verifySweBenchActions(fixture)
+  await verifyProfileActions(fixture)
+  await verifyMemoryActions(fixture)
+  await verifyOpsActions(fixture)
+  await verifyManifestAndViews()
 
-  await verifyPlanFailure(page, fixture)
-  await verifyPlanSuccess(page, fixture)
-  await verifyInferSuccess(page, fixture)
-  await verifyGradeCommand(page)
-
-  const manifest = await fetchJson(`${HOST_URL}/artifacts/manifest`)
-  const paths = manifest.entries.map((entry) => entry.path)
-  check('artifact manifest includes dashboard-created SWE-bench files', paths.includes(`${RUN_ID}/worker-plan.json`) && paths.includes(`${RUN_ID}/predictions.jsonl`) && paths.includes(`${RUN_ID}/summary.json`), paths.filter((path) => path.startsWith(`${RUN_ID}/`)).join(', '))
   check('no browser console or page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
 } catch (err) {
   check('script completed without uncaught error', false, err?.stack ?? String(err))
@@ -98,73 +106,358 @@ try {
 const failed = checks.filter((check) => !check.pass)
 if (failed.length > 0) {
   console.error('\n--- host log tail ---')
-  console.error(hostLog.join('').slice(-4000))
+  console.error(hostLog.join('').slice(-5000))
   process.exit(1)
 }
 
-async function verifyPlanFailure(page, fixture) {
+async function verifySweBenchPlanFailure(fixture) {
   await page.click('[data-testid="swebench-plan-toggle"]')
-  await replaceValue(page, '[data-testid="swebench-plan-run-id"]', `${RUN_ID}-bad`)
-  await replaceValue(page, '[data-testid="swebench-plan-model"]', 'dashboard-e2e-model')
-  await replaceValue(page, '[data-testid="swebench-plan-instances-jsonl"]', join(fixture.root, 'missing.jsonl'))
-  await replaceValue(page, '[data-testid="swebench-plan-root-dir"]', ARTIFACT_ROOT)
+  await replaceValue('[data-testid="swebench-plan-run-id"]', `${RUN_ID}-bad`)
+  await replaceValue('[data-testid="swebench-plan-model"]', 'dashboard-e2e-model')
+  await replaceValue('[data-testid="swebench-plan-instances-jsonl"]', join(fixture.root, 'missing.jsonl'))
+  await replaceValue('[data-testid="swebench-plan-root-dir"]', ARTIFACT_ROOT)
   await page.click('[data-testid="swebench-plan-submit"]')
   await page.waitForSelector('[data-testid="swebench-plan-error"]')
-  const text = await textContent(page, '[data-testid="swebench-plan-error"]')
+  const text = await textContent('[data-testid="swebench-plan-error"]')
   check('SWE-bench plan failure is surfaced in the real dialog', /ENOENT|no such file|missing/i.test(text), text)
 }
 
-async function verifyPlanSuccess(page, fixture) {
-  await replaceValue(page, '[data-testid="swebench-plan-run-id"]', RUN_ID)
-  await replaceValue(page, '[data-testid="swebench-plan-model"]', 'dashboard-e2e-model')
-  await replaceValue(page, '[data-testid="swebench-plan-instances-jsonl"]', fixture.instances)
-  await replaceValue(page, '[data-testid="swebench-plan-root-dir"]', ARTIFACT_ROOT)
-  await replaceValue(page, '[data-testid="swebench-plan-instance-ids"]', 'local__repo-1, local__repo-2')
-  await replaceValue(page, '[data-testid="swebench-plan-limit"]', '2')
-  await replaceValue(page, '[data-testid="swebench-plan-max-workers"]', '2')
+async function verifySweBenchPlanSuccess(fixture) {
+  await replaceValue('[data-testid="swebench-plan-run-id"]', RUN_ID)
+  await replaceValue('[data-testid="swebench-plan-model"]', 'dashboard-e2e-model')
+  await replaceValue('[data-testid="swebench-plan-instances-jsonl"]', fixture.instances)
+  await replaceValue('[data-testid="swebench-plan-root-dir"]', ARTIFACT_ROOT)
+  await replaceValue('[data-testid="swebench-plan-instance-ids"]', 'local__repo-1, local__repo-2')
+  await replaceValue('[data-testid="swebench-plan-limit"]', '2')
+  await replaceValue('[data-testid="swebench-plan-max-workers"]', '2')
   await page.click('[data-testid="swebench-plan-submit"]')
   await page.waitForSelector('[data-testid="swebench-plan-result"]')
-  const text = await textContent(page, '[data-testid="swebench-plan-result"]')
-  const planPath = join(ARTIFACT_ROOT, RUN_ID, 'worker-plan.json')
-  const plan = JSON.parse(readFileSync(planPath, 'utf8'))
-  check('SWE-bench plan succeeds through browser and host', text.includes('2 instances') && plan.selectedCount === 2 && plan.shards.length === 2, `${text} / ${planPath}`)
+  const text = await textContent('[data-testid="swebench-plan-result"]')
+  const plan = readJsonFile(join(ARTIFACT_ROOT, RUN_ID, 'worker-plan.json'))
+  check('SWE-bench plan succeeds through browser and host', text.includes('2 instances') && plan.selectedCount === 2 && plan.shards.length === 2, text)
 }
 
-async function verifyInferSuccess(page, fixture) {
-  await page.click('[data-testid="enhancement-action-toggle"]')
-  await page.select('[data-testid="enhancement-action-select"]', 'swebench-infer-patches')
-  await replaceValue(page, '[data-testid="enhancement-action-root-dir"]', ARTIFACT_ROOT)
-  await replaceValue(page, '[data-testid="enhancement-action-field-runId"]', RUN_ID)
-  await replaceValue(page, '[data-testid="enhancement-action-field-dataset"]', 'local/SWE-bench-e2e')
-  await replaceValue(page, '[data-testid="enhancement-action-field-model"]', 'dashboard-e2e-model')
-  await replaceValue(page, '[data-testid="enhancement-action-field-instancesJsonl"]', fixture.instances)
-  await replaceValue(page, '[data-testid="enhancement-action-field-patchesDir"]', fixture.patches)
-  await replaceValue(page, '[data-testid="enhancement-action-field-instanceIds"]', 'local__repo-1, local__repo-2')
-  await replaceValue(page, '[data-testid="enhancement-action-field-limit"]', '2')
-  await page.click('[data-testid="enhancement-action-submit"]')
-  await page.waitForSelector('[data-testid="enhancement-action-result"]')
-  const text = await textContent(page, '[data-testid="enhancement-action-result"]')
-  const predictionsPath = join(ARTIFACT_ROOT, RUN_ID, 'predictions.jsonl')
-  const rows = readFileSync(predictionsPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line))
-  check('SWE-bench infer action creates official prediction JSONL through dashboard', text.includes('predictions.jsonl') && rows.length === 2 && rows.every((row) => row.instance_id && typeof row.model_patch === 'string'), `${text} / rows=${rows.length}`)
+async function verifyEvalActions(fixture) {
+  await openActionPanel('eval')
+  await runAction('eval-judge-score', {
+    rootDir: COMPARE_ROOT,
+    fields: {
+      promptPath: fixture.judgePrompt,
+      responsePath: fixture.judgeResponse,
+      judgeModel: 'judge-e2e-model',
+      scorer: 'dashboard_e2e_judge',
+      instanceId: 'local__repo-1',
+      threshold: '0.7',
+      inputRef: 'local__repo-1',
+    },
+    expectText: 'scores.json',
+  })
+  const judgeScore = readJsonFile(join(COMPARE_ROOT, 'scores.json'))
+  check('eval judge score action writes parseable score artifact', judgeScore.resolved === true && judgeScore.results[0]?.scorer === 'dashboard_e2e_judge', JSON.stringify(judgeScore))
+
+  await runAction('eval-score-session', {
+    rootDir: COMPARE_ROOT,
+    fields: {
+      sessionLogPath: fixture.sessionLog,
+      instanceId: 'local__repo-1',
+      patchPath: fixture.patchFile,
+      requireDone: 'true',
+      workspaceRoot: WORKSPACE_ROOT,
+    },
+    expectText: 'scores.json',
+  })
+  const sessionScore = readJsonFile(join(COMPARE_ROOT, 'scores.json'))
+  check('eval score session action evaluates real session log and patch', sessionScore.resolved === true && sessionScore.results.some((row) => row.scorer === 'patch.non_empty'), JSON.stringify(sessionScore))
+
+  await runAction('eval-compare-runs', {
+    rootDir: COMPARE_ROOT,
+    fields: {
+      baselineSummaryPath: fixture.baselineSummary,
+      candidateSummaryPath: fixture.candidateSummary,
+    },
+    expectText: 'eval-comparison.json',
+  })
+  const comparison = readJsonFile(join(COMPARE_ROOT, 'eval-comparison.json'))
+  check('eval compare runs action writes pass-rate delta', comparison.deltas.passRate === 0.5, JSON.stringify(comparison.deltas))
 }
 
-async function verifyGradeCommand(page) {
-  await page.select('[data-testid="enhancement-action-select"]', 'swebench-grade-command')
-  await replaceValue(page, '[data-testid="enhancement-action-field-runId"]', RUN_ID)
-  await replaceValue(page, '[data-testid="enhancement-action-field-dataset"]', 'local/SWE-bench-e2e')
-  await replaceValue(page, '[data-testid="enhancement-action-field-predictionsPath"]', join(ARTIFACT_ROOT, RUN_ID, 'predictions.jsonl'))
-  await replaceValue(page, '[data-testid="enhancement-action-field-maxWorkers"]', '2')
-  await replaceValue(page, '[data-testid="enhancement-action-field-instanceIds"]', 'local__repo-1')
-  await page.click('[data-testid="enhancement-action-submit"]')
-  await page.waitForSelector('[data-testid="enhancement-action-result"]')
-  const text = await textContent(page, '[data-testid="enhancement-action-result"]')
-  check('SWE-bench grade command is generated through dashboard without running Docker', text.includes('python -m swebench.harness.run_evaluation') && text.includes('--predictions_path'), text)
+async function verifySweBenchActions(fixture) {
+  await runAction('swebench-infer-patches', {
+    rootDir: ARTIFACT_ROOT,
+    fields: {
+      runId: RUN_ID,
+      dataset: 'local/SWE-bench-e2e',
+      model: 'dashboard-e2e-model',
+      instancesJsonl: fixture.instances,
+      patchesDir: fixture.patches,
+      instanceIds: 'local__repo-1, local__repo-2',
+      limit: '2',
+    },
+    expectText: 'predictions.jsonl',
+  })
+  const predictions = readJsonlFile(join(ARTIFACT_ROOT, RUN_ID, 'predictions.jsonl'))
+  check('SWE-bench infer action creates official prediction JSONL through dashboard', predictions.length === 2 && predictions.every((row) => row.instance_id && typeof row.model_patch === 'string'), `rows=${predictions.length}`)
+
+  await runAction('swebench-export-session', {
+    rootDir: ARTIFACT_ROOT,
+    fields: {
+      runId: EXPORT_RUN_ID,
+      dataset: 'local/SWE-bench-e2e',
+      model: 'dashboard-e2e-model',
+      instanceId: 'local__repo-1',
+      sessionLogPath: fixture.sessionLog,
+      modelPatchPath: fixture.patchFile,
+      workspaceRoot: WORKSPACE_ROOT,
+    },
+    expectText: 'predictions.jsonl',
+  })
+  const exported = readJsonlFile(join(ARTIFACT_ROOT, EXPORT_RUN_ID, 'predictions.jsonl'))
+  check('SWE-bench export session action writes prediction from a real session log', exported.length === 1 && exported[0].instance_id === 'local__repo-1', JSON.stringify(exported[0]))
+
+  await runAction('swebench-ingest-results', {
+    rootDir: ARTIFACT_ROOT,
+    fields: { runId: RUN_ID, resultsDir: fixture.resultsDir },
+    expectText: 'summary.json',
+  })
+  const summary = readJsonFile(join(ARTIFACT_ROOT, RUN_ID, 'summary.json'))
+  check('SWE-bench ingest results action updates summary from official-shaped result rows', summary.resolved === 1 && summary.failed === 1, JSON.stringify(summary))
+
+  await runAction('swebench-grade-command', {
+    fields: {
+      runId: RUN_ID,
+      dataset: 'local/SWE-bench-e2e',
+      predictionsPath: join(ARTIFACT_ROOT, RUN_ID, 'predictions.jsonl'),
+      maxWorkers: '2',
+      instanceIds: 'local__repo-1',
+    },
+    expectText: 'python -m swebench.harness.run_evaluation',
+  })
+  const gradeText = await textContent(`[data-testid="${actionPrefix}-result"]`)
+  check('SWE-bench grade command is generated through dashboard without running Docker', gradeText.includes('--predictions_path') && gradeText.includes('--instance_ids'), gradeText)
+}
+
+async function verifyProfileActions(fixture) {
+  await runApiAction('profile-session', {
+    rootDir: PROFILE_ROOT,
+    fields: { sessionLogPath: fixture.sessionLog, pricingPath: fixture.pricingPath },
+  })
+  const profile = readJsonFile(join(PROFILE_ROOT, 'profile.json'))
+  check('profile session action writes latency/token/cost profile from session log', profile.sessionId === 'e2e-parent' && profile.llmCalls >= 1 && profile.costStatus === 'estimated', JSON.stringify(profile))
+}
+
+async function verifyMemoryActions(fixture) {
+  await runApiAction('memory-index', {
+    rootDir: MEMORY_ROOT,
+    fields: { workspaceRoot: WORKSPACE_ROOT },
+  })
+  const index = readJsonFile(join(MEMORY_ROOT, 'memory-index.json'))
+  check('memory index action writes active and tombstoned workspace memory entries', index.entries.some((row) => row.key === 'project-style' && row.status === 'active') && index.entries.some((row) => row.key === 'old-note' && row.status === 'tombstoned'), JSON.stringify(index.entries))
+}
+
+async function verifyOpsActions(fixture) {
+  await runApiAction('reliability-audit-session', {
+    rootDir: OPS_ROOT,
+    fields: { sessionLogPath: fixture.danglingLog },
+  })
+  const audit = readJsonFile(join(OPS_ROOT, 'reliability-audit.json'))
+  check('reliability audit action detects dangling tool calls', audit.dangling === true && audit.danglingKind === 'tool_call', JSON.stringify(audit))
+
+  await runApiAction('reliability-chaos-replay', {
+    rootDir: OPS_ROOT,
+    fields: { sessionLogPaths: `${fixture.danglingLog}, ${fixture.recoveredLog}` },
+  })
+  const chaos = readJsonFile(join(OPS_ROOT, 'reliability-chaos.json'))
+  check('reliability chaos replay action summarizes dangling and recovered sessions', chaos.sessionCount === 2 && chaos.danglingCount === 1 && chaos.recoveryEventCount === 1, JSON.stringify(chaos))
+
+  await runApiAction('trace-export-session', {
+    rootDir: OPS_ROOT,
+    fields: { sessionLogPath: fixture.sessionLog, runId: RUN_ID, evalInstanceId: 'local__repo-1', workspaceRoot: WORKSPACE_ROOT },
+  })
+  const trace = readJsonFile(join(OPS_ROOT, 'traces', 'e2e-parent.openinference.json'))
+  check('trace export action writes OpenInference-shaped spans and provider request artifacts', Array.isArray(trace.spans) && trace.spans.length >= 1 && existsSync(join(OPS_ROOT, 'llm', 'e2e-parent', '2.request.json')), `spans=${trace.spans?.length}`)
+
+  await runApiAction('rollout-export-segments', {
+    rootDir: OPS_ROOT,
+    fields: { sessionLogPath: fixture.sessionLog, runId: RUN_ID, evalInstanceId: 'local__repo-1', workspaceRoot: WORKSPACE_ROOT },
+  })
+  const segments = readJsonFile(join(OPS_ROOT, 'rl-token-segments', 'e2e-parent.json'))
+  check('rollout segment action captures topology without token-id synthesis', segments.tokenIdsCaptured === false && segments.topology.subAgentCallCount === 1 && segments.segments.length >= 4, JSON.stringify(segments.topology))
+
+  await runApiAction('rollout-export-session', {
+    rootDir: OPS_ROOT,
+    fields: {
+      sessionLogPath: fixture.sessionLog,
+      taskId: 'swebench:local__repo-1',
+      frameworkTarget: 'slime',
+      model: 'dashboard-e2e-model',
+      weightVersion: 'e2e-weight',
+    },
+  })
+  const sidecarPath = latestJsonFile(join(OPS_ROOT, 'rollouts'))
+  const sidecar = readJsonFile(sidecarPath)
+  check('rollout sidecar action writes trace-linked RL metadata', sidecar.framework_target === 'slime' && sidecar.trace_ref && sidecar.token_segments_ref, JSON.stringify(sidecar))
+
+  await runApiAction('rollout-export-adapter', {
+    rootDir: OPS_ROOT,
+    fields: { sidecarPath, frameworkTarget: 'slime' },
+  })
+  const adapter = readJsonFile(join(OPS_ROOT, 'rl-adapters', 'slime', basename(sidecarPath)))
+  check('rollout adapter action writes framework-specific adapter manifest', adapter.status === 'ready' && adapter.frameworkTarget === 'slime' && adapter.entrypoint === 'custom_rollout_manifest', JSON.stringify(adapter))
+
+  await runApiAction('subagents-graph', {
+    rootDir: OPS_ROOT,
+    fields: { sessionsDir: SESSIONS_DIR },
+  })
+  const graph = readJsonFile(join(OPS_ROOT, 'subagent-graph.json'))
+  check('subagent graph action exports parent-child session topology', graph.nodes.length >= 2 && graph.edges.some((edge) => edge.parentSessionId === 'e2e-parent' && edge.childSessionId === 'e2e-child'), JSON.stringify(graph))
+}
+
+async function verifyManifestAndViews() {
+  const manifest = await fetchJson(`${HOST_URL}/artifacts/manifest`)
+  const paths = manifest.entries.map((entry) => entry.path)
+  const required = [
+    `${RUN_ID}/worker-plan.json`,
+    `${RUN_ID}/predictions.jsonl`,
+    `${RUN_ID}/summary.json`,
+    `${EXPORT_RUN_ID}/predictions.jsonl`,
+    'compare/eval-comparison.json',
+    'profile/profile.json',
+    'memory/memory-index.json',
+    'ops/reliability-audit.json',
+    'ops/reliability-chaos.json',
+    'ops/traces/e2e-parent.openinference.json',
+    'ops/rl-token-segments/e2e-parent.json',
+    'ops/subagent-graph.json',
+  ]
+  const missing = required.filter((path) => !paths.includes(path))
+  check('artifact manifest includes every dashboard-created enhancement artifact family', missing.length === 0, missing.join(', '))
+
+  await page.goto(HOST_URL, { waitUntil: 'networkidle2', timeout: 15_000 })
+  await openArtifactMode('eval')
+  const evalText = await bodyText()
+  check('Eval artifact view renders generated runs, scores, comparisons, and worker plans', evalText.includes(RUN_ID) && evalText.includes('Scores') && evalText.includes('Comparisons') && evalText.includes('Worker plans'), evalText.slice(0, 500))
+  await openArtifactMode('profiles')
+  check('Profile artifact view renders generated profile', (await bodyText()).includes('e2e-parent'))
+  await openArtifactMode('memory')
+  check('Memory artifact view renders generated memory index', (await bodyText()).includes('project-style'))
+  await openArtifactMode('ops')
+  await page.waitForFunction(
+    () => (document.body.textContent ?? '').includes('reliability-audit.json') && (document.body.textContent ?? '').includes('subagent-graph.json'),
+    { timeout: 12_000 },
+  )
+  const opsText = await bodyText()
+  check('Ops artifact view renders generated reliability, trace, rollout, and subagent artifacts', opsText.includes('reliability-audit.json') && opsText.includes('rl-token-segments') && opsText.includes('subagent-graph.json'), opsText.slice(0, 700))
+}
+
+async function openArtifactMode(mode) {
+  const button = mode === 'eval'
+    ? '[data-testid="eval-dashboard-button"]'
+    : mode === 'ops'
+      ? '[data-testid="ops-artifacts-button"]'
+      : '[data-testid="artifacts-button"]'
+  const modeButton = `[data-testid="artifact-mode-${mode}"]`
+  if (!await visible(modeButton)) {
+    await waitForVisible(button)
+    await clickVisible(button)
+    await waitForVisible('[data-testid="artifact-dialog"]')
+  }
+  await waitForVisible(modeButton)
+  await clickVisible(modeButton)
+  await sleep(150)
+}
+
+async function openActionPanel(kind) {
+  actionPrefix = `enhancement-action-${kind}-artifact-actions`
+  const selector = `[data-testid="${actionPrefix}-toggle"]`
+  await waitForVisible(selector)
+  const isOpen = await visibleText(selector).then((text) => text.includes('hide'))
+  if (!isOpen) await clickVisible(selector)
+}
+
+async function runAction(action, opts) {
+  const selectSelector = `[data-testid="${actionPrefix}-select"]`
+  await waitForVisible(selectSelector)
+  await selectVisible(selectSelector, action)
+  await page.waitForFunction(
+    (selector, selected) => Array.from(document.querySelectorAll(selector)).some((el) => {
+      const style = window.getComputedStyle(el)
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0 && el.value === selected
+    }),
+    { timeout: 5_000 },
+    selectSelector,
+    action,
+  )
+  await replaceValue(`[data-testid="${actionPrefix}-root-dir"]`, opts.rootDir ?? '')
+  for (const [key, value] of Object.entries(opts.fields ?? {})) {
+    await replaceValue(`[data-testid="${actionPrefix}-field-${key}"]`, String(value))
+  }
+  await submitVisibleForm(`[data-testid="${actionPrefix}-form"]`)
+  try {
+    await page.waitForFunction(
+      (selector, expected) => Array.from(document.querySelectorAll(selector)).some((el) => {
+        const style = window.getComputedStyle(el)
+        return style.display !== 'none' && style.visibility !== 'hidden' && el.textContent?.includes(expected)
+      }),
+      { timeout: 12_000 },
+      `[data-testid="${actionPrefix}-result"]`,
+      opts.expectText,
+    )
+  } catch (err) {
+    const diag = await page.evaluate(() => ({
+      result: Array.from(document.querySelectorAll('[data-testid$="-result"]')).map((el) => el.textContent).filter(Boolean).slice(-5),
+      error: Array.from(document.querySelectorAll('[data-testid$="-error"]')).map((el) => el.textContent).filter(Boolean).slice(-5),
+      action: Array.from(document.querySelectorAll('[data-testid$="-select"]')).map((el) => el.value).filter(Boolean).slice(-5),
+      body: document.body.textContent?.slice(0, 1200) ?? '',
+    }))
+    throw new Error(`action ${action} did not produce expected text ${opts.expectText}: ${JSON.stringify(diag)}`, { cause: err })
+  }
+}
+
+async function runApiAction(action, opts) {
+  const payload = { action, ...(opts.rootDir ? { rootDir: opts.rootDir } : {}), ...(opts.fields ?? {}) }
+  const result = await page.evaluate(async (body) => {
+    const res = await fetch('/enhancement/action', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok) throw new Error(JSON.stringify(json))
+    return json
+  }, payload)
+  check(`browser API action ${action} returns success`, result?.action === action, JSON.stringify(result).slice(0, 300))
+  return result
+}
+
+function writeFixtures() {
+  mkdirSync(FIXTURE_ROOT, { recursive: true })
+  mkdirSync(RELIABILITY_LOG_DIR, { recursive: true })
+  mkdirSync(WORKSPACE_ROOT, { recursive: true })
+  const swebench = writeSweBenchFixture()
+  const sessionLog = writeSessionFixture({ sessionId: 'e2e-parent' })
+  const childLog = writeSessionFixture({ sessionId: 'e2e-child', parentSessionId: 'e2e-parent', parentCursor: 2 })
+  const danglingLog = writeDanglingSessionFixture('e2e-dangling')
+  const recoveredLog = writeRecoveredSessionFixture('e2e-recovered')
+  const patchFile = join(FIXTURE_ROOT, 'model.patch')
+  writeFileSync(patchFile, 'diff --git a/a.txt b/a.txt\n+fixed from session\n', 'utf8')
+  const judgePrompt = join(FIXTURE_ROOT, 'judge-prompt.txt')
+  const judgeResponse = join(FIXTURE_ROOT, 'judge-response.json')
+  writeFileSync(judgePrompt, 'Score whether the patch resolves local__repo-1.', 'utf8')
+  writeFileSync(judgeResponse, JSON.stringify({ score: 0.92, label: 'resolved', explanation: 'Patch is adequate.' }), 'utf8')
+  const pricingPath = join(FIXTURE_ROOT, 'pricing.json')
+  writeFileSync(pricingPath, JSON.stringify({ version: 'e2e', currency: 'USD', models: { 'dashboard-e2e-model': { inputPerMillion: 2, outputPerMillion: 8 } } }, null, 2), 'utf8')
+  const baselineSummary = writeEvalSummary('baseline', 0, join(FIXTURE_ROOT, 'baseline-summary.json'))
+  const candidateSummary = writeEvalSummary('candidate', 1, join(FIXTURE_ROOT, 'candidate-summary.json'))
+  writeMemoryFixture()
+  void childLog
+  return { ...swebench, sessionLog, danglingLog, recoveredLog, patchFile, judgePrompt, judgeResponse, pricingPath, baselineSummary, candidateSummary }
 }
 
 function writeSweBenchFixture() {
   const patches = join(FIXTURE_ROOT, 'patches')
+  const resultsDir = join(FIXTURE_ROOT, 'official-results')
   mkdirSync(patches, { recursive: true })
+  mkdirSync(resultsDir, { recursive: true })
   const instances = join(FIXTURE_ROOT, 'instances.jsonl')
   writeFileSync(
     instances,
@@ -176,28 +469,261 @@ function writeSweBenchFixture() {
   )
   writeFileSync(join(patches, 'local__repo-1.diff'), 'diff --git a/a.txt b/a.txt\n+fixed\n', 'utf8')
   writeFileSync(join(patches, 'local__repo-2.diff'), 'diff --git a/b.txt b/b.txt\n+fixed\n', 'utf8')
-  return { root: FIXTURE_ROOT, instances, patches }
+  writeFileSync(join(resultsDir, 'instance_results.jsonl'), JSON.stringify({ instance_id: 'local__repo-1', resolved: true }) + '\n' + JSON.stringify({ instance_id: 'local__repo-2', resolved: false, error: 'tests failed' }) + '\n', 'utf8')
+  writeFileSync(join(resultsDir, 'local__repo-2.log'), 'failing test output', 'utf8')
+  return { root: FIXTURE_ROOT, instances, patches, resultsDir }
 }
 
-async function replaceValue(page, selector, value) {
-  await page.waitForSelector(selector)
-  await page.$eval(selector, (el) => { el.value = '' })
-  await page.click(selector)
+function writeMemoryFixture() {
+  const dir = join(WORKSPACE_ROOT, '.agent-kernel', 'memory')
+  const tombstones = join(dir, '.tombstones')
+  mkdirSync(tombstones, { recursive: true })
+  writeFileSync(join(dir, 'project-style.md'), ['---', 'name: Project Style', 'description: Prefer focused tests', 'confidence: 0.8', '---', 'Use real e2e coverage for dashboard features.', ''].join('\n'), 'utf8')
+  writeFileSync(join(tombstones, 'old-note.json'), JSON.stringify({ key: 'old-note', deletedAt: new Date().toISOString(), archivedPath: join(dir, 'old-note.md') }, null, 2), 'utf8')
+}
+
+function writeEvalSummary(experimentId, resolved, path) {
+  const summary = {
+    experimentId,
+    dataset: 'local/SWE-bench-e2e',
+    model: 'dashboard-e2e-model',
+    trialCount: 2,
+    completed: 2,
+    failed: 2 - resolved,
+    timedOut: 0,
+    resolved,
+    unresolved: 2 - resolved,
+    emptyPatch: 0,
+    failureCounts: resolved === 0 ? { test_failed: 2 } : { test_failed: 1, resolved: 1 },
+    metrics: { passRate: resolved / 2 },
+  }
+  writeFileSync(path, `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
+  return path
+}
+
+function writeSessionFixture({ sessionId, parentSessionId, parentCursor }) {
+  const logPath = join(SESSIONS_DIR, `${Date.now()}_${sessionId}.jsonl`)
+  const header = headerEntry(sessionId, { parentSessionId, parentCursor })
+  const entries = [
+    header,
+    eventEntry(1, { kind: 'user_message', text: 'fix local__repo-1' }, [{ kind: 'call_llm', messages: [], tools: header.config.tools }]),
+    eventEntry(
+      2,
+      { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'agent-1', name: 'agent', input: { prompt: 'inspect failing test', agent_type: 'research' } }] }, usage: { inputTokens: 120, outputTokens: 30 } },
+      [{ kind: 'call_tool', callId: 'agent-1', name: 'agent', input: { prompt: 'inspect failing test', agent_type: 'research' } }],
+      {
+        provider: 'openai',
+        model: 'dashboard-e2e-model',
+        request: { url: 'https://redacted.example/v1/chat/completions', headers: { authorization: '[redacted]' }, body: { model: 'dashboard-e2e-model', messages: [{ role: 'user', content: 'fix local__repo-1' }] } },
+        response: { status: 200, body: { choices: [{ message: { content: null, tool_calls: [] } }] }, metrics: { durationMs: 75, timeToFirstChunkMs: 20 } },
+      },
+      'dashboard-e2e-model',
+    ),
+    eventEntry(3, { kind: 'tool_result', callId: 'agent-1', ok: true, content: '<sub_agent session_id="e2e-child" agent_type="research" status="completed" turns="2" duration_ms="42">done</sub_agent>' }, [{ kind: 'call_llm', messages: [], tools: header.config.tools }]),
+    eventEntry(4, { kind: 'compact_replaced', trigger: 'manual', preserveFrom: 2, summary: 'compressed previous context', replacedCount: 2, tokensBefore: 1000, tokensAfter: 120 }, []),
+    eventEntry(5, { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'fixed' }] }, usage: { inputTokens: 80, outputTokens: 12 } }, [{ kind: 'finish' }], undefined, 'dashboard-e2e-model'),
+  ]
+  writeFileSync(logPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8')
+  return logPath
+}
+
+function writeDanglingSessionFixture(sessionId) {
+  const logPath = join(RELIABILITY_LOG_DIR, `${Date.now()}_${sessionId}.jsonl`)
+  const header = headerEntry(sessionId)
+  const entries = [
+    header,
+    eventEntry(1, { kind: 'user_message', text: 'read x' }, []),
+    eventEntry(2, { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'dangling-1', name: 'read', input: { path: 'x' } }] } }, [{ kind: 'call_tool', callId: 'dangling-1', name: 'read', input: { path: 'x' } }]),
+  ]
+  writeFileSync(logPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8')
+  return logPath
+}
+
+function writeRecoveredSessionFixture(sessionId) {
+  const logPath = join(RELIABILITY_LOG_DIR, `${Date.now()}_${sessionId}.jsonl`)
+  const header = headerEntry(sessionId)
+  const entries = [
+    header,
+    eventEntry(1, { kind: 'user_message', text: 'read x' }, []),
+    eventEntry(2, { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'recover-1', name: 'read', input: { path: 'x' } }] } }, [{ kind: 'call_tool', callId: 'recover-1', name: 'read', input: { path: 'x' } }]),
+    eventEntry(3, { kind: 'tool_result', callId: 'recover-1', ok: false, content: 'host restarted while call was pending' }, [{ kind: 'call_llm', messages: [], tools: header.config.tools }]),
+    eventEntry(4, { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'recovered' }] } }, [{ kind: 'finish' }]),
+  ]
+  writeFileSync(logPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8')
+  return logPath
+}
+
+function headerEntry(sessionId, opts = {}) {
+  const config = {
+    tools: [
+      { name: 'read', description: 'read', inputSchema: { type: 'object' }, requiresApproval: false },
+      { name: 'agent', description: 'spawn agent', inputSchema: { type: 'object' }, requiresApproval: false },
+    ],
+    systemPrompt: 'e2e system',
+  }
+  return {
+    kind: 'header',
+    seq: 0,
+    ts: new Date().toISOString(),
+    sessionId,
+    formatVersion: 1,
+    kernelVersion: '@agent-kernel/kernel@0.0.0',
+    config,
+    initialState: {
+      sessionId,
+      messages: [{ role: 'system', content: [{ type: 'text', text: 'e2e system' }] }],
+      pendingCalls: [],
+      status: 'idle',
+      usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      cursor: 0,
+      cwd: WORKSPACE_ROOT,
+      contextPressureLevel: 'none',
+      approvalMode: 'auto',
+    },
+    workspaceId: 'dashboard-enhancement-e2e',
+    workspaceName: 'dashboard enhancement e2e',
+    initialCwd: WORKSPACE_ROOT,
+    ...(opts.parentSessionId ? { parentSessionId: opts.parentSessionId } : {}),
+    ...(opts.parentCursor !== undefined ? { parentCursor: opts.parentCursor } : {}),
+  }
+}
+
+function eventEntry(seq, event, effects, llmTrace, model) {
+  const usage = event.usage
+  return {
+    kind: 'event',
+    seq,
+    ts: new Date().toISOString(),
+    event,
+    effects,
+    ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheCreationTokens: usage.cacheCreationTokens ?? 0, cacheReadTokens: usage.cacheReadTokens ?? 0 } } : {}),
+    ...(llmTrace ? { llmTrace } : {}),
+    ...(model ? { model } : {}),
+  }
+}
+
+async function replaceValue(selector, value) {
+  await waitForVisible(selector)
+  await page.$$eval(selector, (els) => {
+    const el = els.find((candidate) => {
+      const style = window.getComputedStyle(candidate)
+      return style.display !== 'none' && style.visibility !== 'hidden' && candidate.getClientRects().length > 0
+    })
+    if (el) el.value = ''
+  })
+  await clickVisible(selector)
   await page.keyboard.down(process.platform === 'darwin' ? 'Meta' : 'Control')
   await page.keyboard.press('A')
   await page.keyboard.up(process.platform === 'darwin' ? 'Meta' : 'Control')
   await page.keyboard.press('Backspace')
-  await page.type(selector, value)
+  if (value) await page.type(selector, value)
 }
 
-async function textContent(page, selector) {
-  return page.$eval(selector, (el) => el.textContent ?? '')
+async function exists(selector) {
+  return Boolean(await page.$(selector))
+}
+
+async function visible(selector) {
+  return page.$$eval(selector, (els) => {
+    return els.some((el) => {
+      const style = window.getComputedStyle(el)
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0
+    })
+  }).catch(() => false)
+}
+
+async function waitForVisible(selector, timeoutMs = 12_000) {
+  await page.waitForFunction(
+    (target) => Array.from(document.querySelectorAll(target)).some((el) => {
+      const style = window.getComputedStyle(el)
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0
+    }),
+    { timeout: timeoutMs },
+    selector,
+  )
+}
+
+async function textContent(selector) {
+  return visibleText(selector)
+}
+
+async function visibleText(selector) {
+  return page.$$eval(selector, (els) => {
+    const el = els.find((candidate) => {
+      const style = window.getComputedStyle(candidate)
+      return style.display !== 'none' && style.visibility !== 'hidden' && candidate.getClientRects().length > 0
+    })
+    return el?.textContent ?? ''
+  })
+}
+
+async function clickVisible(selector) {
+  const handles = await page.$$(selector)
+  for (const handle of handles) {
+    const isVisible = await handle.evaluate((el) => {
+      const style = window.getComputedStyle(el)
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0
+    })
+    if (isVisible) {
+      await handle.click()
+      return
+    }
+  }
+  throw new Error(`no visible element for ${selector}`)
+}
+
+async function selectVisible(selector, value) {
+  const handles = await page.$$(selector)
+  for (const handle of handles) {
+    const isVisible = await handle.evaluate((el) => {
+      const style = window.getComputedStyle(el)
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0
+    })
+    if (isVisible) {
+      await handle.select(value)
+      return
+    }
+  }
+  throw new Error(`no visible select for ${selector}`)
+}
+
+async function submitVisibleForm(selector) {
+  await page.$$eval(selector, (els) => {
+    const form = els.find((candidate) => {
+      const style = window.getComputedStyle(candidate)
+      return style.display !== 'none' && style.visibility !== 'hidden' && candidate.getClientRects().length > 0
+    })
+    if (!form) throw new Error(`no visible form for ${selector}`)
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  })
+}
+
+async function bodyText() {
+  return page.evaluate(() => document.body.textContent ?? '')
 }
 
 async function fetchJson(url) {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`${url} failed: ${res.status}`)
   return res.json()
+}
+
+function readJsonFile(path) {
+  return JSON.parse(readFileSync(path, 'utf8'))
+}
+
+function readJsonlFile(path) {
+  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+}
+
+function latestJsonFile(dir) {
+  const files = readDirSync(dir).filter((file) => file.endsWith('.json')).sort()
+  if (files.length === 0) throw new Error(`no json files in ${dir}`)
+  return join(dir, files[files.length - 1])
+}
+
+function readDirSync(dir) {
+  return existsSync(dir) ? readdirSync(dir) : []
 }
 
 function check(name, pass, detail = '') {
@@ -210,13 +736,7 @@ function isExpectedConsoleError(text) {
 }
 
 function detectBrowser() {
-  const candidates = [
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/snap/bin/chromium',
-  ]
+  const candidates = ['/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/snap/bin/chromium']
   for (const path of candidates) if (existsSync(path)) return path
   return undefined
 }
