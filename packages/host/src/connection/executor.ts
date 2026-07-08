@@ -345,9 +345,12 @@ export function createExecutorRegistry(
       // session. With sticky routing gone there's no single "owner"
       // executor  -  but calls are still scoped per-session inside each bind.
       for (const bind of byExecutor.values()) {
-        for (const p of bind.pending.values()) {
+        for (const p of [...bind.pending.values()]) {
           if (p.sessionId !== sessionId) continue
           bind.socket.emit('tool:cancel', { sessionId, callId: p.callId })
+          clearTimeout(p.timer)
+          bind.pending.delete(p.callId)
+          p.resolve({ ok: false, content: 'cancelled by user' })
         }
       }
     },

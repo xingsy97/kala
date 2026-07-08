@@ -12,10 +12,6 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 
 import type {
-  ExecutorClientToServerEvents,
-  ExecutorServerToClientEvents,
-  DashboardClientToServerEvents,
-  DashboardServerToClientEvents,
   ModelInfo,
   ServerMessageQueueEvent,
   ServerSettingsPayload,
@@ -24,11 +20,9 @@ import type {
 } from '@agent-kernel/shared'
 import type {
   AgentConfig,
-  AgentState,
-  MessageContent,
   RequestApprovalEffect,
 } from '@agent-kernel/kernel'
-import { Server as IOServer, type Namespace } from 'socket.io'
+import { Server as IOServer } from 'socket.io'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LoopBroadcast, LoopHandle } from './loop.js'
