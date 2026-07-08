@@ -130,6 +130,10 @@ agent-kernel-host enhancement rollout export-session \
   --framework slime \
   --model local-policy \
   --reward rewards/<session>.json
+
+agent-kernel-host enhancement rollout export-segments \
+  --root-dir runs/rollouts \
+  --session-log ~/.agent-kernel/sessions/<session>.jsonl
 ```
 
 The command first exports the OpenInference-shaped trace and redacted LLM
@@ -147,12 +151,28 @@ The sidecar links to the event log, trace, optional reward file, optional token
 segment file, target framework, model, and weight version. It deliberately does
 not invent token ids or masks when the serving path did not capture them.
 
+The host also exports a conservative rollout segment index:
+
+```text
+runs/rollouts/rl-token-segments/<session_id>.json
+```
+
+This artifact is intentionally not a framework training tensor file. It marks
+assistant message segments with `lossMask=1`, user/system/tool/effect/compaction
+segments with `lossMask=0`, preserves event sequence links, and sets
+`tokenIdsCaptured=false`. It exists to make rollout structure inspectable and to
+provide a stable handoff point for a future gateway that captures real token ids
+at generation time.
+
 Phase 1: export completed session logs and verifier rewards with stable rollout
 ids. Implemented as sidecar export.
 
 Phase 2: add controlled local model gateway token capture for one backend.
 
 Phase 3: segment builder for single-agent, no-compaction coding tasks.
+Implemented as a host-side segment index over session logs. It does not
+retokenize or synthesize token ids; it records estimated tokens, event seq links,
+source roles, and loss-mask policy for debugging and adapter preparation.
 
 Phase 4: slime adapter with verifier reward.
 

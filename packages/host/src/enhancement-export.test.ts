@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from './store/log.js'
 import { buildArtifactManifest } from './artifact-manifest.js'
-import { exportRolloutSidecar, exportSessionTraceArtifacts } from './enhancement-export.js'
+import { exportRolloutSegments, exportRolloutSidecar, exportSessionTraceArtifacts } from './enhancement-export.js'
 import { parseEnhancementCli } from './enhancement-cli.js'
 
 const config: AgentConfig = { tools: [] }
@@ -84,6 +84,46 @@ describe('enhancement artifact export', () => {
     expect(sidecar.framework_target).toBe('slime')
     expect(sidecar.trace_ref).toBe('traces/s1.openinference.json')
     expect(sidecar.reward_ref).toBe('rewards/s1.json')
+    expect(sidecar.token_segments_ref).toBe('rl-token-segments/s1.json')
+    expect(sidecar.metadata.tokenIdsCaptured).toBe(false)
+  })
+
+  it('exports rollout segment indexes with assistant-only loss masks', async () => {
+    const logPath = join(dir, 'session.jsonl')
+    await writeHeader({ path: logPath, sessionId: 's1', config, initialState })
+    await appendEventEntry({
+      path: logPath,
+      seq: 1,
+      event: { kind: 'user_message', text: 'fix it' },
+      effects: [],
+    })
+    await appendEventEntry({
+      path: logPath,
+      seq: 2,
+      event: {
+        kind: 'llm_response',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_call', callId: 'c1', name: 'read', input: { path: 'a.ts' } }],
+        },
+      },
+      effects: [{ kind: 'call_tool', callId: 'c1', name: 'read', input: { path: 'a.ts' } }],
+    })
+    await appendEventEntry({
+      path: logPath,
+      seq: 3,
+      event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'file content' },
+      effects: [],
+    })
+
+    const result = await exportRolloutSegments({ rootDir: dir, sessionLogPath: logPath })
+
+    expect(result.artifact.uri).toBe('rl-token-segments/s1.json')
+    expect(result.segments.tokenIdsCaptured).toBe(false)
+    expect(result.segments.warnings[0]).toContain('not a training tensor')
+    expect(result.segments.segments.some((segment) => segment.source === 'assistant' && segment.lossMask === 1)).toBe(true)
+    expect(result.segments.segments.some((segment) => segment.source === 'tool' && segment.lossMask === 0)).toBe(true)
+    expect(result.segments.segments.some((segment) => segment.source === 'effect' && segment.lossMask === 0)).toBe(true)
   })
 
   it('parses enhancement trace and rollout export commands', () => {
@@ -108,6 +148,16 @@ describe('enhancement artifact export', () => {
       '--framework',
       'verl',
     ])).toMatchObject({ kind: 'rollout-export-session', frameworkTarget: 'verl' })
+
+    expect(parseEnhancementCli([
+      'enhancement',
+      'rollout',
+      'export-segments',
+      '--session-log',
+      's.jsonl',
+      '--root-dir',
+      'runs/rollouts',
+    ])).toMatchObject({ kind: 'rollout-export-segments', sessionLogPath: 's.jsonl' })
 
     expect(parseEnhancementCli([
       'enhancement',
