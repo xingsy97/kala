@@ -9,12 +9,14 @@ import {
   createArtifactStore,
   createEvalExperiment,
   createMessageAssemblyArtifact,
+  createSessionProfile,
   createRolloutSidecar,
   createSweBenchPrediction,
   exportSessionSpans,
   redactForPersistence,
   serializeJsonl,
   summarizeEvalRun,
+  summarizeEvalScores,
 } from '@agent-kernel/shared'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -244,5 +246,49 @@ describe('enhancement foundation', () => {
     expect(artifact.parts.map((part) => part.name)).toContain('system')
     expect(artifact.parts.map((part) => part.name)).toContain('tools')
     expect(artifact.estimatedTokens).toBeGreaterThan(0)
+  })
+
+  it('summarizes eval scores and session profiles without kernel state changes', () => {
+    const score = summarizeEvalScores([
+      {
+        scorer: 'patch.non_empty',
+        passed: false,
+        label: 'empty_patch',
+        score: 0,
+        metrics: {},
+        artifactRefs: [],
+      },
+    ], 'i1')
+    expect(score.failureLabel).toBe('empty_patch')
+    expect(score.resolved).toBe(false)
+
+    const profile = createSessionProfile({
+      header,
+      events: [
+        {
+          kind: 'event',
+          seq: 1,
+          ts: '2026-07-09T00:00:01.000Z',
+          event: { kind: 'llm_response', message: { role: 'assistant', content: [] } },
+          effects: [],
+          model: 'gpt-test',
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 500,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 100,
+          },
+        },
+      ],
+      pricing: {
+        version: 'test',
+        currency: 'USD',
+        models: { 'gpt-test': { inputPerMillion: 1, outputPerMillion: 2, cacheReadPerMillion: 0.1 } },
+      },
+    })
+    expect(profile.llmCalls).toBe(1)
+    expect(profile.totalInputTokens).toBe(1000)
+    expect(profile.costStatus).toBe('estimated')
+    expect(profile.estimatedCostUsd).toBe(0.00201)
   })
 })
