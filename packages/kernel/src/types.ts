@@ -55,26 +55,44 @@ export type ImageContent = {
 }
 
 /**
- * Extended-thinking block (Anthropic-specific). The model's private
- * reasoning that produced the visible answer. Preserved in the message log
- * because the API requires echoing it back on the next turn for tool-use
- * flows; UI displays it collapsed by default.
+ * Model reasoning block  -  the model's private chain-of-thought that
+ * produced the visible answer. Every major provider now surfaces some
+ * variant of this: Anthropic's extended thinking, OpenAI's o1 reasoning
+ * traces, Gemini's thoughts. Adapters normalize their provider-specific
+ * shape into this envelope so the kernel and dashboard stay agnostic.
  *
- * `signature` is a provider-generated opaque token proving the block came
- * from the API, required on the next turn per Anthropic's spec.
+ * Preserved in the message log because some provider APIs (notably
+ * Anthropic) require echoing it back on the next turn for tool-use flows;
+ * the kernel treats it as opaque and simply round-trips whatever the
+ * adapter attached.
+ *
+ * `signature` is a provider-generated opaque token some APIs demand on
+ * the next turn to prove the block came from them. `provider` is a soft
+ * hint for the dashboard's rendering (e.g. show an Anthropic badge); it
+ * MUST NOT be interpreted by the kernel.
+ *
+ * The wire discriminator stays `type: 'thinking'` for JSONL-log backward
+ * compatibility  -  every existing log line already carries that literal.
  */
-export type ThinkingContent = {
+export type ReasoningContent = {
   type: 'thinking'
   text: string
   signature?: string
+  provider?: string
 }
+
+/**
+ * @deprecated Use {@link ReasoningContent}. Kept as an alias so existing
+ * imports keep working through the rename.
+ */
+export type ThinkingContent = ReasoningContent
 
 export type MessageContent =
   | TextContent
   | ToolCallContent
   | ToolResultContent
   | ImageContent
-  | ThinkingContent
+  | ReasoningContent
 
 export type Message = {
   role: Role
@@ -152,18 +170,17 @@ export type UsageTotal = {
 export const MEMORY_TOOL_NAME = 'memory'
 
 /**
- * Session-scoped notepad the agent maintains for itself across turns of the
- * current conversation. Written via the `memory` executor tool with
- * `operation: 'write'` and `scope: 'session'`; the reducer intercepts the tool_result and lifts the
- * (key, content) into this map so future turns see it inlined in state
- * without re-hitting IO. Workspace- and global-scope memory live on disk
- * (executor writes them, dashboard fetches them lazily) and never touch
- * kernel state.
+ * @deprecated Kernel no longer lifts memory entries into state. Kept for
+ * consumers that still import the name; will be removed in a follow-up.
+ * The `memory` tool executes entirely inside the executor; a session-scope
+ * write echoes its (key, content) back through the normal tool_result and
+ * dashboards derive their view from the timeline via a shadow-state
+ * consumer on the host side.
  */
 export type MemoryEntry = {
   readonly key: string
   readonly content: string
-  readonly updatedAt: string  // ISO-8601, provider-supplied via tool input
+  readonly updatedAt: string
 }
 
 export type ContextPressureLevel = 'none' | 'soft' | 'hard'
@@ -192,7 +209,6 @@ export type AgentState = {
   readonly status: AgentStatus
   readonly usage: UsageTotal
   readonly cursor: number // monotonic event counter, for replay positioning
-  readonly memory: readonly MemoryEntry[]
   readonly cwd?: string
   /**
    * Derived on every step from `usage.inputTokens / config.contextLimit`.

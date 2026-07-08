@@ -1084,7 +1084,10 @@ function StateRuntime({
   const inspectedState = replayState ?? state
   if (!state) return <EmptyBlock label="No AgentState loaded." />
   const pendingCalls = inspectedState?.pendingCalls.map((c) => `${c.name}  -  ${c.status}`) ?? []
-  const memoryKeys = inspectedState?.memory?.map((entry) => entry.key) ?? []
+  // Session memory used to live on state.memory; it moved out of the kernel
+  // in the protocol refactor and now flows via a host-side shadow-state
+  // channel. Placeholder empty until that channel is wired in the dashboard.
+  const memoryKeys: readonly string[] = []
   return (
     <>
       <ScrollArea className="h-full">
@@ -1131,7 +1134,7 @@ function StateRuntime({
             <StateGroup
               title="Memory"
               rows={[
-                ['session entries', String(inspectedState?.memory?.length ?? 0)],
+                ['session entries', String(memoryKeys.length)],
                 ['keys', memoryKeys.length > 0 ? memoryKeys.join(', ') : 'none'],
               ]}
             />
@@ -1277,8 +1280,10 @@ function isSkillTool(tool: ToolSchema): boolean {
   return tool.name === 'skill'
 }
 
-function MemoryRuntime({ state }: { state: AgentState | null }): JSX.Element {
-  const memory = state?.memory ?? []
+function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Element {
+  // Session memory moved out of kernel state; the dashboard will consume a
+  // host-shadow-state channel in a follow-up. Empty for now.
+  const memory: ReadonlyArray<{ key: string; content: string; updatedAt: string }> = []
   const [scope, setScope] = useState<'session' | 'workspace' | 'global'>('session')
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(7rem,0.8fr)_minmax(0,1.2fr)] gap-2">

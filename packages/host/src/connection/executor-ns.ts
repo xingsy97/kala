@@ -81,14 +81,29 @@ export function configureExecutorNamespace(
       deps.executors.fulfill(payload.sessionId, payload)
     })
     socket.on('executor:bg_task_updated', (payload: ServerBgTaskUpdated) => {
+      const room = `workspace:${payload.workspaceId}`
+      deps.dashboardNs.to(room).emit('server:bg_task_updated', payload)
+      deps.dashboardNs.to(room).emit('server:control_update', {
+        kind: 'bg_task_updated',
+        ...payload,
+      })
+    })
+    socket.on('executor:tool_progress', (payload) => {
+      // Fan out to any dashboard subscribed to this session's room.
       deps.dashboardNs
-        .to(`workspace:${payload.workspaceId}`)
-        .emit('server:bg_task_updated', payload)
+        .to(`session:${payload.sessionId}`)
+        .emit('server:control_update', {
+          kind: 'tool_progress',
+          ...payload,
+        })
     })
     socket.on('executor:bg_task_evicted', (payload: ServerBgTaskEvicted) => {
-      deps.dashboardNs
-        .to(`workspace:${payload.workspaceId}`)
-        .emit('server:bg_task_evicted', payload)
+      const room = `workspace:${payload.workspaceId}`
+      deps.dashboardNs.to(room).emit('server:bg_task_evicted', payload)
+      deps.dashboardNs.to(room).emit('server:control_update', {
+        kind: 'bg_task_evicted',
+        ...payload,
+      })
     })
     socket.on('disconnect', () => {
       deps.executors.detach(socket)

@@ -289,14 +289,20 @@ export async function startHostServer(
       })
     },
     onSubAgentStarted(payload) {
-      io.of('/dashboard')
-        .to(`session:${payload.parentSessionId}`)
-        .emit('server:sub_agent_started', payload)
+      const room = `session:${payload.parentSessionId}`
+      io.of('/dashboard').to(room).emit('server:sub_agent_started', payload)
+      io.of('/dashboard').to(room).emit('server:control_update', {
+        kind: 'sub_agent_started',
+        ...payload,
+      })
     },
     onSubAgentFinished(payload) {
-      io.of('/dashboard')
-        .to(`session:${payload.parentSessionId}`)
-        .emit('server:sub_agent_finished', payload)
+      const room = `session:${payload.parentSessionId}`
+      io.of('/dashboard').to(room).emit('server:sub_agent_finished', payload)
+      io.of('/dashboard').to(room).emit('server:control_update', {
+        kind: 'sub_agent_finished',
+        ...payload,
+      })
     },
   }
 
@@ -368,6 +374,10 @@ export async function startHostServer(
   // shows all daemons, not just the one for the currently-selected session.
   executors.onChange((change) => {
     dashboardNs.emit('server:executor_changed', change)
+    dashboardNs.emit('server:control_update', {
+      kind: 'executor_changed',
+      ...change,
+    })
   })
 
   function broadcastError(
