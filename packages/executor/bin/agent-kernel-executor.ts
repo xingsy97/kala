@@ -23,7 +23,12 @@
  * `workspaceId` matches this executor's stored workspace id.
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
+
+import lockfile from 'proper-lockfile'
 
 import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
@@ -80,6 +85,56 @@ function parseArgs(argv: readonly string[]): Args {
   return out
 }
 
+/**
+ * Acquire a single-instance lock at `~/.agent-kernel/executor.lock`. Fails
+ * fast (no retry) if another executor process on the same user account is
+ * already running. The lock is released automatically on process exit;
+ * `proper-lockfile` also uses mtime-based stale detection so a crashed
+ * executor's lock becomes reclaimable after 30 seconds.
+ */
+async function acquireLocalLock(
+  logger: ReturnType<typeof createRuntimeLogger>,
+): Promise<string> {
+  const dir = join(homedir(), '.agent-kernel')
+  mkdirSync(dir, { recursive: true })
+  const lockPath = join(dir, 'executor.lock')
+  // proper-lockfile locks a target file  -  write an empty sentinel first
+  // so its existence check succeeds.
+  if (!existsSync(lockPath)) {
+    writeFileSync(lockPath, '', { flag: 'a', mode: 0o600 })
+  }
+  try {
+    await lockfile.lock(lockPath, {
+      stale: 30_000,
+      retries: 0,
+      realpath: false,
+    })
+    // Overwrite the sentinel with our PID + timestamp so a user can trace
+    // stray locks. (proper-lockfile itself keeps a sibling `.lock`
+    // directory; the payload of `lockPath` is just informational.)
+    writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n`)
+    return lockPath
+  } catch (err) {
+    // Contention: read whoever's already holding the lock.
+    let existingPid = '?'
+    try {
+      existingPid = readFileSync(lockPath, 'utf8').split('\n')[0]?.trim() ?? '?'
+    } catch {
+      // ignore
+    }
+    logger.error(
+      {
+        existingPid,
+        lockPath,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      `another executor is already running on this machine (pid ${existingPid}). ` +
+        `Stop it first, or if you're sure no executor is running, delete ${lockPath}.`,
+    )
+    process.exit(1)
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
   const host = args.host ?? process.env.HOST_URL
@@ -100,6 +155,18 @@ async function main(): Promise<void> {
     )
     process.exit(1)
   }
+
+  // Local single-instance lock. A single machine may only run one executor
+  // at a time  -  otherwise two processes would race for the same workspaceId
+  // and only one would end up bound on the host side (the other would be
+  // rejected by the host's workspaceId arbitration, but the misleading
+  // failure mode is worse than an early exit here).
+  const lockPath = await acquireLocalLock(logger)
+  process.on('exit', () => {
+    // Best-effort release. proper-lockfile also survives crashes via mtime
+    // staleness so we don't panic if this doesn't run.
+    void lockfile.unlock(lockPath, { realpath: false }).catch(() => undefined)
+  })
 
   if (!noUpdateCheck && process.env.AGENT_KERNEL_SKIP_UPDATE_ONCE !== '1') {
     try {
@@ -148,6 +215,26 @@ async function main(): Promise<void> {
   }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+
+  // Wait for a permanent error signal from the wire layer. This resolves
+  // only if we've decided reconnection is hopeless  -  bad version, wrong
+  // auth, host claimed our workspaceId, or socket.io ran out of retry
+  // budget. Distinct exit codes let systemd / launchd distinguish "please
+  // restart me" from "don't restart, fix the config".
+  const failure = await handle.permanentError
+  const exitCodeByReason: Record<string, number> = {
+    workspace_id_conflict: 2,
+    version_incompatible: 3,
+    auth_failed: 4,
+    reconnect_exhausted: 5,
+  }
+  const code = exitCodeByReason[failure.code] ?? 1
+  logger.error(
+    { failure },
+    `executor stopping  -  this is a permanent failure that will not self-heal. ` +
+      `See message above for instructions.`,
+  )
+  process.exit(code)
 }
 
 main().catch((err) => {

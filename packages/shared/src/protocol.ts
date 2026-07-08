@@ -1059,6 +1059,21 @@ export type ExecutorServerToClientEvents = {
     ack: (result: ToolResultAck) => void,
   ) => void
   'tool:cancel': (payload: ToolCancelMessage) => void
+  /**
+   * Permanent-failure signal. Sent immediately before a server-initiated
+   * `socket.disconnect(true)` when the executor must not retry (workspaceId
+   * conflict, auth failure, protocol-version incompatibility). Executors
+   * should log `payload.message` and exit their process  -  the socket.io
+   * client will fire `disconnect('io server disconnect')` right after this
+   * event and, per the client's own retry policy, must not reconnect.
+   *
+   * The `code` field is machine-readable so the executor's exit path can
+   * pick a distinct exit code per class of failure.
+   */
+  'executor:host_reject': (payload: {
+    code: 'workspace_id_conflict' | 'version_incompatible' | 'auth_failed'
+    message: string
+  }) => void
 }
 
 // ============================================================================

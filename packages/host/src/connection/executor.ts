@@ -307,25 +307,79 @@ export function createExecutorRegistry(
   return {
     attach(socket, announcement, clientVersion) {
       const executorId = announcement.executorId
-      const existing = byExecutor.get(executorId)
-      const bind: Bind = {
+      const workspaceId = announcement.workspaceId
+      const newBind: Bind = {
         socket,
         announcement,
         attachedAt: new Date().toISOString(),
         pending: new Map(),
         ...(clientVersion !== undefined ? { clientVersion } : {}),
       }
-      if (existing) {
-        // Same executor, new socket: reconnect. Preserve outstanding calls.
-        socketToExecutor.delete(existing.socket.id)
-        redispatchPending(existing, bind)
+
+      // Case 1: same executorId already attached  -  normal reconnect. Preserve
+      // outstanding calls and swap in the new socket. This is the path
+      // triggered when a single executor process restarts or its socket
+      // briefly disconnects.
+      const existingSame = byExecutor.get(executorId)
+      if (existingSame) {
+        socketToExecutor.delete(existingSame.socket.id)
+        redispatchPending(existingSame, newBind)
+        byExecutor.set(executorId, newBind)
+        socketToExecutor.set(socket.id, executorId)
+        emitChange({
+          change: 'updated',
+          executorId,
+          executor: toAttached(newBind),
+        })
+        return
       }
-      byExecutor.set(executorId, bind)
+
+      // Case 2: different executorId but same workspaceId  -  a *different*
+      // process is claiming the same workspace. That happens when a
+      // duplicate `~/.agent-kernel/workspace-id` file was copied to another
+      // machine, or when two processes on the same host started before the
+      // local-instance lockfile could take effect.
+      //
+      // Arbitration: if the current claimant's socket is still connected,
+      // reject the newcomer with a permanent error. If it's already gone
+      // (a disconnect event that hasn't propagated, or a race), let the
+      // newcomer take over.
+      const wsClaimant = findBindByWorkspace(workspaceId)
+      if (wsClaimant && wsClaimant.announcement.executorId !== executorId) {
+        if (wsClaimant.socket.connected) {
+          socket.emit('executor:host_reject', {
+            code: 'workspace_id_conflict',
+            message:
+              `workspace ${workspaceId} is already claimed by ` +
+              `executor ${wsClaimant.announcement.executorId} ` +
+              `(from ${wsClaimant.announcement.hostname ?? '?'}). ` +
+              `Two executors cannot hold the same workspaceId simultaneously  -  ` +
+              `check for a duplicate ~/.agent-kernel/workspace-id file across machines.`,
+          })
+          // Server-initiated disconnect: the executor's socket.io client sees
+          // this as `disconnect('io server disconnect')` and, with the retry
+          // logic in fix 3, will stop reconnecting instead of hot-looping.
+          socket.disconnect(true)
+          return
+        }
+        // Stale claimant: take over. Cancel its in-flight calls, evict it
+        // from the registry, then fall through to normal attach.
+        synthesizeFailure(wsClaimant, 'workspace claimed by new executor')
+        byExecutor.delete(wsClaimant.announcement.executorId)
+        socketToExecutor.delete(wsClaimant.socket.id)
+        emitChange({
+          change: 'detached',
+          executorId: wsClaimant.announcement.executorId,
+        })
+      }
+
+      // Case 3: brand-new executor + fresh workspaceId. Normal attach.
+      byExecutor.set(executorId, newBind)
       socketToExecutor.set(socket.id, executorId)
       emitChange({
-        change: existing ? 'updated' : 'attached',
+        change: 'attached',
         executorId,
-        executor: toAttached(bind),
+        executor: toAttached(newBind),
       })
     },
     detach(socket) {

@@ -175,6 +175,9 @@ export function useSession({
       },
       reconnection: true,
       reconnectionDelay: 500,
+      reconnectionDelayMax: 30_000,
+      reconnectionAttempts: 30,
+      randomizationFactor: 0.5,
     }) as DashboardSocket
     socketRef.current = socket
     const isCurrentSocket = (): boolean => socketRef.current === socket
@@ -275,12 +278,31 @@ export function useSession({
         setSelectedModel(p.model.length > 0 ? p.model : null)
       }
     })
-    socket.on('connect_error', () => {
+    socket.on('connect_error', (err) => {
+      if (!isCurrentSocket()) return
+      // Version / auth failures are handshake-time  -  no point retrying.
+      // Stop the socket.io retry loop and hold in an error state so the
+      // user sees an actionable banner instead of a hot-looping toast.
+      const msg = (err as Error | undefined)?.message ?? ''
+      if (msg === 'version_incompatible' || msg === 'auth_failed') {
+        socket.disconnect()
+      }
+      setStatus('error')
+    })
+    socket.io.on('reconnect_failed', () => {
       if (!isCurrentSocket()) return
       setStatus('error')
     })
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
       if (!isCurrentSocket()) return
+      // Server-initiated disconnect (e.g. workspaceId conflict analogue on
+      // dashboard side, or host shutdown) is terminal  -  don't let socket.io
+      // keep dialing.
+      if (reason === 'io server disconnect') {
+        socket.disconnect()
+        setStatus('error')
+        return
+      }
       setStatus('disconnected')
     })
 
