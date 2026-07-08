@@ -201,7 +201,7 @@ New hook `packages/dashboard/src/features/chat/useBackgroundTasks.ts`:
 
 `BackgroundTerminalPanel` gets a rewrite:
 
-- Peek strip at the bottom of the chat pane, similar to `TasksPeek`: shows a one-line status ("2 running · npm run dev · 12 s") that expands into a drawer.
+- Compact footer control, similar to `TasksButton`: shows a one-line status ("2 running · npm run dev · 12 s") that expands into a popover/drawer.
 - Drawer content: left column = task list (status dot, command, elapsed, kill button), right column = output pane with monospace, auto-scroll-to-bottom toggle, copy-all, restart hint.
 - Selecting a task in the drawer sets it as the poll target; unselecting stops the poll (only push events keep the summary current).
 - Kill button emits `bg:kill` and disables until the task's status flips.
