@@ -12,7 +12,7 @@
  */
 
 import { realpath } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, resolve, sep } from 'node:path'
 
 export type ResolveOptions = {
@@ -75,12 +75,45 @@ async function canonicalizeMaybeMissing(p: string): Promise<string> {
   }
 }
 
+/**
+ * Synchronous canonicalizer for the configured roots. Roots are resolved once
+ * at construction, so a sync `realpath` keeps `createSandbox` synchronous.
+ *
+ * Roots MUST be canonicalized the same way inputs are, and here that means
+ * `realpathSync.native`  -  NOT the plain `realpathSync`. On Windows the two
+ * sync variants disagree with the async `realpath` used for inputs: given a
+ * path carrying an 8.3 short name (`C:\Users\USER\ - `, as `os.tmpdir()`
+ * can yield), plain `realpathSync` leaves the alias intact while both
+ * `realpathSync.native` and the async `realpath` expand it to the long name
+ * (`C:\Users\user\ - `). If the root stayed short while inputs came back
+ * long, `canonical.startsWith(root + sep)` would be false for paths genuinely
+ * inside the root  -  a false EACCES (and, conversely, a short-form root would
+ * never match its own realpath'd contents). Using `.native` keeps both sides
+ * on the long form. Falls back to the resolved path if the root does not yet
+ * exist.
+ */
+function canonicalizeRootSync(p: string): string {
+  if (existsSync(p)) return realpathSync.native(p)
+  let cur = p
+  const parts: string[] = []
+  while (true) {
+    if (existsSync(cur)) {
+      const base = realpathSync.native(cur)
+      return resolve(base, ...parts.reverse())
+    }
+    const parent = dirname(cur)
+    if (parent === cur) return p
+    parts.push(cur.slice(parent.length + 1))
+    cur = parent
+  }
+}
+
 export function createSandbox(options: SandboxOptions): Sandbox {
   const canonicalRoots = options.roots.map((r) => {
     if (!isAbsolute(r)) {
       throw new Error(`sandbox root must be absolute: ${r}`)
     }
-    return resolve(r)
+    return canonicalizeRootSync(resolve(r))
   })
 
   return {

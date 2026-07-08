@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -111,6 +111,20 @@ function toolResultContent(logPath: string, callId: string): string | undefined 
   return undefined
 }
 
+/**
+ * Fold a path to a comparable form. `bash pwd` on Windows prints Git-Bash /
+ * MSYS drive syntax (`/c/Users/ - `) while the paths we build with `node:path`
+ * use native backslashes. Lowercase the drive letter and switch to forward
+ * slashes so an assertion checks "same location", not the shell's byte form.
+ * Effectively identity on POSIX.
+ */
+function normalizePath(p: string): string {
+  let s = p.trim().replace(/\\/g, '/')
+  const msys = /^\/([a-zA-Z])\//.exec(s)
+  if (msys) s = `${msys[1]!.toLowerCase()}:/${s.slice(3)}`
+  return s.replace(/^([a-zA-Z]):\//, (_m, d: string) => `${d.toLowerCase()}:/`)
+}
+
 describe('executor end-to-end', () => {
   let server: HostServer
   let sessionsDir: string
@@ -121,7 +135,11 @@ describe('executor end-to-end', () => {
 
   beforeEach(async () => {
     sessionsDir = mkdtempSync(join(tmpdir(), 'ak-e2e-sess-'))
-    sandboxRoot = mkdtempSync(join(tmpdir(), 'ak-e2e-ws-'))
+    // Canonicalize the workspace root: the sandbox returns canonical paths
+    // (8.3 short names expanded on Windows), and state.cwd / tool output are
+    // compared against paths derived from this root. `os.tmpdir()` may itself
+    // be an 8.3 path, so canonicalize up front to compare like with like.
+    sandboxRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'ak-e2e-ws-')))
     targetPath = join(sandboxRoot, 'hello.txt')
     config = createConfig({ tools: [WRITE_SCHEMA], systemPrompt: 'sys' })
     const http = createServer()
@@ -288,7 +306,7 @@ describe('executor end-to-end', () => {
     const rec = server.store.get(sessionId)!
     expect(toolResultContent(rec.logPath, 'ls-cwd')).toBe('child-only.txt')
     const pwd = toolResultContent(rec.logPath, 'pwd-cwd')
-    expect(pwd?.split('\n')[0]).toBe(child)
+    expect(normalizePath(pwd?.split('\n')[0] ?? '')).toBe(normalizePath(child))
     expect(pwd).not.toContain(sandboxRoot + '\n--- exit code')
 
     dashboard.close()
@@ -381,7 +399,7 @@ describe('executor end-to-end', () => {
 
     const rec = server.store.get(sessionId)!
     const pwd = toolResultContent(rec.logPath, 'pwd-after-set-cwd')
-    expect(pwd?.split('\n')[0]).toBe(child)
+    expect(normalizePath(pwd?.split('\n')[0] ?? '')).toBe(normalizePath(child))
     expect(pwd).not.toContain(process.cwd())
 
     dashboard.close()
