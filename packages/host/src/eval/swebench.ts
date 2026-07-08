@@ -690,6 +690,7 @@ export async function exportSessionForSweBench(
   experiment: EvalExperiment
   prediction: SweBenchPrediction
   traceArtifact: ArtifactRef
+  trial: EvalTrial
 }> {
   const parsed = await readSessionLog(input.sessionLogPath)
   const spans = exportSessionSpans({
@@ -724,7 +725,27 @@ export async function exportSessionForSweBench(
     `traces/${input.instanceId}.openinference.json`,
     { spans },
   )
-  return { layout, experiment, prediction, traceArtifact }
+  await mkdir(layout.trialsDir, { recursive: true })
+  const diffArtifact = await store.writeText('diff', `artifacts/${input.instanceId}/final.diff`, input.modelPatch)
+  const failureLabel = input.modelPatch.trim().length === 0 ? 'empty_patch' : undefined
+  const trial: EvalTrial = {
+    trialId: `${input.runId}:${input.instanceId}`,
+    experimentId: experiment.experimentId,
+    instanceId: input.instanceId,
+    sessionId: parsed.header.sessionId,
+    status: failureLabel ? 'failed' : 'completed',
+    resolved: false,
+    ...(failureLabel ? { failureLabel } : {}),
+    artifacts: [traceArtifact, diffArtifact],
+    metrics: {
+      eventCount: parsed.events.length,
+      patchBytes: Buffer.byteLength(input.modelPatch, 'utf8'),
+      patchLines: input.modelPatch.length === 0 ? 0 : input.modelPatch.split('\n').length,
+    },
+  }
+  await writeFile(join(layout.trialsDir, `${input.instanceId}.json`), `${JSON.stringify(trial, null, 2)}\n`, 'utf8')
+  await writeFile(layout.summaryPath, `${JSON.stringify(summarizeEvalRun(experiment, [trial]), null, 2)}\n`, 'utf8')
+  return { layout, experiment, prediction, traceArtifact, trial }
 }
 
 export type SweBenchGradeInput = {
