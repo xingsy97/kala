@@ -9,6 +9,7 @@ export default defineConfig({
     alias: {
       '@agent-kernel/host': resolve(__dirname, '../host/src/index.ts'),
       '@agent-kernel/kernel': resolve(__dirname, '../kernel/src/index.ts'),
+      '@agent-kernel/shared/enhancement': resolve(__dirname, '../shared/src/enhancement.ts'),
       '@agent-kernel/shared': resolve(__dirname, '../shared/src/index.ts'),
     },
   },
