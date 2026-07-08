@@ -186,11 +186,33 @@ dry-run SWE-bench harness command construction. Full Docker grading remains
 manual/opt-in because official SWE-bench evaluation has large CPU, memory, and
 storage requirements.
 
-Phase 5: model-assisted judge evaluators with saved judge traces.
+Phase 5: model-assisted judge evaluators with saved judge traces. Implemented
+as a host-side artifact runner, not as a replacement for deterministic grading:
+
+```bash
+agent-kernel-host enhancement eval judge-score \
+  --root-dir runs/eval/judge-score \
+  --prompt runs/tmp/judge-prompt.txt \
+  --response runs/tmp/judge-response.json \
+  --judge-model judge-model-v1 \
+  --scorer answer.groundedness \
+  --threshold 0.7
+```
+
+The response file must contain a numeric `score` field in the `[0, 1]` range.
+Optional `label` and `explanation` fields are preserved when present. The
+runner writes:
+
+- `judge/<scorer>.judge-trace.json`: redacted judge prompt, judge model,
+  raw response, parsed score/pass/failure label, and metadata;
+- `scores.json`: standard eval score summary with the judge trace artifact ref.
+
+This preserves auditability for subjective evaluators while keeping official
+benchmark scoring, such as SWE-bench, delegated to the official harness.
 
 ## Testing Plan
 
-- Unit tests for score aggregation.
+- Unit tests for score aggregation and model-judge trace persistence.
 - Snapshot tests for experiment metadata.
 - Integration test running a tiny fixture task end-to-end.
 - Browser test for experiment list and trial detail.

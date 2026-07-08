@@ -85,7 +85,11 @@ missing, `costStatus` is `unknown`; the runner does not invent cost precision.
 Add compact profiling views:
 
 - Per-call latency bars in trace.
-- Cost/token summary per session.
+- Cost/token summary per session. Implemented in the dashboard artifact
+  explorer as a `Profiles` tab that discovers `profile.json` artifacts through
+  the manifest endpoint, loads their content on demand, and shows LLM/tool
+  calls, token totals, known estimated cost, unknown-cost count, missing LLM
+  traces, and model ids.
 - Eval run cost distribution.
 - Slowest calls and largest context calls.
 - TTFT for streaming LLM calls.
@@ -94,6 +98,8 @@ Add compact profiling views:
 
 - Unit tests for pricing table lookup and unknown-cost handling.
 - Implemented for session-log profile export.
+- Browser-level component test for profile artifact rendering with missing
+  provider trace counts and estimated cost.
 - Integration test that LLM spans include TTFT when streaming.
 - Browser test for cost summary with missing usage fields.
 

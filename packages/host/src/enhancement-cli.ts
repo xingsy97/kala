@@ -10,9 +10,11 @@ import {
 import { buildArtifactManifest, type BuildArtifactManifestInput } from './artifact-manifest.js'
 import {
   compareEvalRuns,
+  judgeScore,
   profileSession,
   scoreSession,
   type CompareEvalRunsInput,
+  type JudgeScoreInput,
   type ProfileSessionInput,
   type ScoreSessionInput,
 } from './eval/generic.js'
@@ -23,6 +25,7 @@ import { exportSubAgentGraph, type ExportSubAgentGraphInput } from './subagent-g
 export type EnhancementCliCommand =
   | { kind: 'none' }
   | ({ kind: 'eval-score-session' } & ScoreSessionInput)
+  | ({ kind: 'eval-judge-score' } & JudgeScoreInput)
   | ({ kind: 'eval-compare-runs' } & CompareEvalRunsInput)
   | ({ kind: 'profile-session' } & ProfileSessionInput)
   | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
@@ -66,6 +69,21 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       rootDir: value(rest, '--root-dir') ?? 'runs/eval/compare',
       baselineSummaryPath: required(rest, '--baseline-summary'),
       candidateSummaryPath: required(rest, '--candidate-summary'),
+    }
+  }
+  if (argv[1] === 'eval' && argv[2] === 'judge-score') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'eval-judge-score',
+      rootDir: value(rest, '--root-dir') ?? 'runs/eval/judge-score',
+      promptPath: required(rest, '--prompt'),
+      responsePath: required(rest, '--response'),
+      judgeModel: required(rest, '--judge-model'),
+      scorer: value(rest, '--scorer'),
+      instanceId: value(rest, '--instance-id'),
+      threshold: numberValue(rest, '--threshold'),
+      inputRef: value(rest, '--input-ref'),
+      workspaceRoot: value(rest, '--workspace-root'),
     }
   }
   if (argv[1] === 'profile' && argv[2] === 'session') {
@@ -168,6 +186,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
   if (command.kind === 'eval-compare-runs') {
     const result = await compareEvalRuns(command)
     console.log(JSON.stringify({ comparisonPath: result.comparisonPath, comparison: result.comparison }, null, 2))
+    return true
+  }
+  if (command.kind === 'eval-judge-score') {
+    const result = await judgeScore(command)
+    console.log(JSON.stringify({ scoresPath: result.scoresPath, judgeTrace: result.judgeTrace, summary: result.summary }, null, 2))
     return true
   }
   if (command.kind === 'profile-session') {
