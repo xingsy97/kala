@@ -561,6 +561,7 @@ function fromAnthropicBlock(block: AnthropicBlock): MessageContent | null {
     return {
       type: 'thinking',
       text: block.thinking,
+      provider: 'anthropic',
       ...(block.signature ? { signature: block.signature } : {}),
     }
   }

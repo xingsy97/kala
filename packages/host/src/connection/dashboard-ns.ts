@@ -368,6 +368,11 @@ export function configureDashboardNamespace(
           sessionId: p.sessionId,
           label: applied,
         })
+        deps.dashboardNs.emit('server:control_update', {
+          kind: 'session_meta_changed',
+          sessionId: p.sessionId,
+          label: applied,
+        })
         await broadcastSessionList(deps)
       } catch (err) {
         deps.broadcastError(
@@ -653,6 +658,13 @@ function applyPreferencesUpdate(
   deps.dashboardNs
     .to(`session:${sessionId}`)
     .emit('session:preferences_changed', { sessionId, preferences: effective })
+  deps.dashboardNs
+    .to(`session:${sessionId}`)
+    .emit('server:control_update', {
+      kind: 'session_meta_changed',
+      sessionId,
+      preferences: effective,
+    })
 }
 
 async function safeDispatch(

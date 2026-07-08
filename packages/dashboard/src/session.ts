@@ -15,6 +15,7 @@ import type {
   AgentState,
   Effect,
 } from '@agent-kernel/kernel'
+import { step } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
   AttachedExecutor,
@@ -98,6 +99,10 @@ export function useSession({
   const [parentCursor, setParentCursor] = useState<number | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
+  // Latest AgentConfig — needed by the client-side fold on event:appended,
+  // which lives inside a stable useEffect closure and can't read the React
+  // `config` state directly.
+  const configRef = useRef<AgentConfig | null>(null)
   // Streaming smoother: token_delta events land in `streamBufferRef`, and a
   // requestAnimationFrame loop drains a chunk per frame into React state. This
   // collapses 60-100 setState calls/sec into ~60 frames/sec AND paces bursty
@@ -111,6 +116,7 @@ export function useSession({
     setStatus('connecting')
     setState(null)
     setConfig(null)
+    configRef.current = null
     setTimeline([])
     setStreamingText('')
     streamBufferRef.current = ''
@@ -178,6 +184,7 @@ export function useSession({
       setStatus('ready')
       setState(p.state)
       setConfig(p.config)
+      configRef.current = p.config
       setParentSessionId(p.parentSessionId ?? null)
       setParentCursor(p.parentCursor ?? null)
       setSelectedModel(p.selectedModel ?? null)
@@ -206,6 +213,11 @@ export function useSession({
     })
     socket.on('state:changed', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
+      // Kept as a fallback / correction channel. The primary path is
+      // `session:ready` (baseline) + `event:appended` (client-side fold
+      // via kernel step()). This handler runs if a wire event lands
+      // out-of-order or if the host pushes a mid-stream correction; in
+      // both cases the server-computed state wins.
       setState(p.state)
       if (p.state.status !== 'thinking') resetStream()
     })
@@ -215,6 +227,15 @@ export function useSession({
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
         resetStream()
       }
+      // Client-side fold: apply the event to the last known state so the
+      // dashboard doesn't need `state:changed` to stay in sync. If config
+      // isn't loaded yet (very early race between event:appended and
+      // session:ready) we skip — state:changed above will correct it.
+      setState((prev) => {
+        if (prev === null || configRef.current === null) return prev
+        const { next } = step(prev, p.event, configRef.current)
+        return next
+      })
       setTimeline((prev) =>
         mergeBySeq(prev, [
           {

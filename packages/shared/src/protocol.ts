@@ -105,6 +105,60 @@ export type SessionPreferencesChangedEvent = {
   preferences: SessionPreferences
 }
 
+// ============================================================================
+// Unified control-plane push channel
+// ============================================================================
+
+/**
+ * A single wire event — `server:control_update` — carries every "something
+ * outside the kernel changed" push. This replaces the ~8 individual
+ * push-event names that previously fanned out for renames, preferences,
+ * executor attaches/detaches, background-task lifecycle, sub-agent
+ * lifecycle, and tool-progress deltas.
+ *
+ * The `kind` field is the discriminator. Dashboard code should `switch`
+ * on it (with an exhaustive default that logs an unknown kind rather
+ * than throws — so a v(N+1) host can push a new kind to a v(N)
+ * dashboard without crashing it).
+ *
+ * The legacy per-name events (`session:renamed`, `server:executor_changed`,
+ * `server:bg_task_updated`, etc.) are still emitted for one release cycle
+ * so mid-flight dashboard bundles keep working during rollout. New code
+ * should subscribe to `server:control_update` and read from the payload.
+ */
+export type ControlUpdate =
+  | ({ kind: 'session_meta_changed' } & SessionMetaChanged)
+  | ({ kind: 'executor_changed' } & ServerExecutorChangedPayload)
+  | ({ kind: 'bg_task_updated' } & ServerBgTaskUpdated)
+  | ({ kind: 'bg_task_evicted' } & ServerBgTaskEvicted)
+  | ({ kind: 'sub_agent_started' } & ServerSubAgentStartedEvent)
+  | ({ kind: 'sub_agent_finished' } & ServerSubAgentFinishedEvent)
+  | ({ kind: 'tool_progress' } & ToolProgressPayload)
+
+/**
+ * "Something about the session's metadata changed." Groups rename +
+ * preferences + any future per-session UI-owned mutation. Any field left
+ * `undefined` means "unchanged since last snapshot"; the dashboard merges
+ * with its current view.
+ */
+export type SessionMetaChanged = {
+  sessionId: string
+  label?: string
+  preferences?: SessionPreferences
+}
+
+/**
+ * Streaming progress for long-running tools. `chunk` is arbitrary text
+ * the executor wants surfaced (e.g. lines from a long-running build).
+ * Ordering per (sessionId, callId) is preserved; interleaving across
+ * callIds is best-effort.
+ */
+export type ToolProgressPayload = {
+  sessionId: string
+  callId: string
+  chunk: string
+}
+
 export type StateChangedEvent = {
   sessionId: string
   cursor: number
@@ -940,6 +994,13 @@ export type DashboardServerToClientEvents = {
   'server:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
   'server:sub_agent_started': (payload: ServerSubAgentStartedEvent) => void
   'server:sub_agent_finished': (payload: ServerSubAgentFinishedEvent) => void
+  /**
+   * Unified control-plane push. Every "something outside the kernel
+   * changed" push is either duplicated here (during the migration
+   * window) or emitted only here (for new features). See {@link ControlUpdate}
+   * for the discriminated payload.
+   */
+  'server:control_update': (payload: ControlUpdate) => void
 }
 
 export type ServerMessageQueueEvent = {
@@ -958,6 +1019,7 @@ export type QueuedMessagePreview = {
 export type ExecutorClientToServerEvents = {
   'executor:announce': (payload: ExecutorAnnounce) => void
   'executor:tool_result': (payload: ExecutorToolResult) => void
+  'executor:tool_progress': (payload: ToolProgressPayload) => void
   'executor:bg_task_updated': (payload: ServerBgTaskUpdated) => void
   'executor:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
 }
