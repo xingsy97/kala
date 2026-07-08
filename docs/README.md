@@ -19,7 +19,6 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Three-process topology and a full turn end-to-end |
 | [core-protocol-design-review.md](core-protocol-design-review.md) | Review of the kernel FSM, event/effect schema, wire protocol, and boundary risks |
-| [platform.md](platform.md) | SaaS platformization design (multi-user cloud brain + local executors)  -  planned, not yet implemented |
 | [browser-core-local-runtime.md](browser-core-local-runtime.md) | Browser-core local runtime option for teaching/debugging  -  planned, not yet implemented |
 | [mcp.md](mcp.md) | MCP runtime integration design (planned, not yet implemented) |
 | [agentic-rl-integration.md](agentic-rl-integration.md) | Agentic RL rollout integration research note - adapter-first, not custom trajectory-first |

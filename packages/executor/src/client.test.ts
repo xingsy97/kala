@@ -15,6 +15,7 @@ import type {
   DashboardServerToClientEvents,
   SessionReadyEvent,
 } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
 import { startExecutor } from './client.js'
@@ -161,7 +162,7 @@ describe('executor end-to-end', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -262,7 +263,7 @@ describe('executor end-to-end', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -344,7 +345,7 @@ describe('executor end-to-end', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>

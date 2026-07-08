@@ -24,6 +24,7 @@ import type {
   ToolCancelMessage,
   ToolResultAck,
 } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { io as clientIO, type Socket } from 'socket.io-client'
 import { ulid } from 'ulid'
 
@@ -107,7 +108,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     transports: ['websocket'],
     auth: {
       role: 'executor',
-      clientVersion: '0.0.0',
+      clientVersion: PROTOCOL_VERSION,
       ...(options.token !== undefined ? { token: options.token } : {}),
     },
     reconnection: true,

@@ -50,7 +50,6 @@ export type LoopBroadcast = {
   ): void
   onApprovalRequired(sessionId: string, eff: RequestApprovalEffect): void
   onError(sessionId: string, message: string): void
-  onUsageChanged(sessionId: string, state: AgentState): void
   /**
    * Streaming text token from the adapter, forwarded to dashboards.
    * Optional  -  non-streaming adapters never invoke it and the wire event
@@ -216,9 +215,6 @@ export async function dispatchOne(
   safeBroadcast(() =>
     deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, llmTrace, model),
   )
-  if (usageChanged) {
-    safeBroadcast(() => deps.broadcast.onUsageChanged(sessionId, next))
-  }
 
   // Cancellation of in-flight IO is the host's job (SPEC  - Non-goals:
   // "Cancellation of in-flight tools  -  Only handles state  -  Host cancels

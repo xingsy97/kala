@@ -5,8 +5,8 @@
  * timestamps, workspace, executor, activity counters). The three editable
  * rows (label / cwd / approvalMode) each fire their own protocol event on
  * blur or submit so the modal can stay open while the host echoes the
- * result back through `session:renamed`, `event:appended` (cwd_changed),
- * or `session:approval_mode`.
+ * result back through `session:renamed` or `event:appended` (cwd_changed /
+ * approval_mode_changed).
  */
 
 import { useEffect, useState } from 'react'

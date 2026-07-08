@@ -54,6 +54,7 @@ import type {
   SessionReadyEvent,
   SubAgentSummary,
 } from '@agent-kernel/shared'
+import { isCompatibleVersion } from '@agent-kernel/shared'
 import type {
   AgentConfig,
   AgentEvent,
@@ -125,6 +126,10 @@ export function configureDashboardNamespace(
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'dashboard') {
       nextFn(new Error('role_mismatch'))
+      return
+    }
+    if (typeof auth.clientVersion !== 'string' || !isCompatibleVersion(auth.clientVersion)) {
+      nextFn(new Error('version_incompatible'))
       return
     }
     if (deps.authToken && auth.token !== deps.authToken) {
@@ -488,7 +493,11 @@ export function configureDashboardNamespace(
         await socket.join(`session:${record.sessionId}`)
         socket.emit(
           'session:ready',
-          readyEventFor(record, deps.selectedModels.get(record.sessionId)),
+          readyEventFor(
+            record,
+            deps.selectedModels.get(record.sessionId),
+            created ? 'created' : 'load',
+          ),
         )
         if (created) {
           await broadcastSessionList(deps)
@@ -547,6 +556,7 @@ export function configureDashboardNamespace(
         await socket.join(`session:${record.sessionId}`)
         const forked: SessionForkedEvent = {
           sessionId: record.sessionId,
+          reason: 'forked',
           parentSessionId: p.sourceSessionId,
           parentCursor: p.cursor,
           cursor: record.state.cursor,
@@ -603,16 +613,46 @@ export function configureDashboardNamespace(
 
     socket.on('client:set_model', (p: ClientSetModel) => {
       const trimmed = p.model.trim()
-      if (trimmed.length === 0) {
-        deps.selectedModels.delete(p.sessionId)
-      } else {
-        deps.selectedModels.set(p.sessionId, trimmed)
-      }
-      deps.dashboardNs
-        .to(`session:${p.sessionId}`)
-        .emit('session:model_changed', { sessionId: p.sessionId, model: trimmed })
+      applyPreferencesUpdate(deps, p.sessionId, { selectedModel: trimmed })
+    })
+    socket.on('client:update_preferences', (p) => {
+      applyPreferencesUpdate(deps, p.sessionId, p.preferences)
     })
   })
+}
+
+/**
+ * Apply a partial preferences patch. Empty string on `selectedModel` clears
+ * it (back to the host default). Emits both the new `session:preferences_changed`
+ * (canonical) and the legacy `session:model_changed` (kept for one release so
+ * old dashboard bundles keep working during rollout).
+ */
+function applyPreferencesUpdate(
+  deps: DashboardDeps,
+  sessionId: string,
+  patch: import('@agent-kernel/shared').SessionPreferences,
+): void {
+  if ('selectedModel' in patch) {
+    const trimmed = (patch.selectedModel ?? '').trim()
+    if (trimmed.length === 0) {
+      deps.selectedModels.delete(sessionId)
+    } else {
+      deps.selectedModels.set(sessionId, trimmed)
+    }
+    // Legacy emit  -  remove once every dashboard build has migrated to
+    // `session:preferences_changed`.
+    deps.dashboardNs
+      .to(`session:${sessionId}`)
+      .emit('session:model_changed', { sessionId, model: trimmed })
+  }
+  const effective: import('@agent-kernel/shared').SessionPreferences = {
+    ...(deps.selectedModels.get(sessionId)
+      ? { selectedModel: deps.selectedModels.get(sessionId) }
+      : {}),
+  }
+  deps.dashboardNs
+    .to(`session:${sessionId}`)
+    .emit('session:preferences_changed', { sessionId, preferences: effective })
 }
 
 async function safeDispatch(
@@ -769,9 +809,11 @@ async function broadcastSessionList(deps: DashboardDeps): Promise<void> {
 export function readyEventFor(
   record: SessionRecord,
   selectedModel?: string,
+  reason: SessionReadyEvent['reason'] = 'load',
 ): SessionReadyEvent {
   return {
     sessionId: record.sessionId,
+    reason,
     cursor: record.state.cursor,
     state: record.state,
     config: record.config,

@@ -27,6 +27,7 @@ import type {
   SessionSummary,
   LLMTrace,
 } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { io, type Socket } from 'socket.io-client'
 
 export type DashboardSocket = Socket<
@@ -163,7 +164,7 @@ export function useSession({
       auth: {
         sessionId,
         role: 'dashboard',
-        clientVersion: '0.0.0',
+        clientVersion: PROTOCOL_VERSION,
         ...(token !== undefined ? { token } : {}),
       },
       reconnection: true,

@@ -282,12 +282,6 @@ export async function startHostServer(
       io.of('/dashboard').to(`session:${sessionId}`).emit('session:error', payload)
       io.of('/executor').to(`session:${sessionId}`).emit('session:error', payload)
     },
-    onUsageChanged(sessionId, state) {
-      io.of('/dashboard').to(`session:${sessionId}`).emit('usage:updated', {
-        sessionId,
-        usage: state.usage,
-      })
-    },
     onTokenDelta(sessionId, text) {
       io.of('/dashboard').to(`session:${sessionId}`).emit('session:token_delta', {
         sessionId,

@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 import type { LLMAdapter } from '../src/llm/adapter.js'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { startHostServer } from '../src/server.js'
 import { startExecutor } from '../../executor/src/client.js'
 
@@ -100,7 +101,7 @@ async function main(): Promise<void> {
     auth: {
       sessionId: SESSION_ID,
       role: 'dashboard',
-      clientVersion: '0.0.0',
+      clientVersion: PROTOCOL_VERSION,
     },
     reconnection: false,
   })
