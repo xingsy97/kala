@@ -21,10 +21,10 @@
  * (no slashes, no dots) and to keep listings sortable/greppable.
  */
 
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import type { Tool, ToolContext } from './registry.js'
 import { ToolError, throwIfAborted } from './registry.js'
@@ -34,6 +34,7 @@ const KEY_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
 const MAX_CONTENT_BYTES = 128 * 1024 // 128 KB per entry — memory is notes, not files
 const VALID_SCOPES = new Set(['session', 'workspace', 'global'])
 const VALID_OPERATIONS = new Set(['read', 'list', 'write', 'delete'])
+const TOMBSTONE_DIR = '.tombstones'
 
 type Scope = 'session' | 'workspace' | 'global'
 type MemoryOperation = 'read' | 'list' | 'write' | 'delete'
@@ -198,6 +199,20 @@ async function deleteMemory(
     // Idempotent delete — treat missing as success. LLMs sometimes retry.
     return `no-op: scope=${scope} key=${key} did not exist`
   }
-  await unlink(file)
-  return `deleted scope=${scope} key=${key}`
+  const tombstoneDir = join(dir, TOMBSTONE_DIR)
+  await ensureDir(tombstoneDir)
+  const deletedAt = new Date().toISOString()
+  const archiveName = `${key}.${deletedAt.replace(/[:.]/g, '-')}.md`
+  const archivedPath = join(tombstoneDir, archiveName)
+  await rename(file, archivedPath)
+  await writeFile(join(tombstoneDir, `${archiveName}.json`), `${JSON.stringify({
+    schemaVersion: 1,
+    scope,
+    key,
+    deletedAt,
+    originalPath: file,
+    archivedPath,
+    archivedFile: basename(archivedPath),
+  }, null, 2)}\n`, 'utf8')
+  return `deleted scope=${scope} key=${key} (tombstone=${TOMBSTONE_DIR}/${archiveName}.json)`
 }

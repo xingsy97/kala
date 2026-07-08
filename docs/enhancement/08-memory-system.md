@@ -64,6 +64,14 @@ frontmatter such as `name`, `description`, `type`, `source`, `confidence`,
 memory to kernel state and does not inject memory into prompts. It is a derived
 artifact for dashboard provenance, eval reproducibility, and cleanup tooling.
 
+Workspace/global delete is implemented as a tombstone, not a hard erase. The
+executor moves the active markdown note under `.agent-kernel/memory/.tombstones/`
+and writes a JSON tombstone with `scope`, `key`, `deletedAt`, original path, and
+archive path. Normal `read`/`list` only sees active notes, while
+`memory-index.json` includes both `status: "active"` and `status: "tombstoned"`
+entries so deletion remains auditable and reversible without adding memory state
+to the kernel protocol.
+
 Implemented message assembly observability also accounts for memory. When a
 session already contains a structured `memory` tool call and its matching tool
 result, the live `message-assembly` artifact includes a `memory` contribution
@@ -77,9 +85,11 @@ state machine.
 - Implemented unit tests for workspace memory index export.
 - Implemented unit tests for memory contribution metadata in message assembly
   artifacts.
+- Implemented unit tests for workspace/global delete tombstones and tombstone
+  indexing.
 - Tests that benchmark mode disables cross-task memory by default.
 - Retrieval ranking tests with stale conflicting facts.
-- Browser tests for memory provenance and delete/tombstone behavior.
+- Browser tests for memory provenance views.
 
 ## Non-Goals
 
