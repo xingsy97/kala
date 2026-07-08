@@ -16,7 +16,7 @@ import type {
   ToolDispatcher,
 } from './loop.js'
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
-import { discoverSkills } from './skills.js'
+import { discoverSkills } from './extensions/skills.js'
 
 function silentBroadcast(): LoopBroadcast {
   return {
