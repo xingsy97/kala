@@ -140,9 +140,26 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
+function powershellQuote(value: string): string {
+  // PowerShell double-quoted strings interpolate `$`, treat `` ` `` as escape,
+  // and end at `"`. Escape all three so an untrusted hostUrl can't break out.
+  const escaped = value.replaceAll('`', '``').replaceAll('$', '`$').replaceAll('"', '`"')
+  return `"${escaped}"`
+}
+
 function commandFor(tab: OsTab, hostUrl: string): string {
   if (tab === 'windows') {
-    return `wget -qO- ${RELEASE_BASE}/run.sh | COMPONENT=executor HOST_URL=${shellQuote(hostUrl)} SANDBOX_ROOTS="$PWD" bash`
+    const quotedHost = powershellQuote(hostUrl)
+    return [
+      `$dir = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "agent-kernel-$([guid]::NewGuid())");`,
+      `iwr ${RELEASE_BASE}/agent-kernel-executor.cjs -OutFile "$dir/agent-kernel-executor.cjs";`,
+      `iwr ${RELEASE_BASE}/SHA256SUMS -OutFile "$dir/SHA256SUMS";`,
+      `$exp = (Get-Content "$dir/SHA256SUMS" | Where-Object { $_ -match 'agent-kernel-executor.cjs$' }).Split()[0];`,
+      `if ((Get-FileHash "$dir/agent-kernel-executor.cjs" -Algorithm SHA256).Hash -ne $exp.ToUpper()) { throw 'checksum mismatch' };`,
+      `$env:HOST_URL=${quotedHost};`,
+      `$env:SANDBOX_ROOTS=(Get-Location).Path;`,
+      `node "$dir/agent-kernel-executor.cjs"`,
+    ].join('\n')
   }
   return `wget -qO- ${RELEASE_BASE}/run.sh | COMPONENT=executor HOST_URL=${shellQuote(hostUrl)} SANDBOX_ROOTS="$PWD" bash`
 }
