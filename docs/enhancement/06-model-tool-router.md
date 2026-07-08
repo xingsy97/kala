@@ -52,10 +52,12 @@ Implemented host artifact capture writes this decision before each LLM call when
 <artifactRoot>/router-decisions/<session_id>/<event_seq>.json
 ```
 
-The initial decision artifact records selected/requested model, inferred
-provider or router adapter, reason codes, and context budget. It is
-observability-only: the actual model call path remains the existing host router,
-and replay still comes from the JSONL event ledger.
+The decision artifact records selected/requested model, inferred provider or
+router adapter, reason codes, context budget, and tool visibility policy. Tool
+policy includes total visible tools, approval-gated tool count, skill-backed
+tool count, and whether sub-agent or memory tools were available to that LLM
+call. It is observability-only: the actual model call path remains the existing
+host router, and replay still comes from the JSONL event ledger.
 
 ## Tool Routing
 
@@ -108,8 +110,8 @@ Retries should be typed:
 - Unit tests for routing decisions under provider outage, context overflow, and
   tool-required tasks.
 - Contract tests for skill-backed tool schemas.
-- Implemented artifact tests for router decisions and skill-backed tool catalog
-  metadata.
+- Implemented artifact tests for router decisions, tool visibility policy, and
+  skill-backed tool catalog metadata.
 - Integration test that a failed provider call records retry and fallback spans.
 - Dashboard test that skill-backed tools are visibly marked.
 

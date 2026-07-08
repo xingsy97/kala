@@ -309,6 +309,7 @@ async function maybeWriteMessageAssemblyArtifact(
         selectedModel: model,
         adapterName: deps.llm.name,
         maxInputTokens: record?.config.contextLimit,
+        tools: effect.tools,
       }),
     )
     await store.writeJson(
