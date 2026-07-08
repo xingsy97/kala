@@ -159,6 +159,12 @@ describe('ArtifactExplorerDialog', () => {
           resolved: true,
           artifacts: [
             { kind: 'diff', uri: 'artifacts/local__repo-1/final.diff', bytes: 42, mediaType: 'text/x-diff' },
+            { kind: 'trace', uri: 'traces/local__repo-1.openinference.json', bytes: 1024, mediaType: 'application/json' },
+            { kind: 'metadata', uri: 'artifacts/local__repo-1/swebench-result.json', bytes: 256, mediaType: 'application/json' },
+            { kind: 'log', uri: 'artifacts/local__repo-1/harness/test.log', bytes: 2048, mediaType: 'text/plain' },
+            { kind: 'log', uri: 'artifacts/local__repo-1/agent.stdout.log', bytes: 128, mediaType: 'text/plain' },
+            { kind: 'metadata', uri: 'artifacts/local__repo-1/prompt.txt', bytes: 64, mediaType: 'text/plain' },
+            { kind: 'metadata', uri: 'artifacts/local__repo-1/workspace-metadata.json', bytes: 96, mediaType: 'application/json' },
           ],
           metrics: { durationMs: 1250, patchBytes: 42 },
         },
@@ -190,7 +196,16 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getByText('+50%')).toBeTruthy()
     await waitFor(() => expect(screen.getAllByText('local__repo-1').length).toBeGreaterThanOrEqual(1))
     expect(screen.getAllByText('resolved').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('artifacts/local__repo-1/final.diff')).toBeTruthy()
+    expect(screen.getAllByText('Final Patch').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Trace').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Harness Evidence').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Agent Logs')).toBeTruthy()
+    expect(screen.getByText('Prompt')).toBeTruthy()
+    expect(screen.getByText('Metadata')).toBeTruthy()
+    expect(screen.getAllByText('artifacts/local__repo-1/final.diff').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('traces/local__repo-1.openinference.json').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('artifacts/local__repo-1/swebench-result.json').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('artifacts/local__repo-1/harness/test.log').length).toBeGreaterThanOrEqual(1)
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fsummary.json',
       { cache: 'no-store' },
@@ -208,7 +223,7 @@ describe('ArtifactExplorerDialog', () => {
       { cache: 'no-store' },
     )
 
-    fireEvent.click(screen.getByText('artifacts/local__repo-1/final.diff'))
+    fireEvent.click(screen.getAllByText('artifacts/local__repo-1/final.diff')[0]!)
 
     await screen.findByText('diff --git a/file b/file')
     expect(fetchMock).toHaveBeenCalledWith(

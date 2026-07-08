@@ -409,9 +409,13 @@ Phase 5: dashboard eval explorer.
 Implemented read-only summary, comparison, and instance-level trial views through
 the artifact explorer. The dashboard loads run summaries, trial JSON artifacts,
 and comparison deltas through the bounded artifact content endpoint without
-adding eval state to the kernel protocol. Remaining work: dedicated navigation,
-inline final diff/log preview, official harness log grouping, linked traces, and
-comparison charts.
+adding eval state to the kernel protocol. Trial details now derive grouped
+artifact sections from existing refs, with prominent entries for final patches,
+OpenInference traces, official SWE-bench result evidence, harness logs, agent
+logs, prompts, and metadata. The grouping is UI-only: it uses `kind`,
+`mediaType`, and path conventions from preserved artifacts rather than adding a
+benchmark-specific protocol field. Remaining work: dedicated navigation, direct
+trace-to-session linking, and richer comparison charts.
 
 Phase 6: CI eval smoke and manual official-harness workflow.
 Implemented through `scripts/verify-swebench-smoke.mjs`, default CI, and

@@ -173,6 +173,22 @@ type ArtifactDetailRequest = {
   label: string
 }
 
+type TrialArtifactItem = {
+  artifact: EvalTrialArtifactRef
+  category: TrialArtifactCategory
+  path: string | null
+  title: string
+  meta: string
+}
+
+type TrialArtifactCategory = 'patch' | 'trace' | 'harness' | 'log' | 'prompt' | 'metadata' | 'other'
+
+type TrialArtifactGroup = {
+  category: TrialArtifactCategory
+  label: string
+  items: readonly TrialArtifactItem[]
+}
+
 export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Element {
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
   const [mode, setMode] = useState<ViewMode>('artifacts')
@@ -605,6 +621,12 @@ function EvalTrialDetail({
   error: string | null
   onOpenArtifact(request: ArtifactDetailRequest): void
 }): JSX.Element {
+  const artifactGroups = selectedTrial
+    ? groupTrialArtifacts(run.root, selectedTrial.trial.artifacts ?? [])
+    : []
+  const primaryArtifacts = artifactGroups
+    .flatMap((group) => group.items)
+    .filter((item) => item.category === 'patch' || item.category === 'trace' || item.category === 'harness')
   return (
     <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_280px] overflow-hidden rounded-md border border-border max-xl:grid-cols-1">
       <div className="min-h-0 border-r border-border max-xl:border-b max-xl:border-r-0">
@@ -664,32 +686,55 @@ function EvalTrialDetail({
               <Stat label="Artifacts" value={String(selectedTrial.trial.artifacts?.length ?? 0)} />
               <Stat label="Session" value={selectedTrial.trial.sessionId ? 'linked' : 'none'} />
             </div>
+            {primaryArtifacts.length > 0 ? (
+              <div className="grid grid-cols-2 gap-1.5">
+                {primaryArtifacts.slice(0, 4).map((item) => (
+                  <button
+                    key={`${item.path ?? item.title}-primary`}
+                    type="button"
+                    disabled={!item.path}
+                    onClick={() => item.path && onOpenArtifact({ path: item.path, label: item.title })}
+                    className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-muted/40 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-background"
+                  >
+                    <div className="truncate font-medium">{trialArtifactCategoryLabel(item.category)}</div>
+                    <div className="truncate font-mono text-muted-foreground" title={item.title}>{item.title}</div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="rounded-md border border-border bg-background/70">
               <div className="border-b border-border px-2 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">Artifacts</div>
-              <div className="max-h-48 overflow-auto p-2">
-                {(selectedTrial.trial.artifacts ?? []).length > 0 ? (
-                  <div className="grid gap-1.5">
-                    {(selectedTrial.trial.artifacts ?? []).map((artifact, index) => {
-                      const uri = artifact.uri
-                      const path = uri ? resolveTrialArtifactPath(run.root, uri) : null
-                      return (
-                      <button
-                        key={`${uri ?? 'artifact'}-${index}`}
-                        type="button"
-                        disabled={!path}
-                        onClick={() => path && onOpenArtifact({ path, label: uri ?? path })}
-                        className="min-w-0 rounded border border-border bg-muted/20 px-2 py-1 text-left transition-colors hover:bg-muted/40 disabled:cursor-default disabled:hover:bg-muted/20"
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
-                          <span className="truncate font-mono text-[11px]" title={uri}>{uri ?? '(inline)'}</span>
+              <div className="max-h-64 overflow-auto p-2">
+                {artifactGroups.length > 0 ? (
+                  <div className="grid gap-2">
+                    {artifactGroups.map((group) => (
+                      <div key={group.category} className="grid gap-1">
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                          <span className="font-medium uppercase">{group.label}</span>
+                          <span className="font-mono">{group.items.length}</span>
                         </div>
-                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                          <span>{artifact.kind ?? 'artifact'}</span>
-                          <span>{typeof artifact.bytes === 'number' ? formatBytes(artifact.bytes) : ''}</span>
+                        <div className="grid gap-1.5">
+                          {group.items.map((item, index) => (
+                            <button
+                              key={`${item.path ?? item.title}-${index}`}
+                              type="button"
+                              disabled={!item.path}
+                              onClick={() => item.path && onOpenArtifact({ path: item.path, label: item.title })}
+                              className="min-w-0 rounded border border-border bg-muted/20 px-2 py-1 text-left transition-colors hover:bg-muted/40 disabled:cursor-default disabled:hover:bg-muted/20"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <FileText className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+                                <span className="truncate font-mono text-[11px]" title={item.title}>{item.title}</span>
+                              </div>
+                              <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span className="truncate">{item.meta}</span>
+                                <span>{typeof item.artifact.bytes === 'number' ? formatBytes(item.artifact.bytes) : ''}</span>
+                              </div>
+                            </button>
+                          ))}
                         </div>
-                      </button>
-                    )})}
+                      </div>
+                    ))}
                   </div>
                 ) : <div className="text-[11px] text-muted-foreground">No artifact refs in trial.</div>}
               </div>
@@ -987,6 +1032,53 @@ function resolveTrialArtifactPath(runRoot: string, uri: string): string {
   if (uri.startsWith('/') || uri.includes('://')) return uri
   if (uri === runRoot || uri.startsWith(`${runRoot}/`)) return uri
   return `${runRoot}/${uri}`
+}
+
+function groupTrialArtifacts(runRoot: string, artifacts: readonly EvalTrialArtifactRef[]): TrialArtifactGroup[] {
+  const byCategory = new Map<TrialArtifactCategory, TrialArtifactItem[]>()
+  for (const artifact of artifacts) {
+    const uri = artifact.uri
+    const path = uri ? resolveTrialArtifactPath(runRoot, uri) : null
+    const category = classifyTrialArtifact(artifact)
+    const title = uri ?? '(inline artifact)'
+    const meta = [artifact.kind ?? 'artifact', artifact.mediaType].filter(Boolean).join(' / ')
+    const items = byCategory.get(category) ?? []
+    items.push({ artifact, category, path, title, meta })
+    byCategory.set(category, items)
+  }
+  return trialArtifactCategoryOrder
+    .map((category) => {
+      const items = byCategory.get(category) ?? []
+      return { category, label: trialArtifactCategoryLabel(category), items }
+    })
+    .filter((group) => group.items.length > 0)
+}
+
+const trialArtifactCategoryOrder: readonly TrialArtifactCategory[] = ['patch', 'trace', 'harness', 'log', 'prompt', 'metadata', 'other']
+
+function classifyTrialArtifact(artifact: EvalTrialArtifactRef): TrialArtifactCategory {
+  const kind = (artifact.kind ?? '').toLowerCase()
+  const uri = (artifact.uri ?? '').toLowerCase()
+  const mediaType = (artifact.mediaType ?? '').toLowerCase()
+  if (kind === 'diff' || uri.endsWith('.diff') || uri.endsWith('.patch') || mediaType.includes('diff')) return 'patch'
+  if (kind === 'trace' || uri.includes('trace') || uri.includes('openinference')) return 'trace'
+  if (uri.includes('/harness/') || uri.includes('swebench-result')) return 'harness'
+  if (uri.endsWith('prompt.txt') || uri.includes('/prompt.')) return 'prompt'
+  if (kind === 'log' || uri.endsWith('.log') || uri.includes('stdout') || uri.includes('stderr') || mediaType.startsWith('text/plain')) return 'log'
+  if (kind === 'metadata' || mediaType.includes('json')) return 'metadata'
+  return 'other'
+}
+
+function trialArtifactCategoryLabel(category: TrialArtifactCategory): string {
+  switch (category) {
+    case 'patch': return 'Final Patch'
+    case 'trace': return 'Trace'
+    case 'harness': return 'Harness Evidence'
+    case 'log': return 'Agent Logs'
+    case 'prompt': return 'Prompt'
+    case 'metadata': return 'Metadata'
+    case 'other': return 'Other'
+  }
 }
 
 function mergeEvalRuns(
