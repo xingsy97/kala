@@ -66,10 +66,36 @@ GitHub Actions should run:
 - attach artifacts to GitHub Releases
 - optional manual SWE-bench smoke workflow
 
+## Artifact Manifest
+
+Status: implemented host-side CLI foundation
+
+Production dashboards and eval explorers should not discover data by guessing
+every run-directory layout. The host now provides a manifest builder:
+
+```bash
+agent-kernel-host enhancement artifacts manifest \
+  --root-dir runs/enhancement \
+  --output runs/enhancement/artifact-manifest.json
+```
+
+The manifest records relative path, inferred kind, media type, size, mtime, and
+sha256 when the file is under the configured hash limit. It deliberately does
+not copy request bodies, responses, prompts, logs, or diffs into manifest
+entries. Large files are retained as entries with a `hashSkippedReason`, which
+keeps dashboard indexing responsive on long production runs.
+
+This is an index, not a new protocol. It gives the dashboard and cleanup tools a
+stable discovery surface while preserving the existing artifact contracts:
+OpenInference traces, SWE-bench summaries/trials, rollout sidecars, profiles,
+memory indexes, and reliability reports remain the source documents.
+
 ## Testing Plan
 
 - Cross-language contract tests using JSON fixtures.
 - CLI smoke tests for packaged host/executor.
+- Artifact-manifest tests that verify kind inference, hash limits, and payload
+  non-duplication.
 - Release workflow dry-run on pull requests without publishing.
 - Manual release workflow that uploads artifacts only on tags.
 
@@ -79,4 +105,3 @@ GitHub Actions should run:
 - Do not create separate protocols per language.
 - Do not add Python/Go just for portfolio value; each component must own a real
   integration or operational boundary.
-

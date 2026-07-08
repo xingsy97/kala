@@ -4,6 +4,7 @@ import {
   type ExportRolloutSidecarInput,
   type ExportSessionTraceInput,
 } from './enhancement-export.js'
+import { buildArtifactManifest, type BuildArtifactManifestInput } from './artifact-manifest.js'
 import {
   compareEvalRuns,
   profileSession,
@@ -24,6 +25,7 @@ export type EnhancementCliCommand =
   | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
   | ({ kind: 'memory-index' } & BuildMemoryIndexInput)
   | ({ kind: 'subagents-graph' } & ExportSubAgentGraphInput)
+  | ({ kind: 'artifacts-manifest' } & BuildArtifactManifestInput)
   | ({ kind: 'trace-export-session' } & ExportSessionTraceInput)
   | ({ kind: 'rollout-export-session' } & ExportRolloutSidecarInput)
 
@@ -112,6 +114,16 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       tokenSegmentsPath: value(rest, '--token-segments'),
     }
   }
+  if (argv[1] === 'artifacts' && argv[2] === 'manifest') {
+    const rest = argv.slice(3)
+    const maxHashBytes = numberValue(rest, '--max-hash-bytes')
+    return {
+      kind: 'artifacts-manifest',
+      rootDir: value(rest, '--root-dir') ?? 'runs/enhancement',
+      outputPath: value(rest, '--output'),
+      ...(maxHashBytes === undefined ? {} : { maxHashBytes }),
+    }
+  }
   throw new Error(`unknown enhancement command: ${argv.slice(1).join(' ') || '<missing>'}`)
 }
 
@@ -152,6 +164,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
     console.log(JSON.stringify({ graphPath: result.graphPath, nodes: result.graph.nodes.length, edges: result.graph.edges.length, warnings: result.graph.warnings }, null, 2))
     return true
   }
+  if (command.kind === 'artifacts-manifest') {
+    const result = await buildArtifactManifest(command)
+    console.log(JSON.stringify({ manifestPath: result.manifestPath, summary: result.manifest.summary }, null, 2))
+    return true
+  }
   const result = await exportRolloutSidecar(command)
   console.log(JSON.stringify({
     rolloutId: result.sidecar.rollout_id,
@@ -178,6 +195,14 @@ function required(argv: readonly string[], name: string): string {
 
 function flag(argv: readonly string[], name: string): boolean {
   return argv.includes(name)
+}
+
+function numberValue(argv: readonly string[], name: string): number | undefined {
+  const found = value(argv, name)
+  if (found === undefined) return undefined
+  const parsed = Number(found)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`invalid numeric ${name}: ${found}`)
+  return parsed
 }
 
 function frameworkTarget(value: string): ExportRolloutSidecarInput['frameworkTarget'] {
