@@ -6,12 +6,16 @@ import {
 } from './enhancement-export.js'
 import { profileSession, scoreSession, type ProfileSessionInput, type ScoreSessionInput } from './eval/generic.js'
 import { auditSessionReliability, type AuditSessionReliabilityInput } from './reliability.js'
+import { buildMemoryIndex, type BuildMemoryIndexInput } from './memory-index.js'
+import { exportSubAgentGraph, type ExportSubAgentGraphInput } from './subagent-graph.js'
 
 export type EnhancementCliCommand =
   | { kind: 'none' }
   | ({ kind: 'eval-score-session' } & ScoreSessionInput)
   | ({ kind: 'profile-session' } & ProfileSessionInput)
   | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
+  | ({ kind: 'memory-index' } & BuildMemoryIndexInput)
+  | ({ kind: 'subagents-graph' } & ExportSubAgentGraphInput)
   | ({ kind: 'trace-export-session' } & ExportSessionTraceInput)
   | ({ kind: 'rollout-export-session' } & ExportRolloutSidecarInput)
 
@@ -57,6 +61,23 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       sessionLogPath: required(rest, '--session-log'),
     }
   }
+  if (argv[1] === 'memory' && argv[2] === 'index') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'memory-index',
+      rootDir: value(rest, '--root-dir') ?? 'runs/memory',
+      workspaceRoot: value(rest, '--workspace-root'),
+      includeGlobal: flag(rest, '--include-global'),
+    }
+  }
+  if (argv[1] === 'subagents' && argv[2] === 'graph') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'subagents-graph',
+      rootDir: value(rest, '--root-dir') ?? 'runs/subagents',
+      sessionsDir: required(rest, '--sessions-dir'),
+    }
+  }
   if (argv[1] === 'rollout' && argv[2] === 'export-session') {
     const rest = argv.slice(3)
     return {
@@ -97,6 +118,16 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
   if (command.kind === 'reliability-audit-session') {
     const result = await auditSessionReliability(command)
     console.log(JSON.stringify({ auditPath: result.auditPath, audit: result.audit }, null, 2))
+    return true
+  }
+  if (command.kind === 'memory-index') {
+    const result = await buildMemoryIndex(command)
+    console.log(JSON.stringify({ indexPath: result.indexPath, entries: result.index.entries.length, warnings: result.index.warnings }, null, 2))
+    return true
+  }
+  if (command.kind === 'subagents-graph') {
+    const result = await exportSubAgentGraph(command)
+    console.log(JSON.stringify({ graphPath: result.graphPath, nodes: result.graph.nodes.length, edges: result.graph.edges.length, warnings: result.graph.warnings }, null, 2))
     return true
   }
   const result = await exportRolloutSidecar(command)
