@@ -27,7 +27,18 @@ import type {
 } from '@agent-kernel/shared'
 
 import { buildArtifactManifest } from '../artifact-manifest.js'
+import {
+  exportRolloutFrameworkAdapter,
+  exportRolloutSegments,
+  exportRolloutSidecar,
+  exportSessionTraceArtifacts,
+} from '../enhancement-export.js'
+import { compareEvalRuns, profileSession, scoreSession } from '../eval/generic.js'
 import { planSweBenchWorkerRun } from '../eval/swebench.js'
+import { buildMemoryIndex } from '../memory-index.js'
+import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
+import type { SessionStore } from '../store/session.js'
+import { exportSubAgentGraph } from '../subagent-graph.js'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -63,6 +74,33 @@ type CreateSweBenchPlanRequest = {
   repoCacheDir?: string
 }
 
+type EnhancementActionRequest = {
+  action?: string
+  rootDir?: string
+  sessionId?: string
+  sessionLogPath?: string
+  sessionLogPaths?: readonly string[] | string
+  workspaceRoot?: string
+  runId?: string
+  evalInstanceId?: string
+  instanceId?: string
+  patchPath?: string
+  requireDone?: boolean
+  pricingPath?: string
+  baselineSummaryPath?: string
+  candidateSummaryPath?: string
+  includeGlobal?: boolean
+  sessionsDir?: string
+  taskId?: string
+  frameworkTarget?: string
+  framework?: string
+  model?: string
+  weightVersion?: string
+  rewardPath?: string
+  tokenSegmentsPath?: string
+  sidecarPath?: string
+}
+
 export function attachJsonRoutes(
   server: HttpServer,
   payloads: {
@@ -72,6 +110,7 @@ export function attachJsonRoutes(
     addManualModel?: (input: ClientAddManualModel) => ServerSettingsPayload
     deleteManualModel?: (input: ClientDeleteManualModel) => ServerSettingsPayload
     artifactRootDir?: string | false
+    sessions?: SessionStore
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -108,6 +147,14 @@ export function attachJsonRoutes(
       claimRoute(req)
       void readJson(req)
         .then((body) => createSweBenchPlan(body as CreateSweBenchPlanRequest, payloads.artifactRootDir))
+        .then((result) => sendJson(req, res, result))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/enhancement/action' && req.method === 'POST') {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => runEnhancementAction(body as EnhancementActionRequest, payloads))
         .then((result) => sendJson(req, res, result))
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 400, err instanceof Error ? err.message : String(err)))
       return
@@ -150,6 +197,94 @@ export function attachJsonRoutes(
       return
     }
   })
+}
+
+async function runEnhancementAction(
+  body: EnhancementActionRequest,
+  payloads: { artifactRootDir?: string | false; sessions?: SessionStore },
+): Promise<unknown> {
+  const action = requiredString(body.action, 'action')
+  const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+  if (!rootDir) throw new HttpRouteError(400, 'rootDir is required when artifact capture is not configured')
+  if (action === 'profile-session') {
+    const result = await profileSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.pricingPath) ? { pricingPath: cleanString(body.pricingPath) } : {}) })
+    return { action, profilePath: result.profilePath, profile: result.profile }
+  }
+  if (action === 'reliability-audit-session') {
+    const result = await auditSessionReliability({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions) })
+    return { action, auditPath: result.auditPath, audit: result.audit }
+  }
+  if (action === 'reliability-chaos-replay') {
+    const result = await replayReliabilityChaos({ rootDir, sessionLogPaths: sessionLogPaths(body) })
+    return { action, reportPath: result.reportPath, report: result.report }
+  }
+  if (action === 'memory-index') {
+    const result = await buildMemoryIndex({ rootDir, ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}), ...(body.includeGlobal === true ? { includeGlobal: true } : {}) })
+    return { action, indexPath: result.indexPath, entries: result.index.entries.length, warnings: result.index.warnings }
+  }
+  if (action === 'subagents-graph') {
+    const result = await exportSubAgentGraph({ rootDir, sessionsDir: cleanString(body.sessionsDir) ?? payloads.sessions?.dir ?? requiredString(body.sessionsDir, 'sessionsDir') })
+    return { action, graphPath: result.graphPath, nodes: result.graph.nodes.length, edges: result.graph.edges.length, warnings: result.graph.warnings }
+  }
+  if (action === 'trace-export-session') {
+    const result = await exportSessionTraceArtifacts({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}), ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
+    return { action, sessionId: result.sessionId, traceArtifact: result.traceArtifact, llmArtifacts: result.llmArtifacts }
+  }
+  if (action === 'rollout-export-segments') {
+    const result = await exportRolloutSegments({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}), ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
+    return { action, sessionId: result.sessionId, artifact: result.artifact, segmentCount: result.segments.segments.length }
+  }
+  if (action === 'rollout-export-session') {
+    const result = await exportRolloutSidecar({
+      rootDir,
+      sessionLogPath: await sessionLogPath(body, payloads.sessions),
+      taskId: requiredString(body.taskId, 'taskId'),
+      frameworkTarget: frameworkTarget(requiredString(body.frameworkTarget ?? body.framework, 'frameworkTarget')),
+      ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}),
+      ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}),
+      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
+      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
+      ...(cleanString(body.weightVersion) ? { weightVersion: cleanString(body.weightVersion) } : {}),
+      ...(cleanString(body.rewardPath) ? { rewardPath: cleanString(body.rewardPath) } : {}),
+      ...(cleanString(body.tokenSegmentsPath) ? { tokenSegmentsPath: cleanString(body.tokenSegmentsPath) } : {}),
+    })
+    return { action, rolloutId: result.sidecar.rollout_id, sidecarPath: result.sidecarPath, traceArtifact: result.traceArtifact }
+  }
+  if (action === 'rollout-export-adapter') {
+    const framework = cleanString(body.frameworkTarget ?? body.framework)
+    const result = await exportRolloutFrameworkAdapter({ rootDir, sidecarPath: requiredString(body.sidecarPath, 'sidecarPath'), ...(framework ? { frameworkTarget: frameworkTarget(framework) } : {}) })
+    return { action, adapterPath: result.adapterPath, status: result.adapter.status, frameworkTarget: result.adapter.frameworkTarget }
+  }
+  if (action === 'eval-score-session') {
+    const result = await scoreSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}), ...(cleanString(body.patchPath) ? { patchPath: cleanString(body.patchPath) } : {}), ...(body.requireDone === true ? { requireDone: true } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
+    return { action, scoresPath: result.scoresPath, summary: result.summary }
+  }
+  if (action === 'eval-compare-runs') {
+    const result = await compareEvalRuns({ rootDir, baselineSummaryPath: requiredString(body.baselineSummaryPath, 'baselineSummaryPath'), candidateSummaryPath: requiredString(body.candidateSummaryPath, 'candidateSummaryPath') })
+    return { action, comparisonPath: result.comparisonPath, comparison: result.comparison }
+  }
+  throw new HttpRouteError(400, `unsupported enhancement action: ${action}`)
+}
+
+async function sessionLogPath(body: EnhancementActionRequest, sessions: SessionStore | undefined): Promise<string> {
+  const explicit = cleanString(body.sessionLogPath)
+  if (explicit) return explicit
+  const sessionId = requiredString(body.sessionId, 'sessionId')
+  if (!sessions) throw new HttpRouteError(400, 'sessionId lookup is unavailable')
+  const cached = sessions.get(sessionId)
+  if (cached) return cached.logPath
+  return (await sessions.load(sessionId)).logPath
+}
+
+function sessionLogPaths(body: EnhancementActionRequest): readonly string[] {
+  const paths = listInput(body.sessionLogPaths)
+  if (!paths) throw new HttpRouteError(400, 'sessionLogPaths is required')
+  return paths
+}
+
+function frameworkTarget(value: string): 'slime' | 'verl' | 'trl' | 'openrlhf' | 'unknown' {
+  if (value === 'slime' || value === 'verl' || value === 'trl' || value === 'openrlhf' || value === 'unknown') return value
+  throw new HttpRouteError(400, `invalid frameworkTarget: ${value}`)
 }
 
 async function createSweBenchPlan(body: CreateSweBenchPlanRequest, artifactRootDir: string | false | undefined): Promise<unknown> {

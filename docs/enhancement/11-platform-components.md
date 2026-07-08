@@ -112,15 +112,20 @@ only create artifacts and do not mutate kernel session state:
 
 - `Eval`: SWE-bench and generic eval summaries, worker plans, score artifacts,
   judge traces, progress, comparisons, trials, final patches, harness evidence,
-  and linked sessions. The dashboard can also create a SWE-bench worker plan via
-  the host HTTP route that reuses the CLI planner.
+  and linked sessions. The dashboard can create a SWE-bench worker plan, score a
+  session, and compare two summary artifacts through host actions that reuse the
+  CLI implementations.
 - `Profiles`: session latency, token, missing-trace, and estimated-cost
-  profiles.
+  profiles. The dashboard can generate a profile artifact from a session id or
+  explicit session log path.
 - `Memory`: memory index provenance, active/tombstoned entries, confidence, and
-  source metadata.
+  source metadata. The dashboard can rebuild the memory index for a workspace
+  and optionally include global memory.
 - `Ops`: reliability audit/chaos reports, RL rollout sidecars, token segment
   indexes, slime/verl adapter artifacts, subagent graphs, OpenInference traces,
-  message assembly artifacts, router decisions, and tool catalogs.
+  message assembly artifacts, router decisions, and tool catalogs. The dashboard
+  can trigger reliability audits, chaos summary generation, trace export,
+  rollout segment/sidecar/adapter export, and subagent graph export.
 
 This gives every major CLI-generated artifact family a dashboard equivalent for
 inspection while keeping execution control explicit and reproducible in the host

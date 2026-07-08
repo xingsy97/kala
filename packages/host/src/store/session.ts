@@ -73,6 +73,10 @@ export class SessionStore {
     mkdirSync(this.sessionsDir, { recursive: true })
   }
 
+  get dir(): string {
+    return this.sessionsDir
+  }
+
   async create(params: CreateSessionParams): Promise<SessionRecord> {
     const sessionId = params.sessionId ?? ulid()
     const initialState =
