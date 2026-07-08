@@ -249,6 +249,61 @@ export function createExecutorRegistry(
     return { ok: true, bind }
   }
 
+  /**
+   * Host-initiated direct-mode tool call. Sent as an ordinary `tool:call`
+   * with `dispatchMode: 'direct'`  -  the executor runs the tool identically
+   * to a kernel-initiated call, but the host doesn't feed the result back
+   * through the kernel FSM. The tool's stdout string is expected to be
+   * JSON; we parse it and hand the caller the typed result. On timeout
+   * or wire failure the caller gets a synthetic error result of type T
+   * built via `onError(errorMessage)`.
+   */
+  function dispatchDirectTool<T>(
+    bind: Bind,
+    workspaceId: string,
+    name: string,
+    input: Record<string, unknown>,
+    onError: (msg: string) => T,
+  ): Promise<T> {
+    return new Promise<T>((resolve) => {
+      const callId = `direct-${Math.random().toString(36).slice(2, 10)}`
+      const timer = setTimeout(() => {
+        resolve(onError(`${name} timed out after ${toolTimeoutMs}ms`))
+      }, toolTimeoutMs)
+      // sessionId here is a routing convenience; the direct-mode flag tells
+      // the executor's runOne to skip the tool_result event dispatch on
+      // the host side. Use the workspaceId as the pseudo-sessionId so any
+      // future audit trace can correlate.
+      bind.socket.emit(
+        'tool:call',
+        {
+          sessionId: `__direct:${workspaceId}`,
+          callId,
+          name,
+          input,
+          timeoutMs: toolTimeoutMs,
+          dispatchMode: 'direct',
+        },
+        (ack: ToolResultAck) => {
+          clearTimeout(timer)
+          if (!ack.ok) {
+            resolve(onError(ack.content || `${name} failed`))
+            return
+          }
+          try {
+            resolve(JSON.parse(ack.content) as T)
+          } catch (err) {
+            resolve(
+              onError(
+                `${name} returned invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+              ),
+            )
+          }
+        },
+      )
+    })
+  }
+
   return {
     attach(socket, announcement, clientVersion) {
       const executorId = announcement.executorId
@@ -373,20 +428,13 @@ export function createExecutorRegistry(
       if (!bind) {
         return defaultDirList(requestId, workspaceId, path, 'workspace offline')
       }
-      return await new Promise<DirListResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve(defaultDirList(requestId, workspaceId, path, 'directory listing timed out'))
-        }, toolTimeoutMs)
-        const payload: ClientListDirs = {
-          requestId,
-          workspaceId,
-          ...(path !== undefined ? { path } : {}),
-        }
-        bind.socket.emit('fs:list_dirs', payload, (result: DirListResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<DirListResult>(
+        bind,
+        workspaceId,
+        '__fs_list_dirs',
+        { requestId, workspaceId, ...(path !== undefined ? { path } : {}) },
+        (msg) => defaultDirList(requestId, workspaceId, path, msg),
+      )
     },
     async listFiles(payload) {
       const bind = findBindByWorkspace(payload.workspaceId)
@@ -399,21 +447,19 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await new Promise<FileListResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({
-            requestId: payload.requestId,
-            workspaceId: payload.workspaceId,
-            files: [],
-            truncated: false,
-            error: 'file listing timed out',
-          })
-        }, toolTimeoutMs)
-        bind.socket.emit('fs:list_files', payload, (result: FileListResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<FileListResult>(
+        bind,
+        payload.workspaceId,
+        '__fs_list_files',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          files: [],
+          truncated: false,
+          error: msg,
+        }),
+      )
     },
     async readFile(payload) {
       const bind = findBindByWorkspace(payload.workspaceId)
@@ -425,20 +471,18 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await new Promise<FileContentsResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({
-            requestId: payload.requestId,
-            workspaceId: payload.workspaceId,
-            path: payload.path,
-            error: 'file read timed out',
-          })
-        }, toolTimeoutMs)
-        bind.socket.emit('fs:read_file', payload, (result: FileContentsResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<FileContentsResult>(
+        bind,
+        payload.workspaceId,
+        '__fs_read_file',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          path: payload.path,
+          error: msg,
+        }),
+      )
     },
     async readOverflow(payload, workspaceId) {
       const bind = findBindByWorkspace(workspaceId)
@@ -450,20 +494,18 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await new Promise<OverflowContentsResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({
-            requestId: payload.requestId,
-            sessionId: payload.sessionId,
-            callId: payload.callId,
-            error: 'overflow read timed out',
-          })
-        }, toolTimeoutMs)
-        bind.socket.emit('fs:read_overflow', payload, (result: OverflowContentsResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<OverflowContentsResult>(
+        bind,
+        workspaceId,
+        '__fs_read_overflow',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          sessionId: payload.sessionId,
+          callId: payload.callId,
+          error: msg,
+        }),
+      )
     },
     async copyOverflowSession(workspaceId, sourceSessionId, targetSessionId) {
       const bind = findBindByWorkspace(workspaceId)
@@ -473,15 +515,13 @@ export function createExecutorRegistry(
         targetSessionId,
       }
       if (!bind) return { ...payload, copied: false, error: 'workspace offline' }
-      return await new Promise<CopyOverflowSessionResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({ ...payload, copied: false, error: 'overflow copy timed out' })
-        }, toolTimeoutMs)
-        bind.socket.emit('fs:copy_overflow_session', payload, (result: CopyOverflowSessionResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<CopyOverflowSessionResult>(
+        bind,
+        workspaceId,
+        '__fs_copy_overflow_session',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({ ...payload, copied: false, error: msg }),
+      )
     },
     async deleteOverflowSession(workspaceId, sessionId) {
       const bind = findBindByWorkspace(workspaceId)
@@ -490,15 +530,13 @@ export function createExecutorRegistry(
         sessionId,
       }
       if (!bind) return { ...payload, deleted: false, error: 'workspace offline' }
-      return await new Promise<DeleteOverflowSessionResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({ ...payload, deleted: false, error: 'overflow delete timed out' })
-        }, toolTimeoutMs)
-        bind.socket.emit('fs:delete_overflow_session', payload, (result: DeleteOverflowSessionResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<DeleteOverflowSessionResult>(
+        bind,
+        workspaceId,
+        '__fs_delete_overflow_session',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({ ...payload, deleted: false, error: msg }),
+      )
     },
     async listBg(payload) {
       const bind = findBindByWorkspace(payload.workspaceId)
@@ -510,20 +548,18 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await new Promise<BgListResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({
-            requestId: payload.requestId,
-            workspaceId: payload.workspaceId,
-            tasks: [],
-            error: 'bg:list timed out',
-          })
-        }, toolTimeoutMs)
-        bind.socket.emit('bg:list', payload, (result: BgListResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<BgListResult>(
+        bind,
+        payload.workspaceId,
+        '__bg_list',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          tasks: [],
+          error: msg,
+        }),
+      )
     },
     async readBg(payload) {
       const bind = findBindByWorkspace(payload.workspaceId)
@@ -540,25 +576,23 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await new Promise<BgOutputResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({
-            requestId: payload.requestId,
-            workspaceId: payload.workspaceId,
-            taskId: payload.taskId,
-            content: '',
-            nextOffset: 0,
-            done: true,
-            status: 'exited',
-            bytesTruncated: 0,
-            error: 'bg:output timed out',
-          })
-        }, toolTimeoutMs)
-        bind.socket.emit('bg:output', payload, (result: BgOutputResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<BgOutputResult>(
+        bind,
+        payload.workspaceId,
+        '__bg_output',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          taskId: payload.taskId,
+          content: '',
+          nextOffset: 0,
+          done: true,
+          status: 'exited',
+          bytesTruncated: 0,
+          error: msg,
+        }),
+      )
     },
     async killBg(payload) {
       const bind = findBindByWorkspace(payload.workspaceId)
@@ -571,21 +605,19 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await new Promise<BgKillResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve({
-            requestId: payload.requestId,
-            workspaceId: payload.workspaceId,
-            taskId: payload.taskId,
-            killed: false,
-            error: 'bg:kill timed out',
-          })
-        }, toolTimeoutMs)
-        bind.socket.emit('bg:kill', payload, (result: BgKillResult) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-      })
+      return await dispatchDirectTool<BgKillResult>(
+        bind,
+        payload.workspaceId,
+        '__bg_kill',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          taskId: payload.taskId,
+          killed: false,
+          error: msg,
+        }),
+      )
     },
     onChange(listener) {
       listeners.add(listener)

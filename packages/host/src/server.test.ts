@@ -22,6 +22,7 @@ import type {
   ServerSessionsPayload,
   SessionForkedEvent,
   SessionReadyEvent,
+  ToolResultAck,
   ToolCallMessage,
   ToolResultAck,
 } from '@agent-kernel/shared'
@@ -96,26 +97,31 @@ function attachDirListHandler(
   existingDirs: readonly string[],
 ): void {
   const known = new Set(existingDirs.map((p) => resolve(p)))
-  executor.on('fs:list_dirs', (payload: ClientListDirs, ack: (result: DirListResult) => void) => {
-    const requested = resolve(payload.path ?? roots[0] ?? process.cwd())
-    if (!known.has(requested)) {
-      ack({
-        requestId: payload.requestId,
-        workspaceId: payload.workspaceId,
-        path: requested,
-        roots,
-        entries: [],
-        error: `ENOENT: no such file or directory, scandir '${requested}'`,
-      })
-      return
-    }
-    ack({
-      requestId: payload.requestId,
-      workspaceId: payload.workspaceId,
-      path: requested,
-      roots,
-      entries: [],
-    })
+  // Direct-mode tool calls (host-initiated fs / bg / overflow RPCs) arrive
+  // as `tool:call` with `dispatchMode: 'direct'`. The stub executor here
+  // pretends to be the `__fs_list_dirs` built-in and returns a JSON string
+  // matching DirListResult.
+  executor.on('tool:call', (payload, ack: (result: ToolResultAck) => void) => {
+    if (payload.dispatchMode !== 'direct' || payload.name !== '__fs_list_dirs') return
+    const input = payload.input as { requestId: string; workspaceId: string; path?: string }
+    const requested = resolve(input.path ?? roots[0] ?? process.cwd())
+    const result: DirListResult = known.has(requested)
+      ? {
+          requestId: input.requestId,
+          workspaceId: input.workspaceId,
+          path: requested,
+          roots,
+          entries: [],
+        }
+      : {
+          requestId: input.requestId,
+          workspaceId: input.workspaceId,
+          path: requested,
+          roots,
+          entries: [],
+          error: `ENOENT: no such file or directory, scandir '${requested}'`,
+        }
+    ack({ callId: payload.callId, ok: true, content: JSON.stringify(result) })
   })
 }
 
@@ -1029,14 +1035,17 @@ describe('wire protocol', () => {
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
-    executor.on('fs:list_dirs', (payload, ack) => {
-      ack({
-        requestId: payload.requestId,
-        workspaceId: payload.workspaceId,
+    executor.on('tool:call', (payload, ack) => {
+      if (payload.dispatchMode !== 'direct' || payload.name !== '__fs_list_dirs') return
+      const input = payload.input as { requestId: string; workspaceId: string }
+      const result: DirListResult = {
+        requestId: input.requestId,
+        workspaceId: input.workspaceId,
         path: root,
         roots: [root],
         entries: [{ name: 'child', path: child }],
-      })
+      }
+      ack({ callId: payload.callId, ok: true, content: JSON.stringify(result) })
     })
     executor.emit('executor:announce', {
       executorId: 'ex-list-dirs',

@@ -387,7 +387,7 @@ export async function startHostServer(
   ): void {
     const payload: SessionErrorEvent = { sessionId, scope, message }
     dashboardNs.to(`session:${sessionId}`).emit('session:error', payload)
-    executorNs.to(`session:${sessionId}`).emit('session:error', payload)
+    // Executor no longer subscribes to session:error  -  it's UI-only.
   }
 
   await new Promise<void>((resolve) => {

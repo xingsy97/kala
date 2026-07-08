@@ -40,15 +40,6 @@ import {
 } from './tools/overflow.js'
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
-import {
-  copyOverflowSession,
-  deleteOverflowSession,
-  listDirs,
-  listFiles,
-  readOverflowFile,
-  readWorkspaceFile,
-} from './fs-handlers.js'
-import { handleBgKill, handleBgList, handleBgOutput } from './bg-handlers.js'
 import { subscribeBackgroundTasks } from './tools/background-shell.js'
 
 export type ExecutorOptions = {
@@ -159,41 +150,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     if (ctrl) ctrl.abort()
   })
 
-  socket.on('fs:list_dirs', async (payload, ack) => {
-    ack(await listDirs(payload.requestId, payload.workspaceId, payload.path, sandbox))
-  })
-
-  socket.on('fs:list_files', async (payload, ack) => {
-    ack(await listFiles(payload, sandbox))
-  })
-
-  socket.on('fs:read_file', async (payload, ack) => {
-    ack(await readWorkspaceFile(payload, sandbox))
-  })
-
-  socket.on('fs:read_overflow', async (payload, ack) => {
-    ack(await readOverflowFile(payload, sandbox))
-  })
-
-  socket.on('fs:delete_overflow_session', async (payload, ack) => {
-    ack(await deleteOverflowSession(payload, sandbox))
-  })
-
-  socket.on('fs:copy_overflow_session', async (payload, ack) => {
-    ack(await copyOverflowSession(payload, sandbox))
-  })
-
-  socket.on('bg:list', async (payload, ack) => {
-    ack(await handleBgList(payload))
-  })
-
-  socket.on('bg:output', async (payload, ack) => {
-    ack(await handleBgOutput(payload))
-  })
-
-  socket.on('bg:kill', async (payload, ack) => {
-    ack(await handleBgKill(payload))
-  })
+  // The nine `fs:*` and `bg:*` bespoke RPCs that used to live here are gone.
+  // Host now sends them as ordinary `tool:call` messages with
+  // `dispatchMode: 'direct'`; the tools themselves are declared in
+  // `./tools/internal.ts` and picked up by `defaultTools`.
 
   const unsubscribeBg = subscribeBackgroundTasks((change) => {
     if (change.kind === 'evicted') {
