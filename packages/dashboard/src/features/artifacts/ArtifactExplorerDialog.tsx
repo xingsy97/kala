@@ -1030,6 +1030,7 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
               {actions.map((action) => <option key={action.action} value={action.action}>{action.label}</option>)}
             </select>
           </label>
+          <LabeledInput label="Root Dir" value={rootDir} onChange={setRootDir} placeholder="uses artifact root when empty" />
           <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
             {config.fields.map((field) => (
               <LabeledInput
@@ -1045,7 +1046,6 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
           </div>
           {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
           {result ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">{typeof result.shellCommand === 'string' ? 'Generated' : 'Created'} {enhancementResultLabel(result)}</div> : null}
-          <LabeledInput label="Root Dir" value={rootDir} onChange={setRootDir} placeholder="uses artifact root when empty" />
           <div className="flex justify-end">
             <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Running...' : 'Run Action'}</Button>
           </div>
@@ -1081,7 +1081,7 @@ const evalActionConfigs: readonly EnhancementActionConfig[] = [
   { action: 'swebench-infer-patches', label: 'SWE-bench infer patches', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'split', label: 'Split' }, { key: 'model', label: 'Model', required: true }, { key: 'instancesJsonl', label: 'Instances JSONL', required: true }, { key: 'patchesDir', label: 'Patches Dir', required: true }, { key: 'instanceIds', label: 'Instance IDs', placeholder: 'comma separated', list: true }, { key: 'limit', label: 'Limit', numeric: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
   { action: 'swebench-export-session', label: 'SWE-bench export session', fields: [...sessionFields, { key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'split', label: 'Split' }, { key: 'model', label: 'Model', required: true }, { key: 'instanceId', label: 'Instance ID', required: true }, { key: 'modelPatchPath', label: 'Model Patch Path', required: true }, { key: 'workspaceRoot', label: 'Workspace Root' }] },
   { action: 'swebench-ingest-results', label: 'SWE-bench ingest results', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'resultsDir', label: 'Results Dir', required: true }] },
-  { action: 'swebench-grade-command', label: 'SWE-bench grade command', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'predictionsPath', label: 'Predictions Path', required: true }, { key: 'maxWorkers', label: 'Max Workers', numeric: true }, { key: 'instanceIds', label: 'Instance IDs', placeholder: 'comma separated', list: true }, { key: 'modal', label: 'Modal', placeholder: 'true or false', boolean: true }, { key: 'cwd', label: 'CWD' }] },
+  { action: 'swebench-grade-command', label: 'SWE-bench grade command', fields: [{ key: 'runId', label: 'Run ID', required: true }, { key: 'dataset', label: 'Dataset', required: true, defaultValue: 'SWE-bench/SWE-bench_Verified' }, { key: 'predictionsPath', label: 'Predictions Path', required: true }, { key: 'maxWorkers', label: 'Max Workers', numeric: true }, { key: 'instanceIds', label: 'Instance IDs', placeholder: 'comma separated', list: true }, { key: 'modal', label: 'Modal', placeholder: 'true or false', boolean: true }] },
 ]
 
 const profileActionConfigs: readonly EnhancementActionConfig[] = [
