@@ -16,7 +16,8 @@ export type TaskPoolValidation = {
 export async function loadTaskPoolFile(path: string, options: { trainingMode?: boolean; workspaceRoot?: string } = {}): Promise<TaskPoolValidation> {
   const text = await readFile(path, 'utf8')
   const trimmed = text.trim()
-  const tasks = trimmed.startsWith('{')
+  const isJsonl = /\}\s*\r?\n\s*\{/u.test(trimmed)
+  const tasks = !isJsonl && trimmed.startsWith('{')
     ? parseJsonObjectPool(trimmed, path)
     : parseJsonLinesPool(text, path)
   return validateTaskPool(path, tasks, options)

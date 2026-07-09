@@ -20,6 +20,8 @@ import { SessionStore } from '../store/session.js'
 import { buildTrajectory, validateSlimeSampleReadiness } from './trajectory-builder.js'
 import { validateTokenCapture } from './token-capture.js'
 import { defaultWorkspaceForTask, runCommandVerifier } from './verifier.js'
+import { seedWorkspace } from './workspace-seeder.js'
+import { snapshotWriteScope, type WriteScopeSnapshot } from './write-scope.js'
 
 export type RunRlRolloutInput = {
   rootDir: string
@@ -46,13 +48,27 @@ export async function runRlRollout(input: RunRlRolloutInput): Promise<RunRlRollo
   const timeoutMs = input.timeoutMs ?? 60_000
   const workspace = defaultWorkspaceForTask(input.rootDir, rolloutId, input.task)
   await mkdir(workspace, { recursive: true })
+  await seedWorkspace(workspace, input.task)
+  const writeScopeSnapshot: WriteScopeSnapshot | null = await snapshotWriteScope(workspace, input.task)
   const store = createArtifactStore(input.rootDir)
   const taskRef = await store.writeJson('rl_task_pool', `rl-tasks/${sanitize(rolloutId)}.json`, input.task)
   const sessionStore = new SessionStore(join(input.rootDir, 'sessions'))
   const events: Array<{ seq: number; event: AgentEvent; effects: readonly Effect[]; state: AgentState }> = []
+  const maxTurns = input.maxTurns ?? 15
+  let turnCount = 0
+  let turnCapExceeded = false
+  let loopRef: ReturnType<typeof runHostLoop> | undefined
   const broadcast: LoopBroadcast = {
     onEvent(_sid, seq, event, effects, state) {
       events.push({ seq, event, effects, state })
+      if (event.kind === 'llm_response') {
+        turnCount += 1
+        if (turnCount >= maxTurns && !turnCapExceeded) {
+          turnCapExceeded = true
+          try { loopRef?.cancelStream(_sid) } catch {}
+          void (async () => { try { await loopRef?.dispatch(_sid, { kind: 'cancel' }) } catch {} })()
+        }
+      }
     },
     onApprovalRequired() {},
     onError(_sid, message) {
@@ -65,6 +81,7 @@ export async function runRlRollout(input: RunRlRolloutInput): Promise<RunRlRollo
       tools: input.config?.tools ?? [],
       ...(input.config?.systemPrompt ? { systemPrompt: input.config.systemPrompt } : {}),
       ...(input.config?.contextLimit ? { contextLimit: input.config.contextLimit } : {}),
+      ...(input.config?.noToolCallNudges !== undefined ? { noToolCallNudges: input.config.noToolCallNudges } : {}),
     },
     initialCwd: workspace,
     initialApprovalMode: 'allow_all',
@@ -77,6 +94,7 @@ export async function runRlRollout(input: RunRlRolloutInput): Promise<RunRlRollo
     broadcast,
     artifactRootDir: input.rootDir,
   })
+  loopRef = loop
   let status: AgentRlRolloutResult['status'] = 'completed'
   let blockedReason: string | undefined
   try {
@@ -86,6 +104,10 @@ export async function runRlRollout(input: RunRlRolloutInput): Promise<RunRlRollo
     blockedReason = error instanceof Error ? error.message : String(error)
     if (status === 'timeout') loop.cancelStream(sessionId)
   }
+  if (turnCapExceeded && status === 'completed') {
+    status = 'blocked'
+    blockedReason = `reached maxTurns=${maxTurns} (llm_response count=${turnCount})`
+  }
   const eventLogRef = await fileArtifactRef('trace', record.logPath)
   const tokenCaptureRefs = await collectTokenCaptureRefs(input.rootDir, rolloutId)
   let rewardRef: ArtifactRef | undefined
@@ -94,7 +116,7 @@ export async function runRlRollout(input: RunRlRolloutInput): Promise<RunRlRollo
   let readiness: RolloutReadiness = tokenCaptureRefs.length > 0 ? 'token-captured' : 'live-rollout-complete'
   if (status === 'completed') {
     try {
-      const reward = await runCommandVerifier({ rootDir: input.rootDir, rolloutId, task: input.task, cwd: workspace })
+      const reward = await runCommandVerifier({ rootDir: input.rootDir, rolloutId, task: input.task, cwd: workspace, writeScopeSnapshot })
       rewardRef = reward.artifact
       readiness = 'reward-verified'
       if (tokenCaptureRefs.length > 0) {
