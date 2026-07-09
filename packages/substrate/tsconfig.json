@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "types": ["node"],
+    "paths": {
+      "@agent-kernel/host": ["../host/src/index.ts"],
+      "@agent-kernel/kernel": ["../kernel/src/index.ts"],
+      "@agent-kernel/shared": ["../shared/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "examples/**/*"],
+  "exclude": ["dist", "node_modules", "**/*.test.ts"]
+}
