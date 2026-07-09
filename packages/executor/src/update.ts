@@ -54,7 +54,8 @@ export async function checkExecutorUpdate(opts: Options): Promise<void> {
   await writeFile(nextPath, updated)
   await chmod(nextPath, 0o755)
   await rename(nextPath, target)
-  opts.logger.info({ latest: latestTag, path: target }, 'executor updated; restarting')
+  opts.logger.info(`executor updated to ${latestTag}; restarting`)
+  opts.logger.debug({ latest: latestTag, path: target }, 'executor update details')
   process.env.AGENT_KERNEL_RELEASE_TAG = latestTag
   process.env.AGENT_KERNEL_SKIP_UPDATE_ONCE = '1'
   const { spawn } = await import('node:child_process')

@@ -24,6 +24,7 @@ function makeGroup(
   return {
     kind: 'tool_call_group',
     toolName: 'agent',
+    mixed: false,
     calls,
     results: new Map(results),
     firstCallId: calls[0]!.callId,

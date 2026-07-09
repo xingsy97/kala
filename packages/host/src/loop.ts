@@ -26,7 +26,7 @@ import type {
   RequestApprovalEffect,
   Effect,
 } from '@agent-kernel/kernel'
-import { step } from '@agent-kernel/kernel'
+import { estimateMessageTokens, step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import { redactLlmTrace, type LLMTrace } from '@agent-kernel/shared'
@@ -641,22 +641,6 @@ function shouldPreflightCompact(
   const reserve = Math.min(baseReserve + thinking, Math.floor(config.contextLimit * 0.5))
   const limit = Math.max(0, config.contextLimit - reserve)
   return estimateMessageTokens(messages) >= limit
-}
-
-function estimateMessageTokens(messages: readonly import('@agent-kernel/kernel').Message[]): number {
-  let chars = 0
-  for (const message of messages) {
-    chars += message.role.length + 8
-    for (const content of message.content) {
-      if (content.type === 'text' || content.type === 'thinking') chars += content.text.length
-      else if (content.type === 'tool_call') chars += content.name.length + content.callId.length + JSON.stringify(content.input).length
-      else if (content.type === 'tool_result') chars += content.callId.length + content.content.length + 16
-      else chars += content.source.kind === 'file_ref'
-        ? content.source.path.length + 64
-        : Math.round(content.source.data.length / 4)
-    }
-  }
-  return Math.ceil(chars / 4)
 }
 
 function capToolResultForContext(content: string, contextLimit: number | undefined): string {

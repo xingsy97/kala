@@ -30,7 +30,7 @@ describe('ConnectWorkspaceDialog', () => {
       }
       return {
         ok: true,
-        json: async () => ({ inviteToken: 'ak_invite_test', expiresAt: '2026-07-11T00:10:00.000Z' }),
+            json: async () => ({ inviteToken: 'ak_invite_test' }),
       } as Response
     }))
   })
@@ -38,7 +38,7 @@ describe('ConnectWorkspaceDialog', () => {
   it('shows release bootstrap commands for connecting an executor', async () => {
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
 
-    await screen.findByText(/Invite expires at/i)
+    await screen.findByText(/Invite ready/i)
 
     const text = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
     expect(text).toContain('run.sh')
@@ -63,7 +63,7 @@ describe('ConnectWorkspaceDialog', () => {
 
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
 
-    await screen.findByText(/Invite expires at/i)
+    await screen.findByText(/Invite ready/i)
 
     const text = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
     expect(text).toContain('http://192.0.2.11:3000/release-assets/run.sh')
@@ -74,7 +74,7 @@ describe('ConnectWorkspaceDialog', () => {
     const writeText = vi.mocked(navigator.clipboard.writeText)
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
 
-    await screen.findByText(/Invite expires at/i)
+    await screen.findByText(/Invite ready/i)
     fireEvent.click(screen.getByTestId('connect-workspace-tab-unix'))
     fireEvent.click(screen.getByTestId('copy-executor-command'))
 
@@ -90,7 +90,7 @@ describe('ConnectWorkspaceDialog', () => {
   it('switches command by operating system tab', async () => {
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
 
-    await screen.findByText(/Invite expires at/i)
+    await screen.findByText(/Invite ready/i)
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-windows'))
     const windowsText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''

@@ -56,19 +56,38 @@ trust a workspace id solely because an executor announced it.
 The product path is invite based:
 
 1. Dashboard calls `POST /auth/executor-invites`.
-2. Host returns a short-lived one-time invite token.
+2. Host returns a permanent invite token and stores only its hash.
 3. The Connect Workspace modal renders one copyable command containing that
    invite.
 4. The executor starts with `--invite <token>` and announces its `workspaceId`.
-5. Host validates and consumes the invite, mints a long-term executor token,
-   binds it to the announced `workspaceId`, and persists only its hash.
+5. Host validates the invite, binds it to the announced `workspaceId` on first
+   use, mints a long-term executor token, and persists only its hash.
 6. Host returns the long-term token in `executor:welcome`.
 7. Executor writes it to `~/.agent-kernel/executor-token` and uses it on later
    reconnects.
 
 The operator never has to type a `workspaceId` or JSON token mapping.
 
-The Dashboard can list and revoke saved executor identities through
+The Dashboard has two invite creation paths:
+
+- **Connect Workspace** creates a new permanent invite labeled
+  `Connect Workspace` and renders a one-time copyable command. The invite does
+  not expire; operators should revoke it from Settings when it should stop
+  working.
+- **Settings → Executor access** is the durable management surface. It lists
+  invite summaries, creates labeled invites, edits labels and optional
+  workspace pre-bindings, revokes invites, and regenerates token material.
+
+The Dashboard can list, create, edit, revoke, and regenerate executor invites
+through `GET/POST/PATCH/DELETE /auth/executor-invites` and
+`POST /auth/executor-invites/:id/regenerate`. Invite list responses return only
+summaries: id, optional label, optional bound workspace id, creation time, last
+used time, and revocation status. They never return token hashes or plaintext
+tokens; plaintext is returned only once from create/regenerate responses.
+Revoking or regenerating a bound invite also removes the saved reconnect
+identity for that workspace, so future reconnects must use a valid invite again.
+
+The Dashboard can also list and revoke saved executor identities through
 `GET /auth/executor-identities` and
 `DELETE /auth/executor-identities?workspaceId=<id>`. These endpoints return
 only identity summaries: `workspaceId`, optional label, creation time, and last
@@ -97,14 +116,14 @@ Rules:
    accepted.
 2. If a long-term token is scoped to a workspace id, the announced `workspaceId` must
    equal that scope.
-3. If a valid one-time invite is used, the first announced `workspaceId` becomes
-   the scope for the new long-term identity.
+3. If a valid unbound invite is used, the first announced `workspaceId` becomes
+   the invite binding and the scope for the new long-term identity.
 4. If the token is unscoped, the announced `workspaceId` is allowed but still
    audited.
 5. A second live executor claiming the same workspace remains rejected.
 6. Reconnect with the same executor id is allowed only after token validation.
 7. When the host has an executor identity store configured, anonymous executor
-   handshakes are rejected. A daemon must use a one-time invite, a saved
+   handshakes are rejected. A daemon must use an invite, a saved
    long-term token, or an explicitly configured static token.
 
 This prevents an attacker from connecting a daemon and self-assigning someone

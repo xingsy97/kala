@@ -374,7 +374,7 @@ describe('wire protocol', () => {
     executor.close()
   })
 
-  it('creates one-time executor invites and binds the first announced workspace', async () => {
+  it('creates permanent executor invites and binds the first announced workspace', async () => {
     await server.close()
     const identityPath = join(dir, 'executor-identities.json')
     const identityStore = new ExecutorIdentityStore(identityPath)
@@ -394,7 +394,8 @@ describe('wire protocol', () => {
 
     const inviteRes = await fetch(`${url}/auth/executor-invites`, { method: 'POST' })
     expect(inviteRes.ok).toBe(true)
-    const invite = await inviteRes.json() as { inviteToken: string; expiresAt: string }
+    const invite = await inviteRes.json() as { id: string; inviteToken: string; createdAt: string }
+    expect(invite.id).toMatch(/^inv_/)
     expect(invite.inviteToken).toMatch(/^ak_invite_/)
     expect(readFileSync(identityPath, 'utf8')).not.toContain(invite.inviteToken)
 
@@ -426,6 +427,12 @@ describe('wire protocol', () => {
     expect(JSON.stringify(listBody)).not.toContain(payload.token)
     expect(JSON.stringify(listBody)).not.toContain('tokenHash')
 
+    const inviteList = await fetch(`${url}/auth/executor-invites`).then((res) => res.json()) as { invites: Array<{ id: string; workspaceId?: string; lastUsedAt?: string; inviteToken?: string; inviteHash?: string; revoked: boolean }> }
+    expect(inviteList.invites).toEqual([expect.objectContaining({ id: invite.id, workspaceId: 'ws-invite', revoked: false })])
+    expect(inviteList.invites[0]?.lastUsedAt).toBeTruthy()
+    expect(JSON.stringify(inviteList)).not.toContain(invite.inviteToken)
+    expect(JSON.stringify(inviteList)).not.toContain('inviteHash')
+
     const revokeRes = await fetch(`${url}/auth/executor-identities?workspaceId=ws-invite`, { method: 'DELETE' })
     expect(revokeRes.ok).toBe(true)
     expect(await revokeRes.json()).toEqual({ ok: true, workspaceId: 'ws-invite', revoked: true })
@@ -434,7 +441,41 @@ describe('wire protocol', () => {
     executor.close()
   })
 
-  it('keeps one-time executor invites valid across host restarts without storing plaintext invites', async () => {
+  it('revoking an executor invite also removes the saved reconnect identity', async () => {
+    await server.close()
+    const identityPath = join(dir, 'executor-identities.json')
+    const identityStore = new ExecutorIdentityStore(identityPath)
+    identityStore.load()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: { executorIdentityStore: identityStore },
+    })
+    url = `http://localhost:${server.port}`
+
+    const invite = await fetch(`${url}/auth/executor-invites`, { method: 'POST' }).then((res) => res.json()) as { id: string; inviteToken: string }
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, invite: invite.inviteToken },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    executor.emit('executor:announce', { executorId: 'exec-revoke-invite', workspaceId: 'ws-revoke-invite', workspaceName: 'revoked', tools: ['bash'], runtime: 'node', runtimeVersion: 'test' })
+    await new Promise<{ token: string; workspaceId: string }>((resolve) => executor.on('executor:welcome', resolve))
+    executor.close()
+    await expect(fetch(`${url}/auth/executor-identities`).then((res) => res.json())).resolves.toMatchObject({ identities: [expect.objectContaining({ workspaceId: 'ws-revoke-invite' })] })
+
+    const revokeRes = await fetch(`${url}/auth/executor-invites/${invite.id}`, { method: 'DELETE' })
+    expect(revokeRes.ok).toBe(true)
+    await expect(fetch(`${url}/auth/executor-identities`).then((res) => res.json())).resolves.toEqual({ identities: [] })
+  })
+
+  it('keeps executor invites valid across host restarts without storing plaintext invites', async () => {
     await server.close()
     const identityPath = join(dir, 'executor-identities.json')
     const identityStore = new ExecutorIdentityStore(identityPath)
@@ -487,6 +528,76 @@ describe('wire protocol', () => {
     })
     await expect(welcome).resolves.toMatchObject({ workspaceId: 'ws-restarted-invite' })
     executor.close()
+  })
+
+  it('allows invite reuse for the bound workspace and rejects a different workspace', async () => {
+    await server.close()
+    const identityPath = join(dir, 'executor-identities.json')
+    const identityStore = new ExecutorIdentityStore(identityPath)
+    identityStore.load()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: { executorIdentityStore: identityStore },
+    })
+    url = `http://localhost:${server.port}`
+
+    const invite = await fetch(`${url}/auth/executor-invites`, { method: 'POST' }).then((res) => res.json()) as { inviteToken: string }
+
+    async function announceWithInvite(executorId: string, workspaceId: string): Promise<ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>> {
+      const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+        transports: ['websocket'],
+        auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, invite: invite.inviteToken },
+        reconnection: false,
+      })
+      await new Promise<void>((resolve) => executor.on('connect', resolve))
+      executor.emit('executor:announce', { executorId, workspaceId, workspaceName: workspaceId, tools: ['bash'], runtime: 'node', runtimeVersion: 'test' })
+      return executor
+    }
+
+    const first = await announceWithInvite('exec-reuse-1', 'ws-reuse')
+    await new Promise<{ token: string; workspaceId: string }>((resolve) => first.on('executor:welcome', resolve))
+    first.close()
+
+    const second = await announceWithInvite('exec-reuse-2', 'ws-reuse')
+    await expect(new Promise<{ token: string; workspaceId: string }>((resolve) => second.on('executor:welcome', resolve))).resolves.toMatchObject({ workspaceId: 'ws-reuse' })
+    second.close()
+
+    const wrong = await announceWithInvite('exec-reuse-3', 'ws-other')
+    await expect(new Promise<{ code: string }>((resolve) => wrong.on('executor:host_reject', resolve))).resolves.toMatchObject({ code: 'auth_failed' })
+    wrong.close()
+  })
+
+  it('regenerates executor invites and clears the workspace binding', async () => {
+    await server.close()
+    const identityPath = join(dir, 'executor-identities.json')
+    const identityStore = new ExecutorIdentityStore(identityPath)
+    identityStore.load()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: { executorIdentityStore: identityStore },
+    })
+    url = `http://localhost:${server.port}`
+
+    const created = await fetch(`${url}/auth/executor-invites`, { method: 'POST', body: JSON.stringify({ label: 'runner', workspaceId: 'ws-old' }) }).then((res) => res.json()) as { id: string; inviteToken: string }
+    const regenerated = await fetch(`${url}/auth/executor-invites/${created.id}/regenerate`, { method: 'POST' }).then((res) => res.json()) as { id: string; inviteToken: string; workspaceId?: string; label?: string }
+    expect(regenerated.id).toBe(created.id)
+    expect(regenerated.inviteToken).toMatch(/^ak_invite_/)
+    expect(regenerated.inviteToken).not.toBe(created.inviteToken)
+    expect(regenerated.workspaceId).toBeUndefined()
+    expect(regenerated.label).toBe('runner')
+    expect(readFileSync(identityPath, 'utf8')).not.toContain(regenerated.inviteToken)
   })
 
   it('answers first-paint dashboard requests sent before session:ready', async () => {

@@ -44,7 +44,8 @@ node packages/host/bin/agent-kernel-host.js
 
 - Spec: [`docs/kernel/spec.md`](../../docs/kernel/spec.md) (kernel contract Host consumes)
 - Wire: [`docs/protocol/wire-protocol.md`](../../docs/protocol/wire-protocol.md)
-- Log: [`docs/protocol/event-log.md`](../../docs/protocol/event-log.md)
+- Current log: [`docs/protocol/event-log.md`](../../docs/protocol/event-log.md)
+- Target log rewrite: [`docs/host/session-log-context-persistence.md`](../../docs/host/session-log-context-persistence.md)
 - Architecture: [`docs/architecture/overview.md`](../../docs/architecture/overview.md)
 
 ## Test coverage target

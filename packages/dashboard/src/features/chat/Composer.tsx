@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
 import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
@@ -25,6 +25,7 @@ import {
 import { Textarea } from '../../components/ui/textarea.js'
 import { cn } from '../../lib/utils.js'
 import { RuntimeMetrics } from './RuntimeMetrics.js'
+import type { TimelineEntry } from '../../session.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { ComposerModeToggle } from './composer/ComposerModeToggle.js'
 import { SimpleComposerInput } from './composer/SimpleComposerInput.js'
@@ -45,6 +46,7 @@ type Props = {
   state: AgentState | null
   config: AgentConfig | null
   queuedMessages: readonly QueuedMessagePreview[]
+  timeline?: readonly TimelineEntry[]
   onQueuedReorder?(id: string, beforeId?: string | null): void
   onQueuedUpdate?(id: string, text: string): void
   onQueuedDelete?(id: string): void
@@ -59,6 +61,7 @@ type Props = {
 }
 
 export type SendMode = 'steer' | 'queue'
+const SEND_MODE_STORAGE_PREFIX = 'agent-kernel:composer:send-mode:'
 
 type PastedImage = {
   id: string
@@ -96,6 +99,25 @@ function approvalModeDisplay(mode: ApprovalMode, t: TFunction): { label: string;
   return { label: fallback?.label ?? mode, hint: fallback?.hint ?? '' }
 }
 
+function readStoredSendMode(sessionId: string | null): SendMode {
+  if (!sessionId || typeof window === 'undefined') return 'steer'
+  try {
+    const value = window.localStorage.getItem(`${SEND_MODE_STORAGE_PREFIX}${sessionId}`)
+    return value === 'queue' ? 'queue' : 'steer'
+  } catch {
+    return 'steer'
+  }
+}
+
+function writeStoredSendMode(sessionId: string | null, mode: SendMode): void {
+  if (!sessionId || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(`${SEND_MODE_STORAGE_PREFIX}${sessionId}`, mode)
+  } catch {
+    // Storage can be unavailable in private mode or quota-exceeded states.
+  }
+}
+
 function useIsNarrow(): boolean {
   const query = '(max-width: 639px)'
   const [matches, setMatches] = useState(() =>
@@ -127,6 +149,7 @@ export function Composer({
   state,
   config,
   queuedMessages,
+  timeline,
   onQueuedReorder,
   onQueuedUpdate,
   onQueuedDelete,
@@ -143,8 +166,16 @@ export function Composer({
       ? t('composer.placeholderShort')
       : t('composer.placeholder')
   const { mode, toggle: toggleMode } = useComposerMode()
+  const sessionId = state?.sessionId ?? null
   const [text, setText] = useState('')
-  const [sendMode, setSendMode] = useState<SendMode>('steer')
+  const [sendMode, setSendMode] = useState<SendMode>(() => readStoredSendMode(sessionId))
+  useEffect(() => {
+    setSendMode(readStoredSendMode(sessionId))
+  }, [sessionId])
+  const updateSendMode = useCallback((next: SendMode): void => {
+    setSendMode(next)
+    writeStoredSendMode(sessionId, next)
+  }, [sessionId])
   const [pastedImages, setPastedImages] = useState<readonly PastedImage[]>([])
   const [mentionState, setMentionState] = useState<MentionState | null>(null)
   const [mentionFiles, setMentionFiles] = useState<readonly FileListEntry[]>([])
@@ -394,7 +425,7 @@ export function Composer({
             <SendButton
               disabled={!canSubmit}
               sendMode={sendMode}
-              onSendModeChange={setSendMode}
+              onSendModeChange={updateSendMode}
               density="simple"
             />
             <ComposerModeToggle
@@ -640,11 +671,14 @@ export function Composer({
                 config={config}
                 modelInfo={models.find((m) => m.id === model) ?? null}
                 queuedMessages={queuedMessages.length}
+                timeline={timeline}
+                onCompact={onCompact}
+                compactDisabled={disabled}
               />
               <SendButton
                 disabled={!canSubmit}
                 sendMode={sendMode}
-                onSendModeChange={setSendMode}
+                onSendModeChange={updateSendMode}
               />
             </div>
           </div>
@@ -844,8 +878,8 @@ function QueuedMessagesDock({
           {t('composer.queued.sendsAfterActiveTurn')}
         </span>
       </div>
-      <ScrollArea className="max-h-24" data-testid="queued-messages-scrollarea">
-        <div className="space-y-1 pr-2">
+      <ScrollArea className="h-40 max-h-40" data-testid="queued-messages-scrollarea">
+        <div className="space-y-1 pr-3">
           {items.map((item, index) => (
             <div
               key={item.id}

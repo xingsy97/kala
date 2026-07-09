@@ -20,10 +20,9 @@ export type TranscriptItem =
       id: string
       text: string
       mode: 'steer' | 'queue'
-      status: 'sending' | 'queued'
+      status: 'sending'
       content?: readonly MessageContent[]
       createdAt: string
-      position?: number
     }
   | CompactBoundary
 
@@ -178,18 +177,6 @@ export function visibleTranscript(
       createdAt: pending.createdAt,
     })
   }
-
-  queuedMessages.forEach((queued, index) => {
-    out.push({
-      kind: 'pending_user_message',
-      id: queued.id,
-      text: queued.text,
-      mode: queued.mode,
-      status: 'queued',
-      createdAt: queued.createdAt,
-      position: index + 1,
-    })
-  })
 
   if (timeline.length > 0 || streamingText.length > 0 || pendingUserMessages.length > 0 || queuedMessages.length > 0) return out
   return stateMessages

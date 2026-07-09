@@ -98,6 +98,35 @@
     animation: ak-fade-in 120ms ease-out;
   }
 
+
+  .ak-chat-item {
+    animation: ak-chat-item-in 160ms ease-out both;
+  }
+
+  .ak-expand-in {
+    overflow: hidden;
+    animation: ak-expand-in 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    transform-origin: top;
+  }
+
+  .ak-status-pulse {
+    animation: ak-status-pulse 2s ease-in-out infinite;
+  }
+
+  .ak-explorer-loading-row {
+    position: relative;
+    animation: ak-loading-rise 260ms ease-out both;
+  }
+
+  .ak-explorer-loading-row::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.06), transparent);
+    animation: ak-loading-sweep 1.8s ease-in-out infinite;
+  }
+
   /**
    * Rotating conic-gradient ring used by [[border-beam]]. The trick is a
    * 1.5px-wide mask (`xor` composite between the padded and content boxes)
@@ -150,11 +179,41 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+@keyframes ak-chat-item-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ak-expand-in {
+  from { opacity: 0; transform: translateY(-3px) scaleY(0.98); }
+  to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+
+@keyframes ak-status-pulse {
+  0%, 100% { opacity: 0.58; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes ak-loading-rise {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ak-loading-sweep {
+  0% { transform: translateX(-100%); }
+  55%, 100% { transform: translateX(100%); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ak-motion-overlay,
   .ak-motion-dialog,
   .ak-motion-popover,
-  .ak-motion-tab-panel {
+  .ak-motion-tab-panel,
+  .ak-chat-item,
+  .ak-expand-in,
+  .ak-status-pulse,
+  .ak-explorer-loading-row,
+  .ak-explorer-loading-row::after {
     animation: none !important;
   }
 

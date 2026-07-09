@@ -256,7 +256,7 @@ export function buildRunHealth(
 
 function contextPressure(state: AgentState | null, config: AgentConfig | null | undefined): { label: string; tone: RunHealthItem['tone'] } {
   if (!state || !config?.contextLimit) return { label: state?.contextPressureLevel ?? 'not configured', tone: 'neutral' }
-  const percent = Math.round((state.usage.inputTokens / config.contextLimit) * 100)
+  const percent = Math.round(((state.contextTokens ?? state.usage.inputTokens) / config.contextLimit) * 100)
   const level = state.contextPressureLevel ?? 'none'
   return {
     label: `${level} · ${percent}%`,

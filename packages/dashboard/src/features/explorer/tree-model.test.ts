@@ -96,9 +96,7 @@ describe('buildTree', () => {
     expect(tree.map((n) => n.name)).toEqual(['zulu', 'alpha', 'Unassigned'])
   })
 
-  it('sorts sessions within a workspace by lastActivity desc, using createdAt as fallback', () => {
-    // 3 sessions triggers time-bucketing; pin "now" so all fall into today.
-    const now = () => Date.parse('2026-07-05T23:00:00.000Z')
+  it('keeps sessions in incoming order so activity does not move cards to the top', () => {
     const tree = buildTree(
       [executor()],
       [
@@ -118,14 +116,11 @@ describe('buildTree', () => {
           createdAt: '2026-07-05T12:00:00.000Z',
         }),
       ],
-      { now },
     )
-    const [first] = tree[0]!.children
-    expect(first?.kind).toBe('bucket')
-    expect((first as { children: { sessionId: string }[] }).children.map((c) => c.sessionId)).toEqual([
+    expect(tree[0]!.children.map((c) => c.sessionId)).toEqual([
+      'old',
       'new',
       'mid-created-only',
-      'old',
     ])
   })
 
@@ -151,97 +146,19 @@ describe('buildTree', () => {
     expect(labels).toContain('new session · aaaaaa')
   })
 
-  it('keeps children flat when a workspace has fewer than 3 sessions', () => {
+  it('keeps children flat regardless of session count', () => {
     const tree = buildTree(
       [executor()],
       [
         session({ sessionId: 's-1', workspaceId: 'ws-1' }),
         session({ sessionId: 's-2', workspaceId: 'ws-1' }),
+        session({ sessionId: 's-3', workspaceId: 'ws-1' }),
+        session({ sessionId: 's-4', workspaceId: 'ws-1' }),
       ],
     )
     for (const c of tree[0]!.children) {
       expect(c.kind).toBe('session')
     }
-  })
-
-  it('buckets sessions by activity age relative to injected now', () => {
-    const now = () => Date.parse('2026-07-05T12:00:00.000Z')
-    const tree = buildTree(
-      [executor()],
-      [
-        session({
-          sessionId: 't-today',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-07-05T10:00:00.000Z',
-        }),
-        session({
-          sessionId: 't-yesterday',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-07-04T10:00:00.000Z',
-        }),
-        session({
-          sessionId: 't-last7',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-07-01T10:00:00.000Z',
-        }),
-        session({
-          sessionId: 't-last30',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-06-20T10:00:00.000Z',
-        }),
-        session({
-          sessionId: 't-older',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-05-01T10:00:00.000Z',
-        }),
-      ],
-      { now },
-    )
-    const kids = tree[0]!.children
-    expect(kids.every((c) => c.kind === 'bucket')).toBe(true)
-    const shape = kids.map((b) => {
-      if (b.kind !== 'bucket') throw new Error('unreachable')
-      return [b.bucket, b.children.map((c) => c.sessionId)]
-    })
-    expect(shape).toEqual([
-      ['today', ['t-today']],
-      ['yesterday', ['t-yesterday']],
-      ['last7', ['t-last7']],
-      ['last30', ['t-last30']],
-      ['older', ['t-older']],
-    ])
-  })
-
-  it('skips empty buckets in the output', () => {
-    const now = () => Date.parse('2026-07-05T12:00:00.000Z')
-    const tree = buildTree(
-      [executor()],
-      [
-        session({
-          sessionId: 't-1',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-07-05T10:00:00.000Z',
-        }),
-        session({
-          sessionId: 't-2',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-07-05T09:00:00.000Z',
-        }),
-        session({
-          sessionId: 't-3',
-          workspaceId: 'ws-1',
-          lastEventAt: '2026-05-01T10:00:00.000Z',
-        }),
-      ],
-      { now },
-    )
-    const kids = tree[0]!.children
-    expect(kids.length).toBe(2)
-    if (kids[0]!.kind !== 'bucket' || kids[1]!.kind !== 'bucket') {
-      throw new Error('expected buckets')
-    }
-    expect(kids[0]!.bucket).toBe('today')
-    expect(kids[1]!.bucket).toBe('older')
   })
 
   it('nests a fork under its parent instead of surfacing it as a sibling', () => {
@@ -331,13 +248,13 @@ describe('buildTree', () => {
     )
     const alpha = tree.find((n) => n.workspaceId === 'ws-a')!
     const bravo = tree.find((n) => n.workspaceId === 'ws-b')!
-    expect(alpha.children.map((c) => (c.kind === 'session' ? c.sessionId : c.bucket))).toEqual(['parent'])
-    expect(bravo.children.map((c) => (c.kind === 'session' ? c.sessionId : c.bucket))).toEqual(['child'])
+    expect(alpha.children.map((c) => c.sessionId)).toEqual(['parent'])
+    expect(bravo.children.map((c) => c.sessionId)).toEqual(['child'])
   })
 
-  it('counts only root sessions toward the bucket threshold', () => {
-    // Three sessions total, but two are forks under a single root — only
-    // one root, so we should NOT bucket. Parent + its forks stay flat.
+  it('keeps fork roots flat with their children', () => {
+    // Three sessions total, but two are forks under a single root. Parent +
+    // its forks stay flat.
     const tree = buildTree(
       [executor()],
       [
@@ -364,7 +281,7 @@ describe('buildTree', () => {
     const node = tree[0]!.children[0]!
     expect(node.kind).toBe('session')
     if (node.kind !== 'session') throw new Error('unreachable')
-    // Forks under a root are sorted by activity desc.
-    expect(node.children.map((c) => c.sessionId)).toEqual(['fork-2', 'fork-1'])
+    // Forks keep the incoming order so activity does not reshuffle rows.
+    expect(node.children.map((c) => c.sessionId)).toEqual(['fork-1', 'fork-2'])
   })
 })

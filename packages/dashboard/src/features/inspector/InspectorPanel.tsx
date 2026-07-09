@@ -72,6 +72,15 @@ import {
   type StateDiffSummaryGroup,
   type StateDiffSummaryItem,
 } from './debugger-model.js'
+import {
+  buildLlmCalls,
+  contextProportions,
+  messageContextKind,
+  providerBodyHasKey,
+  type ContextProportion,
+  type ContextProportionKind,
+  type LlmCall,
+} from '../chat/context-composition.js'
 
 type Props = {
   state: AgentState | null
@@ -91,15 +100,6 @@ type InspectorView = 'trace' | 'llm' | 'tools' | 'status'
 type TraceMode = 'list' | 'flow' | 'compare'
 type LlmDetailView = 'assembler' | 'api'
 type TraceCategory = 'user' | 'llm' | 'tool' | 'approval' | 'system'
-type ContextProportionKind = 'system' | 'user' | 'assistant' | 'tool' | 'tools' | 'attachments' | 'other'
-type ContextProportion = {
-  kind: ContextProportionKind
-  label: string
-  bytes: number
-  percent: number
-  displayPercent: string
-  color: string
-}
 type DetailSelection =
   | { kind: 'event'; entry: TimelineEntry; priorCallLlm: PriorCallLlm | null; flow?: StateFlowStep }
   | { kind: 'llm'; call: LlmCall }
@@ -107,19 +107,6 @@ type DetailSelection =
   | null
 
 type PriorCallLlm = { seq: number; effect: CallLlmEffect }
-
-type LlmCall = {
-  id: string
-  source: 'turn' | 'compact'
-  requestSeq: number
-  responseSeq?: number
-  effect: CallLlmEffect
-  response?: Extract<AgentEvent, { kind: 'llm_response' }>
-  error?: Extract<AgentEvent, { kind: 'llm_error' }>
-  compact?: Extract<AgentEvent, { kind: 'compact_replaced' }>
-  trace?: LLMTrace
-  model?: string
-}
 
 type ToolCallLifecycle = {
   callId: string
@@ -2129,57 +2116,6 @@ function KeyValueTable({ rows, compact = false }: { rows: readonly (readonly [st
   )
 }
 
-function buildLlmCalls(timeline: readonly TimelineEntry[]): readonly LlmCall[] {
-  const calls: LlmCall[] = []
-  for (let i = 0; i < timeline.length; i++) {
-    const entry = timeline[i]!
-    if (entry.event.kind === 'compact_replaced' && entry.event.request) {
-      calls.push({
-        id: `compact-llm-${entry.seq}`,
-        source: 'compact',
-        requestSeq: entry.seq,
-        responseSeq: entry.seq,
-        effect: {
-          kind: 'call_llm',
-          messages: entry.event.request.messages,
-          tools: entry.event.request.tools ?? [],
-        },
-        compact: entry.event,
-        ...(entry.llmTrace ? { trace: entry.llmTrace } : {}),
-        ...(entry.model ?? entry.event.request.model ? { model: entry.model ?? entry.event.request.model } : {}),
-      })
-    }
-    for (const effect of entry.effects) {
-      if (effect.kind !== 'call_llm') continue
-      const call: LlmCall = {
-        id: `llm-${entry.seq}-${calls.length}`,
-        source: 'turn',
-        requestSeq: entry.seq,
-        effect,
-      }
-      for (let j = i + 1; j < timeline.length; j++) {
-        const candidate = timeline[j]!
-        if (candidate.event.kind === 'llm_response') {
-          call.responseSeq = candidate.seq
-          call.response = candidate.event
-          if (candidate.llmTrace) call.trace = candidate.llmTrace
-          if (candidate.model) call.model = candidate.model
-          break
-        }
-        if (candidate.event.kind === 'llm_error') {
-          call.responseSeq = candidate.seq
-          call.error = candidate.event
-          if (candidate.llmTrace) call.trace = candidate.llmTrace
-          if (candidate.model) call.model = candidate.model
-          break
-        }
-      }
-      calls.push(call)
-    }
-  }
-  return calls
-}
-
 function buildToolCalls(timeline: readonly TimelineEntry[]): readonly ToolCallLifecycle[] {
   const byId = new Map<string, ToolCallLifecycle>()
   const ensure = (callId: string, name: string, input: Record<string, unknown>): ToolCallLifecycle => {
@@ -2694,113 +2630,6 @@ function roleCounts(messages: readonly Message[]): string {
   return [...counts.entries()].map(([role, count]) => `${role} ${count}`).join(', ') || 'none'
 }
 
-function contextProportions(call: LlmCall): readonly ContextProportion[] {
-  const systemBytes = serializedSize(systemContextFromCall(call))
-  const messageBytes = new Map<ContextProportionKind, number>()
-  for (const message of call.effect.messages) {
-    const kind = messageContextKind(message)
-    messageBytes.set(kind, (messageBytes.get(kind) ?? 0) + serializedSize(message))
-  }
-  const toolBytes = serializedSize(call.effect.tools)
-  const userBytes = messageBytes.get('user') ?? 0
-  const assistantBytes = messageBytes.get('assistant') ?? 0
-  const toolMessageBytes = messageBytes.get('tool') ?? 0
-  const attachmentBytes = messageBytes.get('attachments') ?? 0
-  const otherBytes = messageBytes.get('other') ?? 0
-  const total = Math.max(1, systemBytes + userBytes + assistantBytes + toolMessageBytes + attachmentBytes + otherBytes + toolBytes)
-  const percentOf = (bytes: number): number => {
-    if (bytes <= 0) return 0
-    return Math.max(1, Math.round((bytes / total) * 100))
-  }
-  const displayPercentOf = (bytes: number): string => {
-    if (bytes <= 0) return '0%'
-    const exact = (bytes / total) * 100
-    return exact < 1 ? '<1%' : `${Math.round(exact)}%`
-  }
-  return [
-    {
-      kind: 'system',
-      label: 'System',
-      bytes: systemBytes,
-      percent: percentOf(systemBytes),
-      displayPercent: displayPercentOf(systemBytes),
-      color: 'bg-amber-500',
-    },
-    {
-      kind: 'user',
-      label: 'User',
-      bytes: userBytes,
-      percent: percentOf(userBytes),
-      displayPercent: displayPercentOf(userBytes),
-      color: 'bg-sky-500',
-    },
-    {
-      kind: 'assistant',
-      label: 'Assistant',
-      bytes: assistantBytes,
-      percent: percentOf(assistantBytes),
-      displayPercent: displayPercentOf(assistantBytes),
-      color: 'bg-violet-500',
-    },
-    {
-      kind: 'tool',
-      label: 'Tool results',
-      bytes: toolMessageBytes,
-      percent: percentOf(toolMessageBytes),
-      displayPercent: displayPercentOf(toolMessageBytes),
-      color: 'bg-emerald-500',
-    },
-    {
-      kind: 'tools',
-      label: 'Tool registry',
-      bytes: toolBytes,
-      percent: percentOf(toolBytes),
-      displayPercent: displayPercentOf(toolBytes),
-      color: 'bg-teal-500',
-    },
-    {
-      kind: 'attachments',
-      label: 'Attachments',
-      bytes: attachmentBytes,
-      percent: percentOf(attachmentBytes),
-      displayPercent: displayPercentOf(attachmentBytes),
-      color: 'bg-fuchsia-500',
-    },
-    {
-      kind: 'other',
-      label: 'Other',
-      bytes: otherBytes,
-      percent: percentOf(otherBytes),
-      displayPercent: displayPercentOf(otherBytes),
-      color: 'bg-slate-500',
-    },
-  ]
-}
-
-function messageContextKind(message: Message): ContextProportionKind {
-  if (message.content.some((block) => block.type === 'image')) return 'attachments'
-  if (message.role === 'system') return 'system'
-  if (message.role === 'user') return 'user'
-  if (message.role === 'assistant') return 'assistant'
-  if (message.role === 'tool') return 'tool'
-  return 'other'
-}
-
-function systemContextFromCall(call: LlmCall): unknown {
-  if (call.trace && providerBodyHasKey(call.trace.request.body, 'system')) {
-    return (call.trace.request.body as Record<string, unknown>).system
-  }
-  return call.effect.messages.filter((message) => message.role === 'system')
-}
-
-function serializedSize(value: unknown): number {
-  try {
-    return JSON.stringify(value)?.length ?? 0
-  } catch {
-    return 0
-  }
-}
-
 function describeSystemInjection(call: LlmCall): string {
   const provider = call.trace ? providerFromTrace(call.trace) : 'unknown'
   const firstSystem = call.effect.messages.find((message) => message.role === 'system')
@@ -2838,9 +2667,6 @@ function redactedApiRequest(trace: LLMTrace): LLMTrace['request'] {
   return redactLlmTrace(trace).request
 }
 
-function providerBodyHasKey(body: unknown, key: string): boolean {
-  return Boolean(body && typeof body === 'object' && !Array.isArray(body) && key in body)
-}
 
 function providerArrayLength(body: unknown, key: string): string {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'not present'

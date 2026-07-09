@@ -32,7 +32,7 @@ type HandshakeAuth = {
   role: 'dashboard' | 'executor'
   sessionId?: string         // required for `dashboard`; MUST be absent for `executor`
   token?: string             // bearer token for private deployments / executors
-  invite?: string            // one-time executor onboarding token from `POST /auth/executor-invites`
+  invite?: string            // executor invite token from `POST /auth/executor-invites`
   clientVersion: string      // e.g. "@agent-kernel/executor@0.1.0"
 }
 ```
@@ -805,15 +805,60 @@ auto-discovered entries from manual ones.
 
 #### HTTP `POST /auth/executor-invites`
 
-Creates a short-lived one-time executor invite for the Connect Workspace dialog.
-When GitHub OAuth is required, the request MUST carry a valid host login cookie.
+Creates a permanent executor invite credential. When GitHub OAuth is required,
+the request MUST carry a valid host login cookie. Plaintext invite tokens are
+returned only from create/regenerate responses; list responses never include
+token material. The Connect Workspace dialog uses this endpoint and labels its
+records `Connect Workspace`; Settings → Executor access uses the same endpoint
+for operator-created invites.
 
 ```ts
 {
+  id: string
   inviteToken: string          // opaque, starts with `ak_invite_`
-  expiresAt: string            // ISO-8601
+  label?: string
+  workspaceId?: string         // optional pre-binding; otherwise first use binds
+  createdAt: string            // ISO-8601
 }
 ```
+
+#### HTTP `GET /auth/executor-invites`
+
+Returns invite summaries without plaintext tokens or token hashes.
+
+```ts
+{
+  invites: Array<{
+    id: string
+    label?: string
+    workspaceId?: string
+    createdAt: string
+    lastUsedAt?: string
+    revoked: boolean
+  }>
+}
+```
+
+#### HTTP `PATCH /auth/executor-invites/:id`
+
+Updates invite metadata. Supported fields are `label` and `workspaceId`; setting
+`workspaceId` to `null` clears the binding.
+
+#### HTTP `DELETE /auth/executor-invites/:id`
+
+Revokes an invite. Revoked invites cannot authenticate new executor handshakes.
+If the invite was bound to a workspace, the host also removes that workspace's
+saved reconnect identity.
+
+```ts
+{ ok: true; id: string; revoked: boolean }
+```
+
+#### HTTP `POST /auth/executor-invites/:id/regenerate`
+
+Rotates an invite token and returns the new plaintext token once. Regeneration
+clears any workspace binding, removes that workspace's saved reconnect identity,
+and un-revokes the invite record.
 
 #### HTTP `GET /auth/executor-identities`
 
@@ -1120,16 +1165,19 @@ A workspace is a machine identity with one or more filesystem roots. `workspaceN
 
 Host stores the attach in a registry keyed by `executorId`. A second `executor:announce` from the same executorId replaces the first entry and fires `server:executor_changed { change: 'updated' }` (§4.2).
 
-If the executor handshake used `invite`, the host consumes that invite during
-`executor:announce`, binds the first announced `workspaceId`, persists only a
-hash of a newly minted long-term token, and replies with `executor:welcome`.
+If the executor handshake used `invite`, the host validates that the invite is
+not revoked, binds the first announced `workspaceId` when the invite is still
+unbound, updates `lastUsedAt`, persists only a hash of a newly minted long-term
+token, and replies with `executor:welcome`. Subsequent uses of the same invite
+must announce the same bound `workspaceId`.
 
 ### 5.2 Host → Executor
 
 #### `executor:welcome`
 
-Sent only after a successful invite-based first attach. The executor persists
-`token` locally and uses it for future reconnects instead of reusing the invite.
+Sent after a successful invite-based attach. The executor persists `token`
+locally and uses it for future reconnects. The invite remains valid until it is
+revoked or regenerated.
 
 ```ts
 {

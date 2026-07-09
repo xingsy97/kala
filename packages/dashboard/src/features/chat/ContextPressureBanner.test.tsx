@@ -62,18 +62,15 @@ describe('ContextPressureBanner', () => {
     expect(button.textContent ?? '').toMatch(/compacting/i)
   })
 
-  it('renders the hard tier explaining auto-compaction', () => {
-    render(
+  it('renders nothing at the hard tier (auto-compact now surfaces in the transcript, not here)', () => {
+    const { container } = render(
       <ContextPressureBanner
         state={stateWithLevel('hard')}
         compactRunning={false}
         onCompactNow={() => {}}
       />,
     )
-    const banner = screen.getByTestId('context-pressure-banner')
-    expect(banner.getAttribute('data-level')).toBe('hard')
-    expect(banner.textContent ?? '').toMatch(/auto-compacting/i)
-    expect(screen.queryByTestId('context-pressure-compact-now')).toBeNull()
+    expect(container.firstChild).toBeNull()
   })
 
   it('does not show context-pressure copy while the current turn is active', () => {
@@ -91,7 +88,7 @@ describe('ContextPressureBanner', () => {
   it('can be suppressed while the client is awaiting submit acknowledgement', () => {
     const { container } = render(
       <ContextPressureBanner
-        state={stateWithLevel('hard')}
+        state={stateWithLevel('soft')}
         compactRunning={false}
         suppressed
         onCompactNow={() => {}}

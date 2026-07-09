@@ -23,6 +23,7 @@ import { cn } from '../../lib/utils.js'
 
 export type CompactStatus =
   | { kind: 'idle' }
+  | { kind: 'queued' }
   | { kind: 'running'; startedAt: number; tokensBefore: number }
   | { kind: 'done' }
   | { kind: 'empty'; message: string }
@@ -184,7 +185,7 @@ export function CompactFeedbackRow({
   tokensBefore,
   onDismiss,
 }: {
-  kind: 'running' | 'done' | 'empty' | 'error'
+  kind: 'queued' | 'running' | 'done' | 'empty' | 'error'
   message?: string
   startedAt?: number
   tokensBefore?: number
@@ -193,6 +194,24 @@ export function CompactFeedbackRow({
   const { t } = useTranslation()
   const isRunning = kind === 'running'
   const elapsedMs = useElapsedMs(isRunning, startedAt)
+  if (kind === 'queued') {
+    return (
+      <div
+        className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+        data-testid="inline-compact-queued"
+        role="status"
+      >
+        <span className="relative flex h-2 w-2 flex-none items-center justify-center">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/60 opacity-75 animate-ping" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400" />
+        </span>
+        <span className="font-medium">{t('chatStatus.compactQueued')}</span>
+        <span className="truncate text-amber-700/70 dark:text-amber-300/70">
+          {t('chatStatus.compactQueuedHint')}
+        </span>
+      </div>
+    )
+  }
   if (kind === 'running') {
     return (
       <div

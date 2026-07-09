@@ -199,7 +199,7 @@ describe('Composer', () => {
     expect(onQueuedDelete).toHaveBeenCalledWith('queued-simple-1')
   })
 
-  it('explains send modes and shows pending delivery previews', () => {
+  it('explains send modes and shows queue previews', () => {
     render(
       <Composer
         model=""
@@ -234,7 +234,7 @@ describe('Composer', () => {
     expect(screen.getByTestId('send-mode-steer').getAttribute('title') ?? '').toContain('current run')
     expect(screen.getByTestId('send-mode-queue').getAttribute('title') ?? '').toContain('FIFO')
     const dock = screen.getByTestId('queued-messages-dock')
-    expect(dock.textContent ?? '').toContain('2 pending deliveries')
+    expect(dock.textContent ?? '').toContain('2 Messages in Queue')
     expect(dock.textContent ?? '').toContain('run this after the current answer')
     expect(dock.textContent ?? '').toContain('Queued follow-up')
     expect(dock.textContent ?? '').toContain('Steering update')

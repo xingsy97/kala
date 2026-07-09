@@ -21,8 +21,6 @@ type Props = {
 }
 
 const IMAGE_ATTR = 'data-ak-img-id'
-const CARET_MARKER = '​'
-
 function serializeDom(root: HTMLElement): { text: string; imageIds: string[]; caret: number | null } {
   let text = ''
   let caret: number | null = null
@@ -85,13 +83,15 @@ function buildDom(root: HTMLElement, text: string, images: readonly SimpleCompos
     span.setAttribute('role', 'img')
     span.setAttribute('aria-label', `Image #${i + 1}`)
     span.dataset.akTokenIndex = String(i + 1)
-    span.className = 'ak-composer-token'
-    span.textContent = `[Image #${i + 1}]`
+    span.className = 'ak-composer-token inline-flex h-8 w-8 align-middle overflow-hidden rounded-md border border-border/60 bg-background p-0.5'
+    const image = document.createElement('img')
+    image.src = img.dataUrl
+    image.alt = `Image #${i + 1}`
+    image.className = 'h-full w-full object-cover'
+    image.draggable = false
+    span.appendChild(image)
     root.appendChild(span)
   })
-  if (root.childNodes.length === 0) {
-    root.appendChild(document.createTextNode(CARET_MARKER))
-  }
 }
 
 function placeCaretAtEnd(root: HTMLElement): void {
@@ -148,7 +148,7 @@ export function SimpleComposerInput({
       return
     }
     const { text: nextText, imageIds, caret } = serializeDom(el)
-    const cleanText = nextText.replace(new RegExp(CARET_MARKER, 'g'), '')
+    const cleanText = nextText
     const previousIds = new Set(images.map((i) => i.id))
     const currentIds = new Set(imageIds)
     for (const id of previousIds) {

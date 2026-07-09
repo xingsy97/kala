@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
 
+import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
 import { ChatPanel } from './ChatPanel.js'
 
@@ -310,8 +311,38 @@ describe('ChatPanel', () => {
       />,
     )
     const img = container.querySelector('img')
-    expect(img?.className ?? '').toContain('max-w-full')
+    const trigger = screen.getByTestId('message-image-preview-trigger')
+    expect(trigger.className).toContain('h-28')
+    expect(trigger.className).toContain('w-40')
+    expect(img?.className ?? '').toContain('h-full')
+    expect(img?.className ?? '').toContain('w-full')
     expect(img?.className ?? '').toContain('object-contain')
+    expect(img?.className ?? '').not.toContain('border')
+    expect(trigger.className).not.toContain('border')
+  })
+
+  it('opens image content in a preview modal', () => {
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { kind: 'base64', mediaType: 'image/png', data: 'iVBORw0KGgo=' },
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('message-image-preview-trigger'))
+
+    expect(screen.getByTestId('message-image-preview-dialog')).toBeTruthy()
+    const fullImage = screen.getByTestId('message-image-preview-full') as HTMLImageElement
+    expect(fullImage.src).toContain('data:image/png;base64,iVBORw0KGgo=')
   })
 
   it('highlights the message matching highlightIndex', () => {
@@ -401,7 +432,7 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-compact-empty').textContent ?? '').toContain('send a message')
   })
 
-  it('renders sending and queued user messages inline with the transcript', () => {
+  it('renders sending user messages inline with the transcript', () => {
     render(
       <ChatPanel
         items={[
@@ -413,23 +444,31 @@ describe('ChatPanel', () => {
             status: 'sending',
             createdAt: '2026-07-06T00:00:00.000Z',
           },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('pending-user-message-local-1').textContent ?? '').toContain('sending now')
+    expect(screen.getByTestId('pending-user-message-local-1').textContent ?? '').not.toContain('Sending')
+    expect(screen.getByTestId('pending-user-message-status-local-1').getAttribute('aria-label')).toBe('Sending')
+    expect(screen.queryByText(/Queued #/)).toBeNull()
+  })
+
+  it('renders cancelled assistant suffix as a status chip', () => {
+    render(
+      <ChatPanel
+        messages={[
           {
-            kind: 'pending_user_message',
-            id: 'queue-1',
-            text: 'after this turn',
-            mode: 'queue',
-            status: 'queued',
-            createdAt: '2026-07-06T00:00:01.000Z',
-            position: 1,
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Partial response\n\n[cancelled]' }],
           },
         ]}
       />,
     )
 
-    expect(screen.getByTestId('pending-user-message-local-1').textContent ?? '').toContain('Sending')
-    expect(screen.getByTestId('pending-user-message-local-1').textContent ?? '').toContain('sending now')
-    expect(screen.getByTestId('pending-user-message-queue-1').textContent ?? '').toContain('Queued #1')
-    expect(screen.getByTestId('pending-user-message-queue-1').textContent ?? '').toContain('after this turn')
+    expect(screen.getByText('Partial response')).toBeTruthy()
+    expect(screen.queryByText('[cancelled]')).toBeNull()
+    expect(screen.getByTestId('assistant-message-cancelled').textContent ?? '').toContain('Response cancelled')
   })
 
   it('fires onEditAndRerun with the correct seq when a user message is edited', () => {
@@ -546,9 +585,267 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
-    expect(screen.getByText('Needs approval')).toBeTruthy()
-    expect(screen.getByText('Failed')).toBeTruthy()
-    expect(screen.getByText('Succeeded')).toBeTruthy()
+    expect(screen.getByText('1 Needs approval')).toBeTruthy()
+    expect(screen.getByText('1 Failed')).toBeTruthy()
+    expect(screen.getByText('1 Succeeded')).toBeTruthy()
+  })
+
+  it('collapses a long mixed tool activity into one compact block', () => {
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'read', input: { path: '/repo/a.ts' } },
+              { type: 'tool_call', callId: 'c2', name: 'grep', input: { pattern: 'needle', path: '/repo' } },
+              { type: 'tool_call', callId: 'c3', name: 'edit', input: { path: '/repo/a.ts' } },
+              { type: 'tool_call', callId: 'c4', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'c1', ok: true, content: 'file contents' },
+              { type: 'tool_result', callId: 'c2', ok: true, content: '/repo/a.ts:1:needle' },
+              { type: 'tool_result', callId: 'c3', ok: true, content: 'edited' },
+              { type: 'tool_result', callId: 'c4', ok: false, content: 'failed' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.getByText('4 ops')).toBeTruthy()
+    expect(screen.getByText(/read 1, grep 1, edit 1, bash 1/)).toBeTruthy()
+    expect(screen.getByText('1 Failed')).toBeTruthy()
+    expect(screen.getAllByText(/Failed/i)).toHaveLength(1)
+    expect(screen.getByText('3 Succeeded')).toBeTruthy()
+    expect(screen.queryByText(/read · \/repo\/a\.ts/)).toBeNull()
+
+    fireEvent.click(screen.getByTestId('tool-call-group-toggle-c1'))
+
+    expect(screen.getByText(/read · \/repo\/a\.ts/)).toBeTruthy()
+    expect(screen.getByText(/grep · \/needle\//)).toBeTruthy()
+    expect(screen.getByText(/edit · \/repo\/a\.ts/)).toBeTruthy()
+    expect(screen.getByText(/bash · pnpm test/)).toBeTruthy()
+  })
+
+  it('collapses mixed tool activity split across timeline items', () => {
+    const timeline: TimelineEntry[] = [
+      toolCallEntry(1, 'c1', 'grep', { pattern: 'foo', path: '/repo' }),
+      toolResultEntry(2, 'c1', true, '/repo/a.ts:1:foo'),
+      toolCallEntry(3, 'c2', 'read', { path: '/repo/a.ts' }),
+      toolResultEntry(4, 'c2', true, 'file a'),
+      toolCallEntry(5, 'c3', 'grep', { pattern: 'bar', path: '/repo' }),
+      toolResultEntry(6, 'c3', true, '/repo/b.ts:1:bar'),
+      toolCallEntry(7, 'c4', 'read', { path: '/repo/b.ts' }),
+      toolResultEntry(8, 'c4', false, 'missing file'),
+      toolCallEntry(9, 'c5', 'grep', { pattern: 'baz', path: '/repo' }),
+      toolResultEntry(10, 'c5', true, '/repo/c.ts:1:baz'),
+      toolCallEntry(11, 'c6', 'read', { path: '/repo/c.ts' }),
+      toolResultEntry(12, 'c6', true, 'file c'),
+    ]
+
+    render(<ChatPanel items={visibleTranscript([], timeline, '')} />)
+
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.getByText('6 ops')).toBeTruthy()
+    expect(screen.getByText(/grep 3, read 3/)).toBeTruthy()
+    expect(screen.getByText('1 Failed')).toBeTruthy()
+    expect(screen.getByText('5 Succeeded')).toBeTruthy()
+    expect(screen.queryByText('Tool result')).toBeNull()
+  })
+
+  it('auto-reveals only the configured live tail for running mixed tool activity', () => {
+    render(
+      <ChatPanel
+        liveToolActivityTailCount={2}
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'grep', input: { pattern: 'one', path: '/repo' } },
+              { type: 'tool_call', callId: 'c2', name: 'read', input: { path: '/repo/two.ts' } },
+              { type: 'tool_call', callId: 'c3', name: 'grep', input: { pattern: 'three', path: '/repo' } },
+              { type: 'tool_call', callId: 'c4', name: 'read', input: { path: '/repo/four.ts' } },
+              { type: 'tool_call', callId: 'c5', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'c1', ok: true, content: 'one hit' },
+              { type: 'tool_result', callId: 'c2', ok: true, content: 'two file' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-details-c1')).toBeTruthy()
+    expect(screen.queryByText(/grep · \/one\//)).toBeNull()
+    expect(screen.queryByText(/read · \/repo\/two\.ts/)).toBeNull()
+    expect(screen.queryByText(/grep · \/three\//)).toBeNull()
+    expect(screen.getByText(/read · \/repo\/four\.ts/)).toBeTruthy()
+    expect(screen.getByText(/bash · pnpm test/)).toBeTruthy()
+  })
+
+  it('keeps collapsed mixed tool activity closed when a tail result arrives', () => {
+    const { rerender } = render(
+      <ChatPanel
+        liveToolActivityTailCount={2}
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'grep', input: { pattern: 'one', path: '/repo' } },
+              { type: 'tool_call', callId: 'c2', name: 'read', input: { path: '/repo/two.ts' } },
+              { type: 'tool_call', callId: 'c3', name: 'grep', input: { pattern: 'three', path: '/repo' } },
+              { type: 'tool_call', callId: 'c4', name: 'read', input: { path: '/repo/four.ts' } },
+              { type: 'tool_call', callId: 'c5', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'c1', ok: true, content: 'one hit' },
+              { type: 'tool_result', callId: 'c2', ok: true, content: 'two file' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('tool-call-group-details-c1')).toBeTruthy()
+    expect(screen.getByText(/bash · pnpm test/)).toBeTruthy()
+
+    rerender(
+      <ChatPanel
+        liveToolActivityTailCount={2}
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'grep', input: { pattern: 'one', path: '/repo' } },
+              { type: 'tool_call', callId: 'c2', name: 'read', input: { path: '/repo/two.ts' } },
+              { type: 'tool_call', callId: 'c3', name: 'grep', input: { pattern: 'three', path: '/repo' } },
+              { type: 'tool_call', callId: 'c4', name: 'read', input: { path: '/repo/four.ts' } },
+              { type: 'tool_call', callId: 'c5', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'c1', ok: true, content: 'one hit' },
+              { type: 'tool_result', callId: 'c2', ok: true, content: 'two file' },
+              { type: 'tool_result', callId: 'c3', ok: true, content: 'three hit' },
+              { type: 'tool_result', callId: 'c4', ok: true, content: 'four file' },
+              { type: 'tool_result', callId: 'c5', ok: true, content: 'passed' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByTestId('tool-call-group-details-c1')).toBeNull()
+    expect(screen.queryByText(/bash · pnpm test/)).toBeNull()
+    expect(screen.getByText('5 Succeeded')).toBeTruthy()
+  })
+
+  it('keeps live mixed tool activity fully collapsed when the tail count is zero', () => {
+    render(
+      <ChatPanel
+        liveToolActivityTailCount={0}
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'grep', input: { pattern: 'one', path: '/repo' } },
+              { type: 'tool_call', callId: 'c2', name: 'read', input: { path: '/repo/two.ts' } },
+              { type: 'tool_call', callId: 'c3', name: 'grep', input: { pattern: 'three', path: '/repo' } },
+              { type: 'tool_call', callId: 'c4', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.queryByTestId('tool-call-group-details-c1')).toBeNull()
+    expect(screen.queryByText(/bash · pnpm test/)).toBeNull()
+  })
+
+  it('highlights a collapsed transcript-level tool activity by any consumed message index', () => {
+    const timeline: TimelineEntry[] = [
+      toolCallEntry(1, 'c1', 'grep', { pattern: 'foo', path: '/repo' }),
+      toolResultEntry(2, 'c1', true, 'hit'),
+      toolCallEntry(3, 'c2', 'read', { path: '/repo/a.ts' }),
+      toolResultEntry(4, 'c2', true, 'file'),
+      toolCallEntry(5, 'c3', 'grep', { pattern: 'bar', path: '/repo' }),
+      toolResultEntry(6, 'c3', true, 'hit'),
+      toolCallEntry(7, 'c4', 'read', { path: '/repo/b.ts' }),
+      toolResultEntry(8, 'c4', true, 'file'),
+    ]
+
+    const { container } = render(
+      <ChatPanel items={visibleTranscript([], timeline, '')} highlightIndex={5} />,
+    )
+
+    const activity = container.querySelector('[data-message-index="0"]')
+    expect(activity?.className).toMatch(/bg-amber-50/)
+  })
+
+  it('does not collapse split tool activity across assistant text', () => {
+    const timeline: TimelineEntry[] = [
+      toolCallEntry(1, 'c1', 'grep', { pattern: 'foo', path: '/repo' }),
+      toolResultEntry(2, 'c1', true, 'hit'),
+      toolCallEntry(3, 'c2', 'read', { path: '/repo/a.ts' }),
+      toolResultEntry(4, 'c2', true, 'file'),
+      {
+        seq: 5,
+        ts: '2026-07-11T00:00:05.000Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'checking next' }] } },
+        effects: [],
+      },
+      toolCallEntry(6, 'c3', 'grep', { pattern: 'bar', path: '/repo' }),
+      toolResultEntry(7, 'c3', true, 'hit'),
+      toolCallEntry(8, 'c4', 'read', { path: '/repo/b.ts' }),
+      toolResultEntry(9, 'c4', true, 'file'),
+    ]
+
+    render(<ChatPanel items={visibleTranscript([], timeline, '')} />)
+
+    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.getByText('checking next')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-c4')).toBeTruthy()
+  })
+
+  it('keeps short mixed tool runs as separate compact rows', () => {
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'read', input: { path: '/repo/a.ts' } },
+              { type: 'tool_call', callId: 'c2', name: 'bash', input: { command: 'pwd' } },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-c2')).toBeTruthy()
+    expect(screen.getByText('read')).toBeTruthy()
+    expect(screen.getByText('bash')).toBeTruthy()
   })
 
   it('renders empty state end-to-end for an ephemeral session (system prompt only, no timeline)', () => {
@@ -571,3 +868,37 @@ describe('ChatPanel', () => {
     ).toBeNull()
   })
 })
+
+function toolCallEntry(
+  seq: number,
+  callId: string,
+  name: string,
+  input: Record<string, unknown>,
+): TimelineEntry {
+  return {
+    seq,
+    ts: `2026-07-11T00:00:${String(seq).padStart(2, '0')}.000Z`,
+    event: {
+      kind: 'llm_response',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_call', callId, name, input }],
+      },
+    },
+    effects: [],
+  }
+}
+
+function toolResultEntry(
+  seq: number,
+  callId: string,
+  ok: boolean,
+  content: string,
+): TimelineEntry {
+  return {
+    seq,
+    ts: `2026-07-11T00:00:${String(seq).padStart(2, '0')}.000Z`,
+    event: { kind: 'tool_result', callId, ok, content },
+    effects: [],
+  }
+}
