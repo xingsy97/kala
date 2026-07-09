@@ -56,8 +56,8 @@ export function overflowConfigFromEnv(overflowDir: string): OverflowConfig {
 }
 
 /**
- * Byte length of a UTF-8 string. Matches how the kernel measures message
- * content for `contextPressureLevel`.
+ * Byte length of a UTF-8 string. Matches the host-side context estimator's
+ * rough input sizing.
  */
 function byteLength(s: string): number {
   return Buffer.byteLength(s, 'utf8')

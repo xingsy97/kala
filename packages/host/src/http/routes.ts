@@ -21,7 +21,11 @@ import { dirname, extname, join, normalize, resolve as resolvePath, sep } from '
 import type {
   AttachedExecutor,
   ClientAddManualModel,
+  ClientAddManualProvider,
   ClientDeleteManualModel,
+  ClientDeleteManualProvider,
+  ClientSetDefaultModel,
+  ClientUpdateAgentPromptSettings,
   ServerExecutorIdentitiesPayload,
   ServerExecutorIdentityRevokedPayload,
   ServerExecutorInvitePayload,
@@ -43,10 +47,10 @@ import {
 import { verifyReward } from '../rl-reward.js'
 import { exportSessionTraceArtifacts } from '../session-export.js'
 import { exportTraceOtlp, loadHeadersFile } from '../trace-otlp-export.js'
-import { compareEvalRuns, judgeScore, profileSession, scoreSession } from '../eval/generic.js'
-import { evaluateRegressionGate, type RegressionThresholdPolicy } from '../eval/regression-gate.js'
-import { aggregateProfiles } from '../eval/cost-aggregate.js'
-import { evaluateProfileBudget, type ProfileBudgetPolicy } from '../eval/profile-budget.js'
+import { compareEvalRuns, judgeScore, profileSession, scoreSession } from '../eval/session/generic.js'
+import { evaluateRegressionGate, type RegressionThresholdPolicy } from '../eval/session/regression-gate.js'
+import { aggregateProfiles } from '../eval/session/cost-aggregate.js'
+import { evaluateProfileBudget, type ProfileBudgetPolicy } from '../eval/session/profile-budget.js'
 import {
   exportSessionForSweBench,
   inferSweBenchPatchRun,
@@ -55,31 +59,31 @@ import {
   runSweBenchAgentPatchRun,
   runSweBenchGrade,
   sweBenchRunLayout,
-} from '../eval/swebench.js'
+} from '../eval/swebench/swebench.js'
 import {
   importTerminalBenchResults,
   resolveTerminalBenchTasks,
   runTerminalBenchRun,
   terminalBenchRunLayout,
-} from '../eval/terminal-bench.js'
-import { mineBadCases } from '../eval/badcase-mining.js'
-import { readSweBenchRunRegistry } from '../eval/run-registry.js'
-import { exportForRL, exportForSFT } from '../eval/badcase-export.js'
-import { exportRollouts } from '../eval/rollout-export.js'
-import { annotateBadCase, readBadCaseAnnotations, BAD_CASE_LABELS, type BadCaseLabel } from '../eval/badcase-annotations.js'
+} from '../eval/terminal-bench/terminal-bench.js'
+import { mineBadCases } from '../eval/badcases/badcase-mining.js'
+import { readSweBenchRunRegistry } from '../eval/core/run-registry.js'
+import { exportForRL, exportForSFT } from '../eval/badcases/badcase-export.js'
+import { exportRollouts } from '../eval/badcases/rollout-export.js'
+import { annotateBadCase, readBadCaseAnnotations, BAD_CASE_LABELS, type BadCaseLabel } from '../eval/badcases/badcase-annotations.js'
 import {
   InstancesSourceError,
   resolveSweBenchInstances,
   type InstancesSource,
-} from '../eval/swebench-instances-source.js'
+} from '../eval/swebench/swebench-instances-source.js'
 import {
   PatchesSourceError,
   resolveSweBenchPatches,
-} from '../eval/swebench-patches-source.js'
+} from '../eval/swebench/swebench-patches-source.js'
 import {
   ResultsSourceError,
   resolveSweBenchResults,
-} from '../eval/swebench-results-source.js'
+} from '../eval/swebench/swebench-results-source.js'
 import { buildMemoryIndex } from '../memory-index.js'
 import { retrieveMemory } from '../memory-retrieval.js'
 import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
@@ -313,6 +317,12 @@ export function attachJsonRoutes(
     settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
     addManualModel?: (input: ClientAddManualModel) => ServerSettingsPayload
     deleteManualModel?: (input: ClientDeleteManualModel) => ServerSettingsPayload
+    addManualProvider?: (input: ClientAddManualProvider) => ServerSettingsPayload
+    deleteManualProvider?: (input: ClientDeleteManualProvider) => ServerSettingsPayload
+    setDefaultModel?: (input: ClientSetDefaultModel) => ServerSettingsPayload
+    updateAgentPrompt?: (input: ClientUpdateAgentPromptSettings) => ServerSettingsPayload
+    initializeSocketAdmin?: (input: { password: string; mode?: 'development' | 'production' }) => ServerSettingsPayload
+    updateSocketAdminMode?: (input: { mode: 'development' | 'production' }) => ServerSettingsPayload
     artifactRootDir?: string | false
     sessions?: SessionStore
     routerHealth?: () => unknown
@@ -551,6 +561,115 @@ export function attachJsonRoutes(
       }
       return
     }
+    if (path === '/settings/providers' && req.method === 'POST' && payloads.addManualProvider) {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => {
+          const input = parseWire(schema.ClientAddManualProviderSchema, body, { channel: 'POST /settings/providers' })
+          if (!input) {
+            sendError(res, 400, 'invalid manual provider input')
+            return
+          }
+          const result = payloads.addManualProvider!(input)
+          payloads.audit?.log({ action: 'settings.provider_add', actor: httpActor(req, payloads.auth), target: { providerId: input.id }, outcome: 'ok' })
+          sendJson(req, res, result)
+        })
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/settings/providers' && req.method === 'DELETE' && payloads.deleteManualProvider) {
+      claimRoute(req)
+      const parsed = new URL(url, 'http://x')
+      try {
+        const input = parseWire(schema.ClientDeleteManualProviderSchema, {
+          providerId: parsed.searchParams.get('providerId') ?? '',
+        }, { channel: 'DELETE /settings/providers' })
+        if (!input) {
+          sendError(res, 400, 'invalid manual provider delete input')
+          return
+        }
+        const result = payloads.deleteManualProvider(input)
+        payloads.audit?.log({ action: 'settings.provider_delete', actor: httpActor(req, payloads.auth), target: { providerId: input.providerId }, outcome: 'ok' })
+        sendJson(req, res, result)
+      } catch (err: unknown) {
+        sendError(res, 400, err instanceof Error ? err.message : String(err))
+      }
+      return
+    }
+    if (path === '/settings/default-model' && req.method === 'POST' && payloads.setDefaultModel) {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => {
+          const input = parseWire(schema.ClientSetDefaultModelSchema, body, { channel: 'POST /settings/default-model' })
+          if (!input) {
+            sendError(res, 400, 'invalid default model input')
+            return
+          }
+          const result = payloads.setDefaultModel!(input)
+          payloads.audit?.log({ action: 'settings.default_model_set', actor: httpActor(req, payloads.auth), target: { model: input.model }, outcome: 'ok' })
+          sendJson(req, res, result)
+        })
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/settings/agent-prompt' && req.method === 'POST' && payloads.updateAgentPrompt) {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => {
+          const input = parseWire(schema.ClientUpdateAgentPromptSettingsSchema, body, { channel: 'POST /settings/agent-prompt' })
+          if (!input) {
+            sendError(res, 400, 'invalid agent prompt settings input')
+            return
+          }
+          const result = payloads.updateAgentPrompt!(input)
+          payloads.audit?.log({ action: 'settings.agent_prompt_update', actor: httpActor(req, payloads.auth), target: { preset: input.preset }, outcome: 'ok' })
+          sendJson(req, res, result)
+        })
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/settings/socket-admin/init' && req.method === 'POST' && payloads.initializeSocketAdmin) {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => {
+          const input = typeof body === 'object' && body !== null ? body as { password?: unknown; mode?: unknown } : {}
+          const password = typeof input.password === 'string' ? input.password : ''
+          if (!password.trim()) {
+            sendError(res, 400, 'password is required')
+            return
+          }
+          if (input.mode !== undefined && input.mode !== 'development' && input.mode !== 'production') {
+            sendError(res, 400, 'mode must be development or production')
+            return
+          }
+          const result = payloads.initializeSocketAdmin!({ password, ...(input.mode ? { mode: input.mode } : {}) })
+          payloads.audit?.log({ action: 'settings.socket_admin_init', actor: httpActor(req, payloads.auth), outcome: 'ok' })
+          sendJson(req, res, result)
+        })
+        .catch((err: unknown) => {
+          const status = err && typeof err === 'object' && 'status' in err && typeof (err as { status?: unknown }).status === 'number'
+            ? (err as { status: number }).status
+            : 400
+          sendError(res, status, err instanceof Error ? err.message : String(err))
+        })
+      return
+    }
+    if (path === '/settings/socket-admin/mode' && req.method === 'POST' && payloads.updateSocketAdminMode) {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => {
+          const input = typeof body === 'object' && body !== null ? body as { mode?: unknown } : {}
+          if (input.mode !== 'development' && input.mode !== 'production') {
+            sendError(res, 400, 'mode must be development or production')
+            return
+          }
+          const result = payloads.updateSocketAdminMode!({ mode: input.mode })
+          payloads.audit?.log({ action: 'settings.socket_admin_mode_update', actor: httpActor(req, payloads.auth), target: { mode: input.mode }, outcome: 'ok' })
+          sendJson(req, res, result)
+        })
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
     if (path === '/eval/swebench/plan' && req.method === 'POST') {
       claimRoute(req)
       void readJson(req)
@@ -633,6 +752,9 @@ function isProtectedJsonRoute(path: string): boolean {
   return path === '/models' ||
     path === '/settings' ||
     path === '/settings/models' ||
+    path === '/settings/agent-prompt' ||
+    path === '/settings/socket-admin/init' ||
+    path === '/settings/socket-admin/mode' ||
     path === '/auth/executor-invites' ||
     path.startsWith('/auth/executor-invites/') ||
     path === '/auth/executor-identities' ||
@@ -1842,6 +1964,99 @@ export function attachStaticHandler(server: HttpServer, staticDir: string): void
   })
 }
 
+export type EmbeddedStaticAsset = {
+  readonly path: string
+  readonly contentBase64: string
+}
+
+export type StaticMount = {
+  readonly path: string
+  readonly rootDir?: string
+  readonly assets?: readonly EmbeddedStaticAsset[]
+}
+
+export type DynamicStaticMount = () => StaticMount | undefined
+
+export function attachEmbeddedStaticHandler(server: HttpServer, assets: readonly EmbeddedStaticAsset[]): void {
+  const byPath = new Map<string, EmbeddedStaticAsset>()
+  for (const asset of assets) {
+    const normalized = normalizeStaticAssetPath(asset.path)
+    byPath.set(normalized, { ...asset, path: normalized })
+  }
+  server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const url = req.url ?? '/'
+    if (url.startsWith('/socket.io/')) return
+    if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (routeClaimed(req) || res.headersSent || res.writableEnded) return
+
+    serveEmbeddedStatic(byPath, req, res)
+  })
+}
+
+export function attachStaticMountHandler(server: HttpServer, mount: StaticMount): void {
+  const mountPath = normalizeMountPath(mount.path)
+  const root = mount.rootDir ? resolvePath(mount.rootDir) : undefined
+  const byPath = mount.assets ? embeddedAssetMap(mount.assets) : undefined
+  server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const url = req.url ?? '/'
+    if (!isMountedPath(url, mountPath)) return
+    if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (routeClaimed(req) || res.headersSent || res.writableEnded) return
+    claimRoute(req)
+    if (new URL(url, 'http://x').pathname === mountPath) {
+      redirectToMountedRoot(req, res, mountPath)
+      return
+    }
+    const originalUrl = req.url
+    req.url = mountedRequestUrl(originalUrl ?? '/', mountPath)
+    if (root) {
+      void serveStatic(root, req, res).finally(() => {
+        req.url = originalUrl
+      })
+      return
+    }
+    if (byPath) {
+      serveEmbeddedStatic(byPath, req, res)
+      req.url = originalUrl
+      return
+    }
+    req.url = originalUrl
+    res.writeHead(404).end('not found')
+  })
+}
+
+export function attachDynamicStaticMountHandler(server: HttpServer, getMount: DynamicStaticMount): void {
+  server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const mount = getMount()
+    if (!mount) return
+    const url = req.url ?? '/'
+    const mountPath = normalizeMountPath(mount.path)
+    if (!isMountedPath(url, mountPath)) return
+    if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (routeClaimed(req) || res.headersSent || res.writableEnded) return
+    claimRoute(req)
+    if (new URL(url, 'http://x').pathname === mountPath) {
+      redirectToMountedRoot(req, res, mountPath)
+      return
+    }
+    const originalUrl = req.url
+    req.url = mountedRequestUrl(originalUrl ?? '/', mountPath)
+    if (mount.rootDir) {
+      void serveStatic(resolvePath(mount.rootDir), req, res).finally(() => {
+        req.url = originalUrl
+      })
+      return
+    }
+    if (mount.assets) {
+      serveEmbeddedStatic(embeddedAssetMap(mount.assets), req, res)
+      req.url = originalUrl
+      return
+    }
+    req.url = originalUrl
+    res.writeHead(404).end('not found')
+  })
+}
+
 export function attachReleaseAssetsHandler(server: HttpServer, releaseDir: string): void {
   const root = resolvePath(releaseDir)
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -1852,6 +2067,44 @@ export function attachReleaseAssetsHandler(server: HttpServer, releaseDir: strin
     claimRoute(req)
     void serveReleaseAsset(root, req, res)
   })
+}
+
+function embeddedAssetMap(assets: readonly EmbeddedStaticAsset[]): Map<string, EmbeddedStaticAsset> {
+  const byPath = new Map<string, EmbeddedStaticAsset>()
+  for (const asset of assets) {
+    const normalized = normalizeStaticAssetPath(asset.path)
+    byPath.set(normalized, { ...asset, path: normalized })
+  }
+  return byPath
+}
+
+function normalizeMountPath(path: string): string {
+  const trimmed = path.trim() || '/'
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  return withSlash.replace(/\/+$/, '') || '/'
+}
+
+function isMountedPath(rawUrl: string, mountPath: string): boolean {
+  const pathname = new URL(rawUrl, 'http://x').pathname
+  return pathname === mountPath || pathname.startsWith(`${mountPath}/`)
+}
+
+function mountedRequestUrl(rawUrl: string, mountPath: string): string {
+  const url = new URL(rawUrl, 'http://x')
+  const suffix = url.pathname === mountPath ? '/' : url.pathname.slice(mountPath.length)
+  url.pathname = suffix.startsWith('/') ? suffix : `/${suffix}`
+  return `${url.pathname}${url.search}`
+}
+
+function redirectToMountedRoot(req: IncomingMessage, res: ServerResponse, mountPath: string): void {
+  const url = new URL(req.url ?? '/', 'http://x')
+  const location = `${mountPath}/${url.search}`
+  res.writeHead(308, {
+    location,
+    'cache-control': 'no-store',
+    'content-length': '0',
+  })
+  res.end()
 }
 
 export function attachRequestHandler(
@@ -1902,6 +2155,56 @@ async function serveStatic(
     return
   }
   createReadStream(filePath).pipe(res)
+}
+
+function serveEmbeddedStatic(
+  assets: ReadonlyMap<string, EmbeddedStaticAsset>,
+  req: IncomingMessage,
+  res: ServerResponse,
+): void {
+  const url = new URL(req.url ?? '/', 'http://x')
+  const requested = normalizeStaticAssetPath(decodeURIComponent(url.pathname))
+  const asset = pickEmbeddedAsset(assets, requested)
+  if (!asset) {
+    res.writeHead(404).end('not found')
+    return
+  }
+  const body = Buffer.from(asset.contentBase64, 'base64')
+  const mime = MIME[extname(asset.path).toLowerCase()] ?? 'application/octet-stream'
+  const headers: Record<string, string> = {
+    'content-type': mime,
+    'content-length': String(body.byteLength),
+  }
+  if (/^assets\/[^/]+\.[0-9a-f]{6,}\./i.test(asset.path)) {
+    headers['cache-control'] = 'public, max-age=31536000, immutable'
+  } else {
+    headers['cache-control'] = 'no-cache, must-revalidate'
+  }
+  res.writeHead(200, headers)
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  res.end(body)
+}
+
+function pickEmbeddedAsset(
+  assets: ReadonlyMap<string, EmbeddedStaticAsset>,
+  requested: string,
+): EmbeddedStaticAsset | null {
+  if (requested === '__forbidden__') return null
+  const direct = assets.get(requested)
+  if (direct) return direct
+  const index = assets.get(`${requested.replace(/\/+$/u, '')}/index.html`)
+  if (index) return index
+  return assets.get('index.html') ?? null
+}
+
+function normalizeStaticAssetPath(path: string): string {
+  const rel = normalize(path).replace(/^[/\\]+/, '')
+  if (!rel || rel === '.') return 'index.html'
+  if (rel.startsWith('..') || rel.includes(`..${sep}`)) return '__forbidden__'
+  return rel.replace(/\\/g, '/')
 }
 
 async function serveReleaseAsset(

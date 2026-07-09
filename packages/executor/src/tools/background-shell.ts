@@ -121,6 +121,7 @@ export async function startBackgroundShell(params: {
   sessionId: string
   command: string
   cwd: string
+  env?: NodeJS.ProcessEnv
 }): Promise<BackgroundTaskSummary> {
   await mkdir(TASK_DIR, { recursive: true })
   const taskId = ulid()
@@ -129,7 +130,7 @@ export async function startBackgroundShell(params: {
 
   const child = spawn('bash', ['-c', params.command], {
     cwd: params.cwd,
-    env: process.env,
+    env: params.env ?? process.env,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })

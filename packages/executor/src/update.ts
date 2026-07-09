@@ -3,7 +3,7 @@ import { chmod, rename, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import process from 'node:process'
 
-import type { Logger } from 'pino'
+import type { RuntimeLogger } from './logger.js'
 
 type LatestRelease = {
   tag_name?: string
@@ -15,7 +15,7 @@ type Options = {
   currentTag?: string
   autoUpdate: boolean
   argv: readonly string[]
-  logger: Logger
+  logger: RuntimeLogger
 }
 
 const EXECUTOR_ASSET = 'agent-kernel-executor.cjs'

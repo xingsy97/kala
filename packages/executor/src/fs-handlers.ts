@@ -2,7 +2,7 @@
  * Filesystem RPC handlers on the executor side.
  *
  * The dashboard drives three read-only inspection endpoints — directory
- * picker, workspace file search, single-file preview. They intentionally
+ * picker, workspace file search, single-file view. They intentionally
  * bypass the LLM / tool_call path so the browser can show file trees
  * without cluttering the transcript. Each returns a well-formed payload
  * regardless of failure so the dashboard doesn't crash on a partial
@@ -18,7 +18,7 @@
  * `process.cwd()` when the executor was started without a jail.
  */
 
-import { cp, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { cp, open, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 
 import type {
@@ -51,15 +51,24 @@ export async function listDirs(
   try {
     const resolved = await sandbox.resolve(requested)
     const entries = await readdir(resolved, { withFileTypes: true })
+    const items = await Promise.all(entries
+      .filter((entry) => entry.isDirectory() || entry.isFile())
+      .map(async (entry) => {
+        const path = join(resolved, entry.name)
+        if (entry.isDirectory()) return { name: entry.name, path, type: 'directory' as const }
+        const info = await stat(path).catch(() => undefined)
+        return { name: entry.name, path, type: 'file' as const, ...(info ? { size: info.size } : {}) }
+      }))
+    items.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
     return {
       requestId,
       workspaceId,
       path: resolved,
       roots,
-      entries: entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => ({ name: entry.name, path: join(resolved, entry.name) }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
+      entries: items,
     }
   } catch (err) {
     return {
@@ -170,11 +179,25 @@ export async function listFiles(
 }
 
 // ============================================================================
-// readWorkspaceFile — single-file preview
+// readWorkspaceFile — single-file view
 // ============================================================================
 
-const FILE_READ_DEFAULT_MAX_BYTES = 64 * 1024
-const FILE_READ_HARD_CEILING = 512 * 1024
+const FILE_READ_DEFAULT_MAX_BYTES = 1024 * 1024
+const FILE_READ_HARD_CEILING = 1024 * 1024
+const FILE_BINARY_PROBE_BYTES = 8192
+const IMAGE_MEDIA_TYPES = new Map<string, string>([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
+  ['.bmp', 'image/bmp'],
+  ['.ico', 'image/x-icon'],
+])
+const VIEWABLE_BINARY_MEDIA_TYPES = new Map<string, string>([
+  ['.pdf', 'application/pdf'],
+])
 
 type ReadFilePayload = {
   requestId: string
@@ -206,14 +229,72 @@ export async function readWorkspaceFile(
     if (!info.isFile()) {
       return { ...base, error: 'ENOTFILE: not a regular file' }
     }
+    const imageMediaType = imageMediaTypeFor(resolved)
+    if (imageMediaType) {
+      if (info.size > cap) {
+        return { ...base, size: info.size, kind: 'too_large', truncated: true, error: `EFBIG: image is ${info.size} bytes (limit ${cap})` }
+      }
+      const content = (await readFile(resolved)).toString('base64')
+      return { ...base, content, size: info.size, kind: 'image', encoding: 'base64', mediaType: imageMediaType }
+    }
+    const viewableBinaryMediaType = viewableBinaryMediaTypeFor(resolved)
+    if (viewableBinaryMediaType) {
+      if (info.size > cap) {
+        return { ...base, size: info.size, kind: 'too_large', truncated: true, error: `EFBIG: file is ${info.size} bytes (limit ${cap})` }
+      }
+      const content = (await readFile(resolved)).toString('base64')
+      return { ...base, content, size: info.size, kind: 'pdf', encoding: 'base64', mediaType: viewableBinaryMediaType }
+    }
+    const probe = await readPrefix(resolved, Math.min(FILE_BINARY_PROBE_BYTES, info.size))
+    if (looksBinary(probe)) {
+      return { ...base, size: info.size, kind: 'binary', error: 'EBINARY: file appears to be binary' }
+    }
     if (info.size > cap) {
-      return { ...base, size: info.size, error: `EFBIG: file is ${info.size} bytes (limit ${cap})` }
+      const content = (await readPrefix(resolved, cap)).toString('utf8')
+      return { ...base, content, size: info.size, kind: 'too_large', truncated: true, error: `EFBIG: file is ${info.size} bytes (limit ${cap})` }
     }
     const content = await readFile(resolved, 'utf8')
-    return { ...base, content, size: info.size }
+    return { ...base, content, size: info.size, kind: 'text' }
   } catch (err) {
-    return { ...base, error: err instanceof Error ? err.message : String(err) }
+    return { ...base, kind: 'error', error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+function imageMediaTypeFor(path: string): string | undefined {
+  const lower = path.toLowerCase()
+  for (const [ext, mediaType] of IMAGE_MEDIA_TYPES) {
+    if (lower.endsWith(ext)) return mediaType
+  }
+  return undefined
+}
+
+function viewableBinaryMediaTypeFor(path: string): string | undefined {
+  const lower = path.toLowerCase()
+  for (const [ext, mediaType] of VIEWABLE_BINARY_MEDIA_TYPES) {
+    if (lower.endsWith(ext)) return mediaType
+  }
+  return undefined
+}
+
+async function readPrefix(path: string, bytes: number): Promise<Buffer> {
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(bytes)
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0)
+    return buffer.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
+}
+
+function looksBinary(buffer: Buffer): boolean {
+  if (buffer.length === 0) return false
+  let suspicious = 0
+  for (const byte of buffer) {
+    if (byte === 0) return true
+    if (byte < 7 || (byte > 14 && byte < 32)) suspicious += 1
+  }
+  return suspicious / buffer.length > 0.08
 }
 
 // ============================================================================

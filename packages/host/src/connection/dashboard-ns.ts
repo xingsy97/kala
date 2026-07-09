@@ -30,6 +30,7 @@ import type {
   ClientListSessions,
   ClientListSubAgents,
   ClientLoadHistory,
+  ClientLoadLogArtifact,
   ClientReadBgOutput,
   ClientReadFile,
   ClientReadOverflow,
@@ -40,6 +41,10 @@ import type {
   ClientSetApprovalMode,
   ClientSetCwd,
   ClientSetModel,
+  ClientTerminalCreate,
+  ClientTerminalInput,
+  ClientTerminalKill,
+  ClientTerminalResize,
   ClientUpdateQueuedMessage,
   ClientSubscribe,
   ClientUserApprove,
@@ -75,12 +80,16 @@ import { resetCompactRuntime } from '../extensions/compaction.js'
 import { readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
-import { resolve as resolvePath, sep } from 'node:path'
+import { dirname, resolve as resolvePath, sep } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { AuthConfig } from '../auth-control.js'
 import { authenticateDashboardHandshake } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
 import { parseWire, type WireValidationContext } from '../wire-validation.js'
 import { isSkillManager } from '../extensions/skills.js'
+import { contextSnapshot, snapshotFromConfig, type ContextWindowOverride } from '../context/manager.js'
+import { sessionRoom } from './rooms.js'
+import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -88,6 +97,7 @@ export type QueuedUserMessage = {
   mode: 'steer' | 'queue'
   createdAt: string
   content?: readonly MessageContent[]
+  model?: string
 }
 
 export type MessageQueueManager = {
@@ -114,7 +124,7 @@ export type DashboardDeps = {
   loop: LoopHandle
   loopDeps: HostLoopDeps
   executors: ReturnType<typeof createExecutorRegistry>
-  defaultConfig: AgentConfig
+  defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
   audit?: AuditLogger
   broadcastError(
@@ -123,6 +133,8 @@ export type DashboardDeps = {
     message: string,
   ): void
   selectedModels: Map<string, string>
+  contextWindowForModel?(model: string | undefined): ContextWindowOverride | undefined
+  normalizeModelRef?(model: string): string | undefined
   dashboardNs: DashboardNs
   messageQueues: MessageQueueManager
   executorSnapshot?(): readonly AttachedExecutor[]
@@ -135,6 +147,9 @@ export function configureDashboardNamespace(
   ns: DashboardNs,
   deps: DashboardDeps,
 ): void {
+  const getDefaultConfig = (): AgentConfig => typeof deps.defaultConfig === 'function'
+    ? deps.defaultConfig()
+    : deps.defaultConfig
   ns.use((socket, nextFn) => {
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'dashboard') {
@@ -155,8 +170,13 @@ export function configureDashboardNamespace(
       nextFn(new Error('missing_session_id'))
       return
     }
+    const connectionMeta = dashboardConnectionMeta({
+      actor: authResult.actor,
+      clientVersion: auth.clientVersion,
+    })
     socket.data.dashboardActor = authResult.actor
-    deps.audit?.log({ action: 'dashboard.socket_accept', actor: authResult.actor, target: { sessionId: auth.sessionId }, outcome: 'ok' })
+    socket.data.connectionMeta = connectionMeta
+    deps.audit?.log({ action: 'dashboard.socket_accept', actor: authResult.actor, target: { sessionId: auth.sessionId }, outcome: 'ok', metadata: auditConnectionMeta(connectionMeta) })
     nextFn()
   })
 
@@ -234,6 +254,8 @@ export function configureDashboardNamespace(
             ts: e.ts,
             event: e.event,
             effects: e.effects,
+            ...(e.effectsArtifact ? { hasEffectsArtifact: true } : {}),
+            ...(e.llmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
             ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
             ...(e.model ? { model: e.model } : {}),
           }))
@@ -245,6 +267,42 @@ export function configureDashboardNamespace(
           'host',
           err instanceof Error ? err.message : String(err),
         )
+      }
+    })
+
+    socket.on('client:load_log_artifact', async (raw: ClientLoadLogArtifact) => {
+      const p = vparse(schema.ClientLoadLogArtifactSchema, raw, 'client:load_log_artifact', (raw as ClientLoadLogArtifact | undefined)?.sessionId)
+      if (!p) return
+      try {
+        let target: SessionRecord | undefined = deps.store.get(p.sessionId)
+        if (!target) target = await deps.store.load(p.sessionId)
+        const parsed = await readSessionLog(target.logPath)
+        const entry = parsed.events.find((e) => e.seq === p.seq)
+        if (!entry) {
+          socket.emit('server:log_artifact', { sessionId: p.sessionId, seq: p.seq, error: 'event not found' })
+          return
+        }
+        const payload: { effects?: unknown; llmTrace?: unknown } = {}
+        if (entry.effectsArtifact) {
+          payload.effects = await readJsonLogArtifact(target.logPath, entry.effectsArtifact.path)
+        }
+        if (entry.llmTraceArtifact) {
+          payload.llmTrace = await readJsonLogArtifact(target.logPath, entry.llmTraceArtifact.path)
+        } else if (entry.llmTrace) {
+          payload.llmTrace = entry.llmTrace
+        }
+        socket.emit('server:log_artifact', {
+          sessionId: p.sessionId,
+          seq: p.seq,
+          ...(payload.effects ? { effects: payload.effects as never } : {}),
+          ...(payload.llmTrace ? { llmTrace: payload.llmTrace as never } : {}),
+        })
+      } catch (err) {
+        socket.emit('server:log_artifact', {
+          sessionId: p.sessionId,
+          seq: p.seq,
+          error: err instanceof Error ? err.message : String(err),
+        })
       }
     })
 
@@ -263,14 +321,18 @@ export function configureDashboardNamespace(
         record = undefined
       }
     }
-    if (record) await refreshSessionSkillsIfNeeded(deps, record)
-    await socket.join(`session:${sessionId}`)
+    if (record) {
+      await refreshSessionSkillsIfNeeded(deps, record)
+      syncSelectedModelCache(deps, record)
+    }
+    await socket.join(sessionRoom(sessionId))
     const ready: SessionReadyEvent = record
-      ? readyEventFor(record, deps.selectedModels.get(sessionId))
-      : ephemeralReadyEventFor(
+      ? readyEventFor(record, effectiveSelectedModel(deps, record), 'load', contextWindowForSession(deps, sessionId, record))
+        : ephemeralReadyEventFor(
           sessionId,
-          deps.defaultConfig,
+          getDefaultConfig(),
           deps.selectedModels.get(sessionId),
+          contextWindowForSession(deps, sessionId),
         )
     socket.emit('session:ready', ready)
     socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
@@ -287,14 +349,18 @@ export function configureDashboardNamespace(
           target = undefined
         }
       }
-      if (target) await refreshSessionSkillsIfNeeded(deps, target)
-      await socket.join(`session:${sessionId}`)
+      if (target) {
+        await refreshSessionSkillsIfNeeded(deps, target)
+        syncSelectedModelCache(deps, target)
+      }
+      await socket.join(sessionRoom(sessionId))
       const payload: SessionReadyEvent = target
-        ? readyEventFor(target, deps.selectedModels.get(sessionId))
+        ? readyEventFor(target, effectiveSelectedModel(deps, target), 'load', contextWindowForSession(deps, sessionId, target))
         : ephemeralReadyEventFor(
             sessionId,
-            deps.defaultConfig,
+            getDefaultConfig(),
             deps.selectedModels.get(sessionId),
+            contextWindowForSession(deps, sessionId),
           )
       socket.emit('session:ready', payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
@@ -510,21 +576,42 @@ export function configureDashboardNamespace(
       }
     })
     socket.on('client:list_dirs', async (raw: ClientListDirs) => {
-      const p = vparse(schema.ClientListDirsSchema, raw, 'client:list_dirs')
+      const p = vparse(schema.ClientListDirsSchema, raw, 'client:list_dirs') as ClientListDirs | undefined
       if (!p) return
+      if (p.sessionId) {
+        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+        if (error) {
+          socket.emit('server:dir_list', { requestId: p.requestId, workspaceId: p.workspaceId, path: p.path ?? '', roots: [], entries: [], error })
+          return
+        }
+      }
       deps.audit?.log({ action: 'internal_tool.list_dirs', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
       socket.emit('server:dir_list', result)
     })
     socket.on('client:list_files', async (raw: ClientListFiles) => {
-      const p = vparse(schema.ClientListFilesSchema, raw, 'client:list_files')
+      const p = vparse(schema.ClientListFilesSchema, raw, 'client:list_files') as ClientListFiles | undefined
       if (!p) return
+      if (p.sessionId) {
+        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+        if (error) {
+          socket.emit('server:file_list', { requestId: p.requestId, workspaceId: p.workspaceId, files: [], truncated: false, error })
+          return
+        }
+      }
       const result = await deps.executors.listFiles(p)
       socket.emit('server:file_list', result)
     })
     socket.on('client:read_file', async (raw: ClientReadFile) => {
-      const p = vparse(schema.ClientReadFileSchema, raw, 'client:read_file')
+      const p = vparse(schema.ClientReadFileSchema, raw, 'client:read_file') as ClientReadFile | undefined
       if (!p) return
+      if (p.sessionId) {
+        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+        if (error) {
+          socket.emit('server:file_contents', { requestId: p.requestId, workspaceId: p.workspaceId, path: p.path, kind: 'error', error })
+          return
+        }
+      }
       deps.audit?.log({ action: 'internal_tool.read_file', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.readFile(p)
       socket.emit('server:file_contents', result)
@@ -571,20 +658,41 @@ export function configureDashboardNamespace(
       const result = await deps.executors.killBg(p)
       ack(result)
     })
-    socket.on('sub_agent:list', (raw: ClientListSubAgents, ack) => {
+    socket.on('terminal:create', async (raw: ClientTerminalCreate, ack) => {
+      const p = vparse(schema.ClientTerminalCreateSchema, raw, 'terminal:create', (raw as ClientTerminalCreate | undefined)?.sessionId)
+      if (!p) return
+      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, error })
+      const result = await deps.executors.createTerminal(p)
+      ack(result)
+    })
+    socket.on('terminal:input', async (raw: ClientTerminalInput) => {
+      const p = vparse(schema.ClientTerminalInputSchema, raw, 'terminal:input', (raw as ClientTerminalInput | undefined)?.sessionId)
+      if (!p) return
+      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      if (error) return
+      deps.executors.inputTerminal(p)
+    })
+    socket.on('terminal:resize', async (raw: ClientTerminalResize) => {
+      const p = vparse(schema.ClientTerminalResizeSchema, raw, 'terminal:resize', (raw as ClientTerminalResize | undefined)?.sessionId)
+      if (!p) return
+      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      if (error) return
+      deps.executors.resizeTerminal(p)
+    })
+    socket.on('terminal:kill', async (raw: ClientTerminalKill, ack) => {
+      const p = vparse(schema.ClientTerminalKillSchema, raw, 'terminal:kill', (raw as ClientTerminalKill | undefined)?.sessionId)
+      if (!p) return
+      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, terminalId: p.terminalId, killed: false, error })
+      const result = await deps.executors.killTerminal(p)
+      ack(result)
+    })
+    socket.on('sub_agent:list', async (raw: ClientListSubAgents, ack) => {
       const p = vparse(schema.ClientListSubAgentsSchema, raw, 'sub_agent:list')
       if (!p) return
-      // Cheap scan — we don't expect many thousands of sessions in memory,
-      // and each row is a plain object. An index by parentSessionId is a
-      // follow-up if this shows up in a profile.
-      //
-      // Optional fields (parentCallId, agentType, startedAt) are omitted here
-      // because SessionRecord does not carry them today. Push events
-      // (`server:sub_agent_started/_finished`) DO carry them for live runs; this
-      // RPC is the log-replay fallback and returns only what the record has.
       const children: SubAgentSummary[] = []
-      for (const rec of deps.store.list()) {
-        if (rec.parentSessionId !== p.parentSessionId) continue
+      for (const rec of await deps.store.listChildren(p.parentSessionId)) {
         const status: SubAgentSummary['status'] =
           rec.state.status === 'done'
             ? 'completed'
@@ -593,7 +701,11 @@ export function configureDashboardNamespace(
               : 'running'
         children.push({
           childSessionId: rec.sessionId,
+          ...(rec.parentCallId !== undefined ? { parentCallId: rec.parentCallId } : {}),
+          ...(rec.agentType !== undefined ? { agentType: rec.agentType } : {}),
           status,
+          ...(rec.subAgentStartedAt !== undefined ? { startedAt: rec.subAgentStartedAt } : {}),
+          ...(status !== 'running' && rec.lastEventAt !== undefined ? { finishedAt: rec.lastEventAt } : {}),
         })
       }
       ack({ requestId: p.requestId, parentSessionId: p.parentSessionId, children })
@@ -631,6 +743,16 @@ export function configureDashboardNamespace(
       if (!parsed) return
       let p: ClientCreateSession = parsed
       try {
+        const selectedModel = p.selectedModel?.trim()
+        const normalizedSelectedModel = selectedModel ? normalizeIncomingModel(deps, selectedModel) : undefined
+        if (selectedModel && !normalizedSelectedModel) {
+          socket.emit('session:error', {
+            sessionId: p.sessionId,
+            scope: 'host',
+            message: `unknown or ambiguous model: ${selectedModel}`,
+          })
+          return
+        }
         const cwd = p.cwd?.trim()
         if (cwd && cwd.length > 0 && p.workspaceId) {
           const validation = await validateWorkspaceCwd(deps, p.workspaceId, cwd)
@@ -647,21 +769,24 @@ export function configureDashboardNamespace(
         }
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
-          defaultConfig: deriveSessionConfig(deps.defaultConfig, p.tools),
+          defaultConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }
             : {}),
           ...(p.cwd !== undefined ? { initialCwd: p.cwd } : {}),
+          ...(normalizedSelectedModel !== undefined ? { preferences: { selectedModel: normalizedSelectedModel } } : {}),
         })
         await refreshSessionSkillsIfNeeded(deps, record)
-        await socket.join(`session:${record.sessionId}`)
+        syncSelectedModelCache(deps, record)
+        await socket.join(sessionRoom(record.sessionId))
         socket.emit(
           'session:ready',
           readyEventFor(
             record,
-            deps.selectedModels.get(record.sessionId),
+            effectiveSelectedModel(deps, record),
             created ? 'created' : 'load',
+            contextWindowForSession(deps, record.sessionId, record),
           ),
         )
         if (created) {
@@ -713,8 +838,12 @@ export function configureDashboardNamespace(
             : {}),
         })
         await refreshSessionSkillsIfNeeded(deps, record)
-        const parentModel = deps.selectedModels.get(p.sourceSessionId)
-        if (parentModel) deps.selectedModels.set(record.sessionId, parentModel)
+        const parentModel = effectiveSelectedModel(deps, source)
+        if (parentModel) {
+          await deps.store.updatePreferences(record.sessionId, { selectedModel: parentModel })
+          record.preferences = { ...record.preferences, selectedModel: parentModel }
+          deps.selectedModels.set(record.sessionId, parentModel)
+        }
         if (source.workspaceId) {
           await deps.executors.copyOverflowSession(
             source.workspaceId,
@@ -722,7 +851,7 @@ export function configureDashboardNamespace(
             record.sessionId,
           ).catch(() => undefined)
         }
-        await socket.join(`session:${record.sessionId}`)
+        await socket.join(sessionRoom(record.sessionId))
         const forked: SessionForkedEvent = {
           sessionId: record.sessionId,
           reason: 'forked',
@@ -731,6 +860,8 @@ export function configureDashboardNamespace(
           cursor: record.state.cursor,
           state: record.state,
           config: record.config,
+          contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record.sessionId, record)),
+          ...(parentModel ? { selectedModel: parentModel } : {}),
           ...(record.workspaceId !== undefined
             ? { workspaceId: record.workspaceId }
             : {}),
@@ -745,7 +876,7 @@ export function configureDashboardNamespace(
           await deps.loop.dispatch(record.sessionId, {
             kind: 'user_message',
             text: p.seedMessage,
-          })
+          }, parentModel ? { model: parentModel } : undefined)
         }
       } catch (err) {
         deps.broadcastError(
@@ -760,22 +891,27 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientDeleteSessionSchema, raw, 'client:delete_session', (raw as ClientDeleteSession | undefined)?.sessionId)
       if (!p) return
       try {
-        const record = deps.store.get(p.sessionId)
-        if (record && deps.onSessionDeleted) {
-          try {
-            await deps.onSessionDeleted(record)
-          } catch {
-            // Lifecycle hook errors are advisory — swallow.
+        const targetIds = p.cascade
+          ? collectSessionDescendants(await deps.store.listSummaries(), p.sessionId)
+          : [p.sessionId]
+        for (const targetSessionId of targetIds) {
+          const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
+          if (record && deps.onSessionDeleted) {
+            try {
+              await deps.onSessionDeleted(record)
+            } catch {
+              // Lifecycle hook errors are advisory — swallow.
+            }
           }
+          if (record?.workspaceId) {
+            await deps.executors.deleteOverflowSession(record.workspaceId, targetSessionId).catch(() => undefined)
+          }
+          await deps.store.delete(targetSessionId)
+          deps.selectedModels.delete(targetSessionId)
+          resetCompactRuntime(targetSessionId)
+          deps.audit?.log({ action: 'dashboard.session_delete', actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId: record?.workspaceId }, outcome: 'ok', refs: p.cascade ? { rootSessionId: p.sessionId } : undefined })
+          ns.emit('server:session_deleted', { sessionId: targetSessionId })
         }
-        if (record?.workspaceId) {
-          await deps.executors.deleteOverflowSession(record.workspaceId, p.sessionId).catch(() => undefined)
-        }
-        await deps.store.delete(p.sessionId)
-        deps.selectedModels.delete(p.sessionId)
-        resetCompactRuntime(p.sessionId)
-        deps.audit?.log({ action: 'dashboard.session_delete', actor: auditActor(socket), target: { sessionId: p.sessionId, workspaceId: record?.workspaceId }, outcome: 'ok' })
-        ns.emit('server:session_deleted', { sessionId: p.sessionId })
       } catch (err) {
         deps.broadcastError(
           p.sessionId,
@@ -785,17 +921,17 @@ export function configureDashboardNamespace(
       }
     })
 
-    socket.on('client:set_model', (raw: ClientSetModel) => {
+    socket.on('client:set_model', async (raw: ClientSetModel) => {
       const p = vparse(schema.ClientSetModelSchema, raw, 'client:set_model', (raw as ClientSetModel | undefined)?.sessionId)
       if (!p) return
       const trimmed = p.model.trim()
       deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: trimmed } })
-      applyPreferencesUpdate(deps, p.sessionId, { selectedModel: trimmed })
+      await applyPreferencesUpdate(deps, p.sessionId, { selectedModel: trimmed })
     })
-    socket.on('client:update_preferences', (raw) => {
+    socket.on('client:update_preferences', async (raw) => {
       const p = vparse(schema.ClientUpdatePreferencesSchema, raw, 'client:update_preferences', (raw as { sessionId?: string } | undefined)?.sessionId)
       if (!p) return
-      applyPreferencesUpdate(deps, p.sessionId, p.preferences)
+      await applyPreferencesUpdate(deps, p.sessionId, p.preferences)
     })
   })
 }
@@ -826,19 +962,40 @@ function auditActor(socket: { data: Record<string, unknown> }): AuditActor {
   return actor ?? { kind: 'anonymous' }
 }
 
+function auditConnectionMeta(meta: ConnectionMeta): Record<string, unknown> {
+  return {
+    connectionKind: meta.kind,
+    connectionLabel: meta.label,
+    clientVersion: meta.clientVersion,
+  }
+}
+
 /**
  * Apply a partial preferences patch. Empty string on `selectedModel` clears
  * it (back to the host default). Emits both the new `session:preferences_changed`
  * (canonical) and the legacy `session:model_changed` (kept for one release so
  * old dashboard bundles keep working during rollout).
  */
-function applyPreferencesUpdate(
+async function applyPreferencesUpdate(
   deps: DashboardDeps,
   sessionId: string,
   patch: import('@agent-kernel/shared').SessionPreferences,
-): void {
+): Promise<void> {
+  const normalizedPatch = normalizePreferencesPatch(deps, sessionId, patch)
+  if (!normalizedPatch) return
+  let effective: import('@agent-kernel/shared').SessionPreferences
+  try {
+    effective = await deps.store.updatePreferences(sessionId, normalizedPatch)
+  } catch (err) {
+    deps.broadcastError(
+      sessionId,
+      'host',
+      err instanceof Error ? err.message : String(err),
+    )
+    return
+  }
   if ('selectedModel' in patch) {
-    const trimmed = (patch.selectedModel ?? '').trim()
+    const trimmed = effective.selectedModel ?? ''
     if (trimmed.length === 0) {
       deps.selectedModels.delete(sessionId)
     } else {
@@ -847,24 +1004,62 @@ function applyPreferencesUpdate(
     // Legacy emit — remove once every dashboard build has migrated to
     // `session:preferences_changed`.
     deps.dashboardNs
-      .to(`session:${sessionId}`)
+      .to(sessionRoom(sessionId))
       .emit('session:model_changed', { sessionId, model: trimmed })
   }
-  const effective: import('@agent-kernel/shared').SessionPreferences = {
-    ...(deps.selectedModels.get(sessionId)
-      ? { selectedModel: deps.selectedModels.get(sessionId) }
-      : {}),
-  }
   deps.dashboardNs
-    .to(`session:${sessionId}`)
+    .to(sessionRoom(sessionId))
     .emit('session:preferences_changed', { sessionId, preferences: effective })
   deps.dashboardNs
-    .to(`session:${sessionId}`)
+    .to(sessionRoom(sessionId))
     .emit('server:control_update', {
       kind: 'session_meta_changed',
       sessionId,
       preferences: effective,
     })
+  const record = deps.store.get(sessionId)
+  if (record) {
+    deps.dashboardNs.to(sessionRoom(sessionId)).emit('state:changed', {
+      sessionId,
+      cursor: record.state.cursor,
+      state: record.state,
+      contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, sessionId, record)),
+    })
+  }
+}
+
+function contextWindowForSession(deps: DashboardDeps, sessionId: string, record?: SessionRecord): ContextWindowOverride | undefined {
+  return deps.contextWindowForModel?.(record ? effectiveSelectedModel(deps, record) : deps.selectedModels.get(sessionId))
+}
+
+function effectiveSelectedModel(deps: DashboardDeps, record: SessionRecord): string | undefined {
+  return record.preferences.selectedModel ?? deps.selectedModels.get(record.sessionId)
+}
+
+function syncSelectedModelCache(deps: DashboardDeps, record: SessionRecord): void {
+  const selectedModel = record.preferences.selectedModel
+  if (selectedModel) deps.selectedModels.set(record.sessionId, selectedModel)
+  else deps.selectedModels.delete(record.sessionId)
+}
+
+function normalizePreferencesPatch(
+  deps: DashboardDeps,
+  sessionId: string,
+  patch: import('@agent-kernel/shared').SessionPreferences,
+): import('@agent-kernel/shared').SessionPreferences | null {
+  if (!('selectedModel' in patch)) return patch
+  const selectedModel = patch.selectedModel?.trim()
+  if (!selectedModel) return { ...patch, selectedModel: '' }
+  const normalized = normalizeIncomingModel(deps, selectedModel)
+  if (!normalized) {
+    deps.broadcastError(sessionId, 'host', `unknown or ambiguous model: ${selectedModel}`)
+    return null
+  }
+  return { ...patch, selectedModel: normalized }
+}
+
+function normalizeIncomingModel(deps: DashboardDeps, model: string): string | undefined {
+  return deps.normalizeModelRef ? deps.normalizeModelRef(model) : model.trim()
 }
 
 async function safeDispatch(
@@ -902,7 +1097,7 @@ async function handleUserMessage(
   deps: DashboardDeps,
   p: ClientUserMessage,
 ): Promise<void> {
-  const record = await loadRecordForDashboard(deps, p.sessionId)
+  let record = await loadRecordForDashboard(deps, p.sessionId)
   if (!record) {
     deps.broadcastError(
       p.sessionId,
@@ -911,13 +1106,20 @@ async function handleUserMessage(
     )
     return
   }
+  if (record.state.status === 'thinking' && !deps.loop.hasActiveLlmCall(p.sessionId)) {
+    await deps.loop.recoverInterruptedLlm(p.sessionId)
+    record = await loadRecordForDashboard(deps, p.sessionId)
+    if (!record) return
+  }
   const mode = p.mode ?? 'steer'
+  const selectedModel = effectiveSelectedModel(deps, record)
   const queued: QueuedUserMessage = {
     id: ulid(),
     text: p.text,
     mode,
     createdAt: new Date().toISOString(),
     ...(p.content ? { content: p.content } : {}),
+    ...(selectedModel ? { model: selectedModel } : {}),
   }
   if (mode === 'queue') {
     deps.messageQueues.enqueue(p.sessionId, queued)
@@ -933,7 +1135,7 @@ async function handleUserMessage(
     kind: 'user_message',
     text: p.text,
     ...(p.content ? { content: p.content } : {}),
-  })
+  }, queued.model ? { model: queued.model } : undefined)
 }
 
 async function loadRecordForDashboard(
@@ -1018,10 +1220,44 @@ async function broadcastSessionList(deps: DashboardDeps): Promise<void> {
   deps.dashboardNs.emit('server:sessions', { sessions })
 }
 
+function collectSessionDescendants(
+  sessions: readonly { sessionId: string; parentSessionId?: string }[],
+  rootSessionId: string,
+): string[] {
+  const childrenByParent = new Map<string, string[]>()
+  for (const session of sessions) {
+    if (!session.parentSessionId) continue
+    const children = childrenByParent.get(session.parentSessionId) ?? []
+    children.push(session.sessionId)
+    childrenByParent.set(session.parentSessionId, children)
+  }
+  const out: string[] = []
+  const seen = new Set<string>()
+  const queue = [rootSessionId]
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+    queue.push(...(childrenByParent.get(id) ?? []))
+  }
+  return out
+}
+
+async function readJsonLogArtifact(logPath: string, refPath: string): Promise<unknown> {
+  const base = dirname(logPath)
+  const resolved = resolvePath(base, refPath)
+  if (resolved !== base && !resolved.startsWith(base + sep)) {
+    throw new Error('artifact path escapes session directory')
+  }
+  return JSON.parse(await readFile(resolved, 'utf8'))
+}
+
 export function readyEventFor(
   record: SessionRecord,
   selectedModel?: string,
   reason: SessionReadyEvent['reason'] = 'load',
+  contextOverride?: ContextWindowOverride,
 ): SessionReadyEvent {
   return {
     sessionId: record.sessionId,
@@ -1029,11 +1265,21 @@ export function readyEventFor(
     cursor: record.state.cursor,
     state: record.state,
     config: record.config,
+    contextSnapshot: contextSnapshot(record, record.state.messages, contextOverride),
     ...(record.parentSessionId
       ? { parentSessionId: record.parentSessionId }
       : {}),
     ...(record.parentCursor !== undefined
       ? { parentCursor: record.parentCursor }
+      : {}),
+    ...(record.parentCallId !== undefined
+      ? { parentCallId: record.parentCallId }
+      : {}),
+    ...(record.agentType !== undefined
+      ? { agentType: record.agentType }
+      : {}),
+    ...(record.subAgentStartedAt !== undefined
+      ? { subAgentStartedAt: record.subAgentStartedAt }
       : {}),
     ...(record.workspaceId !== undefined
       ? { workspaceId: record.workspaceId }
@@ -1054,6 +1300,7 @@ export function ephemeralReadyEventFor(
   sessionId: string,
   defaultConfig: AgentConfig,
   selectedModel?: string,
+  contextOverride?: ContextWindowOverride,
 ): SessionReadyEvent {
   const state = createInitialState({
     sessionId,
@@ -1066,6 +1313,7 @@ export function ephemeralReadyEventFor(
     cursor: state.cursor,
     state,
     config: defaultConfig,
+    contextSnapshot: snapshotFromConfig(defaultConfig, state.messages, contextOverride),
     ...(selectedModel ? { selectedModel } : {}),
   }
 }

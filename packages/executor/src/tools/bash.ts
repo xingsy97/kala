@@ -54,8 +54,7 @@ export const bashTool: Tool = {
     }
     const cwdInput = optionalString(input, 'cwd')
     const runInBackground = optionalBoolean(input, 'run_in_background') ?? false
-    const timeoutMs =
-      optionalPositiveInt(input, 'timeoutMs', 100) ?? DEFAULT_TIMEOUT_MS
+    const timeoutMs = bashTimeoutMs(input) ?? DEFAULT_TIMEOUT_MS
 
     const cwd = cwdInput ?? ctx.cwd ?? ctx.sandbox.roots[0] ?? process.cwd()
     let resolvedCwd: string
@@ -75,7 +74,7 @@ export const bashTool: Tool = {
     }
 
     if (runInBackground) {
-      const task = await startBackgroundShell({ sessionId: ctx.sessionId, command, cwd: resolvedCwd })
+      const task = await startBackgroundShell({ sessionId: ctx.sessionId, command, cwd: resolvedCwd, env: ctx.env })
       return JSON.stringify({
         taskId: task.taskId,
         note: 'started',
@@ -96,7 +95,7 @@ export const bashTool: Tool = {
       try {
         child = spawn('bash', ['-c', command], {
           cwd: resolvedCwd,
-          env: process.env,
+          env: ctx.env ?? process.env,
           stdio: ['ignore', 'pipe', 'pipe'],
         })
       } catch (err) {
@@ -168,4 +167,15 @@ export const bashTool: Tool = {
       })
     })
   },
+}
+
+function bashTimeoutMs(input: Record<string, unknown>): number | undefined {
+  const timeoutSeconds =
+    optionalPositiveInt(input, 'timeout_seconds', 1) ??
+    optionalPositiveInt(input, 'timeoutSeconds', 1)
+  if (timeoutSeconds !== undefined) return timeoutSeconds * 1000
+  return (
+    optionalPositiveInt(input, 'timeout_ms', 100) ??
+    optionalPositiveInt(input, 'timeoutMs', 100)
+  )
 }

@@ -22,6 +22,11 @@ export type ToolContext = {
    * `sandbox.roots[0]` or `process.cwd()`.
    */
   readonly cwd?: string
+  /**
+   * Optional per-call process environment for shell-like tools. Omitted keys
+   * inherit from the executor process only when the tool chooses to merge them.
+   */
+  readonly env?: NodeJS.ProcessEnv
 }
 
 export type ToolRunner = (

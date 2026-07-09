@@ -5,7 +5,7 @@ import { checksumFor, normalizeTag } from './update.js'
 describe('executor update helpers', () => {
   it('finds the checksum for the executor release asset', () => {
     const sums = [
-      'aaa111  agent-kernel-host.cjs',
+      'aaa111  bundle-dashboard-with-runtime.cjs',
       'bbb222  agent-kernel-executor.cjs',
       'ccc333  run.sh',
     ].join('\n')

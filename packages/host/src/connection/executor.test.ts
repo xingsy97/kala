@@ -98,12 +98,13 @@ function callEffect(
   callId: string,
   name = 'bash',
   cwd?: string,
+  input: Record<string, unknown> = { command: 'echo hi' },
 ): CallToolEffect {
   return {
     kind: 'call_tool',
     callId,
     name,
-    input: { command: 'echo hi' },
+    input,
     ...(cwd !== undefined ? { cwd } : {}),
   }
 }
@@ -121,12 +122,37 @@ describe('ExecutorRegistry', () => {
     const p = reg.callTool('sess-1', callEffect('c1', 'bash', '/tmp/work'))
     expect(sock.emitted).toHaveLength(1)
     expect(sock.emitted[0]!.event).toBe('tool:call')
-    expect((sock.emitted[0]!.payload as ToolCallMessage).cwd).toBe('/tmp/work')
+    const payload = sock.emitted[0]!.payload as ToolCallMessage
+    expect(payload.cwd).toBe('/tmp/work')
+    expect(payload.ackTimeoutMs).toBe(5_000)
+    expect('timeoutMs' in payload).toBe(false)
 
     // Ack via the callback — this is the sole settle path now that the
     // redundant executor:tool_result event has been removed.
     sock.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'hi\n' })
     await expect(p).resolves.toEqual({ ok: true, content: 'hi\n' })
+  })
+
+  it('keeps bash business timeout in input and stretches only the host ack timeout', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-long': 'ws-default' }),
+      60_000,
+    )
+    const sock = makeFakeSocket('s-long')
+    reg.attach(sock as never, announceOf('e-long'))
+
+    const p = reg.callTool('sess-long', callEffect('c-long', 'bash', undefined, {
+      command: 'pnpm test',
+      timeout_seconds: 600,
+    }))
+    const payload = sock.emitted[0]!.payload as ToolCallMessage
+    expect(payload.input).toEqual({ command: 'pnpm test', timeout_seconds: 600 })
+    expect(payload.ackTimeoutMs).toBe(660_000)
+    expect('timeoutMs' in payload).toBe(false)
+
+    sock.emitted[0]!.ack!({ callId: 'c-long', ok: true, content: 'ok' })
+    await expect(p).resolves.toEqual({ ok: true, content: 'ok' })
   })
 
   it('fails pending calls when the executor disconnects with no replacement', async () => {
@@ -314,7 +340,7 @@ describe('ExecutorRegistry', () => {
       await vi.advanceTimersByTimeAsync(150)
       await expect(p).resolves.toEqual({
         ok: false,
-        content: 'tool call timed out after 100ms',
+        content: 'tool call ack timed out after 100ms',
       })
     } finally {
       vi.useRealTimers()

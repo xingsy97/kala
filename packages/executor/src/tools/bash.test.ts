@@ -46,6 +46,16 @@ describe('bash', () => {
     expect(out).toContain('--- exit code: 0')
   })
 
+  it('uses ctx.env for shell HOME expansion', async () => {
+    const out = await bashTool.run(
+      { command: 'printf "%s\n" ~' },
+      { ...makeCtx(root), env: { ...process.env, HOME: root } },
+    )
+
+    expect(normalizePath(out.split('\n')[0]!)).toBe(normalizePath(root))
+    expect(out).toContain('--- exit code: 0')
+  })
+
   it('allows the workspace root itself as cwd', async () => {
     const out = await bashTool.run(
       { command: 'pwd', cwd: root },
@@ -74,6 +84,22 @@ describe('bash', () => {
   it('honours timeoutMs by killing the process', async () => {
     const out = await bashTool.run(
       { command: 'sleep 5', timeoutMs: 200 },
+      makeCtx(root),
+    )
+    expect(out).toContain('killed after 200ms (timeout)')
+  })
+
+  it('honours timeout_seconds from the public tool schema', async () => {
+    const out = await bashTool.run(
+      { command: 'sleep 5', timeout_seconds: 1 },
+      makeCtx(root),
+    )
+    expect(out).toContain('killed after 1000ms (timeout)')
+  })
+
+  it('honours timeout_ms for older recorded tool calls', async () => {
+    const out = await bashTool.run(
+      { command: 'sleep 5', timeout_ms: 200 },
       makeCtx(root),
     )
     expect(out).toContain('killed after 200ms (timeout)')

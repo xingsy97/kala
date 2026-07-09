@@ -36,7 +36,7 @@ export function buildExecutorCapabilitySnapshot(input: {
     ...(exec.sandboxRoots && exec.sandboxRoots.length > 0
       ? { sandboxRoots: [...exec.sandboxRoots] }
       : {}),
-    ...(exec.workingDir ? { workingDir: exec.workingDir } : {}),
+    ...(exec.defaultCwd ?? exec.workingDir ? { defaultCwd: exec.defaultCwd ?? exec.workingDir } : {}),
   }))
   executors.sort((a, b) => a.executorId.localeCompare(b.executorId))
   return {

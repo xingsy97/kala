@@ -18,6 +18,8 @@ import type {
   ExecutorRuntime,
   ServerBgTaskEvicted,
   ServerBgTaskUpdated,
+  ServerTerminalExit,
+  ServerTerminalOutput,
   ToolCallMessage,
   ToolCancelMessage,
   ToolProgressPayload,
@@ -26,6 +28,7 @@ import type {
   BackgroundTaskSummary,
   HandshakeAuth,
   ClientRole,
+  ExecutorCapabilities,
 } from '../protocol.js'
 
 // ============================================================================
@@ -59,13 +62,37 @@ const ExecutorOsSchema = z.enum([
   'other',
 ]) satisfies z.ZodType<ExecutorOs>
 
+export const BuildMetadataSchema = z.object({
+  releaseTag: z.string(),
+  gitCommit: z.string(),
+  builtAt: z.string(),
+  artifactKind: z.enum(['source', 'cjs', 'native']),
+  dashboardMode: z.enum(['vite', 'static', 'embedded', 'none']),
+  embeddedDashboardFiles: z.number().int().nonnegative().optional(),
+  socketAdminMode: z.enum(['embedded', 'filesystem', 'missing']).optional(),
+  embeddedSocketAdminFiles: z.number().int().nonnegative().optional(),
+})
+
+export const ExecutorCapabilitiesSchema = z.object({
+  schemaVersion: z.literal(1),
+  features: z.object({
+    backgroundShell: z.boolean(),
+    filePicker: z.boolean(),
+    overflowFiles: z.boolean(),
+    workspaceSandbox: z.boolean(),
+  }),
+}) satisfies z.ZodType<ExecutorCapabilities>
+
 export const ExecutorAnnounceSchema = z.object({
   executorId: z.string(),
   executorVersion: z.string().optional(),
+  build: BuildMetadataSchema.optional(),
+  capabilities: ExecutorCapabilitiesSchema.optional(),
   workspaceId: z.string(),
   workspaceName: z.string(),
   tools: z.array(z.string()),
   sandboxRoots: z.array(z.string()).optional(),
+  defaultCwd: z.string().optional(),
   workingDir: z.string().optional(),
   runtime: ExecutorRuntimeSchema,
   runtimeVersion: z.string(),
@@ -122,6 +149,21 @@ export const ServerBgTaskEvictedSchema = z.object({
   taskId: z.string(),
 }) satisfies z.ZodType<ServerBgTaskEvicted>
 
+export const ServerTerminalOutputSchema = z.object({
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  terminalId: z.string(),
+  data: z.string(),
+}) satisfies z.ZodType<ServerTerminalOutput>
+
+export const ServerTerminalExitSchema = z.object({
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  terminalId: z.string(),
+  exitCode: z.number().int().nullable(),
+  signal: z.string().nullable(),
+}) satisfies z.ZodType<ServerTerminalExit>
+
 // ============================================================================
 // Host → Executor
 // ============================================================================
@@ -132,7 +174,7 @@ export const ToolCallMessageSchema = z.object({
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
   cwd: z.string().optional(),
-  timeoutMs: z.number().int().nonnegative().optional(),
+  ackTimeoutMs: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<ToolCallMessage>
 
 export const ToolCancelMessageSchema = z.object({
