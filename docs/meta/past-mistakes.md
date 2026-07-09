@@ -60,9 +60,9 @@ A list of engineering mistakes that have been made in this repository, kept as a
 
 ## 10. Design documents outnumbering code
 
-- **Symptom**: `docs/planning/enhancement/` reached twelve design documents. On first opening the repo, if the `docs/` tree is larger than `packages/`, the impression is "planning without shipping".
+- **Symptom**: `docs/capabilities/` reached twelve design documents. On first opening the repo, if the `docs/` tree is larger than `packages/`, the impression is "planning without shipping".
 - **Root cause**: treating "planning" as "output"; writing design documents has an immediate psychological reward, whereas writing code has a delayed one.
-- **Lesson**: every design document must correspond to at least one shipped feature commit. Design documents older than two weeks with no corresponding code are deleted or downgraded to issues. No new `docs/planning/enhancement/*.md`. See principles.md E1, F4.
+- **Lesson**: every capability document must correspond to at least one shipped feature commit. Capability documents older than two weeks with no corresponding code are deleted or downgraded to issues. No new `docs/capabilities/*.md`. See principles.md E1, F4.
 
 ## 11. Forgetting who the product is for
 

@@ -163,15 +163,15 @@ Design documents use paper-style `[1]`, `[2]` numbered references in the body. F
 
 ## E. Documentation discipline
 
-### E1. No new `docs/planning/enhancement/*.md`
+### E1. No new `docs/capabilities/*.md`
 
-Twelve design documents is the ceiling. Additional design ideas go under `docs/planning/roadmap-notes/` or straight into an issue.
+Twelve capability documents is the ceiling. Additional design ideas go under `docs/planning/roadmap-notes/` or straight into an issue.
 
 ### E2. Every design document must bind to at least one shipped commit hash
 
-A design document with no corresponding code after two weeks is deleted or downgraded to an issue.
+A capability document with no corresponding code after two weeks is deleted or downgraded to an issue.
 
-**Enforcement**: `scripts/verify-doc-code-binding.mjs` should scan the frontmatter of each `docs/planning/enhancement/*.md` for a `commit:` field.
+**Enforcement**: `scripts/verify-doc-code-binding.mjs` should scan the frontmatter of each `docs/capabilities/*.md` for a `commit:` field.
 
 ---
 
@@ -180,7 +180,7 @@ A design document with no corresponding code after two weeks is deleted or downg
 - **F1** No standalone sandbox executor abstraction layer.
 - **F2** No pure-infrastructure direction such as HDFS, Kubernetes, or MQ. This project is a product plus evaluation platform; infrastructure work does not belong here.
 - **F3** No mock-first implementations or placeholder stubs.
-- **F4** No new `docs/planning/enhancement/*.md`.
+- **F4** No new `docs/capabilities/*.md`.
 - **F5** No OSWorld-class desktop or computer-use benchmarks. They are not in the first benchmark set and are too GUI/VM-heavy for the executor plus browser plus tool-protocol path.
 
 ---
@@ -218,4 +218,4 @@ Before merging a PR:
 - [ ] No premature abstraction (D2)
 - [ ] No defensive code (D3)
 - [ ] No "what" comments (D4)
-- [ ] No new `docs/planning/enhancement/*.md` (E1, F4)
+- [ ] No new `docs/capabilities/*.md` (E1, F4)

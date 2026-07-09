@@ -25,7 +25,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [host/tool-output-overflow.md](host/tool-output-overflow.md) | Executor-side large-output spillover and preview pointers |
 | [host/skills.md](host/skills.md) | OpenCode-style `skill({ name })` tool loading |
 | [host/mcp.md](host/mcp.md) | MCP runtime integration design (planned, not yet implemented) |
-| [host/web-native-paths-implementation.md](host/web-native-paths-implementation.md) | Companion to [enhancement 12](planning/enhancement/12-web-native-path-handling.md) |
+| [host/web-native-paths-implementation.md](host/web-native-paths-implementation.md) | Companion to [capability 12](capabilities/12-web-native-path-handling.md) |
 
 ### Dashboard — React SPA (`packages/dashboard`)
 
@@ -80,6 +80,12 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | Three processes and one full turn end-to-end |
 
+### Capabilities
+
+| File | Purpose |
+|---|---|
+| [capabilities/](capabilities/) | Numbered capability designs (12 items — see the [README](capabilities/README.md)) |
+
 ### Planning
 
 | File | Purpose |
@@ -87,7 +93,6 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [planning/roadmap.md](planning/roadmap.md) | Shipped feature ledger + deferred items |
 | [planning/feature-gaps.md](planning/feature-gaps.md) | Shipped vs. deliberately-out vs. gaps; comparison table (pi / opencode / codex / claude-code) |
 | [planning/production-readiness.md](planning/production-readiness.md) | What still stands between the current build and a production deploy |
-| [planning/enhancement/](planning/enhancement/) | Numbered enhancement designs (12 items — see the [README](planning/enhancement/README.md)) |
 | [planning/roadmap-notes/](planning/roadmap-notes/) | Free-form roadmap essays: eval-moat, narrative, streaming, RL, product-polish, what-not-to-do |
 
 ### Meta — principles, testing, releasing, ADRs
@@ -119,6 +124,7 @@ If you find such a contradiction, please open a PR to fix the lower-tier doc —
 
 - Belongs to one component? Put it under `kernel/`, `host/`, `dashboard/`, `executor/`, `protocol/`, or `evals/`.
 - Cross-component design? Put it under `architecture/`.
-- Roadmap / enhancement design? Put it under `planning/`.
+- Capability design? Put it under `capabilities/`.
+- Roadmap or planning note? Put it under `planning/`.
 - Principle, process, ADR, or team-level guidance? Put it under `meta/`.
 - Add a link to this index in the same PR.

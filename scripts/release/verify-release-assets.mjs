@@ -95,8 +95,20 @@ if (shellAssets.length > 1) fail(`expected at most one shell bootstrap, got ${sh
 const notesPath = join(releaseDir, 'RELEASE_NOTES.md')
 if (!existsSync(notesPath)) fail('missing release/RELEASE_NOTES.md')
 const notes = readFileSync(notesPath, 'utf8')
-if (manifest.assets.includes('run.sh') && !notes.includes('wget -nv -O "$tmp"')) {
-  fail('release notes missing diagnostic bootstrap download command')
+if (manifest.assets.includes('run.sh') && (!notes.includes('wget -nv -O -') || !notes.includes('| COMPONENT='))) {
+  fail('release notes missing direct one-line wget-to-bash bootstrap command')
+}
+if (manifest.assets.includes('run.sh') && !notes.includes('## Advanced Usage')) {
+  fail('release notes missing advanced usage section')
+}
+if (notes.includes('## Assets')) {
+  fail('release notes must not duplicate the GitHub release assets list')
+}
+if (/bash -c 'set -euo pipefail; tmp=\$\(mktemp\)/.test(notes)) {
+  fail('release notes must not wrap bootstrap commands in bash -c temp-file snippets')
+}
+if (notes.includes('chmod +x run.sh') || notes.includes('./run.sh')) {
+  fail('release notes must not require saving run.sh before execution')
 }
 if (notes.includes('curl ')) {
   fail('release notes must not mention curl')

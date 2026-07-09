@@ -3,6 +3,7 @@ import { copyFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -11,7 +12,7 @@ import { build } from 'esbuild'
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
 const dashboardDist = join(root, 'packages/dashboard/dist')
-const socketAdminDist = join(root, '.presq/socket.io-admin-ui/dist')
+const socketAdminDist = resolveSocketAdminDist()
 const options = parseOptions(process.argv.slice(2))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const { component, tag, nativeOnly, finalizeOnly, noNative, skipDashboardBuild, skipPackageBuild } = options
@@ -263,6 +264,22 @@ function embeddedSocketAdminBanner(dir) {
     assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
   }
   return `globalThis.__AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__=${JSON.stringify(assets)};\n`
+}
+
+function resolveSocketAdminDist() {
+  const configured = process.env.AGENT_KERNEL_SOCKET_ADMIN_DIST
+  if (configured) return configured
+
+  const localPrepared = join(root, '.presq/socket.io-admin-ui/dist')
+  if (existsSync(join(localPrepared, 'index.html'))) return localPrepared
+
+  try {
+    const hostRequire = createRequire(new URL('../../packages/host/package.json', import.meta.url))
+    const packageRoot = dirname(hostRequire.resolve('@socket.io/admin-ui/package.json'))
+    return join(packageRoot, 'ui/dist')
+  } catch {}
+
+  return localPrepared
 }
 
 function prepareEmbeddedReleaseAssetsForHost() {
@@ -662,41 +679,56 @@ function unifiedBootstrap({ repo, tag, component }) {
 function releaseNotes(manifest) {
   const tagPath = manifest.tag === 'latest' ? 'latest/download' : `download/${manifest.tag}`
   const base = `https://github.com/${manifest.repo}/releases/${tagPath}`
+  const canRunHost = manifest.component === 'all' || manifest.component === 'host'
+  const canRunDashboard = manifest.component === 'all' || manifest.component === 'dashboard'
+  const canRunExecutor = manifest.component === 'all' || manifest.component === 'executor'
   const run = (component, extraEnv = '') => {
     const env = [extraEnv.trim(), `COMPONENT=${component}`].filter(Boolean).join(' ')
-    return `bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \\\"$tmp\\\"" EXIT; wget -nv -O "$tmp" "${base}/run.sh"; ${env} bash "$tmp"'`
+    return `wget -nv -O - "${base}/run.sh" | ${env} bash`
   }
   const hasNativeAssets = Object.values(manifest.nativeAssets ?? {}).some((assets) => Array.isArray(assets) && assets.length > 0)
   const lines = [
     `# Agent RunLab ${manifest.tag}`,
     '',
     hasNativeAssets
-      ? 'Release assets include compact Node.js 22 `.cjs` host/executor assets, OS-native fallback binaries, and a wget-only bash bootstrap that downloads and verifies the selected component before running it. By default, `run.sh` uses `.cjs` when Node.js 22+ is available and uses the native binary only when Node is missing or too old.'
-      : 'Release assets currently include Node.js 22 `.cjs` fallback assets and a wget-only bash bootstrap that downloads and verifies the selected component before running it. Native binaries are uploaded by the follow-up native release job.',
+      ? 'Agent RunLab ships a self-contained host + dashboard bundle, a standalone executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component. By default, `run.sh` uses Node.js 22 `.cjs` assets when Node.js 22+ is available and falls back to native binaries when Node is missing or too old.'
+      : 'Agent RunLab ships a self-contained host + dashboard bundle, a standalone executor, and a wget-only bootstrap script that downloads, verifies, and runs the selected component.',
     '',
-    '## Quick start',
+    '## Quick Start',
     '',
   ]
   if (manifest.assets.includes('run.sh')) {
-    if (manifest.component === 'all' || manifest.component === 'host') {
+    if (canRunHost) {
       lines.push(
-        'Run host + dashboard (one-command VM deploy):',
+        'Run the host and dashboard together:',
         '',
         '```bash',
         run('host-frontend'),
         '```',
         '',
-        'Run headless host only (dashboard deployed separately):',
+      )
+    }
+    if (canRunExecutor) {
+      lines.push(
+        'Run an executor that connects to the host:',
         '',
         '```bash',
-        run('host'),
+        run('executor', 'HOST_URL=http://host-machine:3000'),
         '```',
+        '',
+        'Use `HOST_URL=https://agent.example.com` when the host is exposed through a public domain.',
         '',
       )
     }
-    if (manifest.component === 'all' || manifest.component === 'dashboard') {
+    if (canRunHost || canRunDashboard) {
+      lines.push('## Advanced Usage', '')
+    }
+    if (canRunHost) {
+      lines.push('Run only the headless host:', '', '```bash', run('host'), '```', '')
+    }
+    if (canRunDashboard) {
       lines.push(
-        'Download and extract only the frontend bundle (serve with your own static server):',
+        'Download and extract only the dashboard frontend bundle:',
         '',
         '```bash',
         run('frontend'),
@@ -704,33 +736,28 @@ function releaseNotes(manifest) {
         '',
       )
     }
-    if (manifest.component === 'all' || manifest.component === 'executor') {
-      lines.push(
-        'Run an executor that dials into a running host:',
-        '',
-        '```bash',
-        run('executor', 'HOST_URL=http://host-machine:3000'),
-        '```',
-        '',
-      )
+    if (canRunHost) {
+      lines.push('Bind the host to all interfaces and use a custom port:', '', '```bash', run('host-frontend', 'HOST=0.0.0.0 PORT=3000'), '```', '')
     }
-    if (manifest.component !== 'dashboard') {
+    if (canRunHost || canRunExecutor) {
       lines.push(
-        'Environment variables the bootstrap and host understand:',
+        '## Configuration',
         '',
-        '- `HOST` — bind interface (default `127.0.0.1`; set `0.0.0.0` to expose on all interfaces).',
-        '- `PORT` — listen port (default `3000`).',
-        '- `AGENT_KERNEL_FRONTEND_DIR` — where the frontend bundle is extracted (default: temp dir).',
-        '- `AGENT_KERNEL_ALLOWED_ORIGINS` — comma-separated origins allowed for cross-origin dashboards. Unset = same-origin only.',
-        '- `AGENT_KERNEL_RUNTIME=auto|cjs|native` — pick runtime. `auto` uses `.cjs` when Node.js 22+ is available, otherwise the native binary.',
-        '- `AGENT_KERNEL_RUN_DIR` — persistent scratch dir (default: fresh mktemp cleaned on exit).',
+        '- `COMPONENT=host-frontend|host|frontend|executor`',
+        '- `HOST_URL` - host URL used by executors.',
+        '- `HOST` - host bind interface, default `127.0.0.1`.',
+        '- `PORT` - host listen port, default `3000`.',
+        '- `AGENT_KERNEL_FRONTEND_DIR` - frontend extraction directory.',
+        '- `AGENT_KERNEL_ALLOWED_ORIGINS` - comma-separated dashboard origins.',
+        '- `AGENT_KERNEL_RUNTIME=auto|cjs|native` - runtime selection.',
+        '- `AGENT_KERNEL_RUN_DIR` - persistent runtime scratch directory.',
         '',
       )
     }
   }
   const verifyTargets = manifest.assets.filter((asset) => asset !== 'RELEASE_NOTES.md' && asset !== 'manifest.json' && asset !== 'SHA256SUMS')
   lines.push(
-    '## Verify checksums',
+    '## Verify Checksums',
     '',
     '```bash',
     `wget -q ${base}/SHA256SUMS`,
@@ -739,7 +766,6 @@ function releaseNotes(manifest) {
     '```',
     '',
   )
-  lines.push('## Assets', '', ...manifest.assets.map((asset) => `- \`${asset}\``), '- `manifest.json`', '- `SHA256SUMS`', '')
   return `${lines.join('\n')}\n`
 }
 

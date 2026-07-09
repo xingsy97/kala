@@ -1,16 +1,16 @@
-# Enhancement Design Index
+# Capability Design Index
 
 Status: implementation-aligned design documents
 Created: 2026-07-09
 Last reviewed against implementation: 2026-07-09
 
-This folder collects production-oriented enhancement designs for `agent-kernel`.
+This folder collects production-oriented capability designs for `agent-kernel`.
 The files are ordered by expected user and product value, not by
 implementation difficulty.
 
 Each document now has an implementation alignment section. That section is the
 source of truth for what the repository actually does today versus what remains
-design work. This distinction matters because several enhancement areas already
+design work. This distinction matters because several capability areas already
 have CLI actions, artifact schemas, dashboard readouts, and browser e2e coverage,
 but are not yet full product workflows.
 
@@ -73,7 +73,7 @@ lifecycle. Neither path adds scheduler state to the kernel protocol.
 
 ## Common Architecture Rule
 
-Each enhancement should fit this layering:
+Each capability should fit this layering:
 
 - Kernel: pure reducer, existing event/state invariants, no benchmark or vendor
   knowledge.
@@ -143,9 +143,9 @@ redaction boundary when it may contain provider URLs, credentials, local paths,
 environment variables, prompt bodies, tool args, tool results, or user data.
 The UI should state whether content is captured, redacted, truncated, or absent.
 
-### 5. Every Enhancement Needs A Failure Taxonomy
+### 5. Every Capability Needs A Failure Taxonomy
 
-Production systems need low-cardinality failure labels. Each enhancement should
+Production systems need low-cardinality failure labels. Each capability should
 define its own operational labels and keep raw details as artifacts. Examples:
 `provider_timeout`, `patch_apply_failed`, `tool_timeout`, `artifact_missing`,
 `agent_timeout`, `redaction_applied`, `unknown_cost`.
@@ -159,13 +159,13 @@ useful for comparisons or training.
 
 ### 7. UI Fancy Features Stay Derived
 
-Dashboard enhancements can be visually rich, but they should remain projections
+Dashboard capabilities can be visually rich, but they should remain projections
 over session logs, artifacts, traces, and eval summaries. They must not add
 hidden state machines that compete with the host/kernel lifecycle.
 
 ## Implementation Foundation
 
-The first implementation layer shared by all enhancement themes is:
+The first implementation layer shared by all capability themes is:
 
 - an artifact store for redacted JSON/text artifacts;
 - an artifact manifest that indexes run outputs for dashboards and cleanup jobs

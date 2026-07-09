@@ -41,6 +41,7 @@ jobs:
               pnpm run verify:swebench-smoke
               ;;
             release-assets)
+              pnpm run prepare:socket-admin-ui
               pnpm run build:release-assets -- --no-native --repo ${{ github.repository }}
               pnpm run verify:release-assets
               ;;
