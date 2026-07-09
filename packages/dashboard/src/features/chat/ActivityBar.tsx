@@ -8,6 +8,7 @@ export type CompactStatus =
   | { kind: 'idle' }
   | { kind: 'running' }
   | { kind: 'done' }
+  | { kind: 'empty'; message: string }
   | { kind: 'error'; message: string }
 
 type Props = {
@@ -85,6 +86,15 @@ function activityFor(
       icon: AlertTriangle,
       className:
         'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200',
+    }
+  }
+  if (compactStatus.kind === 'empty') {
+    return {
+      label: 'Nothing to compact',
+      detail: compactStatus.message,
+      icon: Check,
+      className:
+        'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200',
     }
   }
   if (!state) return null

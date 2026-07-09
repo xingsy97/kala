@@ -3,6 +3,7 @@ import { GitBranch } from 'lucide-react'
 import type { AgentEvent, AgentState, CallLlmEffect, Effect } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
+import { stateFlow, type StateFlowStep } from '../../state-flow.js'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,10 +49,12 @@ export function InspectorPanel({
   onJumpToMessage,
 }: Props): JSX.Element {
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
+  const [historyView, setHistoryView] = useState<'timeline' | 'state-flow'>('timeline')
   const [selectedTimeline, setSelectedTimeline] = useState<{
     entry: TimelineEntry
     priorCallLlm: { seq: number; effect: CallLlmEffect } | null
   } | null>(null)
+  const flow = stateFlow(timeline)
 
   const confirmFork = (): void => {
     if (pendingForkSeq !== null && onFork) onFork(pendingForkSeq)
@@ -66,8 +69,11 @@ export function InspectorPanel({
           autoSaveId="ak-inspector-split"
         >
           <ResizablePanel defaultSize={65} minSize={25}>
-            <Timeline
+            <HistorySection
+              view={historyView}
+              onViewChange={setHistoryView}
               timeline={timeline}
+              flow={flow}
               messagesCount={visibleMessagesCount ?? state?.messages.length ?? 0}
               onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
               onJumpToMessage={onJumpToMessage}
@@ -146,6 +152,142 @@ export function InspectorPanel({
       </Dialog>
     </div>
   )
+}
+
+function HistorySection({
+  view,
+  onViewChange,
+  timeline,
+  flow,
+  messagesCount,
+  onForkRequest,
+  onJumpToMessage,
+  onInspect,
+}: {
+  view: 'timeline' | 'state-flow'
+  onViewChange(view: 'timeline' | 'state-flow'): void
+  timeline: readonly TimelineEntry[]
+  flow: readonly StateFlowStep[]
+  messagesCount: number
+  onForkRequest?(cursor: number): void
+  onJumpToMessage?(messageIndex: number): void
+  onInspect(payload: {
+    entry: TimelineEntry
+    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
+  }): void
+}): JSX.Element {
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500 flex-none">
+        <span className="font-medium">History</span>
+        <div
+          className="ml-auto inline-flex rounded border border-slate-200 bg-white p-0.5 dark:border-slate-800 dark:bg-slate-950"
+          data-testid="history-view-switch"
+        >
+          <button
+            type="button"
+            onClick={() => onViewChange('timeline')}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px]',
+              view === 'timeline'
+                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+            )}
+            data-testid="history-view-timeline"
+          >
+            Timeline
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewChange('state-flow')}
+            className={cn(
+              'rounded px-2 py-0.5 text-[11px]',
+              view === 'state-flow'
+                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900',
+            )}
+            data-testid="history-view-state-flow"
+          >
+            State flow
+          </button>
+        </div>
+      </div>
+      {view === 'timeline' ? (
+        <Timeline
+          timeline={timeline}
+          messagesCount={messagesCount}
+          onForkRequest={onForkRequest}
+          onJumpToMessage={onJumpToMessage}
+          onInspect={onInspect}
+        />
+      ) : (
+        <StateFlowSection steps={flow} />
+      )}
+    </div>
+  )
+}
+
+function StateFlowSection({ steps }: { steps: readonly StateFlowStep[] }): JSX.Element {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-3 pb-2 text-xs text-slate-500 flex-none">
+        reducer status after each event
+      </div>
+      <ScrollArea className="flex-1 min-h-0">
+        {steps.length === 0 ? (
+          <div className="px-3 pb-3 text-sm text-slate-500">no state transitions yet</div>
+        ) : (
+          <ol className="px-2 pb-3 space-y-1" data-testid="state-flow-list">
+            {steps.map((step) => (
+              <StateFlowRow key={step.seq} step={step} />
+            ))}
+          </ol>
+        )}
+      </ScrollArea>
+    </div>
+  )
+}
+
+function StateFlowRow({ step }: { step: StateFlowStep }): JSX.Element {
+  const changed = step.from !== step.to
+  return (
+    <li
+      className="rounded border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-800"
+      data-testid="state-flow-row"
+    >
+      <div className="flex items-center gap-2">
+        <span className="w-8 flex-none text-right font-mono text-slate-500">#{step.seq}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-slate-700 dark:text-slate-200">
+          {step.eventKind}
+        </span>
+        <span className={cn('font-mono', changed ? 'text-sky-700 dark:text-sky-300' : 'text-slate-500')}>
+          {statusLabel(step.from)} → {statusLabel(step.to)}
+        </span>
+      </div>
+      {step.effects.length > 0 ? (
+        <div className="mt-1 truncate pl-10 font-mono text-[11px] text-slate-500">
+          effects: {step.effects.map((e) => e.kind).join(', ')}
+        </div>
+      ) : null}
+    </li>
+  )
+}
+
+function statusLabel(status: StateFlowStep['from']): string {
+  switch (status) {
+    case 'idle':
+      return 'Ready'
+    case 'thinking':
+      return 'Waiting for LLM'
+    case 'awaiting_approval':
+      return 'Needs approval'
+    case 'executing_tools':
+      return 'Running tools'
+    case 'done':
+      return 'Done'
+    case 'error':
+      return 'Error'
+  }
 }
 
 function inboundOf(event: AgentEvent): { source: string; tone: string } {
@@ -237,12 +379,9 @@ function Timeline({
   }): void
 }): JSX.Element {
   return (
-    <div className="h-full flex flex-col">
-      <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500 flex-none">
-        timeline
-        <span className="ml-2 normal-case tracking-normal text-slate-500 dark:text-slate-600">
-          click any row to inspect the raw event + effects JSON
-        </span>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-3 pb-2 text-xs text-slate-500 flex-none">
+        click any row to inspect the raw event + effects JSON
       </div>
       <ScrollArea className="flex-1 min-h-0">
         {timeline.length === 0 ? (
