@@ -7,8 +7,7 @@
     <script>
       // Read the persisted theme before React mounts so the initial paint
       // matches the user's last choice — otherwise the page flashes dark
-      // before hydrating into light mode. Default: dark (matches the
-      // slate-* palette the rest of the app assumes).
+      // before hydrating into light mode. Default: dark.
       try {
         var t = localStorage.getItem('ak-theme') || 'dark'
         if (t === 'dark') document.documentElement.classList.add('dark')
@@ -17,7 +16,7 @@
       }
     </script>
   </head>
-  <body class="bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <body class="bg-background text-foreground">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
