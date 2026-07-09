@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DirListEntry, DirListResult, FileContentsResult, TerminalCreateResult, TerminalKillResult } from '@agent-kernel/shared'
 
@@ -26,6 +26,8 @@ vi.mock('react-arborist', () => ({
 const writeMock = vi.fn()
 const writelnMock = vi.fn()
 const inputListeners: Array<(data: string) => void> = []
+const createObjectURLMock = vi.fn(() => 'blob:mock')
+const revokeObjectURLMock = vi.fn()
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class TerminalMock {
@@ -83,6 +85,14 @@ describe('SessionFilesPanel', () => {
     revealLineInCenterMock.mockClear()
     inputListeners.length = 0
     Object.assign(navigator, { clipboard: { writeText: vi.fn() } })
+    vi.stubGlobal('URL', { ...URL, createObjectURL: createObjectURLMock, revokeObjectURL: revokeObjectURLMock })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    createObjectURLMock.mockClear()
+    revokeObjectURLMock.mockClear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('loads the session file tree and views text files read-only', async () => {
@@ -154,9 +164,25 @@ describe('SessionFilesPanel', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repo/image.png')
     fireEvent.click(screen.getByRole('button', { name: /copy visible content/i }))
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('data:image/png;base64,aW1hZ2U=')
+    fireEvent.click(screen.getByRole('button', { name: /download file/i }))
+    expect(createObjectURLMock).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /refresh file/i }))
     await waitFor(() => expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ path: '/repo/image.png' })))
     expect(socket.emitMock.mock.calls.filter(([event]) => event === 'client:read_file')).toHaveLength(2)
+  })
+
+  it('downloads files from the tree and requests binary download content', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'binary', content: 'AAE=', size: 2, encoding: 'base64', mediaType: 'application/octet-stream' },
+      entries: [{ name: 'archive.bin', path: '/repo/archive.bin', type: 'file', size: 2 }],
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /download archive\.bin/i }))
+
+    await waitFor(() => expect(createObjectURLMock).toHaveBeenCalled())
+    expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo/archive.bin', download: true, maxBytes: 100 * 1024 * 1024 }))
   })
 
   it('renders GIF files through the image viewer', async () => {

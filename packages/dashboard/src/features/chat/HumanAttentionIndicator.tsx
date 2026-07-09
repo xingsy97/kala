@@ -1,0 +1,249 @@
+import { useEffect, useRef, useState } from 'react'
+import { Activity, AlertTriangle } from 'lucide-react'
+import type { HumanAttentionLevel, HumanAttentionTimeline } from '@agent-kernel/shared'
+
+import { cn } from '../../lib/utils.js'
+
+type Props = {
+  timeline: HumanAttentionTimeline
+  density?: 'default' | 'simple'
+}
+
+const LEVEL_LABEL: Record<HumanAttentionLevel, string> = {
+  engaged: 'Engaged',
+  watching: 'Watching',
+  drifting: 'Drifting',
+  absent: 'Low',
+}
+
+const DIMENSION_LABELS: ReadonlyArray<[keyof NonNullable<HumanAttentionTimeline['latest']>['dimensions'], string]> = [
+  ['inputQuality', 'Input'],
+  ['reviewDepth', 'Review'],
+  ['correctionQuality', 'Corrections'],
+  ['riskAwareness', 'Risk awareness'],
+  ['continuity', 'Continuity'],
+  ['riskExposure', 'Risk exposure'],
+]
+
+export function HumanAttentionIndicator({ timeline, density = 'default' }: Props): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  const latest = timeline.latest
+  const isSimple = density === 'simple'
+  const scoreText = latest ? String(latest.score) : '--'
+  const title = latest
+    ? `Attention ${latest.score} · ${LEVEL_LABEL[latest.level]}`
+    : 'Attention unavailable'
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (event: MouseEvent): void => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="relative flex-none" ref={ref}>
+      <button
+        type="button"
+        className={cn(
+          'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+          latest && levelTone(latest.level),
+          open && 'bg-accent text-foreground',
+          isSimple ? 'h-9 min-w-9 rounded-full px-2' : 'h-8 rounded px-1.5',
+        )}
+        title={title}
+        aria-label={title}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        data-testid="human-attention-indicator"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Activity className="h-4 w-4 flex-none" aria-hidden="true" />
+        <span className="flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground">
+          {scoreText}
+        </span>
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label="Human Attention"
+          className="absolute bottom-full right-0 z-30 mb-2 w-[min(26rem,calc(100vw-2rem))] rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl"
+          data-testid="human-attention-popover"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-lg font-semibold tracking-tight text-foreground">Human Attention</div>
+              <div className="mt-1 text-xs text-muted-foreground">Session-scoped estimate</div>
+            </div>
+            <div className="text-right">
+              <div className={cn('font-mono text-2xl leading-none', latest ? scoreTextTone(latest.level) : 'text-muted-foreground')}>
+                {scoreText}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {latest ? LEVEL_LABEL[latest.level] : 'No data'}
+              </div>
+            </div>
+          </div>
+
+          {latest ? (
+            <>
+              <AttentionChart timeline={timeline} />
+              <div className="mt-4 grid gap-2">
+                {DIMENSION_LABELS.map(([key, label]) => (
+                  <DimensionBar key={key} label={label} value={latest.dimensions[key]} reverse={key === 'riskExposure'} />
+                ))}
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>Cursor {latest.messageCursor}</span>
+                <span>Confidence {Math.round(latest.confidence * 100)}%</span>
+              </div>
+              {latest.reasons.length > 0 ? (
+                <ul className="mt-3 space-y-1.5 text-xs" data-testid="human-attention-reasons">
+                  {latest.reasons.map((reason, index) => (
+                    <li key={`${reason.kind}-${index}`} className={cn('rounded-md px-2 py-1.5', reasonTone(reason.severity))}>
+                      <span className="font-medium">{reason.message}</span>
+                      {reason.evidence ? <span className="ml-1 opacity-80">{reason.evidence}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          ) : (
+            <div className="mt-4 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              No human messages have been evaluated yet.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+export function HumanAttentionLowBanner({ timeline }: { timeline: HumanAttentionTimeline }): JSX.Element | null {
+  const latest = timeline.latest
+  if (!latest || latest.level !== 'absent') return null
+  if (!shouldShowLowAttentionBanner(timeline)) return null
+  return (
+    <div
+      className="flex items-center gap-2 border-t border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
+      data-testid="human-attention-low-banner"
+      role="status"
+    >
+      <AlertTriangle className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+      <span className="font-medium">Attention is low.</span>
+      <span className="truncate text-rose-700/80 dark:text-rose-200/75">Review recent changes before broad instructions.</span>
+    </div>
+  )
+}
+
+function shouldShowLowAttentionBanner(timeline: HumanAttentionTimeline): boolean {
+  const latest = timeline.latest
+  if (!latest) return false
+  if (latest.dimensions.riskExposure >= 35) return true
+  if (latest.reasons.some((reason) => reason.kind === 'high_agent_activity' || reason.kind === 'high_risk_action' || reason.kind === 'stale_review')) return true
+  const recentPoints = timeline.points.slice(-6)
+  const continueOnlyWarnings = recentPoints.filter((point) => point.reasons.some((reason) => reason.kind === 'continue_only')).length
+  return recentPoints.length >= 4 && continueOnlyWarnings >= 2
+}
+
+function AttentionChart({ timeline }: { timeline: HumanAttentionTimeline }): JSX.Element {
+  const points = timeline.points.slice(-40)
+  const width = 320
+  const height = 96
+  const padding = 10
+  const minCursor = points[0]?.messageCursor ?? 0
+  const maxCursor = points.at(-1)?.messageCursor ?? minCursor
+  const cursorSpan = Math.max(1, maxCursor - minCursor)
+  const path = points.map((point) => {
+    const x = padding + ((point.messageCursor - minCursor) / cursorSpan) * (width - padding * 2)
+    const y = padding + ((100 - point.score) / 100) * (height - padding * 2)
+    return `${roundCoord(x)},${roundCoord(y)}`
+  }).join(' ')
+
+  return (
+    <div className="mt-4 rounded-md border border-border/60 bg-background/50 p-2" data-testid="human-attention-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-24 w-full text-sky-500" role="img" aria-label="Attention score timeline">
+        <line x1={padding} y1={padding} x2={padding} y2={height - padding} className="stroke-border" strokeWidth="1" />
+        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} className="stroke-border" strokeWidth="1" />
+        <line x1={padding} y1={padding + (height - padding * 2) * 0.7} x2={width - padding} y2={padding + (height - padding * 2) * 0.7} className="stroke-rose-300/70 dark:stroke-rose-800/80" strokeDasharray="4 4" strokeWidth="1" />
+        {path ? <polyline points={path} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" /> : null}
+        {points.map((point) => {
+          const x = padding + ((point.messageCursor - minCursor) / cursorSpan) * (width - padding * 2)
+          const y = padding + ((100 - point.score) / 100) * (height - padding * 2)
+          return <circle key={point.messageCursor} cx={roundCoord(x)} cy={roundCoord(y)} r="2.2" className={scoreFill(point.level)} />
+        })}
+      </svg>
+      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+        <span>{minCursor}</span>
+        <span>Message cursor</span>
+        <span>{maxCursor}</span>
+      </div>
+    </div>
+  )
+}
+
+function DimensionBar({ label, value, reverse }: { label: string; value: number; reverse?: boolean }): JSX.Element {
+  return (
+    <div className="grid grid-cols-[7rem_minmax(0,1fr)_2.5rem] items-center gap-2 text-xs">
+      <span className="truncate text-muted-foreground">{label}</span>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className={cn('h-full rounded-full', reverse ? riskBarTone(value) : qualityBarTone(value))} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </div>
+      <span className="text-right font-mono text-[11px] text-foreground">{value}</span>
+    </div>
+  )
+}
+
+function levelTone(level: HumanAttentionLevel): string {
+  if (level === 'engaged') return 'text-emerald-700 dark:text-emerald-300'
+  if (level === 'watching') return 'text-sky-700 dark:text-sky-300'
+  if (level === 'drifting') return 'text-amber-700 dark:text-amber-300'
+  return 'text-rose-700 dark:text-rose-300'
+}
+
+function scoreTextTone(level: HumanAttentionLevel): string {
+  if (level === 'engaged') return 'text-emerald-600 dark:text-emerald-300'
+  if (level === 'watching') return 'text-sky-600 dark:text-sky-300'
+  if (level === 'drifting') return 'text-amber-600 dark:text-amber-300'
+  return 'text-rose-600 dark:text-rose-300'
+}
+
+function scoreFill(level: HumanAttentionLevel): string {
+  if (level === 'engaged') return 'fill-emerald-500'
+  if (level === 'watching') return 'fill-sky-500'
+  if (level === 'drifting') return 'fill-amber-500'
+  return 'fill-rose-500'
+}
+
+function qualityBarTone(value: number): string {
+  if (value >= 70) return 'bg-emerald-500'
+  if (value >= 45) return 'bg-sky-500'
+  if (value >= 25) return 'bg-amber-500'
+  return 'bg-rose-500'
+}
+
+function riskBarTone(value: number): string {
+  if (value >= 70) return 'bg-rose-500'
+  if (value >= 40) return 'bg-amber-500'
+  return 'bg-emerald-500'
+}
+
+function reasonTone(severity: 'info' | 'warning' | 'critical'): string {
+  if (severity === 'critical') return 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
+  if (severity === 'warning') return 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+  return 'bg-muted/60 text-muted-foreground'
+}
+
+function roundCoord(value: number): number {
+  return Math.round(value * 10) / 10
+}

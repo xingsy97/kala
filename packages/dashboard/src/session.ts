@@ -19,21 +19,23 @@ import { createInitialState, step } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
   AttachedExecutor,
-  ContextSnapshot,
+  ContextUsageSnapshot,
   ControlUpdate,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
   EventAppendedEvent,
   QueuedMessagePreview,
   SessionErrorEvent,
-  SessionForkedEvent,
   SessionReadyEvent,
   SessionSummary,
   LLMTrace,
+  HostRestartEvent,
+  HumanAttentionTimeline,
 } from '@agent-kernel/shared'
-import { PROTOCOL_VERSION } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION, buildHumanAttentionTimeline } from '@agent-kernel/shared'
 import { io, type Socket } from 'socket.io-client'
 
+import { decideSessionHydration } from './session-hydration-policy.js'
 import type { CachedSessionViewInput, SessionViewCache } from './session-view-cache.js'
 
 export type DashboardSocket = Socket<
@@ -63,8 +65,9 @@ export type SessionView = {
   status: ConnectionStatus
   state: AgentState | null
   config: AgentConfig | null
-  contextSnapshot: ContextSnapshot | null
+  contextSnapshot: ContextUsageSnapshot | null
   timeline: readonly TimelineEntry[]
+  humanAttention: HumanAttentionTimeline
   streamingText: string
   /**
    * Derived from `state.pendingCalls` (status='awaiting_approval'), NOT from
@@ -85,13 +88,20 @@ export type SessionView = {
   socket: DashboardSocket | null
 }
 
+type BoundDashboardSocket = {
+  sessionId: string
+  socket: DashboardSocket
+}
+
 export type UseSessionOptions = {
   host: string
   sessionId: string | null
   token?: string
   cache?: SessionViewCache
-  onForked?: (payload: SessionForkedEvent) => void
+  onForked?: (payload: SessionReadyEvent) => void
 }
+
+const CONTROL_SOCKET_SESSION_ID = '__agent-kernel-control__'
 
 export function useSession({
   host,
@@ -103,7 +113,7 @@ export function useSession({
   const [status, setStatus] = useState<ConnectionStatus>('idle')
   const [state, setState] = useState<AgentState | null>(null)
   const [config, setConfig] = useState<AgentConfig | null>(null)
-  const [contextSnapshot, setContextSnapshot] = useState<ContextSnapshot | null>(null)
+  const [contextSnapshot, setContextUsageSnapshot] = useState<ContextUsageSnapshot | null>(null)
   const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
@@ -112,6 +122,7 @@ export function useSession({
   const [parentCursor, setParentCursor] = useState<number | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null)
+  const [boundSocket, setBoundSocket] = useState<BoundDashboardSocket | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
   // Latest AgentConfig — needed by the client-side fold on event:appended,
   // which lives inside a stable useEffect closure and can't read the React
@@ -130,10 +141,11 @@ export function useSession({
     if (sessionId === null) {
       socketRef.current?.close()
       socketRef.current = null
+      setBoundSocket(null)
       setStatus('idle')
       setState(null)
       setConfig(null)
-      setContextSnapshot(null)
+      setContextUsageSnapshot(null)
       configRef.current = null
       setTimeline([])
       setStreamingText('')
@@ -148,7 +160,7 @@ export function useSession({
     setStatus('connecting')
     setState(null)
     setConfig(null)
-    setContextSnapshot(null)
+    setContextUsageSnapshot(null)
     configRef.current = null
     setTimeline([])
     setStreamingText('')
@@ -185,7 +197,7 @@ export function useSession({
       setStatus('connecting')
       setState(cached.state)
       setConfig(cached.config)
-      setContextSnapshot(cached.contextSnapshot)
+      setContextUsageSnapshot(cached.contextSnapshot)
       configRef.current = cached.config
       setTimeline(cached.timeline)
       setQueuedMessages(cached.queuedMessages)
@@ -251,14 +263,28 @@ export function useSession({
       randomizationFactor: 0.5,
     }) as DashboardSocket
     socketRef.current = socket
+    setBoundSocket({ sessionId, socket })
     const isCurrentSocket = (): boolean => socketRef.current === socket
+    let plannedRestartUntil = 0
+
+    const noteHostRestart = (event: HostRestartEvent): void => {
+      if (!isCurrentSocket()) return
+      if (event.phase === 'restarting') {
+        plannedRestartUntil = Date.now() + 120_000
+      }
+    }
 
     socket.on('session:ready', (p) => {
-      if (!isCurrentSocket() || p.sessionId !== sessionId) return
+      if (!isCurrentSocket()) return
+      if (p.reason === 'forked') {
+        onForkedRef.current?.(p)
+        return
+      }
+      if (p.sessionId !== sessionId) return
       setStatus('ready')
       setState(p.state)
       setConfig(p.config)
-      setContextSnapshot(p.contextSnapshot ?? null)
+      setContextUsageSnapshot(p.contextSnapshot ?? null)
       configRef.current = p.config
       setParentSessionId(p.parentSessionId ?? null)
       setParentCursor(p.parentCursor ?? null)
@@ -280,18 +306,20 @@ export function useSession({
       // empty timeline for a session that already has history. Live
       // event:appended events overlapping the tail of history are
       // deduped by seq below.
-      const cachedLastSeq = cached?.timeline.at(-1)?.seq ?? 0
-      if (cachedLastSeq > p.cursor) {
-        cache?.delete(p.sessionId)
-        cacheDraft = { ...cacheDraft, timeline: [], hydratedSessionId: p.sessionId }
-        resetHistoryBaseOnNextReplay = true
-        setTimeline([])
+      const hydration = decideSessionHydration({ cached, hostCursor: p.cursor })
+      if (hydration.kind === 'load_full_history') {
+        if (hydration.resetTimeline) {
+          cache?.delete(p.sessionId)
+          cacheDraft = { ...cacheDraft, timeline: [], hydratedSessionId: p.sessionId }
+          resetHistoryBaseOnNextReplay = true
+          setTimeline([])
+        }
         socket.emit('client:load_history', { sessionId: p.sessionId })
         return
       }
       socket.emit('client:load_history', {
         sessionId: p.sessionId,
-        ...(cachedLastSeq > 0 ? { sinceCursor: cachedLastSeq } : {}),
+        sinceCursor: hydration.sinceCursor,
       })
     })
     socket.on('server:history', (p) => {
@@ -314,10 +342,6 @@ export function useSession({
         return next
       })
     })
-    socket.on('session:forked', (p) => {
-      if (!isCurrentSocket()) return
-      onForkedRef.current?.(p)
-    })
     socket.on('state:changed', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       // Kept as a fallback / correction channel. The primary path is
@@ -326,7 +350,7 @@ export function useSession({
       // out-of-order or if the host pushes a mid-stream correction; in
       // both cases the server-computed state wins.
       setState(p.state)
-      setContextSnapshot(p.contextSnapshot ?? null)
+      setContextUsageSnapshot(p.contextSnapshot ?? null)
       writeCacheSnapshot({ state: p.state, contextSnapshot: p.contextSnapshot ?? null })
       if (p.state.status !== 'thinking') resetStream()
     })
@@ -388,10 +412,10 @@ export function useSession({
       if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) pushStreamDelta(p.text)
     })
-    socket.on('session:model_changed', (p) => {
-      if (!isCurrentSocket()) return
-      if (p.sessionId === sessionId) {
-        const model = p.model.length > 0 ? p.model : null
+    socket.on('server:control_update', (p: ControlUpdate) => {
+      if (p.kind === 'host_restart') noteHostRestart(p)
+      if (p.kind === 'session_meta_changed' && p.sessionId === sessionId && p.preferences && 'selectedModel' in p.preferences) {
+        const model = p.preferences.selectedModel && p.preferences.selectedModel.length > 0 ? p.preferences.selectedModel : null
         setSelectedModel(model)
         writeCacheSnapshot({ selectedModel: model })
       }
@@ -417,6 +441,10 @@ export function useSession({
       // dashboard side, or host shutdown) is terminal — don't let socket.io
       // keep dialing.
       if (reason === 'io server disconnect') {
+        if (Date.now() < plannedRestartUntil) {
+          setStatus('disconnected')
+          return
+        }
         socket.disconnect()
         setStatus('error')
         return
@@ -432,6 +460,7 @@ export function useSession({
       streamBufferRef.current = ''
       socket.close()
       socketRef.current = null
+      setBoundSocket((current) => current?.socket === socket ? null : current)
     }
   }, [host, sessionId, token, cache])
 
@@ -452,6 +481,11 @@ export function useSession({
     [state, timeline],
   )
 
+  const humanAttention = useMemo(
+    () => deriveHumanAttentionTimeline(sessionId, timeline),
+    [sessionId, timeline],
+  )
+
   return useMemo(
     () => ({
       status,
@@ -459,6 +493,7 @@ export function useSession({
       config,
       contextSnapshot,
       timeline,
+      humanAttention,
       streamingText,
       pendingApprovals,
       queuedMessages,
@@ -468,13 +503,14 @@ export function useSession({
       selectedModel,
       toolExecutionStartedAt,
       hydratedSessionId,
-      socket: socketRef.current,
+      socket: boundSocket?.sessionId === sessionId ? boundSocket.socket : null,
     }),
     [
       status,
       state,
       config,
       timeline,
+      humanAttention,
       streamingText,
       pendingApprovals,
       queuedMessages,
@@ -484,8 +520,44 @@ export function useSession({
       selectedModel,
       toolExecutionStartedAt,
       hydratedSessionId,
+      boundSocket,
+      sessionId,
     ],
   )
+}
+
+export function useDashboardControlSocket(host: string, token?: string): DashboardSocket | null {
+  const [socket, setSocket] = useState<DashboardSocket | null>(null)
+
+  useEffect(() => {
+    const next = io(`${host}/dashboard`, {
+      auth: {
+        sessionId: CONTROL_SOCKET_SESSION_ID,
+        role: 'dashboard',
+        clientVersion: PROTOCOL_VERSION,
+        ...(token !== undefined ? { token } : {}),
+      },
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 30_000,
+      reconnectionAttempts: 30,
+      randomizationFactor: 0.5,
+    }) as DashboardSocket
+    setSocket(next)
+    return () => {
+      next.close()
+      setSocket((current) => current === next ? null : current)
+    }
+  }, [host, token])
+
+  return socket
+}
+
+export function deriveHumanAttentionTimeline(
+  sessionId: string | null,
+  timeline: readonly TimelineEntry[],
+): HumanAttentionTimeline {
+  return sessionId ? buildHumanAttentionTimeline(sessionId, timeline) : { sessionId: '', points: [], latest: null }
 }
 
 export function deriveToolExecutionStartedAt(
@@ -621,12 +693,12 @@ export function createSessionWithAck(
   })
 }
 
-export function setSessionModel(
+export function updateSessionPreferences(
   socket: DashboardSocket,
   sessionId: string,
-  model: string,
+  preferences: { selectedModel?: string },
 ): void {
-  socket.emit('client:set_model', { sessionId, model })
+  socket.emit('client:update_preferences', { sessionId, preferences })
 }
 
 export function setSessionApprovalMode(
@@ -694,7 +766,7 @@ export type ControlPlaneView = {
 /**
  * Subscribes to the host's control-plane events (executors / sessions) using
  * an already-open dashboard socket. Fetches an initial snapshot on socket
- * change and keeps the daemon list live via `server:executor_changed`.
+ * change and keeps the daemon list live via `server:control_update`.
  *
  * Sessions are fetched on connect and on `refreshSessions()`, and then kept
  * coherent by host pushes such as `server:sessions` and
@@ -730,9 +802,7 @@ export function useControlPlane(
       setSessions((prev) => mergeSessionSummaries(prev, p.sessions))
       setSessionsLoaded(true)
     }
-    const onExecutorChanged: DashboardServerToClientEvents['server:executor_changed'] = (
-      change,
-    ) => {
+    const onExecutorChanged = (change: Extract<ControlUpdate, { kind: 'executor_changed' }>): void => {
       if (!isActive()) return
       setExecutorsLoaded(true)
       setExecutors((prev) => {
@@ -772,6 +842,9 @@ export function useControlPlane(
             : s
         )))
       }
+      if (payload.kind === 'executor_changed') {
+        onExecutorChanged(payload)
+      }
     }
     const onEventAppended: DashboardServerToClientEvents['event:appended'] = (p) => {
       if (!isActive()) return
@@ -796,7 +869,6 @@ export function useControlPlane(
     }
     socket.on('server:executors', onExecutors)
     socket.on('server:sessions', onSessions)
-    socket.on('server:executor_changed', onExecutorChanged)
     socket.on('server:control_update', onControlUpdate)
     socket.on('event:appended', onEventAppended)
     socket.on('state:changed', onStateChanged)
@@ -821,7 +893,6 @@ export function useControlPlane(
       active = false
       socket.off('server:executors', onExecutors)
       socket.off('server:sessions', onSessions)
-      socket.off('server:executor_changed', onExecutorChanged)
       socket.off('server:control_update', onControlUpdate)
       socket.off('event:appended', onEventAppended)
       socket.off('state:changed', onStateChanged)

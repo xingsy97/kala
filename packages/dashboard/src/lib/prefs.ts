@@ -4,6 +4,88 @@ const CHANGE_EVENT = 'ak-pref-change'
 
 type PrefChangeDetail = { key: string; value: string | null }
 
+type BooleanPreferenceDefinition = {
+  readonly key: string
+  readonly type: 'boolean'
+  readonly defaultValue: boolean
+}
+
+type NumberPreferenceDefinition = {
+  readonly key: string
+  readonly type: 'number'
+  readonly defaultValue: number
+  readonly min?: number
+  readonly max?: number
+}
+
+type StringPreferenceDefinition = {
+  readonly key: string
+  readonly type: 'string'
+  readonly defaultValue: string
+}
+
+type JsonPreferenceDefinition = {
+  readonly key: string
+  readonly type: 'json'
+}
+
+type PreferenceDefinition =
+  | BooleanPreferenceDefinition
+  | NumberPreferenceDefinition
+  | StringPreferenceDefinition
+  | JsonPreferenceDefinition
+
+type PreferenceRegistry = Record<string, PreferenceDefinition>
+
+function definePreferenceRegistry<const T extends PreferenceRegistry>(registry: T): T {
+  return registry
+}
+
+export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
+  showToolCallTab: { key: 'ak-show-tool-call-tab', type: 'boolean', defaultValue: true },
+  liveToolActivityTailCount: { key: 'ak-live-tool-activity-tail-count', type: 'number', defaultValue: 3, min: 0, max: 50 },
+  explorerOpen: { key: 'ak-explorer-open', type: 'boolean', defaultValue: true },
+  sessionExplorerSectionOpen: { key: 'ak-session-explorer-section-open', type: 'boolean', defaultValue: true },
+  inspectorOpen: { key: 'ak-inspector-open', type: 'boolean', defaultValue: true },
+  topbarOpen: { key: 'ak-topbar-open', type: 'boolean', defaultValue: true },
+  chatFontSize: { key: 'ak-chat-font-size', type: 'number', defaultValue: 3, min: 0, max: 6 },
+  sessionExplorerFontSize: { key: 'ak-session-explorer-font-size', type: 'number', defaultValue: 2, min: 0, max: 4 },
+  fileExplorerFontSize: { key: 'ak-file-explorer-font-size', type: 'number', defaultValue: 1, min: 0, max: 4 },
+  fileViewFontSize: { key: 'ak-file-view-font-size', type: 'number', defaultValue: 2, min: 0, max: 4 },
+  chatContentWidth: { key: 'ak-chat-content-width', type: 'number', defaultValue: 1, min: 0, max: 2 },
+  chatSideSpace: { key: 'ak-chat-side-space', type: 'number', defaultValue: 1, min: 0, max: 2 },
+  chatLineHeight: { key: 'ak-chat-line-height', type: 'number', defaultValue: 1, min: 0, max: 2 },
+  chatMathScale: { key: 'ak-chat-math-scale', type: 'number', defaultValue: 2, min: 0, max: 4 },
+  sessionViewCacheMaxMb: { key: 'ak-session-view-cache-max-mb', type: 'number', defaultValue: 500, min: 0, max: 4096 },
+  desktopNotificationsEnabled: { key: 'ak-desktop-notifications-enabled', type: 'boolean', defaultValue: false },
+  desktopNotificationApproval: { key: 'ak-desktop-notification-approval-required', type: 'boolean', defaultValue: true },
+  desktopNotificationWaiting: { key: 'ak-desktop-notification-waiting-for-user', type: 'boolean', defaultValue: true },
+  desktopNotificationError: { key: 'ak-desktop-notification-session-error', type: 'boolean', defaultValue: true },
+  desktopNotificationConnection: { key: 'ak-desktop-notification-connection-lost', type: 'boolean', defaultValue: true },
+  desktopNotificationWorkspace: { key: 'ak-desktop-notification-workspace-offline', type: 'boolean', defaultValue: true },
+  desktopNotificationSound: { key: 'ak-desktop-notification-sound', type: 'boolean', defaultValue: true },
+  theme: { key: 'ak-theme', type: 'string', defaultValue: 'dark' },
+  vscodeTheme: { key: 'ak-vscode-theme', type: 'json' },
+  dashboardLanguage: { key: 'ak-dashboard-language', type: 'string', defaultValue: 'en' },
+  hostEndpoint: { key: 'agent-kernel:host-endpoint', type: 'string', defaultValue: '' },
+  model: { key: 'ak-model', type: 'string', defaultValue: '' },
+  composerMode: { key: 'ak-composer-mode', type: 'string', defaultValue: 'full' },
+  composerSendModePrefix: { key: 'agent-kernel:composer:send-mode:', type: 'string', defaultValue: '' },
+  hiddenWorkspaces: { key: 'ak-hidden-workspaces', type: 'json' },
+  workspaceOrder: { key: 'agent-kernel:explorer:workspace-order:v1', type: 'json' },
+  sessionOrder: { key: 'agent-kernel:explorer:session-order:v1', type: 'json' },
+  workspaceOpen: { key: 'agent-kernel:explorer:workspace-open:v1', type: 'json' },
+  sessionChildrenOpen: { key: 'agent-kernel:explorer:session-children-open:v1', type: 'json' },
+} as const)
+
+export function dashboardPreferenceDefinitions(): readonly PreferenceDefinition[] {
+  return Object.values(DASHBOARD_PREFERENCES)
+}
+
+export function numberPreferenceOptions(definition: NumberPreferenceDefinition): { min?: number; max?: number } {
+  return { min: definition.min, max: definition.max }
+}
+
 function readRaw(key: string): string | null {
   try {
     return localStorage.getItem(key)
@@ -116,25 +198,38 @@ export function useNumberPref(
   return [value, set]
 }
 
-export const PREF_SHOW_TOOL_CALL_TAB = 'ak-show-tool-call-tab'
-export const PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT = 'ak-live-tool-activity-tail-count'
-export const PREF_EXPLORER_OPEN = 'ak-explorer-open'
-export const PREF_INSPECTOR_OPEN = 'ak-inspector-open'
-export const PREF_TOPBAR_OPEN = 'ak-topbar-open'
-export const PREF_CHAT_FONT_SIZE = 'ak-chat-font-size'
-export const PREF_SESSION_EXPLORER_FONT_SIZE = 'ak-session-explorer-font-size'
-export const PREF_FILE_EXPLORER_FONT_SIZE = 'ak-file-explorer-font-size'
-export const PREF_FILE_VIEW_FONT_SIZE = 'ak-file-view-font-size'
-export const PREF_CHAT_CONTENT_WIDTH = 'ak-chat-content-width'
-export const PREF_CHAT_SIDE_SPACE = 'ak-chat-side-space'
-export const PREF_CHAT_LINE_HEIGHT = 'ak-chat-line-height'
-export const PREF_CHAT_MATH_SCALE = 'ak-chat-math-scale'
-export const DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT = 3
-export const DEFAULT_CHAT_FONT_SIZE = 3
-export const DEFAULT_SESSION_EXPLORER_FONT_SIZE = 2
-export const DEFAULT_FILE_EXPLORER_FONT_SIZE = 1
-export const DEFAULT_FILE_VIEW_FONT_SIZE = 2
-export const DEFAULT_CHAT_CONTENT_WIDTH = 1
-export const DEFAULT_CHAT_SIDE_SPACE = 1
-export const DEFAULT_CHAT_LINE_HEIGHT = 1
-export const DEFAULT_CHAT_MATH_SCALE = 2
+export const PREF_SHOW_TOOL_CALL_TAB = DASHBOARD_PREFERENCES.showToolCallTab.key
+export const PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveToolActivityTailCount.key
+export const PREF_EXPLORER_OPEN = DASHBOARD_PREFERENCES.explorerOpen.key
+export const PREF_SESSION_EXPLORER_SECTION_OPEN = DASHBOARD_PREFERENCES.sessionExplorerSectionOpen.key
+export const PREF_INSPECTOR_OPEN = DASHBOARD_PREFERENCES.inspectorOpen.key
+export const PREF_TOPBAR_OPEN = DASHBOARD_PREFERENCES.topbarOpen.key
+export const PREF_CHAT_FONT_SIZE = DASHBOARD_PREFERENCES.chatFontSize.key
+export const PREF_SESSION_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.sessionExplorerFontSize.key
+export const PREF_FILE_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.fileExplorerFontSize.key
+export const PREF_FILE_VIEW_FONT_SIZE = DASHBOARD_PREFERENCES.fileViewFontSize.key
+export const PREF_CHAT_CONTENT_WIDTH = DASHBOARD_PREFERENCES.chatContentWidth.key
+export const PREF_CHAT_SIDE_SPACE = DASHBOARD_PREFERENCES.chatSideSpace.key
+export const PREF_CHAT_LINE_HEIGHT = DASHBOARD_PREFERENCES.chatLineHeight.key
+export const PREF_CHAT_MATH_SCALE = DASHBOARD_PREFERENCES.chatMathScale.key
+export const PREF_MODEL = DASHBOARD_PREFERENCES.model.key
+export const PREF_HOST_ENDPOINT = DASHBOARD_PREFERENCES.hostEndpoint.key
+export const PREF_THEME = DASHBOARD_PREFERENCES.theme.key
+export const PREF_VSCODE_THEME = DASHBOARD_PREFERENCES.vscodeTheme.key
+export const PREF_DASHBOARD_LANGUAGE = DASHBOARD_PREFERENCES.dashboardLanguage.key
+export const PREF_COMPOSER_MODE = DASHBOARD_PREFERENCES.composerMode.key
+export const PREF_COMPOSER_SEND_MODE_PREFIX = DASHBOARD_PREFERENCES.composerSendModePrefix.key
+export const PREF_HIDDEN_WORKSPACES = DASHBOARD_PREFERENCES.hiddenWorkspaces.key
+export const PREF_WORKSPACE_ORDER = DASHBOARD_PREFERENCES.workspaceOrder.key
+export const PREF_SESSION_ORDER = DASHBOARD_PREFERENCES.sessionOrder.key
+export const PREF_WORKSPACE_OPEN = DASHBOARD_PREFERENCES.workspaceOpen.key
+export const PREF_SESSION_CHILDREN_OPEN = DASHBOARD_PREFERENCES.sessionChildrenOpen.key
+export const DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveToolActivityTailCount.defaultValue
+export const DEFAULT_CHAT_FONT_SIZE = DASHBOARD_PREFERENCES.chatFontSize.defaultValue
+export const DEFAULT_SESSION_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.sessionExplorerFontSize.defaultValue
+export const DEFAULT_FILE_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.fileExplorerFontSize.defaultValue
+export const DEFAULT_FILE_VIEW_FONT_SIZE = DASHBOARD_PREFERENCES.fileViewFontSize.defaultValue
+export const DEFAULT_CHAT_CONTENT_WIDTH = DASHBOARD_PREFERENCES.chatContentWidth.defaultValue
+export const DEFAULT_CHAT_SIDE_SPACE = DASHBOARD_PREFERENCES.chatSideSpace.defaultValue
+export const DEFAULT_CHAT_LINE_HEIGHT = DASHBOARD_PREFERENCES.chatLineHeight.defaultValue
+export const DEFAULT_CHAT_MATH_SCALE = DASHBOARD_PREFERENCES.chatMathScale.defaultValue

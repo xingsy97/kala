@@ -5,7 +5,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as XTerm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { Check, ChevronDown, ChevronRight, Copy, File, Folder, Loader2, Minus, Play, Plus, RefreshCw, SquareTerminal, WrapText, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, Download, File, Folder, Loader2, Minus, Play, Plus, RefreshCw, SquareTerminal, WrapText, X } from 'lucide-react'
 import { Tree, type NodeApi } from 'react-arborist'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -25,6 +25,7 @@ import type {
 
 import { Button } from '../../components/ui/button.js'
 import { DEFAULT_FILE_VIEW_FONT_SIZE, PREF_FILE_VIEW_FONT_SIZE, useNumberPref } from '../../lib/prefs.js'
+import { notify } from '../../notify.js'
 import type { WorkspaceFileTarget } from '../chat/ChatPanel.js'
 import {
   Dialog,
@@ -34,10 +35,13 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
+import { downloadFilename, fileResultDownloadBlob, saveBlob } from './file-download.js'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 
 const FILE_VIEW_FONT_SIZE_PX = [10, 12, 14, 16, 18] as const
+const FILE_PREVIEW_MAX_BYTES = 1024 * 1024
+const FILE_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
 
 type FileNode = {
   id: string
@@ -71,6 +75,7 @@ export function WorkspaceFileViewDialog({
   const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview')
   const [copied, setCopied] = useState<'path' | 'content' | null>(null)
   const [fontSizeDelta, setFontSizeDelta] = useState(0)
+  const [downloading, setDownloading] = useState(false)
   const viewTarget = target ?? (path ? { path } : null)
   const viewPath = viewTarget?.path
   const effectiveFontSize = useFileViewFontSize(fontSizeDelta)
@@ -101,11 +106,22 @@ export function WorkspaceFileViewDialog({
     window.setTimeout(() => setCopied((current) => current === target ? null : current), 1200)
   }, [viewPath, viewer])
 
+  const downloadView = useCallback(async (): Promise<void> => {
+    const targetPath = viewPath ?? viewerPath(viewer)
+    if (!targetPath || !socket || !workspaceId) return
+    setDownloading(true)
+    try {
+      await downloadWorkspaceFile(socket, workspaceId, sessionId, targetPath, viewer)
+    } finally {
+      setDownloading(false)
+    }
+  }, [sessionId, socket, viewPath, viewer, workspaceId])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] max-w-[min(1100px,94vw)] gap-0 overflow-hidden p-0" data-testid="session-file-view-dialog">
-        <DialogHeader className="border-b border-border px-4 py-2.5 pr-10">
-          <div className="flex min-w-0 items-start gap-3">
+      <DialogContent className="max-h-[92dvh] w-[96vw] max-w-[min(1100px,96vw)] gap-0 overflow-hidden p-0" data-testid="session-file-view-dialog">
+        <DialogHeader className="border-b border-border px-3 py-2.5 pr-10 sm:px-4">
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5">
                 <Button variant="ghost" size="icon" className="h-6 w-6 flex-none" disabled={!viewPath && !viewerPath(viewer)} onClick={() => void copyView('path')} title="Copy path" aria-label="Copy path">
@@ -117,10 +133,13 @@ export function WorkspaceFileViewDialog({
                 {viewerMeta(viewer).map((item) => <span key={item}>{item}</span>)}
               </div>
             </div>
-            <div className="flex flex-none items-center gap-2">
-              <div className="flex items-center gap-1">
+            <div className="flex w-full flex-none flex-wrap items-center gap-x-2 gap-y-1 sm:w-auto sm:justify-end">
+              <div className="flex flex-wrap items-center gap-1">
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!copyableViewerContent(viewer)} onClick={() => void copyView('content')} title="Copy visible content" aria-label="Copy visible content">
                   {copied === 'content' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!viewPath || viewer.kind === 'loading' || downloading} onClick={() => void downloadView()} title="Download file" aria-label="Download file">
+                  {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                 </Button>
                 <Button variant={wordWrap ? 'outline' : 'ghost'} size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text'} onClick={() => setWordWrap((value) => !value)} title="Toggle word wrap" aria-label="Toggle word wrap">
                   <WrapText className="h-3.5 w-3.5" />
@@ -131,7 +150,7 @@ export function WorkspaceFileViewDialog({
                   </Button>
                 ) : null}
               </div>
-              <div className="flex items-center gap-1 border-l border-border pl-2">
+              <div className="flex items-center gap-1 sm:border-l sm:border-border sm:pl-2">
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={viewer.kind !== 'text' || fontSizeDelta <= -2} onClick={() => setFontSizeDelta((value) => Math.max(-2, value - 1))} title="Decrease file view font size" aria-label="Decrease file view font size">
                   <Minus className="h-3.5 w-3.5" />
                 </Button>
@@ -142,7 +161,7 @@ export function WorkspaceFileViewDialog({
                   <Plus className="h-3.5 w-3.5" />
                 </Button>
               </div>
-              <div className="border-l border-border pl-2">
+              <div className="sm:border-l sm:border-border sm:pl-2">
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!viewPath || viewer.kind === 'loading'} onClick={() => void viewFile()} title="Refresh file" aria-label="Refresh file">
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>
@@ -151,7 +170,7 @@ export function WorkspaceFileViewDialog({
           </div>
           <DialogDescription className="sr-only">Read-only file view.</DialogDescription>
         </DialogHeader>
-        <div className="h-[min(76vh,720px)] min-h-0">
+        <div className="h-[min(68dvh,720px)] min-h-0 sm:h-[min(74dvh,720px)]">
           <FileView viewer={viewer} path={viewPath} target={viewTarget ?? undefined} chrome={false} wordWrap={wordWrap} fontSizeDelta={fontSizeDelta} markdownMode={markdownMode} />
         </div>
       </DialogContent>
@@ -179,6 +198,7 @@ function SessionFilesPanelImpl({
   const [selected, setSelected] = useState<FileNode | null>(null)
   const [viewer, setViewer] = useState<FileViewState>({ kind: 'empty' })
   const [viewOpen, setViewOpen] = useState(false)
+  const [downloadingPath, setDownloadingPath] = useState<string | null>(null)
   const online = Boolean(socket && workspaceId)
   const [treeHostRef, treeSize] = useElementSize<HTMLDivElement>()
 
@@ -223,6 +243,17 @@ function SessionFilesPanelImpl({
     setViewer(fileResultToViewState(result))
   }, [loadDir, mode, sessionId, socket, workspaceId])
 
+  const downloadNode = useCallback(async (node: FileNode): Promise<void> => {
+    if (node.type !== 'file' || !socket || !workspaceId) return
+    setDownloadingPath(node.path)
+    try {
+      const cachedViewer = viewerPath(viewer) === node.path ? viewer : undefined
+      await downloadWorkspaceFile(socket, workspaceId, sessionId ?? undefined, node.path, cachedViewer)
+    } finally {
+      setDownloadingPath((current) => current === node.path ? null : current)
+    }
+  }, [sessionId, socket, viewer, workspaceId])
+
   if (mode === 'sidebar') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="session-files-panel">
@@ -234,8 +265,8 @@ function SessionFilesPanelImpl({
           ) : nodes.length === 0 ? (
             <div className="p-3 text-xs text-sidebar-foreground/60">No files.</div>
           ) : (
-            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={14} rowHeight={26} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
-              {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} />}
+            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={14} rowHeight={28} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
+              {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} onDownload={downloadNode} downloadingPath={downloadingPath} surface="sidebar" />}
             </Tree>
           )}
         </div>
@@ -252,8 +283,8 @@ function SessionFilesPanelImpl({
   }
 
   return (
-    <div className="grid h-[min(78vh,760px)] min-h-0 grid-cols-[280px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_220px] overflow-hidden rounded-md border border-border bg-background" data-testid="session-files-panel">
-      <div className="flex min-h-0 flex-col border-r border-border bg-muted/20">
+    <div className="grid h-[min(82dvh,760px)] min-h-0 grid-cols-1 grid-rows-[minmax(160px,0.75fr)_minmax(220px,1fr)_180px] overflow-hidden rounded-md border border-border bg-background md:h-[min(78vh,760px)] md:grid-cols-[280px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_220px]" data-testid="session-files-panel">
+      <div className="flex min-h-0 flex-col border-b border-border bg-muted/20 md:border-b-0 md:border-r">
         <div className="flex h-10 items-center justify-between border-b border-border px-2">
           <div className="min-w-0 truncate text-xs font-medium">Files</div>
           <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!online || loadingPath !== null} onClick={() => void loadDir()} title="Refresh files" aria-label="Refresh files">
@@ -266,14 +297,14 @@ function SessionFilesPanelImpl({
           ) : nodes.length === 0 && loadingPath ? (
             <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading files</div>
           ) : (
-            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={16} rowHeight={28} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
-              {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} />}
+            <Tree<FileNode> data={nodes} width="100%" height={Math.max(120, treeSize.height)} indent={16} rowHeight={30} openByDefault={false} onActivate={(node) => void openNode(node.data)}>
+              {(props) => <FileTreeRow {...props} fontSizePx={fontSizePx} onDownload={downloadNode} downloadingPath={downloadingPath} />}
             </Tree>
           )}
         </div>
       </div>
       <FileView viewer={viewer} selected={selected} />
-      <div className="col-span-2 min-h-0 border-t border-border">
+      <div className="min-h-0 border-t border-border md:col-span-2">
         {sessionId !== null ? (
           <SessionTerminal key={`${workspaceId ?? 'offline'}:${sessionId}`} socket={socket} workspaceId={workspaceId} sessionId={sessionId} cwd={cwd} />
         ) : null}
@@ -298,27 +329,63 @@ function useElementSize<T extends HTMLElement>(): [(node: T | null) => void, { w
   return [setNode, size]
 }
 
-function FileTreeRow({ node, style, fontSizePx }: { node: NodeApi<FileNode>; style: CSSProperties; fontSizePx: number }): JSX.Element {
+function FileTreeRow({
+  node,
+  style,
+  fontSizePx,
+  onDownload,
+  downloadingPath,
+  surface = 'default',
+}: {
+  node: NodeApi<FileNode>
+  style: CSSProperties
+  fontSizePx: number
+  onDownload?: (node: FileNode) => void | Promise<void>
+  downloadingPath?: string | null
+  surface?: 'default' | 'sidebar'
+}): JSX.Element {
   const item = node.data
+  const downloading = downloadingPath === item.path
+  const sidebar = surface === 'sidebar'
   return (
-    <button
-      className={cn('flex w-full min-w-0 items-center gap-1.5 rounded px-1 text-left hover:bg-accent', node.isSelected && 'bg-accent text-accent-foreground')}
-      style={{ ...style, fontSize: fontSizePx }}
-      onClick={() => {
-        node.activate()
-        if (item.type === 'directory') node.toggle()
-      }}
-      data-testid={`session-file-${item.type}`}
-    >
-      {item.type === 'directory'
-        ? node.isOpen
-          ? <ChevronDown className="h-3 w-3 flex-none text-muted-foreground" />
-          : <ChevronRight className="h-3 w-3 flex-none text-muted-foreground" />
-        : <span className="h-3 w-3 flex-none" />}
-      {item.type === 'directory' ? <Folder className="h-3.5 w-3.5 flex-none text-sky-500" /> : <File className="h-3.5 w-3.5 flex-none text-muted-foreground" />}
-      <span className="min-w-0 truncate">{item.name}</span>
-      {item.type === 'file' && item.size !== undefined ? <span className="ml-auto flex-none text-[10px] text-muted-foreground">{formatBytes(item.size)}</span> : null}
-    </button>
+    <div className="flex w-full min-w-0 items-center" style={{ ...style, fontSize: fontSizePx }}>
+      <button
+        type="button"
+        className={cn(
+          'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded px-1 text-left',
+          sidebar ? 'hover:bg-sidebar-accent' : 'hover:bg-accent',
+          node.isSelected && (sidebar ? 'bg-sidebar-accent text-sidebar-foreground' : 'bg-accent text-accent-foreground'),
+        )}
+        onClick={() => {
+          node.activate()
+          if (item.type === 'directory') node.toggle()
+        }}
+        data-testid={`session-file-${item.type}`}
+      >
+        {item.type === 'directory'
+          ? node.isOpen
+            ? <ChevronDown className={cn('h-3 w-3 flex-none', sidebar ? 'text-sidebar-foreground/55' : 'text-muted-foreground')} />
+            : <ChevronRight className={cn('h-3 w-3 flex-none', sidebar ? 'text-sidebar-foreground/55' : 'text-muted-foreground')} />
+          : <span className="h-3 w-3 flex-none" />}
+        {item.type === 'directory' ? <Folder className="h-3.5 w-3.5 flex-none text-sky-500" /> : <File className={cn('h-3.5 w-3.5 flex-none', sidebar ? 'text-sidebar-foreground/55' : 'text-muted-foreground')} />}
+        <span className="min-w-0 truncate">{item.name}</span>
+        {item.type === 'file' && item.size !== undefined ? <span className={cn('ml-auto hidden flex-none text-[10px] sm:inline', sidebar ? 'text-sidebar-foreground/45' : 'text-muted-foreground')}>{formatBytes(item.size)}</span> : null}
+      </button>
+      {item.type === 'file' ? (
+        <button
+          type="button"
+          className={cn('ml-1 flex h-6 w-6 flex-none items-center justify-center rounded', sidebar ? 'text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}
+          title="Download file"
+          aria-label={`Download ${item.name}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            void onDownload?.(item)
+          }}
+        >
+          {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+        </button>
+      ) : null}
+    </div>
   )
 }
 
@@ -328,7 +395,8 @@ type FileViewState =
   | { kind: 'text'; path: string; content: string; size?: number; truncated?: boolean; error?: string }
   | { kind: 'image'; path: string; content: string; size?: number; mediaType: string }
   | { kind: 'pdf'; path: string; content: string; size?: number; mediaType: string }
-  | { kind: 'binary' | 'too_large' | 'not_found' | 'error'; path?: string; size?: number; message?: string }
+  | { kind: 'binary'; path?: string; size?: number; message?: string; content?: string; mediaType?: string }
+  | { kind: 'too_large' | 'not_found' | 'error'; path?: string; size?: number; message?: string }
 
 function FileView({ viewer, selected, path, target, chrome = true, wordWrap = true, fontSizeDelta = 0, markdownMode = 'source' }: { viewer: FileViewState; selected?: FileNode | null; path?: string; target?: WorkspaceFileTarget; chrome?: boolean; wordWrap?: boolean; fontSizeDelta?: number; markdownMode?: 'preview' | 'source' }): JSX.Element {
   const activePath = selected?.path ?? path ?? viewerPath(viewer)
@@ -382,10 +450,10 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
 
 function MarkdownFileView({ content }: { content: string }): JSX.Element {
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background px-6 py-5 text-sm leading-6" data-testid="session-file-markdown-preview">
+    <div className="h-full min-h-0 overflow-auto bg-background px-4 py-4 text-sm leading-6 sm:px-6 sm:py-5" data-testid="session-file-markdown-preview">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-        h1: ({ children }) => <h1 className="mb-3 mt-0 text-2xl font-semibold leading-tight">{children}</h1>,
-        h2: ({ children }) => <h2 className="mb-2 mt-5 text-xl font-semibold leading-tight">{children}</h2>,
+        h1: ({ children }) => <h1 className="mb-3 mt-0 text-xl font-semibold leading-tight sm:text-2xl">{children}</h1>,
+        h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-semibold leading-tight sm:text-xl">{children}</h2>,
         h3: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold leading-tight">{children}</h3>,
         p: ({ children }) => <p className="my-2 text-foreground/90">{children}</p>,
         ul: ({ children }) => <ul className="my-2 list-disc pl-5">{children}</ul>,
@@ -445,6 +513,29 @@ function copyableViewerContent(viewer: FileViewState): string | undefined {
   return undefined
 }
 
+async function downloadWorkspaceFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, cachedViewer?: FileViewState): Promise<void> {
+  const cached = cachedViewer && viewerPath(cachedViewer) === path ? downloadableBlob(cachedViewer) : undefined
+  if (cached) {
+    saveBlob(cached.blob, downloadFilename(path))
+    notify.success('Download started', { description: path, id: `file-download:${path}` })
+    return
+  }
+  const result = await requestFile(socket, workspaceId, sessionId, path, { download: true, maxBytes: FILE_DOWNLOAD_MAX_BYTES, timeoutMs: 120_000 })
+  const viewer = fileResultToViewState(result)
+  const downloadable = downloadableBlob(viewer)
+  if (!downloadable || result.truncated || result.kind === 'too_large') {
+    notify.error('File download unavailable', { description: result.error ?? 'The file is too large or cannot be read by the executor.', id: `file-download:${path}` })
+    return
+  }
+  saveBlob(downloadable.blob, downloadFilename(path))
+  notify.success('Download started', { description: path, id: `file-download:${path}` })
+}
+
+function downloadableBlob(viewer: FileViewState): { blob: Blob } | undefined {
+  if (viewer.kind === 'text' || viewer.kind === 'image' || viewer.kind === 'pdf' || viewer.kind === 'binary') return fileResultDownloadBlob(viewer)
+  return undefined
+}
+
 function isMarkdownViewer(viewer: FileViewState): boolean {
   return viewer.kind === 'text' && languageForPath(viewer.path) === 'markdown'
 }
@@ -476,6 +567,9 @@ function fileViewDiagnostic(kind: string, message?: string): { title: string; de
 }
 
 function fileResultToViewState(result: FileContentsResult): FileViewState {
+  if (result.kind === 'binary' && result.content !== undefined) {
+    return { kind: 'binary', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType, message: result.error }
+  }
   if (result.kind === 'image' && result.content !== undefined) {
     return { kind: 'image', path: result.path, content: result.content, size: result.size, mediaType: result.mediaType ?? 'application/octet-stream' }
   }
@@ -591,14 +685,14 @@ function SessionTerminal({ socket, workspaceId, sessionId, cwd }: { socket: Dash
   }
 
   return (
-    <div className="grid h-full grid-cols-[220px_minmax(0,1fr)] bg-black text-white">
-      <div className="border-r border-white/10 bg-background p-3 text-foreground">
-        <div className="mb-3 flex items-center gap-2 text-xs font-medium"><SquareTerminal className="h-4 w-4" /> Terminal</div>
-        <div className="space-y-2">
-          <Button className="h-8 w-full justify-start gap-2" size="sm" disabled={!socket || !workspaceId || status === 'starting' || status === 'running'} onClick={() => void start()}><Play className="h-3.5 w-3.5" /> Start</Button>
-          <Button className="h-8 w-full justify-start gap-2" size="sm" variant="outline" disabled={!terminalId || status !== 'running'} onClick={() => void kill()}><X className="h-3.5 w-3.5" /> Kill</Button>
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-black text-white md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
+      <div className="border-b border-white/10 bg-background p-2 text-foreground md:border-b-0 md:border-r md:p-3">
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium md:mb-3"><SquareTerminal className="h-4 w-4" /> Terminal</div>
+        <div className="flex gap-2 md:block md:space-y-2">
+          <Button className="h-8 flex-1 justify-center gap-2 md:w-full md:justify-start" size="sm" disabled={!socket || !workspaceId || status === 'starting' || status === 'running'} onClick={() => void start()}><Play className="h-3.5 w-3.5" /> Start</Button>
+          <Button className="h-8 flex-1 justify-center gap-2 md:w-full md:justify-start" size="sm" variant="outline" disabled={!terminalId || status !== 'running'} onClick={() => void kill()}><X className="h-3.5 w-3.5" /> Kill</Button>
         </div>
-        <div className="mt-3 text-xs text-muted-foreground">{status}{error ? ` · ${error}` : ''}</div>
+        <div className="mt-2 truncate text-xs text-muted-foreground md:mt-3">{status}{error ? ` · ${error}` : ''}</div>
       </div>
       <div ref={hostRef} className="min-h-0 min-w-0 overflow-hidden p-1" />
     </div>
@@ -623,13 +717,13 @@ async function requestDir(socket: DashboardSocket, workspaceId: string, sessionI
   })
 }
 
-async function requestFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string): Promise<FileContentsResult> {
+async function requestFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, options: { maxBytes?: number; download?: boolean; timeoutMs?: number } = {}): Promise<FileContentsResult> {
   return await new Promise((resolve) => {
     const requestId = crypto.randomUUID()
     const timer = window.setTimeout(() => {
       socket.off('server:file_contents', handler)
       resolve({ requestId, workspaceId, path, kind: 'error', error: 'timed out' })
-    }, 8000)
+    }, options.timeoutMs ?? 8000)
     const handler = (result: FileContentsResult): void => {
       if (result.requestId !== requestId) return
       window.clearTimeout(timer)
@@ -637,7 +731,7 @@ async function requestFile(socket: DashboardSocket, workspaceId: string, session
       resolve(result)
     }
     socket.on('server:file_contents', handler)
-    socket.emit('client:read_file', { requestId, workspaceId, ...(sessionId ? { sessionId } : {}), path, maxBytes: 1024 * 1024 })
+    socket.emit('client:read_file', { requestId, workspaceId, ...(sessionId ? { sessionId } : {}), path, maxBytes: options.maxBytes ?? FILE_PREVIEW_MAX_BYTES, ...(options.download ? { download: true } : {}) })
   })
 }
 

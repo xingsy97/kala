@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { PREF_COMPOSER_MODE } from '../../../lib/prefs.js'
+
 export type ComposerMode = 'full' | 'simple'
 
-const STORAGE_KEY = 'ak-composer-mode'
+const STORAGE_KEY = PREF_COMPOSER_MODE
 
 function readInitialMode(): ComposerMode {
   try {

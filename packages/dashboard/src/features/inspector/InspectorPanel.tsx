@@ -28,12 +28,14 @@ import type {
   MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
-import { redactLlmTrace, type ContextSnapshot, type LLMTrace, type ServerHistoryPayload, type ServerLogArtifactPayload } from '@agent-kernel/shared'
+import { redactLlmTrace, type HumanAttentionTimeline, type LLMTrace, type ServerHistoryPayload, type ServerLogArtifactPayload } from '@agent-kernel/shared'
+import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 import { useTranslation } from 'react-i18next'
 
 import type { DashboardSocket, TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
 import { formatTokens } from '../../lib/format.js'
+import { evaluateDashboardContextPressure } from '../../domain/context-pressure.js'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -86,7 +88,8 @@ import {
 type Props = {
   state: AgentState | null
   config?: AgentConfig | null
-  contextSnapshot?: ContextSnapshot | null
+  contextSnapshot?: ContextUsageSnapshot | null
+  humanAttention?: HumanAttentionTimeline
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
   socket?: DashboardSocket | null
@@ -592,7 +595,7 @@ function DebuggerHeader({
 }: {
   state: AgentState | null
   config?: AgentConfig | null
-  contextSnapshot?: ContextSnapshot | null
+  contextSnapshot?: ContextUsageSnapshot | null
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
 }): JSX.Element {
@@ -1201,7 +1204,7 @@ function RuntimeSection({
   replayState: AgentState | null
   replaySeq: number | null
   config?: AgentConfig | null
-  contextSnapshot?: ContextSnapshot | null
+  contextSnapshot?: ContextUsageSnapshot | null
   timeline: readonly TimelineEntry[]
   toolCalls: readonly ToolCallLifecycle[]
   subAgentRelation: SubAgentRelationSummary
@@ -1293,7 +1296,7 @@ function StateRuntime({
   state: AgentState | null
   replayState: AgentState | null
   replaySeq: number | null
-  contextSnapshot?: ContextSnapshot | null
+  contextSnapshot?: ContextUsageSnapshot | null
   subAgentRelation: SubAgentRelationSummary
 }): JSX.Element {
   const { t } = useTranslation()
@@ -1301,6 +1304,7 @@ function StateRuntime({
   const inspectedState = replayState ?? state
   if (!state) return <EmptyBlock label={t('inspector.runtime.noAgentState')} />
   const pendingCalls = inspectedState?.pendingCalls.map((c) => `${c.name} · ${c.status}`) ?? []
+  const contextPressure = evaluateDashboardContextPressure({ snapshot: contextSnapshot })
   // Session memory used to live on state.memory; it moved out of the kernel
   // in the protocol refactor and now flows via a host-side shadow-state
   // channel. Placeholder empty until that channel is wired in the dashboard.
@@ -1336,8 +1340,8 @@ function StateRuntime({
               rows={[
                 ['messages', String(inspectedState?.messages.length ?? 0)],
                 ['pending', pendingCalls.length > 0 ? pendingCalls.join(', ') : 'none'],
-                ['context pressure', contextSnapshot?.pressureLevel ?? 'n/a'],
-                ['context input', contextSnapshot ? String(contextSnapshot.estimatedTotalInputTokens) : 'n/a'],
+                ['context pressure', contextPressure.level],
+                ['context input', contextSnapshot ? String(contextSnapshot.usage.inputTokens) : 'n/a'],
               ]}
             />
             <StateGroup

@@ -1,20 +1,18 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
-import type { ContextSnapshot, ModelInfo } from '@agent-kernel/shared'
+import type { ModelInfo } from '@agent-kernel/shared'
+import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 
 import { formatTokens } from '../../lib/format.js'
 import { cn } from '../../lib/utils.js'
 import type { TimelineEntry } from '../../session.js'
-import {
-  contextBreakdownForSessionInfo,
-  latestTurnLlmCall,
-} from './context-composition.js'
+import { evaluateDashboardContextPressure } from '../../domain/context-pressure.js'
 
 type Props = {
   state: AgentState | null
   config: AgentConfig | null
-  contextSnapshot: ContextSnapshot | null
+  contextSnapshot: ContextUsageSnapshot | null
   modelInfo: ModelInfo | null
   queuedMessages: number
   timeline?: readonly TimelineEntry[]
@@ -47,30 +45,31 @@ export function RuntimeMetrics({
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [open])
 
-  const contextTokens = contextSnapshot?.estimatedTotalInputTokens ?? 0
-  const totalContextWindow = contextSnapshot?.contextWindow ?? modelInfo?.contextWindow ?? config?.contextLimit ?? null
-  const userContextWindow = contextSnapshot?.effectiveLimit ?? contextSnapshot?.contextTokens ?? totalContextWindow
-  const contextSource = contextSnapshot?.contextWindowSource ?? (modelInfo?.contextWindow ? 'model' : config?.contextLimit ? 'session-config' : 'unknown')
-  const ratio = userContextWindow && userContextWindow > 0
-    ? Math.max(0, contextTokens / userContextWindow)
-    : 0
-  const percent = Math.round(ratio * 100)
+  const contextTokens = contextSnapshot?.usage.inputTokens ?? 0
+  const evaluation = evaluateDashboardContextPressure({
+    snapshot: contextSnapshot,
+    config,
+    fallbackModelContextWindow: modelInfo?.contextWindow ?? null,
+  })
+  const totalContextWindow = contextSnapshot?.contextWindow.tokens ?? modelInfo?.contextWindow ?? config?.contextLimit ?? null
+  const userContextWindow = evaluation.limitTokens
+  const contextSource = contextSnapshot?.contextWindow.source ?? (modelInfo?.contextWindow ? 'model_registry' : config?.contextLimit ? 'manual_config' : 'unknown')
+  const ratio = evaluation.ratio ?? 0
+  const percent = evaluation.percent
   const visualRatio = Math.min(1, ratio)
-  const tone = contextSnapshot?.pressureLevel === 'hard'
+  const tone = evaluation.tone === 'error'
     ? 'text-rose-600 dark:text-rose-300'
-    : contextSnapshot?.pressureLevel === 'soft'
+    : evaluation.tone === 'warn'
       ? 'text-amber-600 dark:text-amber-300'
       : 'text-sky-600 dark:text-sky-300'
   const title = userContextWindow && userContextWindow > 0
     ? t('chat.runtimeMetrics.title', {
       input: formatTokens(contextTokens),
       userWindow: formatTokens(userContextWindow),
-      percent,
+      percent: percent ?? 0,
       totalWindow: totalContextWindow ? formatTokens(totalContextWindow) : t('chat.runtimeMetrics.unknown'),
     })
     : t('chat.runtimeMetrics.unavailableTitle', { input: formatTokens(contextTokens) })
-  const latestCall = useMemo(() => latestTurnLlmCall(timeline), [timeline])
-  const breakdown = useMemo(() => contextBreakdownForSessionInfo(latestCall), [latestCall])
   const reservedRatio = Math.max(0, Math.min(1, 1 - (config?.hardThreshold ?? 0.92)))
   const ringRadius = 7
   const ringCircumference = 2 * Math.PI * ringRadius
@@ -127,7 +126,7 @@ export function RuntimeMetrics({
           />
         </svg>
         <span className="flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground">
-          {userContextWindow && userContextWindow > 0 ? `${percent}%` : 'n/a'}
+          {percent !== null ? `${percent}%` : '?'}
         </span>
       </button>
       {open ? (
@@ -145,9 +144,9 @@ export function RuntimeMetrics({
           <SectionTitle>Context Window</SectionTitle>
           <div className="mt-3 flex items-baseline justify-between gap-4">
             <span className="text-lg text-foreground">
-              {formatTokens(contextTokens)} / {userContextWindow ? formatTokens(userContextWindow) : t('chat.runtimeMetrics.unknown')} tokens
+              {contextSnapshot?.estimator.total.confidence === 'exact' ? '' : '~'}{formatTokens(contextTokens)} / {userContextWindow ? formatTokens(userContextWindow) : t('chat.runtimeMetrics.unknown')} tokens
             </span>
-            <span className={cn('text-lg', tone)}>{userContextWindow ? `${percent}%` : 'n/a'}</span>
+            <span className={cn('text-lg', tone)}>{percent !== null ? `${percent}%` : '?'}</span>
           </div>
           {totalContextWindow && userContextWindow && totalContextWindow !== userContextWindow ? (
             <div className="mt-2 text-xs text-muted-foreground">
@@ -159,8 +158,13 @@ export function RuntimeMetrics({
             </div>
           ) : null}
           <div className="mt-1 text-xs text-muted-foreground">
-            Source: {contextSource}{contextSnapshot?.contextWindowModel ? ` (${contextSnapshot.contextWindowModel})` : ''}
+            Source: {contextSource}{contextSnapshot?.model.ref ? ` (${contextSnapshot.model.ref})` : ''}
           </div>
+          {contextSnapshot ? (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Total estimator: {contextSnapshot.estimator.total.kind} / {contextSnapshot.estimator.total.confidence}. Breakdown: {contextSnapshot.estimator.breakdown.kind} / {contextSnapshot.estimator.breakdown.confidence}.
+            </div>
+          ) : null}
           <div className="relative mt-3 h-2 overflow-hidden rounded-full border border-border bg-muted">
             <div className="absolute inset-y-0 left-0 rounded-full bg-sky-500" style={{ width: usedWidth }} />
             <div
@@ -182,12 +186,14 @@ export function RuntimeMetrics({
           </div>
 
           <SectionTitle>System</SectionTitle>
-          <MetricRow label="System Instructions" value={breakdown.systemInstructions} />
-          <MetricRow label="Tool Definitions" value={breakdown.toolDefinitions} />
+          <MetricRow label="System / reserve" value={formatTokens(contextSnapshot?.breakdown.system ?? 0)} />
+          <MetricRow label="Tool Definitions" value={formatTokens(contextSnapshot?.breakdown.tools ?? 0)} />
 
           <SectionTitle>User Context</SectionTitle>
-          <MetricRow label="Messages" value={breakdown.messages} />
-          <MetricRow label="Tool Results" value={breakdown.toolResults} />
+          <MetricRow label="Messages" value={formatTokens(contextSnapshot?.breakdown.transcript ?? 0)} />
+          <MetricRow label="Memory" value={formatTokens(contextSnapshot?.breakdown.memory ?? 0)} />
+          <MetricRow label="Attachments" value={formatTokens(contextSnapshot?.breakdown.attachments ?? 0)} />
+          <MetricRow label="Pending input" value={formatTokens(contextSnapshot?.breakdown.pendingUserInput ?? 0)} />
 
           <button
             type="button"

@@ -156,6 +156,62 @@ describe('BackgroundShellsButton', () => {
     expect(await screen.findByText('Workspace shells')).toBeTruthy()
     expect(screen.getByTestId('bg-task-empty').textContent ?? '').toContain('No background shells')
   })
+
+  it('surfaces workspace operation errors in the shell panel', async () => {
+    render(
+      <BackgroundShellsButton
+        socket={makeBgListSocket({
+          requestId: 'ignored',
+          workspaceId: 'ws-1',
+          sessionId: 'sess-1',
+          tasks: [],
+          error: 'This workspace operation belongs to another session. Switch back to that session and reopen the panel.',
+        })}
+        workspaceId="ws-1"
+        sessionId="sess-1"
+        fallbackTasks={[]}
+      />,
+    )
+
+    fireEvent.click(await screen.findByTestId('background-shells-trigger'))
+
+    expect(await screen.findByText(/belongs to another session/i)).toBeTruthy()
+  })
+
+  it('closes the shell panel when the session binding changes', async () => {
+    const { rerender } = render(
+      <BackgroundShellsButton
+        socket={makeBgListSocket({
+          requestId: 'ignored',
+          workspaceId: 'ws-1',
+          sessionId: 'sess-1',
+          tasks: [],
+        })}
+        workspaceId="ws-1"
+        sessionId="sess-1"
+        fallbackTasks={[]}
+      />,
+    )
+
+    fireEvent.click(await screen.findByTestId('background-shells-trigger'))
+    expect(await screen.findByText('Workspace shells')).toBeTruthy()
+
+    rerender(
+      <BackgroundShellsButton
+        socket={makeBgListSocket({
+          requestId: 'ignored',
+          workspaceId: 'ws-1',
+          sessionId: 'sess-2',
+          tasks: [],
+        })}
+        workspaceId="ws-1"
+        sessionId="sess-2"
+        fallbackTasks={[]}
+      />,
+    )
+
+    await waitFor(() => expect(screen.queryByText('Workspace shells')).toBeNull())
+  })
 })
 
 function makeBgListSocket(result: BgListResult): DashboardSocket & { emitMock: ReturnType<typeof vi.fn> } {

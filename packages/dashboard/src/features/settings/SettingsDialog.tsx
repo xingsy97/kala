@@ -7,8 +7,10 @@ import {
   Check,
   Copy,
   Cpu,
+  Eye,
   ExternalLink,
   KeyRound,
+  Loader2,
   Monitor,
   Moon,
   Palette,
@@ -71,6 +73,16 @@ import {
   PREF_SESSION_VIEW_CACHE_MAX_MB,
 } from '../../session-view-cache.js'
 import { useTheme } from '../../lib/theme.js'
+import {
+  BUILTIN_VSCODE_THEMES,
+  builtinThemeForScheme,
+  readStoredVSCodeTheme,
+  validateVSCodeTheme,
+  writeStoredVSCodeTheme,
+  applyVSCodeTheme,
+  applyCurrentVSCodeTheme,
+  type StoredVSCodeTheme,
+} from '../../theme/vscode-theme.js'
 import { getStoredHostEndpoint, resolveHostEndpoint, setStoredHostEndpoint } from '../../host-endpoint.js'
 import {
   DESKTOP_NOTIFICATION_PREFS,
@@ -88,6 +100,12 @@ type Props = {
   onOpenChange(open: boolean): void
   onModelsChanged?(): void
   executors?: readonly AttachedExecutor[]
+}
+
+function errorMessageFromBody(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null
+  const error = (body as { error?: unknown }).error
+  return typeof error === 'string' && error.length > 0 ? error : null
 }
 
 type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
@@ -133,31 +151,31 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[calc(100dvh-0.5rem)] max-w-6xl overflow-hidden border-white/10 bg-[#1f1f1f] p-0 text-zinc-100 shadow-2xl gap-0 grid-rows-[auto_minmax(0,1fr)] sm:h-[min(90dvh,44rem)] [&_input]:border-white/10 [&_input]:bg-[#111111] [&_input]:text-zinc-100 [&_select]:border-white/10 [&_select]:bg-[#111111] [&_select]:text-zinc-100 [&_table]:bg-black/10 [&_td]:text-zinc-300 [&_textarea]:border-white/10 [&_textarea]:bg-[#111111] [&_textarea]:text-zinc-100 [&_th]:bg-white/[0.04] [&_th]:text-zinc-200"
+        className="h-[calc(100dvh-0.5rem)] max-w-6xl overflow-hidden border-border bg-background p-0 text-foreground shadow-2xl gap-0 grid-rows-[auto_minmax(0,1fr)] sm:h-[min(90dvh,44rem)] [&_input]:border-border [&_input]:bg-background [&_input]:text-foreground [&_select]:border-border [&_select]:bg-background [&_select]:text-foreground [&_table]:bg-muted/20 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-background [&_textarea]:text-foreground [&_th]:bg-muted/50 [&_th]:text-foreground"
         data-testid="settings-dialog"
       >
-        <DialogHeader className="border-b border-white/10 bg-[#202020] px-4 py-3 sm:px-5">
-          <DialogTitle className="text-base font-semibold text-zinc-50">{t('settings.title')}</DialogTitle>
-          <DialogDescription className="line-clamp-2 text-xs text-zinc-400 sm:line-clamp-none">
+        <DialogHeader className="border-b border-border bg-card px-4 py-3 sm:px-5">
+          <DialogTitle className="text-base font-semibold text-foreground">{t('settings.title')}</DialogTitle>
+          <DialogDescription className="line-clamp-2 text-xs text-muted-foreground sm:line-clamp-none">
             {t('settings.description')}
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="min-h-0 min-w-0 border-b border-white/10 bg-[#232323] md:border-b-0 md:border-r">
+          <aside className="min-h-0 min-w-0 border-b border-border bg-sidebar md:border-b-0 md:border-r">
             <nav className="flex w-full max-w-full gap-1 overflow-x-auto p-2 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:block md:h-full md:space-y-1 md:overflow-x-hidden md:overflow-y-auto md:p-3" aria-label={t('settings.sectionsLabel')}>
               {SECTIONS.map((s) => (
                 <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
               ))}
             </nav>
           </aside>
-          <ScrollArea className="min-h-0 min-w-0 bg-[#1f1f1f]">
-            <div className="min-w-0 p-4 text-zinc-100 sm:p-7">
+          <ScrollArea className="min-h-0 min-w-0 bg-background">
+            <div className="min-w-0 p-4 text-foreground sm:p-7">
               {loadError ? (
                 <div className="rounded-md border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                   {t('settings.loadFailed', { error: loadError })}
                 </div>
               ) : payload === null ? (
-                <div className="text-sm text-zinc-400">{t('common.loading')}</div>
+                <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
               ) : section === 'connection' ? (
@@ -214,15 +232,15 @@ function SettingsSectionButton({
       className={cn(
         'w-32 flex-none rounded-md px-3 py-2 text-left text-sm transition-colors sm:w-36 md:w-full',
         active
-          ? 'bg-[#3a3a3a] text-zinc-50 shadow-sm ring-1 ring-white/10'
-          : 'text-zinc-300 hover:bg-[#2c2c2c] hover:text-zinc-50',
+          ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm ring-1 ring-sidebar-border'
+          : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground',
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <Icon className={cn('h-4 w-4 flex-none', active ? 'text-zinc-50' : 'text-zinc-400')} aria-hidden="true" />
+        <Icon className={cn('h-4 w-4 flex-none', active ? 'text-sidebar-accent-foreground' : 'text-sidebar-foreground/60')} aria-hidden="true" />
         <div className="min-w-0 truncate font-medium">{label}</div>
       </div>
-      <div className="mt-1 hidden truncate pl-6 text-[11px] text-zinc-500 md:block">{hint}</div>
+      <div className="mt-1 hidden truncate pl-6 text-[11px] text-sidebar-foreground/50 md:block">{hint}</div>
     </button>
   )
 }
@@ -235,10 +253,10 @@ function SectionHeader({
   subtitle?: string
 }): JSX.Element {
   return (
-    <div className="mb-6 min-w-0 border-b border-white/10 pb-5">
-      <h3 className="text-2xl font-semibold text-zinc-50">{title}</h3>
+    <div className="mb-6 min-w-0 border-b border-border pb-5">
+      <h3 className="text-2xl font-semibold text-foreground">{title}</h3>
       {subtitle ? (
-        <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-zinc-400">{subtitle}</p>
+        <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-muted-foreground">{subtitle}</p>
       ) : null}
     </div>
   )
@@ -266,6 +284,38 @@ function RuntimeSection({
   payload: ServerSettingsPayload
 }): JSX.Element {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const restart = useMutation({
+    mutationFn: async (): Promise<unknown> => {
+      const res = await fetch('/runtime/restart', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'checkpoint', reason: 'manual' }),
+      })
+      const body = await res.json() as unknown | { error?: string }
+      if (!res.ok) throw new Error(errorMessageFromBody(body) ?? `HTTP ${res.status}`)
+      return body
+    },
+    onSuccess: () => {
+      setError(null)
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+  const abortRestart = useMutation({
+    mutationFn: async (): Promise<unknown> => {
+      const res = await fetch('/runtime/restart/abort', { method: 'POST' })
+      const body = await res.json() as unknown
+      if (!res.ok) throw new Error(errorMessageFromBody(body) ?? `HTTP ${res.status}`)
+      return body
+    },
+    onSuccess: () => {
+      setError(null)
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
   const rows: Array<[string, string]> = [
     [t('settings.runtime.anthropicSettings'), payload.paths.claudeSettings],
     [t('settings.runtime.openaiProviders'), payload.paths.codexConfig],
@@ -273,12 +323,40 @@ function RuntimeSection({
     [t('settings.runtime.hooksConfig'), payload.paths.hooksConfig],
     [t('settings.runtime.sessionsDirectory'), payload.paths.sessionsDir],
   ]
+  const runtime = payload.runtime
+  const currentAttempt = runtime?.current
   return (
     <div>
       <SectionHeader
         title={t('settings.sections.runtime.label')}
         subtitle={t('settings.runtime.subtitle')}
       />
+      {runtime ? (
+        <div className="mb-4 rounded-md bg-black/[0.18] p-4 ring-1 ring-white/10">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+            <div className="min-w-0 space-y-1 text-sm">
+              <div className="font-medium text-foreground">{t('settings.runtime.hostRuntime')}</div>
+              <div className="text-xs text-muted-foreground">PID {runtime.pid} - {t('settings.runtime.startedAt')}: {runtime.startedAt}</div>
+              <div className="text-xs text-muted-foreground">
+                {t('settings.runtime.restartPhase')}: {currentAttempt?.phase ?? t('settings.runtime.restartIdle')}
+                {currentAttempt ? ` - ${currentAttempt.sessions.length} ${t('settings.runtime.restartSessions')}` : ''}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button type="button" size="sm" className="h-9" disabled={restart.isPending || Boolean(currentAttempt)} onClick={() => restart.mutate()}>
+                <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.runtime.restartHost')}
+              </Button>
+              {currentAttempt ? (
+                <Button type="button" variant="outline" size="sm" className="h-9" disabled={abortRestart.isPending} onClick={() => abortRestart.mutate()}>
+                  {t('settings.runtime.abortRestart')}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">{t('settings.runtime.restartDesc')}</p>
+          {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
+        </div>
+      ) : null}
       <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
         <table className="min-w-[34rem] w-full text-sm">
           <tbody>
@@ -444,6 +522,30 @@ function DeploymentSection({
   return (
     <div>
       <SectionHeader title={t('settings.sections.deployment.label')} subtitle={t('settings.deployment.subtitle')} />
+      {payload.socketConnections ? (
+        <div className="mb-4 rounded-md border border-border bg-card/60 px-4 py-3 text-sm" data-testid="settings-socket-connections">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="font-medium text-foreground">{t('settings.deployment.socketConnections')}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {t('settings.deployment.socketConnectionsDesc', {
+                  total: payload.socketConnections.total,
+                  dashboard: payload.socketConnections.dashboard,
+                  executor: payload.socketConnections.executor,
+                  other: payload.socketConnections.other,
+                })}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground sm:justify-end">
+              {payload.socketConnections.namespaces.map((entry) => (
+                <span key={entry.namespace} className="rounded border border-border bg-background/70 px-2 py-1 font-mono">
+                  {t('settings.deployment.namespaceConnections', { namespace: entry.namespace, sockets: entry.sockets })}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <h4 className="mb-2 text-sm font-semibold text-foreground">{t('settings.deployment.componentInventory')}</h4>
       <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
         <table className="min-w-[820px] w-full text-sm">
@@ -1584,7 +1686,21 @@ function InterfaceSection(): JSX.Element {
   const [chatLineHeight, setChatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
   const [chatMathScale, setChatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
   const [sessionCacheMaxMb, setSessionCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
-  const [theme, , setTheme] = useTheme()
+  const [theme, , setTheme, effectiveTheme] = useTheme()
+  const [storedVSCodeTheme, setStoredVSCodeTheme] = useState<StoredVSCodeTheme | null>(() => readStoredVSCodeTheme())
+  const currentThemeLabel = storedVSCodeTheme?.label ?? builtinThemeForScheme(effectiveTheme).label
+  const restoreSavedTheme = (): void => {
+    applyCurrentVSCodeTheme(effectiveTheme)
+    setStoredVSCodeTheme(readStoredVSCodeTheme())
+  }
+  const applyStoredTheme = (next: StoredVSCodeTheme | null): void => {
+    writeStoredVSCodeTheme(next)
+    setStoredVSCodeTheme(next)
+  }
+  const previewTheme = (next: StoredVSCodeTheme): void => {
+    applyVSCodeTheme(next.theme, effectiveTheme)
+  }
+  useEffect(() => restoreSavedTheme, [effectiveTheme])
   return (
     <div>
       <SectionHeader
@@ -1654,6 +1770,25 @@ function InterfaceSection(): JSX.Element {
               <span>{t('settings.interface.theme.light')}</span>
             </button>
           </div>
+        </li>
+        <li className="rounded-md border border-border bg-card/60 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="font-medium">{t('settings.interface.vscodeTheme.label')}</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t('settings.interface.vscodeTheme.desc')}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground" data-testid="settings-vscode-theme-current">
+                {t('settings.interface.vscodeTheme.current', { theme: currentThemeLabel })}
+              </p>
+            </div>
+          </div>
+          <MarketplaceThemeBrowser
+            activeThemeId={storedVSCodeTheme?.id ?? `agent-kernel-${effectiveTheme}`}
+            effectiveTheme={effectiveTheme}
+            onPreview={previewTheme}
+            onApply={(next) => applyStoredTheme(next)}
+          />
         </li>
         <SegmentedNumberPref
           label={t('settings.interface.chatFontSize')}
@@ -1820,6 +1955,235 @@ function InterfaceSection(): JSX.Element {
           </div>
         </li>
       </ul>
+    </div>
+  )
+}
+
+type MarketplaceSearchResult = {
+  namespace: string
+  name: string
+  displayName: string
+  description: string
+  version: string
+  verified: boolean
+  downloadCount: number
+  iconUrl?: string
+}
+
+type MarketplaceExtension = MarketplaceSearchResult & {
+  themes: Array<{ id: string; label: string; uiTheme: string; path: string }>
+}
+
+function MarketplaceThemeBrowser({
+  activeThemeId,
+  effectiveTheme,
+  onPreview,
+  onApply,
+}: {
+  activeThemeId: string
+  effectiveTheme: 'dark' | 'light'
+  onPreview(theme: StoredVSCodeTheme): void
+  onApply(theme: StoredVSCodeTheme): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [query, setQuery] = useState('dark')
+  const [selected, setSelected] = useState<MarketplaceSearchResult | null>(null)
+  const [previewThemeId, setPreviewThemeId] = useState<string | null>(null)
+  const [themeAction, setThemeAction] = useState<{ id: string; kind: 'preview' | 'apply' } | null>(null)
+  const searchQuery = useQuery({
+    queryKey: ['vscode-theme-marketplace-search', query],
+    queryFn: async (): Promise<MarketplaceSearchResult[]> => {
+      const res = await fetch(`/themes/marketplace/search?q=${encodeURIComponent(query)}`, { cache: 'no-store' })
+      if (!res.ok) throw new Error(await responseError(res))
+      const payload = await res.json() as { results?: MarketplaceSearchResult[] }
+      return payload.results ?? []
+    },
+    enabled: query.trim().length > 0,
+    staleTime: 60_000,
+  })
+  const extensionQuery = useQuery({
+    queryKey: ['vscode-theme-marketplace-extension', selected?.namespace, selected?.name],
+    queryFn: async (): Promise<MarketplaceExtension> => {
+      if (!selected) throw new Error('missing extension')
+      const res = await fetch(`/themes/marketplace/extensions/${encodeURIComponent(selected.namespace)}/${encodeURIComponent(selected.name)}`, { cache: 'no-store' })
+      if (!res.ok) throw new Error(await responseError(res))
+      return await res.json() as MarketplaceExtension
+    },
+    enabled: selected !== null,
+    staleTime: 60_000,
+  })
+
+  const loadTheme = async (extension: MarketplaceExtension, themeId: string): Promise<StoredVSCodeTheme> => {
+    const res = await fetch(`/themes/marketplace/extensions/${encodeURIComponent(extension.namespace)}/${encodeURIComponent(extension.name)}/themes/${encodeURIComponent(themeId)}`, { cache: 'no-store' })
+    if (!res.ok) throw new Error(await responseError(res))
+    const payload = await res.json() as { theme: unknown; extension: MarketplaceExtension }
+    const theme = validateVSCodeTheme(payload.theme)
+    if (!theme) throw new Error(t('settings.interface.vscodeTheme.invalidTheme'))
+    const contribution = extension.themes.find((entry) => entry.id === themeId || entry.label === themeId)
+    return {
+      source: 'marketplace',
+      id: `${extension.namespace}.${extension.name}:${themeId}`,
+      label: contribution?.label ?? theme.name ?? themeId,
+      extension: `${extension.namespace}.${extension.name}`,
+      theme: { ...theme, name: theme.name ?? contribution?.label },
+    }
+  }
+
+  const selectedThemes = extensionQuery.data?.themes ?? []
+  const themeRows: Array<{
+    id: string
+    label: string
+    source: string
+    load(): Promise<StoredVSCodeTheme> | StoredVSCodeTheme
+  }> = [
+    ...BUILTIN_VSCODE_THEMES.map((candidate) => ({
+      id: candidate.id,
+      label: candidate.label,
+      source: `${candidate.label} / ${candidate.theme.type === 'light' ? 'vs' : 'vs-dark'}`,
+      load: () => candidate,
+    })),
+    ...selectedThemes.map((candidate) => ({
+      id: `${extensionQuery.data!.namespace}.${extensionQuery.data!.name}:${candidate.id}`,
+      label: candidate.label,
+      source: `${extensionQuery.data!.displayName} / ${candidate.uiTheme}`,
+      load: () => loadTheme(extensionQuery.data!, candidate.id),
+    })),
+  ]
+
+  const runThemeAction = async (row: (typeof themeRows)[number], kind: 'preview' | 'apply'): Promise<void> => {
+    setThemeAction({ id: row.id, kind })
+    try {
+      const theme = await Promise.resolve(row.load())
+      if (kind === 'preview') {
+        onPreview(theme)
+        setPreviewThemeId(row.id)
+      } else {
+        onApply(theme)
+        setPreviewThemeId(null)
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : String(err))
+    } finally {
+      setThemeAction((current) => current?.id === row.id && current.kind === kind ? null : current)
+    }
+  }
+
+  return (
+    <div className="mt-4 space-y-3" data-testid="settings-vscode-marketplace">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="text-sm font-medium">{t('settings.interface.vscodeTheme.themeList')}</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.interface.vscodeTheme.marketplaceDesc')}</p>
+        </div>
+        <div className="flex min-w-0 gap-2">
+          <input
+            className="h-8 min-w-0 rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('settings.interface.vscodeTheme.searchPlaceholder')}
+            data-testid="settings-vscode-marketplace-search"
+          />
+          <Button type="button" variant="outline" size="sm" onClick={() => searchQuery.refetch()}>
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            {t('settings.interface.vscodeTheme.refresh')}
+          </Button>
+        </div>
+      </div>
+      {searchQuery.error ? <div className="text-xs text-destructive">{(searchQuery.error as Error).message}</div> : null}
+      <div className="rounded-md border border-border bg-background/40 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+          <div className="font-medium text-muted-foreground">{t('settings.interface.vscodeTheme.searchResults')}</div>
+          {selected ? <div className="min-w-0 truncate text-[11px] text-muted-foreground">{selected.displayName}</div> : null}
+        </div>
+        <div className="max-h-36 space-y-1 overflow-y-auto pr-1">
+          {(searchQuery.data ?? []).map((result) => (
+            <button
+              key={`${result.namespace}.${result.name}`}
+              type="button"
+              className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground', selected?.namespace === result.namespace && selected.name === result.name ? 'bg-accent text-accent-foreground' : 'text-muted-foreground')}
+              onClick={() => setSelected(result)}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-foreground">{result.displayName}</div>
+                <div className="truncate text-[11px]">{result.namespace}.{result.name}</div>
+              </div>
+              {result.verified ? <span className="rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary">{t('settings.interface.vscodeTheme.verified')}</span> : null}
+            </button>
+          ))}
+          {searchQuery.isLoading ? <div className="px-2 py-1 text-xs text-muted-foreground">{t('common.loading')}</div> : null}
+          {selected !== null && extensionQuery.isLoading ? <div className="px-2 py-1 text-xs text-muted-foreground">{t('settings.interface.vscodeTheme.loadingThemes')}</div> : null}
+          {extensionQuery.error ? <div className="px-2 py-1 text-xs text-destructive">{(extensionQuery.error as Error).message}</div> : null}
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-md border border-border bg-background/60" data-testid="settings-vscode-theme-list">
+        <div className="max-h-72 divide-y divide-border overflow-y-auto">
+          {themeRows.map((row) => {
+            const active = activeThemeId === row.id || (!activeThemeId && row.id === `agent-kernel-${effectiveTheme}`)
+            return (
+              <ThemeListRow
+                key={row.id}
+                id={row.id}
+                label={row.label}
+                source={row.source}
+                active={active}
+                previewing={previewThemeId === row.id}
+                previewLoading={themeAction?.id === row.id && themeAction.kind === 'preview'}
+                applyLoading={themeAction?.id === row.id && themeAction.kind === 'apply'}
+                onPreview={() => void runThemeAction(row, 'preview')}
+                onApply={() => void runThemeAction(row, 'apply')}
+              />
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ThemeListRow({
+  id,
+  label,
+  source,
+  active,
+  previewing,
+  previewLoading,
+  applyLoading,
+  onPreview,
+  onApply,
+}: {
+  id: string
+  label: string
+  source: string
+  active: boolean
+  previewing: boolean
+  previewLoading: boolean
+  applyLoading: boolean
+  onPreview(): void
+  onApply(): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="flex min-w-0 flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center" data-testid={`settings-vscode-theme-${id}`}>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-sm font-medium">{label}</div>
+            {active ? <span className="flex-none rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary">{t('settings.interface.vscodeTheme.active')}</span> : null}
+            {previewing ? <span className="flex-none rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground">{t('settings.interface.vscodeTheme.previewing')}</span> : null}
+          </div>
+          <div className="truncate text-xs text-muted-foreground">{source}</div>
+        </div>
+      </div>
+      <div className="flex flex-none gap-2 sm:justify-end">
+        <Button type="button" variant="outline" size="sm" onClick={onPreview} disabled={previewLoading || applyLoading}>
+          {previewLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Eye className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+          {t('settings.interface.vscodeTheme.preview')}
+        </Button>
+        <Button type="button" size="sm" onClick={onApply} disabled={active || previewLoading || applyLoading}>
+          {applyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+          {t('settings.interface.vscodeTheme.apply')}
+        </Button>
+      </div>
     </div>
   )
 }

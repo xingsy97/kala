@@ -18,16 +18,17 @@
  *     don't stack, but a distinct new error still fires.
  *   - Sub-agent completed/failed: socket-driven; the app never keeps a per-child
  *     `useSubAgentSession` (that's inside the SubAgentCard), so we listen to
- *     the raw `server:sub_agent_started`/`_finished` events directly.
+ *     `server:control_update` directly.
  *   - Background shell exit: observed on the timeline-derived task list; toasts
  *     when a running task transitions to done/killed.
  */
 
 import { useEffect, useRef } from 'react'
 
-import type { ApprovalRequiredEvent, SessionErrorEvent, SessionSummary } from '@agent-kernel/shared'
+import type { ApprovalRequiredEvent, ControlUpdate, SessionErrorEvent, SessionSummary } from '@agent-kernel/shared'
 
 import type { BackgroundTerminalTask } from './background-terminal.js'
+import { decideInactiveSummaryNotification } from './domain/notification-policy.js'
 import { notify } from './notify.js'
 import type { DashboardSocket } from './session.js'
 
@@ -137,24 +138,27 @@ export function useInactiveSessionSummaryToasts({
 
     for (const session of sessions) {
       next.set(session.sessionId, session.status)
-      if (session.sessionId === activeSessionId) continue
-
       const before = prev.get(session.sessionId)
-      if (!isActiveSummaryStatus(before)) continue
-      if (session.status === before) continue
+      const decision = decideInactiveSummaryNotification({
+        previousStatus: before,
+        nextStatus: session.status,
+        focusedSessionId: activeSessionId,
+        eventSessionId: session.sessionId,
+      })
+      if (!decision.notify) continue
 
       const label = sessionSummaryLabel(session)
-      if (session.status === 'awaiting_approval') {
+      if (decision.reason === 'approval_required') {
         notify.info(`Approval requested — ${label}`, {
           id: `inactive-session-approval-${session.sessionId}`,
           duration: 8000,
         })
-      } else if (session.status === 'error') {
+      } else if (decision.reason === 'error') {
         notify.error(`Session failed — ${label}`, {
           id: `inactive-session-error-${session.sessionId}`,
           duration: 10000,
         })
-      } else if (isRestingSummaryStatus(session.status)) {
+      } else if (decision.reason === 'background_session_completed') {
         notify.success(`Session finished — ${label}`, {
           id: `inactive-session-finished-${session.sessionId}`,
           duration: 6000,
@@ -211,11 +215,14 @@ export function useSubAgentToasts(socket: DashboardSocket | null): void {
       }
     }
 
-    socket.on('server:sub_agent_started', onStarted)
-    socket.on('server:sub_agent_finished', onFinished)
+    const onControlUpdate = (payload: ControlUpdate): void => {
+      if (payload.kind === 'sub_agent_started') onStarted(payload)
+      if (payload.kind === 'sub_agent_finished') onFinished(payload)
+    }
+
+    socket.on('server:control_update', onControlUpdate)
     return () => {
-      socket.off('server:sub_agent_started', onStarted)
-      socket.off('server:sub_agent_finished', onFinished)
+      socket.off('server:control_update', onControlUpdate)
     }
   }, [socket])
 }
@@ -273,14 +280,6 @@ export function commandHead(cmd: string): string {
   if (head.length === 0) return '(shell)'
   if (head.length <= 32) return head
   return `${head.slice(0, 29)}…`
-}
-
-function isActiveSummaryStatus(status: SessionSummary['status'] | undefined): boolean {
-  return status === 'thinking' || status === 'executing_tools'
-}
-
-function isRestingSummaryStatus(status: SessionSummary['status'] | undefined): boolean {
-  return status === 'idle' || status === 'done'
 }
 
 function sessionSummaryLabel(session: SessionSummary): string {

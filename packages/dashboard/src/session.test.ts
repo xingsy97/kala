@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 import type { TimelineEntry } from './session.js'
-import { deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
+import { deriveHumanAttentionTimeline, deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
 
 function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry {
   if (kind === 'llm_response') {
@@ -73,6 +73,22 @@ describe('mergeSessionSummaries', () => {
     const merged = mergeSessionSummaries([base], [{ ...base, eventCount: 2, status: 'done' }])
 
     expect(merged[0]?.status).toBe('done')
+  })
+})
+
+describe('deriveHumanAttentionTimeline', () => {
+  it('builds session-scoped points on message cursors', () => {
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: 't-1', event: { kind: 'user_message', text: '先审计，不要部署，给证据。' }, effects: [] },
+      { seq: 2, ts: 't-2', event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'c1', name: 'rg', input: {} }] } }, effects: [{ kind: 'call_tool', callId: 'c1', name: 'rg', input: {} }] },
+      { seq: 3, ts: 't-3', event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'read' }, effects: [] },
+    ]
+
+    const attention = deriveHumanAttentionTimeline('s1', timeline)
+
+    expect(attention.sessionId).toBe('s1')
+    expect(attention.points.map((point) => point.messageCursor)).toEqual([1, 2, 3])
+    expect(attention.latest?.score).toBeGreaterThan(0)
   })
 })
 

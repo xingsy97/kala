@@ -48,15 +48,36 @@ import {
   AlertDialogTitle,
 } from '../../components/ui/alert-dialog.js'
 import { Button } from '../../components/ui/button.js'
+import {
+  PREF_SESSION_CHILDREN_OPEN,
+  PREF_SESSION_ORDER,
+  PREF_WORKSPACE_OPEN,
+  PREF_WORKSPACE_ORDER,
+} from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
-import { buildTree } from './tree-model.js'
+import {
+  applyManualSessionOrder,
+  applyManualWorkspaceOrder,
+  buildInitialOpenState,
+  buildTree,
+  countSessionDescendants,
+  filterTree,
+  isRootDropParent,
+  reorderSessionIds,
+  reorderWorkspaceIds,
+  runtimeMetaFor,
+  sessionStructureKeyFor,
+  syncSessionOrder,
+  syncWorkspaceOrder,
+  toStructuralSessionSummary,
+} from './tree-model.js'
 import { useHiddenWorkspaces } from './useHiddenWorkspaces.js'
 import { SessionHoverPreview, type SessionPreviewAnchor } from './SessionHoverPreview.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 import type {
   SessionNode,
+  SessionRuntimeMeta,
   TreeNode,
-  WorkspaceChild,
   WorkspaceNode,
 } from './tree-model.js'
 
@@ -83,21 +104,15 @@ type Props = {
 
 const SESSION_ROW_HEIGHT = 60
 const WORKSPACE_ROW_HEIGHT = 34
-const SESSION_ORDER_STORAGE_KEY = 'agent-kernel:explorer:session-order:v1'
-const WORKSPACE_ORDER_STORAGE_KEY = 'agent-kernel:explorer:workspace-order:v1'
-const WORKSPACE_OPEN_STORAGE_KEY = 'agent-kernel:explorer:workspace-open:v1'
-const SESSION_CHILDREN_OPEN_STORAGE_KEY = 'agent-kernel:explorer:session-children-open:v1'
+const SESSION_ORDER_STORAGE_KEY = PREF_SESSION_ORDER
+const WORKSPACE_ORDER_STORAGE_KEY = PREF_WORKSPACE_ORDER
+const WORKSPACE_OPEN_STORAGE_KEY = PREF_WORKSPACE_OPEN
+const SESSION_CHILDREN_OPEN_STORAGE_KEY = PREF_SESSION_CHILDREN_OPEN
 const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
 const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2'
 const EXPLORER_RAIL_CELL = 'flex h-5 w-4 flex-none items-center justify-center'
 
 export type SessionActivityStatus = SessionSummary['status'] | 'loading'
-
-type SessionRuntimeMeta = {
-  status?: SessionSummary['status']
-  currentCwd?: string
-  lastActivityIso: string
-}
 
 function ExplorerImpl({
   executors,
@@ -485,22 +500,22 @@ function HiddenWorkspacesBar({
   const missingIds = Array.from(hiddenIds).filter((id) => !restoredIds.has(id))
   const hiddenCount = workspaces.length + missingIds.length
   return (
-    <div className="flex-none border-b border-sidebar-border bg-sidebar/80 px-2 py-1.5" data-testid="hidden-workspaces-bar">
+    <div className="flex-none border-t border-sidebar-border bg-sidebar px-1.5 py-1" data-testid="hidden-workspaces-bar">
       <button
         type="button"
-        className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         onClick={() => setOpen((value) => !value)}
         data-testid="hidden-workspaces-toggle"
         aria-expanded={open}
       >
-        {open ? <ChevronDown className="h-3.5 w-3.5 flex-none" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 flex-none" aria-hidden="true" />}
-        <EyeOff className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+        {open ? <ChevronDown className="h-3 w-3 flex-none" aria-hidden="true" /> : <ChevronRight className="h-3 w-3 flex-none" aria-hidden="true" />}
+        <EyeOff className="h-3 w-3 flex-none" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate">
           {t('explorer.hiddenWorkspaces', { count: hiddenCount })}
         </span>
       </button>
       {open ? (
-        <div className="mt-1 space-y-0.5" data-testid="hidden-workspaces-list">
+        <div className="mt-0.5 space-y-px" data-testid="hidden-workspaces-list">
           {workspaces.map((workspace) => workspace.workspaceId === null ? null : (
             <HiddenWorkspaceItem
               key={workspace.workspaceId}
@@ -534,17 +549,17 @@ function HiddenWorkspaceItem({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent/60" data-testid="hidden-workspace-item">
+    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-workspace-item">
       <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
       <button
         type="button"
-        className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="flex-none rounded p-0.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         onClick={() => onUnhide(workspaceId)}
         data-testid={`workspace-unhide-${workspaceId}`}
         title={t('explorer.unhideWorkspace')}
         aria-label={t('explorer.unhideWorkspaceAria', { workspaceId })}
       >
-        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+        <RotateCcw className="h-3 w-3" aria-hidden="true" />
       </button>
     </div>
   )
@@ -1407,27 +1422,6 @@ function writeStoredWorkspaceOrder(order: readonly string[]): void {
   }
 }
 
-function buildInitialOpenState(
-  workspaces: readonly WorkspaceNode[],
-  workspaceOpenState: Record<string, boolean>,
-  sessionChildrenOpenState: Record<string, boolean>,
-): Record<string, boolean> {
-  const out: Record<string, boolean> = { ...workspaceOpenState }
-  const visitSession = (session: SessionNode): void => {
-    if (session.children.length > 0) {
-      out[session.id] = sessionChildrenOpenState[session.id] ?? false
-      session.children.forEach(visitSession)
-    }
-  }
-  for (const workspace of workspaces) {
-    out[workspace.id] = workspaceOpenState[workspace.id] ?? true
-    workspace.children.forEach((child) => {
-      if (child.kind === 'session') visitSession(child)
-    })
-  }
-  return out
-}
-
 function readStoredSessionOrder(): readonly string[] {
   try {
     const raw = window.localStorage.getItem(SESSION_ORDER_STORAGE_KEY)
@@ -1445,39 +1439,6 @@ function writeStoredSessionOrder(order: readonly string[]): void {
     window.localStorage.setItem(SESSION_ORDER_STORAGE_KEY, JSON.stringify(order))
   } catch {
     // Storage can be unavailable in private mode or quota-exceeded states.
-  }
-}
-
-function sessionStructureKeyFor(session: SessionSummary): string {
-  return [
-    session.sessionId,
-    session.workspaceId ?? '',
-    session.workspaceName ?? '',
-    session.parentSessionId ?? '',
-    session.firstUserMessage ?? '',
-    session.label ?? '',
-    session.createdAt,
-  ].join('\u001e')
-}
-
-function toStructuralSessionSummary(session: SessionSummary): SessionSummary {
-  return {
-    sessionId: session.sessionId,
-    createdAt: session.createdAt,
-    eventCount: 0,
-    ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
-    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
-    ...(session.workspaceName ? { workspaceName: session.workspaceName } : {}),
-    ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
-    ...(session.label !== undefined ? { label: session.label } : {}),
-  }
-}
-
-function runtimeMetaFor(session: SessionSummary): SessionRuntimeMeta {
-  return {
-    status: session.status,
-    currentCwd: session.currentCwd,
-    lastActivityIso: session.lastEventAt ?? session.createdAt,
   }
 }
 
@@ -1558,187 +1519,9 @@ function sameSessionStatusMap(
   return true
 }
 
-function syncWorkspaceOrder(
-  prev: readonly string[],
-  workspaces: readonly WorkspaceNode[],
-): readonly string[] {
-  const ids = workspaces
-    .map((workspace) => workspace.workspaceId)
-    .filter((id): id is string => typeof id === 'string' && id.length > 0)
-  const live = new Set(ids)
-  const next = prev.filter((id) => live.has(id))
-  const seen = new Set(next)
-  for (const id of ids) {
-    if (!seen.has(id)) next.push(id)
-  }
-  return next
-}
-
-function applyManualWorkspaceOrder(
-  workspaces: readonly WorkspaceNode[],
-  order: readonly string[],
-): readonly WorkspaceNode[] {
-  const rank = new Map(order.map((id, index) => [id, index]))
-  return [...workspaces].sort((a, b) => {
-    if (a.workspaceId === null || b.workspaceId === null) {
-      if (a.workspaceId === b.workspaceId) return 0
-      return a.workspaceId === null ? 1 : -1
-    }
-    const ar = rank.get(a.workspaceId) ?? Number.MAX_SAFE_INTEGER
-    const br = rank.get(b.workspaceId) ?? Number.MAX_SAFE_INTEGER
-    return ar - br
-  })
-}
-
-function reorderWorkspaceIds(
-  order: readonly string[],
-  targetIds: readonly string[],
-  movedIds: readonly string[],
-  targetIndex: number,
-): readonly string[] {
-  const moved = new Set(movedIds)
-  const targetWithoutMoved = targetIds.filter((id) => !moved.has(id))
-  const insertIndex = Math.max(0, Math.min(targetIndex, targetWithoutMoved.length))
-  return [
-    ...targetWithoutMoved.slice(0, insertIndex),
-    ...movedIds,
-    ...targetWithoutMoved.slice(insertIndex),
-  ]
-}
-
-function isRootDropParent(node: NodeApi<TreeNode> | null): boolean {
-  return node === null || node.isRoot || node.id === '__REACT_ARBORIST_INTERNAL_ROOT__'
-}
-
 function canUseHoverPreview(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
   return window.matchMedia('(hover: hover) and (pointer: fine)').matches
-}
-
-export function canDropWorkspacesAtRootForTest(input: {
-  parentNode: Pick<NodeApi<TreeNode>, 'id' | 'isRoot'> | null
-  dragNodes: readonly { data: Pick<WorkspaceNode, 'kind' | 'workspaceId'> }[]
-}): boolean {
-  return isRootDropParent(input.parentNode as NodeApi<TreeNode> | null) && input.dragNodes.every((node) => node.data.kind === 'workspace' && node.data.workspaceId !== null)
-}
-
-export function reorderWorkspaceIdsForTest(
-  order: readonly string[],
-  targetIds: readonly string[],
-  movedIds: readonly string[],
-  targetIndex: number,
-): readonly string[] {
-  return reorderWorkspaceIds(order, targetIds, movedIds, targetIndex)
-}
-
-function syncSessionOrder(
-  prev: readonly string[],
-  sessions: readonly SessionSummary[],
-): readonly string[] {
-  const ids = sessions.map((s) => s.sessionId)
-  const live = new Set(ids)
-  const next = prev.filter((id) => live.has(id))
-  const seen = new Set(next)
-  for (const id of ids) {
-    if (!seen.has(id)) next.push(id)
-  }
-  return next
-}
-
-function applyManualSessionOrder(
-  sessions: readonly SessionSummary[],
-  order: readonly string[],
-): readonly SessionSummary[] {
-  const rank = new Map(order.map((id, index) => [id, index]))
-  return [...sessions].sort((a, b) => {
-    const ar = rank.get(a.sessionId) ?? Number.MAX_SAFE_INTEGER
-    const br = rank.get(b.sessionId) ?? Number.MAX_SAFE_INTEGER
-    return ar - br
-  })
-}
-
-function reorderSessionIds(
-  order: readonly string[],
-  targetIds: readonly string[],
-  movedIds: readonly string[],
-  targetIndex: number,
-): readonly string[] {
-  const moved = new Set(movedIds)
-  const target = new Set(targetIds)
-  const targetWithoutMoved = targetIds.filter((id) => !moved.has(id))
-  const insertIndex = Math.max(0, Math.min(targetIndex, targetWithoutMoved.length))
-  const reorderedTarget = [
-    ...targetWithoutMoved.slice(0, insertIndex),
-    ...movedIds,
-    ...targetWithoutMoved.slice(insertIndex),
-  ]
-  let cursor = 0
-  return order.map((id) => {
-    if (!target.has(id)) return id
-    return reorderedTarget[cursor++] ?? id
-  })
-}
-
-function countSessionDescendants(session: SessionNode): number {
-  let count = 0
-  for (const child of session.children) {
-    count += 1 + countSessionDescendants(child)
-  }
-  return count
-}
-
-function filterTree(nodes: readonly WorkspaceNode[], query: string): WorkspaceNode[] {
-  const needle = query.trim().toLocaleLowerCase()
-  if (!needle) return [...nodes]
-  const filtered: WorkspaceNode[] = []
-  for (const workspace of nodes) {
-    const workspaceMatches = workspaceMatchesQuery(workspace, needle)
-    const children: WorkspaceChild[] = []
-    for (const child of workspace.children) {
-      if (child.kind === 'session') {
-        const kept = filterSessionSubtree(child, needle, workspaceMatches)
-        if (kept) children.push(kept)
-      } else {
-        const kept = filterSessionSubtree(child, needle, workspaceMatches)
-        if (kept) children.push(kept)
-      }
-    }
-    if (workspaceMatches || children.length > 0) filtered.push({ ...workspace, children })
-  }
-  return filtered
-}
-
-/**
- * Keeps a session if it or any descendant matches the query. When a parent
- * only exists to house a matching child, we still return the parent so the
- * user sees the fork relationship — otherwise the child would appear as
- * an orphaned root and lose context.
- */
-function filterSessionSubtree(
-  session: SessionNode,
-  needle: string,
-  workspaceMatches: boolean,
-): SessionNode | null {
-  const keptChildren: SessionNode[] = []
-  for (const child of session.children) {
-    const kept = filterSessionSubtree(child, needle, workspaceMatches)
-    if (kept) keptChildren.push(kept)
-  }
-  const selfMatches = workspaceMatches || sessionMatchesQuery(session, needle)
-  if (!selfMatches && keptChildren.length === 0) return null
-  return { ...session, children: keptChildren }
-}
-
-function workspaceMatchesQuery(workspace: WorkspaceNode, needle: string): boolean {
-  return [workspace.name, workspace.workspaceId, workspace.os, workspace.runtime, workspace.runtimeVersion, workspace.ip]
-    .filter((value): value is string => typeof value === 'string')
-    .some((value) => value.toLocaleLowerCase().includes(needle))
-}
-
-function sessionMatchesQuery(session: SessionNode, needle: string): boolean {
-  return [session.label, session.sessionId, session.workspaceId, session.currentCwd, session.status, session.parentSessionId]
-    .filter((value): value is string => typeof value === 'string')
-    .some((value) => value.toLocaleLowerCase().includes(needle))
 }
 
 function HighlightText({ text, query }: { text: string; query: string }): JSX.Element {

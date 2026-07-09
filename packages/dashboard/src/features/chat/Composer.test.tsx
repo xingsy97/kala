@@ -6,6 +6,8 @@ import type { FileListEntry } from '@agent-kernel/shared'
 
 import { Composer } from './Composer.js'
 
+const EMPTY_HUMAN_ATTENTION = { sessionId: '', points: [], latest: null } as const
+
 function renderComposer(props?: {
   onSubmit?: (
     text: string,
@@ -32,6 +34,7 @@ function renderComposer(props?: {
       onApprovalModeChange={() => {}}
       state={props?.state ?? null}
       config={null}
+      humanAttention={EMPTY_HUMAN_ATTENTION}
       queuedMessages={props?.queuedMessages ?? []}
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       onSubmit={props?.onSubmit ?? (() => {})}
@@ -56,6 +59,7 @@ describe('Composer', () => {
         onApprovalModeChange={() => {}}
         state={null}
         config={null}
+        humanAttention={EMPTY_HUMAN_ATTENTION}
         queuedMessages={[]}
         onSubmit={() => {}}
         onCompact={() => {}}
@@ -65,7 +69,7 @@ describe('Composer', () => {
     expect(screen.queryByTestId('composer-state-chips')).toBeNull()
     expect(screen.queryByTestId('connection-status')).toBeNull()
     const indicator = screen.getByTestId('context-usage-indicator')
-    expect(indicator.textContent ?? '').toContain('n/a')
+    expect(indicator.textContent ?? '').toContain('?')
     expect(indicator.textContent ?? '').not.toContain('Events')
     expect(indicator.textContent ?? '').not.toContain('Tools')
     expect(indicator.textContent ?? '').not.toContain('Tokens')
@@ -305,6 +309,7 @@ describe('Composer', () => {
         onApprovalModeChange={() => {}}
         state={null}
         config={null}
+        humanAttention={EMPTY_HUMAN_ATTENTION}
         queuedMessages={[
           {
             id: 'queued-1',
@@ -349,6 +354,7 @@ describe('Composer', () => {
         onApprovalModeChange={() => {}}
         state={null}
         config={null}
+        humanAttention={EMPTY_HUMAN_ATTENTION}
         queuedMessages={[
           { id: 'q1', text: 'first queued', mode: 'queue', createdAt: '2026-07-06T00:00:00.000Z' },
           { id: 'q2', text: 'second queued', mode: 'queue', createdAt: '2026-07-06T00:00:01.000Z' },
@@ -391,6 +397,7 @@ describe('Composer', () => {
         onApprovalModeChange={onApprovalModeChange}
         state={null}
         config={null}
+        humanAttention={EMPTY_HUMAN_ATTENTION}
         queuedMessages={[]}
         onSubmit={() => {}}
         onCompact={() => {}}
@@ -412,6 +419,7 @@ describe('Composer', () => {
         onApprovalModeChange={() => {}}
         state={null}
         config={null}
+        humanAttention={EMPTY_HUMAN_ATTENTION}
         queuedMessages={[]}
         onSubmit={() => {}}
         onCompact={() => {}}
@@ -431,6 +439,7 @@ describe('Composer', () => {
         onApprovalModeChange={() => {}}
         state={null}
         config={null}
+        humanAttention={EMPTY_HUMAN_ATTENTION}
         queuedMessages={[]}
         onSubmit={() => {}}
         onCompact={() => {}}

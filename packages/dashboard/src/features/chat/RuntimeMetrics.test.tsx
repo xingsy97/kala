@@ -2,8 +2,31 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
+import type { ContextUsageSnapshot } from '@agent-kernel/shared'
 
 import { RuntimeMetrics } from './RuntimeMetrics.js'
+
+function contextSnapshot(inputTokens: number, contextWindow: number, source: ContextUsageSnapshot['contextWindow']['source'] = 'manual_config', modelRef = 'test-model'): ContextUsageSnapshot {
+  return {
+    model: { ref: modelRef, id: modelRef },
+    contextWindow: { tokens: contextWindow, source },
+    usage: { inputTokens, totalTokens: inputTokens },
+    breakdown: {
+      system: 100,
+      transcript: Math.max(0, inputTokens - 200),
+      tools: 100,
+      memory: 0,
+      attachments: 0,
+      pendingUserInput: 0,
+    },
+    estimator: {
+      total: { kind: 'heuristic', confidence: 'rough' },
+      breakdown: { kind: 'heuristic', confidence: 'rough' },
+      version: 'test',
+    },
+    updatedAt: 0,
+  }
+}
 
 describe('RuntimeMetrics', () => {
   it('shows a session info popover for context window usage', () => {
@@ -26,15 +49,7 @@ describe('RuntimeMetrics', () => {
       <RuntimeMetrics
         state={state}
         config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
-        contextSnapshot={{
-          estimatedMessageTokens: 1_000,
-          estimatedToolSchemaTokens: 100,
-          estimatedTotalInputTokens: 1_200,
-          reserveTokens: 100,
-          effectiveLimit: 4_000,
-          pressureLevel: 'none',
-          reasonCodes: [],
-        }}
+        contextSnapshot={contextSnapshot(1_200, 4_000)}
         modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
         queuedMessages={2}
         timeline={[
@@ -69,10 +84,10 @@ describe('RuntimeMetrics', () => {
     expect(popover.textContent ?? '').toContain('Session Info')
     expect(popover.textContent ?? '').toContain('Context Window')
     expect(popover.textContent ?? '').toContain('Reserved for response')
-    expect(popover.textContent ?? '').toContain('System Instructions')
+    expect(popover.textContent ?? '').toContain('System / reserve')
     expect(popover.textContent ?? '').toContain('Tool Definitions')
     expect(popover.textContent ?? '').toContain('Messages')
-    expect(popover.textContent ?? '').toContain('Tool Results')
+    expect(popover.textContent ?? '').toContain('Memory')
 
     fireEvent.click(screen.getByTestId('context-compact-conversation'))
     expect(onCompact).toHaveBeenCalledTimes(1)
@@ -83,18 +98,7 @@ describe('RuntimeMetrics', () => {
       <RuntimeMetrics
         state={createInitialState({ sessionId: 'sess-opus' })}
         config={{ contextLimit: 400_000, hardThreshold: 0.8 }}
-        contextSnapshot={{
-          estimatedMessageTokens: 1_000,
-          estimatedToolSchemaTokens: 100,
-          estimatedTotalInputTokens: 2_000,
-          reserveTokens: 100,
-          effectiveLimit: 1_000_000,
-          contextWindow: 1_000_000,
-          contextWindowSource: 'model',
-          contextWindowModel: 'claude-opus-4.7-1m-internal',
-          pressureLevel: 'none',
-          reasonCodes: [],
-        }}
+        contextSnapshot={contextSnapshot(2_000, 1_000_000, 'model_registry', 'claude-opus-4.7-1m-internal')}
         modelInfo={{ id: 'claude-opus-4.7-1m-internal', label: 'Opus 1M', provider: 'Anthropic', contextWindow: 1_000_000 }}
         queuedMessages={0}
       />,
@@ -106,6 +110,6 @@ describe('RuntimeMetrics', () => {
     fireEvent.click(indicator)
     const popover = screen.getByTestId('context-pressure-popover')
     expect(popover.textContent ?? '').toContain('Model context 1.0M')
-    expect(popover.textContent ?? '').toContain('Source: model')
+    expect(popover.textContent ?? '').toContain('Source: model_registry')
   })
 })

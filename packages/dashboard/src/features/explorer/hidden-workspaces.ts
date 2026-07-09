@@ -1,3 +1,5 @@
+import { PREF_HIDDEN_WORKSPACES } from '../../lib/prefs.js'
+
 /**
  * Hidden-workspaces preference storage.
  *
@@ -11,7 +13,7 @@
  * degrades to "nothing hidden" rather than throwing during app boot.
  */
 
-export const HIDDEN_WORKSPACES_STORAGE_KEY = 'ak-hidden-workspaces'
+export const HIDDEN_WORKSPACES_STORAGE_KEY = PREF_HIDDEN_WORKSPACES
 
 type StoredShape = { version: 1; ids: readonly string[] }
 

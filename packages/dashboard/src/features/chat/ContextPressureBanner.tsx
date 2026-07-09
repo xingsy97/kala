@@ -3,9 +3,10 @@ import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
-import type { ContextSnapshot } from '@agent-kernel/shared'
+import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 
 import { Button } from '../../components/ui/button.js'
+import { evaluateDashboardContextPressure } from '../../domain/context-pressure.js'
 
 /**
  * Banner shown above the composer when the session is close to the context
@@ -20,7 +21,7 @@ import { Button } from '../../components/ui/button.js'
  */
 type Props = {
   state: AgentState | null
-  contextSnapshot: ContextSnapshot | null
+  contextSnapshot: ContextUsageSnapshot | null
   compactRunning: boolean
   suppressed?: boolean
   onCompactNow: () => void
@@ -35,15 +36,15 @@ export function ContextPressureBanner({
 }: Props): JSX.Element | null {
   const { t } = useTranslation()
   if (suppressed) return null
-  const level = contextSnapshot?.pressureLevel ?? 'none'
-  if (level !== 'soft') return null
+  const pressure = evaluateDashboardContextPressure({ snapshot: contextSnapshot })
+  if (pressure.level !== 'high') return null
   if (isActiveTurn(state?.status)) return null
 
   return (
     <motion.div
       className="flex items-center gap-2 border-t border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
       data-testid="context-pressure-banner"
-      data-level="soft"
+      data-level={pressure.level}
       role="status"
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}

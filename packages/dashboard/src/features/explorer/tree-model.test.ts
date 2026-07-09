@@ -2,7 +2,22 @@ import { describe, expect, it } from 'vitest'
 
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
 
-import { buildTree } from './tree-model.js'
+import {
+  applyManualSessionOrder,
+  applyManualWorkspaceOrder,
+  buildInitialOpenState,
+  buildTree,
+  canDropWorkspacesAtRoot,
+  countSessionDescendants,
+  filterTree,
+  reorderSessionIds,
+  reorderWorkspaceIds,
+  runtimeMetaFor,
+  sessionStructureKeyFor,
+  syncSessionOrder,
+  syncWorkspaceOrder,
+  toStructuralSessionSummary,
+} from './tree-model.js'
 
 function executor(overrides: Partial<AttachedExecutor> = {}): AttachedExecutor {
   return {
@@ -283,5 +298,125 @@ describe('buildTree', () => {
     if (node.kind !== 'session') throw new Error('unreachable')
     // Forks keep the incoming order so activity does not reshuffle rows.
     expect(node.children.map((c) => c.sessionId)).toEqual(['fork-1', 'fork-2'])
+  })
+})
+
+describe('explorer tree model helpers', () => {
+  it('syncs workspace order against live non-unassigned workspaces', () => {
+    const tree = buildTree(
+      [
+        executor({ workspaceId: 'ws-a', workspaceName: 'alpha' }),
+        executor({ executorId: 'ex-2', workspaceId: 'ws-b', workspaceName: 'bravo' }),
+      ],
+      [session({ sessionId: 'orphan' })],
+    )
+
+    expect(syncWorkspaceOrder(['deleted', 'ws-b'], tree)).toEqual(['ws-b', 'ws-a'])
+    expect(applyManualWorkspaceOrder(tree, ['ws-b', 'ws-a']).map((node) => node.workspaceId)).toEqual(['ws-b', 'ws-a', null])
+    expect(reorderWorkspaceIds(['ws-a', 'ws-b'], ['ws-a', 'ws-b'], ['ws-b'], 0)).toEqual(['ws-b', 'ws-a'])
+  })
+
+  it('syncs and reorders sessions only inside the target workspace slice', () => {
+    const sessions = [
+      session({ sessionId: 's-1', workspaceId: 'ws-a' }),
+      session({ sessionId: 's-2', workspaceId: 'ws-a' }),
+      session({ sessionId: 's-3', workspaceId: 'ws-b' }),
+    ]
+
+    expect(syncSessionOrder(['gone', 's-2'], sessions)).toEqual(['s-2', 's-1', 's-3'])
+    expect(applyManualSessionOrder(sessions, ['s-2', 's-1', 's-3']).map((item) => item.sessionId)).toEqual(['s-2', 's-1', 's-3'])
+    expect(reorderSessionIds(['s-1', 's-2', 's-3'], ['s-1', 's-2'], ['s-2'], 0)).toEqual(['s-2', 's-1', 's-3'])
+  })
+
+  it('builds initial open state with workspaces open and fork sessions closed by default', () => {
+    const tree = buildTree(
+      [executor()],
+      [
+        session({ sessionId: 'parent', workspaceId: 'ws-1' }),
+        session({ sessionId: 'child', workspaceId: 'ws-1', parentSessionId: 'parent' }),
+      ],
+    )
+
+    expect(buildInitialOpenState(tree, {}, {})).toEqual({
+      'ws:ws-1': true,
+      'sess:parent': false,
+    })
+    expect(buildInitialOpenState(tree, { 'ws:ws-1': false }, { 'sess:parent': true })).toEqual({
+      'ws:ws-1': false,
+      'sess:parent': true,
+    })
+  })
+
+  it('filters matching fork descendants while keeping parent context', () => {
+    const tree = buildTree(
+      [executor()],
+      [
+        session({ sessionId: 'parent', workspaceId: 'ws-1', firstUserMessage: 'root task' }),
+        session({ sessionId: 'child', workspaceId: 'ws-1', parentSessionId: 'parent', firstUserMessage: 'needle task' }),
+      ],
+    )
+
+    const filtered = filterTree(tree, 'needle')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]!.children.map((node) => node.sessionId)).toEqual(['parent'])
+    expect(filtered[0]!.children[0]!.children.map((node) => node.sessionId)).toEqual(['child'])
+  })
+
+  it('counts descendants recursively for cascade delete prompts', () => {
+    const tree = buildTree(
+      [executor()],
+      [
+        session({ sessionId: 'root', workspaceId: 'ws-1' }),
+        session({ sessionId: 'child', workspaceId: 'ws-1', parentSessionId: 'root' }),
+        session({ sessionId: 'grandchild', workspaceId: 'ws-1', parentSessionId: 'child' }),
+      ],
+    )
+
+    expect(countSessionDescendants(tree[0]!.children[0]!)).toBe(2)
+  })
+
+  it('keeps structure derivation stable when runtime-only fields change', () => {
+    const base = session({
+      sessionId: 's-1',
+      workspaceId: 'ws-1',
+      label: 'label',
+      firstUserMessage: 'hello',
+      createdAt: '2026-07-05T10:00:00.000Z',
+      status: 'thinking',
+      currentCwd: '/one',
+      lastEventAt: '2026-07-05T11:00:00.000Z',
+      eventCount: 10,
+    })
+    const changedRuntime = { ...base, status: 'done' as const, currentCwd: '/two', lastEventAt: '2026-07-05T12:00:00.000Z', eventCount: 20 }
+
+    expect(sessionStructureKeyFor(base)).toBe(sessionStructureKeyFor(changedRuntime))
+    expect(toStructuralSessionSummary(base)).toEqual({
+      sessionId: 's-1',
+      createdAt: '2026-07-05T10:00:00.000Z',
+      eventCount: 0,
+      workspaceId: 'ws-1',
+      firstUserMessage: 'hello',
+      label: 'label',
+    })
+    expect(runtimeMetaFor(changedRuntime)).toEqual({
+      status: 'done',
+      currentCwd: '/two',
+      lastActivityIso: '2026-07-05T12:00:00.000Z',
+    })
+  })
+
+  it('allows only real workspace nodes to drop at the root', () => {
+    expect(canDropWorkspacesAtRoot({
+      parentNode: { id: '__REACT_ARBORIST_INTERNAL_ROOT__', isRoot: true },
+      dragNodes: [{ data: { kind: 'workspace', workspaceId: 'ws-1' } }],
+    })).toBe(true)
+    expect(canDropWorkspacesAtRoot({
+      parentNode: { id: 'ws:ws-2', isRoot: false },
+      dragNodes: [{ data: { kind: 'workspace', workspaceId: 'ws-1' } }],
+    })).toBe(false)
+    expect(canDropWorkspacesAtRoot({
+      parentNode: null,
+      dragNodes: [{ data: { kind: 'workspace', workspaceId: null } }],
+    })).toBe(false)
   })
 })

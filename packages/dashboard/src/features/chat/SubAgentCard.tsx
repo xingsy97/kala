@@ -3,7 +3,7 @@
  * transcript. Four modes, chosen from `lifecycle.status`:
  *
  *   pending   — the parent LLM emitted the tool_call but no child session
- *               has spawned yet (waiting for `server:sub_agent_started`)
+ *               has spawned yet (waiting for `server:control_update`)
  *   running   — child is live; [[NestedTranscript]] mirrors its
  *               state.messages in a slim, bubble-free layout
  *   completed — envelope arrived and parsed; header shows agent_type,

@@ -8,9 +8,10 @@ import {
   type AgentState,
   type Effect,
 } from '@agent-kernel/kernel'
-import type { ContextSnapshot } from '@agent-kernel/shared'
+import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 
 import type { TimelineEntry } from '../../session.js'
+import { contextPressureLabel, evaluateDashboardContextPressure } from '../../domain/context-pressure.js'
 
 export type ReplaySnapshot = {
   seq: number
@@ -207,7 +208,7 @@ export function buildRunHealth(
   state: AgentState | null,
   config: AgentConfig | null | undefined,
   timeline: readonly TimelineEntry[],
-  contextSnapshot?: ContextSnapshot | null,
+  contextSnapshot?: ContextUsageSnapshot | null,
 ): readonly RunHealthItem[] {
   const missingTrace = timeline.filter((entry) => entry.event.kind === 'llm_response' && !entry.llmTrace).length
   const failedTools = timeline.filter((entry) => entry.event.kind === 'tool_result' && entry.event.ok === false).length
@@ -254,16 +255,15 @@ export function buildRunHealth(
   ]
 }
 
-function contextPressure(contextSnapshot: ContextSnapshot | null | undefined, config: AgentConfig | null | undefined): { label: string; tone: RunHealthItem['tone'] } {
+function contextPressure(contextSnapshot: ContextUsageSnapshot | null | undefined, config: AgentConfig | null | undefined): { label: string; tone: RunHealthItem['tone'] } {
   if (!contextSnapshot) return { label: config?.contextLimit ? 'unknown' : 'not configured', tone: 'neutral' }
-  const limit = contextSnapshot.effectiveLimit ?? config?.contextLimit
-  const percent = limit && limit > 0
-    ? Math.round((contextSnapshot.estimatedTotalInputTokens / limit) * 100)
-    : null
-  const level = contextSnapshot.pressureLevel
+  const evaluation = evaluateDashboardContextPressure({
+    snapshot: contextSnapshot,
+    config,
+  })
   return {
-    label: percent === null ? level : `${level} · ${percent}%`,
-    tone: level === 'hard' ? 'error' : level === 'soft' ? 'warn' : 'ok',
+    label: contextPressureLabel(evaluation),
+    tone: evaluation.tone === 'neutral' ? 'neutral' : evaluation.tone,
   }
 }
 

@@ -36,12 +36,17 @@ export function BackgroundShellsButton({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const { tasks: liveTasks, killTask } = useBackgroundTasks({
+  const { tasks: liveTasks, error, killTask } = useBackgroundTasks({
     socket,
     workspaceId,
     sessionId,
     selectedTaskId: open ? selectedTaskId : null,
   })
+
+  useEffect(() => {
+    setOpen(false)
+    setSelectedTaskId(null)
+  }, [socket, workspaceId, sessionId])
 
   const liveById = useMemo(() => {
     const m = new Map<string, LiveBackgroundTask>()
@@ -128,6 +133,7 @@ export function BackgroundShellsButton({
           <div className="grid gap-0 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
             <TaskList
               rows={rows}
+              error={error}
               selectedTaskId={selectedTaskId}
               onSelect={setSelectedTaskId}
               onKill={hasWorkspaceRegistry ? killTask : null}
@@ -193,11 +199,13 @@ function rowFromFallback(task: BackgroundTerminalTask): TerminalRow {
 
 function TaskList({
   rows,
+  error,
   selectedTaskId,
   onSelect,
   onKill,
 }: {
   rows: readonly TerminalRow[]
+  error: string | null
   selectedTaskId: string | null
   onSelect: (id: string) => void
   onKill: ((taskId: string) => Promise<unknown>) | null
@@ -207,11 +215,23 @@ function TaskList({
   return (
     <ScrollArea className="h-[28rem] border-r border-border/50">
       {rows.length === 0 ? (
-        <div className="px-3 py-6 text-xs text-muted-foreground" data-testid="bg-task-empty">
-          {t('chat.backgroundShells.empty')}
+        <div className="space-y-2 px-3 py-6 text-xs text-muted-foreground" data-testid="bg-task-empty">
+          {error ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive">
+              {error}
+            </div>
+          ) : null}
+          <div>{t('chat.backgroundShells.empty')}</div>
         </div>
       ) : (
       <ul ref={listRef} className="divide-y divide-border/50">
+        {error ? (
+          <li className="px-3 py-2 text-xs text-destructive">
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5">
+              {error}
+            </div>
+          </li>
+        ) : null}
         {rows.map((row) => {
           const selected = row.taskId === selectedTaskId
           const parts = splitCommand(row.command, t('chat.backgroundShells.emptyCommand'))

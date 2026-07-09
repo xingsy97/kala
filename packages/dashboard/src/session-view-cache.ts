@@ -1,10 +1,11 @@
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
-import type { ContextSnapshot, QueuedMessagePreview, SessionErrorEvent } from '@agent-kernel/shared'
+import type { ContextUsageSnapshot, QueuedMessagePreview, SessionErrorEvent } from '@agent-kernel/shared'
 
+import { DASHBOARD_PREFERENCES } from './lib/prefs.js'
 import type { ConnectionStatus, TimelineEntry } from './session.js'
 
-export const DEFAULT_SESSION_VIEW_CACHE_MAX_MB = 500
-export const PREF_SESSION_VIEW_CACHE_MAX_MB = 'ak-session-view-cache-max-mb'
+export const DEFAULT_SESSION_VIEW_CACHE_MAX_MB = DASHBOARD_PREFERENCES.sessionViewCacheMaxMb.defaultValue
+export const PREF_SESSION_VIEW_CACHE_MAX_MB = DASHBOARD_PREFERENCES.sessionViewCacheMaxMb.key
 
 const BYTES_PER_STRING_CHAR = 2
 const MB = 1024 * 1024
@@ -14,7 +15,7 @@ export type CachedSessionView = {
   status: ConnectionStatus
   state: AgentState | null
   config: AgentConfig | null
-  contextSnapshot: ContextSnapshot | null
+  contextSnapshot: ContextUsageSnapshot | null
   timeline: readonly TimelineEntry[]
   queuedMessages: readonly QueuedMessagePreview[]
   lastError: SessionErrorEvent | null
