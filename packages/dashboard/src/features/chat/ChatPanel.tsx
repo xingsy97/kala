@@ -90,7 +90,22 @@ function ContentBlock({
     )
   }
   if (content.type === 'tool_call') return <ToolCallBlock call={content} />
-  return <ToolResultBlock result={content} />
+  if (content.type === 'tool_result') return <ToolResultBlock result={content} />
+  return <ImageBlock content={content} />
+}
+
+function ImageBlock({ content }: { content: import('@agent-kernel/kernel').ImageContent }): JSX.Element {
+  const src =
+    content.source.kind === 'base64'
+      ? `data:${content.source.mediaType};base64,${content.source.data}`
+      : content.source.path
+  return (
+    <img
+      src={src}
+      alt=""
+      className="max-w-xs max-h-64 rounded border border-slate-200 dark:border-slate-800"
+    />
+  )
 }
 
 function AssistantMarkdown({ text }: { text: string }): JSX.Element {

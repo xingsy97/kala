@@ -24,6 +24,7 @@ import {
   readSessionLog,
   writeHeader,
 } from './log.js'
+import { step } from '@agent-kernel/kernel'
 
 export type SessionRecord = {
   readonly sessionId: string
@@ -45,6 +46,7 @@ export type CreateSessionParams = {
   sessionId?: string
   workspaceId?: string
   workspaceName?: string
+  initialCwd?: string
 }
 
 export class SessionStore {
@@ -70,12 +72,15 @@ export class SessionStore {
         sessionId,
         systemPrompt: params.systemPrompt ?? params.config.systemPrompt,
       })
+    const stateWithCwd: AgentState = params.initialCwd
+      ? { ...initialState, cwd: params.initialCwd }
+      : initialState
     const logPath = this.pathFor(sessionId)
     await writeHeader({
       path: logPath,
       sessionId,
       config: params.config,
-      initialState,
+      initialState: stateWithCwd,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
@@ -88,12 +93,15 @@ export class SessionStore {
       ...(params.workspaceName !== undefined
         ? { workspaceName: params.workspaceName }
         : {}),
+      ...(params.initialCwd !== undefined
+        ? { initialCwd: params.initialCwd }
+        : {}),
     })
     const record: SessionRecord = {
       sessionId,
       logPath,
       config: params.config,
-      state: initialState,
+      state: stateWithCwd,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
@@ -274,7 +282,57 @@ export class SessionStore {
   ): Promise<SessionRecord> {
     const parsed = await readSessionLog(path)
     const events = parsed.events.map((e) => e.event)
-    const finalState = fold(parsed.header.initialState, events, parsed.header.config)
+    let finalState = fold(parsed.header.initialState, events, parsed.header.config)
+    let cursor = finalState.cursor
+
+    // Crash recovery: a session that was mid-tool-call when the host died
+    // has status='awaiting_approval' or 'executing_tools' with non-empty
+    // pendingCalls. The promise that would have resolved is gone, so the
+    // session hangs. Synthesize a failed tool_result for each pending call
+    // and append it to the log so replay stays exact.
+    if (
+      (finalState.status === 'awaiting_approval' ||
+        finalState.status === 'executing_tools') &&
+      finalState.pendingCalls.length > 0
+    ) {
+      for (const pending of finalState.pendingCalls) {
+        const recoveryEvent: AgentEvent = {
+          kind: 'tool_result',
+          callId: pending.callId,
+          ok: false,
+          content: 'host restarted while call was pending',
+        }
+        // `awaiting_approval` calls never got a `dispatched` status, so the
+        // reducer would refuse a `tool_result` for them. Approve first to
+        // move the call into `dispatched`, then feed the failure — the
+        // reducer will accept it and settle the pending list.
+        if (pending.status === 'awaiting_approval') {
+          const { next } = step(
+            finalState,
+            { kind: 'user_approve', callId: pending.callId },
+            parsed.header.config,
+          )
+          finalState = next
+          cursor = next.cursor
+          await appendEventEntry({
+            path,
+            seq: cursor,
+            event: { kind: 'user_approve', callId: pending.callId },
+            effects: [],
+          })
+        }
+        const { next } = step(finalState, recoveryEvent, parsed.header.config)
+        finalState = next
+        cursor = next.cursor
+        await appendEventEntry({
+          path,
+          seq: cursor,
+          event: recoveryEvent,
+          effects: [],
+        })
+      }
+    }
+
     const record: SessionRecord = {
       sessionId,
       logPath: path,
@@ -318,6 +376,11 @@ function summarizeLog(
   // would be a guess. Host can layer it on later by tracking attach history.
   const status =
     lastSnapshot?.state.status ?? statusFromEffects(events)
+  const foldedState = lastSnapshot?.state ?? fold(
+    header.initialState,
+    events.map((e) => e.event),
+    header.config,
+  )
   return {
     sessionId: header.sessionId,
     createdAt: header.ts,
@@ -331,6 +394,9 @@ function summarizeLog(
       ? { workspaceName: header.workspaceName }
       : {}),
     ...(status ? { status } : {}),
+    ...(foldedState.cwd
+      ? { currentCwd: foldedState.cwd }
+      : {}),
     ...(firstUserText
       ? { firstUserMessage: firstUserText.slice(0, 120) }
       : {}),

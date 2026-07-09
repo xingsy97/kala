@@ -163,7 +163,10 @@ async function runOne(
     }
   }
   try {
-    const content = await tool.run(payload.input, { sandbox, signal })
+    const input = payload.cwd
+      ? { ...payload.input, cwd: payload.cwd }
+      : payload.input
+    const content = await tool.run(input, { sandbox, signal })
     return { callId: payload.callId, ok: true, content }
   } catch (err) {
     if (err instanceof ToolError) {

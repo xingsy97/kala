@@ -80,6 +80,32 @@ describe('step: user_message', () => {
     const { next } = step(s0, { kind: 'user_message', text: 'hi' }, CONFIG)
     expect(next.cursor).toBe(s0.cursor + 1)
   })
+
+  it('accepts structured image content unchanged', () => {
+    const s0 = initial()
+    const content: Message['content'] = [
+      { type: 'text', text: 'describe this' },
+      {
+        type: 'image',
+        source: {
+          kind: 'base64',
+          mediaType: 'image/png',
+          data: 'aW1hZ2U=',
+        },
+      },
+    ]
+    const { next, effects } = step(
+      s0,
+      { kind: 'user_message', content },
+      CONFIG,
+    )
+    expect(next.status).toBe('thinking')
+    expect(next.messages[1]).toEqual({ role: 'user', content })
+    expect(effects[0]).toMatchObject({
+      kind: 'call_llm',
+      messages: next.messages,
+    })
+  })
 })
 
 describe('step: llm_response (plain answer)', () => {
@@ -539,6 +565,154 @@ describe('regression: state hygiene on re-entry', () => {
 })
 
 // ============================================================================
+// Compaction + context pressure
+// ============================================================================
+
+describe('context pressure', () => {
+  it('stays "none" when config has no contextLimit', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'thinking',
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'llm_response',
+        message: asst({ type: 'text', text: 'hi' }),
+        usage: { inputTokens: 10_000_000, outputTokens: 1 },
+      },
+      CONFIG,
+    )
+    expect(next.contextPressureLevel).toBe('none')
+  })
+
+  it('rises to "soft" then "hard" as inputTokens grow past thresholds', () => {
+    const c: AgentConfig = createConfig({
+      tools: TOOLS,
+      systemPrompt: 'x',
+      contextLimit: 100,
+      softThreshold: 0.75,
+      hardThreshold: 0.92,
+    })
+    const s0: AgentState = { ...initial(), status: 'thinking' }
+    // 70 → still none
+    const r1 = step(
+      s0,
+      { kind: 'llm_response', message: asst({ type: 'text', text: 'a' }), usage: { inputTokens: 70, outputTokens: 0 } },
+      c,
+    )
+    expect(r1.next.contextPressureLevel).toBe('none')
+
+    // Add 10 → 80, soft
+    const r2 = step(
+      { ...r1.next, status: 'thinking' },
+      { kind: 'llm_response', message: asst({ type: 'text', text: 'b' }), usage: { inputTokens: 10, outputTokens: 0 } },
+      c,
+    )
+    expect(r2.next.contextPressureLevel).toBe('soft')
+
+    // Add 15 → 95, hard
+    const r3 = step(
+      { ...r2.next, status: 'thinking' },
+      { kind: 'llm_response', message: asst({ type: 'text', text: 'c' }), usage: { inputTokens: 15, outputTokens: 0 } },
+      c,
+    )
+    expect(r3.next.contextPressureLevel).toBe('hard')
+  })
+})
+
+describe('step: compact_replaced', () => {
+  const c: AgentConfig = createConfig({
+    tools: TOOLS,
+    systemPrompt: 'x',
+    contextLimit: 100,
+  })
+
+  it('replaces messages, keeps leading system, resets inputTokens', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'done',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'you are' }] },
+        { role: 'user', content: [{ type: 'text', text: 'a' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
+        { role: 'user', content: [{ type: 'text', text: 'c' }] },
+      ],
+      usage: { inputTokens: 95, outputTokens: 40, costUsd: 0.02 },
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'compact_replaced',
+        summary: 'we discussed X and Y',
+        replacedCount: 3,
+        tokensBefore: 95,
+        tokensAfter: 10,
+      },
+      c,
+    )
+    expect(next.messages).toHaveLength(2)
+    expect(next.messages[0]?.role).toBe('system')
+    expect(next.messages[0]?.content).toEqual([{ type: 'text', text: 'you are' }])
+    expect(next.messages[1]?.role).toBe('system')
+    expect(next.messages[1]?.content).toEqual([
+      { type: 'text', text: 'we discussed X and Y' },
+    ])
+    expect(next.usage).toEqual({ inputTokens: 10, outputTokens: 40, costUsd: 0.02 })
+    expect(next.contextPressureLevel).toBe('none')
+  })
+
+  it('is a no-op while awaiting_approval (unsafe to drop pending calls)', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'awaiting_approval',
+      pendingCalls: [
+        { callId: 'c1', name: 'write', input: {}, status: 'awaiting_approval' },
+      ],
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'x' }] },
+        { role: 'user', content: [{ type: 'text', text: 'big prompt' }] },
+      ],
+      usage: { inputTokens: 95, outputTokens: 0, costUsd: 0 },
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'compact_replaced',
+        summary: 'should be ignored',
+        replacedCount: 0,
+        tokensBefore: 95,
+        tokensAfter: 5,
+      },
+      c,
+    )
+    expect(next.messages).toEqual(s0.messages)
+    expect(next.pendingCalls).toEqual(s0.pendingCalls)
+  })
+
+  it('is legal from error state (post-mortem recovery)', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'error',
+      error: 'boom',
+      usage: { inputTokens: 100, outputTokens: 0, costUsd: 0 },
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'compact_replaced',
+        summary: 's',
+        replacedCount: 0,
+        tokensBefore: 100,
+        tokensAfter: 5,
+      },
+      c,
+    )
+    expect(next.usage.inputTokens).toBe(5)
+  })
+})
+
+// ============================================================================
 // Purity + immutability
 // ============================================================================
 
@@ -641,5 +815,158 @@ describe('fork', () => {
     expect(texts).toContain('first')
     expect(texts).toContain('different')
     expect(texts).not.toContain('a1')
+  })
+})
+
+describe('step: approval mode', () => {
+  const assistantWith = (name: string): Message =>
+    asst({
+      type: 'tool_call',
+      callId: 'c1',
+      name,
+      input: {},
+    })
+
+  it('defaults to "auto" — READ (requiresApproval:false) dispatches, WRITE asks', () => {
+    // Sanity baseline. Rest of the tests build on this by mutating mode.
+    const s0 = initial()
+    expect(s0.approvalMode).toBe('auto')
+    const r1 = step(
+      { ...s0, status: 'thinking' },
+      { kind: 'llm_response', message: assistantWith('write') },
+      CONFIG,
+    )
+    expect(r1.next.status).toBe('awaiting_approval')
+    expect(r1.effects[0]?.kind).toBe('request_approval')
+  })
+
+  it('"ask" mode forces approval even for safe tools', () => {
+    const s0: AgentState = { ...initial(), approvalMode: 'ask' }
+    const r = step(
+      { ...s0, status: 'thinking' },
+      { kind: 'llm_response', message: assistantWith('read') },
+      CONFIG,
+    )
+    expect(r.next.status).toBe('awaiting_approval')
+    expect(r.effects.map((e) => e.kind)).toEqual(['request_approval'])
+  })
+
+  it('"allow_all" mode dispatches WRITE without asking', () => {
+    const s0: AgentState = { ...initial(), approvalMode: 'allow_all' }
+    const r = step(
+      { ...s0, status: 'thinking' },
+      { kind: 'llm_response', message: assistantWith('write') },
+      CONFIG,
+    )
+    expect(r.next.status).toBe('executing_tools')
+    expect(r.effects.map((e) => e.kind)).toEqual(['call_tool'])
+  })
+
+  it('"deny" mode short-circuits WRITE into a synthetic tool_result and re-asks the LLM', () => {
+    const s0: AgentState = { ...initial(), approvalMode: 'deny' }
+    const r = step(
+      { ...s0, status: 'thinking' },
+      { kind: 'llm_response', message: assistantWith('write') },
+      CONFIG,
+    )
+    // No tool ever dispatches. Instead the reducer injects a tool_result
+    // message and immediately schedules another LLM turn so the assistant
+    // can react to the refusal.
+    expect(r.next.pendingCalls).toEqual([])
+    expect(r.next.status).toBe('thinking')
+    expect(r.effects.map((e) => e.kind)).toEqual(['call_llm'])
+    const lastMsg = r.next.messages[r.next.messages.length - 1]!
+    expect(lastMsg.role).toBe('tool')
+    expect(lastMsg.content[0]).toMatchObject({
+      type: 'tool_result',
+      ok: false,
+    })
+  })
+
+  it('"deny" still dispatches safe tools (requiresApproval:false)', () => {
+    const s0: AgentState = { ...initial(), approvalMode: 'deny' }
+    const r = step(
+      { ...s0, status: 'thinking' },
+      { kind: 'llm_response', message: assistantWith('read') },
+      CONFIG,
+    )
+    expect(r.next.status).toBe('executing_tools')
+    expect(r.effects.map((e) => e.kind)).toEqual(['call_tool'])
+  })
+
+  it('approval_mode_changed updates state.approvalMode in every status', () => {
+    const s0 = initial()
+    for (const status of [
+      'idle',
+      'thinking',
+      'awaiting_approval',
+      'executing_tools',
+      'done',
+      'error',
+    ] as const) {
+      const r = step(
+        { ...s0, status },
+        { kind: 'approval_mode_changed', mode: 'ask' },
+        CONFIG,
+      )
+      expect(r.next.approvalMode).toBe('ask')
+      // Status is unchanged by the mode event itself.
+      expect(r.next.status).toBe(status)
+    }
+  })
+})
+
+describe('step: cwd', () => {
+  it('updates cwd only while idle or done', () => {
+    const s0 = initial()
+    const idle = step(s0, { kind: 'cwd_changed', cwd: '/work/app' }, CONFIG)
+    expect(idle.next.cwd).toBe('/work/app')
+
+    const thinking = step(
+      { ...idle.next, status: 'thinking' },
+      { kind: 'cwd_changed', cwd: '/work/other' },
+      CONFIG,
+    )
+    expect(thinking.next.cwd).toBe('/work/app')
+
+    const done = step(
+      { ...idle.next, status: 'done' },
+      { kind: 'cwd_changed', cwd: '/work/other' },
+      CONFIG,
+    )
+    expect(done.next.cwd).toBe('/work/other')
+  })
+
+  it('routes subsequent tool calls with the current cwd', () => {
+    const config = createConfig({
+      tools: [
+        {
+          name: 'bash',
+          description: 'run shell',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+        },
+      ],
+      systemPrompt: 'sys',
+    })
+    const s0 = step(initial(), { kind: 'cwd_changed', cwd: '/work/app' }, config).next
+    const r = step(
+      { ...s0, status: 'thinking' },
+      {
+        kind: 'llm_response',
+        message: asst({
+          type: 'tool_call',
+          callId: 'c1',
+          name: 'bash',
+          input: { command: 'pwd' },
+        }),
+      },
+      config,
+    )
+    expect(r.effects[0]).toMatchObject({
+      kind: 'call_tool',
+      callId: 'c1',
+      cwd: '/work/app',
+    })
   })
 })

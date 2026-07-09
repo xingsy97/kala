@@ -34,6 +34,7 @@ export type WriteHeaderParams = {
   parentCursor?: number
   workspaceId?: string
   workspaceName?: string
+  initialCwd?: string
 }
 
 export async function writeHeader(params: WriteHeaderParams): Promise<void> {
@@ -59,6 +60,7 @@ export async function writeHeader(params: WriteHeaderParams): Promise<void> {
     ...(params.workspaceName !== undefined
       ? { workspaceName: params.workspaceName }
       : {}),
+    ...(params.initialCwd !== undefined ? { initialCwd: params.initialCwd } : {}),
   }
   await writeFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
 }
