@@ -46,7 +46,9 @@ import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import { ArtifactExplorerDialog } from './features/artifacts/ArtifactExplorerDialog.js'
-import { LanguageSwitcher } from './features/i18n/LanguageSwitcher.js'
+import { AppShellNav } from './app-shell/AppShellNav.js'
+import { useAppSection, type AppSection } from './app-shell/section.js'
+import { BenchmarksPage } from './features/benchmarks/BenchmarksPage.js'
 import {
   cancelSession,
   clearSession,
@@ -67,13 +69,12 @@ import { cn } from './lib/utils.js'
 import { withViewTransition } from './lib/viewTransition.js'
 import { visibleMessages, visibleTranscript } from './transcript.js'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
+import { useTheme, type Theme } from './lib/theme.js'
 import {
   useBackgroundShellToasts,
   useSessionToasts,
   useSubAgentToasts,
 } from './session-toasts.js'
-
-type Theme = 'dark' | 'light'
 
 const MODEL_STORAGE_KEY = 'ak-model'
 const COMPACT_WATCHDOG_MS = 75_000
@@ -108,23 +109,6 @@ function useModels(): { models: readonly ModelInfo[]; defaultModel: string; relo
     }
   }, [version])
   return { ...state, reload: () => setVersion((v) => v + 1) }
-}
-
-function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      const stored = localStorage.getItem('ak-theme')
-      if (stored === 'light' || stored === 'dark') return stored
-    } catch {}
-    return 'dark'
-  })
-  useEffect(() => {
-    const root = document.documentElement
-    if (theme === 'dark') root.classList.add('dark')
-    else root.classList.remove('dark')
-    try { localStorage.setItem('ak-theme', theme) } catch {}
-  }, [theme])
-  return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))]
 }
 
 function useMinWidth(px: number): boolean {
@@ -563,6 +547,15 @@ export function App(): JSX.Element {
     setArtifactsOpen(true)
   }
 
+  const [section, setSection] = useAppSection()
+  const handleSectionSelect = (next: AppSection): void => {
+    setSection(next)
+    // Benchmarks is now a real page — rendered inline below, not a modal.
+    if (next === 'operations') openArtifacts('ops')
+    else if (next === 'artifacts') openArtifacts('artifacts')
+    else if (next === 'pipeline') setPipelineGuideOpen(true)
+  }
+
   const commandPaletteCommands = useMemo<readonly CommandPaletteItem[]>(() => {
     const cmds: CommandPaletteItem[] = []
     const socket = session.socket
@@ -886,8 +879,20 @@ export function App(): JSX.Element {
   )
 
   return (
-    <div className="h-dvh w-screen bg-background text-foreground overflow-hidden">
+    <div className="h-dvh w-screen bg-background text-foreground overflow-hidden flex flex-col">
+      <AppShellNav
+        section={section}
+        onSelect={handleSectionSelect}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onToggleInspector={() => setInspectorOpen((v) => !v)}
+        inspectorOpen={wideLayout && inspectorOpen}
+        inspectorAvailable={wideLayout && hasSelectedSession}
+      />
+      <div className="flex-1 min-h-0">
       <div className="hidden" data-testid="login-column-hidden" />
+      {section === 'benchmarks' ? (
+        <BenchmarksPage onLaunchSwebench={() => openArtifacts('eval')} />
+      ) : (
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
           <>
@@ -933,16 +938,6 @@ export function App(): JSX.Element {
               onOpenExplorer={() => setExplorerDrawerOpen(true)}
               explorerAvailable={!wideLayout}
               onChangeCwd={openCwdDialog}
-              onOpenEval={() => openArtifacts('eval')}
-              onOpenOps={() => openArtifacts('ops')}
-              onOpenArtifacts={() => openArtifacts('artifacts')}
-              onOpenPipelineGuide={() => setPipelineGuideOpen(true)}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onToggleInspector={() => setInspectorOpen((v) => !v)}
-              inspectorOpen={wideLayout && inspectorOpen}
-              inspectorAvailable={wideLayout && hasSelectedSession}
-              theme={theme}
-              onToggleTheme={toggleTheme}
               sessionSelected={hasSelectedSession}
             />
             {!hasSelectedSession ? (
@@ -1200,6 +1195,7 @@ export function App(): JSX.Element {
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
+      )}
       <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
           className="left-0 top-0 h-dvh w-[min(22rem,100vw)] max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 sm:rounded-none"
@@ -1305,6 +1301,7 @@ export function App(): JSX.Element {
         commands={commandPaletteCommands}
       />
       <Toaster position="bottom-right" richColors closeButton theme={theme} />
+      </div>
     </div>
   )
 }
@@ -1524,16 +1521,6 @@ function WorkbenchToolbar({
   onOpenExplorer,
   explorerAvailable,
   onChangeCwd,
-  onOpenEval,
-  onOpenOps,
-  onOpenArtifacts,
-  onOpenPipelineGuide,
-  onOpenSettings,
-  onToggleInspector,
-  inspectorOpen,
-  inspectorAvailable,
-  theme,
-  onToggleTheme,
   sessionSelected,
 }: {
   sessionLabel: string
@@ -1542,16 +1529,6 @@ function WorkbenchToolbar({
   onOpenExplorer(): void
   explorerAvailable: boolean
   onChangeCwd(): void
-  onOpenEval(): void
-  onOpenOps(): void
-  onOpenArtifacts(): void
-  onOpenPipelineGuide(): void
-  onOpenSettings(): void
-  onToggleInspector(): void
-  inspectorOpen: boolean
-  inspectorAvailable: boolean
-  theme: Theme
-  onToggleTheme(): void
   sessionSelected: boolean
 }): JSX.Element {
   const { t } = useTranslation()
@@ -1597,101 +1574,6 @@ function WorkbenchToolbar({
       </Button>
       ) : null}
       <span className="min-w-0 flex-1" />
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onOpenEval}
-        title={t('app.openEvalDashboard')}
-        aria-label={t('app.openEvalDashboard')}
-        data-testid="eval-dashboard-button"
-        className="h-8 gap-1.5 px-2 text-xs"
-      >
-        <BarChart3 className="h-4 w-4 flex-none" />
-        <span>{t('common.eval')}</span>
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onOpenOps}
-        title={t('app.openOpsArtifacts')}
-        aria-label={t('app.openOpsArtifacts')}
-        data-testid="ops-artifacts-button"
-        className="h-8 gap-1.5 px-2 text-xs"
-      >
-        <Workflow className="h-4 w-4 flex-none" />
-        <span>{t('common.ops')}</span>
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onOpenArtifacts}
-        title={t('app.openArtifacts')}
-        aria-label={t('app.openArtifacts')}
-        data-testid="artifacts-button"
-        className="h-8 gap-1.5 px-2 text-xs"
-      >
-        <Boxes className="h-4 w-4 flex-none" />
-        <span>{t('common.artifacts')}</span>
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onOpenPipelineGuide}
-        title={t('pipeline.buttonTitle')}
-        aria-label={t('pipeline.buttonTitle')}
-        data-testid="pipeline-guide-button"
-        className="h-8 gap-1.5 px-2 text-xs"
-      >
-        <Sparkles className="h-4 w-4 flex-none" />
-        <span>{t('pipeline.buttonLabel')}</span>
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onOpenSettings}
-        title={t('app.openSettings')}
-        aria-label={t('app.openSettings')}
-        data-testid="settings-button"
-        className="h-8 gap-1.5 px-2 text-xs"
-      >
-        <Settings className="h-4 w-4 flex-none" />
-        <span>{t('common.settings')}</span>
-      </Button>
-      <LanguageSwitcher />
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onToggleTheme}
-        title={theme === 'dark' ? t('app.switchToLight') : t('app.switchToDark')}
-        data-testid="theme-toggle"
-        aria-label={t('app.toggleTheme')}
-        className="h-8 gap-1.5 px-2 text-xs"
-      >
-        {theme === 'dark' ? (
-          <Sun className="h-4 w-4 flex-none" />
-        ) : (
-          <Moon className="h-4 w-4 flex-none" />
-        )}
-        <span>{theme === 'dark' ? t('common.light') : t('common.dark')}</span>
-      </Button>
-      {inspectorAvailable ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggleInspector}
-          title={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
-          aria-label={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
-          data-testid="inspector-toggle"
-          className="h-8 gap-1.5 px-2 text-xs"
-        >
-          {inspectorOpen ? (
-            <PanelRightClose className="h-4 w-4 flex-none" />
-          ) : (
-            <PanelRight className="h-4 w-4 flex-none" />
-          )}
-          <span>{inspectorOpen ? t('app.hideDebugger') : t('app.debugger')}</span>
-        </Button>
-      ) : null}
       {sessionSelected ? <ConnectionStatus status={status} /> : null}
     </div>
   )

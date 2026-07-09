@@ -82,8 +82,10 @@ if (failed.length > 0) {
 }
 
 async function openEvalMode(page) {
-  await page.waitForSelector('[data-testid="eval-dashboard-button"]', { timeout: 15_000 })
-  await page.click('[data-testid="eval-dashboard-button"]')
+  await page.waitForSelector('[data-testid="app-shell-nav-benchmarks"]', { timeout: 15_000 })
+  await page.click('[data-testid="app-shell-nav-benchmarks"]')
+  await page.waitForSelector('[data-testid="benchmarks-launcher-open"]', { timeout: 10_000 })
+  await page.click('[data-testid="benchmarks-launcher-open"]')
   await page.waitForSelector('[data-testid="artifact-dialog"]', { timeout: 10_000 })
   await page.waitForSelector('[data-testid="artifact-mode-eval"]', { timeout: 10_000 })
   await page.click('[data-testid="artifact-mode-eval"]')

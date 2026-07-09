@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
 import { cn } from '../../lib/utils.js'
+import { BadCasesTab } from './BadCasesTab.js'
 
 export type ArtifactManifestEntry = {
   path: string
@@ -46,7 +47,7 @@ type Props = {
   onOpenSession?(sessionId: string): void
 }
 
-type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops'
+type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops' | 'badcases'
 
 type ArtifactContentResponse = {
   path: string
@@ -606,7 +607,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
           <div className="flex items-start justify-between gap-3">
             <div>
               <DialogTitle>{t(`artifacts.modes.${mode}`)}</DialogTitle>
-              <DialogDescription>{mode === 'eval' ? t('artifacts.descriptions.eval') : mode === 'ops' ? t('artifacts.descriptions.ops') : t('artifacts.descriptions.default')}</DialogDescription>
+              <DialogDescription>{mode === 'eval' ? t('artifacts.descriptions.eval') : mode === 'ops' ? t('artifacts.descriptions.ops') : mode === 'badcases' ? t('artifacts.descriptions.badcases') : t('artifacts.descriptions.default')}</DialogDescription>
             </div>
             <div className="flex items-center gap-2">
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
@@ -615,6 +616,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
                 <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')} data-testid="artifact-mode-profiles">{t('artifacts.modes.profiles')}</button>
                 <button type="button" className={tabClass(mode === 'memory')} onClick={() => setMode('memory')} data-testid="artifact-mode-memory">{t('artifacts.modes.memory')}</button>
                 <button type="button" className={tabClass(mode === 'ops')} onClick={() => setMode('ops')} data-testid="artifact-mode-ops">{t('artifacts.modes.ops')}</button>
+                <button type="button" className={tabClass(mode === 'badcases')} onClick={() => setMode('badcases')} data-testid="artifact-mode-badcases">{t('artifacts.modes.badcases')}</button>
               </div>
               <Button
                 type="button"
@@ -668,6 +670,8 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             loading={loading}
             onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
           />
+        ) : mode === 'badcases' ? (
+          <BadCasesTab />
         ) : (
           <OpsView
             manifest={manifest}

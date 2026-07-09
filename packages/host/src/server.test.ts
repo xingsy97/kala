@@ -2304,6 +2304,316 @@ describe('wire protocol', () => {
   })
 })
 
+describe('terminal-bench HTTP actions', () => {
+  let server: HostServer
+  let dir: string
+  let url: string
+  let config: AgentConfig
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agent-kernel-tb-http-'))
+    config = createConfig({ tools: [WRITE], systemPrompt: 'sys' })
+  })
+
+  afterEach(async () => {
+    await server?.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  async function boot(): Promise<string> {
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((r) => http.listen(0, r))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+    return artifactRootDir
+  }
+
+  it('resolves inline terminal-bench tasks and returns only counts (no paths)', async () => {
+    await boot()
+    const tasksContent = [
+      { taskId: 't1', instruction: 'go', testScript: 'true' },
+      { taskId: 't2', instruction: 'go', testScript: 'true' },
+    ].map((t) => JSON.stringify(t)).join('\n')
+    const res = await postEnhancementAction(url, {
+      action: 'terminal-bench-resolve-tasks',
+      runId: 'tb-resolve',
+      tasksContent,
+    }) as Record<string, unknown>
+    expect(res.taskCount).toBe(2)
+    expect(res.runId).toBe('tb-resolve')
+    // Response must not leak filesystem paths (principle A1).
+    const asString = JSON.stringify(res)
+    expect(asString).not.toContain(dir)
+    expect(asString).not.toContain('.jsonl')
+  })
+
+  it('runs a terminal-bench agent end-to-end and reports summary counts', async () => {
+    const artifactRootDir = await boot()
+    const tasksContent = [
+      { taskId: 'pass', instruction: 'x', testScript: 'test -f pass.txt' },
+      { taskId: 'fail', instruction: 'x', testScript: 'test -f neverExists' },
+    ].map((t) => JSON.stringify(t)).join('\n')
+    await postEnhancementAction(url, {
+      action: 'terminal-bench-resolve-tasks',
+      runId: 'tb-run',
+      tasksContent,
+    })
+    const summary = await postEnhancementAction(url, {
+      action: 'terminal-bench-run-agent',
+      runId: 'tb-run',
+      agentCommand: 'if [ "$AGENT_KERNEL_TB_TASK_ID" = "pass" ]; then touch pass.txt; fi',
+    }) as { total: number; resolved: number; unresolved: number; errored: number; accuracy: number }
+    expect(summary.total).toBe(2)
+    expect(summary.resolved).toBe(1)
+    expect(summary.unresolved).toBe(1)
+    expect(summary.errored).toBe(0)
+    expect(summary.accuracy).toBeCloseTo(0.5)
+    const imported = await postEnhancementAction(url, {
+      action: 'terminal-bench-import-results',
+      runId: 'tb-run',
+    }) as { resolved: number; unresolved: number; total: number }
+    expect(imported.resolved).toBe(1)
+    expect(imported.unresolved).toBe(1)
+    expect(imported.total).toBe(2)
+    // Sanity: registry entry was written under artifactRootDir with the right kind.
+    const registry = JSON.parse(await readFile(join(artifactRootDir, 'registry', 'run-index.json'), 'utf8')) as {
+      entries: Array<{ runId: string; kind?: string }>
+    }
+    expect(registry.entries.find((e) => e.runId === 'tb-run')?.kind).toBe('terminal-bench')
+  })
+
+  it('reads terminal-bench progress after a completed run', async () => {
+    await boot()
+    const tasksContent = JSON.stringify({ taskId: 'p', instruction: 'x', testScript: 'true' })
+    await postEnhancementAction(url, {
+      action: 'terminal-bench-resolve-tasks',
+      runId: 'tb-progress',
+      tasksContent,
+    })
+    await postEnhancementAction(url, {
+      action: 'terminal-bench-run-agent',
+      runId: 'tb-progress',
+      agentCommand: 'true',
+    })
+    const progress = await postEnhancementAction(url, {
+      action: 'terminal-bench-read-progress',
+      runId: 'tb-progress',
+    }) as { status: string; total: number; completed: number; resolved: number }
+    expect(progress.status).toBe('completed')
+    expect(progress.total).toBe(1)
+    expect(progress.completed).toBe(1)
+    expect(progress.resolved).toBe(1)
+  })
+
+  it('reports not_started progress when no run exists yet', async () => {
+    await boot()
+    const progress = await postEnhancementAction(url, {
+      action: 'terminal-bench-read-progress',
+      runId: 'tb-missing',
+    }) as { status: string; total: number; completed: number }
+    expect(progress.status).toBe('not_started')
+    expect(progress.total).toBe(0)
+    expect(progress.completed).toBe(0)
+  })
+})
+
+describe('bad-case HTTP actions', () => {
+  let server: HostServer
+  let dir: string
+  let url: string
+  let config: AgentConfig
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agent-kernel-badcase-http-'))
+    config = createConfig({ tools: [WRITE], systemPrompt: 'sys' })
+  })
+
+  afterEach(async () => {
+    await server?.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  async function boot(): Promise<string> {
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((r) => http.listen(0, r))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+    return artifactRootDir
+  }
+
+  async function seedTerminalBenchFailure(rootDir: string, runId: string): Promise<void> {
+    await mkdir(join(rootDir, runId, 'trials'), { recursive: true })
+    await writeFile(
+      join(rootDir, runId, 'trials', 'task-x.json'),
+      JSON.stringify({
+        taskId: 'task-x',
+        status: 'unresolved',
+        parserOutput: { parser: 'exit-code', allPassed: false, details: 'exit 1' },
+        agentExitCode: 0,
+        agentTimedOut: false,
+        testExitCode: 1,
+        testTimedOut: false,
+        durationMs: 5,
+        agentStdout: 'hello',
+        agentStderr: 'ERROR: nope',
+        testStdout: '',
+        testStderr: '',
+      }),
+      'utf8',
+    )
+  }
+
+  it('badcase-list returns grouped counts and no filesystem paths', async () => {
+    const artifactRootDir = await boot()
+    await seedTerminalBenchFailure(artifactRootDir, 'r-list')
+    const res = await postEnhancementAction(url, {
+      action: 'badcase-list',
+      runId: 'r-list',
+    }) as { counts: Record<string, number>; cases: Array<{ instanceId: string; failureCategory: string }> }
+    expect(res.cases).toHaveLength(1)
+    expect(res.cases[0]!.instanceId).toBe('task-x')
+    expect(res.counts['verifier-failure']).toBe(1)
+    const asString = JSON.stringify(res)
+    expect(asString).not.toContain(dir)
+    expect(asString).not.toContain('.jsonl')
+  })
+
+  it('badcase-annotate persists a label and badcase-list echoes it', async () => {
+    const artifactRootDir = await boot()
+    await seedTerminalBenchFailure(artifactRootDir, 'r-annot')
+    await postEnhancementAction(url, {
+      action: 'badcase-annotate',
+      runId: 'r-annot',
+      instanceId: 'task-x',
+      label: 'worth-retraining',
+      note: 'good SFT candidate',
+    })
+    const res = await postEnhancementAction(url, {
+      action: 'badcase-list',
+      runId: 'r-annot',
+    }) as { cases: Array<{ instanceId: string; annotation?: { label: string; note?: string } }> }
+    expect(res.cases[0]!.annotation?.label).toBe('worth-retraining')
+    expect(res.cases[0]!.annotation?.note).toBe('good SFT candidate')
+  })
+
+  it('badcase-annotate rejects unknown labels', async () => {
+    await boot()
+    const response = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'badcase-annotate',
+        runId: 'r-bad',
+        instanceId: 'task-x',
+        label: 'made-up',
+      }),
+    })
+    expect(response.status).toBe(400)
+  })
+
+  it('badcase-export returns SFT and RL JSONL content strings', async () => {
+    const artifactRootDir = await boot()
+    await seedTerminalBenchFailure(artifactRootDir, 'r-export')
+    const sft = await postEnhancementAction(url, {
+      action: 'badcase-export',
+      runId: 'r-export',
+      instanceIds: ['task-x'],
+      format: 'sft',
+    }) as { format: string; count: number; content: string }
+    expect(sft.format).toBe('sft')
+    expect(sft.count).toBe(1)
+    const sftRow = JSON.parse(sft.content.trim()) as Record<string, unknown>
+    expect(sftRow).toHaveProperty('instruction')
+    expect(sftRow).toHaveProperty('trace')
+
+    const rl = await postEnhancementAction(url, {
+      action: 'badcase-export',
+      runId: 'r-export',
+      instanceIds: ['task-x'],
+      format: 'rl',
+    }) as { content: string }
+    const rlRow = JSON.parse(rl.content.trim()) as Record<string, unknown>
+    expect(rlRow.reward).toBe(0)
+    expect(rlRow.reason).toBe('verifier-failure')
+  })
+
+  it('rollout-export returns verl and slime JSONL with per-trial reward and no paths', async () => {
+    const artifactRootDir = await boot()
+    await mkdir(join(artifactRootDir, 'r-rollout', 'trials'), { recursive: true })
+    await writeFile(
+      join(artifactRootDir, 'r-rollout', 'trials', 'inst-ok.json'),
+      JSON.stringify({
+        trialId: 'r-rollout:inst-ok',
+        experimentId: 'r-rollout',
+        instanceId: 'inst-ok',
+        status: 'completed',
+        resolved: true,
+        artifacts: [],
+        metrics: {},
+      }),
+      'utf8',
+    )
+    await writeFile(
+      join(artifactRootDir, 'r-rollout', 'trials', 'inst-bad.json'),
+      JSON.stringify({
+        trialId: 'r-rollout:inst-bad',
+        experimentId: 'r-rollout',
+        instanceId: 'inst-bad',
+        status: 'failed',
+        resolved: false,
+        artifacts: [],
+        metrics: {},
+      }),
+      'utf8',
+    )
+
+    const verl = await postEnhancementAction(url, {
+      action: 'rollout-export',
+      runId: 'r-rollout',
+      target: 'verl',
+    }) as { target: string; rolloutCount: number; content: string }
+    expect(verl.target).toBe('verl')
+    expect(verl.rolloutCount).toBe(2)
+    const verlRows = verl.content.trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>)
+    const rewards = new Map(verlRows.map((r) => [r.taskId as string, r.reward as number]))
+    expect(rewards.get('inst-ok')).toBe(1)
+    expect(rewards.get('inst-bad')).toBe(0)
+    const envelope = JSON.stringify(verl)
+    expect(envelope).not.toContain(artifactRootDir)
+    expect(envelope).not.toContain('.jsonl')
+
+    const slime = await postEnhancementAction(url, {
+      action: 'rollout-export',
+      runId: 'r-rollout',
+      target: 'slime',
+      includeStatuses: ['completed'],
+    }) as { rolloutCount: number; content: string }
+    expect(slime.rolloutCount).toBe(1)
+    const slimeRow = JSON.parse(slime.content.trim()) as Record<string, unknown>
+    expect(slimeRow.frameworkTarget).toBe('slime')
+    expect(slimeRow.entrypoint).toBe('custom_rollout_manifest')
+    expect(slimeRow.reward).toBe(1)
+  })
+})
+
 describe('protocol doc drift', () => {
   it('wire-protocol.md §3.4 session:error scope union matches SESSION_ERROR_SCOPES', async () => {
     // Reviewer round-2 observation: the shared TS type used `'host'` while
