@@ -413,6 +413,49 @@ export type ServerModelsPayload = {
   defaultModel: string
 }
 
+/**
+ * Host's advertised settings snapshot. Returned by `GET /settings`.
+ *
+ * Read-only: the host reads its config from local files owned by the
+ * operator, and we don't (yet) let the dashboard write those files. The
+ * Settings UI shows what's active, points at where to edit it, and provides
+ * copy-paste config snippets for the current state.
+ *
+ * Never contains API keys, hook payloads, or command args that could leak
+ * env — the endpoint is served over the same socket the dashboard uses and
+ * anyone with dashboard access could already fetch these, but we still
+ * scrub secrets before serializing.
+ */
+export type SettingsProviderSummary = {
+  id: string
+  label: string
+  wire: 'anthropic' | 'openai'
+  baseUrl?: string
+  models: readonly string[]
+}
+
+export type SettingsHookSummary = {
+  event: 'pre_tool_use' | 'post_tool_use' | 'session_start' | 'session_end'
+  command: string
+  match?: string
+}
+
+export type ServerSettingsPayload = {
+  providers: readonly SettingsProviderSummary[]
+  defaultModel: string
+  hooks: readonly SettingsHookSummary[]
+  paths: {
+    claudeSettings: string
+    codexConfig: string
+    hooksConfig: string
+    sessionsDir: string
+  }
+  mcp: {
+    supported: false
+    note: string
+  }
+}
+
 // ============================================================================
 // Socket.IO event maps
 // ============================================================================
