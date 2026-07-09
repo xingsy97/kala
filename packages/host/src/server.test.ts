@@ -1446,6 +1446,24 @@ describe('wire protocol', () => {
     expect(toolResultContent).toContain('status="cancelled"')
     expect(toolResultContent).toContain('sub-agent interrupted by user')
 
+    const textDeadline = Date.now() + 2000
+    while (Date.now() < textDeadline) {
+      const rec = server.store.get(sessionId)
+      if (rec?.state.status === 'done') {
+        const log = await readSessionLog(rec.logPath)
+        const hasParentText = log.events.some((e) => {
+          if (e.event.kind !== 'llm_response') return false
+          const content = e.event.message.content
+          if (typeof content === 'string') return content.includes('parent observed cancellation')
+          return content.some(
+            (block) => block.type === 'text' && block.text.includes('parent observed cancellation'),
+          )
+        })
+        if (hasParentText) break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+
     dashboard.close()
   })
 
