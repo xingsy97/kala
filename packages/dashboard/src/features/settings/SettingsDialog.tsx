@@ -61,14 +61,14 @@ export function SettingsDialog({ open, onOpenChange }: Props): JSX.Element {
         className="max-w-4xl h-[80vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)]"
         data-testid="settings-dialog"
       >
-        <DialogHeader className="border-b border-border px-4 py-3">
+        <DialogHeader className="border-b border-border/50 px-4 py-3">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
             Read-only view of the host's runtime config. Edit the underlying files and restart the host to change these values.
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 grid-cols-[200px_minmax(0,1fr)]">
-          <aside className="min-h-0 border-r border-border bg-muted/60">
+          <aside className="min-h-0 border-r border-border/50 bg-muted/60">
             <nav className="space-y-1 p-2" aria-label="Settings sections">
               {SECTIONS.map((s) => (
                 <button
@@ -157,11 +157,11 @@ function RuntimeSection({
               <tr
                 key={label}
                 className={cn(
-                  'border-border',
+                  'border-border/50',
                   i !== rows.length - 1 && 'border-b',
                 )}
               >
-                <th className="w-56 border-r border-border bg-muted/50 px-3 py-2.5 text-left font-medium">
+                <th className="w-56 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">
                   {label}
                 </th>
                 <td className="px-3 py-2.5 font-mono text-xs">
@@ -299,9 +299,9 @@ function HooksSection({
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="border-b border-border px-3 py-2 text-left">Event</th>
-                <th className="border-b border-border px-3 py-2 text-left">Match</th>
-                <th className="border-b border-border px-3 py-2 text-left">Command</th>
+                <th className="border-b border-border/50 px-3 py-2 text-left">Event</th>
+                <th className="border-b border-border/50 px-3 py-2 text-left">Match</th>
+                <th className="border-b border-border/50 px-3 py-2 text-left">Command</th>
               </tr>
             </thead>
             <tbody>
@@ -309,7 +309,7 @@ function HooksSection({
                 <tr
                   key={i}
                   className={cn(
-                    'border-border',
+                    'border-border/50',
                     i !== payload.hooks.length - 1 && 'border-b',
                   )}
                 >

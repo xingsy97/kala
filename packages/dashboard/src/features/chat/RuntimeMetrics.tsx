@@ -40,7 +40,7 @@ export function RuntimeMetrics({
 
   return (
     <div
-      className="flex min-w-[16rem] flex-1 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-secondary px-2 py-1 text-[11px] text-secondary-foreground"
+      className="flex min-w-[16rem] flex-1 items-center gap-1.5 overflow-hidden rounded-md border border-border/50 bg-secondary px-2 py-1 text-[11px] text-secondary-foreground"
       title={title}
       aria-label={title}
       data-testid="context-usage-indicator"
@@ -132,7 +132,7 @@ function Metric({
           ? 'border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300'
           : tone === 'sky'
             ? 'border-sky-300 text-sky-700 dark:border-sky-800 dark:text-sky-300'
-            : 'border-border',
+            : 'border-border/50',
         className,
       )}
       title={`${title} Current value: ${value}.`}
