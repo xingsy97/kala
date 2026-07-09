@@ -27,7 +27,7 @@ Every executor bundled in this repo MUST implement the tools below. Third-party 
 | `edit` | Precise string replace | ✅ | Mutating |
 | `bash` | Execute shell command; can start background tasks with `run_in_background` | ✅ | Mutating |
 | `todowrite` | Replace the session todo list | ❌ | Planning tool |
-| `web_search` | DuckDuckGo HTML search | ❌ | Network |
+| `websearch` | Serper search with DuckDuckGo HTML fallback | ❌ | Network |
 | `memory` | List, read, write, or delete memory entries (session / workspace / global scope) | ❌ | Memory |
 | `agent` | Spawn a host-side child agent session | ❌ | Host builtin |
 | `bash_output` | Poll background shell task output | ❌ | Background shell |
@@ -271,9 +271,9 @@ Replace the session's todo list.
 
 **Reducer behavior**: none. This is a normal tool call. The dashboard may derive a task display from successful `todowrite` calls in the timeline, but `AgentState` does not contain todos.
 
-### 2.9 `web_search`
+### 2.9 `websearch`
 
-Search the web via DuckDuckGo. No API key required.
+Search the web. When `SERPER_API_KEY` is configured, the executor uses Serper. Without that key, it falls back to DuckDuckGo HTML endpoints.
 
 **Schema**:
 ```json
@@ -287,16 +287,18 @@ Search the web via DuckDuckGo. No API key required.
 }
 ```
 
-**Output**: JSON `{"results": [{"title": string, "url": string, "snippet": string}]}`. Snippets are truncated to 500 characters. If DuckDuckGo returns no results, `results` is an empty array.
+**Output**: Plain text search results with title, URL, and snippet. Snippets are truncated to 500 characters. If the provider returns no results, the tool returns `No results for: <query>`.
 
 **Errors** (`ok: false, content: <string>`):
-- `web_search timed out after 15000ms`
-- `web_search failed: <http status>`
-- `web_search failed: <error message>`
+- `ETIMEDOUT: search timed out after 15000ms`
+- `EHTTP: Serper returned HTTP <status>`
+- `EHTTP: DuckDuckGo returned HTTP <status>`
+- `ESEARCH_UNAVAILABLE: DuckDuckGo returned a landing/challenge page instead of search results`
+- `ENETWORK: search failed: <error message>`
 
 **Approval**: `requiresApproval: false`.
 
-**Implementation**: `packages/executor/src/tools/websearch.ts` hits `https://html.duckduckgo.com/html/?q=<query>` and parses the anchor/snippet HTML. No Serper / Brave / Google API key is used.
+**Implementation**: `packages/executor/src/tools/websearch.ts` posts to `https://google.serper.dev/search` when `SERPER_API_KEY` is present. Otherwise it tries DuckDuckGo HTML/lite endpoints and parses result anchors/snippets.
 
 ### 2.10 `memory`
 

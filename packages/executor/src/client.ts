@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 import type {
+  BuildMetadata,
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
   ExecutorServerToClientEvents,
@@ -41,9 +42,17 @@ import {
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
 import { subscribeBackgroundTasks } from './tools/background-shell.js'
+import { createTerminalManager } from './terminal-manager.js'
+import type { RuntimeLogger } from './logger.js'
 import packageJson from '../package.json' with { type: 'json' }
 
 const EXECUTOR_VERSION = packageJson.version
+
+const noopLogger: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'> = {
+  debug() {},
+  info() {},
+  warn() {},
+}
 
 export type ExecutorOptions = {
   /** Host URL (e.g. `wss://host.example.com` or `http://localhost:3000`). */
@@ -71,6 +80,7 @@ export type ExecutorOptions = {
   executorId?: string
   onToken?(token: string): void
   tools?: readonly Tool[]
+  logger?: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'>
   /** Injectable Socket.IO factory — used by tests. */
   ioFactory?: typeof clientIO
 }
@@ -102,6 +112,7 @@ export type ExecutorHandle = {
 }
 
 export function startExecutor(options: ExecutorOptions): ExecutorHandle {
+  const logger = options.logger ?? noopLogger
   const sandboxRoots = options.sandboxRoots ?? []
   const sandbox: Sandbox = createSandbox({ roots: sandboxRoots })
   const tools = createToolRegistry(options.tools ?? defaultTools)
@@ -148,10 +159,13 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   const announcement: ExecutorAnnounce = {
     executorId,
     executorVersion: EXECUTOR_VERSION,
+    build: executorBuildInfo(),
+    capabilities: executorCapabilities(tools, sandboxRoots),
     workspaceId,
     workspaceName,
     tools: [...tools.keys()],
     ...(sandboxRoots.length > 0 ? { sandboxRoots: [...sandboxRoots] } : {}),
+    defaultCwd: workspaceRoot,
     runtime: 'node',
     runtimeVersion: process.version,
     hostname: hostname(),
@@ -163,7 +177,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 
   const ready = new Promise<void>((resolve) => {
     socket.on('connect', () => {
-      process.stderr.write(`agent-kernel-executor: socket connected (id=${socket.id}), announcing workspace ${workspaceId} (${workspaceName})\n`)
+      logger.info({ socketId: socket.id, workspaceId, workspaceName }, 'socket connected; announcing workspace')
       socket.emit('executor:announce', announcement)
       resolve()
     })
@@ -182,20 +196,22 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
         detailParts.push(`description=${d}`)
       }
     }
-    const detail = detailParts.length > 0 ? ` [${detailParts.join(', ')}]` : ''
-    process.stderr.write(`agent-kernel-executor: connect_error: ${e.message || String(err)}${detail}\n`)
+    logger.warn(
+      { err: e, details: detailParts },
+      `connect_error: ${e.message || String(err)}`,
+    )
   })
   socket.on('disconnect', (reason) => {
-    process.stderr.write(`agent-kernel-executor: disconnected (${reason})\n`)
+    logger.info({ reason }, 'socket disconnected')
   })
   socket.io.on('reconnect_attempt', (n) => {
-    process.stderr.write(`agent-kernel-executor: reconnect attempt #${n}\n`)
+    logger.info({ attempt: n }, 'socket reconnect attempt')
   })
   socket.io.on('reconnect_failed', () => {
-    process.stderr.write(`agent-kernel-executor: giving up — reconnection attempts exhausted\n`)
+    logger.warn('socket reconnect attempts exhausted')
   })
 
-  process.stderr.write(`agent-kernel-executor: dialing ${options.host}/executor (websocket, up to 30 retries with backoff)\n`)
+  logger.info({ host: options.host, namespace: '/executor' }, 'dialing host executor namespace')
 
   // Permanent-error latch. Any handler that discovers we cannot recover
   // resolves this once — the CLI awaits it to exit with a specific code.
@@ -222,7 +238,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
 
   socket.on('executor:welcome', (payload) => {
-    process.stderr.write(`agent-kernel-executor: welcome from host — token saved, ready for tool calls\n`)
+    logger.info('welcome from host; token saved, ready for tool calls')
     options.onToken?.(payload.token)
     socket.auth = {
       role: 'executor',
@@ -282,6 +298,32 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     if (ctrl) ctrl.abort()
   })
 
+  const terminals = createTerminalManager({
+    sandbox,
+    emitOutput(payload) {
+      socket.emit('executor:terminal_output', payload)
+    },
+    emitExit(payload) {
+      socket.emit('executor:terminal_exit', payload)
+    },
+  })
+
+  socket.on('terminal:create', async (payload, ack) => {
+    ack(await terminals.create(payload))
+  })
+
+  socket.on('terminal:input', (payload) => {
+    terminals.input(payload)
+  })
+
+  socket.on('terminal:resize', (payload) => {
+    terminals.resize(payload)
+  })
+
+  socket.on('terminal:kill', (payload, ack) => {
+    ack(terminals.kill(payload))
+  })
+
   // Host-internal filesystem/background RPCs also arrive as ordinary
   // `tool:call` messages. The executor executes tools only; the host decides
   // whether the result enters the agent transcript or returns to a dashboard RPC.
@@ -312,10 +354,53 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     permanentError,
     close() {
       unsubscribeBg()
+      terminals.closeAll()
       for (const c of inFlight.values()) c.abort()
       inFlight.clear()
       socket.disconnect()
     },
+  }
+}
+
+function executorCapabilities(tools: ReadonlyMap<string, Tool>, sandboxRoots: readonly string[]): ExecutorAnnounce['capabilities'] {
+  return {
+    schemaVersion: 1,
+    features: {
+      backgroundShell: tools.has('bash_output') && tools.has('kill_shell'),
+      filePicker: tools.has('__fs_list_dirs') && tools.has('__fs_list_files') && tools.has('__fs_read_file'),
+      overflowFiles: tools.has('__fs_read_overflow'),
+      workspaceSandbox: sandboxRoots.length > 0,
+    },
+  }
+}
+
+function executorBuildInfo(): BuildMetadata {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_BUILD_INFO__?: unknown
+  }).__AGENT_KERNEL_BUILD_INFO__
+  return parseBuildInfo(globalValue) ?? {
+    releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
+    builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
+    artifactKind: 'source',
+    dashboardMode: 'none',
+  }
+}
+
+function parseBuildInfo(value: unknown): BuildMetadata | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const artifactKind = record.artifactKind
+  const dashboardMode = record.dashboardMode
+  if (artifactKind !== 'source' && artifactKind !== 'cjs' && artifactKind !== 'native') return null
+  if (dashboardMode !== 'vite' && dashboardMode !== 'static' && dashboardMode !== 'embedded' && dashboardMode !== 'none') return null
+  return {
+    releaseTag: typeof record.releaseTag === 'string' ? record.releaseTag : 'unknown',
+    gitCommit: typeof record.gitCommit === 'string' ? record.gitCommit : 'unknown',
+    builtAt: typeof record.builtAt === 'string' ? record.builtAt : 'unknown',
+    artifactKind,
+    dashboardMode,
+    ...(typeof record.embeddedDashboardFiles === 'number' ? { embeddedDashboardFiles: record.embeddedDashboardFiles } : {}),
   }
 }
 

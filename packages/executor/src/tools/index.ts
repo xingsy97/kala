@@ -9,6 +9,7 @@ export { bashOutputTool } from './bash-output.js'
 export { killShellTool } from './kill-shell.js'
 export { todowriteTool } from './todowrite.js'
 export { websearchTool } from './websearch.js'
+export { webfetchTool } from './webfetch.js'
 export { memoryTool } from './memory.js'
 export { internalDirectTools } from './internal.js'
 export { agentToolSchema } from './agent.js'
@@ -27,6 +28,7 @@ import { bashOutputTool } from './bash-output.js'
 import { killShellTool } from './kill-shell.js'
 import { todowriteTool } from './todowrite.js'
 import { websearchTool } from './websearch.js'
+import { webfetchTool } from './webfetch.js'
 import { memoryTool } from './memory.js'
 import { internalDirectTools } from './internal.js'
 
@@ -42,6 +44,7 @@ export const allTools: readonly Tool[] = [
   killShellTool,
   todowriteTool,
   websearchTool,
+  webfetchTool,
   memoryTool,
   ...internalDirectTools,
 ]

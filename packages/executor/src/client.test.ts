@@ -13,7 +13,10 @@ import type { LLMAdapter } from '@agent-kernel/host'
 import type {
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
+  FileContentsResult,
+  ServerTerminalOutput,
   SessionReadyEvent,
+  TerminalCreateResult,
 } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
@@ -402,6 +405,66 @@ describe('executor end-to-end', () => {
     expect(normalizePath(pwd?.split('\n')[0] ?? '')).toBe(normalizePath(child))
     expect(pwd).not.toContain(process.cwd())
 
+    dashboard.close()
+    executor.close()
+  })
+
+  it('serves session file view and interactive terminal RPCs through the executor', async () => {
+    const sessionId = 'e2e-files-terminal'
+    const workspaceId = ulid()
+    const filePath = join(sandboxRoot, 'view.txt')
+    writeFileSync(filePath, 'view-ok', 'utf8')
+    await server.store.ensure({
+      sessionId,
+      defaultConfig: config,
+      workspaceId,
+      workspaceName: 'test-ws',
+      initialCwd: sandboxRoot,
+    })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const executor = startExecutor({ host: url, workspaceId, workspaceName: 'test-ws', sandboxRoots: [sandboxRoot] })
+    await executor.ready
+
+    const file = await new Promise<FileContentsResult>((resolve, reject) => {
+      const requestId = 'read-file-view'
+      const timer = setTimeout(() => reject(new Error('file view timed out')), 3000)
+      dashboard.on('server:file_contents', (payload) => {
+        if (payload.requestId !== requestId) return
+        clearTimeout(timer)
+        resolve(payload)
+      })
+      dashboard.emit('client:read_file', { requestId, workspaceId, path: filePath })
+    })
+    expect(file).toMatchObject({ content: 'view-ok', kind: 'text' })
+
+    const created = await new Promise<TerminalCreateResult>((resolve) => {
+      dashboard.emit('terminal:create', { requestId: 'term-create', workspaceId, sessionId, cwd: sandboxRoot, cols: 80, rows: 8 }, resolve)
+    })
+    expect(created.error).toBeUndefined()
+    expect(created.terminalId).toBeTruthy()
+
+    const output = new Promise<ServerTerminalOutput>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('terminal output timed out')), 5000)
+      dashboard.on('server:terminal_output', (payload) => {
+        if (payload.terminalId !== created.terminalId) return
+        if (!payload.data.includes('terminal-ok')) return
+        clearTimeout(timer)
+        resolve(payload)
+      })
+    })
+    dashboard.emit('terminal:input', { workspaceId, sessionId, terminalId: created.terminalId!, data: 'echo terminal-ok\n' })
+    await output
+
+    await new Promise<void>((resolve) => {
+      dashboard.emit('terminal:kill', { requestId: 'term-kill', workspaceId, sessionId, terminalId: created.terminalId! }, () => resolve())
+    })
     dashboard.close()
     executor.close()
   })

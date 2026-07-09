@@ -37,8 +37,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
-import type { ManualModelInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { ManualModelInput, ManualProviderInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
+import bcrypt from 'bcryptjs'
 
 import packageJson from '../package.json' with { type: 'json' }
 import { anthropicAdapter } from '../src/llm/anthropic.js'
@@ -51,27 +52,43 @@ import {
 } from '../src/llm/provider-health.js'
 import { routerAdapter, toFallbackArtifact, type MutableRouter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
-import { createBuiltinTools } from '../src/builtin-tools.js'
+import { AGENT_SYSTEM_PROMPT_PRESETS, normalizeAgentSystemPromptPreset, resolveBuiltinAgentModule } from '../src/builtin-tools.js'
 import { createHookRunner } from '../src/extensions/hooks.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import {
   knownContextWindow,
+  defaultAgentSettingsPath,
+  loadAgentRuntimeSettings,
   loadHookConfigs,
   loadRuntimeConfig,
   modelInfo,
+  modelRef,
   type ProviderSpec,
-  writeManualModels,
+  writeAgentRuntimeSettings,
+  writeManualConfig,
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
+import type { EmbeddedStaticAsset } from '../src/http/routes.js'
+import { loadSocketAdminConfig, type EmbeddedSocketAdminAsset } from '../src/socket-admin.js'
+import { createSocketAdminStore } from '../src/socket-admin-store.js'
 import { authSettings, type AuthConfig } from '../src/auth-control.js'
 import { createAuditLogger } from '../src/audit-log.js'
 import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
-import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench-cli.js'
+import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench/swebench-cli.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 const VERSION = packageJson.version
+
+type BuildInfo = {
+  releaseTag: string
+  gitCommit: string
+  builtAt: string
+  artifactKind: 'source' | 'cjs' | 'native'
+  dashboardMode: 'vite' | 'static' | 'embedded' | 'none'
+  socketAdminMode?: 'embedded' | 'filesystem' | 'missing'
+}
 
 function argValue(argv: readonly string[], name: string): string | undefined {
   for (let i = 0; i < argv.length; i++) {
@@ -88,40 +105,45 @@ function hasFlag(argv: readonly string[], ...names: readonly string[]): boolean 
 }
 
 function printHelp(): void {
-  process.stdout.write(`agent-kernel-host
+  process.stdout.write(`Agent RunLab Runtime
 
 Usage:
-  agent-kernel-host [options]
-  agent-kernel-host eval swebench <command> [options]
-  agent-kernel-host enhancement <area> <command> [options]
+  bundle-dashboard-with-runtime.cjs [options]
+  bundle-dashboard-with-runtime.cjs eval swebench <command> [options]
+  bundle-dashboard-with-runtime.cjs enhancement <area> <command> [options]
 
 Options:
   -h, --help                 Show this help and exit.
   -v, --version              Print version and exit.
   --port <port>              HTTP/WebSocket port. Defaults to HOST_PORT or 3000.
+  --print-agent-module       Print resolved agent module metadata and exit.
+  --print-system-prompt      Print resolved system prompt and exit.
+  --print-tool-registry      Print resolved tool registry and exit.
 
 Common environment:
   HOST_PORT                  Port used when --port is omitted.
   SESSIONS_DIR               Session JSONL directory. Default: ~/.agent-kernel/sessions.
   AGENT_KERNEL_ARTIFACTS_DIR Artifact root. Set to 0 to disable artifact writes.
-  DASHBOARD_DIR              Static dashboard directory to serve.
+  DASHBOARD_DIR              Static dashboard directory override.
   HOST_AUTH_TOKEN            Optional shared token required by clients.
   EXECUTOR_TOKENS            Optional JSON array of executor tokens.
   HOST_MODEL                 Override the default model.
+  AGENT_KERNEL_SOCKET_ADMIN_USER
+                             Socket.IO Admin UI username. Default: admin.
   LOG_LEVEL                  trace, debug, info, warn, error. Default: info.
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
-  agent-kernel-host --port 3000
-  HOST_PORT=3001 DASHBOARD_DIR=/opt/agent-kernel/dashboard agent-kernel-host
-  LOG_FORMAT=json agent-kernel-host --port 3000
-  agent-kernel-host eval swebench --help
-  agent-kernel-host enhancement --help
+  node bundle-dashboard-with-runtime.cjs --port 3000
+  HOST_PORT=3001 node bundle-dashboard-with-runtime.cjs
+  LOG_FORMAT=json node bundle-dashboard-with-runtime.cjs --port 3000
+  node bundle-dashboard-with-runtime.cjs eval swebench --help
+  node bundle-dashboard-with-runtime.cjs enhancement --help
 `)
 }
 
 function printVersion(): void {
-  process.stdout.write(`agent-kernel-host ${VERSION}\n`)
+  process.stdout.write(`Agent RunLab Runtime ${VERSION}\n`)
 }
 
 async function main(): Promise<void> {
@@ -163,17 +185,48 @@ async function main(): Promise<void> {
   const effectiveAuth: AuthConfig = { ...(auth ?? {}), executorIdentityStore }
   const healthRegistry = createProviderHealthRegistry()
   const registry = createModelRegistry(runtime.providers, runtime.manualModels, {
+    initialManualProviders: runtime.manualProviders,
+    initialManualDefaultModel: runtime.manualDefaultModel,
     fallbackDefault: runtime.defaultModel,
     healthRegistry,
     ...(artifactRootDir ? { artifactRootDir } : {}),
     logger,
   })
-  const { llm, defaultModel } = registry
+  const { llm } = registry
+
+  const skills = await discoverSkills()
+  const agentSettingsPath = defaultAgentSettingsPath()
+  let agentSettings = loadAgentRuntimeSettings(agentSettingsPath)
+  const resolveCurrentAgentModule = () => resolveBuiltinAgentModule({
+    skills: skills.skills,
+    systemPromptPreset: agentSettings.systemPromptPreset,
+    ...(knownContextWindow(registry.defaultModel)
+      ? { contextLimit: knownContextWindow(registry.defaultModel) }
+      : {}),
+  })
+  let resolvedAgentModule = resolveCurrentAgentModule()
+  if (hasFlag(argv, '--print-agent-module')) {
+    process.stdout.write(`${JSON.stringify(resolvedAgentModule.metadata, null, 2)}\n`)
+    return
+  }
+  if (hasFlag(argv, '--print-system-prompt')) {
+    process.stdout.write(`${resolvedAgentModule.systemPrompt}\n`)
+    return
+  }
+  if (hasFlag(argv, '--print-tool-registry')) {
+    process.stdout.write(`${JSON.stringify(resolvedAgentModule.toolDefinitions, null, 2)}\n`)
+    return
+  }
 
   const dashboard = await createDashboardServing()
+  const embeddedSocketAdminAssets = embeddedSocketAdminAssetsFromGlobal()
+  const socketAdminStorePath = process.env.AGENT_KERNEL_SOCKET_ADMIN_CONFIG ?? join(homedir(), '.config', 'agent-kernel', 'socket-admin.json')
+  const socketAdminStore = createSocketAdminStore(socketAdminStorePath)
+  let socketAdminState = loadSocketAdminConfig({ currentModulePath: currentModulePath(), configPath: socketAdminStore.path, record: socketAdminStore.load(), embeddedAssets: embeddedSocketAdminAssets })
+  let activeSocketAdminMode = socketAdminState.runtime?.mode
+  const buildInfo = runtimeBuildInfo(dashboard, embeddedSocketAdminAssets)
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
-  const skills = await discoverSkills()
   let release = releaseSettings(port)
 
   const manualModelsPath = join(homedir(), '.config', 'agent-kernel', 'models.json')
@@ -191,13 +244,21 @@ async function main(): Promise<void> {
       ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
       models: registry.models.filter((m) => m.providerId === p.id),
     })),
-    defaultModel,
+    defaultModel: registry.defaultModel,
     hooks: hookSummaries,
     versions: {
       host: VERSION,
       protocol: PROTOCOL_VERSION,
+      build: buildInfo,
+    },
+    agentModule: resolvedAgentModule.metadata,
+    agentPrompt: {
+      selectedPreset: agentSettings.systemPromptPreset,
+      presets: AGENT_SYSTEM_PROMPT_PRESETS,
+      configPath: agentSettingsPath,
     },
     auth: authSettings(effectiveAuth),
+    socketAdmin: socketAdminState.summary,
     paths: {
       claudeSettings: join(homedir(), '.claude', 'settings.json'),
       codexConfig: join(homedir(), '.codex', 'config.toml'),
@@ -216,30 +277,82 @@ async function main(): Promise<void> {
     port,
     sessionsDir,
     llm,
-    defaultConfig: {
-      tools: [...createBuiltinTools(skills.skills)],
-      systemPrompt: 'You are a coding agent running via agent-kernel.',
-      ...(knownContextWindow(defaultModel)
-        ? { contextLimit: knownContextWindow(defaultModel) }
-        : {}),
-    },
+    logger,
+    defaultConfig: () => resolvedAgentModule.config,
     models: () => registry.models,
-    defaultModel,
+    defaultModel: () => registry.defaultModel,
     settings: makeSettings,
     addManualModel: (input) => {
       registry.addManual(input)
-      writeManualModels(manualModelsPath, registry.manualModels)
+      writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
       return makeSettings()
     },
     deleteManualModel: (input) => {
       registry.deleteManual(input.providerId, input.id)
-      writeManualModels(manualModelsPath, registry.manualModels)
+      writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
+      return makeSettings()
+    },
+    addManualProvider: (input) => {
+      registry.addManualProvider(input)
+      writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
+      return makeSettings()
+    },
+    deleteManualProvider: (input) => {
+      registry.deleteManualProvider(input.providerId)
+      writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
+      return makeSettings()
+    },
+    setDefaultModel: (input) => {
+      registry.setDefaultModel(input.model)
+      writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
+      return makeSettings()
+    },
+    updateAgentPrompt: (input) => {
+      agentSettings = { systemPromptPreset: normalizeAgentSystemPromptPreset(input.preset) }
+      writeAgentRuntimeSettings(agentSettingsPath, agentSettings)
+      resolvedAgentModule = resolveCurrentAgentModule()
+      return makeSettings()
+    },
+    initializeSocketAdmin: (input) => {
+      const password = input.password.trim()
+      if (password.length < 8) throw new Error('Socket.IO Admin UI password must be at least 8 characters')
+      if (socketAdminStore.load()) {
+        const err = new Error('Socket.IO Admin UI password is already initialized') as Error & { status?: number }
+        err.status = 409
+        throw err
+      }
+      const username = process.env.AGENT_KERNEL_SOCKET_ADMIN_USER?.trim() || 'admin'
+      socketAdminStore.initialize({ username, passwordHash: hashSocketAdminPassword(password), mode: input.mode ?? socketAdminState.summary.configuredMode })
+      socketAdminState = loadSocketAdminConfig({ currentModulePath: currentModulePath(), configPath: socketAdminStore.path, record: socketAdminStore.load(), embeddedAssets: embeddedSocketAdminAssets })
+      if (socketAdminState.runtime) {
+        input.activate(socketAdminState.runtime)
+        activeSocketAdminMode = socketAdminState.runtime.mode
+      }
+      return makeSettings()
+    },
+    updateSocketAdminMode: (input) => {
+      socketAdminStore.updateMode(input.mode)
+      socketAdminState = loadSocketAdminConfig({ currentModulePath: currentModulePath(), configPath: socketAdminStore.path, record: socketAdminStore.load(), embeddedAssets: embeddedSocketAdminAssets })
+      if (activeSocketAdminMode && input.mode !== activeSocketAdminMode) {
+        socketAdminState = {
+          ...socketAdminState,
+          summary: {
+            ...socketAdminState.summary,
+            runtimeMode: activeSocketAdminMode,
+            configuredMode: input.mode,
+            restartRequired: true,
+          },
+        }
+      }
       return makeSettings()
     },
     auth: effectiveAuth,
     audit,
     ...(dashboard.kind === 'vite' ? { dashboardHandler: dashboard.handler } : {}),
     ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
+    ...(dashboard.kind === 'embedded' ? { embeddedStaticAssets: dashboard.assets } : {}),
+    ...(socketAdminState.runtime ? { socketAdmin: socketAdminState.runtime } : {}),
+    ...(embeddedSocketAdminAssets.length > 0 ? { embeddedSocketAdminAssets } : {}),
     ...(release.source === 'local' ? { releaseAssetsDir: releaseDir() } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
@@ -258,9 +371,11 @@ async function main(): Promise<void> {
     sessionsDir,
     llm: llm.name,
     models: registry.models.map((m) => m.id),
-    defaultModel,
+    defaultModel: registry.defaultModel,
     dashboard: dashboard.kind,
     ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
+    ...(dashboard.kind === 'embedded' ? { embeddedAssets: dashboard.assets.length } : {}),
+    socketAdmin: socketAdminState.summary,
     hooks: hooks.length,
     skills: skills.skills.length,
     artifactRootDir,
@@ -284,38 +399,54 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown)
 }
 
+function hashSocketAdminPassword(password: string): string {
+  return bcrypt.hashSync(password, 10)
+}
+
 type BuildResult = {
   llm: MutableRouter | LLMAdapter
   providers: readonly ProviderSpec[]
   models: readonly ModelInfo[]
+  manualProviders: readonly ManualProviderInput[]
   manualModels: readonly ManualModelInput[]
+  manualDefaultModel?: string
   defaultModel: string
   addManual(input: ManualModelInput): void
   deleteManual(providerId: string, id: string): void
+  addManualProvider(input: ManualProviderInput): void
+  deleteManualProvider(providerId: string): void
+  setDefaultModel(model: string): void
 }
 
 function createModelRegistry(
   providers: readonly ProviderSpec[],
   initialManualModels: readonly ManualModelInput[],
   opts: {
+    initialManualProviders?: readonly ManualProviderInput[]
+    initialManualDefaultModel?: string
     fallbackDefault: string
     healthRegistry?: ProviderHealthRegistry
     artifactRootDir?: string
     logger?: ReturnType<typeof createRuntimeLogger>
   },
 ): BuildResult {
-  const byPrefix: Array<{ prefix: string; adapter: LLMAdapter }> = []
+  const byPrefix: Array<{ prefix: string; adapter: LLMAdapter; routedModel?: string }> = []
   const models: ModelInfo[] = []
+  const providerSpecs: ProviderSpec[] = [...providers]
+  const manualProviders: ManualProviderInput[] = [...(opts.initialManualProviders ?? [])]
   const manualModels: ManualModelInput[] = [...initialManualModels]
   let primary: LLMAdapter | undefined
 
-  for (const p of providers) {
+  for (const p of providerSpecs) {
     const perModelAdapters = buildProviderAdapters(p)
     for (const [modelId, adapter] of perModelAdapters) {
       models.push(modelInfo(modelId, p.label, {
+        ref: modelRef(p.id, modelId),
         providerId: p.id,
         source: manualModels.some((m) => m.providerId === p.id && m.id === modelId) ? 'manual' : p.source,
+        ...(p.contextWindows?.[modelId] ? { contextWindow: p.contextWindows[modelId] } : {}),
       }))
+      byPrefix.push({ prefix: modelRef(p.id, modelId), adapter, routedModel: modelId })
       byPrefix.push({ prefix: modelId, adapter })
       if (!primary) primary = adapter
     }
@@ -348,15 +479,17 @@ function createModelRegistry(
         }
       : {}),
   })
-  const defaultModel = process.env.HOST_MODEL ?? opts.fallbackDefault
+  let manualDefaultModel = opts.initialManualDefaultModel
   return {
     llm: router,
-    providers,
+    providers: providerSpecs,
     models,
+    manualProviders,
     manualModels,
-    defaultModel,
+    get manualDefaultModel() { return manualDefaultModel },
+    get defaultModel() { return process.env.HOST_MODEL ?? manualDefaultModel ?? opts.fallbackDefault },
     addManual(input) {
-      const provider = providers.find((p) => p.id === input.providerId)
+      const provider = providerSpecs.find((p) => p.id === input.providerId)
       if (!provider) throw new Error(`unknown provider: ${input.providerId}`)
       const id = input.id.trim()
       if (id.length === 0) throw new Error('model id is required')
@@ -366,8 +499,10 @@ function createModelRegistry(
       }
       if (!existingModel) {
         const adapter = buildSingleAdapter(provider, id)
+        router.addRoute(modelRef(provider.id, id), adapter, id)
         router.addRoute(id, adapter)
         models.push(modelInfo(id, provider.label, {
+          ref: modelRef(provider.id, id),
           providerId: provider.id,
           source: 'manual',
           ...(input.label ? { label: input.label } : {}),
@@ -390,7 +525,60 @@ function createModelRegistry(
       manualModels.splice(manualIndex, 1)
       const modelIndex = models.findIndex((m) => m.providerId === providerId && m.id === id && m.source === 'manual')
       if (modelIndex !== -1) models.splice(modelIndex, 1)
+      router.deleteRoute(modelRef(providerId, id))
       router.deleteRoute(id)
+    },
+    addManualProvider(input) {
+      const id = input.id.trim()
+      if (id.length === 0) throw new Error('provider id is required')
+      if (providerSpecs.some((p) => p.id === id)) throw new Error(`provider already exists: ${id}`)
+      const baseUrl = input.baseUrl.trim()
+      if (baseUrl.length === 0) throw new Error('base URL is required')
+      const provider: ProviderSpec = {
+        id,
+        label: input.label?.trim() || id,
+        wire: input.wire,
+        source: 'manual',
+        baseUrl,
+        apiKey: input.apiKey,
+        models: [],
+      }
+      providerSpecs.push(provider)
+      manualProviders.push({
+        id,
+        ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+        wire: input.wire,
+        baseUrl,
+        apiKey: input.apiKey,
+      })
+    },
+    deleteManualProvider(providerId) {
+      const manualProviderIndex = manualProviders.findIndex((p) => p.id === providerId)
+      if (manualProviderIndex === -1) return
+      manualProviders.splice(manualProviderIndex, 1)
+      const providerIndex = providerSpecs.findIndex((p) => p.id === providerId && p.source === 'manual')
+      if (providerIndex !== -1) providerSpecs.splice(providerIndex, 1)
+      for (let i = manualModels.length - 1; i >= 0; i--) {
+        if (manualModels[i]?.providerId !== providerId) continue
+        const id = manualModels[i]!.id
+        manualModels.splice(i, 1)
+        router.deleteRoute(modelRef(providerId, id))
+        router.deleteRoute(id)
+      }
+      for (let i = models.length - 1; i >= 0; i--) {
+        if (models[i]?.providerId === providerId) models.splice(i, 1)
+      }
+      if (manualDefaultModel?.startsWith(`${providerId}:`)) manualDefaultModel = undefined
+    },
+    setDefaultModel(model) {
+      const trimmed = model.trim()
+      if (trimmed.length === 0) {
+        manualDefaultModel = undefined
+        return
+      }
+      const exists = models.some((m) => (m.ref ?? m.id) === trimmed || m.id === trimmed)
+      if (!exists) throw new Error(`unknown model: ${trimmed}`)
+      manualDefaultModel = trimmed
     },
   }
 }
@@ -545,6 +733,7 @@ function fail(msg: string): never {
 type DashboardServing =
   | { kind: 'vite'; handler: (req: IncomingMessage, res: ServerResponse) => void }
   | { kind: 'static'; staticDir: string }
+  | { kind: 'embedded'; assets: readonly EmbeddedStaticAsset[] }
   | { kind: 'none' }
 
 async function createDashboardServing(): Promise<DashboardServing> {
@@ -566,8 +755,80 @@ async function createDashboardServing(): Promise<DashboardServing> {
     if (handler) return { kind: 'vite', handler }
   }
 
+  const embedded = embeddedDashboardAssets()
+  if (embedded.length > 0) return { kind: 'embedded', assets: embedded }
+
   const staticDir = resolveDashboardDir()
   return staticDir ? { kind: 'static', staticDir } : { kind: 'none' }
+}
+
+function embeddedDashboardAssets(): readonly EmbeddedStaticAsset[] {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_EMBEDDED_DASHBOARD__?: unknown
+  }).__AGENT_KERNEL_EMBEDDED_DASHBOARD__
+  if (!Array.isArray(globalValue)) return []
+  const assets: EmbeddedStaticAsset[] = []
+  for (const item of globalValue) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    if (typeof record.path !== 'string') continue
+    if (typeof record.contentBase64 !== 'string') continue
+    assets.push({ path: record.path, contentBase64: record.contentBase64 })
+  }
+  return assets
+}
+
+function embeddedSocketAdminAssetsFromGlobal(): readonly EmbeddedSocketAdminAsset[] {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__?: unknown
+  }).__AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__
+  if (!Array.isArray(globalValue)) return []
+  const assets: EmbeddedSocketAdminAsset[] = []
+  for (const item of globalValue) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    if (typeof record.path !== 'string') continue
+    if (typeof record.contentBase64 !== 'string') continue
+    assets.push({ path: record.path, contentBase64: record.contentBase64 })
+  }
+  return assets
+}
+
+function runtimeBuildInfo(dashboard: DashboardServing, socketAdminAssets: readonly EmbeddedSocketAdminAsset[]): BuildInfo & { embeddedDashboardFiles?: number; embeddedSocketAdminFiles?: number } {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_BUILD_INFO__?: unknown
+  }).__AGENT_KERNEL_BUILD_INFO__
+  const base = parseBuildInfo(globalValue) ?? {
+    releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
+    builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
+    artifactKind: 'source' as const,
+    dashboardMode: dashboard.kind,
+  }
+  return {
+    ...base,
+    dashboardMode: dashboard.kind,
+    socketAdminMode: socketAdminAssets.length > 0 ? 'embedded' : base.socketAdminMode ?? 'filesystem',
+    ...(dashboard.kind === 'embedded' ? { embeddedDashboardFiles: dashboard.assets.length } : {}),
+    ...(socketAdminAssets.length > 0 ? { embeddedSocketAdminFiles: socketAdminAssets.length } : {}),
+  }
+}
+
+function parseBuildInfo(value: unknown): BuildInfo | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const artifactKind = record.artifactKind
+  const dashboardMode = record.dashboardMode
+  if (artifactKind !== 'source' && artifactKind !== 'cjs' && artifactKind !== 'native') return null
+  if (dashboardMode !== 'vite' && dashboardMode !== 'static' && dashboardMode !== 'embedded' && dashboardMode !== 'none') return null
+  return {
+    releaseTag: typeof record.releaseTag === 'string' ? record.releaseTag : 'unknown',
+    gitCommit: typeof record.gitCommit === 'string' ? record.gitCommit : 'unknown',
+    builtAt: typeof record.builtAt === 'string' ? record.builtAt : 'unknown',
+    artifactKind,
+    dashboardMode,
+    ...(record.socketAdminMode === 'embedded' || record.socketAdminMode === 'filesystem' || record.socketAdminMode === 'missing' ? { socketAdminMode: record.socketAdminMode } : {}),
+  }
 }
 
 async function createViteDashboardHandler(): Promise<
@@ -668,8 +929,5 @@ function trimTrailingSlash(value: string): string {
 
 main().catch((err) => {
   logger.error({ err }, 'fatal error')
-  if (err instanceof Error) {
-    console.error(err.message)
-  }
   process.exit(1)
 })

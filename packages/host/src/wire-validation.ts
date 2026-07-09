@@ -30,14 +30,7 @@ export type WireValidationLogger = (entry: {
   issues: unknown
 }) => void
 
-let logger: WireValidationLogger = (entry) => {
-  try {
-    // eslint-disable-next-line no-console
-    console.warn('[wire_validation_failed]', JSON.stringify(entry))
-  } catch {
-    /* swallow */
-  }
-}
+let logger: WireValidationLogger = () => {}
 
 export function setWireValidationLogger(next: WireValidationLogger): void {
   logger = next

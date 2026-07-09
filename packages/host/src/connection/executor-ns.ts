@@ -14,6 +14,8 @@ import type {
   HandshakeAuth,
   ServerBgTaskEvicted,
   ServerBgTaskUpdated,
+  ServerTerminalExit,
+  ServerTerminalOutput,
   SessionErrorScope,
 } from '@agent-kernel/shared'
 import { isCompatibleVersion, schema } from '@agent-kernel/shared'
@@ -27,6 +29,8 @@ import type { AuthConfig, ExecutorIdentity } from '../auth-control.js'
 import { authenticateExecutorToken, validateExecutorAnnouncement } from '../auth-control.js'
 import type { AuditLogger } from '../audit-log.js'
 import { parseWire } from '../wire-validation.js'
+import { sessionRoom } from './rooms.js'
+import { executorAnnouncedConnectionMeta, executorPendingConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
 
 export type ExecutorNs = Namespace<
   ExecutorClientToServerEvents,
@@ -36,7 +40,7 @@ export type ExecutorNs = Namespace<
 export type ExecutorDeps = {
   store: SessionStore
   executors: ReturnType<typeof createExecutorRegistry>
-  defaultConfig: AgentConfig
+  defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
   audit?: AuditLogger
   broadcastError(
@@ -56,6 +60,7 @@ export function configureExecutorNamespace(
   ns: ExecutorNs,
   deps: ExecutorDeps,
 ): void {
+  const executorIdentities = new WeakMap<object, ExecutorIdentity>()
   ns.use((socket, nextFn) => {
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'executor') {
@@ -72,8 +77,11 @@ export function configureExecutorNamespace(
       nextFn(new Error(identity.reason ?? 'auth_failed'))
       return
     }
-    socket.data.executorIdentity = identity
-    deps.audit?.log({ action: 'executor.socket_accept', actor: { kind: 'token', ...(identity.label ? { label: identity.label } : {}) }, outcome: 'ok', metadata: { scopedWorkspaceId: identity.workspaceId } })
+    executorIdentities.set(socket, identity)
+    socket.data.executorIdentity = publicExecutorIdentity(identity)
+    const connectionMeta = executorPendingConnectionMeta({ clientVersion: auth.clientVersion })
+    socket.data.connectionMeta = connectionMeta
+    deps.audit?.log({ action: 'executor.socket_accept', actor: { kind: 'token', ...(identity.label ? { label: identity.label } : {}) }, outcome: 'ok', metadata: { ...auditConnectionMeta(connectionMeta), scopedWorkspaceId: identity.workspaceId } })
     nextFn()
   })
 
@@ -87,7 +95,7 @@ export function configureExecutorNamespace(
         peer: socket.id,
       })
       if (!payload) return
-      const identity = socket.data.executorIdentity as ExecutorIdentity | undefined
+      const identity = executorIdentities.get(socket)
       const valid = validateExecutorAnnouncement(identity ?? { accepted: true }, payload.workspaceId)
       if (!valid.ok) {
         deps.audit?.log({ action: 'executor.announce_reject', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'denied', error: valid.reason })
@@ -110,12 +118,20 @@ export function configureExecutorNamespace(
           return
         }
         socket.emit('executor:welcome', { token: bound.token, workspaceId: payload.workspaceId })
-        socket.data.executorIdentity = { accepted: true, token: bound.token, workspaceId: payload.workspaceId, label: payload.workspaceName }
+        const nextIdentity = { accepted: true, token: bound.token, workspaceId: payload.workspaceId, label: payload.workspaceName }
+        executorIdentities.set(socket, nextIdentity)
+        socket.data.executorIdentity = publicExecutorIdentity(nextIdentity)
         deps.audit?.log({ action: 'executor.invite_bound', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: 'ok' })
       } else if (identity?.token) {
         deps.auth?.executorIdentityStore?.markSeen(identity.token)
       }
-      deps.audit?.log({ action: 'executor.announce_accept', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'ok', metadata: { workspaceName: payload.workspaceName } })
+      const connectionMeta = executorAnnouncedConnectionMeta({
+        current: socket.data.connectionMeta as ConnectionMeta | undefined,
+        announcement: payload,
+        clientVersion: auth.clientVersion,
+      })
+      socket.data.connectionMeta = connectionMeta
+      deps.audit?.log({ action: 'executor.announce_accept', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'ok', metadata: { ...auditConnectionMeta(connectionMeta), workspaceName: payload.workspaceName } })
       deps.executors.attach(socket, payload, auth.clientVersion)
     })
     socket.on('executor:bg_task_updated', (rawPayload: ServerBgTaskUpdated) => {
@@ -124,7 +140,7 @@ export function configureExecutorNamespace(
         peer: socket.id,
       })
       if (!payload) return
-      const room = `session:${payload.sessionId}`
+      const room = sessionRoom(payload.sessionId)
       deps.dashboardNs.to(room).emit('server:bg_task_updated', payload)
       deps.dashboardNs.to(room).emit('server:control_update', {
         kind: 'bg_task_updated',
@@ -138,7 +154,7 @@ export function configureExecutorNamespace(
       })
       if (!payload) return
       deps.dashboardNs
-        .to(`session:${payload.sessionId}`)
+        .to(sessionRoom(payload.sessionId))
         .emit('server:control_update', {
           kind: 'tool_progress',
           ...payload,
@@ -150,15 +166,48 @@ export function configureExecutorNamespace(
         peer: socket.id,
       })
       if (!payload) return
-      const room = `session:${payload.sessionId}`
+      const room = sessionRoom(payload.sessionId)
       deps.dashboardNs.to(room).emit('server:bg_task_evicted', payload)
       deps.dashboardNs.to(room).emit('server:control_update', {
         kind: 'bg_task_evicted',
         ...payload,
       })
     })
+    socket.on('executor:terminal_output', (rawPayload: ServerTerminalOutput) => {
+      const payload = parseWire(schema.ServerTerminalOutputSchema, rawPayload, {
+        channel: 'executor:terminal_output',
+        peer: socket.id,
+      })
+      if (!payload) return
+      deps.dashboardNs.to(sessionRoom(payload.sessionId)).emit('server:terminal_output', payload)
+    })
+    socket.on('executor:terminal_exit', (rawPayload: ServerTerminalExit) => {
+      const payload = parseWire(schema.ServerTerminalExitSchema, rawPayload, {
+        channel: 'executor:terminal_exit',
+        peer: socket.id,
+      })
+      if (!payload) return
+      deps.dashboardNs.to(sessionRoom(payload.sessionId)).emit('server:terminal_exit', payload)
+    })
     socket.on('disconnect', () => {
       deps.executors.detach(socket)
     })
   })
+}
+
+function publicExecutorIdentity(identity: ExecutorIdentity): Record<string, unknown> {
+  return {
+    accepted: identity.accepted,
+    ...(identity.workspaceId ? { workspaceId: identity.workspaceId } : {}),
+    ...(identity.label ? { label: identity.label } : {}),
+    ...(identity.reason ? { reason: identity.reason } : {}),
+  }
+}
+
+function auditConnectionMeta(meta: ConnectionMeta): Record<string, unknown> {
+  return {
+    connectionKind: meta.kind,
+    connectionLabel: meta.label,
+    clientVersion: meta.clientVersion,
+  }
 }

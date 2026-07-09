@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { loadOrCreateWorkspaceId } from './workspace-id.js'
+import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile, workspaceIdPath } from './workspace-id.js'
 
 describe('loadOrCreateWorkspaceId', () => {
   let dir: string
@@ -44,5 +44,23 @@ describe('loadOrCreateWorkspaceId', () => {
   it('refuses to boot with a corrupted id file', () => {
     writeFileSync(path, 'not-a-ulid', 'utf8')
     expect(() => loadOrCreateWorkspaceId(path)).toThrow(/Invalid workspace id/)
+  })
+
+  it('uses an isolated workspace id path for a named profile', () => {
+    const profilePath = workspaceIdPath('dev')
+    expect(profilePath).toMatch(/\.agent-kernel\/profiles\/dev\/workspace-id$/)
+    expect(executorProfileDir('dev')).toMatch(/\.agent-kernel\/profiles\/dev$/)
+  })
+
+  it('keeps the default profile on the legacy workspace id path', () => {
+    expect(workspaceIdPath('default')).toMatch(/\.agent-kernel\/workspace-id$/)
+    expect(workspaceIdPath(undefined)).toMatch(/\.agent-kernel\/workspace-id$/)
+  })
+
+  it('rejects unsafe profile names', () => {
+    expect(normalizeExecutorProfile('dev')).toBe('dev')
+    expect(normalizeExecutorProfile('default')).toBeUndefined()
+    expect(() => normalizeExecutorProfile('../dev')).toThrow(/Invalid executor profile/)
+    expect(() => normalizeExecutorProfile('dev/profile')).toThrow(/Invalid executor profile/)
   })
 })
