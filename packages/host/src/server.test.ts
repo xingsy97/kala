@@ -307,6 +307,32 @@ describe('wire protocol', () => {
     expect(missing.body.error).toContain('artifact capture')
 
     await server.close()
+    const emptyArtifactRootDir = join(dir, 'empty-artifacts')
+    const emptyHttp = createServer()
+    await new Promise<void>((resolve) => emptyHttp.listen(0, resolve))
+    server = await startHostServer({
+      port: (emptyHttp.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: emptyHttp,
+      artifactRootDir: emptyArtifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const emptyManifest = await fetch(`${url}/artifacts/manifest`).then(async (r) => ({
+      status: r.status,
+      body: await r.json() as { rootDir: string; summary: { entryCount: number } },
+    }))
+    expect(emptyManifest.status).toBe(200)
+    expect(emptyManifest.body.rootDir).toBe(emptyArtifactRootDir)
+    expect(emptyManifest.body.summary.entryCount).toBe(0)
+    expect(JSON.parse(await readFile(join(emptyArtifactRootDir, 'artifact-manifest.json'), 'utf8'))).toMatchObject({
+      rootDir: emptyArtifactRootDir,
+      summary: { entryCount: 0 },
+    })
+
+    await server.close()
     const artifactRootDir = join(dir, 'artifacts')
     await mkdir(join(artifactRootDir, 'llm/s1'), { recursive: true })
     await writeFile(join(artifactRootDir, 'llm/s1/1.request.json'), JSON.stringify({ ok: true }), 'utf8')

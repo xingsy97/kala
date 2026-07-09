@@ -42,13 +42,18 @@ export async function buildArtifactManifest(
   const outputPath = input.outputPath ?? join(rootDir, 'artifact-manifest.json')
   const maxHashBytes = input.maxHashBytes ?? DEFAULT_MAX_HASH_BYTES
   const outputRelative = normalizeRelative(rootDir, outputPath)
+  await mkdir(rootDir, { recursive: true })
   const files = await collectFiles(rootDir)
   const entries: ArtifactManifestEntry[] = []
 
   for (const filePath of files) {
     const artifactPath = normalizeRelative(rootDir, filePath)
     if (artifactPath === outputRelative) continue
-    const fileStat = await stat(filePath)
+    const fileStat = await stat(filePath).catch((err: unknown) => {
+      if (isNodeErrorCode(err, 'ENOENT')) return undefined
+      throw err
+    })
+    if (!fileStat) continue
     const base = baseEntry(artifactPath, fileStat.size, fileStat.mtime.toISOString())
     if (fileStat.size > maxHashBytes) {
       entries.push({
@@ -77,7 +82,10 @@ async function collectFiles(rootDir: string): Promise<string[]> {
   const out: string[] = []
 
   async function visit(dir: string): Promise<void> {
-    const dirents = await readdir(dir, { withFileTypes: true })
+    const dirents = await readdir(dir, { withFileTypes: true }).catch((err: unknown) => {
+      if (isNodeErrorCode(err, 'ENOENT')) return []
+      throw err
+    })
     for (const dirent of dirents) {
       const child = join(dir, dirent.name)
       if (dirent.isDirectory()) {
@@ -90,6 +98,10 @@ async function collectFiles(rootDir: string): Promise<string[]> {
 
   await visit(rootDir)
   return out
+}
+
+function isNodeErrorCode(err: unknown, code: string): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === code
 }
 
 function baseEntry(path: string, bytes: number, mtime: string): Omit<ArtifactManifestEntry, 'sha256' | 'hashSkippedReason'> {
