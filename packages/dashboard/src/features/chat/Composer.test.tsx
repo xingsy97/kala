@@ -18,7 +18,7 @@ function renderComposer(props?: {
       onApprovalModeChange={() => {}}
       state={null}
       config={null}
-      queuedMessages={0}
+      queuedMessages={[]}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
     />,
@@ -36,7 +36,7 @@ describe('Composer', () => {
         onApprovalModeChange={() => {}}
         state={null}
         config={null}
-        queuedMessages={0}
+        queuedMessages={[]}
         onSubmit={() => {}}
         onCompact={() => {}}
       />,
@@ -44,7 +44,11 @@ describe('Composer', () => {
 
     expect(screen.queryByTestId('composer-state-chips')).toBeNull()
     expect(screen.queryByTestId('connection-status')).toBeNull()
-    expect(screen.getByTestId('context-usage-indicator').textContent ?? '').toContain('Cursor')
+    const indicator = screen.getByTestId('context-usage-indicator')
+    expect(indicator.textContent ?? '').toContain('Events')
+    expect(indicator.textContent ?? '').toContain('Tools')
+    expect(screen.getByText('Events').closest('[title]')?.getAttribute('title') ?? '').toContain('Event log position')
+    expect(screen.getByText('Tools').closest('[title]')?.getAttribute('title') ?? '').toContain('Pending tool calls')
   })
 
   it('shows slash command suggestions for /compact', () => {
@@ -96,6 +100,46 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined)
   })
 
+  it('explains send modes and shows pending delivery previews', () => {
+    render(
+      <Composer
+        model=""
+        models={[]}
+        onModelChange={() => {}}
+        approvalMode="auto"
+        onApprovalModeChange={() => {}}
+        state={null}
+        config={null}
+        queuedMessages={[
+          {
+            id: 'queued-1',
+            text: 'run this after the current answer',
+            mode: 'queue',
+            createdAt: '2026-07-06T00:00:00.000Z',
+          },
+          {
+            id: 'steer-1',
+            text: 'prefer the safer path',
+            mode: 'steer',
+            createdAt: '2026-07-06T00:00:01.000Z',
+          },
+        ]}
+        onSubmit={() => {}}
+        onCompact={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('send-mode-steer').textContent ?? '').toContain('Steer active turn')
+    expect(screen.getByTestId('send-mode-queue').textContent ?? '').toContain('Queue follow-up')
+    expect(screen.getByTestId('send-mode-steer').getAttribute('title') ?? '').toContain('current run')
+    expect(screen.getByTestId('send-mode-queue').getAttribute('title') ?? '').toContain('FIFO')
+    const dock = screen.getByTestId('queued-messages-dock')
+    expect(dock.textContent ?? '').toContain('2 pending deliveries')
+    expect(dock.textContent ?? '').toContain('run this after the current answer')
+    expect(dock.textContent ?? '').toContain('Queued follow-up')
+    expect(dock.textContent ?? '').toContain('Steering update')
+  })
+
   it('renders the approval mode picker and reports selection', () => {
     const onApprovalModeChange = vi.fn()
     render(
@@ -107,12 +151,15 @@ describe('Composer', () => {
         onApprovalModeChange={onApprovalModeChange}
         state={null}
         config={null}
-        queuedMessages={0}
+        queuedMessages={[]}
         onSubmit={() => {}}
         onCompact={() => {}}
       />,
     )
-    expect(screen.getByTestId('approval-mode-picker')).toBeTruthy()
+    const picker = screen.getByTestId('approval-mode-picker')
+    expect(picker).toBeTruthy()
+    expect(picker.textContent ?? '').toContain('Auto')
+    expect(picker.textContent ?? '').not.toContain('ask only for tools marked unsafe')
   })
 
   it('attaches pasted image as an image content block on submit', async () => {

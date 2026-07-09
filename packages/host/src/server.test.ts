@@ -1030,9 +1030,16 @@ describe('wire protocol', () => {
       dashboard.on('session:ready', resolve),
     )
 
-    const queueCounts: number[] = []
+    const queueEvents: Array<{ pending: number; text?: string; mode?: string; id?: string }> = []
     dashboard.on('server:message_queue', (p) => {
-      if (p.sessionId === sessionId) queueCounts.push(p.pending)
+      if (p.sessionId === sessionId) {
+        queueEvents.push({
+          pending: p.pending,
+          text: p.items[0]?.text,
+          mode: p.items[0]?.mode,
+          id: p.items[0]?.id,
+        })
+      }
     })
     const finalDone = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('queued turn never finished')), 4000)
@@ -1057,8 +1064,9 @@ describe('wire protocol', () => {
     releaseFirst()
     await finalDone
 
-    expect(queueCounts).toContain(1)
-    expect(queueCounts).toContain(0)
+    expect(queueEvents.map((e) => e.pending)).toContain(1)
+    expect(queueEvents.map((e) => e.pending)).toContain(0)
+    expect(queueEvents.some((e) => e.pending === 1 && e.text === 'second' && e.mode === 'queue' && typeof e.id === 'string')).toBe(true)
     expect(seenPrompts).toEqual(['first', 'first|second'])
 
     dashboard.close()

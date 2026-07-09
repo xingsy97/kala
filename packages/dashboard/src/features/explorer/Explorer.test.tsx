@@ -171,6 +171,6 @@ describe('Explorer', () => {
       />,
     )
     const sessionRow = screen.getByTestId('session-row')
-    expect(sessionRow.className).toMatch(/border-l-sky/)
+    expect(sessionRow.className).toMatch(/border-l-primary/)
   })
 })

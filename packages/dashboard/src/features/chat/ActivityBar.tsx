@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Clock, Loader2, Wrench } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 
+import { formatElapsed, formatTokens } from '../../lib/format.js'
 import { cn } from '../../lib/utils.js'
 
 export type CompactStatus =
@@ -71,7 +72,7 @@ function activityFor(
   if (compactStatus.kind === 'running') {
     return {
       label: 'Compacting conversation...',
-      detail: `(${formatElapsed(now - compactStatus.startedAt)} · ↑ ${formatTokens(compactStatus.tokensBefore)} tokens)`,
+      detail: `(${formatElapsed(now - compactStatus.startedAt)} · ↑ ${formatTokens(compactStatus.tokensBefore, { thousands: 'compact', millionSuffix: 'm' })} tokens)`,
       icon: Loader2,
       spin: true,
       pulse: true,
@@ -163,20 +164,6 @@ function useActivityClock(active: boolean): number {
     return () => window.clearInterval(timer)
   }, [active])
   return now
-}
-
-function formatElapsed(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes <= 0) return `${seconds}s`
-  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}m`
 }
 
 function agentStatusLabel(status: AgentState['status']): string {
