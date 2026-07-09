@@ -64,6 +64,7 @@ exports[`wire contract — schema surface > exports a stable, sorted set of sche
   "ClientUserApproveSchema",
   "ClientUserMessageSchema",
   "ClientUserRejectSchema",
+  "CompactionMetadataSchema",
   "ConsolidateMemoryResultSchema",
   "ContextUsageSnapshotSchema",
   "ControlUpdateSchema",

@@ -330,10 +330,40 @@
   }
 }
 
+/**
+ * iOS Safari PWA (display-mode: standalone) + viewport-fit=cover leaves a
+ * blank strip at the bottom of the screen for any element sized via normal
+ * flow with height: 100% / 100vh / 100dvh. The only reliable fix documented
+ * by WebKit and confirmed on the openchamber tracker + Stack Overflow
+ * (see https://stackoverflow.com/q/66005655 and openchamber/openchamber#2287)
+ * is to take the root container out of flow with position: fixed pinned to
+ * all four sides of the layout viewport. `inset: 0` + `height: 100dvh`
+ * makes it exactly one viewport tall regardless of what iOS decides the
+ * html/body flow height is.
+ */
 html,
-body,
-#root {
+body {
   height: 100%;
+}
+#root {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  width: 100vw;
+}
+
+/**
+ * iOS Safari PWA (display-mode: standalone) can report `100vw` as larger
+ * than the actual layout viewport when viewport-fit=cover is set + the
+ * device has a notch/landscape safe area. Without an explicit clamp the
+ * page becomes horizontally scrollable in the installed app, even when
+ * the browser tab renders fine at the same URL. Belt-and-suspenders:
+ * both html and body clamp width and forbid horizontal overflow.
+ */
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 body {

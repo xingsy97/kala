@@ -44,7 +44,7 @@ import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { HumanAttentionLowBanner } from './features/chat/HumanAttentionIndicator.js'
 import { BannerStack, BannerSlot } from './features/chat/BannerStack.js'
-import { OfflineBanner, PwaUpdateBanner } from './features/chat/PwaBanners.js'
+import { OfflineBanner, PwaLifecycleHost, PwaUpdateGlobalBanner } from './features/chat/PwaBanners.js'
 import { CommandPalette, type CommandPaletteItem } from './features/command/CommandPalette.js'
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
 import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
@@ -132,6 +132,7 @@ import {
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
 import { useRunningTitleIndicator } from './lib/running-title.js'
 import { useTheme, type Theme } from './lib/theme.js'
+import { useVisualViewportHeight } from './lib/useVisualViewportHeight.js'
 import {
   useBackgroundShellToasts,
   useInactiveSessionSummaryToasts,
@@ -238,6 +239,9 @@ export function App(): JSX.Element {
   const suppressNextAutoSessionSelection = useRef(false)
   const suppressNextWaitingNotification = useRef(false)
   const [themePreference, toggleTheme, , effectiveTheme] = useTheme()
+  // Drives the root container's height via a CSS var; see hook comment
+  // for the iOS PWA `100dvh` background.
+  useVisualViewportHeight()
   const [liveToolActivityTailCount] = useNumberPref(
     PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -449,6 +453,42 @@ export function App(): JSX.Element {
     inferredCompactSeq.current = null
     setCompactStatus({ kind: 'idle' })
   }, [compactStatus, session.timeline])
+
+  // Mirror remote compaction lifecycle broadcasts (server:compact_status)
+  // into local state so every attached dashboard renders the same
+  // "Compacting…" row — not just the tab that clicked /compact.
+  const remoteCompact = session.compactStatus
+  useEffect(() => {
+    if (!remoteCompact) return
+    if (remoteCompact.kind === 'running') {
+      setCompactStatus({
+        kind: 'running',
+        startedAt: Date.parse(remoteCompact.startedAt) || Date.now(),
+        tokensBefore: remoteCompact.tokensBefore,
+      })
+      return
+    }
+    if (remoteCompact.kind === 'done') {
+      setCompactStatus({ kind: 'done' })
+      scheduleCompactIdle(2500)
+      return
+    }
+    if (remoteCompact.kind === 'skipped') {
+      // "skipped" carries a reason code (e.g. summary_schema_invalid,
+      // back_off_same_batch). Surface it verbatim in the inline row so
+      // the user can decide whether to retry or ignore.
+      setCompactStatus({ kind: 'error', message: remoteCompact.message ?? remoteCompact.reason })
+      scheduleCompactIdle(6000)
+      return
+    }
+    if (remoteCompact.kind === 'error') {
+      setCompactStatus({ kind: 'error', message: remoteCompact.message })
+      scheduleCompactIdle(6000)
+    }
+    // Intentionally not listing scheduleCompactIdle in deps: it's a stable
+    // ref-based helper defined in the same component (see below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteCompact])
 
   useEffect(() => {
     if (compactStatus.kind !== 'running') return
@@ -1283,7 +1323,8 @@ export function App(): JSX.Element {
   )
 
   return (
-    <div className="h-dvh w-screen max-w-[100dvw] overflow-hidden bg-background text-foreground flex flex-col">
+    <PwaLifecycleHost>
+    <div className="h-full w-full max-w-full overflow-hidden bg-background text-foreground flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <AppShellNav
         section={section}
         onSelect={handleSectionSelect}
@@ -1293,6 +1334,7 @@ export function App(): JSX.Element {
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
       />
+      <PwaUpdateGlobalBanner />
       {!topbarOpen ? (
         <Button
           variant="ghost"
@@ -1491,9 +1533,9 @@ export function App(): JSX.Element {
                       }}
                     />
                   ) : null}
-                  <div className="relative grid flex-1 min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden">
+                  <div className="relative grid flex-1 min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden">
                     <div
-                      className="flex min-h-0 flex-col bg-background"
+                      className="flex min-h-0 min-w-0 flex-col bg-background overflow-hidden"
                       data-testid="chat-panel"
                     >
                       <ChatPanel
@@ -1574,7 +1616,7 @@ export function App(): JSX.Element {
                         }
                       />
                     </div>
-                    <div className="min-h-0 pb-[env(safe-area-inset-bottom)]">
+                    <div className="min-h-0">
                       <BannerStack>
                         <SessionErrorBanner error={session.lastError} />
                         {sessionWorkspaceKnownOffline ? (
@@ -1613,7 +1655,6 @@ export function App(): JSX.Element {
                           onCompactNow={runCompactNow}
                         />
                         <HumanAttentionLowBanner timeline={session.humanAttention} />
-                        <PwaUpdateBanner />
                         <OfflineBanner />
                       </BannerStack>
                       <ComposerFlipContainer
@@ -1795,7 +1836,7 @@ export function App(): JSX.Element {
       )}
       <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
-          className="left-0 top-0 h-dvh max-h-dvh w-screen max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 sm:w-96 sm:rounded-none"
+          className="left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:w-96 sm:rounded-none"
           data-testid="explorer-drawer"
         >
           <DialogHeader className="sr-only">
@@ -1865,7 +1906,7 @@ export function App(): JSX.Element {
       </Dialog>
       <Dialog open={inspectorDrawerOpen && !wideLayout && hasSelectedSession} onOpenChange={setInspectorDrawerOpen}>
         <DialogContent
-          className="right-0 top-0 h-dvh max-h-dvh w-screen max-w-none !left-auto !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 sm:w-[26rem] sm:rounded-none"
+          className="right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] sm:w-[26rem] sm:rounded-none"
           data-testid="inspector-drawer-mobile"
         >
           <DialogHeader className="sr-only">
@@ -2013,6 +2054,7 @@ export function App(): JSX.Element {
       />
       </div>
     </div>
+    </PwaLifecycleHost>
   )
 }
 

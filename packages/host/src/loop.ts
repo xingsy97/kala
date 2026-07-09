@@ -47,6 +47,7 @@ import { isSkillManager } from './extensions/skills.js'
 import { dispatchConfiguredTool } from './agent-modules/execution.js'
 import type {
   HostLoopDeps,
+  EventBroadcastExtras,
   LoopDrainMode,
   LoopDrainSessionSnapshot,
   LoopHandle,
@@ -61,6 +62,7 @@ export type {
   DispatchOptions,
   HostLoopDeps,
   LoopBroadcast,
+  EventBroadcastExtras,
   LoopHandle,
   LoopRuntime,
   ModelResolver,
@@ -269,6 +271,7 @@ export async function dispatchOne(
   model?: string,
   runtime?: LoopRuntime,
   onCheckpoint?: (sessionId: string) => void,
+  extras?: EventBroadcastExtras,
 ): Promise<void> {
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
@@ -298,7 +301,7 @@ export async function dispatchOne(
   )
 
   safeBroadcast(() =>
-    deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, safeLlmTrace, model),
+    deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, safeLlmTrace, model, extras),
   )
 
   // Cancellation of in-flight IO is the host's job (SPEC §Non-goals:

@@ -83,7 +83,12 @@ describe('RuntimeMetrics', () => {
     const popover = screen.getByTestId('context-pressure-popover')
     expect(popover.textContent ?? '').toContain('Session Info')
     expect(popover.textContent ?? '').toContain('Context Window')
-    expect(popover.textContent ?? '').toContain('Reserved for response')
+    // With stacked segments the legend now says "Reserved" (without the
+    // "for response" tail) and lives inline with the other categories.
+    expect(popover.textContent ?? '').toContain('Reserved')
+    // Detailed token breakdown is collapsed by default; expand to verify rows.
+    expect(screen.queryByTestId('context-breakdown-details')).toBeNull()
+    fireEvent.click(screen.getByTestId('context-breakdown-toggle'))
     expect(popover.textContent ?? '').toContain('System / reserve')
     expect(popover.textContent ?? '').toContain('Tool Definitions')
     expect(popover.textContent ?? '').toContain('Messages')
@@ -109,7 +114,13 @@ describe('RuntimeMetrics', () => {
     expect(indicator.getAttribute('title') ?? '').not.toContain('400.0k')
     fireEvent.click(indicator)
     const popover = screen.getByTestId('context-pressure-popover')
-    expect(popover.textContent ?? '').toContain('Model context 1.0M')
-    expect(popover.textContent ?? '').toContain('Source: model_registry')
+    // Diagnostics (model context / source / estimator) now live under the
+    // "Show token breakdown" collapse — they clutter the default view.
+    expect(popover.textContent ?? '').not.toContain('Model context')
+    expect(popover.textContent ?? '').not.toContain('model_registry')
+    fireEvent.click(screen.getByTestId('context-breakdown-toggle'))
+    expect(popover.textContent ?? '').toContain('Model context')
+    expect(popover.textContent ?? '').toContain('1.0M')
+    expect(popover.textContent ?? '').toContain('model_registry')
   })
 })

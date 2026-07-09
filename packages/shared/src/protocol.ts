@@ -245,6 +245,35 @@ export type EventAppendedEvent = {
   hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
+  /**
+   * Rich metadata for `messages_replaced (reason='compaction')` events.
+   * The kernel event itself only carries `replaceRange` +
+   * `replacementMessages`; the actual token deltas and what triggered the
+   * compaction live in the host's runtime-metadata ledger. We surface them
+   * here so both live streams (`event:appended`) and history replay
+   * (`server:history`) render the CompactBoundary honestly instead of
+   * defaulting to `0 -> 0 tokens · unknown trigger`.
+   *
+   * Absent for any event kind other than `messages_replaced (compaction)`
+   * and, for older sessions predating the metadata plumbing, also absent
+   * on their compaction events.
+   */
+  compactionMetadata?: CompactionMetadata
+}
+
+/**
+ * Wire form of the `runtime_metadata` `compaction_applied` record, kept in
+ * lock-step with what {@link CompactStatusEvent} `kind:'done'` and the host
+ * JSONL runtime-metadata ledger already carry. Values are estimates from
+ * the same tokeniser the context-usage snapshots use.
+ */
+export type CompactionMetadata = {
+  trigger: 'manual' | 'auto' | 'preflight' | 'tool_result'
+  attemptId?: string
+  tokensBefore: number
+  tokensAfter: number
+  /** Number of transcript messages replaced by the summarised prefix. */
+  replacedCount: number
 }
 
 export type ClientLoadLogArtifact = {
@@ -268,6 +297,46 @@ export type SessionErrorEvent = {
   scope: SessionErrorScope
   message: string
 }
+
+/**
+ * Compaction lifecycle broadcast — sent on every attempt so every attached
+ * dashboard sees the same "Compacting…" indicator, not just the one that
+ * fired the request.
+ */
+export type CompactStatusEvent =
+  | {
+      sessionId: string
+      kind: 'running'
+      trigger: 'manual' | 'auto' | 'preflight' | 'tool_result'
+      /** Estimated tokens in context BEFORE the compaction attempt. */
+      tokensBefore: number
+      attemptId: string
+      startedAt: string
+    }
+  | {
+      sessionId: string
+      kind: 'done'
+      attemptId: string
+      tokensBefore: number
+      tokensAfter: number
+      endedAt: string
+    }
+  | {
+      sessionId: string
+      kind: 'skipped'
+      attemptId: string
+      /** Matches the runtime-metadata reason code. */
+      reason: string
+      message?: string
+      endedAt: string
+    }
+  | {
+      sessionId: string
+      kind: 'error'
+      attemptId: string
+      message: string
+      endedAt: string
+    }
 
 // ============================================================================
 // Dashboard → Host
@@ -1447,6 +1516,7 @@ export type DashboardServerToClientEvents = {
    * discriminated payload.
    */
   'server:control_update': (payload: ControlUpdate) => void
+  'server:compact_status': (payload: CompactStatusEvent) => void
 }
 
 export type ServerMessageQueueEvent = {

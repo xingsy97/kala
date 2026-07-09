@@ -122,7 +122,7 @@ export function AppShellNav({
       </span>
       <div
         ref={navItemsRef}
-        className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto snap-x snap-mandatory [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:overflow-visible"
+        className="relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto snap-x snap-mandatory [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:overflow-visible"
       >
         {activePill ? (
           <span
@@ -155,7 +155,7 @@ export function AppShellNav({
               )}
             >
               <Icon className="relative h-4 w-4 flex-none" aria-hidden />
-              <span className="relative hidden sm:inline">{t(labelKey)}</span>
+              <span className="relative hidden lg:inline">{t(labelKey)}</span>
             </Button>
           )
         })}

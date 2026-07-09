@@ -22,7 +22,7 @@ import type {
   PendingToolCall,
   RequestApprovalEffect,
 } from '@agent-kernel/kernel'
-import type { LLMTrace } from '@agent-kernel/shared'
+import type { CompactionMetadata, CompactStatusEvent, LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { HookConfig, HookRunner } from './extensions/hooks.js'
@@ -38,6 +38,7 @@ export type LoopBroadcast = {
     state: AgentState,
     llmTrace?: LLMTrace,
     model?: string,
+    extras?: EventBroadcastExtras,
   ): void
   onApprovalRequired(sessionId: string, eff: RequestApprovalEffect): void
   onError(sessionId: string, message: string): void
@@ -63,6 +64,28 @@ export type LoopBroadcast = {
    * without waiting for the parent turn to advance.
    */
   onSubAgentFinished?(payload: SubAgentFinishedPayload): void
+  /**
+   * Compaction lifecycle. Fired at three points around every attempt so
+   * every attached dashboard sees the same state and can render the
+   * "Compacting…" row / final result without originating the request.
+   *
+   * Payload contract: {@link CompactStatusEvent}.
+   */
+  onCompactStatus?(payload: CompactStatusEvent): void
+}
+
+export type CompactStatusPayload = CompactStatusEvent
+
+/**
+ * Optional broadcast-time enrichments that don't belong on the kernel event
+ * itself. `dispatchOne` accepts these and forwards them to
+ * {@link LoopBroadcast.onEvent}, which then decorates the wire
+ * `event:appended` payload. Today only the compaction extension supplies
+ * this — surfacing `trigger`/token deltas that live in runtime metadata,
+ * not in the kernel `messages_replaced` event.
+ */
+export type EventBroadcastExtras = {
+  compactionMetadata?: CompactionMetadata
 }
 
 export type SubAgentStartedPayload = {

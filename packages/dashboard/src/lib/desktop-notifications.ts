@@ -181,6 +181,7 @@ export function useInterventionDesktopNotifications({
   workspaceOnline,
   workspaceLabel,
   suppressWaitingForUser,
+  approvalMode,
   ready = true,
 }: {
   sessionId: string | null
@@ -193,6 +194,13 @@ export function useInterventionDesktopNotifications({
   workspaceOnline: boolean | null
   workspaceLabel?: string
   suppressWaitingForUser?: boolean
+  /**
+   * When `'allow_all'`, suppress the "Approval required" desktop
+   * notification — the kernel auto-dispatches these calls, so any pending
+   * ones the client observes are transient or pre-mode-switch leftovers,
+   * neither of which the user should be pinged about.
+   */
+  approvalMode?: string
   ready?: boolean
 }): void {
   const prefs = useDesktopNotificationPrefs()
@@ -227,7 +235,7 @@ export function useInterventionDesktopNotifications({
     }
     if (prev?.sessionId !== sessionId) return
 
-    if (pendingApprovalsCount > 0 && approvalSig !== prev?.approvalSig) {
+    if (pendingApprovalsCount > 0 && approvalSig !== prev?.approvalSig && approvalMode !== 'allow_all') {
       const tool = pendingApprovalSummary?.name ?? 'tool call'
       sendDesktopNotification(prefs, 'approval_required', 'Approval required', {
         body: `${sessionLabel}: ${tool}${pendingApprovalsCount > 1 ? ` and ${pendingApprovalsCount - 1} more` : ''}`,
@@ -261,6 +269,7 @@ export function useInterventionDesktopNotifications({
     }
   }, [
     approvalSig,
+    approvalMode,
     connectionStatus,
     errorSig,
     lastError,

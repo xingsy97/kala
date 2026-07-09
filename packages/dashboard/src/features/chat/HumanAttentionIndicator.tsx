@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
-import { Activity, AlertTriangle } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Activity, AlertTriangle, ChevronDown, ChevronUp, X } from 'lucide-react'
 import type { HumanAttentionLevel, HumanAttentionTimeline } from '@agent-kernel/shared'
 
 import { cn } from '../../lib/utils.js'
+import { BannerSlot } from './BannerStack.js'
 
 type Props = {
   timeline: HumanAttentionTimeline
@@ -27,6 +28,7 @@ const DIMENSION_LABELS: ReadonlyArray<[keyof NonNullable<HumanAttentionTimeline[
 
 export function HumanAttentionIndicator({ timeline, density = 'default' }: Props): JSX.Element {
   const [open, setOpen] = useState(false)
+  const [reasonsExpanded, setReasonsExpanded] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   const latest = timeline.latest
   const isSimple = density === 'simple'
@@ -69,7 +71,10 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
         onClick={() => setOpen((value) => !value)}
       >
         <Activity className="h-4 w-4 flex-none" aria-hidden="true" />
-        <span className="flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground">
+        <span className={cn(
+          'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
+          latest && (latest.level === 'engaged' || latest.level === 'watching') && 'hidden sm:inline',
+        )}>
           {scoreText}
         </span>
       </button>
@@ -77,7 +82,7 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
         <div
           role="dialog"
           aria-label="Human Attention"
-          className="absolute bottom-full right-0 z-30 mb-2 w-[min(26rem,calc(100vw-2rem))] rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl"
+          className="fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(26rem,calc(100vw-1rem))]"
           data-testid="human-attention-popover"
         >
           <div className="flex items-start justify-between gap-4">
@@ -108,14 +113,32 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
                 <span>Confidence {Math.round(latest.confidence * 100)}%</span>
               </div>
               {latest.reasons.length > 0 ? (
-                <ul className="mt-3 space-y-1.5 text-xs" data-testid="human-attention-reasons">
-                  {latest.reasons.map((reason, index) => (
-                    <li key={`${reason.kind}-${index}`} className={cn('rounded-md px-2 py-1.5', reasonTone(reason.severity))}>
-                      <span className="font-medium">{reason.message}</span>
-                      {reason.evidence ? <span className="ml-1 opacity-80">{reason.evidence}</span> : null}
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setReasonsExpanded((v) => !v)}
+                    aria-expanded={reasonsExpanded}
+                    data-testid="human-attention-reasons-toggle"
+                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <span>{reasonsExpanded ? 'Hide reasons' : `Show ${latest.reasons.length} reason${latest.reasons.length === 1 ? '' : 's'}`}</span>
+                    {reasonsExpanded ? (
+                      <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                  </button>
+                  {reasonsExpanded ? (
+                    <ul className="mt-2 space-y-1.5 text-xs" data-testid="human-attention-reasons">
+                      {latest.reasons.map((reason, index) => (
+                        <li key={`${reason.kind}-${index}`} className={cn('rounded-md px-2 py-1.5', reasonTone(reason.severity))}>
+                          <span className="font-medium">{reason.message}</span>
+                          {reason.evidence ? <span className="ml-1 opacity-80">{reason.evidence}</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
               ) : null}
             </>
           ) : (
@@ -131,18 +154,53 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
 
 export function HumanAttentionLowBanner({ timeline }: { timeline: HumanAttentionTimeline }): JSX.Element | null {
   const latest = timeline.latest
-  if (!latest || latest.level !== 'absent') return null
-  if (!shouldShowLowAttentionBanner(timeline)) return null
+  const shouldShow = latest?.level === 'absent' && shouldShowLowAttentionBanner(timeline)
+  // Signature must be stable while the underlying situation is unchanged, so
+  // dismissing the banner while the agent keeps producing messages doesn't
+  // re-open it on the next cursor tick. We only re-emerge when the *reason
+  // set* meaningfully changes: a new reason kind appears, or riskExposure
+  // crosses into a coarser bucket. Message cursor is intentionally excluded.
+  const signature = useMemo(() => {
+    if (!latest) return ''
+    const bucket =
+      latest.dimensions.riskExposure >= 80
+        ? 'severe'
+        : latest.dimensions.riskExposure >= 60
+          ? 'high'
+          : latest.dimensions.riskExposure >= 35
+            ? 'mid'
+            : 'low'
+    const reasonKinds = Array.from(new Set(latest.reasons.map((r) => r.kind))).sort().join(',')
+    return `${bucket}:${reasonKinds}`
+  }, [latest])
+  const [dismissedSignature, setDismissedSignature] = useState<string | null>(null)
+  useEffect(() => {
+    if (!shouldShow) setDismissedSignature(null)
+  }, [shouldShow])
+  if (!shouldShow) return null
+  if (dismissedSignature === signature) return null
   return (
-    <div
-      className="flex items-center gap-2 border-t border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
-      data-testid="human-attention-low-banner"
-      role="status"
-    >
-      <AlertTriangle className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-      <span className="font-medium">Attention is low.</span>
-      <span className="truncate text-rose-700/80 dark:text-rose-200/75">Review recent changes before broad instructions.</span>
-    </div>
+    <BannerSlot>
+      <div
+        className="flex min-w-0 items-center gap-2 border-t border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
+        data-testid="human-attention-low-banner"
+        role="status"
+      >
+        <AlertTriangle className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+        <span className="flex-none font-medium">Attention is low.</span>
+        <span className="min-w-0 flex-1 truncate text-rose-700/80 dark:text-rose-200/75">Review recent changes before broad instructions.</span>
+        <button
+          type="button"
+          onClick={() => setDismissedSignature(signature)}
+          aria-label="Dismiss attention warning"
+          title="Dismiss"
+          data-testid="human-attention-low-banner-dismiss"
+          className="ml-auto flex-none rounded p-0.5 text-rose-600/80 transition-colors hover:bg-rose-100 hover:text-rose-800 dark:text-rose-300/80 dark:hover:bg-rose-900/60 dark:hover:text-rose-100"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    </BannerSlot>
   )
 }
 

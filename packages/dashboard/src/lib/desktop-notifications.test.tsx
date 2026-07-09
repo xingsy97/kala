@@ -135,6 +135,34 @@ describe('desktop notification helpers', () => {
     expect(NotificationMock).toHaveBeenCalledWith('Workspace offline', expect.objectContaining({ body: 'demo session: ws-a is offline' }))
   })
 
+  it('suppresses the approval desktop notification when approvalMode is allow_all', () => {
+    localStorage.setItem('ak-desktop-notifications-enabled', '1')
+    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+
+    function Harness(props: Partial<Parameters<typeof useInterventionDesktopNotifications>[0]>): JSX.Element {
+      useInterventionDesktopNotifications({
+        sessionId: 's1',
+        sessionLabel: 'demo session',
+        pendingApprovalsCount: 0,
+        waitingForUser: false,
+        lastError: null,
+        connectionStatus: 'ready',
+        workspaceOnline: true,
+        approvalMode: 'allow_all',
+        ...props,
+      })
+      return <div />
+    }
+
+    const { rerender } = render(<Harness />)
+    rerender(<Harness pendingApprovalsCount={1} pendingApprovalSummary={{ callId: 'c1', name: 'bash' }} />)
+    // Kernel auto-dispatches under allow_all, so the operator should not be
+    // pinged even if a transient pending call briefly reaches the client.
+    expect(NotificationMock).not.toHaveBeenCalledWith('Approval required', expect.anything())
+  })
+
   it('notifies when a busy session becomes ready for user input', () => {
     localStorage.setItem('ak-desktop-notifications-enabled', '1')
     const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))

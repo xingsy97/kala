@@ -22,6 +22,7 @@ import type {
   ConsolidateMemoryResult,
   ContextUsageSnapshot,
   ControlUpdate,
+  CompactionMetadata,
   CopyOverflowSessionResult,
   DeleteOverflowSessionResult,
   DirListEntry,
@@ -232,6 +233,14 @@ export const HostRestartStatusSchema = z.object({
 
 export const HostRestartEventSchema: z.ZodType<HostRestartEvent> = HostRestartAttemptSchema
 
+export const CompactionMetadataSchema = z.object({
+  trigger: z.enum(['manual', 'auto', 'preflight', 'tool_result']),
+  attemptId: z.string().optional(),
+  tokensBefore: z.number().int().nonnegative(),
+  tokensAfter: z.number().int().nonnegative(),
+  replacedCount: z.number().int().nonnegative(),
+}) satisfies z.ZodType<CompactionMetadata>
+
 export const EventAppendedEventSchema = z.object({
   sessionId: z.string(),
   seq: z.number().int().nonnegative(),
@@ -242,6 +251,7 @@ export const EventAppendedEventSchema = z.object({
   hasLlmTraceArtifact: z.boolean().optional(),
   llmTrace: LLMTraceSchema.optional(),
   model: z.string().optional(),
+  compactionMetadata: CompactionMetadataSchema.optional(),
 }) satisfies z.ZodType<EventAppendedEvent>
 
 export const ServerLogArtifactPayloadSchema = z.object({

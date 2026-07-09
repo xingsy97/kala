@@ -159,7 +159,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[calc(100dvh-0.5rem)] max-w-6xl overflow-hidden border-border bg-background p-0 text-foreground shadow-2xl gap-0 grid-rows-[auto_minmax(0,1fr)] sm:h-[min(90dvh,44rem)] [&_input]:border-border [&_input]:bg-background [&_input]:text-foreground [&_select]:border-border [&_select]:bg-background [&_select]:text-foreground [&_table]:bg-muted/20 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-background [&_textarea]:text-foreground [&_th]:bg-muted/50 [&_th]:text-foreground"
+        className="h-[calc(var(--ak-viewport-h,100dvh)-0.5rem)] max-w-6xl overflow-hidden border-border bg-background p-0 text-foreground shadow-2xl gap-0 grid-rows-[auto_minmax(0,1fr)] sm:h-[min(90dvh,44rem)] [&_input]:border-border [&_input]:bg-background [&_input]:text-foreground [&_select]:border-border [&_select]:bg-background [&_select]:text-foreground [&_table]:bg-muted/20 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-background [&_textarea]:text-foreground [&_th]:bg-muted/50 [&_th]:text-foreground"
         data-testid="settings-dialog"
       >
         <DialogHeader className="border-b border-border bg-card px-4 py-3 sm:px-5">
