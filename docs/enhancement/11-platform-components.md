@@ -104,6 +104,44 @@ that endpoint as a read-only view: it shows summary counts, kind distribution,
 file metadata, and hash status without loading artifact payload bodies into UI
 state.
 
+Dashboard coverage mirrors the implemented enhancement CLIs where a UI action is
+reasonable. Expensive or environment-specific jobs still run through explicit
+CLI/CI commands, but their outputs have first-class dashboard surfaces. Cheap,
+deterministic planning actions can be triggered from the dashboard when they
+only create artifacts and do not mutate kernel session state:
+
+Dashboard action forms accept an optional `Root Dir` override for artifact
+outputs; when omitted, the host artifact root is used. Actions that only derive
+handoff data, such as the SWE-bench grading command dry-run, do not require
+artifact capture to be configured.
+
+- `Eval`: SWE-bench and generic eval summaries, worker plans, score artifacts,
+  judge traces, progress, comparisons, trials, final patches, harness evidence,
+  and linked sessions. The dashboard can create a SWE-bench worker plan, score a
+  session, parse a saved judge response into score/judge-trace artifacts,
+  compare two summary artifacts, infer predictions from an offline patches
+  directory, export an existing session into a SWE-bench run, and ingest official
+  SWE-bench result files through host actions that reuse the CLI
+  implementations. It can also build the official grading command in dry-run
+  mode for handoff to CI. Agent batch execution and Docker grading execution
+  stay CLI/CI-only; their outputs are still rendered here once artifacts are
+  written.
+- `Profiles`: session latency, token, missing-trace, and estimated-cost
+  profiles. The dashboard can generate a profile artifact from a session id or
+  explicit session log path.
+- `Memory`: memory index provenance, active/tombstoned entries, confidence, and
+  source metadata. The dashboard can rebuild the memory index for a workspace
+  and optionally include global memory.
+- `Ops`: reliability audit/chaos reports, RL rollout sidecars, token segment
+  indexes, slime/verl adapter artifacts, subagent graphs, OpenInference traces,
+  message assembly artifacts, router decisions, and tool catalogs. The dashboard
+  can trigger reliability audits, chaos summary generation, trace export,
+  rollout segment/sidecar/adapter export, and subagent graph export.
+
+This gives every major CLI-generated artifact family a dashboard equivalent for
+inspection while keeping execution control explicit and reproducible in the host
+CLI or CI workflow.
+
 This is an index, not a new protocol. It gives the dashboard and cleanup tools a
 stable discovery surface while preserving the existing artifact contracts:
 OpenInference traces, SWE-bench summaries/trials, rollout sidecars, profiles,
