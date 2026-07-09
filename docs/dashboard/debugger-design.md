@@ -111,7 +111,7 @@ Reducer Trace merges the old `Timeline` and `State flow` tabs. Each row shows th
 │                                                                    │
 │  #120 user_message               idle ───────────▶ thinking        │
 │       source user                                      call_llm    │
-│       text "Fix executor relative paths so they follow cwd."              │
+│       text "Please fix executor relative paths so they follow cwd."     │
 │                                                                    │
 │  #121 llm_response               thinking ───────▶ awaiting_approval│
 │       source llm                              request_approval     │
@@ -131,7 +131,7 @@ Reducer Trace merges the old `Timeline` and `State flow` tabs. Each row shows th
 │                                                                    │
 │  #124 llm_response              thinking ───────▶ done             │
 │       source llm                                       finish      │
-│       text "translated historical texttranslated historical texttranslated historical text cwd translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。"                 │
+│       text "Fixed cwd-relative path resolution and added tests."        │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -256,7 +256,7 @@ After clicking `View JSON`:
 │   "status": "executing_tools",                                  │
 │   "messages": [                                                   │
 │     { "role": "system", "content": [{ "type": "text", "text": "You are Codex..." }] },
-│     { "role": "user", "content": [{ "type": "text", "text": "Fix executor relative paths so they follow cwd." }] }
+│     { "role": "user", "content": [{ "type": "text", "text": "Please fix executor relative paths so they follow cwd." }] }
 │   ],                                                               │
 │   "pendingCalls": [{ "callId": "toolu_01J4...", "name": "edit", "status": "dispatched" }],
 │   "cwd": "/path/to/agent-kernel"

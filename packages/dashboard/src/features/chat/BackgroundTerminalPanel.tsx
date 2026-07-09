@@ -22,7 +22,7 @@ type Props = {
   /** Bound to the executor's registry. Empty when offline. */
   socket: DashboardSocket | null
   workspaceId: string | undefined
-  sessionId: string
+  sessionId: string | null
   /** Timeline-derived fallback used when there's no live executor. */
   fallbackTasks: readonly BackgroundTerminalTask[]
 }
@@ -98,7 +98,7 @@ export function BackgroundShellsButton({
         >
           <TerminalSquare className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
           <span className="tabular-nums">
-            {visibleRows.length} <span className="hidden sm:inline">{scopeLabel} {t('chat.backgroundShells.shell', { count: visibleRows.length }).replace(/^\d+\s*/, '')}</span>
+            {visibleRows.length} <span className="hidden sm:inline">{t('chat.backgroundShells.shell', { count: visibleRows.length }).replace(/^\d+\s*/, '')}</span>
           </span>
           {running > 0 ? (
             <span

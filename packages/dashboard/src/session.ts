@@ -19,6 +19,7 @@ import { createInitialState, step } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
   AttachedExecutor,
+  ContextSnapshot,
   ControlUpdate,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
@@ -33,6 +34,8 @@ import type {
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { io, type Socket } from 'socket.io-client'
 
+import type { CachedSessionViewInput, SessionViewCache } from './session-view-cache.js'
+
 export type DashboardSocket = Socket<
   DashboardServerToClientEvents,
   DashboardClientToServerEvents
@@ -43,6 +46,8 @@ export type TimelineEntry = {
   ts: string
   event: AgentEvent
   effects: readonly Effect[]
+  hasEffectsArtifact?: boolean
+  hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
 }
@@ -58,6 +63,7 @@ export type SessionView = {
   status: ConnectionStatus
   state: AgentState | null
   config: AgentConfig | null
+  contextSnapshot: ContextSnapshot | null
   timeline: readonly TimelineEntry[]
   streamingText: string
   /**
@@ -74,13 +80,16 @@ export type SessionView = {
   parentSessionId: string | null
   parentCursor: number | null
   selectedModel: string | null
+  toolExecutionStartedAt: number | null
+  hydratedSessionId: string | null
   socket: DashboardSocket | null
 }
 
 export type UseSessionOptions = {
   host: string
-  sessionId: string
+  sessionId: string | null
   token?: string
+  cache?: SessionViewCache
   onForked?: (payload: SessionForkedEvent) => void
 }
 
@@ -88,11 +97,13 @@ export function useSession({
   host,
   sessionId,
   token,
+  cache,
   onForked,
 }: UseSessionOptions): SessionView {
   const [status, setStatus] = useState<ConnectionStatus>('idle')
   const [state, setState] = useState<AgentState | null>(null)
   const [config, setConfig] = useState<AgentConfig | null>(null)
+  const [contextSnapshot, setContextSnapshot] = useState<ContextSnapshot | null>(null)
   const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
@@ -100,6 +111,7 @@ export function useSession({
   const [parentSessionId, setParentSessionId] = useState<string | null>(null)
   const [parentCursor, setParentCursor] = useState<number | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
+  const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
   // Latest AgentConfig — needed by the client-side fold on event:appended,
   // which lives inside a stable useEffect closure and can't read the React
@@ -115,9 +127,28 @@ export function useSession({
   onForkedRef.current = onForked
 
   useEffect(() => {
+    if (sessionId === null) {
+      socketRef.current?.close()
+      socketRef.current = null
+      setStatus('idle')
+      setState(null)
+      setConfig(null)
+      setContextSnapshot(null)
+      configRef.current = null
+      setTimeline([])
+      setStreamingText('')
+      setQueuedMessages([])
+      setLastError(null)
+      setParentSessionId(null)
+      setParentCursor(null)
+      setSelectedModel(null)
+      setHydratedSessionId(null)
+      return
+    }
     setStatus('connecting')
     setState(null)
     setConfig(null)
+    setContextSnapshot(null)
     configRef.current = null
     setTimeline([])
     setStreamingText('')
@@ -131,6 +162,45 @@ export function useSession({
     setParentSessionId(null)
     setParentCursor(null)
     setSelectedModel(null)
+    setHydratedSessionId(null)
+
+    let cacheDraft: CachedSessionViewInput = {
+      sessionId,
+      status: 'connecting',
+      state: null,
+      config: null,
+      contextSnapshot: null,
+      timeline: [],
+      queuedMessages: [],
+      lastError: null,
+      parentSessionId: null,
+      parentCursor: null,
+      selectedModel: null,
+      hydratedSessionId: null,
+    }
+    const cached = cache?.get(sessionId) ?? null
+    let resetHistoryBaseOnNextReplay = false
+    if (cached) {
+      cacheDraft = cached
+      setStatus('connecting')
+      setState(cached.state)
+      setConfig(cached.config)
+      setContextSnapshot(cached.contextSnapshot)
+      configRef.current = cached.config
+      setTimeline(cached.timeline)
+      setQueuedMessages(cached.queuedMessages)
+      setLastError(cached.lastError)
+      setParentSessionId(cached.parentSessionId)
+      setParentCursor(cached.parentCursor)
+      setSelectedModel(cached.selectedModel)
+      setHydratedSessionId(sessionId)
+    }
+
+    const writeCacheSnapshot = (patch: Parameters<SessionViewCache['patch']>[1]): void => {
+      if (!cache) return
+      cacheDraft = { ...cacheDraft, ...patch, sessionId }
+      cache.set(sessionId, cacheDraft)
+    }
 
     const drainStreamBuffer = (): void => {
       const buf = streamBufferRef.current
@@ -168,7 +238,6 @@ export function useSession({
     }
 
     const socket = io(`${host}/dashboard`, {
-      transports: ['websocket'],
       auth: {
         sessionId,
         role: 'dashboard',
@@ -189,16 +258,41 @@ export function useSession({
       setStatus('ready')
       setState(p.state)
       setConfig(p.config)
+      setContextSnapshot(p.contextSnapshot ?? null)
       configRef.current = p.config
       setParentSessionId(p.parentSessionId ?? null)
       setParentCursor(p.parentCursor ?? null)
       setSelectedModel(p.selectedModel ?? null)
+      setHydratedSessionId(p.sessionId)
+      writeCacheSnapshot({
+        status: 'ready',
+        state: p.state,
+        config: p.config,
+        contextSnapshot: p.contextSnapshot ?? null,
+        parentSessionId: p.parentSessionId ?? null,
+        parentCursor: p.parentCursor ?? null,
+        selectedModel: p.selectedModel ?? null,
+        hydratedSessionId: p.sessionId,
+        lastError: null,
+      })
       // Timeline was cleared for a fresh connect; ask the host to replay
       // the log so a page reload doesn't leave the user staring at an
       // empty timeline for a session that already has history. Live
       // event:appended events overlapping the tail of history are
       // deduped by seq below.
-      socket.emit('client:load_history', { sessionId: p.sessionId })
+      const cachedLastSeq = cached?.timeline.at(-1)?.seq ?? 0
+      if (cachedLastSeq > p.cursor) {
+        cache?.delete(p.sessionId)
+        cacheDraft = { ...cacheDraft, timeline: [], hydratedSessionId: p.sessionId }
+        resetHistoryBaseOnNextReplay = true
+        setTimeline([])
+        socket.emit('client:load_history', { sessionId: p.sessionId })
+        return
+      }
+      socket.emit('client:load_history', {
+        sessionId: p.sessionId,
+        ...(cachedLastSeq > 0 ? { sinceCursor: cachedLastSeq } : {}),
+      })
     })
     socket.on('server:history', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
@@ -207,10 +301,18 @@ export function useSession({
         ts: e.ts,
         event: e.event,
         effects: e.effects,
+        ...(e.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+        ...(e.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
         ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
         ...(e.model ? { model: e.model } : {}),
       }))
-      setTimeline((prev) => mergeBySeq(prev, entries))
+      setTimeline((prev) => {
+        const base = resetHistoryBaseOnNextReplay ? [] : prev
+        resetHistoryBaseOnNextReplay = false
+        const next = mergeBySeq(base, entries)
+        writeCacheSnapshot({ timeline: next })
+        return next
+      })
     })
     socket.on('session:forked', (p) => {
       if (!isCurrentSocket()) return
@@ -224,6 +326,8 @@ export function useSession({
       // out-of-order or if the host pushes a mid-stream correction; in
       // both cases the server-computed state wins.
       setState(p.state)
+      setContextSnapshot(p.contextSnapshot ?? null)
+      writeCacheSnapshot({ state: p.state, contextSnapshot: p.contextSnapshot ?? null })
       if (p.state.status !== 'thinking') resetStream()
     })
     socket.on('event:appended', (p) => {
@@ -239,20 +343,25 @@ export function useSession({
       setState((prev) => {
         if (prev === null || configRef.current === null) return prev
         const { next } = step(prev, p.event, configRef.current)
+        writeCacheSnapshot({ state: next })
         return next
       })
-      setTimeline((prev) =>
-        mergeBySeq(prev, [
+      setTimeline((prev) => {
+        const next = mergeBySeq(prev, [
           {
             seq: p.seq,
             ts: p.ts,
             event: p.event,
             effects: p.effects,
+            ...(p.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+            ...(p.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
             ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
             ...(p.model ? { model: p.model } : {}),
           },
-        ]),
-      )
+        ])
+        writeCacheSnapshot({ timeline: next })
+        return next
+      })
     })
     socket.on('approval:required', () => {
       // Best-effort: the reducer's next state:changed already carries the
@@ -263,12 +372,17 @@ export function useSession({
     })
     socket.on('server:message_queue', (p) => {
       if (!isCurrentSocket()) return
-      if (p.sessionId === sessionId) setQueuedMessages(p.items ?? [])
+      if (p.sessionId === sessionId) {
+        const items = p.items ?? []
+        setQueuedMessages(items)
+        writeCacheSnapshot({ queuedMessages: items })
+      }
     })
     socket.on('session:error', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       resetStream()
       setLastError(p)
+      writeCacheSnapshot({ lastError: p })
     })
     socket.on('session:token_delta', (p) => {
       if (!isCurrentSocket()) return
@@ -277,7 +391,9 @@ export function useSession({
     socket.on('session:model_changed', (p) => {
       if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) {
-        setSelectedModel(p.model.length > 0 ? p.model : null)
+        const model = p.model.length > 0 ? p.model : null
+        setSelectedModel(model)
+        writeCacheSnapshot({ selectedModel: model })
       }
     })
     socket.on('connect_error', (err) => {
@@ -317,10 +433,10 @@ export function useSession({
       socket.close()
       socketRef.current = null
     }
-  }, [host, sessionId, token])
+  }, [host, sessionId, token, cache])
 
   const pendingApprovals = useMemo<readonly ApprovalRequiredEvent[]>(() => {
-    if (!state) return []
+    if (!state || !sessionId) return []
     return state.pendingCalls
       .filter((c) => c.status === 'awaiting_approval')
       .map((c) => ({
@@ -331,11 +447,17 @@ export function useSession({
       }))
   }, [state, sessionId])
 
+  const toolExecutionStartedAt = useMemo(
+    () => deriveToolExecutionStartedAt(state, timeline),
+    [state, timeline],
+  )
+
   return useMemo(
     () => ({
       status,
       state,
       config,
+      contextSnapshot,
       timeline,
       streamingText,
       pendingApprovals,
@@ -344,6 +466,8 @@ export function useSession({
       parentSessionId,
       parentCursor,
       selectedModel,
+      toolExecutionStartedAt,
+      hydratedSessionId,
       socket: socketRef.current,
     }),
     [
@@ -358,8 +482,31 @@ export function useSession({
       parentSessionId,
       parentCursor,
       selectedModel,
+      toolExecutionStartedAt,
+      hydratedSessionId,
     ],
   )
+}
+
+export function deriveToolExecutionStartedAt(
+  state: AgentState | null,
+  timeline: readonly TimelineEntry[],
+): number | null {
+  if (!state || state.status !== 'executing_tools') return null
+  const activeCallIds = new Set(
+    state.pendingCalls
+      .filter((call) => call.status === 'dispatched' || call.status === 'approved')
+      .map((call) => call.callId),
+  )
+  if (activeCallIds.size === 0) return null
+  let startedAt: number | null = null
+  for (const entry of timeline) {
+    if (!entry.effects.some((effect) => effect.kind === 'call_tool' && activeCallIds.has(effect.callId))) continue
+    const parsed = Date.parse(entry.ts)
+    if (!Number.isFinite(parsed)) continue
+    startedAt = startedAt === null ? parsed : Math.min(startedAt, parsed)
+  }
+  return startedAt
 }
 
 export function respondApproval(
@@ -383,8 +530,9 @@ export function respondApproval(
 export function deleteSession(
   socket: DashboardSocket,
   sessionId: string,
+  options: { cascade?: boolean } = {},
 ): void {
-  socket.emit('client:delete_session', { sessionId })
+  socket.emit('client:delete_session', { sessionId, ...(options.cascade ? { cascade: true } : {}) })
 }
 
 /**
@@ -422,6 +570,7 @@ export function createSession(
     workspaceName?: string
     cwd?: string
     tools?: readonly string[]
+    selectedModel?: string
   },
 ): void {
   socket.emit('client:create_session', {
@@ -430,6 +579,7 @@ export function createSession(
     ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
     ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
     ...(input.tools !== undefined ? { tools: input.tools } : {}),
+    ...(input.selectedModel !== undefined && input.selectedModel.length > 0 ? { selectedModel: input.selectedModel } : {}),
   })
 }
 
@@ -441,6 +591,7 @@ export function createSessionWithAck(
     workspaceName?: string
     cwd?: string
     tools?: readonly string[]
+    selectedModel?: string
   },
   timeoutMs = 10_000,
 ): Promise<void> {
@@ -690,7 +841,7 @@ export function useControlPlane(
   return { executors, sessions, executorsLoaded, sessionsLoaded, refreshSessions }
 }
 
-function mergeSessionSummaries(
+export function mergeSessionSummaries(
   prev: readonly SessionSummary[],
   incoming: readonly SessionSummary[],
 ): readonly SessionSummary[] {
@@ -701,20 +852,12 @@ function mergeSessionSummaries(
   for (const old of prev) {
     const fresh = incomingById.get(old.sessionId)
     if (!fresh) continue
-    next.push({ ...fresh, status: fresherStatus(old.status, fresh.status) })
+    next.push(fresh)
   }
   for (const fresh of incoming) {
     if (!prevById.has(fresh.sessionId)) next.push(fresh)
   }
   return next
-}
-
-function fresherStatus(
-  oldStatus: SessionSummary['status'] | undefined,
-  newStatus: SessionSummary['status'] | undefined,
-): SessionSummary['status'] | undefined {
-  if (isRunningSessionStatus(oldStatus) && isRestingSessionStatus(newStatus)) return oldStatus
-  return newStatus
 }
 
 function updateSessionSummary(
@@ -757,10 +900,6 @@ function updateSessionSummaryFromEvent(
         : { firstUserMessage: entry.event.text.slice(0, 120) }),
     }
   })
-}
-
-function isRunningSessionStatus(status: SessionSummary['status'] | undefined): boolean {
-  return status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval'
 }
 
 function isRestingSessionStatus(status: SessionSummary['status'] | undefined): boolean {

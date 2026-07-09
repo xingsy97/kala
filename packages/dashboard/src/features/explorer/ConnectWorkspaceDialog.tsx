@@ -40,7 +40,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
       const res = await fetch('/auth/executor-invites', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ label: 'Connect Workspace' }),
+        body: JSON.stringify({}),
       })
       if (!res.ok) throw new Error(await res.text())
       return (await res.json()) as { inviteToken: string }
@@ -204,11 +204,11 @@ function commandFor(tab: OsTab, hostUrl: string, bootstrapBaseUrl: string, invit
       `if ((Get-FileHash "$dir/agent-kernel-executor.cjs" -Algorithm SHA256).Hash -ne $exp.ToUpper()) { throw 'checksum mismatch' };`,
       `$env:HOST_URL=${quotedHost};`,
       `$env:EXECUTOR_INVITE=${quotedInvite};`,
-      `$env:SANDBOX_ROOTS=(Get-Location).Path;`,
+      `$env:SANDBOX_ROOTS=$env:USERPROFILE;`,
       `node "$dir/agent-kernel-executor.cjs"`,
     ].join('\n')
   }
-  return `wget -O- ${base}/run.sh | COMPONENT=executor AGENT_KERNEL_RELEASE_BASE_URL=${shellQuote(base)} HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(invitePart)} SANDBOX_ROOTS="$PWD" bash`
+  return `wget -O- ${base}/run.sh | COMPONENT=executor AGENT_KERNEL_RELEASE_BASE_URL=${shellQuote(base)} HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(invitePart)} SANDBOX_ROOTS="$HOME" bash`
 }
 
 function resolveBootstrapBaseUrl(

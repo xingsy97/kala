@@ -19,7 +19,18 @@
  * against.
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type HTMLAttributes } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type TouchEvent,
+  type WheelEvent,
+} from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 
 import { cn } from '../../lib/utils.js'
@@ -84,6 +95,9 @@ function VirtualTranscriptInner<Item>(
   ref: React.ForwardedRef<VirtualTranscriptHandle>,
 ): JSX.Element {
   const virtuoso = useRef<VirtuosoHandle | null>(null)
+  const pinnedRef = useRef(pinnedToBottom)
+  const touchStartY = useRef<number | null>(null)
+  pinnedRef.current = pinnedToBottom
 
   useImperativeHandle(
     ref,
@@ -107,9 +121,37 @@ function VirtualTranscriptInner<Item>(
   // we don't.
   const handleAtBottomChange = useCallback(
     (atBottom: boolean) => {
+      pinnedRef.current = atBottom
       onPinnedChange(atBottom)
     },
     [onPinnedChange],
+  )
+
+  const unpinFromUserScroll = useCallback(() => {
+    if (!pinnedRef.current) return
+    pinnedRef.current = false
+    onPinnedChange(false)
+  }, [onPinnedChange])
+
+  const handleWheel = useCallback(
+    (event: WheelEvent<HTMLDivElement>) => {
+      if (event.deltaY < 0) unpinFromUserScroll()
+    },
+    [unpinFromUserScroll],
+  )
+
+  const handleTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    touchStartY.current = event.touches[0]?.clientY ?? null
+  }, [])
+
+  const handleTouchMove = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      const startY = touchStartY.current
+      const currentY = event.touches[0]?.clientY
+      if (startY == null || currentY == null) return
+      if (currentY - startY > 8) unpinFromUserScroll()
+    },
+    [unpinFromUserScroll],
   )
 
   const followOutput = useCallback(
@@ -136,15 +178,19 @@ function VirtualTranscriptInner<Item>(
 
   useEffect(() => {
     if (!footerSlot || !pinnedToBottom) return
-    scrollVirtuosoToBottom(virtuoso.current, items.length)
+    const scrollIfPinned = () => {
+      if (!pinnedRef.current) return
+      scrollVirtuosoToBottom(virtuoso.current, items.length)
+    }
+    scrollIfPinned()
     let raf2 = 0
     const raf1 = requestAnimationFrame(() => {
-      scrollVirtuosoToBottom(virtuoso.current, items.length)
-      raf2 = requestAnimationFrame(() => scrollVirtuosoToBottom(virtuoso.current, items.length))
+      scrollIfPinned()
+      raf2 = requestAnimationFrame(scrollIfPinned)
     })
     const timeouts = [
-      window.setTimeout(() => scrollVirtuosoToBottom(virtuoso.current, items.length), 60),
-      window.setTimeout(() => scrollVirtuosoToBottom(virtuoso.current, items.length), 180),
+      window.setTimeout(scrollIfPinned, 60),
+      window.setTimeout(scrollIfPinned, 180),
     ]
     return () => {
       cancelAnimationFrame(raf1)
@@ -170,7 +216,26 @@ function VirtualTranscriptInner<Item>(
   const components = useMemo(
     () => ({
       Scroller: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function TranscriptScroller(props, scrollerRef) {
-        return <div {...props} ref={scrollerRef} className={cn(props.className, 'virtual-transcript-scroller')} data-virtuoso-scroller="true" />
+        return (
+          <div
+            {...props}
+            ref={scrollerRef}
+            className={cn(props.className, 'virtual-transcript-scroller overflow-x-hidden')}
+            data-virtuoso-scroller="true"
+            onTouchMove={(event) => {
+              props.onTouchMove?.(event)
+              handleTouchMove(event)
+            }}
+            onTouchStart={(event) => {
+              props.onTouchStart?.(event)
+              handleTouchStart(event)
+            }}
+            onWheel={(event) => {
+              props.onWheel?.(event)
+              handleWheel(event)
+            }}
+          />
+        )
       }),
       Footer: function TranscriptFooter({ context }: { context?: { slot: JSX.Element | null | undefined; itemClassName: string | undefined } }) {
         const slot = context?.slot
@@ -178,7 +243,7 @@ function VirtualTranscriptInner<Item>(
         return slot ? <div className={footerClassName}>{slot}</div> : null
       },
     }),
-    [],
+    [handleTouchMove, handleTouchStart, handleWheel],
   )
 
   const footerContext = useMemo(
@@ -187,7 +252,7 @@ function VirtualTranscriptInner<Item>(
   )
 
   return (
-    <div className={cn('virtual-transcript min-h-0 flex-1', className)} data-scroll-owner="virtuoso" data-testid={dataTestId}>
+    <div className={cn('virtual-transcript min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden', className)} data-scroll-owner="virtuoso" data-testid={dataTestId}>
       <Virtuoso
         ref={virtuoso}
         style={{ height: '100%' }}

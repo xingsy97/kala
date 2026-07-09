@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
+import type { ContextSnapshot } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 
@@ -19,6 +20,7 @@ import { Button } from '../../components/ui/button.js'
  */
 type Props = {
   state: AgentState | null
+  contextSnapshot: ContextSnapshot | null
   compactRunning: boolean
   suppressed?: boolean
   onCompactNow: () => void
@@ -26,13 +28,14 @@ type Props = {
 
 export function ContextPressureBanner({
   state,
+  contextSnapshot,
   compactRunning,
   suppressed,
   onCompactNow,
 }: Props): JSX.Element | null {
   const { t } = useTranslation()
   if (suppressed) return null
-  const level = state?.contextPressureLevel ?? 'none'
+  const level = contextSnapshot?.pressureLevel ?? 'none'
   if (level !== 'soft') return null
   if (isActiveTurn(state?.status)) return null
 

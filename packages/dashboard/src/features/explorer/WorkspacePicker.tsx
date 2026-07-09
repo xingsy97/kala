@@ -214,7 +214,7 @@ export function NewSessionDialog({
 export const WorkspacePicker = NewSessionDialog
 
 function initialPathFor(workspace: AttachedExecutor): string {
-  return workspace.sandboxRoots?.[0] ?? workspace.workingDir ?? '/'
+  return workspace.sandboxRoots?.[0] ?? workspace.defaultCwd ?? workspace.workingDir ?? '/'
 }
 
 function workspaceMeta(workspace: AttachedExecutor): string {

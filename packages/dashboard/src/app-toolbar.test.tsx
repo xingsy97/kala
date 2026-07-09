@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { WorkbenchToolbar } from './app.js'
+import { NoSessionArea, WorkbenchToolbar } from './app.js'
 
 function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]> = {}): void {
   render(
@@ -41,5 +41,17 @@ describe('WorkbenchToolbar', () => {
     renderToolbar({ sessionSelected: true, sessionLoading: true, sessionActivityStatus: 'loading', onChangeCwd: vi.fn() })
 
     expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
+  })
+})
+
+describe('NoSessionArea', () => {
+  it('starts a new session without passing the click event as workspace id', () => {
+    const onNewSession = vi.fn()
+    render(<NoSessionArea onNewSession={onNewSession} hasSessions={false} />)
+
+    fireEvent.click(screen.getByTestId('no-session-new-button'))
+
+    expect(onNewSession).toHaveBeenCalledTimes(1)
+    expect(onNewSession).toHaveBeenCalledWith()
   })
 })

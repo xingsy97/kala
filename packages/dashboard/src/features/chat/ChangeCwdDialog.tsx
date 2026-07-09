@@ -95,7 +95,7 @@ export function ChangeCwdDialog({
             <DirectoryPicker
               socket={socket}
               workspaceId={workspace?.workspaceId ?? ''}
-              initialPath={currentCwd || workspace?.sandboxRoots?.[0] || workspace?.workingDir}
+              initialPath={currentCwd || workspace?.sandboxRoots?.[0] || workspace?.defaultCwd || workspace?.workingDir}
               value={cwd}
               onChange={setCwd}
               inputId="change-cwd-input"
@@ -129,7 +129,7 @@ function workspaceMeta(workspace: AttachedExecutor): string {
     workspace.os,
     workspace.runtime,
     workspace.runtimeVersion,
-    workspace.sandboxRoots?.[0] ?? workspace.workingDir,
+    workspace.sandboxRoots?.[0] ?? workspace.defaultCwd ?? workspace.workingDir,
   ]
     .filter((s) => typeof s === 'string' && s.length > 0)
     .join(' · ')

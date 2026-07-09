@@ -22,6 +22,7 @@ const HOST_HTTP_ROUTES = [
   '/eval',
   '/enhancement',
   '/router',
+  '/admin/socket.io',
 ] as const
 
 export default defineConfig({

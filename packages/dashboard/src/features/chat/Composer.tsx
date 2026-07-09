@@ -5,7 +5,7 @@ import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
-import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
+import type { ContextSnapshot, FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
   AgentConfig,
   AgentState,
@@ -45,6 +45,7 @@ type Props = {
   onApprovalModeChange(mode: ApprovalMode): void
   state: AgentState | null
   config: AgentConfig | null
+  contextSnapshot: ContextSnapshot | null
   queuedMessages: readonly QueuedMessagePreview[]
   timeline?: readonly TimelineEntry[]
   onQueuedReorder?(id: string, beforeId?: string | null): void
@@ -53,6 +54,7 @@ type Props = {
   workspaceOnline?: boolean
   onListFiles?(query: string): Promise<readonly FileListEntry[]>
   onReadFile?(path: string): Promise<{ content?: string; error?: string }>
+  awaitingAck?: boolean
   /**
    * Extra controls rendered inline in the footer, immediately after the
    * approval-mode picker. Used e.g. by the background-shells trigger.
@@ -119,6 +121,10 @@ function writeStoredSendMode(sessionId: string | null, mode: SendMode): void {
   }
 }
 
+function isActiveTurnStatus(status: AgentState['status'] | undefined): boolean {
+  return status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval'
+}
+
 function useIsNarrow(): boolean {
   const query = '(max-width: 639px)'
   const [matches, setMatches] = useState(() =>
@@ -149,6 +155,7 @@ export function Composer({
   onApprovalModeChange,
   state,
   config,
+  contextSnapshot,
   queuedMessages,
   timeline,
   onQueuedReorder,
@@ -157,6 +164,7 @@ export function Composer({
   workspaceOnline,
   onListFiles,
   onReadFile,
+  awaitingAck = false,
   footerExtras,
 }: Props): JSX.Element {
   const { t } = useTranslation()
@@ -390,6 +398,8 @@ export function Composer({
   }
 
   const canSubmit = !disabled && (text.trim().length > 0 || pastedImages.length > 0)
+  const canStop = typeof onCancel === 'function' && (awaitingAck || isActiveTurnStatus(state?.status))
+  const showStopButton = !canSubmit && canStop
 
   return (
     <form
@@ -423,16 +433,28 @@ export function Composer({
                 onEnterSubmit={() => { void submit() }}
               />
             </div>
+            <RuntimeMetrics
+              state={state}
+              config={config}
+              contextSnapshot={contextSnapshot}
+              modelInfo={modelInfoFor(models, model)}
+              queuedMessages={queuedMessages.length}
+              timeline={timeline}
+              density="simple"
+              onCompact={onCompact}
+              compactDisabled={disabled}
+            />
             <SendButton
               disabled={!canSubmit}
               sendMode={sendMode}
               onSendModeChange={updateSendMode}
               density="simple"
+              stop={showStopButton ? { onClick: onCancel } : undefined}
             />
             <ComposerModeToggle
               mode={mode}
               onToggle={toggleMode}
-              className="h-10 w-10 flex-none rounded-full border border-border/50 bg-muted/45 text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="h-9 w-9 flex-none rounded-full border border-border/50 bg-muted/45 text-muted-foreground hover:bg-muted hover:text-foreground sm:h-9 sm:w-9"
             />
           </div>
         ) : (
@@ -442,11 +464,6 @@ export function Composer({
             'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
           )}
         >
-          <ComposerModeToggle
-            mode={mode}
-            onToggle={toggleMode}
-            className="absolute right-2 top-2 z-10"
-          />
           {pastedImages.length > 0 ? (
             <div
               className="flex flex-wrap gap-2 border-b border-border/50 px-3 py-2"
@@ -602,28 +619,30 @@ export function Composer({
             data-testid="composer-footer"
           >
             <Select
-              value={model && models.some((m) => m.id === model) ? model : ''}
+              value={modelInfoFor(models, model ?? '') ? model : ''}
               onValueChange={onModelChange}
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-9 w-11 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:h-7 sm:w-20 md:w-24 xl:w-40"
+                className="h-9 w-11 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent md:h-7 md:w-24 xl:w-40"
                 data-testid="model-picker"
                 aria-label={t('common.model')}
               >
                 <Bot className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-                <span className="hidden min-w-0 truncate sm:inline">
+                <span className="hidden min-w-0 truncate md:inline">
                   <SelectValue
                     placeholder={models.length === 0 ? t('common.noModels') : t('common.model')}
                   />
                 </span>
               </SelectTrigger>
               <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id} data-testid={`model-option-${m.id}`}>
-                    {m.label}
+                {models.map((m) => {
+                  const key = modelKey(m)
+                  return (
+                  <SelectItem key={key} value={key} data-testid={`model-option-${key}`}>
+                    {m.label}{m.providerId ? <span className="ml-1 text-[10px] text-muted-foreground">{m.providerId}</span> : null}
                   </SelectItem>
-                ))}
+                )})}
               </SelectContent>
             </Select>
             <Select
@@ -632,7 +651,7 @@ export function Composer({
             >
               <SelectTrigger
                 className={cn(
-                  'h-9 w-11 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:h-7 sm:w-14 md:w-16 xl:w-32',
+                  'h-9 w-11 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent md:h-7 md:w-16 xl:w-32',
                   approvalMode === 'allow_all'
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
                     : approvalMode === 'ask'
@@ -643,7 +662,7 @@ export function Composer({
                 aria-label={t('composer.approvalMode')}
               >
                 <ShieldCheck className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-                <span className="hidden min-w-0 truncate sm:inline">{approvalModeLabel}</span>
+                <span className="hidden min-w-0 truncate md:inline">{approvalModeLabel}</span>
               </SelectTrigger>
               <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
                 {APPROVAL_MODES.map((m) => {
@@ -670,7 +689,8 @@ export function Composer({
               <RuntimeMetrics
                 state={state}
                 config={config}
-                modelInfo={models.find((m) => m.id === model) ?? null}
+                contextSnapshot={contextSnapshot}
+                modelInfo={modelInfoFor(models, model)}
                 queuedMessages={queuedMessages.length}
                 timeline={timeline}
                 onCompact={onCompact}
@@ -680,6 +700,12 @@ export function Composer({
                 disabled={!canSubmit}
                 sendMode={sendMode}
                 onSendModeChange={updateSendMode}
+                stop={showStopButton ? { onClick: onCancel } : undefined}
+              />
+              <ComposerModeToggle
+                mode={mode}
+                onToggle={toggleMode}
+                className="h-8 w-8 flex-none rounded-full border border-border/50 bg-muted/45 text-muted-foreground hover:bg-muted hover:text-foreground"
               />
             </div>
           </div>
@@ -698,16 +724,29 @@ export function Composer({
   )
 }
 
+function modelKey(model: ModelInfo): string {
+  return model.ref ?? model.id
+}
+
+function modelInfoFor(models: readonly ModelInfo[], key: string): ModelInfo | null {
+  const exact = models.find((m) => modelKey(m) === key)
+  if (exact) return exact
+  const byId = models.filter((m) => m.id === key)
+  return byId.length === 1 ? byId[0]! : null
+}
+
 function SendButton({
   disabled,
   sendMode,
   onSendModeChange,
   density = 'default',
+  stop,
 }: {
   disabled: boolean
   sendMode: SendMode
   onSendModeChange(value: SendMode): void
   density?: 'default' | 'simple'
+  stop?: { onClick?: () => void }
 }): JSX.Element {
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -730,6 +769,26 @@ function SendButton({
       : t('composer.queueHint')
   const isSimple = density === 'simple'
 
+  if (stop) {
+    return (
+      <Button
+        type="button"
+        onClick={stop.onClick}
+        disabled={!stop.onClick}
+        data-testid="composer-stop"
+        className={cn(
+          'flex-none rounded-full bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
+          isSimple ? 'h-9 px-3.5 text-xs font-medium' : 'h-8 px-3 text-xs font-medium',
+        )}
+        aria-label={t('chatStatus.stopTitle')}
+        title={t('chatStatus.stopTitle')}
+      >
+        <Square className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+        {t('chatStatus.stop')}
+      </Button>
+    )
+  }
+
   return (
     <div
       className="relative flex flex-none"
@@ -742,7 +801,7 @@ function SendButton({
         data-testid="composer-send"
         className={cn(
           isSimple
-            ? 'h-10 rounded-r-none rounded-l-full pl-3.5 pr-3 text-xs font-medium shadow-sm'
+            ? 'h-9 rounded-r-none rounded-l-full pl-3.5 pr-3 text-xs font-medium shadow-sm'
             : 'h-8 rounded-r-none rounded-l-full pl-4 pr-3 text-xs font-medium',
           disabled ? 'opacity-50' : '',
         )}
@@ -757,7 +816,7 @@ function SendButton({
         onClick={() => setMenuOpen((v) => !v)}
         className={cn(
           'flex flex-none items-center justify-center rounded-r-full border-l border-primary-foreground/30 bg-primary text-primary-foreground transition-colors hover:bg-primary/90',
-          isSimple ? 'h-10 px-2.5 shadow-sm' : 'h-8 px-2',
+          isSimple ? 'h-9 px-2.5 shadow-sm' : 'h-8 px-2',
         )}
         data-testid="send-mode-toggle"
         aria-label={t('chat.transcript.sendMode')}
@@ -910,8 +969,8 @@ function QueuedMessagesDock({
               }}
               onDragEnd={() => setDraggingId(null)}
             >
-              <span className="mt-0.5 flex h-5 min-w-8 items-center justify-center gap-0.5 rounded bg-muted font-mono text-[10px] text-muted-foreground">
-                {onReorder ? <GripVertical className="h-3 w-3" aria-hidden="true" /> : null}
+              <span className="mt-0.5 flex h-4 min-w-7 items-center justify-center gap-px rounded bg-muted font-mono text-[10px] text-muted-foreground">
+                {onReorder ? <GripVertical className="h-2.5 w-2.5" aria-hidden="true" /> : null}
                 {index + 1}
               </span>
               <span className="min-w-0">

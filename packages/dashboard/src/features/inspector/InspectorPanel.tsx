@@ -28,11 +28,12 @@ import type {
   MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
-import { redactLlmTrace, type LLMTrace, type ServerHistoryPayload } from '@agent-kernel/shared'
+import { redactLlmTrace, type ContextSnapshot, type LLMTrace, type ServerHistoryPayload, type ServerLogArtifactPayload } from '@agent-kernel/shared'
 import { useTranslation } from 'react-i18next'
 
 import type { DashboardSocket, TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
+import { formatTokens } from '../../lib/format.js'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,6 +86,7 @@ import {
 type Props = {
   state: AgentState | null
   config?: AgentConfig | null
+  contextSnapshot?: ContextSnapshot | null
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
   socket?: DashboardSocket | null
@@ -118,6 +120,45 @@ type ToolCallLifecycle = {
   dispatchedSeq?: number
   resultSeq?: number
   result?: Extract<AgentEvent, { kind: 'tool_result' }>
+}
+
+function mergeArtifactEntry(
+  current: readonly TimelineEntry[],
+  base: TimelineEntry,
+  payload: ServerLogArtifactPayload,
+): readonly TimelineEntry[] {
+  const hydrated = hydrateTimelineEntry(base, payload)
+  const without = current.filter((entry) => entry.seq !== hydrated.seq)
+  return [...without, hydrated].sort((a, b) => a.seq - b.seq)
+}
+
+function mergeTimelineArtifacts(
+  timeline: readonly TimelineEntry[],
+  artifacts: readonly TimelineEntry[],
+): readonly TimelineEntry[] {
+  if (artifacts.length === 0) return timeline
+  const bySeq = new Map(artifacts.map((entry) => [entry.seq, entry]))
+  return timeline.map((entry) => {
+    const hydrated = bySeq.get(entry.seq)
+    if (!hydrated) return entry
+    return {
+      ...entry,
+      effects: hydrated.effects,
+      ...(hydrated.llmTrace ? { llmTrace: hydrated.llmTrace } : {}),
+      hasEffectsArtifact: false,
+      hasLlmTraceArtifact: hydrated.llmTrace ? false : entry.hasLlmTraceArtifact,
+    }
+  })
+}
+
+function hydrateTimelineEntry(entry: TimelineEntry, payload: ServerLogArtifactPayload): TimelineEntry {
+  return {
+    ...entry,
+    ...(payload.effects ? { effects: payload.effects } : {}),
+    ...(payload.llmTrace ? { llmTrace: payload.llmTrace } : {}),
+    hasEffectsArtifact: payload.effects ? false : entry.hasEffectsArtifact,
+    hasLlmTraceArtifact: payload.llmTrace ? false : entry.hasLlmTraceArtifact,
+  }
 }
 
 type SubAgentRelationSummary = {
@@ -201,6 +242,7 @@ const TRACE_CATEGORY_TONE: Record<TraceCategory, string> = {
 export function InspectorPanel({
   state,
   config,
+  contextSnapshot,
   timeline,
   visibleMessagesCount,
   socket,
@@ -217,6 +259,7 @@ export function InspectorPanel({
   const [teachingMode, setTeachingMode] = useState(false)
   const [replaySeq, setReplaySeq] = useState<number | null>(null)
   const [selected, setSelected] = useState<DetailSelection>(null)
+  const [artifactTimeline, setArtifactTimeline] = useState<readonly TimelineEntry[]>([])
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
   const [traceFilter, setTraceFilter] = useState<ReadonlySet<TraceCategory>>(
     () => new Set<TraceCategory>(TRACE_CATEGORY_ORDER),
@@ -228,11 +271,12 @@ export function InspectorPanel({
     if (!showToolCallTab && inspectorView === 'tools') setInspectorView('trace')
   }, [showToolCallTab, inspectorView])
 
-  const flow = useMemo(() => stateFlow(timeline), [timeline])
-  const llmCalls = useMemo(() => buildLlmCalls(timeline), [timeline])
-  const toolCalls = useMemo(() => buildToolCalls(timeline), [timeline])
+  const hydratedTimeline = useMemo(() => mergeTimelineArtifacts(timeline, artifactTimeline), [timeline, artifactTimeline])
+  const flow = useMemo(() => stateFlow(hydratedTimeline), [hydratedTimeline])
+  const llmCalls = useMemo(() => buildLlmCalls(hydratedTimeline), [hydratedTimeline])
+  const toolCalls = useMemo(() => buildToolCalls(hydratedTimeline), [hydratedTimeline])
   const parentHistory = useHistoryTimeline(socket ?? null, parentSessionId ?? null)
-  const replaySnapshots = useMemo(() => buildReplaySnapshots(timeline, state, config), [timeline, state, config])
+  const replaySnapshots = useMemo(() => buildReplaySnapshots(hydratedTimeline, state, config), [hydratedTimeline, state, config])
   const replaySnapshot = useMemo(() => {
     if (replaySnapshots.length === 0) return null
     if (replaySeq === null) return replaySnapshots.at(-1) ?? null
@@ -244,17 +288,69 @@ export function InspectorPanel({
     setReplaySeq(seq)
   }
   const inspectTraceSeq = (seq: number): void => {
-    const entryIndex = timeline.findIndex((entry) => entry.seq === seq)
-    const entry = timeline[entryIndex]
+    const entryIndex = hydratedTimeline.findIndex((entry) => entry.seq === seq)
+    const entry = hydratedTimeline[entryIndex]
     if (!entry) return
     setReplaySeq(seq)
     setSelected({
       kind: 'event',
       entry,
-      priorCallLlm: findPriorCallLlm(timeline, entryIndex),
+      priorCallLlm: findPriorCallLlm(hydratedTimeline, entryIndex),
       flow: flow.find((step) => step.seq === entry.seq),
     })
   }
+
+  useEffect(() => {
+    if (!socket || !state?.sessionId || selected?.kind !== 'event') return
+    const entry = selected.entry
+    if (!entry.hasEffectsArtifact && !entry.hasLlmTraceArtifact) return
+    const sessionId = state.sessionId
+    const onArtifact = (p: ServerLogArtifactPayload): void => {
+      if (p.sessionId !== sessionId || p.seq !== entry.seq || p.error) return
+      setArtifactTimeline((current) => mergeArtifactEntry(current, entry, p))
+      setSelected((current) => {
+        if (current?.kind !== 'event' || current.entry.seq !== entry.seq) return current
+        return {
+          ...current,
+          entry: {
+            ...current.entry,
+            ...(p.effects ? { effects: p.effects } : {}),
+            ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
+            hasEffectsArtifact: false,
+            hasLlmTraceArtifact: false,
+          },
+        }
+      })
+    }
+    socket.on('server:log_artifact', onArtifact)
+    socket.emit('client:load_log_artifact', { sessionId, seq: entry.seq })
+    return () => {
+      socket.off('server:log_artifact', onArtifact)
+    }
+  }, [socket, selected, state?.sessionId])
+
+  useEffect(() => {
+    if (!socket || !state?.sessionId || selected?.kind !== 'llm') return
+    const call = selected.call
+    const requestEntry = hydratedTimeline.find((entry) => entry.seq === call.requestSeq)
+    if (!requestEntry?.hasEffectsArtifact) return
+    const sessionId = state.sessionId
+    const onArtifact = (p: ServerLogArtifactPayload): void => {
+      if (p.sessionId !== sessionId || p.seq !== call.requestSeq || p.error) return
+      setArtifactTimeline((current) => mergeArtifactEntry(current, requestEntry, p))
+    }
+    socket.on('server:log_artifact', onArtifact)
+    socket.emit('client:load_log_artifact', { sessionId, seq: call.requestSeq })
+    return () => {
+      socket.off('server:log_artifact', onArtifact)
+    }
+  }, [hydratedTimeline, socket, selected, state?.sessionId])
+
+  useEffect(() => {
+    if (selected?.kind !== 'llm') return
+    const fresh = llmCalls.find((call) => call.id === selected.call.id)
+    if (fresh && fresh !== selected.call) setSelected({ kind: 'llm', call: fresh })
+  }, [llmCalls, selected])
 
   useEffect(() => {
     if (replaySnapshots.length === 0) {
@@ -276,7 +372,7 @@ export function InspectorPanel({
       <DebuggerHeader
         state={state}
         config={config}
-        timeline={timeline}
+        timeline={hydratedTimeline}
         visibleMessagesCount={visibleMessagesCount}
       />
       <InspectorTabs
@@ -288,7 +384,7 @@ export function InspectorPanel({
 
       {inspectorView === 'status' ? (
         <div className="flex min-h-0 flex-1 flex-col" data-testid="inspector-view-panel-status">
-          <Overview state={state} config={config} timeline={timeline} visibleMessagesCount={visibleMessagesCount} />
+          <Overview state={state} config={config} timeline={hydratedTimeline} visibleMessagesCount={visibleMessagesCount} />
           <div className="min-h-0 flex-1">
             <RuntimeSection
               view={runtimeView}
@@ -297,7 +393,8 @@ export function InspectorPanel({
               replayState={replayState}
               replaySeq={replaySeq}
               config={config}
-              timeline={timeline}
+              contextSnapshot={contextSnapshot}
+              timeline={hydratedTimeline}
               toolCalls={toolCalls}
               subAgentRelation={subAgentRelationSummary(parentSessionId ?? null, parentCursor ?? null, toolCalls)}
               topology={statusTopology(socket ?? null, state, llmCalls)}
@@ -308,7 +405,7 @@ export function InspectorPanel({
         <div className="min-h-0 flex-1" data-testid={`inspector-view-panel-${inspectorView}`}>
           <TraceSection
             view={inspectorView}
-            timeline={timeline}
+            timeline={hydratedTimeline}
             flow={flow}
             llmCalls={llmCalls}
             toolCalls={toolCalls}
@@ -339,7 +436,7 @@ export function InspectorPanel({
 
       <DetailDialog
         selection={selected}
-        timeline={timeline}
+        timeline={hydratedTimeline}
         onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
         onOpenChange={(open) => {
           if (!open) setSelected(null)
@@ -470,6 +567,8 @@ function useHistoryTimeline(socket: DashboardSocket | null, sessionId: string | 
           ts: e.ts,
           event: e.event,
           effects: e.effects,
+          ...(e.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+          ...(e.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
           ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
           ...(e.model ? { model: e.model } : {}),
         }))
@@ -493,6 +592,7 @@ function DebuggerHeader({
 }: {
   state: AgentState | null
   config?: AgentConfig | null
+  contextSnapshot?: ContextSnapshot | null
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
 }): JSX.Element {
@@ -532,8 +632,8 @@ function Overview({
   const { t } = useTranslation()
   const contextLimit = config?.contextLimit
   const context = contextLimit
-    ? `${state?.usage.inputTokens ?? 0} / ${contextLimit}`
-    : `${state?.usage.inputTokens ?? 0} input`
+    ? `${formatTokens(state?.usage.inputTokens ?? 0, { thousands: 'compact' })} / ${formatTokens(contextLimit, { thousands: 'compact' })}`
+    : `${formatTokens(state?.usage.inputTokens ?? 0, { thousands: 'compact' })} input`
   const pending = state?.pendingCalls.find((c) => c.status !== 'rejected')
   return (
     <section className="flex-none bg-card px-3 pb-3" aria-label={t('inspector.overview')}>
@@ -551,7 +651,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
   return (
     <div className="min-w-0 rounded bg-sidebar px-2 py-1.5 ring-1 ring-border/30">
       <div className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={cn('mt-0.5 truncate font-mono text-[11px] text-foreground', tone)} title={value}>
+      <div className={cn('mt-0.5 break-words font-mono text-[11px] leading-snug text-foreground', tone)} title={value}>
         {value}
       </div>
     </div>
@@ -1089,6 +1189,7 @@ function RuntimeSection({
   replayState,
   replaySeq,
   config,
+  contextSnapshot,
   timeline,
   toolCalls,
   subAgentRelation,
@@ -1100,13 +1201,14 @@ function RuntimeSection({
   replayState: AgentState | null
   replaySeq: number | null
   config?: AgentConfig | null
+  contextSnapshot?: ContextSnapshot | null
   timeline: readonly TimelineEntry[]
   toolCalls: readonly ToolCallLifecycle[]
   subAgentRelation: SubAgentRelationSummary
   topology: readonly StatusTopologyNode[]
 }): JSX.Element {
   const { t } = useTranslation()
-  const health = useMemo(() => buildRunHealth(state, config, timeline), [state, config, timeline])
+  const health = useMemo(() => buildRunHealth(state, config, timeline, contextSnapshot), [state, config, timeline, contextSnapshot])
   return (
     <section className="flex h-full min-h-0 flex-col" aria-label={t('inspector.runtime.aria')}>
       <SectionHeader icon={Database} title={t('inspector.runtime.title')}>
@@ -1125,7 +1227,7 @@ function RuntimeSection({
         <StatusTopology nodes={topology} />
         <RunHealthPanel items={health} />
         {view === 'state' ? (
-          <StateRuntime state={state} replayState={replayState} replaySeq={replaySeq} subAgentRelation={subAgentRelation} />
+          <StateRuntime state={state} replayState={replayState} replaySeq={replaySeq} contextSnapshot={contextSnapshot} subAgentRelation={subAgentRelation} />
         ) : view === 'tools' ? (
           <ToolsRuntime tools={config?.tools ?? []} toolCalls={toolCalls} />
         ) : (
@@ -1138,17 +1240,40 @@ function RuntimeSection({
 
 function StatusTopology({ nodes }: { nodes: readonly StatusTopologyNode[] }): JSX.Element {
   return (
-    <div className="grid gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-4" data-testid="status-topology">
+    <div className="grid min-w-0 gap-1.5 text-xs sm:grid-cols-2" data-testid="status-topology">
       {nodes.map((node, index) => (
-        <div key={node.id} className="flex min-w-0 items-center gap-2 rounded bg-background/70 px-2 py-1 ring-1 ring-border/30" title={node.value}>
-          <span className={cn('h-2 w-2 flex-none rounded-full', topologyTone(node.status))} />
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{node.label}</span>
-          <span className="min-w-0 truncate font-mono text-[10px] text-foreground">{node.value}</span>
-          {index < nodes.length - 1 ? <ChevronRight className="hidden h-3 w-3 flex-none text-muted-foreground xl:block" aria-hidden="true" /> : null}
+        <div key={node.id} className="min-w-0 rounded bg-background/70 px-2 py-1.5 ring-1 ring-border/30" title={`${node.label}: ${node.value}`}>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className={cn('h-2 w-2 flex-none rounded-full', topologyTone(node.status))} />
+            <span className="min-w-0 flex-1 text-[10px] font-medium uppercase text-muted-foreground">{node.label}</span>
+            {index < nodes.length - 1 ? <ChevronRight className="h-3 w-3 flex-none text-muted-foreground/60" aria-hidden="true" /> : null}
+          </div>
+          <div className="mt-1 min-w-0 break-words font-mono text-[10px] leading-snug text-foreground">{shortTopologyValue(node)}</div>
         </div>
       ))}
     </div>
   )
+}
+
+function shortTopologyValue(node: StatusTopologyNode): string {
+  if (node.id === 'host') return node.value.replace(/^socket /u, '')
+  if (node.id === 'executor') return compactPath(node.value)
+  if (node.id === 'llm') return compactModelLabel(node.value)
+  return node.value
+}
+
+function compactPath(value: string): string {
+  if (!value.startsWith('/')) return value
+  const parts = value.split('/').filter(Boolean)
+  if (parts.length <= 3) return value
+  return `/${parts.slice(-3).join('/')}`
+}
+
+function compactModelLabel(value: string): string {
+  return value
+    .replace('anthropic / ', '')
+    .replace('kernel / ', '')
+    .replace(/-internal$/u, '')
 }
 
 function topologyTone(status: StatusTopologyNode['status']): string {
@@ -1162,11 +1287,13 @@ function StateRuntime({
   state,
   replayState,
   replaySeq,
+  contextSnapshot,
   subAgentRelation,
 }: {
   state: AgentState | null
   replayState: AgentState | null
   replaySeq: number | null
+  contextSnapshot?: ContextSnapshot | null
   subAgentRelation: SubAgentRelationSummary
 }): JSX.Element {
   const { t } = useTranslation()
@@ -1209,7 +1336,8 @@ function StateRuntime({
               rows={[
                 ['messages', String(inspectedState?.messages.length ?? 0)],
                 ['pending', pendingCalls.length > 0 ? pendingCalls.join(', ') : 'none'],
-                ['context pressure', inspectedState?.contextPressureLevel ?? 'n/a'],
+                ['context pressure', contextSnapshot?.pressureLevel ?? 'n/a'],
+                ['context input', contextSnapshot ? String(contextSnapshot.estimatedTotalInputTokens) : 'n/a'],
               ]}
             />
             <StateGroup
@@ -1290,16 +1418,25 @@ function SubAgentRelationPanel({ summary }: { summary: SubAgentRelationSummary }
 
 function RunHealthPanel({ items }: { items: readonly RunHealthItem[] }): JSX.Element {
   return (
-    <div className="grid gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-3" data-testid="run-health-panel">
+    <div className="grid min-w-0 gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-3" data-testid="run-health-panel">
       {items.map((item) => (
-        <div key={item.id} className="flex min-w-0 items-center gap-2 rounded bg-background/70 px-2 py-1 ring-1 ring-border/30">
-          <HeartPulse className={cn('h-3 w-3 flex-none', healthTone(item.tone))} aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{item.label}</span>
-          <span className={cn('flex-none truncate font-mono text-[10px]', healthTone(item.tone))}>{item.value}</span>
+        <div key={item.id} className="min-w-0 rounded bg-background/70 px-2 py-1.5 ring-1 ring-border/30" title={`${item.label}: ${item.value}`}>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <HeartPulse className={cn('h-3 w-3 flex-none', healthTone(item.tone))} aria-hidden="true" />
+            <span className="min-w-0 flex-1 text-[10px] font-medium uppercase text-muted-foreground">{shortHealthLabel(item.label)}</span>
+          </div>
+          <div className={cn('mt-1 min-w-0 break-words font-mono text-[10px] leading-snug', healthTone(item.tone))}>{item.value}</div>
         </div>
       ))}
     </div>
   )
+}
+
+function shortHealthLabel(label: string): string {
+  if (label === 'Missing HTTP traces') return 'Missing traces'
+  if (label === 'Pending approvals') return 'Approvals'
+  if (label === 'Failed tools') return 'Tool failures'
+  return label
 }
 
 function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; toolCalls: readonly ToolCallLifecycle[] }): JSX.Element {
@@ -1321,6 +1458,9 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
               data-testid="tool-registry-item"
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
+              {tool.toolsetId ? (
+                <span className="hidden flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">{tool.toolsetId}</span>
+              ) : null}
               {isSkillTool(tool) ? (
                 <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span>
               ) : null}
@@ -1343,6 +1483,9 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
                   ) : null}
                 </div>
                 <div className="mt-1 text-muted-foreground">{selectedTool.requiresApproval ? t('inspector.runtime.approvalRequired') : t('inspector.runtime.autoAllowed')}</div>
+                <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                  {[selectedTool.toolsetId ? `toolset ${selectedTool.toolsetId}` : null, selectedTool.risk ? `risk ${selectedTool.risk}` : null, selectedTool.executionKind ? `exec ${selectedTool.executionKind}` : null].filter(Boolean).join(' · ')}
+                </div>
                 <p className="mt-2 text-muted-foreground">{selectedTool.description || t('inspector.runtime.noDescription')}</p>
               </div>
               <div>
@@ -1444,8 +1587,8 @@ function DetailDialog({
               <LlmDetail call={selection.call} onForkRequest={onForkRequest} />
             ) : selection.kind === 'tool' ? (
               <ToolDetail call={selection.call} />
-            ) : selection.entry.event.kind === 'compact_replaced' ? (
-              <CompactDetail entry={selection.entry} timeline={timeline} />
+            ) : selection.entry.event.kind === 'messages_replaced' && selection.entry.event.reason === 'compaction' ? (
+              <CompactDetail entry={selection.entry} />
             ) : (
               <EventDetail selection={selection} />
             )
@@ -1894,6 +2037,7 @@ function ToolRegistryContextView({
               data-highlighted={highlighted ? 'true' : 'false'}
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
+              {tool.toolsetId ? <span className="hidden flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">{tool.toolsetId}</span> : null}
               {isSkillTool(tool) ? <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span> : null}
               <span className={cn('flex-none text-xs', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
                 {tool.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')}
@@ -1910,6 +2054,9 @@ function ToolRegistryContextView({
                 rows={[
                   [t('inspector.llm.toolLabel'), selected.name],
                   [t('inspector.llm.approvalLabel'), selected.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')],
+                  ['toolset', selected.toolsetId ?? 'unknown'],
+                  ['risk', selected.risk ?? 'unknown'],
+                  ['execution', selected.executionKind ?? 'unknown'],
                   [t('inspector.llm.descriptionBytesLabel'), String(selected.description.length)],
                 ]}
               />
@@ -2028,21 +2175,19 @@ function ToolDetail({ call }: { call: ToolCallLifecycle }): JSX.Element {
   )
 }
 
-function CompactDetail({ entry, timeline }: { entry: TimelineEntry; timeline: readonly TimelineEntry[] }): JSX.Element {
-  if (entry.event.kind !== 'compact_replaced') return <EmptyBlock label="Not a compaction event." />
-  const compactRequest = entry.event.request ?? compactRequestFromTimeline(timeline, entry.seq)
+function CompactDetail({ entry }: { entry: TimelineEntry }): JSX.Element {
+  if (entry.event.kind !== 'messages_replaced' || entry.event.reason !== 'compaction') return <EmptyBlock label="Not a compaction event." />
   return (
     <ScrollArea className="h-full">
       <div className="space-y-2 pb-1" data-testid="timeline-row-details">
         <KeyValueTable
           rows={[
-            ['trigger', entry.event.trigger ?? 'unknown'],
-            ['replaced messages', String(entry.event.replacedCount)],
-            ['tokens', `${entry.event.tokensBefore} → ${entry.event.tokensAfter}`],
+            ['reason', entry.event.reason],
+            ['replace range', `${entry.event.replaceRange.start} → ${entry.event.replaceRange.end}`],
+            ['replacement messages', String(entry.event.replacementMessages.length)],
           ]}
         />
-        <JsonBlock label="Compaction Request" value={compactRequest} collapsed={2} />
-        <JsonBlock label="Compaction Result" value={entry.event} collapsed={2} />
+        <JsonBlock label="Message Replacement" value={entry.event} collapsed={2} />
       </div>
     </ScrollArea>
   )
@@ -2199,9 +2344,7 @@ function inboundOf(event: AgentEvent): { source: string; tone: string } {
     case 'cancel':
     case 'clear':
       return { source: 'user', tone: 'text-amber-600 dark:text-amber-300' }
-    case 'compact_replaced':
-    case 'compact_skipped':
-    case 'compact_rejected':
+    case 'messages_replaced':
       return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
   }
 }
@@ -2248,7 +2391,7 @@ function eventCategories(entry: TimelineEntry): Set<TraceCategory> {
     case 'tool_result':
       categories.add('tool')
       break
-    case 'compact_replaced':
+    case 'messages_replaced':
       categories.add('system')
       break
   }
@@ -2545,12 +2688,10 @@ function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | null): str
       return `rejected ${event.callId}${event.reason ? ` · ${event.reason}` : ''}`
     case 'llm_error':
       return event.error
-    case 'compact_replaced':
-      return `${event.trigger ?? 'unknown'} compact · ${event.replacedCount} messages · ${event.tokensBefore} → ${event.tokensAfter}`
-    case 'compact_skipped':
-      return `${event.trigger} compact skipped · ${event.reason}${event.errorMessage ? ` · ${event.errorMessage}` : ''}`
-    case 'compact_rejected':
-      return `compact rejected · ${event.reason}`
+    case 'messages_replaced':
+      return event.reason === 'compaction'
+        ? `compaction · ${event.replaceRange.start} → ${event.replaceRange.end} · ${event.replacementMessages.length} replacement message(s)`
+        : `messages replaced · ${event.reason}`
     case 'approval_mode_changed':
       return `approval mode ${event.mode}`
     case 'cwd_changed':
@@ -2676,14 +2817,12 @@ function providerArrayLength(body: unknown, key: string): string {
 
 function llmResponseSummary(call: LlmCall): string {
   if (call.error) return call.error.error
-  if (call.compact) return `compact summary · ${call.compact.summary.length} chars`
   if (!call.response) return 'pending'
   return summarizeContent(call.response.message.content)
 }
 
 function llmResponseCardSummary(call: LlmCall): string {
   if (call.error) return `error ${call.error.error.length} chars`
-  if (call.compact) return `compact summary ${call.compact.summary.length} chars`
   if (!call.response) return 'pending'
   return summarizeContentForCard(call.response.message.content)
 }
@@ -2800,40 +2939,6 @@ function providerFromModel(model: string | undefined): string | null {
   if (normalized.includes('claude')) return 'anthropic'
   if (normalized.includes('gpt')) return 'openai'
   return null
-}
-
-function compactRequestFromTimeline(timeline: readonly TimelineEntry[], compactSeq: number): {
-  metadataSource: 'reconstructed_from_timeline'
-  note: string
-  unavailable: readonly string[]
-  messages: readonly Message[]
-  tools: readonly []
-} {
-  const messages: Message[] = []
-  for (const row of timeline) {
-    if (row.seq >= compactSeq) break
-    const event = row.event
-    if (event.kind === 'user_message') {
-      messages.push({
-        role: 'user',
-        content: event.content ? [...event.content] : [{ type: 'text', text: event.text ?? '' }],
-      })
-    } else if (event.kind === 'llm_response') {
-      messages.push(event.message)
-    } else if (event.kind === 'tool_result') {
-      messages.push({
-        role: 'tool',
-        content: [{ type: 'tool_result', callId: event.callId, ok: event.ok, content: event.content }],
-      })
-    }
-  }
-  return {
-    metadataSource: 'reconstructed_from_timeline',
-    note: 'This compact_replaced event predates request metadata. The dashboard reconstructed the visible transcript before compaction; exact summarizer prompt, model, and tool schema were not recorded in the log.',
-    unavailable: ['model', 'systemPrompt', 'tool schemas', 'provider request options'],
-    messages,
-    tools: [],
-  }
 }
 
 function MemoryEntryRow({ entry }: { entry: { key: string; content: string; updatedAt: string } }): JSX.Element {

@@ -35,12 +35,10 @@ describe('visibleMessages', () => {
         seq: 3,
         ts: '2026-07-05T00:00:02.000Z',
         event: {
-          kind: 'compact_replaced',
-          preserveFrom: 3,
-          summary: 'hello -> hi',
-          replacedCount: 2,
-          tokensBefore: 100,
-          tokensAfter: 8,
+          kind: 'messages_replaced',
+          reason: 'compaction',
+          replaceRange: { start: 1, end: 3 },
+          replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'hello -> hi' }] }],
         },
         effects: [],
       },
@@ -64,8 +62,8 @@ describe('visibleMessages', () => {
       kind: 'compact_boundary',
       seq: 3,
       trigger: 'unknown',
-      tokensBefore: 100,
-      tokensAfter: 8,
+      tokensBefore: 0,
+      tokensAfter: 0,
     })
   })
 
@@ -85,6 +83,13 @@ describe('visibleMessages', () => {
 
     expect(visible.map((m) => m.role)).toEqual(['user', 'assistant'])
     expect(visible[1]?.content[0]).toEqual({ type: 'text', text: 'partial answer' })
+
+    const transcript = visibleTranscript([system], [], 'partial answer')
+    expect(transcript[0]).toMatchObject({
+      kind: 'message',
+      streaming: true,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'partial answer' }] },
+    })
   })
 
   it('uses timeline messages even before the first assistant response lands', () => {
@@ -103,6 +108,34 @@ describe('visibleMessages', () => {
 
     expect(visible.map((m) => m.role)).toEqual(['user'])
     expect(visible[0]?.content[0]).toEqual({ type: 'text', text: 'first turn' })
+  })
+
+  it('keeps fork baseline messages before child timeline events', () => {
+    const stateMessages: Message[] = [
+      system,
+      { role: 'user', content: [{ type: 'text', text: 'first parent turn' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'first parent answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'edited child prompt' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'child answer' }] },
+    ]
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: '2026-07-06T00:00:00.000Z', event: { kind: 'user_message', text: 'edited child prompt' }, effects: [] },
+      {
+        seq: 2,
+        ts: '2026-07-06T00:00:01.000Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'child answer' }] } },
+        effects: [],
+      },
+    ]
+
+    const visible = visibleMessages(stateMessages, timeline, '', { includeStatePrefix: true })
+
+    expect(visible.map((message) => message.content[0])).toEqual([
+      { type: 'text', text: 'first parent turn' },
+      { type: 'text', text: 'first parent answer' },
+      { type: 'text', text: 'edited child prompt' },
+      { type: 'text', text: 'child answer' },
+    ])
   })
 
   it('emits nothing when the only state message is the system prompt (no timeline, no stream)', () => {

@@ -18,7 +18,6 @@ describe('RuntimeMetrics', () => {
           status: 'pending_approval' as const,
         },
       ],
-      contextTokens: 1_200,
       usage: { inputTokens: 12_000, outputTokens: 34, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const onCompact = vi.fn()
@@ -27,6 +26,15 @@ describe('RuntimeMetrics', () => {
       <RuntimeMetrics
         state={state}
         config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
+        contextSnapshot={{
+          estimatedMessageTokens: 1_000,
+          estimatedToolSchemaTokens: 100,
+          estimatedTotalInputTokens: 1_200,
+          reserveTokens: 100,
+          effectiveLimit: 4_000,
+          pressureLevel: 'none',
+          reasonCodes: [],
+        }}
         modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
         queuedMessages={2}
         timeline={[
@@ -68,5 +76,36 @@ describe('RuntimeMetrics', () => {
 
     fireEvent.click(screen.getByTestId('context-compact-conversation'))
     expect(onCompact).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses selected-model context from the context snapshot ahead of session config', () => {
+    render(
+      <RuntimeMetrics
+        state={createInitialState({ sessionId: 'sess-opus' })}
+        config={{ contextLimit: 400_000, hardThreshold: 0.8 }}
+        contextSnapshot={{
+          estimatedMessageTokens: 1_000,
+          estimatedToolSchemaTokens: 100,
+          estimatedTotalInputTokens: 2_000,
+          reserveTokens: 100,
+          effectiveLimit: 1_000_000,
+          contextWindow: 1_000_000,
+          contextWindowSource: 'model',
+          contextWindowModel: 'claude-opus-4.7-1m-internal',
+          pressureLevel: 'none',
+          reasonCodes: [],
+        }}
+        modelInfo={{ id: 'claude-opus-4.7-1m-internal', label: 'Opus 1M', provider: 'Anthropic', contextWindow: 1_000_000 }}
+        queuedMessages={0}
+      />,
+    )
+
+    const indicator = screen.getByTestId('context-usage-indicator')
+    expect(indicator.getAttribute('title') ?? '').toContain('1.0M')
+    expect(indicator.getAttribute('title') ?? '').not.toContain('400.0k')
+    fireEvent.click(indicator)
+    const popover = screen.getByTestId('context-pressure-popover')
+    expect(popover.textContent ?? '').toContain('Model context 1.0M')
+    expect(popover.textContent ?? '').toContain('Source: model')
   })
 })

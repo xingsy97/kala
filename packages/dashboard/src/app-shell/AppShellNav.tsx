@@ -165,17 +165,6 @@ export function AppShellNav({
         <Button
           variant="ghost"
           size="icon"
-          data-testid="app-shell-nav-collapse"
-          onClick={onCollapse}
-          title={t('app.collapseTopbar')}
-          aria-label={t('app.collapseTopbar')}
-          className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
-        >
-          <ChevronUp className="h-4 w-4" aria-hidden />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
           data-testid="app-shell-nav-settings-icon"
           onClick={onOpenSettings}
           title={t('app.openSettings')}
@@ -185,6 +174,17 @@ export function AppShellNav({
           <SettingsIcon className="h-4 w-4" aria-hidden />
         </Button>
         {connectionStatus}
+        <Button
+          variant="ghost"
+          size="icon"
+          data-testid="app-shell-nav-collapse"
+          onClick={onCollapse}
+          title={t('app.collapseTopbar')}
+          aria-label={t('app.collapseTopbar')}
+          className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+        >
+          <ChevronUp className="h-4 w-4" aria-hidden />
+        </Button>
       </span>
     </nav>
   )

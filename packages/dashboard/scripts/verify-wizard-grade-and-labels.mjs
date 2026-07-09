@@ -43,7 +43,7 @@ try {
 
   const clickedEval = await page.evaluate(() => {
     const nodes = [...document.querySelectorAll('button, [role="tab"]')]
-    const target = nodes.find((n) => /^(Eval)$/i.test((n.textContent ?? '').trim()))
+    const target = nodes.find((n) => /^Eval$/i.test((n.textContent ?? '').trim()))
     if (target) { target.click(); return true }
     return false
   })

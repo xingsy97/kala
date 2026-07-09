@@ -14,7 +14,7 @@ export type CompactBoundary = {
 }
 
 export type TranscriptItem =
-  | { kind: 'message'; message: Message; seq?: number; ts?: string }
+  | { kind: 'message'; message: Message; seq?: number; ts?: string; streaming?: boolean }
   | {
       kind: 'pending_user_message'
       id: string
@@ -107,8 +107,11 @@ export function visibleTranscript(
   streamingText: string,
   pendingUserMessages: readonly PendingUserTranscriptMessage[] = [],
   queuedMessages: readonly QueuedMessagePreview[] = [],
+  options: { includeStatePrefix?: boolean } = {},
 ): readonly TranscriptItem[] {
-  const out: TranscriptItem[] = []
+  const out: TranscriptItem[] = options.includeStatePrefix
+    ? inheritedStatePrefix(stateMessages, timeline).map((message) => ({ kind: 'message' as const, message }))
+    : []
 
   for (const entry of timeline) {
     const event = entry.event
@@ -143,15 +146,15 @@ export function visibleTranscript(
           ],
         },
       })
-    } else if (event.kind === 'compact_replaced') {
+    } else if (event.kind === 'messages_replaced' && event.reason === 'compaction') {
       out.push({
         kind: 'compact_boundary',
         seq: entry.seq,
-        trigger: event.trigger ?? 'unknown',
-        replacedCount: event.replacedCount,
-        tokensBefore: event.tokensBefore,
-        tokensAfter: event.tokensAfter,
-        summary: event.summary,
+        trigger: 'unknown',
+        replacedCount: event.replaceRange.end - event.replaceRange.start,
+        tokensBefore: 0,
+        tokensAfter: 0,
+        summary: event.replacementMessages.map((message) => message.content.map((content) => content.type === 'text' ? content.text : '').join('')).join('\n'),
       })
     }
   }
@@ -159,6 +162,7 @@ export function visibleTranscript(
   if (streamingText.length > 0) {
     out.push({
       kind: 'message',
+      streaming: true,
       message: {
         role: 'assistant',
         content: [{ type: 'text', text: streamingText }],
@@ -188,8 +192,56 @@ export function visibleMessages(
   stateMessages: readonly Message[],
   timeline: readonly TimelineEntry[],
   streamingText: string,
+  options: { includeStatePrefix?: boolean } = {},
 ): readonly Message[] {
-  return visibleTranscript(stateMessages, timeline, streamingText)
+  return visibleTranscript(stateMessages, timeline, streamingText, [], [], options)
     .filter((item): item is { kind: 'message'; message: Message } => item.kind === 'message')
     .map((item) => item.message)
+}
+
+function inheritedStatePrefix(
+  stateMessages: readonly Message[],
+  timeline: readonly TimelineEntry[],
+): readonly Message[] {
+  const stateVisible = stateMessages.filter((m) => m.role !== 'system')
+  if (stateVisible.length === 0 || timeline.length === 0) return stateVisible
+  const timelineMessages = timeline.flatMap((entry) => timelineEntryMessages(entry))
+  if (timelineMessages.length === 0) return stateVisible
+  let stateIndex = stateVisible.length - 1
+  let timelineIndex = timelineMessages.length - 1
+  while (stateIndex >= 0 && timelineIndex >= 0 && sameMessage(stateVisible[stateIndex]!, timelineMessages[timelineIndex]!)) {
+    stateIndex -= 1
+    timelineIndex -= 1
+  }
+  if (timelineIndex >= 0) return []
+  return stateVisible.slice(0, stateIndex + 1)
+}
+
+function timelineEntryMessages(entry: TimelineEntry): readonly Message[] {
+  const event = entry.event
+  if (event.kind === 'user_message') {
+    return [{
+      role: 'user',
+      content: event.content
+        ? [...event.content]
+        : [{ type: 'text', text: event.text ?? '' }],
+    }]
+  }
+  if (event.kind === 'llm_response') return [event.message]
+  if (event.kind === 'tool_result') {
+    return [{
+      role: 'tool',
+      content: [{
+        type: 'tool_result',
+        callId: event.callId,
+        ok: event.ok,
+        content: event.content,
+      }],
+    }]
+  }
+  return []
+}
+
+function sameMessage(a: Message, b: Message): boolean {
+  return a.role === b.role && JSON.stringify(a.content) === JSON.stringify(b.content)
 }

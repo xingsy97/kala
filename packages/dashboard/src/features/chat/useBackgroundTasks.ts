@@ -37,7 +37,7 @@ export type LiveBackgroundTask = BackgroundTaskSummary & {
 type Params = {
   socket: DashboardSocket | null
   workspaceId: string | undefined
-  sessionId: string
+  sessionId: string | null
   selectedTaskId: string | null
   /** Poll interval for the selected task's tail. Injectable for tests. */
   pollIntervalMs?: number

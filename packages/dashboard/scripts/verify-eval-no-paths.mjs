@@ -52,7 +52,7 @@ try {
     // fallback: search by role/label
     await page.evaluate(() => {
       const buttons = [...document.querySelectorAll('button')]
-      const btn = buttons.find((b) => /artifact/i.test(b.textContent ?? '') || /[English text replaces historical Chinese script text][English text replaces historical Chinese script text]/i.test(b.textContent ?? ''))
+      const btn = buttons.find((b) => /artifact/i.test(b.textContent ?? ''))
       if (btn) btn.click()
     })
   } else {
@@ -64,7 +64,7 @@ try {
   // Switch to Eval tab
   const clickedEval = await page.evaluate(() => {
     const nodes = [...document.querySelectorAll('button, [role="tab"]')]
-    const target = nodes.find((n) => /^(Eval)$/i.test((n.textContent ?? '').trim()))
+    const target = nodes.find((n) => /^Eval$/i.test((n.textContent ?? '').trim()))
     if (target) { target.click(); return true }
     return false
   })
@@ -83,7 +83,7 @@ try {
     const pane = document.querySelector('[data-testid="eval-right-pane"]')
     if (!pane) return { pane: false, count: 0 }
     const toggles = [...pane.querySelectorAll('button')]
-      .filter((b) => /^(Show)$/i.test((b.textContent ?? '').trim()) || /toggle/.test(b.dataset.testid ?? ''))
+      .filter((b) => /^Show$/i.test((b.textContent ?? '').trim()) || /toggle/.test(b.dataset.testid ?? ''))
     for (const b of toggles) b.click()
     return { pane: true, count: toggles.length }
   })

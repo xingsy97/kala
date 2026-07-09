@@ -8,7 +8,7 @@
  * sessions without a workspaceId (older logs) group under "Unassigned".
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
 import type { RowRendererProps } from 'react-arborist'
@@ -21,6 +21,7 @@ import {
   ChevronRight,
   Circle,
   Clock3,
+  EyeOff,
   Folder,
   GripVertical,
   GitFork,
@@ -28,10 +29,10 @@ import {
   LoaderCircle,
   Pencil,
   Plus,
+  RotateCcw,
   Search,
   TriangleAlert,
   Trash2,
-  Wrench,
   X,
 } from 'lucide-react'
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
@@ -49,6 +50,9 @@ import {
 import { Button } from '../../components/ui/button.js'
 import { cn } from '../../lib/utils.js'
 import { buildTree } from './tree-model.js'
+import { useHiddenWorkspaces } from './useHiddenWorkspaces.js'
+import { SessionHoverPreview, type SessionPreviewAnchor } from './SessionHoverPreview.js'
+import type { CachedSessionView } from '../../session-view-cache.js'
 import type {
   SessionNode,
   TreeNode,
@@ -63,33 +67,46 @@ type Props = {
   selectedSessionId: string | null
   sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
   onSelect(sessionId: string): void
+  onClearSelection?(): void
   onNewSession(workspaceId?: string): void
   onConnectWorkspace(): void
-  onDelete(sessionId: string): void
+  onDelete(sessionId: string, options?: { cascade?: boolean }): void
   onRename(sessionId: string, label: string): void
   onRenameWorkspace?(workspaceId: string, workspaceName: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
   onCollapse?(): void
+  embeddedHeader?: boolean
+  fontSizePx?: number
+  getCachedSessionView?: (sessionId: string) => CachedSessionView | null
 }
 
 const SESSION_ROW_HEIGHT = 60
-const WORKSPACE_ROW_HEIGHT = 48
+const WORKSPACE_ROW_HEIGHT = 34
 const SESSION_ORDER_STORAGE_KEY = 'agent-kernel:explorer:session-order:v1'
+const WORKSPACE_ORDER_STORAGE_KEY = 'agent-kernel:explorer:workspace-order:v1'
 const WORKSPACE_OPEN_STORAGE_KEY = 'agent-kernel:explorer:workspace-open:v1'
 const SESSION_CHILDREN_OPEN_STORAGE_KEY = 'agent-kernel:explorer:session-children-open:v1'
 const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
+const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2'
 const EXPLORER_RAIL_CELL = 'flex h-5 w-4 flex-none items-center justify-center'
 
 export type SessionActivityStatus = SessionSummary['status'] | 'loading'
 
-export function Explorer({
+type SessionRuntimeMeta = {
+  status?: SessionSummary['status']
+  currentCwd?: string
+  lastActivityIso: string
+}
+
+function ExplorerImpl({
   executors,
   sessions,
   loading = false,
   selectedSessionId,
   sessionStatuses,
   onSelect,
+  onClearSelection,
   onNewSession,
   onConnectWorkspace,
   onDelete,
@@ -98,6 +115,9 @@ export function Explorer({
   onOpenSessionInfo,
   onWorkspaceInfo,
   onCollapse,
+  embeddedHeader = false,
+  fontSizePx = 13,
+  getCachedSessionView,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
@@ -106,34 +126,80 @@ export function Explorer({
   const [query, setQuery] = useState('')
   const [workspaceOpenState, setWorkspaceOpenState] = useState<Record<string, boolean>>(() => readStoredWorkspaceOpenState())
   const [sessionChildrenOpenState, setSessionChildrenOpenState] = useState<Record<string, boolean>>(() => readStoredSessionChildrenOpenState())
+  const [manualWorkspaceOrder, setManualWorkspaceOrder] = useState<readonly string[]>(() => readStoredWorkspaceOrder())
+  const [previewAnchor, setPreviewAnchor] = useState<SessionPreviewAnchor | null>(null)
+  const previewHoveringRef = useRef(false)
+  const hiddenWorkspaces = useHiddenWorkspaces()
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
   const [manualSessionOrder, setManualSessionOrder] = useState<readonly string[]>(() =>
     syncSessionOrder(readStoredSessionOrder(), sessions),
   )
+  const sessionStructureKey = useMemo(() => sessions.map(sessionStructureKeyFor).join('\u001f'), [sessions])
+  const structuralSessions = useMemo(
+    () => sessions.map(toStructuralSessionSummary),
+    [sessionStructureKey],
+  )
+  const sessionRuntimeById = useMemo(
+    () => new Map(sessions.map((session) => [session.sessionId, runtimeMetaFor(session)])),
+    [sessions],
+  )
   useEffect(() => {
-    setManualSessionOrder((prev) => syncSessionOrder(prev, sessions))
-  }, [sessions])
+    setManualSessionOrder((prev) => syncSessionOrder(prev, structuralSessions))
+  }, [structuralSessions])
   useEffect(() => {
     writeStoredSessionOrder(manualSessionOrder)
   }, [manualSessionOrder])
   const orderedSessions = useMemo(
-    () => applyManualSessionOrder(sessions, manualSessionOrder),
-    [sessions, manualSessionOrder],
+    () => applyManualSessionOrder(structuralSessions, manualSessionOrder),
+    [structuralSessions, manualSessionOrder],
   )
-  const data = useMemo(
+  const treeData = useMemo(
     () => buildTree(executors, orderedSessions),
     [executors, orderedSessions],
   )
-  const visibleData = useMemo(() => filterTree(data, query), [data, query])
+  useEffect(() => {
+    setManualWorkspaceOrder((prev) => syncWorkspaceOrder(prev, treeData))
+  }, [treeData])
+  useEffect(() => {
+    writeStoredWorkspaceOrder(manualWorkspaceOrder)
+  }, [manualWorkspaceOrder])
+  const data = useMemo(
+    () => applyManualWorkspaceOrder(treeData, manualWorkspaceOrder),
+    [treeData, manualWorkspaceOrder],
+  )
+  const onlineWorkspaceIds = useMemo(
+    () => new Set(executors.map((executor) => executor.workspaceId).filter((id): id is string => typeof id === 'string' && id.length > 0)),
+    [executors],
+  )
+  const hiddenWorkspaceRows = useMemo(
+    () => data.filter((workspace) => workspace.workspaceId !== null && hiddenWorkspaces.isHidden(workspace.workspaceId)),
+    [data, hiddenWorkspaces],
+  )
+  const visibleWorkspaceData = useMemo(
+    () => data.filter((workspace) => workspace.workspaceId === null || !hiddenWorkspaces.isHidden(workspace.workspaceId)),
+    [data, hiddenWorkspaces],
+  )
+  const visibleData = useMemo(() => filterTree(visibleWorkspaceData, query), [visibleWorkspaceData, query])
   const initialOpenState = useMemo(
     () => buildInitialOpenState(visibleData, workspaceOpenState, sessionChildrenOpenState),
     [visibleData, workspaceOpenState, sessionChildrenOpenState],
   )
+  const pendingDeleteDescendantCount = pendingDelete ? countSessionDescendants(pendingDelete) : 0
 
   const empty = executors.length === 0 && sessions.length === 0
   const filteredEmpty = !empty && query.trim().length > 0 && visibleData.length === 0
+  const hiddenEmpty = !empty && query.trim().length === 0 && visibleData.length === 0 && hiddenWorkspaces.count > 0
   const selection = selectedSessionId ? `sess:${selectedSessionId}` : undefined
+  const clearPreviewSoon = useCallback((sessionId?: string) => {
+    window.setTimeout(() => {
+      setPreviewAnchor((current) => {
+        if (previewHoveringRef.current) return current
+        if (sessionId !== undefined && current?.sessionId !== sessionId) return current
+        return null
+      })
+    }, 80)
+  }, [])
 
   const activate = (node: NodeApi<TreeNode>): void => {
     if (node.data.kind === 'session') onSelect(node.data.sessionId)
@@ -146,6 +212,17 @@ export function Explorer({
     parentNode: NodeApi<TreeNode> | null
     index: number
   }) => {
+    const movedWorkspaces = args.dragNodes
+      .map((node) => node.data)
+      .filter((node): node is WorkspaceNode => node.kind === 'workspace' && node.workspaceId !== null)
+    if (movedWorkspaces.length > 0) {
+      if (movedWorkspaces.length !== args.dragNodes.length || !isRootDropParent(args.parentNode)) return
+      const targetIds = data
+        .filter((node) => node.workspaceId !== null)
+        .map((node) => node.workspaceId as string)
+      setManualWorkspaceOrder((prev) => reorderWorkspaceIds(prev, targetIds, movedWorkspaces.map((node) => node.workspaceId as string), args.index))
+      return
+    }
     const movedSessionIds = args.dragNodes
       .map((node) => node.data)
       .filter((node): node is SessionNode => node.kind === 'session')
@@ -160,16 +237,20 @@ export function Explorer({
     const movableIds = movedSessionIds.filter((id) => targetIds.includes(id))
     if (movableIds.length === 0) return
     setManualSessionOrder((prev) => reorderSessionIds(prev, targetIds, movableIds, args.index))
-  }, [])
+  }, [data])
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/30">
-      <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} />
+      <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} embedded={embeddedHeader} />
       <div
         ref={ref}
         className="flex-1 min-h-0"
         data-testid="explorer-column"
         data-scroll-owner="react-arborist"
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return
+          onClearSelection?.()
+        }}
       >
         {loading ? (
           <ExplorerLoading />
@@ -180,6 +261,10 @@ export function Explorer({
         ) : filteredEmpty ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground" data-testid="explorer-filter-empty">
             {t('explorer.noMatches', { query: query.trim() })}
+          </div>
+        ) : hiddenEmpty ? (
+          <div className="p-4 text-xs leading-relaxed text-muted-foreground" data-testid="explorer-hidden-empty">
+            {t('explorer.allWorkspacesHidden')}
           </div>
         ) : bounds.height > 0 ? (
           <Tree<TreeNode>
@@ -208,8 +293,10 @@ export function Explorer({
                 })
               }
             }}
-            disableDrag={(d) => d.kind !== 'session'}
+            disableDrag={(d) => d.kind === 'workspace' ? d.workspaceId === null : d.parentSessionId !== undefined}
             disableDrop={({ parentNode, dragNodes }) => {
+              const allWorkspaces = dragNodes.every((node) => node.data.kind === 'workspace')
+              if (allWorkspaces) return !isRootDropParent(parentNode) || dragNodes.some((node) => node.data.kind === 'workspace' && node.data.workspaceId === null)
               if (parentNode.data.kind !== 'workspace') return true
               const targetWorkspaceId = parentNode.data.workspaceId ?? undefined
               return dragNodes.some((node) => {
@@ -236,7 +323,10 @@ export function Explorer({
                 dragHandle={dragHandle}
                 editingSessionId={editingSessionId}
                 onDeleteRequest={(sess) => setPendingDelete(sess)}
-                onStartEdit={(sess) => setEditingSessionId(sess.sessionId)}
+                onStartEdit={(sess) => {
+                  if (!isSessionWorkspaceOnline(sess, onlineWorkspaceIds)) return
+                  setEditingSessionId(sess.sessionId)
+                }}
                 onCancelEdit={() => setEditingSessionId(null)}
                 onSubmitEdit={(sess, next) => {
                   setEditingSessionId(null)
@@ -246,6 +336,7 @@ export function Explorer({
                 }}
                 onOpenSessionInfo={onOpenSessionInfo}
                 onWorkspaceInfo={onWorkspaceInfo}
+                onHideWorkspace={hiddenWorkspaces.hide}
                 editingWorkspaceId={editingWorkspaceId}
                 onStartWorkspaceEdit={(workspace) => setEditingWorkspaceId(workspace.workspaceId)}
                 onCancelWorkspaceEdit={() => setEditingWorkspaceId(null)}
@@ -258,11 +349,31 @@ export function Explorer({
                 onNewSession={onNewSession}
                 query={query}
                 sessionStatuses={sessionStatuses}
+                sessionRuntimeById={sessionRuntimeById}
+                onlineWorkspaceIds={onlineWorkspaceIds}
+                fontSizePx={fontSizePx}
+                onPreviewAnchorChange={setPreviewAnchor}
+                onPreviewLeave={clearPreviewSoon}
               />
             )}
           </Tree>
         ) : null}
+        <SessionHoverPreview
+          anchor={previewAnchor}
+          getCachedSessionView={getCachedSessionView}
+          onHoverChange={(hovering) => {
+            previewHoveringRef.current = hovering
+            if (!hovering) clearPreviewSoon()
+          }}
+        />
       </div>
+      {hiddenWorkspaces.count > 0 ? (
+        <HiddenWorkspacesBar
+          workspaces={hiddenWorkspaceRows}
+          hiddenIds={hiddenWorkspaces.hiddenIds}
+          onUnhide={hiddenWorkspaces.unhide}
+        />
+      ) : null}
 
       <AlertDialog
         open={pendingDelete !== null}
@@ -279,10 +390,29 @@ export function Explorer({
               </span>
               <br />
               {t('explorer.deleteDescription')}
+              {pendingDeleteDescendantCount > 0 ? (
+                <>
+                  <br />
+                  <span className="mt-2 block text-amber-700 dark:text-amber-300">
+                    {t('explorer.deleteChildrenDescription', { count: pendingDeleteDescendantCount })}
+                  </span>
+                </>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            {pendingDeleteDescendantCount > 0 ? (
+              <AlertDialogAction
+                data-testid="confirm-delete-cascade-button"
+                onClick={() => {
+                  if (pendingDelete) onDelete(pendingDelete.sessionId, { cascade: true })
+                  setPendingDelete(null)
+                }}
+              >
+                {t('explorer.deleteWithChildren', { count: pendingDeleteDescendantCount })}
+              </AlertDialogAction>
+            ) : null}
             <AlertDialogAction
               data-testid="confirm-delete-button"
               onClick={() => {
@@ -298,6 +428,8 @@ export function Explorer({
     </div>
   )
 }
+
+export const Explorer = memo(ExplorerImpl, areExplorerPropsEqual)
 
 function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>): ReactElement {
   return (
@@ -338,6 +470,86 @@ function ExplorerLoading(): JSX.Element {
   )
 }
 
+function HiddenWorkspacesBar({
+  workspaces,
+  hiddenIds,
+  onUnhide,
+}: {
+  workspaces: readonly WorkspaceNode[]
+  hiddenIds: ReadonlySet<string>
+  onUnhide(workspaceId: string): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const restoredIds = new Set(workspaces.map((workspace) => workspace.workspaceId).filter((id): id is string => typeof id === 'string' && id.length > 0))
+  const missingIds = Array.from(hiddenIds).filter((id) => !restoredIds.has(id))
+  const hiddenCount = workspaces.length + missingIds.length
+  return (
+    <div className="flex-none border-b border-sidebar-border bg-sidebar/80 px-2 py-1.5" data-testid="hidden-workspaces-bar">
+      <button
+        type="button"
+        className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        onClick={() => setOpen((value) => !value)}
+        data-testid="hidden-workspaces-toggle"
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5 flex-none" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 flex-none" aria-hidden="true" />}
+        <EyeOff className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">
+          {t('explorer.hiddenWorkspaces', { count: hiddenCount })}
+        </span>
+      </button>
+      {open ? (
+        <div className="mt-1 space-y-0.5" data-testid="hidden-workspaces-list">
+          {workspaces.map((workspace) => workspace.workspaceId === null ? null : (
+            <HiddenWorkspaceItem
+              key={workspace.workspaceId}
+              workspaceId={workspace.workspaceId}
+              label={workspace.name}
+              onUnhide={onUnhide}
+            />
+          ))}
+          {missingIds.map((workspaceId) => (
+            <HiddenWorkspaceItem
+              key={workspaceId}
+              workspaceId={workspaceId}
+              label={workspaceId}
+              onUnhide={onUnhide}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function HiddenWorkspaceItem({
+  workspaceId,
+  label,
+  onUnhide,
+}: {
+  workspaceId: string
+  label: string
+  onUnhide(workspaceId: string): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent/60" data-testid="hidden-workspace-item">
+      <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
+      <button
+        type="button"
+        className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+        onClick={() => onUnhide(workspaceId)}
+        data-testid={`workspace-unhide-${workspaceId}`}
+        title={t('explorer.unhideWorkspace')}
+        aria-label={t('explorer.unhideWorkspaceAria', { workspaceId })}
+      >
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    </div>
+  )
+}
+
 function rowHeightFor(node: NodeApi<TreeNode>): number {
   if (node.data.kind === 'workspace') return WORKSPACE_ROW_HEIGHT
   return SESSION_ROW_HEIGHT
@@ -348,13 +560,61 @@ function Header({
   onQueryChange,
   onConnectWorkspace,
   onCollapse,
+  embedded,
 }: {
   query: string
   onQueryChange(query: string): void
   onConnectWorkspace: () => void
   onCollapse?: () => void
+  embedded: boolean
 }): JSX.Element {
   const { t } = useTranslation()
+  if (embedded) {
+    return (
+      <div className="flex h-9 flex-none items-center gap-1.5 border-b border-sidebar-border bg-sidebar px-2">
+        <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded bg-background/70 px-2 text-xs ring-1 ring-border/50 focus-within:ring-primary/40">
+          <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+          <input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder={t('explorer.searchPlaceholder')}
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+            data-testid="explorer-search"
+            aria-label={t('explorer.searchLabel')}
+          />
+          {query ? (
+            <button type="button" onClick={() => onQueryChange('')} className="rounded text-muted-foreground hover:text-foreground" aria-label={t('explorer.clearSearch')}>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </label>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onConnectWorkspace}
+          data-testid="new-session-button"
+          title={t('explorer.connectWorkspace')}
+          aria-label={t('explorer.connectWorkspace')}
+          className="h-7 w-7 flex-none"
+        >
+          <Cable className="h-3.5 w-3.5" />
+        </Button>
+        {onCollapse ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onCollapse}
+            data-testid="explorer-collapse-button"
+            title={t('explorer.collapsePanel')}
+            aria-label={t('explorer.collapsePanel')}
+            className="h-7 w-7 flex-none text-muted-foreground hover:text-foreground"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-2 bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
       <div className="flex items-center justify-between gap-2">
@@ -419,6 +679,7 @@ function Row({
   onSubmitEdit,
   onOpenSessionInfo,
   onWorkspaceInfo,
+  onHideWorkspace,
   editingWorkspaceId,
   onStartWorkspaceEdit,
   onCancelWorkspaceEdit,
@@ -426,6 +687,11 @@ function Row({
   onNewSession,
   query,
   sessionStatuses,
+  sessionRuntimeById,
+  onlineWorkspaceIds,
+  fontSizePx,
+  onPreviewAnchorChange,
+  onPreviewLeave,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
@@ -437,6 +703,7 @@ function Row({
   onSubmitEdit(sess: SessionNode, label: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
+  onHideWorkspace(workspaceId: string): void
   editingWorkspaceId: string | null
   onStartWorkspaceEdit(workspace: WorkspaceNode): void
   onCancelWorkspaceEdit(): void
@@ -444,19 +711,27 @@ function Row({
   onNewSession(workspaceId?: string): void
   query: string
   sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
+  sessionRuntimeById: ReadonlyMap<string, SessionRuntimeMeta>
+  onlineWorkspaceIds: ReadonlySet<string>
+  fontSizePx: number
+  onPreviewAnchorChange(anchor: SessionPreviewAnchor | null): void
+  onPreviewLeave(sessionId: string): void
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
-      <WorkspaceRow
-        node={node as NodeApi<WorkspaceNode>}
-        style={style}
-        onWorkspaceInfo={onWorkspaceInfo}
+        <WorkspaceRow
+          node={node as NodeApi<WorkspaceNode>}
+          style={style}
+          dragHandle={dragHandle}
+          onWorkspaceInfo={onWorkspaceInfo}
+          onHideWorkspace={onHideWorkspace}
         editing={node.data.workspaceId !== null && editingWorkspaceId === node.data.workspaceId}
         onStartEdit={onStartWorkspaceEdit}
         onCancelEdit={onCancelWorkspaceEdit}
         onSubmitEdit={onSubmitWorkspaceEdit}
         onNewSession={onNewSession}
         query={query}
+        fontSizePx={fontSizePx}
       />
     )
   }
@@ -473,45 +748,62 @@ function Row({
       onOpenSessionInfo={onOpenSessionInfo}
       query={query}
       activeStatus={sessionStatuses?.get((node.data as SessionNode).sessionId)}
+      runtimeMeta={sessionRuntimeById.get((node.data as SessionNode).sessionId)}
+      renameDisabled={!isSessionWorkspaceOnline(node.data as SessionNode, onlineWorkspaceIds)}
+      fontSizePx={fontSizePx}
+      onPreviewAnchorChange={onPreviewAnchorChange}
+      onPreviewLeave={onPreviewLeave}
     />
   )
+}
+
+function isSessionWorkspaceOnline(session: SessionNode, onlineWorkspaceIds: ReadonlySet<string>): boolean {
+  return session.workspaceId === undefined || onlineWorkspaceIds.has(session.workspaceId)
 }
 
 function WorkspaceRow({
   node,
   style,
+  dragHandle,
   onWorkspaceInfo,
+  onHideWorkspace,
   editing,
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
   onNewSession,
   query,
+  fontSizePx,
 }: {
   node: NodeApi<WorkspaceNode>
   style: React.CSSProperties
+  dragHandle?: (el: HTMLDivElement | null) => void
   onWorkspaceInfo?(workspaceId: string): void
+  onHideWorkspace(workspaceId: string): void
   editing: boolean
   onStartEdit(workspace: WorkspaceNode): void
   onCancelEdit(): void
   onSubmitEdit(workspace: WorkspaceNode, label: string): void
   onNewSession(workspaceId?: string): void
   query: string
+  fontSizePx: number
 }): JSX.Element {
   const { t } = useTranslation()
   const w = node.data
-  const dotCls = w.online
-    ? 'bg-emerald-500 dark:bg-emerald-400'
-    : 'bg-muted-foreground/40'
   const meta =
     w.workspaceId === null
       ? t('explorer.sessionsNoWorkspace')
-      : [w.os, w.runtime, w.runtimeVersion, w.ip]
-          .filter((s) => typeof s === 'string' && s.length > 0)
-          .join(' · ') || t('explorer.offline')
+      : w.online ? t('explorer.online') : t('explorer.offline')
+  const metaBadgeCls = w.workspaceId === null
+    ? 'border-muted-foreground/20 bg-muted/45 text-muted-foreground'
+    : w.online
+      ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+      : 'border-muted-foreground/20 bg-muted/45 text-muted-foreground'
   const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
   const canCreateSession = w.workspaceId !== null
   const canRename = w.workspaceId !== null
+  const canReorder = w.workspaceId !== null
+  const canHide = w.workspaceId !== null
   return (
     <div
       style={style}
@@ -522,19 +814,29 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws min-w-0 cursor-pointer select-none px-3 py-1.5 hover:bg-accent/50',
-        EXPLORER_ROW_GRID,
+        'group/ws relative min-w-0 cursor-pointer select-none px-3 py-1.5 hover:bg-accent/50',
+        WORKSPACE_ROW_GRID,
       )}
     >
+      {canReorder ? (
+        <div
+          ref={dragHandle}
+          className="group/drag absolute bottom-1 left-0 top-1 z-10 flex w-1.5 cursor-grab items-center justify-start active:cursor-grabbing"
+          title={t('explorer.dragWorkspace')}
+          aria-label={t('explorer.dragWorkspace')}
+          data-testid="workspace-drag-handle"
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="h-2.5 w-2.5 text-muted-foreground/70 opacity-0 transition-opacity group-hover/drag:opacity-100 group-active/drag:opacity-100" aria-hidden="true" />
+        </div>
+      ) : null}
       <div className={EXPLORER_RAIL_CELL}>
         {node.isOpen ? (
           <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         ) : (
           <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
-      </div>
-      <div className={EXPLORER_RAIL_CELL}>
-        <span className={cn('inline-block h-2 w-2 flex-none rounded-full', dotCls)} />
       </div>
       {editing ? (
         <RenameInput
@@ -545,18 +847,28 @@ function WorkspaceRow({
           ariaLabel={t('explorer.renameWorkspace')}
         />
       ) : (
-        <span
-          className="min-w-0 truncate text-[13px] font-semibold leading-5 text-foreground"
-          title={canRename ? t('explorer.doubleClickRename') : undefined}
-          onDoubleClick={(e) => {
-            if (!canRename) return
-            e.preventDefault()
-            e.stopPropagation()
-            onStartEdit(w)
-          }}
-        >
-          <HighlightText text={w.name} query={query} />
-        </span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={cn('inline-flex h-4 flex-none items-center rounded border px-1 text-[10px] font-semibold leading-none', metaBadgeCls)}
+            data-testid="workspace-status-badge"
+            title={meta}
+          >
+            {meta}
+          </span>
+          <span
+            className="min-w-0 truncate font-semibold leading-5 text-foreground"
+            style={{ fontSize: fontSizePx }}
+            title={canRename ? t('explorer.doubleClickRename') : undefined}
+            onDoubleClick={(e) => {
+              if (!canRename) return
+              e.preventDefault()
+              e.stopPropagation()
+              onStartEdit(w)
+            }}
+          >
+            <HighlightText text={w.name} query={query} />
+          </span>
+        </div>
       )}
       <div className="flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:opacity-100">
         {canRename && !editing ? (
@@ -606,9 +918,21 @@ function WorkspaceRow({
             <Info className="h-3.5 w-3.5" />
           </button>
         ) : null}
-      </div>
-      <div className="col-start-3 min-w-0 truncate text-[11px] leading-4 text-muted-foreground">
-        {meta}
+        {canHide ? (
+          <button
+            type="button"
+            data-testid={`workspace-hide-${w.workspaceId}`}
+            title={t('explorer.hideWorkspace')}
+            aria-label={t('explorer.hideWorkspaceAria', { workspaceId: w.workspaceId })}
+            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (w.workspaceId !== null) onHideWorkspace(w.workspaceId)
+            }}
+          >
+            <EyeOff className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -626,6 +950,11 @@ function SessionRow({
   onOpenSessionInfo,
   query,
   activeStatus,
+  runtimeMeta,
+  renameDisabled,
+  fontSizePx,
+  onPreviewAnchorChange,
+  onPreviewLeave,
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
@@ -638,11 +967,18 @@ function SessionRow({
   onOpenSessionInfo?(sessionId: string): void
   query: string
   activeStatus?: SessionActivityStatus
+  runtimeMeta?: SessionRuntimeMeta
+  renameDisabled?: boolean
+  fontSizePx: number
+  onPreviewAnchorChange(anchor: SessionPreviewAnchor | null): void
+  onPreviewLeave(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
   const s = node.data
   const selected = node.isSelected
-  const status = activeStatus ?? s.status
+  const status = activeStatus ?? runtimeMeta?.status ?? s.status
+  const currentCwd = runtimeMeta ? runtimeMeta.currentCwd : s.currentCwd
+  const lastActivityIso = runtimeMeta?.lastActivityIso ?? s.lastActivityIso
   return (
     <div
       style={style}
@@ -663,7 +999,19 @@ function SessionRow({
       onDoubleClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
+        if (renameDisabled) return
         onStartEdit(s)
+      }}
+      onPointerEnter={(e) => {
+        if (selected || editing || e.pointerType === 'touch' || !canUseHoverPreview()) return
+        onPreviewAnchorChange({
+          sessionId: s.sessionId,
+          label: s.label,
+          rect: e.currentTarget.getBoundingClientRect(),
+        })
+      }}
+      onPointerLeave={() => {
+        onPreviewLeave(s.sessionId)
       }}
     >
       {selected ? (
@@ -697,14 +1045,14 @@ function SessionRow({
         ) : !s.parentSessionId ? (
           <div
             ref={dragHandle}
-            className="flex h-5 w-4 flex-none cursor-grab items-center justify-center text-muted-foreground/50 opacity-70 active:cursor-grabbing group-hover:text-muted-foreground"
+            className="flex h-4 w-3.5 flex-none cursor-grab items-center justify-center text-muted-foreground/45 opacity-70 active:cursor-grabbing group-hover:text-muted-foreground/80"
             title={t('explorer.dragSession')}
             aria-label={t('explorer.dragSession')}
             data-testid="session-drag-handle"
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           >
-            <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+            <GripVertical className="h-3 w-3" aria-hidden="true" />
           </div>
         ) : (
           <GitFork
@@ -725,9 +1073,10 @@ function SessionRow({
       ) : (
         <div
           className={cn(
-            'min-w-0 truncate text-[13px] font-medium leading-5',
+            'min-w-0 truncate font-medium leading-5',
             selected ? 'text-foreground' : 'text-foreground/90',
           )}
+          style={{ fontSize: fontSizePx }}
           title={t('explorer.doubleClickRename')}
         >
           <HighlightText text={s.label} query={query} />
@@ -738,14 +1087,18 @@ function SessionRow({
           <Button
             variant="ghost"
             size="icon"
+            onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
+              if (renameDisabled) return
               onStartEdit(s)
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
             data-testid="session-rename-button"
             title={t('explorer.renameSession')}
             aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
+            disabled={renameDisabled}
             className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
@@ -754,11 +1107,13 @@ function SessionRow({
             <Button
               variant="ghost"
               size="icon"
+              onPointerDown={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation()
                 onOpenSessionInfo(s.sessionId)
               }}
+              onDoubleClick={(e) => e.stopPropagation()}
               data-testid="session-info-button"
               title={t('explorer.sessionInfoTitle')}
               aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
@@ -770,11 +1125,13 @@ function SessionRow({
           <Button
             variant="ghost"
             size="icon"
+            onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
               onDeleteRequest(s)
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
             data-testid="session-delete-button"
             title={t('explorer.deleteSessionTitle')}
             aria-label={t('explorer.deleteSessionAria', { sessionId: s.sessionId })}
@@ -785,15 +1142,15 @@ function SessionRow({
         </div>
       )}
       <div className="col-start-2 flex h-4 w-4 items-center justify-center text-muted-foreground">
-        {s.currentCwd ? <Folder className="h-3 w-3 opacity-70" aria-hidden="true" /> : null}
+        {currentCwd ? <Folder className="h-3 w-3 opacity-70" aria-hidden="true" /> : null}
       </div>
-      <div className="col-start-3 min-w-0 truncate font-mono text-[11px] leading-4 text-muted-foreground" title={s.currentCwd} data-testid="session-row-cwd">
-        {s.currentCwd ? <HighlightText text={s.currentCwd} query={query} /> : null}
+      <div className="col-start-3 min-w-0 truncate font-mono text-[11px] leading-4 text-muted-foreground" title={currentCwd} data-testid="session-row-cwd">
+        {currentCwd ? <HighlightText text={currentCwd} query={query} /> : null}
       </div>
       <div className="col-start-4 row-start-2 flex min-w-0 justify-end text-[11px] leading-4 text-muted-foreground">
         <span className="inline-flex flex-none items-center gap-1 tabular-nums opacity-70">
           <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
-          {formatWhen(s.lastActivityIso, t)}
+          {formatWhen(lastActivityIso, t)}
         </span>
       </div>
     </div>
@@ -809,7 +1166,7 @@ export function SessionStatusIndicator({
   const { t } = useTranslation()
   const label = statusIndicatorLabel(status, t)
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
-  if (status === 'loading') {
+  if (status === 'loading' || status === 'thinking' || status === 'executing_tools') {
     return (
       <span
         className={base}
@@ -820,35 +1177,6 @@ export function SessionStatusIndicator({
       >
         <LoaderCircle
           className="h-3 w-3 animate-spin text-sky-500 dark:text-sky-400"
-          strokeWidth={2.4}
-        />
-      </span>
-    )
-  }
-  if (status === 'thinking') {
-    return (
-      <span
-        className={base}
-        data-testid="session-status-indicator"
-        data-status={status}
-        aria-label={label}
-        title={label}
-      >
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-sky-500 dark:bg-sky-400" />
-      </span>
-    )
-  }
-  if (status === 'executing_tools') {
-    return (
-      <span
-        className={base}
-        data-testid="session-status-indicator"
-        data-status={status}
-        aria-label={label}
-        title={label}
-      >
-        <Wrench
-          className="h-3 w-3 animate-[spin_2s_linear_infinite] text-violet-500 dark:text-violet-400"
           strokeWidth={2.4}
         />
       </span>
@@ -975,6 +1303,12 @@ function RenameInput({
   const { t } = useTranslation()
   const [value, setValue] = useState(initial)
   const ref = useRef<HTMLInputElement>(null)
+  const submitted = useRef(false)
+  const submit = (): void => {
+    if (submitted.current) return
+    submitted.current = true
+    onSubmit(value)
+  }
   useEffect(() => {
     ref.current?.focus()
     ref.current?.select()
@@ -989,13 +1323,14 @@ function RenameInput({
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault()
-          onSubmit(value)
+          submit()
         } else if (e.key === 'Escape') {
           e.preventDefault()
+          submitted.current = true
           onCancel()
         }
       }}
-      onBlur={() => onSubmit(value)}
+      onBlur={submit}
       data-testid={testId}
       aria-label={ariaLabel ?? t('explorer.renameSession')}
       spellCheck={false}
@@ -1052,6 +1387,26 @@ function writeStoredSessionChildrenOpenState(state: Record<string, boolean>): vo
   }
 }
 
+function readStoredWorkspaceOrder(): readonly string[] {
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_ORDER_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((value): value is string => typeof value === 'string' && value.length > 0)
+  } catch {
+    return []
+  }
+}
+
+function writeStoredWorkspaceOrder(order: readonly string[]): void {
+  try {
+    window.localStorage.setItem(WORKSPACE_ORDER_STORAGE_KEY, JSON.stringify(order))
+  } catch {
+    // Storage can be unavailable in private mode or quota-exceeded states.
+  }
+}
+
 function buildInitialOpenState(
   workspaces: readonly WorkspaceNode[],
   workspaceOpenState: Record<string, boolean>,
@@ -1091,6 +1446,189 @@ function writeStoredSessionOrder(order: readonly string[]): void {
   } catch {
     // Storage can be unavailable in private mode or quota-exceeded states.
   }
+}
+
+function sessionStructureKeyFor(session: SessionSummary): string {
+  return [
+    session.sessionId,
+    session.workspaceId ?? '',
+    session.workspaceName ?? '',
+    session.parentSessionId ?? '',
+    session.firstUserMessage ?? '',
+    session.label ?? '',
+    session.createdAt,
+  ].join('\u001e')
+}
+
+function toStructuralSessionSummary(session: SessionSummary): SessionSummary {
+  return {
+    sessionId: session.sessionId,
+    createdAt: session.createdAt,
+    eventCount: 0,
+    ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.workspaceName ? { workspaceName: session.workspaceName } : {}),
+    ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
+    ...(session.label !== undefined ? { label: session.label } : {}),
+  }
+}
+
+function runtimeMetaFor(session: SessionSummary): SessionRuntimeMeta {
+  return {
+    status: session.status,
+    currentCwd: session.currentCwd,
+    lastActivityIso: session.lastEventAt ?? session.createdAt,
+  }
+}
+
+function areExplorerPropsEqual(prev: Props, next: Props): boolean {
+  return prev.loading === next.loading &&
+    prev.selectedSessionId === next.selectedSessionId &&
+    prev.embeddedHeader === next.embeddedHeader &&
+    prev.fontSizePx === next.fontSizePx &&
+    prev.onSelect === next.onSelect &&
+    prev.onClearSelection === next.onClearSelection &&
+    prev.onNewSession === next.onNewSession &&
+    prev.onConnectWorkspace === next.onConnectWorkspace &&
+    prev.onDelete === next.onDelete &&
+    prev.onRename === next.onRename &&
+    prev.onRenameWorkspace === next.onRenameWorkspace &&
+    prev.onOpenSessionInfo === next.onOpenSessionInfo &&
+    prev.onWorkspaceInfo === next.onWorkspaceInfo &&
+    prev.onCollapse === next.onCollapse &&
+    prev.getCachedSessionView === next.getCachedSessionView &&
+    sameExecutorListForExplorer(prev.executors, next.executors) &&
+    sameSessionListForExplorer(prev.sessions, next.sessions) &&
+    sameSessionStatusMap(prev.sessionStatuses, next.sessionStatuses)
+}
+
+function sameExecutorListForExplorer(prev: readonly AttachedExecutor[], next: readonly AttachedExecutor[]): boolean {
+  if (prev === next) return true
+  if (prev.length !== next.length) return false
+  for (let i = 0; i < prev.length; i += 1) {
+    const a = prev[i]!
+    const b = next[i]!
+    if (a.executorId !== b.executorId ||
+      a.workspaceId !== b.workspaceId ||
+      a.workspaceName !== b.workspaceName ||
+      a.hostname !== b.hostname ||
+      a.os !== b.os ||
+      a.runtime !== b.runtime ||
+      a.runtimeVersion !== b.runtimeVersion ||
+      a.defaultCwd !== b.defaultCwd ||
+      a.workingDir !== b.workingDir ||
+      a.ipAddresses?.[0] !== b.ipAddresses?.[0]) {
+      return false
+    }
+  }
+  return true
+}
+
+function sameSessionListForExplorer(prev: readonly SessionSummary[], next: readonly SessionSummary[]): boolean {
+  if (prev === next) return true
+  if (prev.length !== next.length) return false
+  for (let i = 0; i < prev.length; i += 1) {
+    const a = prev[i]!
+    const b = next[i]!
+    if (a.sessionId !== b.sessionId ||
+      a.createdAt !== b.createdAt ||
+      a.parentSessionId !== b.parentSessionId ||
+      a.workspaceId !== b.workspaceId ||
+      a.workspaceName !== b.workspaceName ||
+      a.status !== b.status ||
+      a.currentCwd !== b.currentCwd ||
+      a.firstUserMessage !== b.firstUserMessage ||
+      a.label !== b.label) {
+      return false
+    }
+  }
+  return true
+}
+
+function sameSessionStatusMap(
+  prev: ReadonlyMap<string, SessionActivityStatus> | undefined,
+  next: ReadonlyMap<string, SessionActivityStatus> | undefined,
+): boolean {
+  if (prev === next) return true
+  if (!prev || !next) return false
+  if (prev.size !== next.size) return false
+  for (const [sessionId, status] of prev) {
+    if (next.get(sessionId) !== status) return false
+  }
+  return true
+}
+
+function syncWorkspaceOrder(
+  prev: readonly string[],
+  workspaces: readonly WorkspaceNode[],
+): readonly string[] {
+  const ids = workspaces
+    .map((workspace) => workspace.workspaceId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  const live = new Set(ids)
+  const next = prev.filter((id) => live.has(id))
+  const seen = new Set(next)
+  for (const id of ids) {
+    if (!seen.has(id)) next.push(id)
+  }
+  return next
+}
+
+function applyManualWorkspaceOrder(
+  workspaces: readonly WorkspaceNode[],
+  order: readonly string[],
+): readonly WorkspaceNode[] {
+  const rank = new Map(order.map((id, index) => [id, index]))
+  return [...workspaces].sort((a, b) => {
+    if (a.workspaceId === null || b.workspaceId === null) {
+      if (a.workspaceId === b.workspaceId) return 0
+      return a.workspaceId === null ? 1 : -1
+    }
+    const ar = rank.get(a.workspaceId) ?? Number.MAX_SAFE_INTEGER
+    const br = rank.get(b.workspaceId) ?? Number.MAX_SAFE_INTEGER
+    return ar - br
+  })
+}
+
+function reorderWorkspaceIds(
+  order: readonly string[],
+  targetIds: readonly string[],
+  movedIds: readonly string[],
+  targetIndex: number,
+): readonly string[] {
+  const moved = new Set(movedIds)
+  const targetWithoutMoved = targetIds.filter((id) => !moved.has(id))
+  const insertIndex = Math.max(0, Math.min(targetIndex, targetWithoutMoved.length))
+  return [
+    ...targetWithoutMoved.slice(0, insertIndex),
+    ...movedIds,
+    ...targetWithoutMoved.slice(insertIndex),
+  ]
+}
+
+function isRootDropParent(node: NodeApi<TreeNode> | null): boolean {
+  return node === null || node.isRoot || node.id === '__REACT_ARBORIST_INTERNAL_ROOT__'
+}
+
+function canUseHoverPreview(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+}
+
+export function canDropWorkspacesAtRootForTest(input: {
+  parentNode: Pick<NodeApi<TreeNode>, 'id' | 'isRoot'> | null
+  dragNodes: readonly { data: Pick<WorkspaceNode, 'kind' | 'workspaceId'> }[]
+}): boolean {
+  return isRootDropParent(input.parentNode as NodeApi<TreeNode> | null) && input.dragNodes.every((node) => node.data.kind === 'workspace' && node.data.workspaceId !== null)
+}
+
+export function reorderWorkspaceIdsForTest(
+  order: readonly string[],
+  targetIds: readonly string[],
+  movedIds: readonly string[],
+  targetIndex: number,
+): readonly string[] {
+  return reorderWorkspaceIds(order, targetIds, movedIds, targetIndex)
 }
 
 function syncSessionOrder(
@@ -1141,6 +1679,14 @@ function reorderSessionIds(
   })
 }
 
+function countSessionDescendants(session: SessionNode): number {
+  let count = 0
+  for (const child of session.children) {
+    count += 1 + countSessionDescendants(child)
+  }
+  return count
+}
+
 function filterTree(nodes: readonly WorkspaceNode[], query: string): WorkspaceNode[] {
   const needle = query.trim().toLocaleLowerCase()
   if (!needle) return [...nodes]
@@ -1184,7 +1730,7 @@ function filterSessionSubtree(
 }
 
 function workspaceMatchesQuery(workspace: WorkspaceNode, needle: string): boolean {
-  return [workspace.name, workspace.workspaceId, workspace.os, workspace.runtime, workspace.runtimeVersion, workspace.ip, workspace.workingDir]
+  return [workspace.name, workspace.workspaceId, workspace.os, workspace.runtime, workspace.runtimeVersion, workspace.ip]
     .filter((value): value is string => typeof value === 'string')
     .some((value) => value.toLocaleLowerCase().includes(needle))
 }

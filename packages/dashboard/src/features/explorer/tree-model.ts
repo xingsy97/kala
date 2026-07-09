@@ -72,7 +72,7 @@ export function buildTree(
       runtime: ex.runtime,
       runtimeVersion: ex.runtimeVersion,
       ip: ex.ipAddresses?.[0],
-      workingDir: ex.workingDir,
+      workingDir: ex.defaultCwd ?? ex.workingDir,
       children: [],
     })
   }

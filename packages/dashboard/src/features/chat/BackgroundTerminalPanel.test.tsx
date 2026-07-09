@@ -38,7 +38,8 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = await screen.findByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('Workspace Shell')
+    expect(trigger.textContent ?? '').toContain('Shell')
+    expect(trigger.textContent ?? '').not.toContain('Workspace Shell')
     expect(trigger.getAttribute('aria-label') ?? '').toContain('workspace background shell')
 
     fireEvent.click(trigger)
@@ -76,7 +77,8 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = screen.getByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('Session replay Shell')
+    expect(trigger.textContent ?? '').toContain('Shell')
+    expect(trigger.textContent ?? '').not.toContain('Session replay Shell')
     expect(trigger.getAttribute('aria-label') ?? '').toContain('session replay background shell')
 
     fireEvent.click(trigger)
@@ -119,7 +121,8 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = await screen.findByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('0 Workspace Shells')
+    expect(trigger.textContent ?? '').toContain('0 Shells')
+    expect(trigger.textContent ?? '').not.toContain('Workspace Shells')
     expect(trigger.getAttribute('aria-label') ?? '').toContain('0 running workspace background shells')
 
     fireEvent.click(trigger)
@@ -146,7 +149,8 @@ describe('BackgroundShellsButton', () => {
     )
 
     const trigger = await screen.findByTestId('background-shells-trigger')
-    expect(trigger.textContent ?? '').toContain('0 Workspace Shells')
+    expect(trigger.textContent ?? '').toContain('0 Shells')
+    expect(trigger.textContent ?? '').not.toContain('Workspace Shells')
 
     fireEvent.click(trigger)
     expect(await screen.findByText('Workspace shells')).toBeTruthy()

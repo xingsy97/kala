@@ -83,7 +83,7 @@ function buildDom(root: HTMLElement, text: string, images: readonly SimpleCompos
     span.setAttribute('role', 'img')
     span.setAttribute('aria-label', `Image #${i + 1}`)
     span.dataset.akTokenIndex = String(i + 1)
-    span.className = 'ak-composer-token inline-flex h-8 w-8 align-middle overflow-hidden rounded-md border border-border/60 bg-background p-0.5'
+    span.className = 'ak-composer-token inline-flex h-6 w-6 align-middle overflow-hidden rounded-md border border-border/60 bg-background p-0.5'
     const image = document.createElement('img')
     image.src = img.dataUrl
     image.alt = `Image #${i + 1}`
@@ -102,6 +102,28 @@ function placeCaretAtEnd(root: HTMLElement): void {
   if (!sel) return
   sel.removeAllRanges()
   sel.addRange(range)
+}
+
+function setEmptyAttr(el: HTMLElement, isEmpty: boolean): void {
+  if (isEmpty) el.setAttribute('data-empty', 'true')
+  else el.removeAttribute('data-empty')
+}
+
+function insertPlainTextAtSelection(root: HTMLElement, text: string): void {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || !selection.anchorNode || !root.contains(selection.anchorNode)) {
+    root.appendChild(document.createTextNode(text))
+    placeCaretAtEnd(root)
+    return
+  }
+  const range = selection.getRangeAt(0)
+  range.deleteContents()
+  const node = document.createTextNode(text)
+  range.insertNode(node)
+  range.setStartAfter(node)
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
 }
 
 export function SimpleComposerInput({
@@ -149,6 +171,7 @@ export function SimpleComposerInput({
     }
     const { text: nextText, imageIds, caret } = serializeDom(el)
     const cleanText = nextText
+    setEmptyAttr(el, cleanText.length === 0 && imageIds.length === 0)
     const previousIds = new Set(images.map((i) => i.id))
     const currentIds = new Set(imageIds)
     for (const id of previousIds) {
@@ -174,17 +197,20 @@ export function SimpleComposerInput({
     e.preventDefault()
     const plain = e.clipboardData?.getData('text/plain') ?? ''
     if (!plain) return
-    document.execCommand('insertText', false, plain)
-  }, [onPaste])
+    const el = ref.current
+    if (!el) return
+    setEmptyAttr(el, false)
+    insertPlainTextAtSelection(el, plain)
+    const { text: nextText, imageIds, caret } = serializeDom(el)
+    lastSerialized.current = { text: nextText, imageIds }
+    onTextChange(nextText)
+    if (caret !== null && onSelectionChange) onSelectionChange(caret)
+  }, [onPaste, onSelectionChange, onTextChange])
 
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    if (text.length === 0 && images.length === 0) {
-      el.setAttribute('data-empty', 'true')
-    } else {
-      el.removeAttribute('data-empty')
-    }
+    setEmptyAttr(el, text.length === 0 && images.length === 0)
   }, [text, images])
 
   return (
@@ -199,9 +225,9 @@ export function SimpleComposerInput({
       data-placeholder={placeholder ?? ''}
       data-testid="composer-input-simple"
       className={cn(
-        'ak-composer-simple w-full whitespace-pre-wrap break-words rounded-2xl border border-border/60 bg-background/60 px-4 py-2.5 text-base leading-relaxed outline-none transition-colors sm:text-sm',
+        'ak-composer-simple relative w-full whitespace-pre-wrap break-words rounded-2xl border border-border/60 bg-background/60 px-3 py-2 text-base leading-5 outline-none transition-colors sm:text-sm',
         'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
-        'min-h-[38px] max-h-[calc(1.5rem*5+1.25rem)] overflow-y-auto',
+        'min-h-10 max-h-[calc(1.25rem*5+1rem)] overflow-y-auto',
         disabled ? 'cursor-not-allowed opacity-60' : '',
       )}
       onInput={handleInput}

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import type { SessionSummary } from '@agent-kernel/shared'
 import type { TimelineEntry } from './session.js'
-import { mergeBySeq } from './session.js'
+import { deriveToolExecutionStartedAt, mergeBySeq, mergeSessionSummaries } from './session.js'
 
 function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry {
   if (kind === 'llm_response') {
@@ -56,5 +57,68 @@ describe('mergeBySeq', () => {
 
     expect(merged?.llmTrace?.model).toBe('gpt-5.5')
     expect(merged?.model).toBe('gpt-5.5')
+  })
+})
+
+describe('mergeSessionSummaries', () => {
+  it('does not keep an old running status after a fresh resting summary arrives', () => {
+    const base: SessionSummary = {
+      sessionId: 's1',
+      createdAt: '2026-07-15T00:00:00.000Z',
+      lastEventAt: '2026-07-15T00:00:01.000Z',
+      eventCount: 1,
+      status: 'thinking',
+    }
+
+    const merged = mergeSessionSummaries([base], [{ ...base, eventCount: 2, status: 'done' }])
+
+    expect(merged[0]?.status).toBe('done')
+  })
+})
+
+describe('deriveToolExecutionStartedAt', () => {
+  it('recovers the running tool elapsed start from replayed call_tool effects', () => {
+    const state = {
+      sessionId: 's1',
+      messages: [],
+      pendingCalls: [
+        { callId: 'c1', name: 'bash', input: {}, status: 'dispatched' as const },
+        { callId: 'c2', name: 'read', input: {}, status: 'approved' as const },
+      ],
+      status: 'executing_tools' as const,
+      usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      cursor: 2,
+      approvalMode: 'auto' as const,
+    }
+    const timeline: TimelineEntry[] = [
+      {
+        seq: 1,
+        ts: '2026-07-20T12:00:05.000Z',
+        event: { kind: 'user_approve', callId: 'c2' },
+        effects: [{ kind: 'call_tool', callId: 'c2', name: 'read', input: {} }],
+      },
+      {
+        seq: 2,
+        ts: '2026-07-20T12:00:01.000Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [] } },
+        effects: [{ kind: 'call_tool', callId: 'c1', name: 'bash', input: {} }],
+      },
+    ]
+
+    expect(deriveToolExecutionStartedAt(state, timeline)).toBe(Date.parse('2026-07-20T12:00:01.000Z'))
+  })
+
+  it('returns null when the session is not currently executing tools', () => {
+    const state = {
+      sessionId: 's1',
+      messages: [],
+      pendingCalls: [{ callId: 'c1', name: 'bash', input: {}, status: 'dispatched' as const }],
+      status: 'thinking' as const,
+      usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      cursor: 1,
+      approvalMode: 'auto' as const,
+    }
+
+    expect(deriveToolExecutionStartedAt(state, [])).toBeNull()
   })
 })

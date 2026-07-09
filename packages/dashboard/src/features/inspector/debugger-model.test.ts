@@ -16,8 +16,6 @@ const state: AgentState = {
   ...createInitialState({ sessionId: 's1' }),
   cwd: '/tmp',
   usage: { inputTokens: 80, outputTokens: 10, cacheCreationTokens: 0, cacheReadTokens: 0 },
-  contextTokens: 80,
-  contextPressureLevel: 'soft',
 }
 
 const timeline: TimelineEntry[] = [
@@ -102,7 +100,15 @@ describe('debugger model helpers', () => {
   })
 
   it('builds run health without cost data', () => {
-    const health = buildRunHealth(state, { tools: [], contextLimit: 100 }, timeline)
+    const health = buildRunHealth(state, { tools: [], contextLimit: 100 }, timeline, {
+      estimatedMessageTokens: 70,
+      estimatedToolSchemaTokens: 0,
+      estimatedTotalInputTokens: 80,
+      reserveTokens: 10,
+      effectiveLimit: 100,
+      pressureLevel: 'soft',
+      reasonCodes: ['pressure_soft'],
+    })
 
     expect(health.find((item) => item.id === 'context')?.value).toBe('soft · 80%')
     expect(health.find((item) => item.id === 'tool-errors')?.tone).toBe('error')

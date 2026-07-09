@@ -1,138 +1,151 @@
-# Chat panel UX translated historical texttranslated historical text
+# Chat Panel UX Design
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text chat panel (translated historical texttranslated historical texttranslated historical text) translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text git log。
+This document records the recent chat-panel redesign decisions for the center column. Future changes should start here instead of reconstructing intent from git history.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text：
+The main threads are:
 
-1. Streaming translated historical texttranslated historical texttranslated historical text (rAF batching + memo + typewriter smoother)
-2. translated historical texttranslated historical text scroll translated historical texttranslated historical text (pinnedToBottomRef + translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text)
-3. Composer ↔ Approval translated historical texttranslated historical text (X translated historical text 3D flip)
-4. Tasks peek (translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 5s translated historical texttranslated historical texttranslated historical text pill)
-5. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text (translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text + modal translated historical texttranslated historical text)
+1. Streaming smoothness: requestAnimationFrame batching, memoization, and an adaptive typewriter smoother.
+2. Auto-scroll to bottom: pinned-to-bottom behavior that users can interrupt.
+3. Composer and approval flip: an X-axis 3D flip between composer and approval review.
+4. Tasks button: a compact composer utility instead of a persistent transcript panel.
+5. Image content preview: borderless thumbnails plus modal enlargement.
 
-## 1. Streaming translated historical texttranslated historical texttranslated historical text
+## 1. Streaming Smoothness
 
-### translated historical texttranslated historical text
+### Problem
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `text_delta` translated historical text `setStreamingText(prev => prev + p.text)`，`ChatPanel` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text markdown translated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical text：
+The previous implementation appended each `text_delta` directly to React state with `setStreamingText(prev => prev + p.text)`. Every state update rerendered `ChatPanel`, and every historical assistant bubble ran through markdown parsing again.
 
-- translated historical texttranslated historical text chunks ~80 translated historical text/translated historical text → 80 translated historical text setState/translated historical text。
-- translated historical texttranslated historical texttranslated historical text setState translated historical text rerender `ChatPanel`，translated historical texttranslated historical texttranslated historical texttranslated historical text assistant bubble translated historical texttranslated historical text `AssistantMarkdown` → `remark → rehype → HTML`。
-- N translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text N translated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical text "translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"。
+Observed behavior:
 
-### translated historical texttranslated historical text
+- Backend chunks could arrive around 80 times per second, causing roughly 80 `setState` calls per second.
+- Each update rerendered `ChatPanel`; every assistant bubble went through `AssistantMarkdown`, `remark`, `rehype`, and HTML rendering.
+- Cost grew linearly with historical message count.
+- Visually, text appeared to jump rather than flow.
 
-1. **rAF batching** (`session.ts`)。translated historical text delta translated historical texttranslated historical text `streamBufferRef`，translated historical texttranslated historical text `requestAnimationFrame` drain translated historical texttranslated historical texttranslated historical text buffer translated historical texttranslated historical texttranslated historical text setState。translated historical texttranslated historical text delta translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，setState translated historical texttranslated historical texttranslated historical text 60Hz translated historical texttranslated historical text —— translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text UI translated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-2. **Adaptive typewriter smoother**。translated historical texttranslated historical text drain `max(2, ceil(backlog / 10))` translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text rAF translated historical texttranslated historical text buffer translated historical texttranslated historical text。translated historical texttranslated historical text：
-   - backlog translated historical texttranslated historical texttranslated historical texttranslated historical text 2 translated historical text → translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-   - backlog translated historical texttranslated historical texttranslated historical text 10% translated historical texttranslated historical text drain → translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-3. **`React.memo` on `AssistantMarkdown`** (`ChatPanel.tsx`)。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text markdown translated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text streaming translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text bubble translated historical texttranslated historical text rerender。
+### Measures
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text：`session.ts` translated historical text `drainStreamBuffer` / `pushStreamDelta` / `resetStream`。translated historical texttranslated historical texttranslated historical text streamingText translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text (turn translated historical texttranslated historical text、error、fork) translated historical texttranslated historical texttranslated historical texttranslated historical text `resetStream()` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `setStreamingText('')`，translated historical texttranslated historical texttranslated historical texttranslated historical text buffer translated historical texttranslated historical texttranslated historical texttranslated historical text turn translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+1. **requestAnimationFrame batching** in `session.ts`. Deltas are written to `streamBufferRef`; one `requestAnimationFrame` drains part of the buffer and performs one state update. Multiple deltas landing in the same browser frame are merged automatically, so UI update frequency is capped by the display frame rate instead of packet frequency.
+2. **Adaptive typewriter smoother**. Each frame drains `max(2, ceil(backlog / 10))` characters and keeps scheduling animation frames until the buffer is empty.
+   - Small backlog: two characters per frame keeps slow output from feeling mechanical.
+   - Large backlog: draining 10% per frame catches up without lagging indefinitely.
+3. **`React.memo` on `AssistantMarkdown`** in `ChatPanel.tsx`. Historical message text does not change, so historical markdown parsing is skipped. Only the current streaming bubble rerenders on each frame.
 
-## 2. translated historical texttranslated historical text scroll translated historical texttranslated historical text
+The critical code path is `session.ts`: `drainStreamBuffer`, `pushStreamDelta`, and `resetStream`. All streaming resets, including turn end, error, and fork, must go through `resetStream()` rather than direct `setStreamingText('')`; otherwise residual buffered text can leak into the next turn.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+## 2. Auto-Scroll to Bottom
 
-translated historical texttranslated historical texttranslated historical text `pinnedToBottomRef` (`app.tsx`) translated historical texttranslated historical text：
+Users reading earlier history should not be forced to the bottom by new messages. If they are already at the bottom, new messages should follow automatically.
 
-- translated historical texttranslated historical text `true`。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text scroll translated historical texttranslated historical texttranslated historical text > 64px：`pinnedToBottomRef.current = false`。
-- translated historical texttranslated historical text scroll translated historical texttranslated historical text ≤ 64px translated historical text：`pinnedToBottomRef.current = true`。
-- translated historical texttranslated historical text `chatItems` / `streamingText` / `pendingApprovals` translated historical texttranslated historical text，translated historical texttranslated historical text pinned translated historical text `scrollToBottom()`，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+The original rule was owned by `pinnedToBottomRef` in `app.tsx`:
 
-64px translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text "translated historical texttranslated historical texttranslated historical texttranslated historical text" translated historical texttranslated historical text —— translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text scroll translated historical texttranslated historical texttranslated historical texttranslated historical text pin translated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Initial value: `true`.
+- User scrolls more than 64 px away from the bottom: `pinnedToBottomRef.current = false`.
+- User returns within 64 px of the bottom: `pinnedToBottomRef.current = true`.
+- When `chatItems`, `streamingText`, or `pendingApprovals` changes, scroll to bottom only if pinned.
 
-## 3. Composer ↔ Approval translated historical texttranslated historical text
+The 64 px threshold is a tolerance radius for "close enough to the bottom". It avoids flipping the pin state when the user makes small scroll adjustments near the end of the transcript.
 
-### translated historical texttranslated historical text
+The virtualized implementation keeps the same user-visible semantics through `VirtualTranscript`: the virtualizer reports bottom state, the parent owns the current pin flag, and explicit send actions force a jump to the bottom because sending is a clear user signal that the active turn should be visible.
 
-Approval translated historical texttranslated historical text composer **translated historical texttranslated historical text** translated historical texttranslated historical texttranslated historical text amber banner + translated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text：
+## 3. Composer and Approval Flip
 
-- translated historical texttranslated historical texttranslated historical text composer translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Composer translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text (translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text)，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical text pending translated historical text banner translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Previous Behavior
 
-### translated historical texttranslated historical text
+Approval review used to appear as an amber banner above the composer, with stacked action buttons. That had three problems:
 
-`ComposerFlipContainer` translated historical texttranslated historical texttranslated historical text 3D flip translated historical text：translated historical texttranslated historical texttranslated historical text Composer，translated historical texttranslated historical texttranslated historical text `ApprovalCard`。translated historical text pending approval translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text **X translated historical text** translated historical text 180° —— translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- The buttons were far from the input area where the user's attention already was.
+- The composer remained visible even though sending a message was not useful during approval.
+- Multiple pending approvals stacked into a visually heavy pile.
 
-**translated historical texttranslated historical texttranslated historical text X translated historical texttranslated historical texttranslated historical text Y translated historical text**：Y translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，X translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text / translated historical texttranslated historical texttranslated historical texttranslated historical text "translated historical texttranslated historical text"。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Current Behavior
 
-translated historical texttranslated historical text CSS：
+`ComposerFlipContainer` is a 3D flip surface. The front is the normal composer; the back is `ApprovalCard`. When there is a pending approval, the surface rotates 180 degrees around the X axis, similar to a split-flap display.
 
+The X axis is intentional. A Y-axis flip reads like a book page; an X-axis flip reads more like a dashboard panel changing state. The container is wide and shallow, so rotating around the short axis keeps the visual weight stable and preserves the user's horizontal focus line.
+
+Key CSS concepts:
+
+```css
+parent: perspective: 1600px;
+inner: transform-style: preserve-3d;
+inner: transform: rotateX(0deg) | rotateX(180deg);
+front: backface-visibility: hidden;
+back: backface-visibility: hidden; transform: rotateX(180deg);
 ```
-parent: [perspective:1600px]
-inner:  [transform-style:preserve-3d]
-        transform: rotateX(0deg) | rotateX(180deg)
-front:  [backface-visibility:hidden]
-back:   [backface-visibility:hidden] [transform:rotateX(180deg)]
-```
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical texttranslated historical text `useMeasure` translated historical texttranslated historical text，translated historical texttranslated historical text `height` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 300ms ease translated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+Height animation uses measured heights for both faces. The outer shell transitions to the active face's measured height over 300 ms. This prevents content from overflowing when the back face is taller.
 
-`inert` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical text Tab translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text DOM。
+The hidden face uses `inert` so keyboard focus cannot enter invisible DOM.
 
-### translated historical text pending
+### Multiple Pending Approvals
 
-translated historical text **A + B translated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical text carousel + translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+The chosen pattern is a hybrid: one card carousel plus top-level bulk actions.
 
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text approval，`1 of N` translated historical texttranslated historical text + `‹ Prev` / `Next ›` translated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `Reject all` / `Approve all` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text：`Enter` translated historical texttranslated historical text、`Esc` translated historical texttranslated historical text、`←` / `→` translated historical texttranslated historical text。
-- Approve translated historical texttranslated historical texttranslated historical texttranslated historical text auto-focus，`Enter` translated historical texttranslated historical texttranslated historical texttranslated historical text。
+- The body shows one approval at a time with a `1 of N` indicator and previous/next navigation.
+- The top-right controls provide `Reject all` and `Approve all` for batch cases.
+- Keyboard behavior: `Enter` approves, `Escape` rejects, and left/right arrows page through approvals.
+- The approve button receives persistent autofocus so `Enter` works for the common path.
 
-Approve translated historical texttranslated historical texttranslated historical text parent translated historical text list translated historical texttranslated historical text，`current` index translated historical texttranslated historical text clamp translated historical texttranslated historical text length —— carousel translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text pending。
+After an approval is handled, the parent list shrinks and the current index clamps to the new length. The carousel naturally advances to the next pending approval.
 
-Chat translated historical texttranslated historical texttranslated historical texttranslated historical text pending translated historical text tool_call translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text amber translated historical texttranslated historical text + translated historical texttranslated historical texttranslated historical texttranslated historical text "Approve or reject in the composer area below."，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text composer translated historical texttranslated historical text。
+The pending tool-call card in the transcript no longer owns the decision buttons. It keeps an amber border and a hint that the action must be reviewed in the composer area. This keeps one primary decision surface and avoids duplicate controls.
 
-## 4. Tasks button (composer utility)
+## 4. Tasks Button
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+### Previous Problem
 
-translated historical text task list translated historical texttranslated historical texttranslated historical texttranslated historical text ScrollArea translated historical text Composer translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。task translated historical texttranslated historical texttranslated historical text agent translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text chat translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+Placing a task list permanently between the transcript scroll area and composer consumed vertical chat space. Tasks are runtime work items surfaced by a normal tool, not a primary chat transcript surface.
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
+### Data Boundary
 
-`todowrite` translated historical texttranslated historical texttranslated historical text executor tool。kernel reducer translated historical texttranslated historical texttranslated historical text `state.todos`，translated historical texttranslated historical texttranslated historical texttranslated historical text todo translated historical texttranslated historical texttranslated historical texttranslated historical text。
+`todowrite` is a normal executor tool. The kernel reducer does not contain `state.todos` and does not know a special todo protocol.
 
-Dashboard translated historical texttranslated historical texttranslated historical texttranslated historical text task translated historical text，translated historical text timeline translated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `call_tool(name: "todowrite")` translated historical texttranslated historical texttranslated historical text `tool_result(ok: true)`，translated historical texttranslated historical texttranslated historical texttranslated historical text tool input translated historical texttranslated historical text `todos` translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text task list。translated historical texttranslated historical text、pending、malformed input translated historical texttranslated historical texttranslated historical texttranslated historical text task display。
+When the dashboard needs to show tasks, it derives them from the timeline:
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text reducer。
+1. Find successful `call_tool(name: "todowrite")` calls.
+2. Match them with corresponding `tool_result(ok: true)` events.
+3. Parse the `todos` array from the tool input for the latest successful call.
 
-### translated historical texttranslated historical text
+Failed calls, pending calls, and malformed inputs do not update the task display.
 
-Composer translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `TasksButton`。translated historical texttranslated historical texttranslated historical texttranslated historical text task icon translated historical text `N/M`，translated historical texttranslated historical text `N` translated historical text completed translated historical texttranslated historical text，`M` translated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text task translated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+This boundary keeps the core state machine focused on protocol facts and prevents one tool's semantics from becoming reducer state.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text popover，translated historical texttranslated historical texttranslated historical texttranslated historical text task list：
+### Design
 
-- title translated historical texttranslated historical texttranslated historical text task translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text icon。
-- secondary translated historical texttranslated historical texttranslated historical text priority，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- completed translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，in-progress translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，pending translated historical texttranslated historical texttranslated historical texttranslated historical text。
+The composer utility area shows a compact `TasksButton`. It displays a task icon plus `N/M`, where `N` is completed count and `M` is total count. It does not render when there are no tasks.
 
-Popover translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text chat translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text transcript translated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text trace translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tool call，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical text IDE todo translated historical texttranslated historical texttranslated historical texttranslated historical text。
+Clicking opens a popover with the full task list:
 
-### translated historical texttranslated historical text
+- Primary row: task content and status icon.
+- Secondary row: priority, only when priority exists.
+- Completed tasks use lower contrast.
+- In-progress tasks use light emphasis.
+- Pending tasks stay neutral.
 
-- translated historical texttranslated historical text `TasksButton` translated historical texttranslated historical text/translated historical texttranslated historical text popover。
-- `Escape` translated historical texttranslated historical text popover。
-- Popover translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text ScrollArea，translated historical texttranslated historical texttranslated historical text native scrollbar。
-- task translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text timeline translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text dashboard translated historical texttranslated historical texttranslated historical texttranslated historical text。
+The popover is a temporary inspection layer. It does not push the transcript layout, consume persistent vertical space, or provide editing and drag behavior.
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
+### Interaction
 
-- translated historical texttranslated historical text task translated historical texttranslated historical text kernel reducer state。
-- translated historical texttranslated historical text UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text task。agent translated historical texttranslated historical texttranslated historical text `todowrite` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text `todowrite` translated historical texttranslated historical text reducer lift、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text compatibility shim。
+- Click `TasksButton` to open or close the popover.
+- Press `Escape` to close.
+- Popover content uses the project's unified `ScrollArea`, not a raw native scrollbar.
+- Task updates follow the derived timeline result; the dashboard does not persist separate task state.
 
-## 5. Image content preview
+### Non-Goals
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text `ImageContent` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text base64 translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text workspace file reference。Chat panel translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text transcript translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text dashboard translated historical texttranslated historical text。
+- Do not write tasks into kernel reducer state.
+- Do not edit tasks directly in the UI. The next `todowrite` call is the source of truth; UI edits would create conflicting ownership.
+- Do not add reducer lifts, protocol special cases, or compatibility shims for `todowrite`.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text：
+## 5. Image Content Preview
 
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `max-w-full` / `object-contain`，translated historical texttranslated historical texttranslated historical texttranslated historical text chat column。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `border` translated historical text `border-border/*` translated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `packages/dashboard/STYLE.md` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text UI。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `cursor-zoom-in`、translated historical texttranslated historical text hover translated historical texttranslated historical text/translated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text modal translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。Modal translated historical texttranslated historical texttranslated historical texttranslated historical text `Dialog` translated historical texttranslated historical text：translated historical texttranslated historical text backdrop、`bg-background`、`shadow-lg`、`border-border/60` soft rim。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text viewport translated historical texttranslated historical text (`max-h-[calc(100dvh-8rem)]`, `max-w-full`, `object-contain`)，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+`ImageContent` in messages can come from pasted base64 data or workspace file references. The chat panel only displays image content that is already present in the transcript; it does not copy images into separate dashboard state.
+
+Thumbnail rules:
+
+- Keep images within the bubble using `max-w-full` and `object-contain`; they must not widen the chat column.
+- Do not draw hard `border` or `border-border/*` frames around thumbnails. The image is content, not a nested card, and hard frames make user bubbles look like wireframes.
+- Express clickability with `cursor-zoom-in`, subtle hover background, or shadow, not with a border.
+- Clicking opens a modal preview. The modal uses the shared `Dialog` layer with dark backdrop, `bg-background`, `shadow-lg`, and a soft `border-border/60` rim.
+- Enlarged images use viewport constraints such as `max-h-[calc(100dvh-8rem)]`, `max-w-full`, and `object-contain`, so mobile viewports do not overflow or hide the close button.

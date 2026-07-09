@@ -1,8 +1,9 @@
 /**
  * A single inline "what is the agent doing right now" row rendered at the tail
  * of the message flow. Reads `state.status` from the kernel — no invented
- * pseudo-statuses. During `thinking` a set of pulsing dots animates until the
- * stream begins (at which point the streaming assistant bubble takes over).
+ * pseudo-statuses. During `thinking` a lightweight breathing dot animates
+ * until the stream begins (at which point the streaming assistant bubble takes
+ * over).
  * During `executing_tools` the currently-running tool calls are summarised
  * with an expandable parameter view. `awaiting_approval` renders a static
  * amber hint pointing to the approval card below. All other statuses render
@@ -14,7 +15,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, Loader2, Square, TriangleAlert, Wrench } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, TriangleAlert, Wrench } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AgentState, PendingToolCall } from '@agent-kernel/kernel'
@@ -31,62 +32,58 @@ export type CompactStatus =
 
 type Props = {
   state: AgentState | null
+  fallbackStatus?: AgentState['status']
   streamingActive: boolean
+  toolExecutionStartedAt?: number | null
   awaitingAck?: boolean
-  onCancel?: () => void
 }
 
-export function InlineStatusRow({ state, streamingActive, awaitingAck, onCancel }: Props): JSX.Element | null {
-  if (state) {
-    switch (state.status) {
+export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolExecutionStartedAt, awaitingAck }: Props): JSX.Element | null {
+  const status = state?.status ?? fallbackStatus
+  if (status) {
+    switch (status) {
       case 'thinking':
         if (streamingActive) return null
-        return <ThinkingRow onCancel={onCancel} />
+        return <ThinkingRow />
       case 'executing_tools':
-        return <ToolsRow calls={state.pendingCalls} onCancel={onCancel} />
+        return <ToolsRow calls={state?.pendingCalls ?? []} startedAt={toolExecutionStartedAt} />
       case 'awaiting_approval':
         return <AwaitingApprovalRow />
     }
   }
   // Bridge the socket round-trip between user submit and the kernel's first
   // `thinking` status push — otherwise the transcript looks frozen.
-  if (awaitingAck && !streamingActive) return <ThinkingRow onCancel={onCancel} />
+  if (awaitingAck && !streamingActive) return <ThinkingRow />
   return null
 }
 
-function ThinkingRow({ onCancel }: { onCancel?: () => void }): JSX.Element {
+function ThinkingRow(): JSX.Element {
   const { t } = useTranslation()
-  const elapsed = useElapsedSeconds(true)
   return (
     <div
-      className="flex items-center gap-3 rounded-md border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200"
+      className="ak-thinking-row mb-3 inline-flex items-center gap-2 overflow-hidden rounded-full border border-border/70 bg-white/90 px-3 py-1.5 text-xs text-foreground shadow-sm ring-1 ring-white/80 dark:bg-zinc-950/90 dark:ring-white/10"
       data-testid="inline-status-thinking"
       role="status"
       aria-live="polite"
     >
-      <span className="flex items-center gap-1" aria-hidden="true">
-        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:150ms]" />
-        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:300ms]" />
+      <span className="relative z-[1] flex h-3 w-3 flex-none items-center justify-center text-primary" aria-hidden="true">
+        <span className="absolute h-3 w-3 rounded-full bg-current opacity-20 ak-thinking-dot" />
+        <span className="relative h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_10px_hsl(var(--primary)/0.55)]" />
       </span>
-      <span className="font-medium">{t('chatStatus.thinking')}</span>
-      <span className="ml-auto flex items-center gap-2">
-        <span className="tabular-nums text-sky-700/70 dark:text-sky-300/70">↳ {elapsed.toFixed(1)}s</span>
-        {onCancel ? <StopButton onClick={onCancel} /> : null}
-      </span>
+      <span className="relative z-[1] font-medium">{t('chatStatus.thinking')}</span>
     </div>
   )
 }
 
 function ToolsRow({
   calls,
-  onCancel,
+  startedAt,
 }: {
   calls: readonly PendingToolCall[]
-  onCancel?: () => void
+  startedAt?: number | null
 }): JSX.Element {
   const { t } = useTranslation()
-  const elapsed = useElapsedSeconds(true)
+  const elapsed = useElapsedSeconds(true, startedAt)
   const active = calls.filter((c) => c.status === 'dispatched' || c.status === 'approved')
   const list = active.length > 0 ? active : calls
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -113,7 +110,6 @@ function ToolsRow({
         <span className="font-medium truncate">{summary}</span>
         <span className="ml-auto flex items-center gap-2">
           <span className="tabular-nums text-violet-700/70 dark:text-violet-300/70">↳ {elapsed.toFixed(1)}s</span>
-          {onCancel ? <StopButton onClick={onCancel} /> : null}
         </span>
       </div>
       <ul className="mt-1.5 flex flex-col gap-1">
@@ -159,22 +155,6 @@ function AwaitingApprovalRow(): JSX.Element {
       <TriangleAlert className="h-3.5 w-3.5 flex-none" />
       <span className="font-medium">{t('chatStatus.awaitingApproval')}</span>
     </div>
-  )
-}
-
-function StopButton({ onClick }: { onClick: () => void }): JSX.Element {
-  const { t } = useTranslation()
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={t('chatStatus.stopTitle')}
-      className="inline-flex items-center gap-1 rounded border border-current/30 px-1.5 py-0.5 text-[11px] font-medium hover:bg-current/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-current"
-      data-testid="inline-status-cancel"
-    >
-      <Square className="h-3 w-3" />
-      {t('chatStatus.stop')}
-    </button>
   )
 }
 
@@ -303,15 +283,15 @@ function formatTokensShort(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(1)}m tokens`
 }
 
-function useElapsedSeconds(active: boolean): number {
-  const [start] = useState(() => Date.now())
-  const [now, setNow] = useState(start)
+function useElapsedSeconds(active: boolean, startedAt?: number | null): number {
+  const [fallbackStart] = useState(() => Date.now())
+  const [now, setNow] = useState(fallbackStart)
   useEffect(() => {
     if (!active) return
     const t = window.setInterval(() => setNow(Date.now()), 100)
     return () => window.clearInterval(t)
   }, [active])
-  return Math.max(0, (now - start) / 1000)
+  return Math.max(0, (now - (startedAt ?? fallbackStart)) / 1000)
 }
 
 function useElapsedMs(active: boolean, startedAt?: number): number {

@@ -25,6 +25,7 @@ import type {
   ServerSubAgentStartedEvent,
   SessionReadyEvent,
   StateChangedEvent,
+  SubAgentListResult,
 } from '@agent-kernel/shared'
 
 import type { DashboardSocket } from '../../session.js'
@@ -106,6 +107,56 @@ export function useSubAgentSession({
   const [model, setModel] = useState<string | undefined>(undefined)
 
   const childIdRef = useRef<string | null>(initialChildSessionId ?? null)
+
+  // Recover lifecycle after a dashboard refresh. Live start/finish pushes are
+  // ephemeral; the durable relation is the child session header returned by
+  // `sub_agent:list`.
+  useEffect(() => {
+    if (!socket || childIdRef.current) return
+    let cancelled = false
+    socket.emit(
+      'sub_agent:list',
+      { requestId: `sub-agent-${parentSessionId}-${parentCallId}`, parentSessionId },
+      (result: SubAgentListResult) => {
+        if (cancelled || result.error) return
+        const child = result.children.find((entry) => entry.parentCallId === parentCallId)
+        if (!child) return
+        childIdRef.current = child.childSessionId
+        if (child.agentType) setAgentType(child.agentType)
+        setLifecycle(() => {
+          if (child.status === 'failed' || child.status === 'cancelled') {
+            return {
+              status: child.status,
+              childSessionId: child.childSessionId,
+              error: 'sub-agent ended before this dashboard connected',
+              turns: 0,
+              durationMs: 0,
+              finishedAt: child.finishedAt ?? '',
+              ...(child.startedAt ? { startedAt: child.startedAt } : {}),
+            }
+          }
+          if (child.status === 'completed') {
+            return {
+              status: 'completed',
+              childSessionId: child.childSessionId,
+              turns: 0,
+              durationMs: 0,
+              finishedAt: child.finishedAt ?? '',
+              ...(child.startedAt ? { startedAt: child.startedAt } : {}),
+            }
+          }
+          return {
+            status: 'running',
+            childSessionId: child.childSessionId,
+            startedAt: child.startedAt ?? '',
+          }
+        })
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [socket, parentSessionId, parentCallId])
 
   // Watch the parent's room for our specific tool call to fire.
   useEffect(() => {

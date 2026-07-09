@@ -75,9 +75,9 @@ function EditDiff({ input }: { input: EditInput }): JSX.Element {
       className="mt-1.5 basis-full overflow-hidden rounded border border-amber-200 bg-card dark:border-amber-900/60"
       data-testid="diff-preview"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{path}</span>
-        <span className="flex items-center gap-2">
+        <span className="flex shrink-0 items-center gap-2">
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">{t('chat.diff.modified')}</span>
           <span className="font-mono text-emerald-700 dark:text-emerald-300">+{added}</span>
           <span className="font-mono text-rose-700 dark:text-rose-300">-{deleted}</span>
@@ -85,8 +85,8 @@ function EditDiff({ input }: { input: EditInput }): JSX.Element {
           <span>{replaceAll ? 'edit · replace_all' : 'edit'}</span>
         </span>
       </div>
-      <ScrollArea className="max-h-80">
-        <pre className="whitespace-pre px-0 py-1 font-mono text-[11px] leading-snug">
+      <ScrollArea className="max-h-80 max-w-full">
+        <pre className="min-w-max whitespace-pre px-0 py-1 font-mono text-[11px] leading-snug">
           {rows.map((row, i) => (
             <DiffLineRow key={i} row={row} />
           ))}
@@ -109,16 +109,16 @@ function WritePreview({ input }: { input: WriteInput }): JSX.Element {
       className="mt-1.5 basis-full overflow-hidden rounded border border-emerald-200 bg-card dark:border-emerald-900/60"
       data-testid="diff-preview"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{path}</span>
-        <span className="flex items-center gap-2">
+        <span className="flex shrink-0 items-center gap-2">
           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">{t('chat.diff.createdOverwrite')}</span>
           write · {formatBytes(bytes)}
           {truncated ? t('chat.diff.showingLines', { shown: WRITE_PREVIEW_LINES, total: lines.length }) : ''}
         </span>
       </div>
-      <ScrollArea className="max-h-80">
-        <pre className="whitespace-pre py-1 pr-2 font-mono text-[11px] leading-snug">
+      <ScrollArea className="max-h-80 max-w-full">
+        <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-[11px] leading-snug">
           {shown.map((line, i) => (
             <span key={i} className="flex">
               <GutterCell newNo={i + 1} />

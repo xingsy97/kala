@@ -1,0 +1,334 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { DirListEntry, DirListResult, FileContentsResult, TerminalCreateResult, TerminalKillResult } from '@agent-kernel/shared'
+
+import { SessionFilesPanel, WorkspaceFileViewDialog } from './SessionFilesPanel.js'
+
+const setPositionMock = vi.fn()
+const revealLineInCenterMock = vi.fn()
+
+vi.mock('@monaco-editor/react', () => ({
+  default: ({ value, language, options, onMount }: { value: string; language: string; options: { readOnly?: boolean; wordWrap?: string; fontSize?: number }; onMount?: (editor: { setPosition: typeof setPositionMock; revealLineInCenter: typeof revealLineInCenterMock }) => void }) => {
+    onMount?.({ setPosition: setPositionMock, revealLineInCenter: revealLineInCenterMock })
+    return <pre data-language={language} data-readonly={String(options.readOnly)} data-word-wrap={String(options.wordWrap)} data-font-size={String(options.fontSize)} data-testid="monaco-editor">{value}</pre>
+  },
+}))
+
+vi.mock('react-arborist', () => ({
+  Tree: ({ data, children, onActivate }: { data: TestTreeNode[]; children: (input: unknown) => JSX.Element; onActivate?: (node: { data: TestTreeNode }) => void }) => (
+    <div data-testid="file-tree">
+      {renderTreeRows(data, children, onActivate)}
+    </div>
+  ),
+}))
+
+const writeMock = vi.fn()
+const writelnMock = vi.fn()
+const inputListeners: Array<(data: string) => void> = []
+
+vi.mock('@xterm/xterm', () => ({
+  Terminal: class TerminalMock {
+    cols = 100
+    rows = 8
+    write = writeMock
+    writeln = writelnMock
+    loadAddon(): void {}
+    open(): void {}
+    dispose(): void {}
+    onData(listener: (data: string) => void): { dispose(): void } {
+      inputListeners.push(listener)
+      return { dispose() {} }
+    }
+  },
+}))
+
+vi.mock('@xterm/addon-fit', () => ({ FitAddon: class FitAddonMock { fit(): void {} } }))
+vi.mock('@xterm/addon-search', () => ({ SearchAddon: class SearchAddonMock {} }))
+vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class WebLinksAddonMock {} }))
+
+type TestTreeNode = {
+  id: string
+  name: string
+  path: string
+  type: 'directory' | 'file'
+  size?: number
+  children?: TestTreeNode[]
+}
+
+function renderTreeRows(
+  data: readonly TestTreeNode[],
+  row: (input: unknown) => JSX.Element,
+  onActivate?: (node: { data: TestTreeNode }) => void,
+): JSX.Element[] {
+  return data.flatMap((item) => {
+    const rendered = row({
+      style: {},
+      node: {
+        data: item,
+        isSelected: false,
+        activate: () => onActivate?.({ data: item }),
+        toggle: vi.fn(),
+      },
+    })
+    return [<div key={item.id}>{rendered}</div>, ...(item.children ? renderTreeRows(item.children, row, onActivate) : [])]
+  })
+}
+
+describe('SessionFilesPanel', () => {
+  beforeEach(() => {
+    writeMock.mockClear()
+    writelnMock.mockClear()
+    setPositionMock.mockClear()
+    revealLineInCenterMock.mockClear()
+    inputListeners.length = 0
+    Object.assign(navigator, { clipboard: { writeText: vi.fn() } })
+  })
+
+  it('loads the session file tree and views text files read-only', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'text', content: 'hello', size: 5 },
+      entries: [{ name: 'notes.txt', path: '/repo/notes.txt', type: 'file', size: 5 }],
+    })
+
+    render(<SessionFilesPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('notes.txt'))
+
+    expect((await screen.findByTestId('monaco-editor')).textContent).toContain('hello')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-readonly')).toBe('true')
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('14')
+    expect(socket.emitMock).toHaveBeenCalledWith('client:list_dirs', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo' }))
+    expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo/notes.txt', maxBytes: 1024 * 1024 }))
+  })
+
+  it('uses the configured file view font size', async () => {
+    localStorage.setItem('ak-file-view-font-size', '4')
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'text', content: 'hello', size: 5 },
+      entries: [{ name: 'notes.txt', path: '/repo/notes.txt', type: 'file', size: 5 }],
+    })
+
+    render(<SessionFilesPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('notes.txt'))
+
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('18')
+  })
+
+  it('shows large and binary files without loading full content into Monaco', async () => {
+    const large = makeSessionFilesSocket({ file: { kind: 'too_large', content: 'visible', size: 2 * 1024 * 1024, truncated: true, error: 'EFBIG' } })
+    const { unmount } = render(<SessionFilesPanel socket={large.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('README.md'))
+
+    expect(await screen.findByText(/Large file view is capped/i)).toBeTruthy()
+    expect(screen.getByTestId('monaco-editor').textContent).toContain('visible')
+    unmount()
+
+    const binary = makeSessionFilesSocket({ file: { kind: 'binary', size: 4096, error: 'EBINARY' } })
+    render(<SessionFilesPanel socket={binary.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+    fireEvent.click(await screen.findByText('README.md'))
+
+    expect(await screen.findByText('Binary file cannot be viewed')).toBeTruthy()
+    expect(screen.getByText(/This file is binary/i)).toBeTruthy()
+    expect(screen.queryByTestId('monaco-editor')).toBeNull()
+  })
+
+  it('renders image files in the sidebar file view modal and supports view actions', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'image', content: 'aW1hZ2U=', size: 5, encoding: 'base64', mediaType: 'image/png' },
+      entries: [{ name: 'image.png', path: '/repo/image.png', type: 'file', size: 5 }],
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('image.png'))
+
+    const image = await screen.findByRole('img')
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,aW1hZ2U=')
+    expect(screen.getByText('image/png')).toBeTruthy()
+    expect(socket.emitMock).toHaveBeenCalledWith('client:list_dirs', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo' }))
+    expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo/image.png' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /copy path/i }))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repo/image.png')
+    fireEvent.click(screen.getByRole('button', { name: /copy visible content/i }))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('data:image/png;base64,aW1hZ2U=')
+    fireEvent.click(screen.getByRole('button', { name: /refresh file/i }))
+    await waitFor(() => expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ path: '/repo/image.png' })))
+    expect(socket.emitMock.mock.calls.filter(([event]) => event === 'client:read_file')).toHaveLength(2)
+  })
+
+  it('renders GIF files through the image viewer', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'image', content: 'R0lGODlh', size: 6, encoding: 'base64', mediaType: 'image/gif' },
+      entries: [{ name: 'spin.gif', path: '/repo/spin.gif', type: 'file', size: 6 }],
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('spin.gif'))
+
+    const image = await screen.findByRole('img')
+    expect(image.getAttribute('src')).toBe('data:image/gif;base64,R0lGODlh')
+    expect(screen.getByText('image/gif')).toBeTruthy()
+  })
+
+  it('renders PDF files in the file view modal', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'pdf', content: 'JVBERi0x', size: 8, encoding: 'base64', mediaType: 'application/pdf' },
+      entries: [{ name: 'report.pdf', path: '/repo/report.pdf', type: 'file', size: 8 }],
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('report.pdf'))
+
+    const pdf = await screen.findByTestId('session-file-pdf-viewer')
+    expect(pdf.getAttribute('type')).toBe('application/pdf')
+    expect(pdf.getAttribute('data')).toBe('data:application/pdf;base64,JVBERi0x')
+  })
+
+  it('opens Markdown files in rendered preview mode by default and can switch to source', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: '# Title\n\n- item', size: 15 } })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('README.md'))
+
+    const preview = await screen.findByTestId('session-file-markdown-preview')
+    expect(preview.textContent).toContain('Title')
+    expect(screen.queryByTestId('monaco-editor')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /show markdown source/i }))
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-language')).toBe('markdown')
+
+    fireEvent.click(screen.getByRole('button', { name: /preview markdown/i }))
+    expect(await screen.findByTestId('session-file-markdown-preview')).toBeTruthy()
+  })
+
+  it('toggles word wrap for text views in the sidebar modal', async () => {
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'text', content: 'long line', size: 9 },
+      entries: [{ name: 'notes.txt', path: '/repo/notes.txt', type: 'file', size: 9 }],
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('notes.txt'))
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-word-wrap')).toBe('on')
+    fireEvent.click(screen.getByRole('button', { name: /toggle word wrap/i }))
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-word-wrap')).toBe('off')
+  })
+
+  it('adjusts file view modal font size only for the current modal', async () => {
+    localStorage.setItem('ak-file-view-font-size', '2')
+    const socket = makeSessionFilesSocket({
+      file: { kind: 'text', content: 'long line', size: 9 },
+      entries: [{ name: 'notes.txt', path: '/repo/notes.txt', type: 'file', size: 9 }],
+    })
+
+    render(<SessionFilesPanel mode="sidebar" socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(await screen.findByText('notes.txt'))
+    expect((await screen.findByTestId('monaco-editor')).getAttribute('data-font-size')).toBe('14')
+
+    fireEvent.click(screen.getByRole('button', { name: /increase file view font size/i }))
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('16')
+    fireEvent.click(screen.getByRole('button', { name: /decrease file view font size/i }))
+    fireEvent.click(screen.getByRole('button', { name: /decrease file view font size/i }))
+    expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('12')
+    expect(localStorage.getItem('ak-file-view-font-size')).toBe('2')
+  })
+
+  it('opens a targeted file view at the requested line and column', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: 'a\nb\nc', size: 5 } })
+
+    render(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" target={{ path: '/repo/source.ts', line: 3, column: 2 }} />)
+
+    expect((await screen.findByTestId('monaco-editor')).textContent).toContain('a\nb\nc')
+    expect(setPositionMock).toHaveBeenCalledWith({ lineNumber: 3, column: 2 })
+    expect(revealLineInCenterMock).toHaveBeenCalledWith(3)
+  })
+
+  it('shows actionable diagnostics for missing files', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'not_found', size: 0, error: 'ENOENT: no such file or directory' } })
+
+    render(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" target={{ path: '/repo/missing.md' }} />)
+
+    expect(await screen.findByText('File not found')).toBeTruthy()
+    expect(screen.getByText(/deleted, moved, or generated in a different workspace/i)).toBeTruthy()
+  })
+
+  it('starts a session terminal, forwards input, renders output, and kills on close', async () => {
+    const socket = makeSessionFilesSocket({ file: { kind: 'text', content: '', size: 0 } })
+    render(<SessionFilesPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+
+    await waitFor(() => expect(socket.emitMock).toHaveBeenCalledWith('terminal:create', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', cwd: '/repo' }), expect.any(Function)))
+    await waitFor(() => expect(inputListeners.length).toBeGreaterThan(0))
+    inputListeners.at(-1)?.('echo ok\r')
+    expect(socket.emitMock).toHaveBeenCalledWith('terminal:input', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1', data: 'echo ok\r' }))
+
+    socket.serverEmit('server:terminal_output', { workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1', data: 'ok\r\n' })
+    expect(writeMock).toHaveBeenCalledWith('ok\r\n')
+
+    fireEvent.click(screen.getByRole('button', { name: /kill/i }))
+    expect(socket.emitMock).toHaveBeenCalledWith('terminal:kill', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1' }), expect.any(Function))
+  })
+})
+
+function makeSessionFilesSocket(input: {
+  file: Pick<FileContentsResult, 'kind' | 'content' | 'size' | 'truncated' | 'error' | 'encoding' | 'mediaType'>
+  entries?: DirListEntry[]
+}) {
+  const handlers = new Map<string, Set<(payload: unknown) => void>>()
+  const emitMock = vi.fn((event: string, payload: Record<string, unknown>, ack?: (payload: unknown) => void) => {
+    if (event === 'client:list_dirs') {
+      queueMicrotask(() => serverEmit('server:dir_list', dirList(String(payload.requestId), input.entries)))
+    }
+    if (event === 'client:read_file') {
+      queueMicrotask(() => serverEmit('server:file_contents', fileContents(String(payload.requestId), String(payload.path), input.file)))
+    }
+    if (event === 'terminal:create') {
+      queueMicrotask(() => ack?.({ requestId: payload.requestId, workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1', cwd: '/repo' } satisfies TerminalCreateResult))
+    }
+    if (event === 'terminal:kill') {
+      queueMicrotask(() => ack?.({ requestId: payload.requestId, workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1', killed: true } satisfies TerminalKillResult))
+    }
+    return undefined
+  })
+  function serverEmit(event: string, payload: unknown): void {
+    for (const handler of handlers.get(event) ?? []) handler(payload)
+  }
+  return {
+    emitMock,
+    serverEmit,
+    asDashboardSocket() {
+      return {
+        on(event: string, handler: (payload: unknown) => void) {
+          const set = handlers.get(event) ?? new Set()
+          set.add(handler)
+          handlers.set(event, set)
+        },
+        off(event: string, handler: (payload: unknown) => void) {
+          handlers.get(event)?.delete(handler)
+        },
+        emit: emitMock,
+      } as never
+    },
+  }
+}
+
+function dirList(requestId: string, overrideEntries?: DirListEntry[]): DirListResult {
+  const entries: DirListEntry[] = overrideEntries ?? [
+    { name: 'src', path: '/repo/src', type: 'directory' },
+    { name: 'README.md', path: '/repo/README.md', type: 'file', size: 7 },
+  ]
+  return { requestId, workspaceId: 'ws-1', path: '/repo', roots: ['/repo'], entries }
+}
+
+function fileContents(requestId: string, path: string, file: Pick<FileContentsResult, 'kind' | 'content' | 'size' | 'truncated' | 'error' | 'encoding' | 'mediaType'>): FileContentsResult {
+  return { requestId, workspaceId: 'ws-1', path, ...file }
+}

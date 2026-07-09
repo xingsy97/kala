@@ -101,7 +101,6 @@ export function WorkspaceMetadataDialog({
     [t('workspaceMetadata.runtime'), executor ? `${executor.runtime} ${executor.runtimeVersion}` : '—'],
     [t('workspaceMetadata.os'), executor?.os ?? '—'],
     [t('workspaceMetadata.hostname'), executor?.hostname ?? '—'],
-    [t('workspaceMetadata.workingDir'), executor?.workingDir ?? '—'],
     [
       t('workspaceMetadata.sandboxRoots'),
       executor?.sandboxRoots && executor.sandboxRoots.length > 0
