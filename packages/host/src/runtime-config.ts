@@ -102,10 +102,8 @@ function loadClaudeSettings(path: string): ProviderSpec | undefined {
     (parsed.apiKeyHelper ? runApiKeyHelper(parsed.apiKeyHelper) : undefined)
   if (!apiKey) return undefined
   const primary = env.ANTHROPIC_MODEL
-  const small = env.ANTHROPIC_SMALL_FAST_MODEL
   const models: string[] = []
   if (primary) models.push(primary)
-  if (small && small !== primary) models.push(small)
   if (models.length === 0) return undefined
   return {
     id: 'anthropic',
