@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint:style": "node scripts/lint-style.mjs"
   },
   "dependencies": {
     "@agent-kernel/kernel": "workspace:*",

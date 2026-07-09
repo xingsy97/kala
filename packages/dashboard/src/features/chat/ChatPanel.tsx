@@ -554,7 +554,7 @@ function MessageRow({
             data-testid={`edit-message-cancel-${index}`}
           >
             <X className="mr-1 h-3.5 w-3.5" />
-            Cancel
+            {t('chat.transcript.editCancel')}
           </Button>
           <Button
             type="button"
@@ -567,7 +567,7 @@ function MessageRow({
             }}
             data-testid={`edit-message-submit-${index}`}
           >
-            Rerun
+            {t('chat.transcript.rerun')}
           </Button>
         </div>
       </div>
@@ -1026,11 +1026,11 @@ function ToolResultBlock({
             statusBadge,
           )}
         >
-          {result.ok ? 'Succeeded' : 'Failed'}
+          {result.ok ? t('chat.transcript.succeeded') : t('chat.transcript.failed')}
         </span>
         {isOverflowed ? (
           <span className="flex-none rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-            Truncated
+            {t('chat.transcript.truncated')}
           </span>
         ) : null}
         <span className="flex-1" />
