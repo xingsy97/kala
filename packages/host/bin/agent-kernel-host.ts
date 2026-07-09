@@ -34,7 +34,7 @@ import { openaiAdapter } from '../src/llm/openai.js'
 import { routerAdapter, type MutableRouter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
 import { createBuiltinTools } from '../src/builtin-tools.js'
-import { createHookRunner } from '../src/hooks.js'
+import { createHookRunner } from '../src/extensions/hooks.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import {
   knownContextWindow,
@@ -45,7 +45,7 @@ import {
   writeManualModels,
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
-import { discoverSkills } from '../src/skills.js'
+import { discoverSkills } from '../src/extensions/skills.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 

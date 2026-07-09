@@ -40,15 +40,6 @@ import {
 } from './tools/overflow.js'
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
-import {
-  copyOverflowSession,
-  deleteOverflowSession,
-  listDirs,
-  listFiles,
-  readOverflowFile,
-  readWorkspaceFile,
-} from './fs-handlers.js'
-import { handleBgKill, handleBgList, handleBgOutput } from './bg-handlers.js'
 import { subscribeBackgroundTasks } from './tools/background-shell.js'
 
 export type ExecutorOptions = {
@@ -79,6 +70,11 @@ export type ExecutorOptions = {
   ioFactory?: typeof clientIO
 }
 
+export type PermanentError = {
+  code: 'workspace_id_conflict' | 'version_incompatible' | 'auth_failed' | 'reconnect_exhausted'
+  message: string
+}
+
 export type ExecutorHandle = {
   readonly executorId: string
   readonly workspaceId: string
@@ -88,6 +84,15 @@ export type ExecutorHandle = {
     ExecutorClientToServerEvents
   >
   readonly ready: Promise<void>
+  /**
+   * Resolves when the executor decides to give up reconnecting — either the
+   * host emitted `executor:host_reject`, a `connect_error` reported an
+   * unrecoverable message, or socket.io exhausted its retry budget. The
+   * CLI wrapper awaits this so it can exit with a distinct code per
+   * failure class; embedders (tests) awaits it to detect fatal state.
+   * Never resolves during normal operation.
+   */
+  readonly permanentError: Promise<PermanentError>
   close(): void
 }
 
@@ -113,10 +118,26 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     },
     reconnection: true,
     reconnectionDelay: 500,
-    reconnectionDelayMax: 5_000,
+    reconnectionDelayMax: 30_000,   // socket.io does exponential backoff up to this
+    reconnectionAttempts: 30,       // stop trying after ~15min of the max delay
+    randomizationFactor: 0.5,       // ±50% jitter, avoid thundering-herd reconnect
   }) as Socket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>
 
   const inFlight = new Map<string, AbortController>()
+  // Idempotency cache: remember the last N completed tool calls so a
+  // duplicate `tool:call` (from `redispatchPending` on the host after a
+  // reconnect) does not re-run a tool that already succeeded. LRU-lite:
+  // insertion order via Map; when full, drop the oldest entry.
+  const COMPLETED_CALL_CACHE_MAX = 500
+  const completedCalls = new Map<string, ToolResultAck>()
+  const rememberCompleted = (callId: string, ack: ToolResultAck): void => {
+    completedCalls.set(callId, ack)
+    while (completedCalls.size > COMPLETED_CALL_CACHE_MAX) {
+      const oldest = completedCalls.keys().next().value
+      if (oldest === undefined) break
+      completedCalls.delete(oldest)
+    }
+  }
 
   const announcement: ExecutorAnnounce = {
     executorId,
@@ -140,11 +161,80 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     })
   })
 
+  // Permanent-error latch. Any handler that discovers we cannot recover
+  // resolves this once — the CLI awaits it to exit with a specific code.
+  let permanentErrorResolver: ((e: PermanentError) => void) | null = null
+  const permanentError = new Promise<PermanentError>((resolve) => {
+    permanentErrorResolver = resolve
+  })
+  const givePermanentError = (e: PermanentError): void => {
+    if (permanentErrorResolver) {
+      permanentErrorResolver(e)
+      permanentErrorResolver = null
+    }
+    // Kill socket.io's own retry loop; otherwise it will keep dialing on a
+    // situation the caller has already decided is unrecoverable.
+    socket.disconnect()
+  }
+
+  // Host-initiated permanent rejects (workspaceId conflict, wrong version,
+  // bad auth). Server emits `executor:host_reject` immediately before it
+  // calls `socket.disconnect(true)`, so we route the code + message into
+  // the permanent-error latch.
+  socket.on('executor:host_reject', (payload) => {
+    givePermanentError({ code: payload.code, message: payload.message })
+  })
+
+  // Handshake failures (auth, version). These come through connect_error
+  // with the error's `.message` being the reason middleware called
+  // `next(new Error(reason))` on the host side.
+  socket.on('connect_error', (err) => {
+    const msg = (err as Error).message || String(err)
+    if (msg === 'version_incompatible') {
+      givePermanentError({ code: 'version_incompatible', message: msg })
+    } else if (msg === 'auth_failed') {
+      givePermanentError({ code: 'auth_failed', message: msg })
+    }
+    // Other connect_errors (network transient, DNS, host down) are
+    // recoverable — let socket.io keep retrying.
+  })
+
+  // Socket.io exhausted its `reconnectionAttempts` budget without ever
+  // reconnecting. The user's network is genuinely unreachable; wait for
+  // them.
+  socket.io.on('reconnect_failed', () => {
+    givePermanentError({
+      code: 'reconnect_exhausted',
+      message: 'exhausted reconnection attempts',
+    })
+  })
+
   socket.on('tool:call', async (payload: ToolCallMessage, ack) => {
+    // Idempotency: two paths can send us the same callId — the normal LLM
+    // path via kernel `call_tool`, and `redispatchPending` on the host
+    // side when the socket reconnects. If we already ran this call, don't
+    // run it again; return the cached result and re-emit tool_result so
+    // the host reliably marks the pending as settled.
+    const cached = completedCalls.get(payload.callId)
+    if (cached) {
+      ack(cached)
+      socket.emit('executor:tool_result', {
+        sessionId: payload.sessionId,
+        callId: payload.callId,
+        ok: cached.ok,
+        content: cached.content,
+      })
+      return
+    }
+    // Already running: the original promise chain will ack when done.
+    // Ignore the duplicate emit.
+    if (inFlight.has(payload.callId)) return
+
     const controller = new AbortController()
     inFlight.set(payload.callId, controller)
     const result = await runOne(tools, sandbox, controller.signal, payload, overflowConfig)
     inFlight.delete(payload.callId)
+    rememberCompleted(payload.callId, result)
     ack(result)
     socket.emit('executor:tool_result', {
       sessionId: payload.sessionId,
@@ -159,41 +249,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     if (ctrl) ctrl.abort()
   })
 
-  socket.on('fs:list_dirs', async (payload, ack) => {
-    ack(await listDirs(payload.requestId, payload.workspaceId, payload.path, sandbox))
-  })
-
-  socket.on('fs:list_files', async (payload, ack) => {
-    ack(await listFiles(payload, sandbox))
-  })
-
-  socket.on('fs:read_file', async (payload, ack) => {
-    ack(await readWorkspaceFile(payload, sandbox))
-  })
-
-  socket.on('fs:read_overflow', async (payload, ack) => {
-    ack(await readOverflowFile(payload, sandbox))
-  })
-
-  socket.on('fs:delete_overflow_session', async (payload, ack) => {
-    ack(await deleteOverflowSession(payload, sandbox))
-  })
-
-  socket.on('fs:copy_overflow_session', async (payload, ack) => {
-    ack(await copyOverflowSession(payload, sandbox))
-  })
-
-  socket.on('bg:list', async (payload, ack) => {
-    ack(await handleBgList(payload))
-  })
-
-  socket.on('bg:output', async (payload, ack) => {
-    ack(await handleBgOutput(payload))
-  })
-
-  socket.on('bg:kill', async (payload, ack) => {
-    ack(await handleBgKill(payload))
-  })
+  // The nine `fs:*` and `bg:*` bespoke RPCs that used to live here are gone.
+  // Host now sends them as ordinary `tool:call` messages with
+  // `dispatchMode: 'direct'`; the tools themselves are declared in
+  // `./tools/internal.ts` and picked up by `defaultTools`.
 
   const unsubscribeBg = subscribeBackgroundTasks((change) => {
     if (change.kind === 'evicted') {
@@ -216,6 +275,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     workspaceName,
     socket,
     ready,
+    permanentError,
     close() {
       unsubscribeBg()
       for (const c of inFlight.values()) c.abort()
