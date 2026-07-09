@@ -44,3 +44,6 @@ references/
 
 # Agent scratch
 .claude/
+
+# Per-package scratch directories (local debug/probe scripts, not committed)
+packages/*/scratch/

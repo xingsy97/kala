@@ -247,6 +247,34 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/substrate:
+    dependencies:
+      '@agent-kernel/host':
+        specifier: workspace:*
+        version: link:../host
+      '@agent-kernel/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@agent-kernel/shared':
+        specifier: workspace:*
+        version: link:../shared
+      ulid:
+        specifier: ^2.3.0
+        version: 2.4.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.5
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)
+
 packages:
 
   '@alloc/quick-lru@5.2.0':
