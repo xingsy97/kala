@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .sample_builder import build_sample_from_artifacts
+from .sample_builder import build_samples_from_artifacts
 
 
 async def generate(args: Any, sample: Any, sampling_params: dict[str, Any]) -> Any:
@@ -20,30 +20,36 @@ async def generate(args: Any, sample: Any, sampling_params: dict[str, Any]) -> A
     metadata = _metadata(sample)
     live = bool(metadata.get("agent_kernel_task_file") or getattr(args, "agent_kernel_task_file", None))
     if live:
-        metadata = {**metadata, **await _run_live_rollout(args, metadata, sampling_params)}
+        metadata = {**metadata, **await _run_live_rollout(args, sample, metadata, sampling_params)}
 
     trajectory_path = metadata.get("trajectory_path") or getattr(args, "agent_kernel_trajectory", None)
     reward_path = metadata.get("reward_path") or getattr(args, "agent_kernel_reward", None)
     if not trajectory_path or not reward_path:
         raise ValueError("agent-kernel slime generate requires trajectory_path/reward_path or agent_kernel_task_file")
 
-    built = build_sample_from_artifacts(
+    built_samples = build_samples_from_artifacts(
         trajectory_path=Path(trajectory_path),
         reward_path=Path(reward_path),
         require_logprobs=bool(metadata.get("require_logprobs", True)),
     )
-    return _apply_sample(sample, built)
+    if isinstance(sample, dict) and len(built_samples) == 1:
+        return _apply_sample(sample, built_samples[0])
+    return [_apply_sample(_clone_sample(sample), built) for built in built_samples]
 
 
-async def _run_live_rollout(args: Any, metadata: dict[str, Any], sampling_params: dict[str, Any]) -> dict[str, Any]:
+async def _run_live_rollout(args: Any, sample: Any, metadata: dict[str, Any], sampling_params: dict[str, Any]) -> dict[str, Any]:
     task_file = metadata.get("agent_kernel_task_file") or getattr(args, "agent_kernel_task_file", None)
     root_dir = metadata.get("agent_kernel_root_dir") or getattr(args, "agent_kernel_root_dir", None)
     if not task_file or not root_dir:
         raise ValueError("live agent-kernel rollout requires agent_kernel_task_file and agent_kernel_root_dir")
     cli = metadata.get("agent_kernel_cli") or getattr(args, "agent_kernel_cli", "agent-kernel-host")
-    rollout_id = metadata.get("rollout_id") or metadata.get("agent_kernel_rollout_id") or getattr(args, "agent_kernel_rollout_id", None)
+    sample_index = getattr(sample, "index", None)
+    rollout_id = _select_indexed(
+        metadata.get("rollout_id") or metadata.get("agent_kernel_rollout_id") or getattr(args, "agent_kernel_rollout_id", None),
+        sample_index,
+    )
     cmd = [
-        str(cli),
+        *_cli_argv(cli),
         "rl",
         "run-rollout-smoke",
         "--root-dir",
@@ -56,10 +62,17 @@ async def _run_live_rollout(args: Any, metadata: dict[str, Any], sampling_params
     ]
     if rollout_id:
         cmd.extend(["--rollout-id", str(rollout_id)])
-    task_id = metadata.get("task_id") or metadata.get("agent_kernel_task_id") or getattr(args, "agent_kernel_task_id", None)
+    task_id = _select_indexed(
+        metadata.get("task_id") or metadata.get("agent_kernel_task_id") or getattr(args, "agent_kernel_task_id", None),
+        sample_index,
+    )
     if task_id:
         cmd.extend(["--task-id", str(task_id)])
-    policy_base_url = metadata.get("policy_base_url") or getattr(args, "agent_kernel_policy_base_url", None)
+    policy_base_url = (
+        metadata.get("policy_base_url")
+        or metadata.get("agent_kernel_policy_base_url")
+        or getattr(args, "agent_kernel_policy_base_url", None)
+    )
     if not policy_base_url:
         try:
             from slime.rollout.sglang_rollout import get_model_url
@@ -106,6 +119,33 @@ async def _run_live_rollout(args: Any, metadata: dict[str, Any], sampling_params
     }
 
 
+def _cli_argv(value: Any) -> list[str]:
+    if value is None:
+        return ["agent-kernel-host"]
+    if isinstance(value, str):
+        if not value:
+            raise ValueError("agent_kernel_cli must not be empty")
+        return [value]
+    if isinstance(value, (list, tuple)):
+        argv = [str(item) for item in value]
+        if not argv or any(not item for item in argv):
+            raise ValueError("agent_kernel_cli argv must contain at least one non-empty item")
+        return argv
+    raise TypeError("agent_kernel_cli must be a string executable or argv list")
+
+
+def _select_indexed(value: Any, sample_index: Any) -> Any:
+    if not isinstance(value, list) or not value:
+        return value
+    if sample_index is None:
+        return value[0]
+    try:
+        index = int(sample_index)
+    except (TypeError, ValueError):
+        index = 0
+    return value[index % len(value)]
+
+
 def _metadata(sample: Any) -> dict[str, Any]:
     value = getattr(sample, "metadata", None)
     if isinstance(value, dict):
@@ -129,3 +169,14 @@ def _apply_sample(sample: Any, built: dict[str, Any]) -> Any:
                 pass
         setattr(sample, key, value)
     return sample
+
+
+def _clone_sample(sample: Any) -> Any:
+    if isinstance(sample, dict):
+        return dict(sample)
+    try:
+        from copy import copy
+
+        return copy(sample)
+    except Exception:
+        return sample

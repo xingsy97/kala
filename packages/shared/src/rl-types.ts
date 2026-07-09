@@ -43,6 +43,11 @@ export const AgentRlTaskSchema = z.object({
     command: z.array(z.string()).optional(),
     timeoutMs: z.number().int().positive(),
     env: z.record(z.string(), z.string()).optional(),
+    rewardParsePattern: z.string().optional(),
+    writeScope: z.object({
+      allowGlobs: z.array(z.string()).default([]),
+      denyGlobs: z.array(z.string()).default([]),
+    }).optional(),
   }),
   governance: z.object({
     trainingAllowed: z.boolean(),
