@@ -155,6 +155,23 @@ describe('ArtifactExplorerDialog', () => {
           candidate: { experimentId: 'candidate', resolved: 2, failed: 0, timedOut: 0 },
           deltas: { resolved: 1, failed: -1, timedOut: 0, passRate: 0.5 },
           failureDeltas: { empty_patch: -1 },
+          subagentUsageDelta: {
+            baseline: null,
+            candidate: {
+              totalCount: 3,
+              trialsWithSubagents: 2,
+              maxDepth: 2,
+              perTrialMean: 1.5,
+              resolvedWithSubagents: 2,
+              unresolvedWithSubagents: 0,
+            },
+            totalCount: 3,
+            trialsWithSubagents: 2,
+            maxDepth: 2,
+            perTrialMean: 1.5,
+            resolvedWithSubagents: 2,
+            unresolvedWithSubagents: 0,
+          },
         },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -255,8 +272,15 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getAllByText('+50%').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByLabelText('comparison delta chart')).toBeTruthy()
     expect(screen.getByText('empty_patch -1')).toBeTruthy()
+    const usageDelta = screen.getByTestId('eval-subagent-usage-delta')
+    expect(usageDelta.textContent).toContain('Sub-agent Usage Δ')
+    expect(usageDelta.textContent).toContain('0 → 3')
+    expect(usageDelta.textContent).toContain('+3')
+    expect(usageDelta.textContent).toContain('spawned Δ')
+    expect(usageDelta.textContent).toContain('trials w/ sub Δ')
+    expect(usageDelta.textContent).toContain('resolved w/ sub Δ')
     expect(screen.getByText('Worker Plans')).toBeTruthy()
-    expect(screen.getByText('2 instances')).toBeTruthy()
+    expect(screen.getByText('2 tasks')).toBeTruthy()
     expect(screen.getByText('4 workers / 2 shards')).toBeTruthy()
     expect(screen.getByText('per-instance-git-clone / max 2')).toBeTruthy()
     expect(screen.getByText('maxWorkers exceeds selected instance count')).toBeTruthy()
@@ -369,31 +393,35 @@ describe('ArtifactExplorerDialog', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/session-score/scores.json', mediaType: 'application/json', body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json', mediaType: 'application/json', body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/swebench/run1/trials/local__repo-1.json', mediaType: 'application/json', body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ instancesJsonlPath: '/tmp/instances.jsonl', rowCount: 2, bytes: 72, source: { kind: 'inline' } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ planPath: '/tmp/artifacts/dash-plan/worker-plan.json', runId: 'dash-plan', selectedCount: 2, maxWorkers: 2, shardCount: 2, warnings: [] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
 
     render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
 
     await screen.findByRole('heading', { name: 'Eval' })
-    fireEvent.click(await screen.findByText('Create SWE-bench Worker Plan'))
-    fireEvent.change(screen.getByLabelText('Run ID'), { target: { value: 'dash-plan' } })
-    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'agent-test' } })
-    fireEvent.change(screen.getByLabelText('Instances JSONL'), { target: { value: '/tmp/instances.jsonl' } })
-    fireEvent.change(screen.getByLabelText('Instance IDs'), { target: { value: 'repo__one-1, repo__two-2' } })
-    fireEvent.change(screen.getByLabelText('Limit'), { target: { value: '2' } })
-    fireEvent.change(screen.getByLabelText('Max Workers'), { target: { value: '2' } })
+    fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'dash-plan' } })
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-model'), { target: { value: 'agent-test' } })
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-max-workers'), { target: { value: '2' } })
+    fireEvent.click(screen.getByTestId('instances-source-tab-paste'))
+    fireEvent.change(screen.getByTestId('instances-paste-textarea'), { target: { value: '{"instance_id":"repo__one-1"}\n{"instance_id":"repo__two-2"}\n' } })
+
+    fireEvent.click(screen.getByTestId('instances-resolve-button'))
+    await screen.findByTestId('instances-resolve-summary')
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Plan' }))
 
-    await screen.findByText('Created /tmp/artifacts/dash-plan/worker-plan.json / 2 instances / 2 shards')
     expect(fetchMock).toHaveBeenCalledWith('/eval/swebench/plan', expect.objectContaining({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
     }))
+    await waitFor(() => {
+      expect(screen.getByTestId('run-benchmark-wizard-step-plan').getAttribute('data-status')).toBe('done')
+    })
     const planCall = fetchMock.mock.calls.find((call) => call[0] === '/eval/swebench/plan')
     const body = JSON.parse(String((planCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
-    expect(body).toMatchObject({ runId: 'dash-plan', model: 'agent-test', instancesJsonl: '/tmp/instances.jsonl', limit: 2, maxWorkers: 2 })
-    expect(body.instanceIds).toEqual(['repo__one-1', 'repo__two-2'])
+    expect(body).toMatchObject({ runId: 'dash-plan', model: 'agent-test', instancesJsonl: '/tmp/instances.jsonl', maxWorkers: 2 })
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
   })
 
@@ -467,8 +495,6 @@ describe('ArtifactExplorerDialog', () => {
           llmTraceMissingCalls: 1,
           totalInputTokens: 1234,
           totalOutputTokens: 567,
-          costStatus: 'estimated',
-          estimatedCostUsd: 0.0123,
           models: ['gpt-test'],
           llmLatencyCalls: 2,
           averageLlmDurationMs: 2400,
@@ -485,8 +511,9 @@ describe('ArtifactExplorerDialog', () => {
 
     await screen.findByText('s1')
     expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('1,234')).toBeTruthy()
-    expect(screen.getAllByText('$0.0123').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('1,234').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('567').length).toBeGreaterThanOrEqual(1)
+    expect(document.body.textContent ?? '').not.toContain('$0.0123')
     expect(document.body.textContent ?? '').toContain('gpt-test')
     expect(screen.getByText('Latency calls')).toBeTruthy()
     expect(screen.getByText('Avg TTFT')).toBeTruthy()
@@ -515,19 +542,18 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /profiles/i }))
     await screen.findByText('s1')
     fireEvent.click(screen.getByText('Profile Artifact Actions'))
-    fireEvent.change(screen.getByLabelText('Root Dir'), { target: { value: '/tmp/custom-artifacts' } })
     fireEvent.change(screen.getByLabelText('Session ID'), { target: { value: 's2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Run Action' }))
 
-    await screen.findByText('Created /tmp/artifacts/profile.json')
+    await screen.findByTestId('enhancement-action-profile-artifact-actions-result')
     expect(fetchMock).toHaveBeenCalledWith('/enhancement/action', expect.objectContaining({ method: 'POST' }))
     const actionCall = fetchMock.mock.calls.find((call) => call[0] === '/enhancement/action')
     const body = JSON.parse(String((actionCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
-    expect(body).toEqual({ action: 'profile-session', rootDir: '/tmp/custom-artifacts', sessionId: 's2' })
+    expect(body).toEqual({ action: 'profile-session', sessionId: 's2' })
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
   })
 
-  it('runs SWE-bench artifact conversion actions from the Eval tab', async () => {
+  it('builds SWE-bench predictions from uploaded patches through the guided wizard', async () => {
     const emptyManifest: ArtifactManifest = {
       schemaVersion: 1,
       generatedAt: '2026-07-09T00:00:00.000Z',
@@ -537,34 +563,93 @@ describe('ArtifactExplorerDialog', () => {
     }
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'swebench-infer-patches', predictionsPath: '/tmp/artifacts/dash/predictions.jsonl', trialCount: 1 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ instancesJsonlPath: '/tmp/artifacts/dash-infer/instances.jsonl', rowCount: 2, bytes: 86, source: { kind: 'inline' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'swebench-upload-patches', patchesDir: '/tmp/artifacts/dash-infer/patches', instanceCount: 2 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'swebench-infer-patches', predictionsPath: '/tmp/artifacts/dash-infer/predictions.jsonl', trialCount: 2, gradingStatus: 'not_graded' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    await screen.findByText('No eval summaries found.')
+
+    fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
+    expect(screen.getByTestId('run-benchmark-wizard-harness-boundary').textContent).toContain('Agent completion does not imply resolved')
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'dash-infer' } })
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-model'), { target: { value: 'agent-test' } })
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-dataset'), { target: { value: 'SWE-bench/local' } })
+    fireEvent.click(screen.getByTestId('instances-source-tab-paste'))
+    fireEvent.change(screen.getByTestId('instances-paste-textarea'), { target: { value: '{"instance_id":"a__b-1"}\n{"instance_id":"c__d-2"}\n' } })
+    fireEvent.click(screen.getByTestId('instances-resolve-button'))
+    await screen.findByTestId('instances-resolve-summary')
+
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-step-infer'))
+    fireEvent.click(screen.getByText('I already ran the agent externally'))
+    fireEvent.change(screen.getByTestId('patches-paste-textarea'), { target: { value: '{"a__b-1":"diff --git a/a b/a\\n+one\\n","c__d-2":"diff --git a/c b/c\\n+two\\n"}' } })
+    fireEvent.click(screen.getByTestId('patches-resolve-button'))
+    await screen.findByTestId('patches-resolve-summary')
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-infer-upload-submit'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-benchmark-wizard-step-infer').getAttribute('data-status')).toBe('done')
+    })
+    const inferCall = fetchMock.mock.calls.find((call) => {
+      if (call[0] !== '/enhancement/action') return false
+      const body = JSON.parse(String((call[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
+      return body.action === 'swebench-infer-patches'
+    })
+    const body = JSON.parse(String((inferCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
+    expect(body).toMatchObject({
+      action: 'swebench-infer-patches',
+      runId: 'dash-infer',
+      dataset: 'SWE-bench/local',
+      model: 'agent-test',
+      instancesJsonl: '/tmp/artifacts/dash-infer/instances.jsonl',
+      patchesDir: '/tmp/artifacts/dash-infer/patches',
+    })
+    expect(body).not.toHaveProperty('resolved')
+  })
+
+  it('posts pasted upload content as *Content payload without a *Path field', async () => {
+    const emptyManifest: ArtifactManifest = {
+      schemaVersion: 1,
+      generatedAt: '2026-07-09T00:00:00.000Z',
+      rootDir: '/tmp/artifacts',
+      entries: [],
+      summary: { entryCount: 0, totalBytes: 0, hashedCount: 0, hashSkippedCount: 0, kinds: {} },
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'eval-judge-score', scoresPath: '/tmp/artifacts/eval/judge/score.json' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
 
     render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
     await screen.findByText('No eval summaries found.')
 
     fireEvent.click(screen.getByText('Eval Artifact Actions'))
-    fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'swebench-infer-patches' } })
-    fireEvent.change(screen.getByLabelText('Run ID'), { target: { value: 'dash-infer' } })
-    fireEvent.change(screen.getByLabelText('Dataset'), { target: { value: 'SWE-bench/local' } })
-    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'agent-test' } })
-    fireEvent.change(screen.getByLabelText('Instances JSONL'), { target: { value: '/tmp/instances.jsonl' } })
-    fireEvent.change(screen.getByLabelText('Patches Dir'), { target: { value: '/tmp/patches' } })
-    fireEvent.change(screen.getByLabelText('Instance IDs'), { target: { value: 'a__b-1, c__d-2' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Run Action' }))
+    fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'eval-judge-score' } })
+    fireEvent.change(screen.getByLabelText('Judge Model'), { target: { value: 'gpt-judge' } })
 
-    await screen.findByText('Created /tmp/artifacts/dash/predictions.jsonl')
+    const promptTextarea = document.querySelector('[data-testid="enhancement-action-eval-artifact-actions-upload-promptPath-textarea"]') as HTMLTextAreaElement | null
+    expect(promptTextarea).not.toBeNull()
+    if (promptTextarea) fireEvent.change(promptTextarea, { target: { value: 'grade this response' } })
+
+    const responseTextarea = document.querySelector('[data-testid="enhancement-action-eval-artifact-actions-upload-responsePath-textarea"]') as HTMLTextAreaElement | null
+    expect(responseTextarea).not.toBeNull()
+    if (responseTextarea) fireEvent.change(responseTextarea, { target: { value: 'Score: 0.9' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Action' }))
+    await screen.findByTestId('enhancement-action-eval-artifact-actions-result')
+
     const actionCall = fetchMock.mock.calls.find((call) => call[0] === '/enhancement/action')
     const body = JSON.parse(String((actionCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
     expect(body).toMatchObject({
-      action: 'swebench-infer-patches',
-      runId: 'dash-infer',
-      dataset: 'SWE-bench/local',
-      model: 'agent-test',
-      instancesJsonl: '/tmp/instances.jsonl',
-      patchesDir: '/tmp/patches',
+      action: 'eval-judge-score',
+      judgeModel: 'gpt-judge',
+      promptContent: 'grade this response',
+      responseContent: 'Score: 0.9',
     })
-    expect(body.instanceIds).toEqual(['a__b-1', 'c__d-2'])
+    expect(body.promptPath).toBeUndefined()
+    expect(body.responsePath).toBeUndefined()
+    expect(body.rootDir).toBeUndefined()
   })
 
   it('loads memory index artifacts in the Memory tab', async () => {
@@ -705,5 +790,276 @@ describe('ArtifactExplorerDialog', () => {
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
 
     await screen.findByText(/artifact capture is not configured/i)
+  })
+
+  it('advances the Run Benchmark wizard from plan to predictions after /eval/swebench/plan succeeds', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
+    })
+    fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'run-1' } })
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-model'), { target: { value: 'gpt-test' } })
+    fireEvent.click(screen.getByTestId('instances-source-tab-paste'))
+    fireEvent.change(screen.getByTestId('instances-paste-textarea'), { target: { value: '{"instance_id":"repo-1"}\n{"instance_id":"repo-2"}\n' } })
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      instancesJsonlPath: '/tmp/instances.jsonl',
+      rowCount: 2,
+      bytes: 64,
+      source: { kind: 'inline' },
+    }), { status: 200 }))
+
+    fireEvent.click(screen.getByTestId('instances-resolve-button'))
+    await screen.findByTestId('instances-resolve-summary')
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      planPath: '/tmp/plan.json',
+      runId: 'run-1',
+      selectedCount: 2,
+      shardCount: 1,
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-plan-submit'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/eval/swebench/plan', expect.objectContaining({ method: 'POST' }))
+    })
+    await screen.findByTestId('run-benchmark-wizard-infer')
+    const planStep = screen.getByTestId('run-benchmark-wizard-step-plan')
+    expect(planStep.getAttribute('data-status')).toBe('done')
+    const inferStep = screen.getByTestId('run-benchmark-wizard-step-infer')
+    expect(inferStep.getAttribute('data-status')).toBe('active')
+  })
+
+  it('surfaces the SWE-bench grade command in the wizard handoff panel', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
+    })
+    fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'run-1' } })
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-step-grade'))
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      action: 'swebench-grade-command',
+      gradingAuthority: 'official-swebench-harness',
+      gradingMode: 'dry-run',
+      requiresDocker: true,
+      shellCommand: 'python -m swebench.harness.run_evaluation --predictions_path artifacts/eval/run-1/predictions.jsonl --dataset_name princeton-nlp/SWE-bench_Lite --run_id run-1',
+      resultsDir: 'evaluation_results/run-1',
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-grade-submit'))
+
+    const commandPanel = await screen.findByTestId('run-benchmark-wizard-grade-command')
+    expect(commandPanel.textContent).toContain('python -m swebench.harness.run_evaluation')
+    expect(commandPanel.textContent).toContain('Official harness command')
+    expect(commandPanel.textContent).toContain('evaluation_results/<run_id>')
+    expect(screen.getByTestId('run-benchmark-wizard-harness-boundary').textContent).toContain('SWE-bench official Docker scoring harness')
+    const gradeStep = screen.getByTestId('run-benchmark-wizard-step-grade')
+    expect(gradeStep.getAttribute('data-status')).toBe('done')
+  })
+
+  it('uploads patches inline from the wizard Infer step', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
+    })
+    fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'run-1' } })
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-step-infer'))
+
+    fireEvent.change(screen.getByTestId('patches-paste-textarea'), {
+      target: { value: '{"astropy__astropy-12907":"diff --git a/x b/x\\n+one\\n"}' },
+    })
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      patchesDir: '/tmp/artifacts/run-1/patches',
+      instanceCount: 1,
+      bytes: 42,
+    }), { status: 200 }))
+
+    fireEvent.click(screen.getByTestId('patches-resolve-button'))
+    await screen.findByTestId('patches-resolve-summary')
+
+    const uploadCall = fetchMock.mock.calls.find((call) => {
+      if (call[0] !== '/enhancement/action') return false
+      const body = JSON.parse(String((call[1] as RequestInit | undefined)?.body ?? '{}')) as { action?: string }
+      return body.action === 'swebench-upload-patches'
+    })
+    expect(uploadCall).toBeTruthy()
+    const uploadBody = JSON.parse(String((uploadCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
+    expect(uploadBody).toMatchObject({
+      action: 'swebench-upload-patches',
+      runId: 'run-1',
+      patches: { 'astropy__astropy-12907': 'diff --git a/x b/x\n+one\n' },
+    })
+    const summary = screen.getByTestId('patches-resolve-summary')
+    expect(summary.textContent).toContain('1')
+  })
+
+  it('uploads grade results inline from the wizard Ingest step', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
+    })
+    fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'run-1' } })
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-step-ingest'))
+
+    fireEvent.change(screen.getByTestId('results-paste-textarea'), {
+      target: { value: '{"instance_results.jsonl":"{\\"instance_id\\":\\"a\\",\\"resolved\\":true}\\n","summary.json":"{\\"total\\":1}"}' },
+    })
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      resultsDir: '/tmp/artifacts/run-1/grade-results',
+      fileCount: 2,
+      bytes: 84,
+    }), { status: 200 }))
+
+    fireEvent.click(screen.getByTestId('results-resolve-button'))
+    await screen.findByTestId('results-resolve-summary')
+
+    const uploadCall = fetchMock.mock.calls.find((call) => {
+      if (call[0] !== '/enhancement/action') return false
+      const body = JSON.parse(String((call[1] as RequestInit | undefined)?.body ?? '{}')) as { action?: string }
+      return body.action === 'swebench-upload-results'
+    })
+    expect(uploadCall).toBeTruthy()
+    const uploadBody = JSON.parse(String((uploadCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
+    expect(uploadBody).toMatchObject({
+      action: 'swebench-upload-results',
+      runId: 'run-1',
+      resultsFiles: {
+        'instance_results.jsonl': '{"instance_id":"a","resolved":true}\n',
+        'summary.json': '{"total":1}',
+      },
+    })
+    const summary = screen.getByTestId('results-resolve-summary')
+    expect(summary.textContent).toContain('2')
+  })
+
+  it('advances to the review step after planning without leaking server paths', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
+    })
+    fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'run-1' } })
+    fireEvent.change(screen.getByTestId('run-benchmark-wizard-model'), { target: { value: 'gpt-test' } })
+    fireEvent.click(screen.getByTestId('instances-source-tab-paste'))
+    fireEvent.change(screen.getByTestId('instances-paste-textarea'), { target: { value: '{"instance_id":"repo-1"}\n{"instance_id":"repo-2"}\n' } })
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      instancesJsonlPath: '/tmp/instances.jsonl',
+      rowCount: 2,
+      bytes: 64,
+      source: { kind: 'inline' },
+    }), { status: 200 }))
+
+    fireEvent.click(screen.getByTestId('instances-resolve-button'))
+    await screen.findByTestId('instances-resolve-summary')
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      planPath: '/tmp/plan.json',
+      registryPath: '/tmp/registry/run-index.json',
+      runId: 'run-1',
+      selectedCount: 2,
+      shardCount: 1,
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-plan-submit'))
+
+    await screen.findByTestId('run-benchmark-wizard-infer')
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-step-review'))
+    const review = await screen.findByTestId('run-benchmark-wizard-review')
+    expect(review.textContent).toContain('run-1')
+    expect(review.textContent).not.toContain('/tmp/')
+    expect(review.textContent).not.toContain('/home/')
+  })
+
+  it('renders the SubAgentUsagePanel when the eval summary carries subagentUsage', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/summary.json',
+        mediaType: 'application/json',
+        body: {
+          experimentId: 'run1',
+          dataset: 'local',
+          model: 'agent-test',
+          trialCount: 2,
+          resolved: 1,
+          failed: 1,
+          timedOut: 0,
+          metrics: { passRate: 0.5 },
+          subagentUsage: {
+            totalCount: 3,
+            trialsWithSubagents: 2,
+            maxDepth: 2,
+            perTrialMean: 1.5,
+            resolvedWithSubagents: 1,
+            unresolvedWithSubagents: 1,
+          },
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/compare/eval-comparison.json',
+        mediaType: 'application/json',
+        body: {},
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/progress.json',
+        mediaType: 'application/json',
+        body: { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 2 },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/worker-plan.json',
+        mediaType: 'application/json',
+        body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 2, maxWorkers: 2, shards: [], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2 } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/session-score/scores.json',
+        mediaType: 'application/json',
+        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
+        mediaType: 'application/json',
+        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/trials/local__repo-1.json',
+        mediaType: 'application/json',
+        body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] },
+      }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+
+    await screen.findByRole('heading', { name: 'Eval' })
+    const panel = await screen.findByTestId('eval-subagent-usage')
+    expect(panel.textContent).toContain('Sub-agent Usage')
+    expect(panel.textContent).toContain('3 spawned')
+    expect(panel.textContent).toContain('trials w/ sub')
+    expect(panel.textContent).toContain('max depth')
+    expect(panel.textContent).toContain('mean / trial')
+    expect(panel.textContent).toContain('1.50')
+    expect(panel.textContent).toContain('resolved w/ sub')
+    expect(panel.textContent).toContain('1 (50%)')
   })
 })

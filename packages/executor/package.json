@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "agent-kernel-executor": "./bin/agent-kernel-executor.js"
+    "agent-kernel-executor": "./dist/bin/agent-kernel-executor.js"
   },
   "files": [
     "dist",

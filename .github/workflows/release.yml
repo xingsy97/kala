@@ -82,6 +82,9 @@ jobs:
       - run: pnpm run test
       - run: pnpm run build:release-assets -- --component ${{ steps.release.outputs.component }} --tag ${{ steps.release.outputs.tag }} --repo ${{ github.repository }}
       - run: pnpm run verify:release-assets
+      - name: Install-time smoke on release assets (host + dashboard bundle)
+        if: steps.release.outputs.component == 'all' || steps.release.outputs.component == 'host'
+        run: pnpm run verify:release-install
 
       - name: Create or update GitHub Release
         env:

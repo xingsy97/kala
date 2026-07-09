@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "frameworkTarget": "verl",
+  "rolloutId": "rollout_00000000-0000-4000-8000-0000000000ff",
+  "prompt_ids": [1, 2, 3, 4, 5],
+  "response_ids": [6, 7, 8],
+  "response_mask": [1, 1, 1],
+  "metadata": {
+    "taskId": "swebench:sympy__sympy-20590",
+    "sessionId": "example-session",
+    "eventLogRef": "sessions/example-session.jsonl",
+    "traceRef": "traces/example-session.openinference.json",
+    "rewardRef": "rl-rewards/swebench__sympy__sympy-20590.json",
+    "model": "policy-preview-1",
+    "weightVersion": "policy-preview-1@2026-07-09"
+  }
+}

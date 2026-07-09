@@ -92,6 +92,10 @@ try {
   await verifyMemoryActions(fixture)
   await verifyOpsActions(fixture)
   await verifyManifestAndViews()
+  await verifyInstancesSourceTabs()
+  await verifyRunBenchmarkWizard(fixture)
+  await verifyDiscoverability()
+  await verifyNewParityActions(fixture)
 
   check('no browser console or page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
 } catch (err) {
@@ -159,7 +163,6 @@ async function verifySweBenchPlanSuccess(fixture) {
 async function verifyEvalActions(fixture) {
   await openActionPanel('eval')
   await runAction('eval-judge-score', {
-    rootDir: COMPARE_ROOT,
     fields: {
       promptPath: fixture.judgePrompt,
       responsePath: fixture.judgeResponse,
@@ -171,38 +174,34 @@ async function verifyEvalActions(fixture) {
     },
     expectText: 'scores.json',
   })
-  const judgeScore = readJsonFile(join(COMPARE_ROOT, 'scores.json'))
+  const judgeScore = readJsonFile(join(ARTIFACT_ROOT, 'scores.json'))
   check('eval judge score action writes parseable score artifact', judgeScore.resolved === true && judgeScore.results[0]?.scorer === 'dashboard_e2e_judge', JSON.stringify(judgeScore))
 
   await runAction('eval-score-session', {
-    rootDir: COMPARE_ROOT,
     fields: {
       sessionLogPath: fixture.sessionLog,
       instanceId: 'local__repo-1',
       patchPath: fixture.patchFile,
       requireDone: 'true',
-      workspaceRoot: WORKSPACE_ROOT,
     },
     expectText: 'scores.json',
   })
-  const sessionScore = readJsonFile(join(COMPARE_ROOT, 'scores.json'))
+  const sessionScore = readJsonFile(join(ARTIFACT_ROOT, 'scores.json'))
   check('eval score session action evaluates real session log and patch', sessionScore.resolved === true && sessionScore.results.some((row) => row.scorer === 'patch.non_empty'), JSON.stringify(sessionScore))
 
   await runAction('eval-compare-runs', {
-    rootDir: COMPARE_ROOT,
     fields: {
       baselineSummaryPath: fixture.baselineSummary,
       candidateSummaryPath: fixture.candidateSummary,
     },
     expectText: 'eval-comparison.json',
   })
-  const comparison = readJsonFile(join(COMPARE_ROOT, 'eval-comparison.json'))
+  const comparison = readJsonFile(join(ARTIFACT_ROOT, 'eval-comparison.json'))
   check('eval compare runs action writes pass-rate delta', comparison.deltas.passRate === 0.5, JSON.stringify(comparison.deltas))
 }
 
 async function verifySweBenchActions(fixture) {
   await runAction('swebench-infer-patches', {
-    rootDir: ARTIFACT_ROOT,
     fields: {
       runId: RUN_ID,
       dataset: 'local/SWE-bench-e2e',
@@ -218,7 +217,6 @@ async function verifySweBenchActions(fixture) {
   check('SWE-bench infer action creates official prediction JSONL through dashboard', predictions.length === 2 && predictions.every((row) => row.instance_id && typeof row.model_patch === 'string'), `rows=${predictions.length}`)
 
   await runAction('swebench-export-session', {
-    rootDir: ARTIFACT_ROOT,
     fields: {
       runId: EXPORT_RUN_ID,
       dataset: 'local/SWE-bench-e2e',
@@ -226,7 +224,6 @@ async function verifySweBenchActions(fixture) {
       instanceId: 'local__repo-1',
       sessionLogPath: fixture.sessionLog,
       modelPatchPath: fixture.patchFile,
-      workspaceRoot: WORKSPACE_ROOT,
     },
     expectText: 'predictions.jsonl',
   })
@@ -234,7 +231,6 @@ async function verifySweBenchActions(fixture) {
   check('SWE-bench export session action writes prediction from a real session log', exported.length === 1 && exported[0].instance_id === 'local__repo-1', JSON.stringify(exported[0]))
 
   await runAction('swebench-ingest-results', {
-    rootDir: ARTIFACT_ROOT,
     fields: { runId: RUN_ID, resultsDir: fixture.resultsDir },
     expectText: 'summary.json',
   })
@@ -339,7 +335,7 @@ async function verifyManifestAndViews() {
     `${RUN_ID}/predictions.jsonl`,
     `${RUN_ID}/summary.json`,
     `${EXPORT_RUN_ID}/predictions.jsonl`,
-    'compare/eval-comparison.json',
+    'eval-comparison.json',
     'profile/profile.json',
     'memory/memory-index.json',
     'ops/reliability-audit.json',
@@ -368,6 +364,189 @@ async function verifyManifestAndViews() {
   check('Ops artifact view renders generated reliability, trace, rollout, and subagent artifacts', opsText.includes('reliability-audit.json') && opsText.includes('rl-token-segments') && opsText.includes('subagent-graph.json'), opsText.slice(0, 700))
 }
 
+async function verifyInstancesSourceTabs() {
+  const PASTE_RUN_ID = 'wizard-paste-e2e'
+  const UPLOAD_RUN_ID = 'wizard-upload-e2e'
+  await page.goto(HOST_URL, { waitUntil: 'networkidle2', timeout: 15_000 })
+  await openArtifactMode('eval')
+  await waitForVisible('[data-testid="run-benchmark-wizard-toggle"]')
+  const toggleText = await visibleText('[data-testid="run-benchmark-wizard-toggle"]')
+  if (!toggleText.includes('hide')) await clickVisible('[data-testid="run-benchmark-wizard-toggle"]')
+
+  await replaceValue('[data-testid="run-benchmark-wizard-run-id"]', PASTE_RUN_ID)
+  const pasteContent = [
+    JSON.stringify({ instance_id: 'paste__row-1', repo: 'org/paste' }),
+    JSON.stringify({ instance_id: 'paste__row-2', repo: 'org/paste' }),
+  ].join('\n') + '\n'
+  const pasteSummary = await resolveInstancesViaPaste(pasteContent)
+  check(
+    'wizard paste tab resolves inline JSONL and reports the count without leaking server paths',
+    pasteSummary.includes('2 instances') && !pasteSummary.includes(ARTIFACT_ROOT),
+    pasteSummary.slice(0, 240),
+  )
+  const pasteResolved = readFileSync(join(ARTIFACT_ROOT, PASTE_RUN_ID, 'instances.jsonl'), 'utf8')
+  check('wizard paste tab writes canonical JSONL under the artifact root', pasteResolved.trim().split('\n').length === 2, pasteResolved.slice(0, 240))
+
+  await replaceValue('[data-testid="run-benchmark-wizard-run-id"]', UPLOAD_RUN_ID)
+  const uploadPath = join(FIXTURE_ROOT, 'wizard-upload.jsonl')
+  writeFileSync(uploadPath, [
+    JSON.stringify({ instance_id: 'upload__row-1', repo: 'org/upload' }),
+    JSON.stringify({ instance_id: 'upload__row-2', repo: 'org/upload' }),
+    JSON.stringify({ instance_id: 'upload__row-3', repo: 'org/upload' }),
+  ].join('\n') + '\n', 'utf8')
+  const uploadSummary = await resolveInstancesViaUpload(uploadPath)
+  check(
+    'wizard upload tab resolves a local .jsonl file and reports the count without leaking server paths',
+    uploadSummary.includes('3 instances') && !uploadSummary.includes(ARTIFACT_ROOT),
+    uploadSummary.slice(0, 240),
+  )
+  const uploadResolved = readFileSync(join(ARTIFACT_ROOT, UPLOAD_RUN_ID, 'instances.jsonl'), 'utf8')
+  check('wizard upload tab writes canonical JSONL under the artifact root', uploadResolved.trim().split('\n').length === 3, uploadResolved.slice(0, 240))
+}
+
+async function verifyRunBenchmarkWizard(fixture) {
+  const WIZARD_RUN_ID = 'wizard-e2e'
+  await page.goto(HOST_URL, { waitUntil: 'networkidle2', timeout: 15_000 })
+  await openArtifactMode('eval')
+  await waitForVisible('[data-testid="run-benchmark-wizard-toggle"]')
+  const toggleText = await visibleText('[data-testid="run-benchmark-wizard-toggle"]')
+  if (!toggleText.includes('hide')) await clickVisible('[data-testid="run-benchmark-wizard-toggle"]')
+  await waitForVisible('[data-testid="run-benchmark-wizard-plan"]')
+
+  await replaceValue('[data-testid="run-benchmark-wizard-run-id"]', WIZARD_RUN_ID)
+  await replaceValue('[data-testid="run-benchmark-wizard-model"]', 'dashboard-e2e-model')
+  await replaceValue('[data-testid="run-benchmark-wizard-dataset"]', 'local/SWE-bench-e2e')
+  await resolveInstancesViaPaste(readFileSync(fixture.instances, 'utf8'))
+  await replaceValue('[data-testid="run-benchmark-wizard-max-workers"]', '2')
+  await clickVisible('[data-testid="run-benchmark-wizard-plan-submit"]')
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="run-benchmark-wizard-step-plan"]')?.getAttribute('data-status') === 'done',
+    { timeout: 12_000 },
+  )
+  const planFile = readJsonFile(join(ARTIFACT_ROOT, WIZARD_RUN_ID, 'worker-plan.json'))
+  check('wizard Plan step creates a worker plan through the browser', planFile.runId === WIZARD_RUN_ID && planFile.model === 'dashboard-e2e-model' && planFile.selectedCount === 2, JSON.stringify({ runId: planFile.runId, model: planFile.model, count: planFile.selectedCount }))
+
+  await waitForVisible('[data-testid="run-benchmark-wizard-infer"]')
+  const patchesPayload = JSON.stringify({
+    'local__repo-1': readFileSync(join(fixture.patches, 'local__repo-1.diff'), 'utf8'),
+    'local__repo-2': readFileSync(join(fixture.patches, 'local__repo-2.diff'), 'utf8'),
+  })
+  await page.$eval('[data-testid="run-benchmark-wizard-infer-advanced"]', (el) => el.setAttribute('open', 'open'))
+  const patchesSummary = await resolvePatchesViaPaste(patchesPayload)
+  check('wizard Infer advanced upload accepts patches through the browser without leaking server paths', patchesSummary.includes('2') && !patchesSummary.includes(ARTIFACT_ROOT) && !patchesSummary.includes(FIXTURE_ROOT), patchesSummary.slice(0, 240))
+  await clickVisible('[data-testid="run-benchmark-wizard-infer-upload-submit"]')
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="run-benchmark-wizard-step-infer"]')?.getAttribute('data-status') === 'done',
+    { timeout: 12_000 },
+  )
+  const wizardPredictions = readJsonlFile(join(ARTIFACT_ROOT, WIZARD_RUN_ID, 'predictions.jsonl'))
+  check('wizard Infer step writes official prediction JSONL through the browser', wizardPredictions.length === 2 && wizardPredictions.every((row) => typeof row.model_patch === 'string' && row.instance_id && row.model_name_or_path === 'dashboard-e2e-model'), `rows=${wizardPredictions.length}`)
+
+  await waitForVisible('[data-testid="run-benchmark-wizard-grade"]')
+  await clickVisible('[data-testid="run-benchmark-wizard-grade-submit"]')
+  await waitForVisible('[data-testid="run-benchmark-wizard-grade-command"]')
+  const commandText = await textContent('[data-testid="run-benchmark-wizard-grade-command"]')
+  check('wizard Grade step generates official grading shell command without executing Docker', commandText.includes('python -m swebench.harness.run_evaluation') && commandText.includes('--predictions_path') && commandText.includes(WIZARD_RUN_ID), commandText.slice(0, 400))
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="run-benchmark-wizard-step-grade"]')?.getAttribute('data-status') === 'done',
+    { timeout: 12_000 },
+  )
+
+  await clickVisible('[data-testid="run-benchmark-wizard-step-ingest"]')
+  await waitForVisible('[data-testid="run-benchmark-wizard-ingest"]')
+  const resultsPayload = JSON.stringify({
+    'instance_results.jsonl': readFileSync(join(fixture.resultsDir, 'instance_results.jsonl'), 'utf8'),
+    'local__repo-2.log': readFileSync(join(fixture.resultsDir, 'local__repo-2.log'), 'utf8'),
+  })
+  const resultsSummary = await resolveResultsViaPaste(resultsPayload)
+  check('wizard Ingest step uploads grade results through the browser without leaking server paths', resultsSummary.includes('2') && !resultsSummary.includes(ARTIFACT_ROOT) && !resultsSummary.includes(FIXTURE_ROOT), resultsSummary.slice(0, 240))
+  await clickVisible('[data-testid="run-benchmark-wizard-ingest-submit"]')
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="run-benchmark-wizard-step-ingest"]')?.getAttribute('data-status') === 'done',
+    { timeout: 12_000 },
+  )
+  const wizardSummary = readJsonFile(join(ARTIFACT_ROOT, WIZARD_RUN_ID, 'summary.json'))
+  check('wizard Ingest step writes summary that matches fixture result rows', wizardSummary.resolved === 1 && wizardSummary.failed === 1 && wizardSummary.trialCount === 2, JSON.stringify({ trialCount: wizardSummary.trialCount, resolved: wizardSummary.resolved, failed: wizardSummary.failed }))
+
+  await waitForVisible('[data-testid="run-benchmark-wizard-review"]')
+  const reviewText = await textContent('[data-testid="run-benchmark-wizard-review"]')
+  check('wizard Review step surfaces the run id without leaking any server paths', reviewText.includes(WIZARD_RUN_ID) && !reviewText.includes(ARTIFACT_ROOT) && !reviewText.includes(FIXTURE_ROOT) && !reviewText.includes('/home/'), reviewText.slice(0, 400))
+  const wizardContainerText = await textContent('[data-testid="run-benchmark-wizard-review"]')
+  check('wizard container never leaks absolute /home/ paths', !wizardContainerText.includes('/home/') && !wizardContainerText.includes('worker-plan.json') && !wizardContainerText.includes('run-index.json'), wizardContainerText.slice(0, 400))
+}
+
+async function verifyDiscoverability() {
+  await page.goto(HOST_URL, { waitUntil: 'networkidle2', timeout: 15_000 })
+  await openArtifactMode('eval')
+  await waitForVisible('[data-testid="run-benchmark-wizard-toggle"]')
+  const toggleLabel = await visibleText('[data-testid="run-benchmark-wizard-toggle"]')
+  check('Eval mode surfaces the Run Benchmark wizard as the primary discovery path', /run benchmark/i.test(toggleLabel), toggleLabel)
+
+  if (!toggleLabel.includes('hide')) await clickVisible('[data-testid="run-benchmark-wizard-toggle"]')
+  await clickVisible('[data-testid="instances-source-tab-paste"]')
+  await waitForVisible('[data-testid="run-benchmark-wizard-instances-help"]')
+  await page.$eval('[data-testid="run-benchmark-wizard-instances-help"]', (el) => el.setAttribute('open', 'open'))
+  const helpText = await visibleText('[data-testid="run-benchmark-wizard-instances-help"]')
+  check(
+    'Instances JSONL format is documented inline for a first-time user',
+    helpText.includes('instance_id') && helpText.includes('One JSON object per line'),
+    helpText.slice(0, 400),
+  )
+
+  await openArtifactMode('ops')
+  await openActionPanel('ops')
+  const opsOptions = await page.$$eval(
+    `[data-testid="${actionPrefix}-select"] option`,
+    (options) => options.map((option) => option.value),
+  )
+  const newActions = ['artifacts-manifest', 'artifacts-prune', 'trace-export-otlp', 'rollout-verify-reward']
+  const missing = newActions.filter((action) => !opsOptions.includes(action))
+  check('Ops action panel exposes CLI-parity actions (manifest/prune/otlp/verify-reward)', missing.length === 0, missing.join(', '))
+}
+
+async function verifyNewParityActions(fixture) {
+  const PARITY_ROOT = join(ARTIFACT_ROOT, 'parity')
+  const OTLP_ROOT = join(PARITY_ROOT, 'otlp')
+  const MANIFEST_ROOT = join(PARITY_ROOT, 'manifest')
+  const PRUNE_ROOT = join(PARITY_ROOT, 'prune')
+  const VERIFY_ROOT = join(PARITY_ROOT, 'reward')
+
+  const otlp = await runApiAction('trace-export-otlp', {
+    rootDir: OTLP_ROOT,
+    fields: {
+      sessionLogPath: fixture.sessionLog,
+      runId: 'parity-run',
+      evalInstanceId: 'local__repo-1',
+      serviceName: 'agent-kernel-e2e',
+    },
+  })
+  check('trace-export-otlp writes a bundle file even without an endpoint', typeof otlp.bundlePath === 'string' && otlp.spanCount >= 1 && !otlp.export, JSON.stringify({ spanCount: otlp.spanCount, hasExport: Boolean(otlp.export) }))
+  const bundle = readJsonFile(otlp.bundlePath)
+  check('trace-export-otlp bundle contains OTLP resource spans', Array.isArray(bundle.resourceSpans) && bundle.resourceSpans.length >= 1, JSON.stringify({ resourceSpans: bundle.resourceSpans?.length }))
+
+  await runApiAction('artifacts-manifest', { rootDir: MANIFEST_ROOT, fields: {} })
+  const manifest = readJsonFile(join(MANIFEST_ROOT, 'artifact-manifest.json'))
+  check('artifacts-manifest handles an empty artifact root', manifest.summary.entryCount === 0 && manifest.summary.totalBytes === 0, JSON.stringify(manifest.summary))
+
+  mkdirSync(PRUNE_ROOT, { recursive: true })
+  const pruneSample = join(PRUNE_ROOT, 'sample.log')
+  writeFileSync(pruneSample, 'noise'.repeat(64), 'utf8')
+  const prune = await runApiAction('artifacts-prune', {
+    rootDir: PRUNE_ROOT,
+    fields: { olderThanDays: '0', dryRun: true },
+  })
+  check('artifacts-prune dry-run reports removal count without mutating disk', prune.dryRun === true && prune.removedCount >= 1 && existsSync(pruneSample), JSON.stringify({ dryRun: prune.dryRun, removed: prune.removedCount, exists: existsSync(pruneSample) }))
+
+  const trial = { trialId: 'local__repo-1-parity', instanceId: 'local__repo-1', resolved: true, status: 'completed', failureLabel: 'resolved' }
+  const trialPath = join(FIXTURE_ROOT, 'graded-trial.json')
+  writeFileSync(trialPath, JSON.stringify(trial), 'utf8')
+  const reward = await runApiAction('rollout-verify-reward', {
+    rootDir: VERIFY_ROOT,
+    fields: { trialPath, taskId: 'swebench:local__repo-1' },
+  })
+  check('rollout-verify-reward maps resolved trial to canonical reward=1.0', reward.reward === 1 && reward.resolved === true && reward.taskId === 'swebench:local__repo-1', JSON.stringify({ reward: reward.reward, resolved: reward.resolved, task: reward.taskId }))
+}
+
 async function openArtifactMode(mode) {
   const button = mode === 'eval'
     ? '[data-testid="eval-dashboard-button"]'
@@ -383,6 +562,43 @@ async function openArtifactMode(mode) {
   await waitForVisible(modeButton)
   await clickVisible(modeButton)
   await sleep(150)
+}
+
+async function resolveInstancesViaPaste(content) {
+  await clickVisible('[data-testid="instances-source-tab-paste"]')
+  await waitForVisible('[data-testid="instances-paste-textarea"]')
+  await replaceValue('[data-testid="instances-paste-textarea"]', content)
+  await clickVisible('[data-testid="instances-resolve-button"]')
+  await waitForVisible('[data-testid="instances-resolve-summary"]', 15_000)
+  return textContent('[data-testid="instances-resolve-summary"]')
+}
+
+async function resolveInstancesViaUpload(filePath) {
+  await clickVisible('[data-testid="instances-source-tab-upload"]')
+  const input = await page.waitForSelector('[data-testid="instances-upload-file"]', { visible: true, timeout: 12_000 })
+  await input.uploadFile(filePath)
+  await waitForVisible('[data-testid="instances-upload-filename"]', 12_000)
+  await clickVisible('[data-testid="instances-resolve-button"]')
+  await waitForVisible('[data-testid="instances-resolve-summary"]', 15_000)
+  return textContent('[data-testid="instances-resolve-summary"]')
+}
+
+async function resolvePatchesViaPaste(pastePayload) {
+  await clickVisible('[data-testid="patches-source-tab-paste"]')
+  await waitForVisible('[data-testid="patches-paste-textarea"]')
+  await replaceValue('[data-testid="patches-paste-textarea"]', pastePayload)
+  await clickVisible('[data-testid="patches-resolve-button"]')
+  await waitForVisible('[data-testid="patches-resolve-summary"]', 15_000)
+  return textContent('[data-testid="patches-resolve-summary"]')
+}
+
+async function resolveResultsViaPaste(pastePayload) {
+  await clickVisible('[data-testid="results-source-tab-paste"]')
+  await waitForVisible('[data-testid="results-paste-textarea"]')
+  await replaceValue('[data-testid="results-paste-textarea"]', pastePayload)
+  await clickVisible('[data-testid="results-resolve-button"]')
+  await waitForVisible('[data-testid="results-resolve-summary"]', 15_000)
+  return textContent('[data-testid="results-resolve-summary"]')
 }
 
 async function openActionPanel(kind) {
@@ -406,9 +622,36 @@ async function runAction(action, opts) {
     selectSelector,
     action,
   )
-  await replaceValue(`[data-testid="${actionPrefix}-root-dir"]`, opts.rootDir ?? '')
+  await sleep(200)
   for (const [key, value] of Object.entries(opts.fields ?? {})) {
-    await replaceValue(`[data-testid="${actionPrefix}-field-${key}"]`, String(value))
+    const textSelector = `[data-testid="${actionPrefix}-field-${key}"]`
+    const uploadTextareaSelector = `[data-testid="${actionPrefix}-upload-${key}-textarea"]`
+    const textExists = await page.$(textSelector)
+    if (textExists) {
+      await replaceValue(textSelector, String(value))
+    } else {
+      const uploadExists = await page.$(uploadTextareaSelector)
+      if (!uploadExists) throw new Error(`no text or upload input for field ${key} on action ${action}`)
+      const content = existsSync(String(value)) ? readFileSync(String(value), 'utf8') : String(value)
+      await replaceValue(uploadTextareaSelector, content)
+    }
+  }
+  if (process.env.DEBUG_ACTION) {
+    const snapshot = await page.evaluate((prefix) => {
+      const fields = {}
+      document.querySelectorAll(`[data-testid^="${prefix}-field-"]`).forEach((el) => {
+        const key = el.getAttribute('data-testid').replace(`${prefix}-field-`, '')
+        fields[key] = el.value
+      })
+      const uploads = {}
+      document.querySelectorAll(`[data-testid^="${prefix}-upload-"][data-testid$="-textarea"]`).forEach((el) => {
+        const testId = el.getAttribute('data-testid')
+        const key = testId.replace(`${prefix}-upload-`, '').replace(/-textarea$/, '')
+        uploads[key] = String(el.value).slice(0, 60)
+      })
+      return { fields, uploads }
+    }, actionPrefix)
+    console.log(`DEBUG ${action} snapshot: ${JSON.stringify(snapshot)}`)
   }
   await submitVisibleForm(`[data-testid="${actionPrefix}-form"]`)
   try {
@@ -623,19 +866,19 @@ function eventEntry(seq, event, effects, llmTrace, model) {
 
 async function replaceValue(selector, value) {
   await waitForVisible(selector)
-  await page.$$eval(selector, (els) => {
+  await page.$$eval(selector, (els, next) => {
     const el = els.find((candidate) => {
       const style = window.getComputedStyle(candidate)
       return style.display !== 'none' && style.visibility !== 'hidden' && candidate.getClientRects().length > 0
     })
-    if (el) el.value = ''
-  })
-  await clickVisible(selector)
-  await page.keyboard.down(process.platform === 'darwin' ? 'Meta' : 'Control')
-  await page.keyboard.press('A')
-  await page.keyboard.up(process.platform === 'darwin' ? 'Meta' : 'Control')
-  await page.keyboard.press('Backspace')
-  if (value) await page.type(selector, value)
+    if (!el) return
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+    if (setter) setter.call(el, next ?? '')
+    else el.value = next ?? ''
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value ?? '')
 }
 
 async function exists(selector) {
@@ -751,7 +994,9 @@ function check(name, pass, detail = '') {
 }
 
 function isExpectedConsoleError(text) {
-  return text.includes('Failed to load resource: the server responded with a status of 400')
+  if (text.includes('Failed to load resource: the server responded with a status of 400')) return true
+  if (text.includes('Failed to load resource: the server responded with a status of 404')) return true
+  return false
 }
 
 function detectBrowser() {

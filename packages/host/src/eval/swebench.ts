@@ -9,6 +9,7 @@ import {
   createArtifactStore,
   createEvalExperiment,
   createSweBenchPrediction,
+  deriveEvalMemoryPolicy,
   exportSessionSpans,
   redactForPersistence,
   serializeJsonl,
@@ -16,11 +17,42 @@ import {
   type ArtifactRef,
   type EvalFailureLabel,
   type EvalExperiment,
+  type EvalMemoryPolicy,
   type EvalTrial,
   type SweBenchPrediction,
 } from '@agent-kernel/shared/enhancement'
 
 import { readSessionLog } from '../store/log.js'
+import { registerSweBenchRun } from './run-registry.js'
+
+async function loadTrialSubAgentGraph(sessionsDir: string): Promise<{
+  nodes: Array<{ sessionId: string; parentSessionId?: string }>
+  edges: Array<{ parentSessionId: string; childSessionId: string }>
+} | undefined> {
+  if (!existsSync(sessionsDir)) return undefined
+  const files = (await readdir(sessionsDir)).filter((file) => file.endsWith('.jsonl'))
+  if (files.length === 0) return undefined
+  const nodes: Array<{ sessionId: string; parentSessionId?: string }> = []
+  const edges: Array<{ parentSessionId: string; childSessionId: string }> = []
+  for (const file of files) {
+    try {
+      const parsed = await readSessionLog(join(sessionsDir, file))
+      nodes.push({
+        sessionId: parsed.header.sessionId,
+        ...(parsed.header.parentSessionId ? { parentSessionId: parsed.header.parentSessionId } : {}),
+      })
+      if (parsed.header.parentSessionId) {
+        edges.push({
+          parentSessionId: parsed.header.parentSessionId,
+          childSessionId: parsed.header.sessionId,
+        })
+      }
+    } catch {
+      // ignore malformed sessions when scanning for subagent edges
+    }
+  }
+  return { nodes, edges }
+}
 
 export type SweBenchRunLayout = {
   runId: string
@@ -33,6 +65,9 @@ export type SweBenchRunLayout = {
   trialsDir: string
   tracesDir: string
   artifactsDir: string
+  patchesDir: string
+  gradeResultsDir: string
+  inputsDir: string
 }
 
 export function sweBenchRunLayout(rootDir: string, runId: string): SweBenchRunLayout {
@@ -48,6 +83,9 @@ export function sweBenchRunLayout(rootDir: string, runId: string): SweBenchRunLa
     trialsDir: join(runRoot, 'trials'),
     tracesDir: join(runRoot, 'traces'),
     artifactsDir: join(runRoot, 'artifacts'),
+    patchesDir: join(runRoot, 'patches'),
+    gradeResultsDir: join(runRoot, 'grade-results'),
+    inputsDir: join(runRoot, 'inputs'),
   }
 }
 
@@ -59,6 +97,7 @@ export type WriteSweBenchPredictionInput = {
   model: string
   predictions: readonly SweBenchPrediction[]
   config?: Record<string, unknown>
+  memoryPolicy?: EvalMemoryPolicy
 }
 
 export async function writeSweBenchPredictionRun(
@@ -66,12 +105,14 @@ export async function writeSweBenchPredictionRun(
 ): Promise<{ layout: SweBenchRunLayout; experiment: EvalExperiment }> {
   const layout = sweBenchRunLayout(input.rootDir, input.runId)
   await mkdir(layout.rootDir, { recursive: true })
+  const memoryPolicy = input.memoryPolicy ?? deriveEvalMemoryPolicy({ benchmarkIsolation: true })
   const experiment = createEvalExperiment({
     experimentId: input.runId,
     dataset: input.dataset,
     ...(input.split ? { split: input.split } : {}),
     model: input.model,
     config: input.config,
+    memoryPolicy,
   })
   await writeFile(layout.experimentPath, `${JSON.stringify(experiment, null, 2)}\n`, 'utf8')
   await writeFile(layout.predictionsPath, serializeJsonl(input.predictions), 'utf8')
@@ -130,6 +171,7 @@ export type InferSweBenchPatchRunInput = {
   instanceIds?: readonly string[]
   limit?: number
   workspaceRoot?: string
+  memoryPolicy?: EvalMemoryPolicy
 }
 
 export async function inferSweBenchPatchRun(
@@ -158,6 +200,7 @@ export async function inferSweBenchPatchRun(
       instanceIds: input.instanceIds ?? [],
       limit: input.limit ?? null,
     },
+    memoryPolicy: input.memoryPolicy ?? deriveEvalMemoryPolicy({ benchmarkIsolation: true }),
   })
   await mkdir(layout.trialsDir, { recursive: true })
   await writeFile(layout.instancesPath, serializeJsonl(selected), 'utf8')
@@ -224,6 +267,8 @@ export type RunSweBenchAgentPatchInput = {
   timeoutMs?: number
   maxWorkers?: number
   skipCompleted?: boolean
+  memoryPolicy?: EvalMemoryPolicy
+  sessionLogsDir?: string
 }
 
 export type SweBenchWorkerPlanInput = {
@@ -266,7 +311,7 @@ export type SweBenchWorkerPlan = {
 
 export async function planSweBenchWorkerRun(
   input: SweBenchWorkerPlanInput,
-): Promise<{ layout: SweBenchRunLayout; plan: SweBenchWorkerPlan; planPath: string }> {
+): Promise<{ layout: SweBenchRunLayout; plan: SweBenchWorkerPlan; planPath: string; registryPath: string }> {
   const allInstances = await readSweBenchInstances(input.instancesJsonl)
   const selected = selectInstances(allInstances, input.instanceIds, input.limit)
   const layout = sweBenchRunLayout(input.rootDir, input.runId)
@@ -307,7 +352,19 @@ export async function planSweBenchWorkerRun(
   }
   const planPath = join(layout.rootDir, 'worker-plan.json')
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8')
-  return { layout, plan, planPath }
+  const registered = await registerSweBenchRun({
+    rootDir: input.rootDir,
+    runId: input.runId,
+    dataset: input.dataset,
+    ...(input.split ? { split: input.split } : {}),
+    model: input.model,
+    planPath,
+    runDir: layout.rootDir,
+    selectedCount: plan.selectedCount,
+    maxWorkers: plan.maxWorkers,
+    shardCount: plan.shards.length,
+  })
+  return { layout, plan, planPath, registryPath: registered.path }
 }
 
 export async function runSweBenchAgentPatchRun(
@@ -345,6 +402,7 @@ export async function runSweBenchAgentPatchRun(
       agentCommandPreview: redactedCommand.value,
       agentCommandRedaction: redactedCommand.summary,
     },
+    memoryPolicy: input.memoryPolicy ?? deriveEvalMemoryPolicy({ benchmarkIsolation: true }),
   })
   await mkdir(layout.trialsDir, { recursive: true })
   await writeFile(layout.instancesPath, serializeJsonl(selected), 'utf8')
@@ -594,6 +652,10 @@ async function runSingleSweBenchAgentInstance({
   const prompt = createSweBenchAgentPrompt(instance, workspaceDir)
   artifacts.push(await store.writeText('metadata', `artifacts/${instance.instance_id}/prompt.txt`, prompt))
 
+  const sessionLogsDir = input.sessionLogsDir ?? join(layout.rootDir, 'sessions')
+  const sessionLogPath = join(sessionLogsDir, `${instance.instance_id}.jsonl`)
+  await mkdir(sessionLogsDir, { recursive: true })
+
   if (!setupError) {
     const command = await runShellCommand(input.agentCommand, {
       cwd: workspaceDir,
@@ -603,6 +665,7 @@ async function runSingleSweBenchAgentInstance({
         AGENT_KERNEL_SWEBENCH_REPO: workspaceDir,
         AGENT_KERNEL_SWEBENCH_PROMPT: prompt,
         AGENT_KERNEL_SWEBENCH_PROMPT_FILE: join(layout.rootDir, 'artifacts', instance.instance_id, 'prompt.txt'),
+        AGENT_KERNEL_SWEBENCH_SESSION_LOG: sessionLogPath,
       },
     })
     exitCode = command.exitCode
@@ -626,6 +689,31 @@ async function runSingleSweBenchAgentInstance({
   })
   artifacts.push(metadataArtifact)
 
+  let sessionId: string | undefined
+  let eventCount: number | undefined
+  if (!setupError && existsSync(sessionLogPath)) {
+    try {
+      const parsed = await readSessionLog(sessionLogPath)
+      sessionId = parsed.header.sessionId
+      eventCount = parsed.events.length
+      const spans = exportSessionSpans({
+        header: parsed.header,
+        events: parsed.events,
+        runId: input.runId,
+        evalInstanceId: instance.instance_id,
+      })
+      const traceArtifact = await store.writeJson(
+        'trace',
+        `traces/${instance.instance_id}.openinference.json`,
+        { spans },
+      )
+      artifacts.push(traceArtifact)
+    } catch {
+      // A malformed or partial session log is not fatal for the eval trial;
+      // the diff artifact and stdout/stderr already anchor the failure.
+    }
+  }
+
   const prediction = createSweBenchPrediction({
     instanceId: instance.instance_id,
     modelNameOrPath: input.model,
@@ -636,6 +724,7 @@ async function runSingleSweBenchAgentInstance({
     trialId: `${input.runId}:${instance.instance_id}`,
     experimentId: experiment.experimentId,
     instanceId: instance.instance_id,
+    ...(sessionId ? { sessionId } : {}),
     status: timedOut ? 'timed_out' : failureLabel === undefined ? 'completed' : 'failed',
     resolved: false,
     ...(failureLabel ? { failureLabel } : {}),
@@ -645,6 +734,7 @@ async function runSingleSweBenchAgentInstance({
       patchBytes: Buffer.byteLength(diff, 'utf8'),
       patchLines: diff.length === 0 ? 0 : diff.split('\n').length,
       ...(exitCode === null ? {} : { agentExitCode: exitCode }),
+      ...(typeof eventCount === 'number' ? { eventCount } : {}),
     },
   }
   return { prediction, trial }
@@ -765,6 +855,7 @@ export type ExportSessionForSweBenchInput = {
   sessionLogPath: string
   modelPatch: string
   workspaceRoot?: string
+  memoryPolicy?: EvalMemoryPolicy
 }
 
 export async function exportSessionForSweBench(
@@ -800,6 +891,7 @@ export async function exportSessionForSweBench(
       sessionId: parsed.header.sessionId,
       eventCount: parsed.events.length,
     },
+    memoryPolicy: input.memoryPolicy ?? deriveEvalMemoryPolicy({ benchmarkIsolation: true }),
   })
   const store = createArtifactStore(layout.rootDir, {
     ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
@@ -828,7 +920,12 @@ export async function exportSessionForSweBench(
     },
   }
   await writeFile(join(layout.trialsDir, `${input.instanceId}.json`), `${JSON.stringify(trial, null, 2)}\n`, 'utf8')
-  await writeFile(layout.summaryPath, `${JSON.stringify(summarizeEvalRun(experiment, [trial]), null, 2)}\n`, 'utf8')
+  const subAgentGraph = await loadTrialSubAgentGraph(dirname(input.sessionLogPath))
+  await writeFile(
+    layout.summaryPath,
+    `${JSON.stringify(summarizeEvalRun(experiment, [trial], subAgentGraph ? { subAgentGraph } : {}), null, 2)}\n`,
+    'utf8',
+  )
   return { layout, experiment, prediction, traceArtifact, trial }
 }
 
