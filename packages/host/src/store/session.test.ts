@@ -467,6 +467,38 @@ describe('SessionStore crash recovery', () => {
     }
   })
 
+  it('can load a graceful restart session without crash recovery side effects', async () => {
+    const sessionId = 'sess-graceful-pending-tool'
+    const path = join(dir, `2026-07-05T00-00-03.000Z_${sessionId}.jsonl`)
+    const cfg = createConfig({ tools: [{ name: 'read', description: 'read', inputSchema: { type: 'object' }, requiresApproval: false }], systemPrompt: 'sys' })
+    const initial = createInitialState({ sessionId, systemPrompt: 'sys' })
+    await writeHeader({ path, sessionId, config: cfg, initialState: initial })
+    await appendEventEntry({
+      path,
+      seq: 1,
+      event: { kind: 'user_message', text: 'read' },
+      effects: [{ kind: 'call_llm', messages: [], tools: cfg.tools }],
+    })
+    await appendEventEntry({
+      path,
+      seq: 2,
+      event: {
+        kind: 'llm_response',
+        message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'c1', name: 'read', input: {} }] },
+      },
+      effects: [{ kind: 'call_tool', callId: 'c1', name: 'read', input: {} }],
+    })
+
+    const graceful = await new SessionStore(dir).load(sessionId, { recoverDangling: false })
+    expect(graceful.state.status).toBe('executing_tools')
+    expect(graceful.state.pendingCalls).toHaveLength(1)
+    expect((await readSessionLog(path)).events).toHaveLength(2)
+
+    const recovered = await new SessionStore(dir).load(sessionId)
+    expect(recovered.state.pendingCalls).toEqual([])
+    expect((await readSessionLog(path)).events).toHaveLength(3)
+  })
+
   it('repairs a cached mid-stream session without forcing a disk reload', async () => {
     const sessionId = 'sess-cached-thinking'
     const cfg = createConfig({ tools: [], systemPrompt: 'sys' })

@@ -19,6 +19,8 @@ import type {
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
 import { createSkillManager, discoverSkills } from './extensions/skills.js'
 import { contextSnapshot } from './context/manager.js'
+import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
+import { estimateStringTokens } from '@agent-kernel/shared/token-estimation'
 
 function silentBroadcast(): LoopBroadcast {
   return {
@@ -948,7 +950,7 @@ describe('host loop', () => {
     expect(llmCalls[1]!.model).toBe('compact-model')
     // Cumulative usage is preserved; current-window context is compacted.
     expect(rec.state.usage.inputTokens).toBe(10)
-    expect(contextSnapshot(rec).estimatedMessageTokens).toBeLessThan(beforeCount * 10)
+    expect(contextSnapshot(rec).breakdown.transcript).toBeLessThan(contextSnapshot(rec, [{ role: 'user', content: [{ type: 'text', text: 'SUMMARY-OF-CONVO'.repeat(20) }] }]).breakdown.transcript)
     const parsed = await readSessionLog(rec.logPath)
     const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
     expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
@@ -1141,7 +1143,7 @@ describe('host loop', () => {
       text: 'auto-summary',
     })
     // Pressure is now host-owned and recomputed from the compacted messages.
-    expect(contextSnapshot(after).pressureLevel).toBe('none')
+    expect(shouldCompactContext(contextSnapshot(after), {}, { triggerRatio: 0.9 }).shouldCompact).toBe(false)
   })
 
   it('auto-compact summarizes the old prefix and preserves the latest user turn', async () => {
@@ -1453,6 +1455,63 @@ describe('host loop', () => {
     expect(appendedKinds).toEqual(['user_message', 'llm_response'])
     // ...state should have used deltas without extra usage records:
     void state
+  })
+
+  it('recovers one short max_tokens text-only response by compacting and retrying', async () => {
+    let calls = 0
+    const llm: LLMAdapter = {
+      name: 'scripted',
+      async call() {
+        calls += 1
+        if (calls === 1) {
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: '好，写成文件。' }] },
+            usage: { inputTokens: 230_000, outputTokens: 10 },
+            finishReason: 'max_tokens',
+          }
+        }
+        if (calls === 2) {
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: '# Compacted Context\n\n## User Intent And Constraints\nWrite the requested file.\n\n## Repository And Runtime State\nNone.\n\n## Decisions And Rationale\nNone.\n\n## Work Completed\nNone.\n\n## Open Work\nWrite the file.' }] },
+            usage: { inputTokens: 10_000, outputTokens: 200 },
+            finishReason: 'end_turn',
+          }
+        }
+        return {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'done after retry' }] },
+          usage: { inputTokens: 12_000, outputTokens: 20 },
+          finishReason: 'end_turn',
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+      models: { get: () => 'm', contextWindow: () => 1_000_000 },
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: '写成文件' })
+
+    expect(calls).toBe(3)
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const llmResponses = parsed.events.filter((entry) => entry.event.kind === 'llm_response')
+    expect(llmResponses).toHaveLength(1)
+    const final = llmResponses.at(-1)!
+    expect(final.event.kind).toBe('llm_response')
+    if (final.event.kind === 'llm_response') {
+      expect(final.event.finishReason).toBe('end_turn')
+      expect(final.event.message.content).toContainEqual({ type: 'text', text: 'done after retry' })
+    }
+    expect(JSON.stringify(parsed.events)).not.toContain('好，写成文件。')
+    expect(parsed.runtimeMetadata.some((entry) => entry.action === 'compaction_applied')).toBe(true)
+    expect(parsed.runtimeMetadata.some((entry) => entry.action === 'token_usage_observed' && entry.payload.trigger === 'max_tokens_retry')).toBe(true)
+  })
+
+  it('uses CJK-aware token estimates instead of chars divided by four', () => {
+    const text = '港股数据字段含义说明缺失'.repeat(100)
+    expect(estimateStringTokens(text)).toBeGreaterThan(Math.ceil(text.length / 2))
   })
 
   it('cancelStream aborts an in-flight streaming LLM call', async () => {
@@ -2239,6 +2298,52 @@ describe('host loop', () => {
     expect(postSeen).toBe(true)
     const rec = store.get(sessionId)!
     expect(rec.state.status).toBe('done')
+  })
+
+  it('checkpoint drain pauses after llm_response before dispatching tools', async () => {
+    let toolCalls = 0
+    let releaseLlm!: (response: LLMResponse) => void
+    let markLlmStarted!: () => void
+    const llmStarted = new Promise<void>((resolve) => {
+      markLlmStarted = resolve
+    })
+    const llmResponse = new Promise<LLMResponse>((resolve) => {
+      releaseLlm = resolve
+    })
+    const loop = runHostLoop({
+      store,
+      llm: {
+        name: 'deferred',
+        async call() {
+          markLlmStarted()
+          return await llmResponse
+        },
+      },
+      tools: nullTools({
+        callTool: async () => {
+          toolCalls += 1
+          return { ok: true, content: 'ok' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+
+    const turn = loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    await llmStarted
+    loop.beginDrain('checkpoint')
+    releaseLlm({
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_call', callId: 'c1', name: 'read', input: {} }],
+      },
+    })
+    await turn
+
+    const rec = store.get(sessionId)!
+    expect(rec.state.status).toBe('executing_tools')
+    expect(rec.state.pendingCalls[0]?.callId).toBe('c1')
+    expect(toolCalls).toBe(0)
+    expect(loop.drainSnapshot(sessionId).safe).toBe(true)
   })
 })
 

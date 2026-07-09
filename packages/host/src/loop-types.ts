@@ -19,6 +19,7 @@ import type {
   AgentState,
   CallToolEffect,
   Effect,
+  PendingToolCall,
   RequestApprovalEffect,
 } from '@agent-kernel/kernel'
 import type { LLMTrace } from '@agent-kernel/shared'
@@ -115,6 +116,11 @@ export type LoopHandle = {
   compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'): Promise<void>
   hasActiveLlmCall(sessionId: string): boolean
   recoverInterruptedLlm(sessionId: string): Promise<boolean>
+  beginDrain(mode: LoopDrainMode): void
+  endDrain(): void
+  drainSnapshot(sessionId: string): LoopDrainSessionSnapshot
+  waitForCheckpoint(sessionId: string): Promise<LoopDrainSessionSnapshot>
+  resumeSession(sessionId: string): Promise<boolean>
   /**
    * Abort the in-flight LLM call for a session, if any. Any streamed text
    * so far becomes the final assistant message with a `[cancelled]` suffix,
@@ -122,6 +128,17 @@ export type LoopHandle = {
    * dangling call. No-op when nothing is streaming.
    */
   cancelStream(sessionId: string): void
+}
+
+export type LoopDrainMode = 'none' | 'checkpoint' | 'idle'
+
+export type LoopDrainSessionSnapshot = {
+  sessionId: string
+  status: AgentState['status'] | 'missing'
+  safe: boolean
+  waiting: 'none' | 'llm' | 'tool' | 'idle'
+  pendingCalls: readonly PendingToolCall[]
+  cursor?: number
 }
 
 export type DispatchOptions = {
@@ -137,6 +154,9 @@ export type LoopRuntime = {
   handle: LoopHandle
   loopGuard: Map<string, PostCompactionLoopGuard>
   model?: string
+  drain?: () => LoopDrainMode
+  toolStarted?(sessionId: string, callId: string): void
+  toolSettled?(sessionId: string, callId: string): void
 }
 
 export type PostCompactionLoopGuard = {

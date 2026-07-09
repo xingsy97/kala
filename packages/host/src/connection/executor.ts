@@ -29,6 +29,8 @@ import type {
   ClientListBgTasks,
   ClientListDirs,
   ClientListFiles,
+  ClientGitDiff,
+  ClientGitStatus,
   ClientReadBgOutput,
   ClientReadFile,
   ClientReadOverflow,
@@ -46,6 +48,8 @@ import type {
   ExecutorServerToClientEvents,
   FileContentsResult,
   FileListResult,
+  GitDiffResult,
+  GitStatusResult,
   OverflowContentsResult,
   ServerExecutorChangedPayload,
   TerminalCreateResult,
@@ -93,6 +97,8 @@ export type ExecutorLookup = {
   listDirs(workspaceId: string, path: string | undefined, requestId: string): Promise<DirListResult>
   listFiles(payload: ClientListFiles): Promise<FileListResult>
   readFile(payload: ClientReadFile): Promise<FileContentsResult>
+  gitStatus(payload: ClientGitStatus): Promise<GitStatusResult>
+  gitDiff(payload: ClientGitDiff): Promise<GitDiffResult>
   readOverflow(payload: ClientReadOverflow, workspaceId: string): Promise<OverflowContentsResult>
   copyOverflowSession(workspaceId: string, sourceSessionId: string, targetSessionId: string): Promise<CopyOverflowSessionResult>
   deleteOverflowSession(workspaceId: string, sessionId: string): Promise<DeleteOverflowSessionResult>
@@ -603,6 +609,50 @@ export function createExecutorRegistry(
           workspaceId: payload.workspaceId,
           path: payload.path,
           error: msg,
+        }),
+      )
+    },
+    async gitStatus(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          files: [],
+          error: { code: 'executor_unavailable', message: 'workspace offline' },
+        }
+      }
+      return await callInternalTool<GitStatusResult>(
+        bind,
+        payload.workspaceId,
+        '__git_status',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          files: [],
+          error: { code: 'internal_error', message: msg },
+        }),
+      )
+    },
+    async gitDiff(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          error: { code: 'executor_unavailable', message: 'workspace offline' },
+        }
+      }
+      return await callInternalTool<GitDiffResult>(
+        bind,
+        payload.workspaceId,
+        '__git_diff',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          workspaceId: payload.workspaceId,
+          error: { code: 'internal_error', message: msg },
         }),
       )
     },

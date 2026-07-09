@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { createConfig } from '@agent-kernel/kernel'
+import { evaluateContextPressure } from '@agent-kernel/shared/context-policy'
 
 import { snapshotFromConfig, shouldAutoCompact } from './manager.js'
 import type { SessionRecord } from '../store/session.js'
@@ -8,15 +9,15 @@ import type { SessionRecord } from '../store/session.js'
 const baseMessage = { role: 'user' as const, content: [{ type: 'text' as const, text: 'hello' }] }
 
 describe('ContextManager', () => {
-  it('keeps pressure none when no context limit is configured', () => {
+  it('records unknown context window when no limit is configured', () => {
     const snap = snapshotFromConfig(createConfig({ tools: [] }), [baseMessage])
 
-    expect(snap.pressureLevel).toBe('none')
-    expect(snap.effectiveLimit).toBeUndefined()
-    expect(snap.reasonCodes).toContain('context_limit_unknown')
+    expect(snap.contextWindow).toEqual({ tokens: null, source: 'unknown' })
+    expect(snap.usage.inputTokens).toBe(snap.usage.totalTokens)
+    expect(evaluateContextPressure(snap).level).toBe('unknown')
   })
 
-  it('calculates pressure from current model-visible input, tool schemas, and reserve', () => {
+  it('estimates current model-visible input, tool schemas, and reserve', () => {
     const config = createConfig({
       tools: [{ name: 'read', description: 'Read files', inputSchema: { type: 'object' }, requiresApproval: false }],
       contextLimit: 1_000,
@@ -27,9 +28,10 @@ describe('ContextManager', () => {
     const soft = snapshotFromConfig(config, [{ role: 'user', content: [{ type: 'text', text: 'a'.repeat(1_700) }] }])
     const hard = snapshotFromConfig(config, [{ role: 'user', content: [{ type: 'text', text: 'b'.repeat(3_000) }] }])
 
-    expect(soft.pressureLevel).toBe('soft')
-    expect(hard.pressureLevel).toBe('hard')
-    expect(hard.estimatedTotalInputTokens).toBeGreaterThan(hard.estimatedMessageTokens)
+    expect(evaluateContextPressure(soft, {}, { mediumRatio: 0.5, highRatio: 0.5, criticalRatio: 0.8 }).level).toBe('high')
+    expect(evaluateContextPressure(hard, {}, { mediumRatio: 0.5, highRatio: 0.5, criticalRatio: 0.8 }).level).toBe('critical')
+    expect(hard.usage.inputTokens).toBeGreaterThan(hard.breakdown.transcript)
+    expect(hard.usage.inputTokens).toBe(hard.breakdown.transcript + hard.breakdown.tools + hard.breakdown.system)
   })
 
   it('uses selected model context override ahead of the session config limit', () => {
@@ -39,10 +41,36 @@ describe('ContextManager', () => {
       contextWindow: 1_000_000,
     })
 
-    expect(snap.effectiveLimit).toBe(1_000_000)
-    expect(snap.contextWindow).toBe(1_000_000)
-    expect(snap.contextWindowSource).toBe('model')
-    expect(snap.contextWindowModel).toBe('claude-opus-4.7-1m-internal')
+    expect(snap.contextWindow).toEqual({ tokens: 1_000_000, source: 'model_registry' })
+    expect(snap.model).toMatchObject({ ref: 'claude-opus-4.7-1m-internal', id: 'claude-opus-4.7-1m-internal' })
+  })
+
+  it('keeps provider-qualified model refs separate from provider-native ids', () => {
+    const config = createConfig({ tools: [], contextLimit: 400_000 })
+    const snap = snapshotFromConfig(config, [baseMessage], {
+      model: 'anthropic:claude-opus-4.7-1m-internal',
+      modelId: 'claude-opus-4.7-1m-internal',
+      provider: 'anthropic',
+      contextWindow: 1_000_000,
+    })
+
+    expect(snap.model).toEqual({
+      ref: 'anthropic:claude-opus-4.7-1m-internal',
+      id: 'claude-opus-4.7-1m-internal',
+      provider: 'anthropic',
+    })
+  })
+
+  it('uses a manual context token cap ahead of the model registry window', () => {
+    const config = createConfig({ tools: [], contextLimit: 400_000 })
+    const snap = snapshotFromConfig(config, [baseMessage], {
+      model: 'claude-opus-4.7-1m-internal',
+      contextWindow: 1_000_000,
+      contextTokens: 250_000,
+    })
+
+    expect(snap.contextWindow).toEqual({ tokens: 250_000, source: 'manual_config' })
+    expect(snap.model.ref).toBe('claude-opus-4.7-1m-internal')
   })
 
   it('is the host-owned auto-compaction trigger', () => {
@@ -61,6 +89,7 @@ describe('ContextManager', () => {
       config: createConfig({ tools: [], contextLimit: 1_000, hardThreshold: 0.8 }),
       logPath: '/tmp/s1.jsonl',
       createdAt: '2026-07-15T00:00:00.000Z',
+      preferences: {},
     }
 
     expect(shouldAutoCompact(record)).toBe(true)

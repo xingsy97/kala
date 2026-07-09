@@ -10,18 +10,17 @@
  * dependency-light and the request/response mapping lives at the boundary.
  */
 
-import { readFile } from 'node:fs/promises'
-
 import type {
-  ImageContent,
   Message,
   MessageContent,
-  ToolSchema,
 } from '@agent-kernel/kernel'
 import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
 import { ProviderHTTPError, wrapProviderFetchError } from './provider-error.js'
+import { buildOpenAIRequestBody } from './provider-request-builder.js'
+import type { OpenAIToolCall } from './provider-request-builder.js'
+import { normalizeOpenAIToolCalls, parseToolArguments } from '../tools/tool-call-normalizer.js'
 
 export type OpenAIOptions = {
   apiKey: string
@@ -39,31 +38,6 @@ export type OpenAIOptions = {
 
 const DEFAULT_MODEL = 'gpt-4o-mini'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
-
-type OpenAIToolCall = {
-  id: string
-  type: 'function'
-  function: {
-    name: string
-    arguments: string // JSON-encoded object per OpenAI spec
-  }
-}
-
-type OpenAIMessage =
-  | {
-      role: 'system' | 'user'
-      content: string | OpenAIUserContentBlock[]
-    }
-  | {
-      role: 'assistant'
-      content: string | null
-      tool_calls?: OpenAIToolCall[]
-    }
-  | {
-      role: 'tool'
-      tool_call_id: string
-      content: string
-    }
 
 type OpenAIResponseBody = {
   id: string
@@ -84,10 +58,6 @@ type OpenAIResponseBody = {
   }
 }
 
-type OpenAIUserContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } }
-
 export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
   const fetchImpl = opts.fetchImpl ?? fetch
   const model = opts.model ?? DEFAULT_MODEL
@@ -100,7 +70,7 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
     name: `openai:${model}`,
     async call(params: LLMCallParams): Promise<LLMResponse> {
       const effectiveModel = params.model ?? model
-      const body = await buildRequestBody(params, effectiveModel, maxTokens)
+      const { body } = await buildOpenAIRequestBody(params, effectiveModel, maxTokens)
       if (params.onTextDelta) {
         body.stream = true
         body.stream_options = { include_usage: true }
@@ -278,11 +248,12 @@ async function callStreaming(
   const indices = [...toolCalls.keys()].sort((a, b) => a - b)
   for (const idx of indices) {
     const tc = toolCalls.get(idx)!
+    const parsed = parseToolArguments('openai', tc.id, tc.name, tc.argsBuf)
     content.push({
       type: 'tool_call',
       callId: tc.id,
       name: tc.name,
-      input: parseArgs(tc.argsBuf),
+      input: parsed.input,
     })
   }
   const message: Message = { role: 'assistant', content }
@@ -383,150 +354,12 @@ export class OpenAIHTTPError extends ProviderHTTPError {
   }
 }
 
-async function buildRequestBody(
-  params: LLMCallParams,
-  model: string,
-  maxTokens: number | undefined,
-): Promise<Record<string, unknown>> {
-  const { messages, tools, systemPrompt } = params
-  const openaiMessages: OpenAIMessage[] = []
-  if (systemPrompt) {
-    openaiMessages.push({ role: 'system', content: systemPrompt })
-  }
-  for (const msg of messages) {
-    openaiMessages.push(...(await toOpenAI(msg)))
-  }
-  const body: Record<string, unknown> = {
-    model,
-    messages: openaiMessages,
-  }
-  if (maxTokens !== undefined) body.max_tokens = maxTokens
-  if (tools.length > 0) {
-    body.tools = tools.map(toOpenAITool)
-    body.tool_choice = 'auto'
-  }
-  return body
-}
-
-async function toOpenAI(msg: Message): Promise<OpenAIMessage[]> {
-  if (msg.role === 'system') {
-    return [{ role: 'system', content: extractText(msg.content) }]
-  }
-  if (msg.role === 'user') {
-    return [{ role: 'user', content: await toOpenAIUserContent(msg.content) }]
-  }
-  if (msg.role === 'tool') {
-    // Every tool_result becomes its own `role: "tool"` message. OpenAI
-    // rejects tool messages with multiple results bundled in one entry.
-    const out: OpenAIMessage[] = []
-    for (const c of msg.content) {
-      if (c.type === 'tool_result') {
-        out.push({
-          role: 'tool',
-          tool_call_id: c.callId,
-          content: c.content,
-        })
-      }
-    }
-    return out
-  }
-  // assistant
-  const text = extractText(msg.content)
-  const toolCalls = msg.content
-    .filter((c): c is Extract<MessageContent, { type: 'tool_call' }> =>
-      c.type === 'tool_call',
-    )
-    .map(
-      (c): OpenAIToolCall => ({
-        id: c.callId,
-        type: 'function',
-        function: {
-          name: c.name,
-          arguments: JSON.stringify(c.input),
-        },
-      }),
-    )
-  const assistant: OpenAIMessage = {
-    role: 'assistant',
-    content: text.length > 0 ? text : null,
-    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-  }
-  return [assistant]
-}
-
-async function toOpenAIUserContent(
-  content: readonly MessageContent[],
-): Promise<string | OpenAIUserContentBlock[]> {
-  const hasImage = content.some((c) => c.type === 'image')
-  if (!hasImage) return extractText(content)
-  const blocks: OpenAIUserContentBlock[] = []
-  for (const c of content) {
-    if (c.type === 'text') {
-      blocks.push({ type: 'text', text: c.text })
-    } else if (c.type === 'image') {
-      blocks.push({
-        type: 'image_url',
-        image_url: { url: await toDataUrl(c) },
-      })
-    }
-  }
-  return blocks
-}
-
-async function toDataUrl(content: ImageContent): Promise<string> {
-  if (content.source.kind === 'base64') {
-    return `data:${content.source.mediaType};base64,${content.source.data}`
-  }
-  const mediaType = content.source.mediaType ?? guessMediaType(content.source.path)
-  const data = (await readFile(content.source.path)).toString('base64')
-  return `data:${mediaType};base64,${data}`
-}
-
-function guessMediaType(
-  path: string,
-): 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif' {
-  const lower = path.toLowerCase()
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
-  if (lower.endsWith('.webp')) return 'image/webp'
-  if (lower.endsWith('.gif')) return 'image/gif'
-  return 'image/png'
-}
-
-function extractText(content: readonly MessageContent[]): string {
-  return content
-    .map((c) => (c.type === 'text' ? c.text : ''))
-    .join('')
-}
-
-function toOpenAITool(tool: ToolSchema): Record<string, unknown> {
-  return {
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema,
-    },
-  }
-}
-
 function parseResponse(body: OpenAIResponseBody): LLMResponse {
   const choice = body.choices[0]
   if (!choice) throw new Error('OpenAI response has no choices')
   const raw = choice.message
-  const content: MessageContent[] = []
-  if (raw.content && raw.content.length > 0) {
-    content.push({ type: 'text', text: raw.content })
-  }
-  if (raw.tool_calls) {
-    for (const tc of raw.tool_calls) {
-      content.push({
-        type: 'tool_call',
-        callId: tc.id,
-        name: tc.function.name,
-        input: parseArgs(tc.function.arguments),
-      })
-    }
-  }
+  const normalized = normalizeOpenAIToolCalls({ rawText: raw.content, rawToolCalls: raw.tool_calls, finishReason: choice.finish_reason })
+  const content = normalized.content
   const message: Message = { role: 'assistant', content }
   // Some OpenAI-compatible gateways return `usage: {}` or omit individual
   // fields. Coerce to numbers so the kernel's usage accumulator never sees
@@ -551,19 +384,6 @@ function parseResponse(body: OpenAIResponseBody): LLMResponse {
 
 function numOr(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
-}
-
-function parseArgs(raw: string): Record<string, unknown> {
-  if (!raw) return {}
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
-    return {}
-  } catch {
-    return {}
-  }
 }
 
 async function safeText(res: Response): Promise<string> {

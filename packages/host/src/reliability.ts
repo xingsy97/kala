@@ -2,7 +2,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { fold } from '@agent-kernel/kernel'
+import type { AgentState } from '@agent-kernel/kernel'
 import type { EventEntry } from '@agent-kernel/shared'
+import { deriveSessionState } from '@agent-kernel/shared'
 
 import { readSessionLog } from './store/log.js'
 
@@ -142,10 +144,16 @@ function classifyDangling(
   status: string,
   pendingCalls: readonly { status: string }[],
 ): SessionReliabilityAudit['danglingKind'] | undefined {
-  if (status === 'thinking' && pendingCalls.length === 0) return 'llm_call'
-  if (status === 'executing_tools' && pendingCalls.length > 0) return 'tool_call'
-  if (status === 'awaiting_approval' && pendingCalls.length > 0) return 'approval'
+  if (!isAgentStatus(status)) return undefined
+  const derived = deriveSessionState({ status, pendingCalls: pendingCalls as never })
+  if (derived.activity === 'thinking' && pendingCalls.length === 0) return 'llm_call'
+  if (derived.activity === 'tooling' && pendingCalls.length > 0) return 'tool_call'
+  if (derived.activity === 'waiting_user' && pendingCalls.length > 0) return 'approval'
   return undefined
+}
+
+function isAgentStatus(status: string): status is AgentState['status'] {
+  return status === 'idle' || status === 'thinking' || status === 'awaiting_approval' || status === 'executing_tools' || status === 'done' || status === 'error'
 }
 
 function recoveryEventDetails(events: readonly EventEntry[]): readonly RecoveryEventDetail[] {

@@ -36,8 +36,8 @@ import type {
   ToolSchema,
   UsageDelta,
 } from '@agent-kernel/kernel'
-import { estimateMessageTokens } from '@agent-kernel/kernel'
 import type { LLMTrace } from '@agent-kernel/shared'
+import { estimateMessageTokens } from '@agent-kernel/shared/token-estimation'
 import {
   createArtifactStore,
   validateCompactionSummary,
@@ -79,7 +79,7 @@ Rules:
 - Do not claim work is done unless the provided messages establish it.
 - Keep the whole response under 1600 tokens.`
 
-const COMPACT_TIMEOUT_MS = 60_000
+const COMPACT_TIMEOUT_MS = 10 * 60_000
 const MIN_RECENT_TAIL_TOKENS = 4_000
 const TARGET_RECENT_TAIL_RATIO = 0.15
 const MAX_RECENT_TAIL_TOKENS = 24_000
@@ -201,7 +201,7 @@ export async function runCompact(
   try {
     const contextLimit = deps.models?.contextWindow?.(sessionId) ?? record.config.contextLimit
     const beforeSnapshot = contextSnapshot(record, record.state.messages, contextWindowOverrideForSession(deps, sessionId))
-    const tokensBefore = beforeSnapshot.estimatedTotalInputTokens
+    const tokensBefore = beforeSnapshot.usage.inputTokens
     const replacedCount = record.state.messages.length
     const preserveFrom = choosePreserveFrom(record.state, trigger, contextLimit)
     const preservedTail = record.state.messages.slice(preserveFrom)

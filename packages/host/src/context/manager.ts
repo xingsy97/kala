@@ -1,103 +1,94 @@
 import type { AgentConfig, Message } from '@agent-kernel/kernel'
-import { estimateMessageTokens } from '@agent-kernel/kernel'
+import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
+import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
+import { estimateMessageTokens, estimateToolSchemaTokens } from '@agent-kernel/shared/token-estimation'
 
 import type { SessionRecord } from '../store/session.js'
 
-export type ContextPressureLevel = 'none' | 'soft' | 'hard'
-
-export type ContextSnapshot = {
-  estimatedMessageTokens: number
-  estimatedToolSchemaTokens: number
-  estimatedTotalInputTokens: number
-  reserveTokens: number
-  effectiveLimit?: number
-  contextWindow?: number
-  contextTokens?: number
-  contextWindowSource?: 'model' | 'session-config' | 'unknown'
-  contextWindowModel?: string
-  pressureLevel: ContextPressureLevel
-  reasonCodes: string[]
-}
-
 export type ContextWindowOverride = {
+  /** Canonical model ref, e.g. `provider-id:model-id`. */
   model?: string
+  /** Provider-native model id, without the provider prefix. */
+  modelId?: string
+  provider?: string
   contextWindow?: number
   contextTokens?: number
 }
 
-const DEFAULT_SOFT_THRESHOLD = 0.75
-const DEFAULT_HARD_THRESHOLD = 0.92
-const DEFAULT_RESERVE_TOKENS = 4_000
+const ESTIMATOR_VERSION = 'heuristic-v1'
+const DEFAULT_COMPACTION_RESERVE_TOKENS = 16_384
 
 export function contextSnapshot(
   record: SessionRecord,
   messages: readonly Message[] = record.state.messages,
   override?: ContextWindowOverride,
-): ContextSnapshot {
-  return snapshotFromConfig(record.config, messages, override)
+): ContextUsageSnapshot {
+  return snapshotFromConfig(record.config, messages, override, record.preferences?.selectedModel)
 }
 
 export function snapshotFromConfig(
   config: AgentConfig,
   messages: readonly Message[],
   override?: ContextWindowOverride,
-): ContextSnapshot {
-  const estimatedMessageTokens = estimateMessageTokens(messages)
-  const estimatedToolSchemaTokens = estimateToolSchemaTokens(config.tools)
-  const contextWindow = positiveInt(override?.contextWindow)
-  const contextTokens = positiveInt(override?.contextTokens)
-  const configLimit = positiveInt(config.contextLimit)
-  const effectiveLimit = contextTokens ?? contextWindow ?? configLimit
-  const contextWindowSource = contextWindow
-    ? 'model'
-    : configLimit
-      ? 'session-config'
-      : 'unknown'
-  const reserveTokens = effectiveLimit ? Math.min(DEFAULT_RESERVE_TOKENS, Math.floor(effectiveLimit * 0.1)) : DEFAULT_RESERVE_TOKENS
-  const estimatedTotalInputTokens = estimatedMessageTokens + estimatedToolSchemaTokens + reserveTokens
-  const reasonCodes: string[] = []
-  if (!effectiveLimit) reasonCodes.push('context_limit_unknown')
-  const pressureLevel = effectiveLimit
-    ? derivePressure(estimatedTotalInputTokens, effectiveLimit, config.softThreshold, config.hardThreshold)
-    : 'none'
-  if (pressureLevel !== 'none') reasonCodes.push(`pressure_${pressureLevel}`)
+  selectedModel?: string,
+): ContextUsageSnapshot {
+  const transcriptTokens = estimateMessageTokens(messages)
+  const toolTokens = estimateToolSchemaTokens(config.tools)
+  const reserveTokens = reserveForContext(override?.contextTokens ?? override?.contextWindow ?? config.contextLimit)
+  const inputTokens = transcriptTokens + toolTokens + reserveTokens
+  const contextWindow = contextWindowFrom(config, override)
+  const modelRef = selectedModel ?? override?.model ?? 'unknown'
   return {
-    estimatedMessageTokens,
-    estimatedToolSchemaTokens,
-    estimatedTotalInputTokens,
-    reserveTokens,
-    ...(effectiveLimit !== undefined ? { effectiveLimit } : {}),
-    ...(contextWindow !== undefined ? { contextWindow } : {}),
-    ...(contextTokens !== undefined ? { contextTokens } : {}),
-    contextWindowSource,
-    ...(override?.model ? { contextWindowModel: override.model } : {}),
-    pressureLevel,
-    reasonCodes,
+    model: {
+      ref: modelRef,
+      ...(override?.provider ? { provider: override.provider } : {}),
+      ...(override?.modelId ?? override?.model ? { id: override?.modelId ?? override?.model } : {}),
+    },
+    contextWindow,
+    usage: {
+      inputTokens,
+      totalTokens: inputTokens,
+    },
+    breakdown: {
+      system: reserveTokens,
+      transcript: transcriptTokens,
+      tools: toolTokens,
+      memory: 0,
+      attachments: 0,
+      pendingUserInput: 0,
+    },
+    estimator: {
+      total: { kind: 'heuristic', confidence: 'rough' },
+      breakdown: { kind: 'heuristic', confidence: 'rough' },
+      version: ESTIMATOR_VERSION,
+    },
+    updatedAt: Date.now(),
   }
 }
 
 export function shouldAutoCompact(record: SessionRecord, override?: ContextWindowOverride): boolean {
-  return contextSnapshot(record, record.state.messages, override).pressureLevel === 'hard'
+  const snapshot = contextSnapshot(record, record.state.messages, override)
+  return shouldCompactContext(snapshot, {}, { triggerRatio: record.config.hardThreshold ?? 0.92 }).shouldCompact
+}
+
+function contextWindowFrom(config: AgentConfig, override?: ContextWindowOverride): ContextUsageSnapshot['contextWindow'] {
+  const userWindow = positiveInt(override?.contextTokens)
+  if (userWindow !== undefined) return { tokens: userWindow, source: 'manual_config' }
+  const modelWindow = positiveInt(override?.contextWindow)
+  if (modelWindow !== undefined) return { tokens: modelWindow, source: 'model_registry' }
+  const configLimit = positiveInt(config.contextLimit)
+  if (configLimit !== undefined) return { tokens: configLimit, source: 'manual_config' }
+  return { tokens: null, source: 'unknown' }
+}
+
+function reserveForContext(limit: number | undefined): number {
+  const positive = positiveInt(limit)
+  if (!positive) return DEFAULT_COMPACTION_RESERVE_TOKENS
+  return Math.min(DEFAULT_COMPACTION_RESERVE_TOKENS, Math.floor(positive * 0.1))
 }
 
 function positiveInt(value: number | undefined): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
   const int = Math.floor(value)
   return int > 0 ? int : undefined
-}
-
-function derivePressure(
-  total: number,
-  limit: number,
-  softThreshold = DEFAULT_SOFT_THRESHOLD,
-  hardThreshold = DEFAULT_HARD_THRESHOLD,
-): ContextPressureLevel {
-  if (total >= limit * hardThreshold) return 'hard'
-  if (total >= limit * softThreshold) return 'soft'
-  return 'none'
-}
-
-function estimateToolSchemaTokens(tools: AgentConfig['tools']): number {
-  if (tools.length === 0) return 0
-  return Math.ceil(JSON.stringify(tools).length / 4)
 }

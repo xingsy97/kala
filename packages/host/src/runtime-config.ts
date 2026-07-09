@@ -98,7 +98,6 @@ export function loadRuntimeConfig(
     p.models.map((m) => {
       const manual = manualModels.find((candidate) => candidate.providerId === p.id && candidate.id === m)
       return modelInfo(m, p.label, {
-        ref: modelRef(p.id, m),
         providerId: p.id,
         source: modelSourceFor(p, m, manualModels, discoveredModels),
         ...(manual?.label ? { label: manual.label } : {}),
@@ -120,15 +119,15 @@ export function loadRuntimeConfig(
 export function modelInfo(
   model: string,
   provider: string,
-  opts: { ref?: string; providerId?: string; source?: ModelSource; label?: string; contextWindow?: number } = {},
+  opts: { providerId: string; source?: ModelSource; label?: string; contextWindow?: number },
 ): ModelInfo {
   const contextWindow = opts.contextWindow ?? knownContextWindow(model)
   return {
-    ...(opts.ref ? { ref: opts.ref } : {}),
+    ref: modelRef(opts.providerId, model),
     id: model,
     label: opts.label ?? model,
     provider,
-    ...(opts.providerId ? { providerId: opts.providerId } : {}),
+    providerId: opts.providerId,
     ...(opts.source ? { source: opts.source } : {}),
     ...(contextWindow ? { contextWindow } : {}),
   }

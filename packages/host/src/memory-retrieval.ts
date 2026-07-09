@@ -18,6 +18,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import { estimateStringTokens } from '@agent-kernel/shared/token-estimation'
+
 import { buildMemoryIndex, type MemoryIndexEntry } from './memory-index.js'
 
 export type MemoryRetrievalHit = {
@@ -92,7 +94,7 @@ export async function retrieveMemory(
       score: matched.score,
       matchedTerms: matched.terms,
       bodyChars: body.length,
-      estimatedTokens: Math.ceil(body.length / 4),
+      estimatedTokens: estimateStringTokens(body),
     })
   }
   scored.sort((a, b) => b.score - a.score || a.key.localeCompare(b.key))

@@ -20,6 +20,8 @@ import type {
   ClientCreateSession,
   ClientDeleteSession,
   ClientFork,
+  ClientGitDiff,
+  ClientGitStatus,
   ClientInterruptSubAgent,
   ClientKillBgTask,
   ClientListAgentTypes,
@@ -40,7 +42,6 @@ import type {
   ClientRenameSession,
   ClientSetApprovalMode,
   ClientSetCwd,
-  ClientSetModel,
   ClientTerminalCreate,
   ClientTerminalInput,
   ClientTerminalKill,
@@ -58,7 +59,6 @@ import type {
   ServerHistoryPayload,
   ServerMessageQueueEvent,
   SessionErrorScope,
-  SessionForkedEvent,
   SessionReadyEvent,
   SubAgentSummary,
 } from '@agent-kernel/shared'
@@ -132,7 +132,6 @@ export type DashboardDeps = {
     scope: SessionErrorScope,
     message: string,
   ): void
-  selectedModels: Map<string, string>
   contextWindowForModel?(model: string | undefined): ContextWindowOverride | undefined
   normalizeModelRef?(model: string): string | undefined
   dashboardNs: DashboardNs
@@ -201,11 +200,16 @@ export function configureDashboardNamespace(
       return parseWire(s, raw, ctx)
     }
     const validateBgSessionAccess = async (targetSessionId: string, workspaceId: string): Promise<string | undefined> => {
-      if (targetSessionId !== sessionId) return 'background tasks are scoped to the connected session'
+      if (targetSessionId !== sessionId) {
+        return 'This workspace operation belongs to another session. Switch back to that session and reopen the panel.'
+      }
       const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
       if (!record) return 'unknown session'
       if (record.workspaceId !== workspaceId) return 'session does not belong to workspace'
       return undefined
+    }
+    const auditScopedAccessDenied = (action: string, targetSessionId: string, workspaceId: string, error: string): void => {
+      deps.audit?.log({ action, actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId }, outcome: 'denied', error })
     }
 
     // Register first-paint request handlers before any awaited session load.
@@ -321,18 +325,13 @@ export function configureDashboardNamespace(
         record = undefined
       }
     }
-    if (record) {
-      await refreshSessionSkillsIfNeeded(deps, record)
-      syncSelectedModelCache(deps, record)
-    }
+    if (record) await refreshSessionSkillsIfNeeded(deps, record)
     await socket.join(sessionRoom(sessionId))
     const ready: SessionReadyEvent = record
-      ? readyEventFor(record, effectiveSelectedModel(deps, record), 'load', contextWindowForSession(deps, sessionId, record))
+      ? readyEventFor(record, selectedModelForRecord(record), 'load', contextWindowForSession(deps, record))
         : ephemeralReadyEventFor(
           sessionId,
           getDefaultConfig(),
-          deps.selectedModels.get(sessionId),
-          contextWindowForSession(deps, sessionId),
         )
     socket.emit('session:ready', ready)
     socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
@@ -351,16 +350,13 @@ export function configureDashboardNamespace(
       }
       if (target) {
         await refreshSessionSkillsIfNeeded(deps, target)
-        syncSelectedModelCache(deps, target)
       }
       await socket.join(sessionRoom(sessionId))
       const payload: SessionReadyEvent = target
-        ? readyEventFor(target, effectiveSelectedModel(deps, target), 'load', contextWindowForSession(deps, sessionId, target))
+        ? readyEventFor(target, selectedModelForRecord(target), 'load', contextWindowForSession(deps, target))
         : ephemeralReadyEventFor(
             sessionId,
             getDefaultConfig(),
-            deps.selectedModels.get(sessionId),
-            contextWindowForSession(deps, sessionId),
           )
       socket.emit('session:ready', payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
@@ -531,10 +527,6 @@ export function configureDashboardNamespace(
       if (!p) return
       try {
         const applied = await deps.store.rename(p.sessionId, p.label)
-        deps.dashboardNs.emit('session:renamed', {
-          sessionId: p.sessionId,
-          label: applied,
-        })
         deps.dashboardNs.emit('server:control_update', {
           kind: 'session_meta_changed',
           sessionId: p.sessionId,
@@ -556,10 +548,6 @@ export function configureDashboardNamespace(
         const applied = deps.renameWorkspace
           ? await deps.renameWorkspace(p.workspaceId, p.workspaceName)
           : p.workspaceName.trim()
-        deps.dashboardNs.emit('workspace:renamed', {
-          workspaceId: p.workspaceId,
-          workspaceName: applied,
-        })
         deps.dashboardNs.emit('server:control_update', {
           kind: 'workspace_meta_changed',
           workspaceId: p.workspaceId,
@@ -581,6 +569,7 @@ export function configureDashboardNamespace(
       if (p.sessionId) {
         const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
         if (error) {
+          auditScopedAccessDenied('internal_tool.list_dirs', p.sessionId, p.workspaceId, error)
           socket.emit('server:dir_list', { requestId: p.requestId, workspaceId: p.workspaceId, path: p.path ?? '', roots: [], entries: [], error })
           return
         }
@@ -595,6 +584,7 @@ export function configureDashboardNamespace(
       if (p.sessionId) {
         const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
         if (error) {
+          auditScopedAccessDenied('internal_tool.list_files', p.sessionId, p.workspaceId, error)
           socket.emit('server:file_list', { requestId: p.requestId, workspaceId: p.workspaceId, files: [], truncated: false, error })
           return
         }
@@ -608,6 +598,7 @@ export function configureDashboardNamespace(
       if (p.sessionId) {
         const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
         if (error) {
+          auditScopedAccessDenied('internal_tool.read_file', p.sessionId, p.workspaceId, error)
           socket.emit('server:file_contents', { requestId: p.requestId, workspaceId: p.workspaceId, path: p.path, kind: 'error', error })
           return
         }
@@ -615,6 +606,34 @@ export function configureDashboardNamespace(
       deps.audit?.log({ action: 'internal_tool.read_file', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.readFile(p)
       socket.emit('server:file_contents', result)
+    })
+    socket.on('git:status', async (raw: ClientGitStatus, ack) => {
+      const p = vparse(schema.ClientGitStatusSchema, raw, 'git:status', (raw as ClientGitStatus | undefined)?.sessionId)
+      if (!p) return
+      if (p.sessionId) {
+        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+        if (error) {
+          auditScopedAccessDenied('internal_tool.git_status', p.sessionId, p.workspaceId, error)
+          return ack({ requestId: p.requestId, workspaceId: p.workspaceId, files: [], error: { code: 'internal_error', message: error } })
+        }
+      }
+      deps.audit?.log({ action: 'internal_tool.git_status', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok' })
+      const result = await deps.executors.gitStatus(p)
+      ack(result)
+    })
+    socket.on('git:diff', async (raw: ClientGitDiff, ack) => {
+      const p = vparse(schema.ClientGitDiffSchema, raw, 'git:diff', (raw as ClientGitDiff | undefined)?.sessionId)
+      if (!p) return
+      if (p.sessionId) {
+        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+        if (error) {
+          auditScopedAccessDenied('internal_tool.git_diff', p.sessionId, p.workspaceId, error)
+          return ack({ requestId: p.requestId, workspaceId: p.workspaceId, error: { code: 'internal_error', message: error } })
+        }
+      }
+      deps.audit?.log({ action: 'internal_tool.git_diff', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path, staged: p.staged === true } })
+      const result = await deps.executors.gitDiff(p)
+      ack(result)
     })
     socket.on('client:read_overflow', async (raw: ClientReadOverflow) => {
       const p = vparse(schema.ClientReadOverflowSchema, raw, 'client:read_overflow', (raw as ClientReadOverflow | undefined)?.sessionId)
@@ -638,7 +657,10 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientListBgTasksSchema, raw, 'bg:list', (raw as ClientListBgTasks | undefined)?.sessionId)
       if (!p) return
       const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, tasks: [], error })
+      if (error) {
+        auditScopedAccessDenied('background_task.list', p.sessionId, p.workspaceId, error)
+        return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, tasks: [], error })
+      }
       const result = await deps.executors.listBg(p)
       ack(result)
     })
@@ -646,7 +668,10 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientReadBgOutputSchema, raw, 'bg:output', (raw as ClientReadBgOutput | undefined)?.sessionId)
       if (!p) return
       const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, taskId: p.taskId, content: '', nextOffset: 0, done: true, status: 'exited', bytesTruncated: 0, error })
+      if (error) {
+        auditScopedAccessDenied('background_task.output', p.sessionId, p.workspaceId, error)
+        return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, taskId: p.taskId, content: '', nextOffset: 0, done: true, status: 'exited', bytesTruncated: 0, error })
+      }
       const result = await deps.executors.readBg(p)
       ack(result)
     })
@@ -654,7 +679,10 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientKillBgTaskSchema, raw, 'bg:kill', (raw as ClientKillBgTask | undefined)?.sessionId)
       if (!p) return
       const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, taskId: p.taskId, killed: false, error })
+      if (error) {
+        auditScopedAccessDenied('background_task.kill', p.sessionId, p.workspaceId, error)
+        return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, taskId: p.taskId, killed: false, error })
+      }
       const result = await deps.executors.killBg(p)
       ack(result)
     })
@@ -662,7 +690,10 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientTerminalCreateSchema, raw, 'terminal:create', (raw as ClientTerminalCreate | undefined)?.sessionId)
       if (!p) return
       const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, error })
+      if (error) {
+        auditScopedAccessDenied('terminal.create', p.sessionId, p.workspaceId, error)
+        return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, error })
+      }
       const result = await deps.executors.createTerminal(p)
       ack(result)
     })
@@ -670,21 +701,30 @@ export function configureDashboardNamespace(
       const p = vparse(schema.ClientTerminalInputSchema, raw, 'terminal:input', (raw as ClientTerminalInput | undefined)?.sessionId)
       if (!p) return
       const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-      if (error) return
+      if (error) {
+        auditScopedAccessDenied('terminal.input', p.sessionId, p.workspaceId, error)
+        return
+      }
       deps.executors.inputTerminal(p)
     })
     socket.on('terminal:resize', async (raw: ClientTerminalResize) => {
       const p = vparse(schema.ClientTerminalResizeSchema, raw, 'terminal:resize', (raw as ClientTerminalResize | undefined)?.sessionId)
       if (!p) return
       const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-      if (error) return
+      if (error) {
+        auditScopedAccessDenied('terminal.resize', p.sessionId, p.workspaceId, error)
+        return
+      }
       deps.executors.resizeTerminal(p)
     })
     socket.on('terminal:kill', async (raw: ClientTerminalKill, ack) => {
       const p = vparse(schema.ClientTerminalKillSchema, raw, 'terminal:kill', (raw as ClientTerminalKill | undefined)?.sessionId)
       if (!p) return
       const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, terminalId: p.terminalId, killed: false, error })
+      if (error) {
+        auditScopedAccessDenied('terminal.kill', p.sessionId, p.workspaceId, error)
+        return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, terminalId: p.terminalId, killed: false, error })
+      }
       const result = await deps.executors.killTerminal(p)
       ack(result)
     })
@@ -778,15 +818,14 @@ export function configureDashboardNamespace(
           ...(normalizedSelectedModel !== undefined ? { preferences: { selectedModel: normalizedSelectedModel } } : {}),
         })
         await refreshSessionSkillsIfNeeded(deps, record)
-        syncSelectedModelCache(deps, record)
         await socket.join(sessionRoom(record.sessionId))
         socket.emit(
           'session:ready',
           readyEventFor(
             record,
-            effectiveSelectedModel(deps, record),
+            selectedModelForRecord(record),
             created ? 'created' : 'load',
-            contextWindowForSession(deps, record.sessionId, record),
+            contextWindowForSession(deps, record),
           ),
         )
         if (created) {
@@ -838,11 +877,10 @@ export function configureDashboardNamespace(
             : {}),
         })
         await refreshSessionSkillsIfNeeded(deps, record)
-        const parentModel = effectiveSelectedModel(deps, source)
+        const parentModel = selectedModelForRecord(source)
         if (parentModel) {
           await deps.store.updatePreferences(record.sessionId, { selectedModel: parentModel })
           record.preferences = { ...record.preferences, selectedModel: parentModel }
-          deps.selectedModels.set(record.sessionId, parentModel)
         }
         if (source.workspaceId) {
           await deps.executors.copyOverflowSession(
@@ -852,7 +890,7 @@ export function configureDashboardNamespace(
           ).catch(() => undefined)
         }
         await socket.join(sessionRoom(record.sessionId))
-        const forked: SessionForkedEvent = {
+        const forked: SessionReadyEvent = {
           sessionId: record.sessionId,
           reason: 'forked',
           parentSessionId: p.sourceSessionId,
@@ -860,7 +898,7 @@ export function configureDashboardNamespace(
           cursor: record.state.cursor,
           state: record.state,
           config: record.config,
-          contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record.sessionId, record)),
+          contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record)),
           ...(parentModel ? { selectedModel: parentModel } : {}),
           ...(record.workspaceId !== undefined
             ? { workspaceId: record.workspaceId }
@@ -869,7 +907,7 @@ export function configureDashboardNamespace(
             ? { workspaceName: record.workspaceName }
             : {}),
         }
-        socket.emit('session:forked', forked)
+        socket.emit('session:ready', forked)
         deps.audit?.log({ action: 'dashboard.session_fork', actor: auditActor(socket), target: { sessionId: record.sessionId, sourceSessionId: p.sourceSessionId }, outcome: 'ok', refs: { parentCursor: p.cursor } })
         await broadcastSessionList(deps)
         if (typeof p.seedMessage === 'string' && p.seedMessage.trim().length > 0) {
@@ -907,7 +945,6 @@ export function configureDashboardNamespace(
             await deps.executors.deleteOverflowSession(record.workspaceId, targetSessionId).catch(() => undefined)
           }
           await deps.store.delete(targetSessionId)
-          deps.selectedModels.delete(targetSessionId)
           resetCompactRuntime(targetSessionId)
           deps.audit?.log({ action: 'dashboard.session_delete', actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId: record?.workspaceId }, outcome: 'ok', refs: p.cascade ? { rootSessionId: p.sessionId } : undefined })
           ns.emit('server:session_deleted', { sessionId: targetSessionId })
@@ -921,16 +958,12 @@ export function configureDashboardNamespace(
       }
     })
 
-    socket.on('client:set_model', async (raw: ClientSetModel) => {
-      const p = vparse(schema.ClientSetModelSchema, raw, 'client:set_model', (raw as ClientSetModel | undefined)?.sessionId)
-      if (!p) return
-      const trimmed = p.model.trim()
-      deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: trimmed } })
-      await applyPreferencesUpdate(deps, p.sessionId, { selectedModel: trimmed })
-    })
     socket.on('client:update_preferences', async (raw) => {
       const p = vparse(schema.ClientUpdatePreferencesSchema, raw, 'client:update_preferences', (raw as { sessionId?: string } | undefined)?.sessionId)
       if (!p) return
+      if ('selectedModel' in p.preferences) {
+        deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: p.preferences.selectedModel?.trim() ?? '' } })
+      }
       await applyPreferencesUpdate(deps, p.sessionId, p.preferences)
     })
   })
@@ -972,9 +1005,7 @@ function auditConnectionMeta(meta: ConnectionMeta): Record<string, unknown> {
 
 /**
  * Apply a partial preferences patch. Empty string on `selectedModel` clears
- * it (back to the host default). Emits both the new `session:preferences_changed`
- * (canonical) and the legacy `session:model_changed` (kept for one release so
- * old dashboard bundles keep working during rollout).
+ * it (back to the host default) and emits a control-plane update.
  */
 async function applyPreferencesUpdate(
   deps: DashboardDeps,
@@ -994,22 +1025,6 @@ async function applyPreferencesUpdate(
     )
     return
   }
-  if ('selectedModel' in patch) {
-    const trimmed = effective.selectedModel ?? ''
-    if (trimmed.length === 0) {
-      deps.selectedModels.delete(sessionId)
-    } else {
-      deps.selectedModels.set(sessionId, trimmed)
-    }
-    // Legacy emit — remove once every dashboard build has migrated to
-    // `session:preferences_changed`.
-    deps.dashboardNs
-      .to(sessionRoom(sessionId))
-      .emit('session:model_changed', { sessionId, model: trimmed })
-  }
-  deps.dashboardNs
-    .to(sessionRoom(sessionId))
-    .emit('session:preferences_changed', { sessionId, preferences: effective })
   deps.dashboardNs
     .to(sessionRoom(sessionId))
     .emit('server:control_update', {
@@ -1023,23 +1038,17 @@ async function applyPreferencesUpdate(
       sessionId,
       cursor: record.state.cursor,
       state: record.state,
-      contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, sessionId, record)),
+      contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record)),
     })
   }
 }
 
-function contextWindowForSession(deps: DashboardDeps, sessionId: string, record?: SessionRecord): ContextWindowOverride | undefined {
-  return deps.contextWindowForModel?.(record ? effectiveSelectedModel(deps, record) : deps.selectedModels.get(sessionId))
+function contextWindowForSession(deps: DashboardDeps, record: SessionRecord): ContextWindowOverride | undefined {
+  return deps.contextWindowForModel?.(selectedModelForRecord(record))
 }
 
-function effectiveSelectedModel(deps: DashboardDeps, record: SessionRecord): string | undefined {
-  return record.preferences.selectedModel ?? deps.selectedModels.get(record.sessionId)
-}
-
-function syncSelectedModelCache(deps: DashboardDeps, record: SessionRecord): void {
-  const selectedModel = record.preferences.selectedModel
-  if (selectedModel) deps.selectedModels.set(record.sessionId, selectedModel)
-  else deps.selectedModels.delete(record.sessionId)
+function selectedModelForRecord(record: SessionRecord): string | undefined {
+  return record.preferences.selectedModel
 }
 
 function normalizePreferencesPatch(
@@ -1112,7 +1121,7 @@ async function handleUserMessage(
     if (!record) return
   }
   const mode = p.mode ?? 'steer'
-  const selectedModel = effectiveSelectedModel(deps, record)
+  const selectedModel = selectedModelForRecord(record)
   const queued: QueuedUserMessage = {
     id: ulid(),
     text: p.text,
@@ -1313,7 +1322,7 @@ export function ephemeralReadyEventFor(
     cursor: state.cursor,
     state,
     config: defaultConfig,
-    contextSnapshot: snapshotFromConfig(defaultConfig, state.messages, contextOverride),
+    contextSnapshot: snapshotFromConfig(defaultConfig, state.messages, contextOverride, selectedModel),
     ...(selectedModel ? { selectedModel } : {}),
   }
 }
