@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx bin/agent-kernel-host.ts"
+    "dev": "tsx bin/agent-kernel-host.ts",
+    "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
   "dependencies": {
     "@agent-kernel/kernel": "workspace:*",
@@ -36,5 +37,8 @@
     "vitest": "^2.1.5"
   },
   "sideEffects": false,
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

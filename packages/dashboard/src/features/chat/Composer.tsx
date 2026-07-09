@@ -1,27 +1,56 @@
 import { useState, type FormEvent } from 'react'
+import { Send } from 'lucide-react'
+
+import type { ModelInfo } from '@agent-kernel/shared'
+
+import { Button } from '../../components/ui/button.js'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select.js'
+import { Textarea } from '../../components/ui/textarea.js'
+import { cn } from '../../lib/utils.js'
 
 type Props = {
   disabled?: boolean
   onSubmit(text: string): void
+  model: string
+  models: readonly ModelInfo[]
+  onModelChange(model: string): void
+  status: string
 }
 
-export function Composer({ disabled, onSubmit }: Props): JSX.Element {
+export function Composer({
+  disabled,
+  onSubmit,
+  model,
+  models,
+  onModelChange,
+  status,
+}: Props): JSX.Element {
   const [text, setText] = useState('')
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>): void {
-    e.preventDefault()
+  const submit = (): void => {
     const trimmed = text.trim()
     if (trimmed.length === 0) return
     onSubmit(trimmed)
     setText('')
   }
 
+  function handleSubmit(e: FormEvent<HTMLFormElement>): void {
+    e.preventDefault()
+    submit()
+  }
+
   return (
     <form
       onSubmit={handleSubmit}
-      className="border-t border-slate-800 p-3 flex gap-2"
+      className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950"
     >
-      <textarea
+      <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={2}
@@ -29,24 +58,66 @@ export function Composer({ disabled, onSubmit }: Props): JSX.Element {
         placeholder={
           disabled ? 'waiting for host…' : 'type a message and press Enter'
         }
-        className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-100 resize-none focus:outline-none focus:border-slate-500 disabled:opacity-50"
+        className="w-full resize-none border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        data-testid="composer-input"
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
-            const trimmed = text.trim()
-            if (trimmed.length === 0) return
-            onSubmit(trimmed)
-            setText('')
+            submit()
           }
         }}
       />
-      <button
-        type="submit"
-        disabled={disabled}
-        className="px-3 py-2 bg-slate-100 text-slate-900 rounded font-medium hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        Send
-      </button>
+      <div className="flex items-center gap-2 px-2 py-1.5 border-t border-slate-200 dark:border-slate-800">
+        <Select
+          value={model && models.some((m) => m.id === model) ? model : undefined}
+          onValueChange={onModelChange}
+          disabled={models.length === 0}
+        >
+          <SelectTrigger
+            className="h-7 w-44 flex-none"
+            data-testid="model-picker"
+            aria-label="model"
+          >
+            <SelectValue
+              placeholder={models.length === 0 ? 'no models' : 'model'}
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {models.map((m) => (
+              <SelectItem key={m.id} value={m.id} data-testid={`model-option-${m.id}`}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span
+          className={cn(
+            'flex-none whitespace-nowrap text-[11px] px-2 py-0.5 rounded-full',
+            statusStyles(status),
+          )}
+          data-testid="connection-status"
+        >
+          {status}
+        </span>
+        <div className="flex-1" />
+        <Button
+          type="submit"
+          disabled={disabled || text.trim().length === 0}
+          data-testid="composer-send"
+          className="h-7 px-3"
+        >
+          <Send className="mr-1 h-3.5 w-3.5" />
+          Send
+        </Button>
+      </div>
     </form>
   )
+}
+
+function statusStyles(status: string): string {
+  if (status === 'ready')
+    return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+  if (status === 'error' || status === 'disconnected')
+    return 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+  return 'bg-slate-500/15 text-slate-600 dark:text-slate-400'
 }

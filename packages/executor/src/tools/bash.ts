@@ -23,7 +23,7 @@ export const bashTool: Tool = {
     const timeoutMs =
       optionalPositiveInt(input, 'timeoutMs', 100) ?? DEFAULT_TIMEOUT_MS
 
-    const cwd = cwdInput ?? ctx.sandbox.roots[0]!
+    const cwd = cwdInput ?? ctx.sandbox.roots[0] ?? process.cwd()
     let resolvedCwd: string
     try {
       resolvedCwd = await ctx.sandbox.resolve(cwd)

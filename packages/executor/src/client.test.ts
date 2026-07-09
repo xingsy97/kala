@@ -4,6 +4,7 @@ import { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ulid } from 'ulid'
 
 import { createConfig } from '@agent-kernel/kernel'
 import type { AgentConfig } from '@agent-kernel/kernel'
@@ -60,15 +61,15 @@ const WRITE_SCHEMA = {
 describe('executor end-to-end', () => {
   let server: HostServer
   let sessionsDir: string
-  let workspace: string
+  let sandboxRoot: string
   let url: string
   let config: AgentConfig
   let targetPath: string
 
   beforeEach(async () => {
     sessionsDir = mkdtempSync(join(tmpdir(), 'ak-e2e-sess-'))
-    workspace = mkdtempSync(join(tmpdir(), 'ak-e2e-ws-'))
-    targetPath = join(workspace, 'hello.txt')
+    sandboxRoot = mkdtempSync(join(tmpdir(), 'ak-e2e-ws-'))
+    targetPath = join(sandboxRoot, 'hello.txt')
     config = createConfig({ tools: [WRITE_SCHEMA], systemPrompt: 'sys' })
     const http = createServer()
     await new Promise<void>((resolve) => http.listen(0, resolve))
@@ -87,11 +88,21 @@ describe('executor end-to-end', () => {
   afterEach(async () => {
     await server.close()
     rmSync(sessionsDir, { recursive: true, force: true })
-    rmSync(workspace, { recursive: true, force: true })
+    rmSync(sandboxRoot, { recursive: true, force: true })
   })
 
   it('runs a real tool call through the wire and writes to disk', async () => {
     const sessionId = 'e2e-1'
+    const workspaceId = ulid()
+    // Dashboard handshakes no longer materialize the session on disk — that
+    // is deferred until the first dispatch. Pre-materialize so the executor
+    // has something to attach to when it dials in.
+    await server.store.ensure({
+      sessionId,
+      defaultConfig: config,
+      workspaceId,
+      workspaceName: 'test-ws',
+    })
 
     const dashboard: ClientSocket<
       DashboardServerToClientEvents,
@@ -107,8 +118,9 @@ describe('executor end-to-end', () => {
 
     const executor = startExecutor({
       host: url,
-      sessionId,
-      workspace,
+      workspaceId,
+      workspaceName: 'test-ws',
+      sandboxRoots: [sandboxRoot],
     })
     await executor.ready
 

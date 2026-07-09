@@ -68,7 +68,7 @@ pnpm --filter @agent-kernel/executor exec tsx bin/agent-kernel-executor.ts \
   --workspace $(pwd)/examples/scratch
 
 # Terminal 3 — dashboard (React SPA)
-pnpm --filter @agent-kernel/dashboard dev              # opens http://localhost:5173
+pnpm --filter @agent-kernel/dashboard dev              # opens http://localhost:5288
 ```
 
 Prefer an OpenAI-compatible endpoint (self-hosted gateway, `newapi`, LiteLLM, ollama's OpenAI-shim, etc.)? Swap terminal 1:
