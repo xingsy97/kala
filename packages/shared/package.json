@@ -34,6 +34,10 @@
       "types": "./dist/human-attention/index.d.ts",
       "import": "./dist/human-attention/index.js"
     },
+    "./push": {
+      "types": "./dist/push.d.ts",
+      "import": "./dist/push.js"
+    },
     "./runtime-logger": {
       "types": "./dist/runtime-logger.d.ts",
       "import": "./dist/runtime-logger.js"

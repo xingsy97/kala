@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, BarChart3, Boxes, ChevronDown, ChevronRight, Eraser, Files, FolderGit2, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
+import { Archive, BarChart3, Boxes, ChevronDown, ChevronRight, Eraser, Files, FolderGit2, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -17,6 +17,7 @@ import type {
   OverflowContentsResult,
   QueuedMessagePreview,
   ServerModelsPayload,
+  SessionErrorEvent,
   SessionSummary,
 } from '@agent-kernel/shared'
 import { deriveSessionState, isSessionResting, isSessionRunning } from '@agent-kernel/shared'
@@ -42,6 +43,8 @@ import { APPROVAL_MODES, Composer } from './features/chat/Composer.js'
 import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { HumanAttentionLowBanner } from './features/chat/HumanAttentionIndicator.js'
+import { BannerStack, BannerSlot } from './features/chat/BannerStack.js'
+import { OfflineBanner, PwaUpdateBanner } from './features/chat/PwaBanners.js'
 import { CommandPalette, type CommandPaletteItem } from './features/command/CommandPalette.js'
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
 import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
@@ -203,6 +206,7 @@ export function App(): JSX.Element {
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [sessionExplorerSectionOpen, setSessionExplorerSectionOpen] = useBooleanPref(PREF_SESSION_EXPLORER_SECTION_OPEN, true)
+  const [lowerExplorerCollapsed, setLowerExplorerCollapsed] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
   const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
@@ -536,10 +540,10 @@ export function App(): JSX.Element {
     if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
   }
 
-  const [consolidateToast, setConsolidateToast] = useState<
+  const [consolidateBanner, setConsolidateBanner] = useState<
     { kind: 'success' | 'info' | 'error'; message: string } | null
   >(null)
-  const consolidateToastTimer = useRef<number | null>(null)
+  const consolidateBannerTimer = useRef<number | null>(null)
   const runConsolidateMemory = useCallback((): void => {
     if (!session.socket || config.sessionId === null) return
     const socket = session.socket
@@ -547,13 +551,13 @@ export function App(): JSX.Element {
     const handler = (result: ConsolidateMemoryResult): void => {
       if (result.requestId !== requestId) return
       socket.off('server:memory_consolidated', handler)
-      if (consolidateToastTimer.current !== null) {
-        window.clearTimeout(consolidateToastTimer.current)
+      if (consolidateBannerTimer.current !== null) {
+        window.clearTimeout(consolidateBannerTimer.current)
       }
       if (result.error) {
-        setConsolidateToast({ kind: 'error', message: t('app.consolidateFailed', { error: result.error }) })
+        setConsolidateBanner({ kind: 'error', message: t('app.consolidateFailed', { error: result.error }) })
       } else if (result.saved.length > 0) {
-        setConsolidateToast({
+        setConsolidateBanner({
           kind: 'success',
           message: t('app.savedMemories', {
             count: result.saved.length,
@@ -562,14 +566,14 @@ export function App(): JSX.Element {
           }),
         })
       } else {
-        setConsolidateToast({
+        setConsolidateBanner({
           kind: 'info',
           message: result.reason ?? t('app.nothingWorthSaving'),
         })
       }
-      consolidateToastTimer.current = window.setTimeout(() => {
-        setConsolidateToast(null)
-        consolidateToastTimer.current = null
+      consolidateBannerTimer.current = window.setTimeout(() => {
+        setConsolidateBanner(null)
+        consolidateBannerTimer.current = null
       }, 6000)
     }
     socket.on('server:memory_consolidated', handler)
@@ -1358,7 +1362,7 @@ export function App(): JSX.Element {
                       <SidebarCollapseButton onCollapse={() => setExplorerOpen(false)} />
                     </div>
                     {sessionExplorerSectionOpen ? (
-                      <ResizablePanelGroup direction="vertical" autoSaveId="ak-left-sidebar-session-file-git-v1" className="min-h-0 flex-1">
+                      <ResizablePanelGroup direction="vertical" autoSaveId="ak-left-sidebar-session-file-git-v2" className="min-h-0 flex-1">
                         <ResizablePanel id="session-explorer" order={1} defaultSize={58} minSize={28} className="min-h-0 overflow-hidden">
                           <Explorer
                             executors={control.executors}
@@ -1380,17 +1384,39 @@ export function App(): JSX.Element {
                             onWorkspaceInfo={setWorkspaceInfoId}
                           />
                         </ResizablePanel>
-                        <ResizableHandle withHandle />
-                        <ResizablePanel id="file-git-explorer" order={2} defaultSize={42} minSize={22} className="flex min-h-0 flex-col">
-                          <LowerExplorerArea
-                            active={lowerExplorerTab}
-                            onSelect={setLowerExplorerTab}
-                            socket={workspaceExplorerBinding.socket}
-                            workspaceId={fileExplorerWorkspaceId}
-                            sessionId={workspaceExplorerBinding.sessionId}
-                            cwd={currentCwd}
-                            fontSizePx={fileExplorerFontSizePx}
-                          />
+                        <ResizableHandle
+                          withHandle
+                          aria-label={
+                            lowerExplorerCollapsed
+                              ? 'Drag up to show files and source control'
+                              : 'Resize files and source control; drag down to hide'
+                          }
+                          className={lowerExplorerCollapsed ? 'h-1.5 data-[panel-group-direction=vertical]:h-1.5' : undefined}
+                        />
+                        <ResizablePanel
+                          id="file-git-explorer"
+                          order={2}
+                          defaultSize={42}
+                          minSize={18}
+                          collapsible
+                          collapsedSize={0}
+                          onCollapse={() => setLowerExplorerCollapsed(true)}
+                          onExpand={() => setLowerExplorerCollapsed(false)}
+                          className="flex min-h-0 flex-col"
+                          data-testid="file-git-explorer-panel"
+                          data-collapsed={lowerExplorerCollapsed ? 'true' : 'false'}
+                        >
+                          {lowerExplorerCollapsed ? null : (
+                            <LowerExplorerArea
+                              active={lowerExplorerTab}
+                              onSelect={setLowerExplorerTab}
+                              socket={workspaceExplorerBinding.socket}
+                              workspaceId={fileExplorerWorkspaceId}
+                              sessionId={workspaceExplorerBinding.sessionId}
+                              cwd={currentCwd}
+                              fontSizePx={fileExplorerFontSizePx}
+                            />
+                          )}
                         </ResizablePanel>
                       </ResizablePanelGroup>
                     ) : (
@@ -1554,46 +1580,47 @@ export function App(): JSX.Element {
                       />
                     </div>
                     <div className="min-h-0 pb-[env(safe-area-inset-bottom)]">
-                      {session.lastError ? (
-                        <div
-                          className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
-                          data-testid="session-error"
-                        >
-                          [{session.lastError.scope}] {session.lastError.message}
-                        </div>
-                      ) : null}
-                      {sessionWorkspaceKnownOffline ? (
-                        <div
-                          className="px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900"
-                          data-testid="workspace-offline-banner"
-                        >
-                          workspace <span className="font-mono">{currentSession?.workspaceName ?? currentSession?.workspaceId}</span> is offline — start its executor to send messages.
-                        </div>
-                      ) : null}
-                      {consolidateToast ? (
-                        <div
-                          className={cn(
-                            'px-3 py-2 text-xs border-t',
-                            consolidateToast.kind === 'success' &&
-                              'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900',
-                            consolidateToast.kind === 'error' &&
-                              'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900',
-                            consolidateToast.kind === 'info' &&
-                              'text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-900',
-                          )}
-                          data-testid="consolidate-toast"
-                        >
-                          {consolidateToast.message}
-                        </div>
-                      ) : null}
-                      <ContextPressureBanner
-                        state={session.state}
-                        contextSnapshot={session.contextSnapshot}
-                        compactRunning={compactStatus.kind === 'running'}
-                        suppressed={awaitingAck || compactStatus.kind === 'running'}
-                        onCompactNow={runCompactNow}
-                      />
-                      <HumanAttentionLowBanner timeline={session.humanAttention} />
+                      <BannerStack>
+                        <SessionErrorBanner error={session.lastError} />
+                        {sessionWorkspaceKnownOffline ? (
+                          <BannerSlot>
+                            <div
+                              className="px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900"
+                              data-testid="workspace-offline-banner"
+                            >
+                              workspace <span className="font-mono">{currentSession?.workspaceName ?? currentSession?.workspaceId}</span> is offline — start its executor to send messages.
+                            </div>
+                          </BannerSlot>
+                        ) : null}
+                        {consolidateBanner ? (
+                          <BannerSlot>
+                            <div
+                              className={cn(
+                                'px-3 py-2 text-xs border-t',
+                                consolidateBanner.kind === 'success' &&
+                                  'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900',
+                                consolidateBanner.kind === 'error' &&
+                                  'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900',
+                                consolidateBanner.kind === 'info' &&
+                                  'text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-900',
+                              )}
+                              data-testid="consolidate-banner"
+                            >
+                              {consolidateBanner.message}
+                            </div>
+                          </BannerSlot>
+                        ) : null}
+                        <ContextPressureBanner
+                          state={session.state}
+                          contextSnapshot={session.contextSnapshot}
+                          compactRunning={compactStatus.kind === 'running'}
+                          suppressed={awaitingAck || compactStatus.kind === 'running'}
+                          onCompactNow={runCompactNow}
+                        />
+                        <HumanAttentionLowBanner timeline={session.humanAttention} />
+                        <PwaUpdateBanner />
+                        <OfflineBanner />
+                      </BannerStack>
                       <ComposerFlipContainer
                         showApproval={session.pendingApprovals.length > 0}
                         front={
@@ -1951,7 +1978,30 @@ export function App(): JSX.Element {
         onOpenChange={setCommandPaletteOpen}
         commands={commandPaletteCommands}
       />
-      <Toaster position="bottom-right" richColors closeButton theme={effectiveTheme} />
+      <Toaster
+        position="bottom-right"
+        theme={effectiveTheme}
+        duration={4000}
+        gap={8}
+        offset={16}
+        toastOptions={{
+          // Match the app's flat, muted style instead of sonner's default
+          // shouty `richColors` variants. A subtle left border carries the
+          // severity, everything else stays bg-popover/text-foreground.
+          unstyled: false,
+          classNames: {
+            toast:
+              'group toast border border-border/70 bg-popover text-popover-foreground shadow-md rounded-md text-xs pl-3 pr-3 py-2 border-l-2',
+            title: 'text-xs font-medium',
+            description: 'text-[11px] text-muted-foreground mt-0.5',
+            actionButton: 'text-[11px] px-2 py-0.5 rounded bg-accent text-accent-foreground hover:bg-accent/80',
+            success: 'border-l-emerald-500/70',
+            info: 'border-l-sky-500/70',
+            warning: 'border-l-amber-500/70',
+            error: 'border-l-rose-500/70',
+          },
+        }}
+      />
       </div>
     </div>
   )
@@ -2284,6 +2334,45 @@ function SidebarCollapseButton({ onCollapse }: { onCollapse(): void }): JSX.Elem
     >
       <PanelLeftClose className="h-3.5 w-3.5" aria-hidden="true" />
     </Button>
+  )
+}
+
+function SessionErrorBanner({ error }: { error: SessionErrorEvent | null }): JSX.Element | null {
+  const shouldShow = Boolean(error)
+  // Signature identifies a distinct error occurrence, so a fresh error after a
+  // dismissed one still surfaces.
+  const signature = useMemo(() => {
+    if (!error) return ''
+    return `${error.scope}\u0000${error.message}`
+  }, [error])
+  const [dismissedSignature, setDismissedSignature] = useState<string | null>(null)
+  useEffect(() => {
+    if (!shouldShow) setDismissedSignature(null)
+  }, [shouldShow])
+  if (!shouldShow || !error) return null
+  if (dismissedSignature === signature) return null
+  return (
+    <BannerSlot>
+      <div
+        className="flex items-start gap-2 border-t border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
+        data-testid="session-error"
+        role="status"
+      >
+        <span className="min-w-0 flex-1">
+          [{error.scope}] {error.message}
+        </span>
+        <button
+          type="button"
+          onClick={() => setDismissedSignature(signature)}
+          aria-label="Dismiss error"
+          title="Dismiss"
+          data-testid="session-error-dismiss"
+          className="flex-none rounded p-0.5 text-rose-600/80 transition-colors hover:bg-rose-100 hover:text-rose-800 dark:text-rose-300/80 dark:hover:bg-rose-900/60 dark:hover:text-rose-100"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    </BannerSlot>
   )
 }
 

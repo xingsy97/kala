@@ -35,6 +35,10 @@ import { createSkillManager, defaultSkillRoots, discoverSkills, type SkillManage
 import { SessionStore, type SessionRecord } from './store/session.js'
 import { slimEffect } from './store/log.js'
 import { WorkspaceAliasStore } from './store/workspace-alias.js'
+import { PushSubscriptionStore } from './push/store.js'
+import { loadOrCreateVapidKeys } from './push/vapid.js'
+import { createPushDispatcher } from './push/dispatch.js'
+import { createPushRoutes } from './push/routes.js'
 import {
   createExecutorRegistry,
   DEFAULT_TOOL_ACK_TIMEOUT_MS,
@@ -184,6 +188,33 @@ export async function startHostServer(
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
   await workspaceAliases.load()
+
+  // Web Push (see docs/planning/roadmap-notes/pwa-mobile-and-push.md §5).
+  // Fail-open: if VAPID isn't configured / can't be generated, dispatcher
+  // short-circuits and /push/vapid-public-key returns publicKey:null so the
+  // dashboard hides the push UI instead of erroring on subscribe.
+  const pushStore = new PushSubscriptionStore(join(options.sessionsDir, '..', 'push-subscriptions.jsonl'))
+  await pushStore.load()
+  const vapid = loadOrCreateVapidKeys(options.sessionsDir)
+  const pushDispatcher = createPushDispatcher({ store: pushStore, vapid })
+  const pushRoutes = createPushRoutes({ store: pushStore, vapid, dispatcher: pushDispatcher })
+  http.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    // pushRoutes returns true when it handled the request. Anything not
+    // matching /push/* falls through to attachJsonRoutes and beyond.
+    void pushRoutes(req, res).then((handled) => {
+      if (!handled) return
+      // A route handled it; nothing to do here — the response is already sent.
+    }).catch((err: unknown) => {
+      if (res.headersSent) return
+      res.writeHead(500, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }))
+    })
+  })
+
+  // Per-session "last status" so we only fire waiting_for_user once per
+  // transition (running → done), not on every subsequent event that carries
+  // the same state.
+  const lastSessionStatus = new Map<string, string>()
 
   const executors = createExecutorRegistry(
     io,
@@ -442,6 +473,21 @@ export async function startHostServer(
           void messageQueues.drain(sessionId)
         }, 0)
       }
+      // Web Push: fire once when a session transitions from running to done.
+      // The dashboard already surfaces waiting_for_user via foreground
+      // Notification API; this catches the case where the tab is closed.
+      const prev = lastSessionStatus.get(sessionId)
+      lastSessionStatus.set(sessionId, state.status)
+      if (prev && prev !== 'done' && state.status === 'done') {
+        void pushDispatcher.send({
+          kind: 'waiting_for_user',
+          sessionId,
+          title: 'Session ready for you',
+          body: 'The active turn finished. Open the dashboard to continue.',
+          url: `/#/sessions/${sessionId}`,
+          tag: `waiting_for_user:${sessionId}`,
+        })
+      }
     },
     onApprovalRequired(sessionId, eff: RequestApprovalEffect) {
       io.of('/dashboard').to(sessionRoom(sessionId)).emit('approval:required', {
@@ -449,6 +495,14 @@ export async function startHostServer(
         callId: eff.callId,
         name: eff.name,
         input: eff.input,
+      })
+      void pushDispatcher.send({
+        kind: 'approval_required',
+        sessionId,
+        title: 'Approval required',
+        body: `${eff.name} is waiting for your approval.`,
+        url: `/#/sessions/${sessionId}`,
+        tag: `approval:${sessionId}:${eff.callId}`,
       })
     },
     onError(sessionId, message) {
@@ -459,6 +513,15 @@ export async function startHostServer(
       }
       io.of('/dashboard').to(sessionRoom(sessionId)).emit('session:error', payload)
       io.of('/executor').to(sessionRoom(sessionId)).emit('session:error', payload)
+      void pushDispatcher.send({
+        kind: 'session_error',
+        sessionId,
+        title: 'Session error',
+        // Cap the body — the raw error text can be an unbounded stack trace.
+        body: message.length > 240 ? `${message.slice(0, 237)}…` : message,
+        url: `/#/sessions/${sessionId}`,
+        tag: `error:${sessionId}`,
+      })
     },
     onTokenDelta(sessionId, text) {
       io.of('/dashboard').to(sessionRoom(sessionId)).emit('session:token_delta', {
