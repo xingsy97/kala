@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { AtSign, Check, ChevronDown, ChevronUp, CornerDownRight, GripVertical, ListChecks, Navigation, Pencil, Trash2, X } from 'lucide-react'
+import { AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, Trash2, X } from 'lucide-react'
 
 import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
@@ -28,6 +28,7 @@ type Props = {
   onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void
   onCompact(): void
   onCancel?(): void
+  onClearSession?(): void
   onConsolidateMemory?(): void
   model: string
   models: readonly ModelInfo[]
@@ -69,7 +70,7 @@ const APPROVAL_MODES: ReadonlyArray<{
   { value: 'auto', label: 'Auto', hint: 'ask only for tools marked unsafe' },
   { value: 'ask', label: 'Ask everything', hint: 'confirm every tool call' },
   { value: 'deny', label: 'Deny unsafe', hint: 'auto-reject anything unsafe' },
-  { value: 'allow_all', label: 'Allow all (danger)', hint: 'bypass all approval prompts' },
+  { value: 'allow_all', label: 'Allow all', hint: 'Danger: bypass all approval prompts' },
 ]
 
 const APPROVAL_MODE_BY_VALUE = new Map(APPROVAL_MODES.map((mode) => [mode.value, mode]))
@@ -79,6 +80,7 @@ export function Composer({
   onSubmit,
   onCompact,
   onCancel,
+  onClearSession,
   onConsolidateMemory,
   model,
   models,
@@ -123,6 +125,13 @@ export function Composer({
           run: onCancel,
         })
       }
+      if (onClearSession) {
+        commands.push({
+          command: '/clear',
+          label: 'Start a fresh session',
+          run: onClearSession,
+        })
+      }
       if (onConsolidateMemory) {
         commands.push({
           command: '/consolidate-memory',
@@ -132,7 +141,7 @@ export function Composer({
       }
       return commands
     },
-    [onCompact, onCancel, onConsolidateMemory],
+    [onCompact, onCancel, onClearSession, onConsolidateMemory],
   )
   const matchingCommands = slashQuery
     ? slashCommands.filter((c) => c.command.startsWith(slashQuery))
@@ -456,10 +465,11 @@ export function Composer({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-7 w-20 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent md:w-24 xl:w-40"
+                className="h-7 w-20 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent md:w-24 xl:w-40"
                 data-testid="model-picker"
                 aria-label="model"
               >
+                <Bot className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
                 <SelectValue
                   placeholder={models.length === 0 ? 'no models' : 'model'}
                 />
@@ -488,6 +498,7 @@ export function Composer({
                 data-testid="approval-mode-picker"
                 aria-label="approval mode"
               >
+                <ShieldCheck className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
                 <span className="min-w-0 truncate">{approvalModeLabel}</span>
               </SelectTrigger>
               <SelectContent>
@@ -508,17 +519,19 @@ export function Composer({
                 ))}
               </SelectContent>
             </Select>
-            <RuntimeMetrics
-              state={state}
-              config={config}
-              modelInfo={models.find((m) => m.id === model) ?? null}
-              queuedMessages={queuedMessages.length}
-            />
-            <SendButton
-              disabled={!canSubmit}
-              sendMode={sendMode}
-              onSendModeChange={setSendMode}
-            />
+            <div className="ml-auto flex flex-none items-center gap-1.5">
+              <RuntimeMetrics
+                state={state}
+                config={config}
+                modelInfo={models.find((m) => m.id === model) ?? null}
+                queuedMessages={queuedMessages.length}
+              />
+              <SendButton
+                disabled={!canSubmit}
+                sendMode={sendMode}
+                onSendModeChange={setSendMode}
+              />
+            </div>
           </div>
         </div>
         {pendingToast ? (

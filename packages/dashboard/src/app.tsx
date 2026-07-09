@@ -18,21 +18,25 @@ import {
   ResizablePanelGroup,
 } from './components/ui/resizable.js'
 import { ScrollArea } from './components/ui/scroll-area.js'
-import { ActivityBar, type CompactStatus } from './features/chat/ActivityBar.js'
+import { InlineStatusRow, CompactFeedbackRow, type CompactStatus } from './features/chat/InlineStatusRow.js'
+import { ApprovalCard } from './features/chat/ApprovalCard.js'
 import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
+import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
 import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
+import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDialog.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
-import { TodoDock } from './features/chat/TodoDock.js'
+import { TasksPeek } from './features/chat/TasksPeek.js'
 import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import {
   cancelSession,
+  clearSession,
   createSession,
   deleteQueuedMessage,
   deleteSession,
@@ -122,8 +126,9 @@ export function App(): JSX.Element {
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
-    { sessionId: string } | null
+    { sessionId: string; workspaceId?: string } | null
   >(null)
+  const [connectWorkspaceOpen, setConnectWorkspaceOpen] = useState(false)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
@@ -317,8 +322,15 @@ export function App(): JSX.Element {
   const selectSession = (sessionId: string): void => {
     setConfig((prev) => ({ ...prev, sessionId, explicit: true }))
   }
-  const newSession = (): void => {
-    setPendingWorkspacePick({ sessionId: crypto.randomUUID() })
+  const newSession = (workspaceId?: string): void => {
+    setPendingWorkspacePick({
+      sessionId: crypto.randomUUID(),
+      ...(workspaceId !== undefined ? { workspaceId } : {}),
+    })
+  }
+  const clearCurrentSession = (): void => {
+    if (!session.socket) return
+    clearSession(session.socket, config.sessionId)
   }
   const pickWorkspaceForNew = (
     workspaceId: string,
@@ -407,7 +419,30 @@ export function App(): JSX.Element {
   const chatItemsCount = chatItems.length
   const streamingLen = session.streamingText.length
   const pendingApprovalsCount = session.pendingApprovals.length
+  // Auto-scroll: pin to bottom while the user is already at (or near) the
+  // bottom, but stop yanking them back if they've deliberately scrolled up
+  // to read history. Switching sessions resets pinning.
+  const pinnedToBottomRef = useRef(true)
   useEffect(() => {
+    pinnedToBottomRef.current = true
+  }, [config.sessionId])
+  useEffect(() => {
+    const root = chatScrollRef.current
+    if (!root) return
+    const viewport = root.querySelector<HTMLElement>(
+      '[data-radix-scroll-area-viewport]',
+    )
+    if (!viewport) return
+    const onScroll = (): void => {
+      const distanceFromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+      pinnedToBottomRef.current = distanceFromBottom < 64
+    }
+    viewport.addEventListener('scroll', onScroll, { passive: true })
+    return () => viewport.removeEventListener('scroll', onScroll)
+  }, [config.sessionId])
+  useEffect(() => {
+    if (!pinnedToBottomRef.current) return
     const root = chatScrollRef.current
     if (!root) return
     const viewport = root.querySelector<HTMLElement>(
@@ -557,6 +592,7 @@ export function App(): JSX.Element {
                   selectedSessionId={config.sessionId}
                   onSelect={selectSession}
                   onNewSession={newSession}
+                  onConnectWorkspace={() => setConnectWorkspaceOpen(true)}
                   onDelete={deleteSessionAt}
                   onRename={renameSessionAt}
                   onOpenSessionInfo={(sid) => {
@@ -616,7 +652,8 @@ export function App(): JSX.Element {
                       }
                     />
                   ) : null}
-                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+                  <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
+                    <TasksPeek todos={session.state?.todos ?? []} />
                     <ScrollArea
                       ref={chatScrollRef}
                       className="flex-1 min-h-0 bg-background"
@@ -648,17 +685,45 @@ export function App(): JSX.Element {
                           })
                           if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
                         }}
+                        footerSlot={
+                          <>
+                            <InlineStatusRow
+                              state={session.state}
+                              streamingActive={session.streamingText.length > 0}
+                              onCancel={() => {
+                                if (!session.socket) return
+                                cancelSession(session.socket, config.sessionId)
+                              }}
+                            />
+                            {compactStatus.kind !== 'idle' ? (
+                              <CompactFeedbackRow
+                                kind={compactStatus.kind}
+                                message={
+                                  compactStatus.kind === 'empty' || compactStatus.kind === 'error'
+                                    ? compactStatus.message
+                                    : undefined
+                                }
+                                startedAt={
+                                  compactStatus.kind === 'running' ? compactStatus.startedAt : undefined
+                                }
+                                tokensBefore={
+                                  compactStatus.kind === 'running' ? compactStatus.tokensBefore : undefined
+                                }
+                                onDismiss={
+                                  compactStatus.kind === 'running'
+                                    ? undefined
+                                    : () => setCompactStatus({ kind: 'idle' })
+                                }
+                              />
+                            ) : null}
+                          </>
+                        }
                       />
                     </ScrollArea>
-                    <TodoDock todos={session.state?.todos ?? []} />
-                    <BackgroundTerminalPanel tasks={backgroundTasks} />
-                    <ActivityBar
-                      state={session.state}
-                      compactStatus={compactStatus}
-                      onCancel={() => {
-                        if (!session.socket) return
-                        cancelSession(session.socket, config.sessionId)
-                      }}
+                    <BackgroundTerminalPanel
+                      socket={session.socket}
+                      workspaceId={currentSession?.workspaceId}
+                      fallbackTasks={backgroundTasks}
                     />
                     {session.lastError ? (
                       <div
@@ -697,55 +762,70 @@ export function App(): JSX.Element {
                       compactRunning={compactStatus.kind === 'running'}
                       onCompactNow={runCompactNow}
                     />
-                    <Composer
-                      disabled={session.status !== 'ready' || !sessionWorkspaceOnline}
-                      model={session.selectedModel ?? preferredModel}
-                      models={models}
-                      onModelChange={onModelChange}
-                      approvalMode={session.state?.approvalMode ?? 'auto'}
-                      onApprovalModeChange={onApprovalModeChange}
-                      state={session.state}
-                      config={session.config}
-                      queuedMessages={session.queuedMessages}
-                      onQueuedReorder={(id, beforeId) => {
-                        if (session.socket) reorderQueuedMessage(session.socket, config.sessionId, id, beforeId)
-                      }}
-                      onQueuedUpdate={(id, text) => {
-                        if (session.socket) updateQueuedMessage(session.socket, config.sessionId, id, text)
-                      }}
-                      onQueuedDelete={(id) => {
-                        if (session.socket) deleteQueuedMessage(session.socket, config.sessionId, id)
-                      }}
-                      onCompact={runCompactNow}
-                      onCancel={() => {
-                        if (!session.socket) return
-                        cancelSession(session.socket, config.sessionId)
-                      }}
-                      onConsolidateMemory={runConsolidateMemory}
-                      workspaceOnline={sessionWorkspaceOnline}
-                      onListFiles={listWorkspaceFiles}
-                      onReadFile={readWorkspaceFile}
-                      onSubmit={(text, mode, images, extraBlocks) => {
-                        const imageBlocks = images ?? []
-                        const extras = extraBlocks ?? []
-                        const hasStructured = imageBlocks.length > 0 || extras.length > 0
-                        const content = hasStructured
-                          ? [
-                              ...(text.length > 0
-                                ? [{ type: 'text' as const, text }]
-                                : []),
-                              ...extras,
-                              ...imageBlocks,
-                            ]
-                          : undefined
-                        session.socket?.emit('client:user_message', {
-                          sessionId: config.sessionId,
-                          text,
-                          mode,
-                          ...(content ? { content } : {}),
-                        })
-                        if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
-                      }}
+                    <ComposerFlipContainer
+                      showApproval={session.pendingApprovals.length > 0}
+                      front={
+                        <Composer
+                          disabled={session.status !== 'ready' || !sessionWorkspaceOnline}
+                          model={session.selectedModel ?? preferredModel}
+                          models={models}
+                          onModelChange={onModelChange}
+                          approvalMode={session.state?.approvalMode ?? 'auto'}
+                          onApprovalModeChange={onApprovalModeChange}
+                          state={session.state}
+                          config={session.config}
+                          queuedMessages={session.queuedMessages}
+                          onQueuedReorder={(id, beforeId) => {
+                            if (session.socket) reorderQueuedMessage(session.socket, config.sessionId, id, beforeId)
+                          }}
+                          onQueuedUpdate={(id, text) => {
+                            if (session.socket) updateQueuedMessage(session.socket, config.sessionId, id, text)
+                          }}
+                          onQueuedDelete={(id) => {
+                            if (session.socket) deleteQueuedMessage(session.socket, config.sessionId, id)
+                          }}
+                          onCompact={runCompactNow}
+                          onClearSession={clearCurrentSession}
+                          onCancel={() => {
+                            if (!session.socket) return
+                            cancelSession(session.socket, config.sessionId)
+                          }}
+                          onConsolidateMemory={runConsolidateMemory}
+                          workspaceOnline={sessionWorkspaceOnline}
+                          onListFiles={listWorkspaceFiles}
+                          onReadFile={readWorkspaceFile}
+                          onSubmit={(text, mode, images, extraBlocks) => {
+                            const imageBlocks = images ?? []
+                            const extras = extraBlocks ?? []
+                            const hasStructured = imageBlocks.length > 0 || extras.length > 0
+                            const content = hasStructured
+                              ? [
+                                  ...(text.length > 0
+                                    ? [{ type: 'text' as const, text }]
+                                    : []),
+                                  ...extras,
+                                  ...imageBlocks,
+                                ]
+                              : undefined
+                            session.socket?.emit('client:user_message', {
+                              sessionId: config.sessionId,
+                              text,
+                              mode,
+                              ...(content ? { content } : {}),
+                            })
+                            if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
+                          }}
+                        />
+                      }
+                      back={
+                        <ApprovalCard
+                          approvals={session.pendingApprovals}
+                          onDecision={(callId, decision) => {
+                            if (!session.socket) return
+                            respondApproval(session.socket, config.sessionId, callId, decision)
+                          }}
+                        />
+                      }
                     />
                   </div>
                 </div>
@@ -805,11 +885,16 @@ export function App(): JSX.Element {
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
         workspaces={control.executors}
+        initialWorkspaceId={pendingWorkspacePick?.workspaceId}
         socket={session.socket}
         onCreate={({ workspaceId, workspaceName, cwd }) =>
           pickWorkspaceForNew(workspaceId, workspaceName, cwd)
         }
         onCancel={() => setPendingWorkspacePick(null)}
+      />
+      <ConnectWorkspaceDialog
+        open={connectWorkspaceOpen}
+        onOpenChange={setConnectWorkspaceOpen}
       />
       <WorkspaceMetadataDialog
         open={workspaceInfoId !== null}

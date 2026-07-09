@@ -116,9 +116,9 @@ capture was disabled or the adapter did not return an `llmTrace`.
 **Extended event kinds**: `event.kind` may be `compact_replaced`,
 `approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union.
 `compact_replaced` events carry the summarizer `request` (`model`,
-`systemPrompt`, `messages`, `tools`), a `trigger` of `manual` or `auto`, and
-optional `responseUsage`, so history can show the exact compact LLM request
-and result side by side.
+`systemPrompt`, `messages`, `tools`), a `trigger` of `manual` or `auto`,
+required `preserveFrom`, and optional `responseUsage`, so history can show the
+exact compact LLM request and result side by side.
 
 ### 3.4 `session:error`
 
@@ -190,6 +190,19 @@ Host → `{ kind: 'user_reject', callId, reason }`.
 
 Host → `{ kind: 'cancel' }`. Also aborts the in-flight LLM stream if any.
 
+#### `client:clear`
+
+```ts
+{ sessionId: string }
+```
+
+Host → `{ kind: 'clear' }`. Clears the current session transcript, pending
+calls, todos, memory, and token usage while keeping the same session id,
+workspace binding, cwd, model, and approval mode. If a turn is active, Host
+also cancels pending tools and aborts the in-flight LLM stream before applying
+the event. This is the wire command behind the `/clear` slash command; it does
+not create a new session.
+
 #### `client:cancel_stream`
 
 ```ts
@@ -207,11 +220,12 @@ streaming. Wired to the dashboard ESC key during a `thinking` turn.
 { sessionId: string }
 ```
 
-Ask the host to summarize the current transcript with the summarizer LLM and
-replace the message list with the summary. Emitted from the exact `/compact`
-input — the dashboard does **not** append `/compact` as a `user_message`. Host
-records a `compact_replaced` event carrying the summarizer request, trigger
-(`manual`), summary text, replaced count, and token deltas.
+Ask the host to summarize stale transcript context with the summarizer LLM.
+Emitted from the exact `/compact` input — the dashboard does **not** append
+`/compact` as a `user_message`. Host chooses a safe recent-user-message pivot,
+summarizes the prefix, preserves the suffix verbatim, and records a
+`compact_replaced` event carrying the summarizer request, trigger (`manual`),
+required `preserveFrom`, summary text, replaced count, and token deltas.
 
 #### `client:set_approval_mode`
 
@@ -421,7 +435,7 @@ Convenience event; a projection of the running `state.usage` after each LLM resp
 ```ts
 {
   sessionId: string
-  usage: UsageTotal           // { inputTokens, outputTokens, costUsd }
+  usage: UsageTotal           // { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens }
 }
 ```
 
@@ -603,6 +617,118 @@ auto-discovered entries from manual ones.
 
 ---
 
+### 4.3 Background-shell control plane
+
+Runs alongside the three built-in tools (`bash{run_in_background}`, `bash_output`, `kill_shell`). The tools remain the way the *agent* starts, reads, and kills background tasks; the RPCs here are how the *dashboard operator* observes and controls the same tasks without prompting the agent. See `docs/background-shell-design.md`.
+
+Routed by `workspaceId`, not `sessionId`. A background task lives in the executor's registry; several sessions on the same workspace can watch the same task.
+
+Shared type:
+
+```ts
+type BackgroundTaskStatus = 'running' | 'exited' | 'killed' | 'signaled'
+
+type BackgroundTaskSummary = {
+  taskId: string
+  command: string
+  cwd: string
+  startedAt: string            // ISO
+  endedAt?: string             // ISO, present iff status ≠ 'running'
+  status: BackgroundTaskStatus
+  exitCode: number | null      // null while running or terminated by signal
+  signal: string | null
+  bytesLogged: number          // includes bytes lost to ring-buffer wrap
+  bytesTruncated: number       // bytes dropped when the ring buffer wrapped
+}
+```
+
+#### `bg:list` (Dashboard → Host → Executor, ack)
+
+```ts
+// Request
+{ requestId: string; workspaceId: string }
+// Ack
+{
+  requestId: string
+  workspaceId: string
+  tasks: BackgroundTaskSummary[]
+  error?: string             // e.g. 'no executor attached'
+}
+```
+
+Returns every task in the executor's registry (including tasks that already exited but haven't been evicted yet — see `docs/background-shell-design.md` §4.1 for the 15-minute grace window).
+
+#### `bg:output` (Dashboard → Host → Executor, ack)
+
+```ts
+// Request
+{
+  requestId: string
+  workspaceId: string
+  taskId: string
+  offset?: number            // byte offset into bytesLogged; missing → whole current buffer
+  maxBytes?: number          // cap on returned slice (default 64 KiB, hard cap 1 MiB)
+}
+// Ack
+{
+  requestId: string
+  workspaceId: string
+  taskId: string
+  content: string
+  nextOffset: number         // pass back on the next poll to continue tailing
+  done: boolean              // true iff the task has ended
+  status: BackgroundTaskStatus
+  bytesTruncated: number
+  error?: string             // 'unknown task' | 'no executor attached'
+}
+```
+
+Reads a slice of the log without blocking. If `offset` is behind the ring-buffer window (task produced more than 4 MiB since that offset), executor returns the current buffer contents and the caller detects the gap via `bytesTruncated`. Dashboard polls this at ~1.5 s for the *selected* task; push events short-circuit the poll for other visible tasks.
+
+#### `bg:kill` (Dashboard → Host → Executor, ack)
+
+```ts
+// Request
+{ requestId: string; workspaceId: string; taskId: string }
+// Ack
+{
+  requestId: string
+  workspaceId: string
+  taskId: string
+  killed: boolean            // false iff the task was already exited/killed
+  error?: string
+}
+```
+
+Sends SIGTERM to the child. The subsequent `close` triggers a `bg:task_updated` push with `status: 'killed'` and `endedAt` set.
+
+#### `server:bg_task_updated` (Host → Dashboard, push)
+
+Fan-out from the executor's registry event stream. Emitted on spawn, on task end, and every ~400 ms during a burst of output (throttled at the executor). Room-scoped: only dashboards subscribed to the task's workspace receive it.
+
+```ts
+{
+  workspaceId: string
+  task: BackgroundTaskSummary
+  delta?: {                  // present when new output caused this update
+    fromOffset: number       // offset within task.bytesLogged where the delta begins
+    content: string
+  }
+}
+```
+
+The dashboard's live-tail reducer appends `delta.content` at `delta.fromOffset` when it holds the immediately-prior byte, and refetches via `bg:output` on gap (e.g. it just selected the task).
+
+#### `server:bg_task_evicted` (Host → Dashboard, push)
+
+```ts
+{ workspaceId: string; taskId: string }
+```
+
+Sent 15 min after a task's `endedAt`. Dashboard drops the task from its map. Late `bg:output` reads for an evicted taskId return `error: 'unknown task'`.
+
+---
+
 ## 5. Executor-specific events
 
 Executor is a pure RPC responder. It receives commands from Host, executes them, and replies. It never originates state-changing events. **An executor is a daemon**: one process serves N sessions. It has no session binding at connect time; Host routes each `tool:call` to it based on the session's `workspaceName` (see §5.1).
@@ -720,6 +846,28 @@ Streaming progress for long-running tools. Not required in v1.
 
 Host forwards to Dashboard as `tool:progress`.
 
+#### `executor:bg_task_updated`
+
+Emitted from the executor's `subscribeBackgroundTasks` callback whenever a background task spawns, produces new output (throttled to ~400 ms), or ends. Host rebroadcasts to every dashboard in the executor's workspace room as `server:bg_task_updated` (§4.3).
+
+```ts
+{
+  workspaceId: string
+  task: BackgroundTaskSummary
+  delta?: { fromOffset: number; content: string }
+}
+```
+
+Payload is identical to `server:bg_task_updated` — Host relays it verbatim after filling in `workspaceId` from the executor's registration if the executor did not.
+
+#### `executor:bg_task_evicted`
+
+Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_task_evicted` (§4.3).
+
+```ts
+{ workspaceId: string; taskId: string }
+```
+
 ---
 
 ## 6. Message routing summary
@@ -730,6 +878,7 @@ Host forwards to Dashboard as `tool:progress`.
 | Dashboard | `client:user_approve` | Host (kernel) |
 | Dashboard | `client:user_reject` | Host (kernel) |
 | Dashboard | `client:cancel` | Host (kernel) |
+| Dashboard | `client:clear` | Host (kernel) |
 | Dashboard | `client:cancel_stream` | Host (LLM adapter) |
 | Dashboard | `client:compact` | Host (kernel) |
 | Dashboard | `client:set_approval_mode` | Host (kernel) |
@@ -742,11 +891,16 @@ Host forwards to Dashboard as `tool:progress`.
 | Dashboard | `client:list_executors` | Host (routing) |
 | Dashboard | `client:list_sessions` | Host (storage) |
 | Dashboard | `client:list_dirs` | Host → Executor (`fs:list_dirs`) |
+| Dashboard | `bg:list` | Host → Executor (`bg:list`) |
+| Dashboard | `bg:output` | Host → Executor (`bg:output`) |
+| Dashboard | `bg:kill` | Host → Executor (`bg:kill`) |
 | Dashboard | `client:load_history` | Host (storage) |
 | Dashboard | `subscribe` | Host (routing) |
 | Executor | `executor:announce` | Host (routing) |
 | Executor | ACK to `tool:call` | Host (kernel) |
 | Executor | `executor:tool_result` | Host (kernel) |
+| Executor | `executor:bg_task_updated` | Host → Dashboard (workspace room) |
+| Executor | `executor:bg_task_evicted` | Host → Dashboard (workspace room) |
 | Host | `session:ready` | Dashboard OR Executor |
 | Host | `session:token_delta` | Dashboard only |
 | Host | `session:model_changed` | Dashboard only |
@@ -761,6 +915,8 @@ Host forwards to Dashboard as `tool:progress`.
 | Host | `server:session_deleted` | Dashboard only (broadcast) |
 | Host | `server:history` | Dashboard only (response) |
 | Host | `server:dir_list` | Dashboard only (response) |
+| Host | `server:bg_task_updated` | Dashboard only (workspace room broadcast) |
+| Host | `server:bg_task_evicted` | Dashboard only (workspace room broadcast) |
 | Host | `tool:call` | Executor only |
 | Host | `tool:cancel` | Executor only |
 | Host | `fs:list_dirs` | Executor only |
@@ -866,7 +1022,7 @@ Executor replies via ACK:
 Host calls Anthropic again; plain text answer:
   ← event:appended { seq: 4, event: { kind: 'llm_response', message: {…} }, effects: [{ kind: 'finish' }] }
   ← state:changed { cursor: 4, state: {status: 'done'} }
-  ← usage:updated { usage: { inputTokens: 352, outputTokens: 94, costUsd: 0 } }
+  ← usage:updated { usage: { inputTokens: 352, outputTokens: 94, cacheCreationTokens: 0, cacheReadTokens: 0 } }
 ```
 
 This session yields 4 lines in the JSONL event log (see [event-log.md](event-log.md) §3).

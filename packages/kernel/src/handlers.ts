@@ -318,17 +318,40 @@ export function onCancel(state: AgentState): StepResult {
   }
 }
 
+export function onClear(state: AgentState): StepResult {
+  return {
+    next: {
+      ...state,
+      messages: [],
+      pendingCalls: [],
+      status: 'idle',
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+      todos: [],
+      memory: [],
+      error: undefined,
+    },
+    effects: [],
+  }
+}
+
 export function onCompactReplaced(
   state: AgentState,
   event: Extract<AgentEvent, { kind: 'compact_replaced' }>,
 ): StepResult {
-  // Preserve the leading system prompt (index 0 if role === 'system') so the
-  // agent's identity/tools framing is not lost. Everything after becomes one
-  // synthetic system message carrying the summary.
   const preserved: Message[] = []
   if (state.messages.length > 0 && state.messages[0]!.role === 'system') {
     preserved.push(state.messages[0]!)
   }
+  const preserveFrom = Math.min(
+    Math.max(event.preserveFrom, preserved.length),
+    state.messages.length,
+  )
+  const tail = state.messages.slice(preserveFrom)
   const summaryMsg: Message = {
     role: 'system',
     content: [{ type: 'text', text: event.summary }],
@@ -340,7 +363,7 @@ export function onCompactReplaced(
   return {
     next: {
       ...state,
-      messages: [...preserved, summaryMsg],
+      messages: [...preserved, summaryMsg, ...tail],
       usage,
     },
     effects: [],

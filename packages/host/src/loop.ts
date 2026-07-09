@@ -154,7 +154,6 @@ export async function dispatchOne(
   const usageChanged =
     next.usage.inputTokens !== prior.usage.inputTokens ||
     next.usage.outputTokens !== prior.usage.outputTokens ||
-    next.usage.costUsd !== prior.usage.costUsd ||
     next.usage.cacheCreationTokens !== prior.usage.cacheCreationTokens ||
     next.usage.cacheReadTokens !== prior.usage.cacheReadTokens
 

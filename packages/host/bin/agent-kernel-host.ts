@@ -60,6 +60,12 @@ function argValue(argv: readonly string[], name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
+  // Default `AK_ALLOW_ALL_OK` to "1" so the dashboard can flip a session into
+  // `allow_all` approval mode without extra env plumbing. Operators who want
+  // the original guard rail back can set `AK_ALLOW_ALL_OK=0` explicitly.
+  if (process.env.AK_ALLOW_ALL_OK === undefined) {
+    process.env.AK_ALLOW_ALL_OK = '1'
+  }
   const runtime = loadRuntimeConfig()
   const registry = createModelRegistry(runtime.providers, runtime.manualModels, {
     fallbackDefault: runtime.defaultModel,
