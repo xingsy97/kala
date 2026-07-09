@@ -5,6 +5,7 @@ export {
   genericRenderer,
   GroupHeaderIcon,
   GroupSummaryRow,
+  previewValue,
   toolStatusIcon,
   truncate,
 } from './renderer.js'

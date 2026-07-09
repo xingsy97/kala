@@ -1,0 +1,79 @@
+# Multi-Agent Collaboration
+
+Status: proposed enhancement  
+Priority: 9
+
+## Why This Matters
+
+Multi-agent workflows are useful when they reduce context pressure or isolate
+specialized work: code search, test diagnosis, review, documentation, and
+benchmark triage. They become harmful when they add opaque state and recursive
+protocol complexity.
+
+## Existing Baseline
+
+The host-side `agent` builtin already spawns child JSONL sessions in the same
+workspace. This is the correct primitive: child agents are ordinary sessions,
+not special reducer states.
+
+## Design Principle
+
+Keep multi-agent collaboration as session orchestration. Do not add multi-agent
+entities to the kernel state machine.
+
+## Collaboration Patterns
+
+Research subagent:
+Reads files and returns a concise report with references.
+
+Test subagent:
+Runs focused tests and reports failure causes.
+
+Review subagent:
+Inspects final diff and reports risks before answer.
+
+Benchmark triage subagent:
+For failed SWE-bench trials, summarizes why patch failed.
+
+## Parent-Child Contract
+
+The parent call should specify:
+
+- objective
+- workspace/cwd
+- allowed tools
+- max turns/time
+- context budget
+- expected output format
+
+The child returns:
+
+- final answer
+- status
+- session id
+- event count
+- key artifacts
+- trace reference
+
+## Dashboard
+
+Show subagents as expandable linked sessions:
+
+- Parent timeline row for the agent tool call.
+- Child session summary and status.
+- Link to child trace and transcript.
+- Clear empty state if the child produced no visible output.
+
+## Testing Plan
+
+- Unit tests for max depth and timeout enforcement.
+- Integration test parent spawning child and receiving final result.
+- Browser test for expanded subagent card content.
+- Eval test comparing single-agent vs subagent-enabled runs.
+
+## Non-Goals
+
+- Do not create a new multi-agent protocol in the reducer.
+- Do not let child agents mutate parent messages except through tool result.
+- Do not enable unbounded recursive delegation.
+
