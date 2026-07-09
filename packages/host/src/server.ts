@@ -103,6 +103,8 @@ export async function startHostServer(
     cors: { origin: '*' },
   })
 
+  const store = new SessionStore(options.sessionsDir)
+
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
@@ -110,6 +112,7 @@ export async function startHostServer(
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
+    sessions: store,
   })
 
   if (options.dashboardHandler) {
@@ -118,7 +121,6 @@ export async function startHostServer(
     attachStaticHandler(http, options.staticDir)
   }
 
-  const store = new SessionStore(options.sessionsDir)
   const executors = createExecutorRegistry(
     io,
     { workspaceIdFor: (sid) => store.get(sid)?.workspaceId },

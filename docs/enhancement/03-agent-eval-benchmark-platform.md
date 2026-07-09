@@ -178,10 +178,30 @@ protocol. It also loads per-run trial artifacts from the same manifest, shows
 instance status/resolution/failure/latency/patch size, and exposes each trial's
 artifact refs. Trial artifact refs are grouped into final patch, trace, harness
 evidence, logs, prompt, and metadata sections in the dashboard, with preview
-buttons backed by the existing artifact content endpoint. The Eval tab now also
-has an aggregate scorecard for runs/trials/resolution/pass rate and compact
-failure-delta chips for comparisons, so cross-run regression signals are visible
-without opening raw JSON.
+buttons backed by the existing artifact content endpoint. It also surfaces
+generic `scores.json`, model judge trace artifacts, and SWE-bench
+`worker-plan.json` artifacts. The Eval tab now has an aggregate scorecard for
+runs/trials/resolution/pass rate and compact failure-delta chips for
+comparisons, so cross-run regression signals are visible without opening raw
+JSON.
+
+The dashboard can create a SWE-bench worker plan through
+`POST /eval/swebench/plan`. This is intentionally limited to the cheap planning
+step: it validates the selected instance set, shards it across workers, writes
+`worker-plan.json`, and refreshes the artifact manifest. The dashboard can also
+invoke lightweight eval artifact actions through `POST /enhancement/action`:
+session scoring, model-judge response parsing, run-summary comparison,
+SWE-bench offline patch inference, session-to-SWE-bench export, and official
+result ingestion. It can also construct the official SWE-bench grading command
+as a dry-run artifact action, without executing Docker. These actions only read
+existing files/session logs, derive command lines, or write the same artifacts
+as their CLI counterparts.
+
+Running the agent over a benchmark shard, cloning/materializing many workspaces,
+and executing Docker-based official grading remain explicit CLI/CI operations.
+Those jobs are long-running, environment-specific, and need reproducible process
+control outside a browser session; the dashboard is the control/readout surface
+for their artifacts, not a second benchmark scheduler.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
 Implemented as a deterministic fixture smoke in default CI plus a manual

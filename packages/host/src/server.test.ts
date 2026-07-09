@@ -154,6 +154,17 @@ async function waitForWorkspace(
   throw new Error(`workspace wait timeout: ${workspaceId}`)
 }
 
+async function postEnhancementAction(url: string, body: Record<string, unknown>): Promise<unknown> {
+  const response = await fetch(`${url}/enhancement/action`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const payload = await response.json() as unknown
+  if (!response.ok) throw new Error(JSON.stringify(payload))
+  return payload
+}
+
 describe('wire protocol', () => {
   let server: HostServer
   let dir: string
@@ -329,6 +340,160 @@ describe('wire protocol', () => {
 
     const traversal = await fetch(`${url}/artifacts/content?path=${encodeURIComponent('../secret.json')}`)
     expect(traversal.status).toBe(403)
+  })
+
+  it('creates SWE-bench worker plan artifacts from the dashboard route', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const instancesJsonl = join(dir, 'instances.jsonl')
+    await writeFile(instancesJsonl, [
+      JSON.stringify({ instance_id: 'repo__one-1' }),
+      JSON.stringify({ instance_id: 'repo__two-2' }),
+      JSON.stringify({ instance_id: 'repo__three-3' }),
+    ].join('\n'), 'utf8')
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const response = await fetch(`${url}/eval/swebench/plan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId: 'dash-plan',
+        dataset: 'princeton-nlp/SWE-bench_Lite',
+        split: 'test',
+        model: 'agent-test',
+        instancesJsonl,
+        instanceIds: ['repo__one-1', 'repo__three-3'],
+        maxWorkers: 2,
+        timeoutMs: 300000,
+      }),
+    }).then((r) => r.json() as Promise<{ planPath: string; selectedCount: number; shardCount: number }>)
+
+    expect(response.selectedCount).toBe(2)
+    expect(response.shardCount).toBe(2)
+    expect(response.planPath).toBe(join(artifactRootDir, 'dash-plan', 'worker-plan.json'))
+
+    const plan = JSON.parse(await readFile(response.planPath, 'utf8')) as {
+      runId: string
+      model: string
+      shards: Array<{ instanceIds: string[] }>
+      resourceHints: { timeoutMs?: number }
+    }
+    expect(plan.runId).toBe('dash-plan')
+    expect(plan.model).toBe('agent-test')
+    expect(plan.shards.flatMap((shard) => shard.instanceIds).sort()).toEqual(['repo__one-1', 'repo__three-3'])
+    expect(plan.resourceHints.timeoutMs).toBe(300000)
+  })
+
+  it('runs lightweight enhancement artifact actions from dashboard routes', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const workspaceRoot = join(dir, 'workspace')
+    await mkdir(join(workspaceRoot, '.agent-kernel', 'memory'), { recursive: true })
+    await writeFile(join(workspaceRoot, '.agent-kernel', 'memory', 'style.md'), '---\nname: Style\nconfidence: 0.8\n---\nUse concise answers.\n', 'utf8')
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+    const { record } = await server.store.ensure({ sessionId: 'dash-actions-session', defaultConfig: config })
+    await server.store.record(record.sessionId, { kind: 'user_message', text: 'hi' }, [], { ...record.state, cursor: record.state.cursor + 1 })
+
+    const profile = await postEnhancementAction(url, { action: 'profile-session', sessionId: record.sessionId }) as { profilePath: string; profile: { sessionId: string } }
+    expect(profile.profilePath).toBe(join(artifactRootDir, 'profile.json'))
+    expect(profile.profile.sessionId).toBe(record.sessionId)
+
+    const audit = await postEnhancementAction(url, { action: 'reliability-audit-session', sessionId: record.sessionId }) as { auditPath: string; audit: { sessionId: string } }
+    expect(audit.auditPath).toBe(join(artifactRootDir, 'reliability-audit.json'))
+    expect(audit.audit.sessionId).toBe(record.sessionId)
+
+    const memory = await postEnhancementAction(url, { action: 'memory-index', workspaceRoot }) as { indexPath: string; entries: number }
+    expect(memory.indexPath).toBe(join(artifactRootDir, 'memory-index.json'))
+    expect(memory.entries).toBe(1)
+
+    const graph = await postEnhancementAction(url, { action: 'subagents-graph' }) as { graphPath: string; nodes: number }
+    expect(graph.graphPath).toBe(join(artifactRootDir, 'subagent-graph.json'))
+    expect(graph.nodes).toBeGreaterThanOrEqual(1)
+
+    const promptPath = join(dir, 'judge-prompt.txt')
+    const responsePath = join(dir, 'judge-response.json')
+    await writeFile(promptPath, 'Judge this patch.', 'utf8')
+    await writeFile(responsePath, JSON.stringify({ score: 0.75, label: 'test_failed', explanation: 'one failing test' }), 'utf8')
+    const judge = await postEnhancementAction(url, { action: 'eval-judge-score', promptPath, responsePath, judgeModel: 'judge-test', threshold: 0.8 }) as { scoresPath: string; judgeTrace: { uri: string } }
+    expect(judge.scoresPath).toBe(join(artifactRootDir, 'scores.json'))
+    expect(judge.judgeTrace.uri).toBe('judge/model_judge.score.judge-trace.json')
+
+    const instancesJsonl = join(dir, 'instances.jsonl')
+    const patchesDir = join(dir, 'patches')
+    await mkdir(patchesDir, { recursive: true })
+    await writeFile(instancesJsonl, `${JSON.stringify({ instance_id: 'local__repo-1', repo: 'local/repo' })}\n`, 'utf8')
+    await writeFile(join(patchesDir, 'local__repo-1.diff'), 'diff --git a/a b/a\n', 'utf8')
+    const infer = await postEnhancementAction(url, { action: 'swebench-infer-patches', runId: 'dash-infer', dataset: 'SWE-bench/local', model: 'agent-test', instancesJsonl, patchesDir }) as { predictionsPath: string; trialCount: number }
+    expect(infer.predictionsPath).toBe(join(artifactRootDir, 'dash-infer', 'predictions.jsonl'))
+    expect(infer.trialCount).toBe(1)
+
+    const patchPath = join(dir, 'model.patch')
+    await writeFile(patchPath, 'diff --git a/b b/b\n', 'utf8')
+    const exported = await postEnhancementAction(url, { action: 'swebench-export-session', runId: 'dash-export', dataset: 'SWE-bench/local', model: 'agent-test', instanceId: 'local__repo-1', sessionId: record.sessionId, modelPatchPath: patchPath }) as { predictionsPath: string; traceArtifact: { uri: string } }
+    expect(exported.predictionsPath).toBe(join(artifactRootDir, 'dash-export', 'predictions.jsonl'))
+    expect(exported.traceArtifact.uri).toBe('traces/local__repo-1.openinference.json')
+
+    const resultsDir = join(dir, 'swebench-results')
+    await mkdir(resultsDir, { recursive: true })
+    await writeFile(join(resultsDir, 'instance_results.jsonl'), `${JSON.stringify({ instance_id: 'local__repo-1', resolved: true })}\n`, 'utf8')
+    const ingested = await postEnhancementAction(url, { action: 'swebench-ingest-results', runId: 'dash-export', resultsDir }) as { summaryPath: string; resolved: number }
+    expect(ingested.summaryPath).toBe(join(artifactRootDir, 'dash-export', 'summary.json'))
+    expect(ingested.resolved).toBe(1)
+
+    const grade = await postEnhancementAction(url, { action: 'swebench-grade-command', runId: 'dash-export', dataset: 'SWE-bench/local', predictionsPath: exported.predictionsPath, maxWorkers: 2, instanceIds: 'local__repo-1' }) as { command: string[]; shellCommand: string }
+    expect(grade.command).toContain(exported.predictionsPath)
+    expect(grade.shellCommand).toContain('dash-export')
+
+    const unsupported = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'not-real' }),
+    })
+    expect(unsupported.status).toBe(400)
+  })
+
+  it('builds SWE-bench grade commands without artifact capture configured', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir: false,
+    })
+    url = `http://localhost:${server.port}`
+
+    const grade = await postEnhancementAction(url, { action: 'swebench-grade-command', runId: 'dry-grade', dataset: 'SWE-bench/local', predictionsPath: '/tmp/predictions.jsonl' }) as { shellCommand: string }
+    expect(grade.shellCommand).toContain('dry-grade')
+    expect(grade.shellCommand).toContain('/tmp/predictions.jsonl')
   })
 
   it('drives a full round-trip with dashboard + executor', async () => {
