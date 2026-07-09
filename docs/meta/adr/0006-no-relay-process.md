@@ -41,6 +41,11 @@ This is the accepted decision. The v1 shape does not include a relay. If v2 need
 
 ## Consequences
 
+**Good**:
+- v1 deploys as *one* headless service. `fly deploy` and you're done.
+- No inter-process contract between Host and Relay to specify.
+- Fewer moving parts to explain in the README and to new contributors.
+
 **Bad**:
 - Host has more responsibility. If Host process dies, both the executor connection and the LLM adapter go down. Mitigation: Host is stateless-in-memory except for the event log, which is on disk. Restart replays the log.
 - No natural place to shed load. If sessions grow beyond one Host's capacity, we'll need horizontal scaling. This is a v2 problem to solve when it becomes a real one, not now.

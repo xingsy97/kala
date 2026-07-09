@@ -82,6 +82,15 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 
 ### Meta — principles, testing, releasing, ADRs
 
+| File | Purpose |
+|---|---|
+| [meta/principles.md](meta/principles.md) | Non-negotiable principles that govern all doc + code decisions |
+| [meta/past-mistakes.md](meta/past-mistakes.md) | Retrospective on decisions that turned out wrong, so we don't repeat them |
+| [meta/authoring-notes.md](meta/authoring-notes.md) | Index of authoring guidance for contributors |
+| [meta/testing.md](meta/testing.md) | Per-layer test strategy + CI configuration |
+| [meta/releasing.md](meta/releasing.md) | npm publish workflow (tag-driven) |
+| [meta/adr/](meta/adr/) | Architecture Decision Records — one file per big call, with alternatives and consequences |
+
 ---
 
 ## When docs disagree
