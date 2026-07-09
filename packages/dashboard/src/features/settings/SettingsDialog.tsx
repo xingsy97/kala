@@ -29,15 +29,16 @@ type Props = {
   onModelsChanged?(): void
 }
 
-type SectionKey = 'runtime' | 'models' | 'approvals' | 'hooks' | 'mcp' | 'interface'
+type SectionKey = 'runtime' | 'models' | 'security' | 'approvals' | 'hooks' | 'mcp' | 'interface'
 
 const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
-  { key: 'runtime', label: 'Runtime', hint: 'Host paths and sessions' },
-  { key: 'models', label: 'Models', hint: 'Providers and default' },
-  { key: 'approvals', label: 'Approvals', hint: 'Per-session, not global' },
-  { key: 'hooks', label: 'Hooks', hint: 'Fire on tool events' },
-  { key: 'interface', label: 'Interface', hint: 'Dashboard UI toggles' },
-  { key: 'mcp', label: 'MCP servers', hint: 'Placeholder — not wired yet' },
+  { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint' },
+  { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint' },
+  { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint' },
+  { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint' },
+  { key: 'hooks', label: 'settings.sections.hooks.label', hint: 'settings.sections.hooks.hint' },
+  { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint' },
+  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint' },
 ]
 
 export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): JSX.Element {
@@ -102,6 +103,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
                 <RuntimeSection payload={payload} />
               ) : section === 'models' ? (
                 <ModelsSection payload={payload} onPayloadChange={setPayload} onModelsChanged={onModelsChanged} />
+              ) : section === 'security' ? (
+                <SecuritySection payload={payload} />
               ) : section === 'approvals' ? (
                 <ApprovalsSection />
               ) : section === 'hooks' ? (
@@ -209,6 +212,48 @@ function RuntimeSection({
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+function SecuritySection({ payload }: { payload: ServerSettingsPayload }): JSX.Element {
+  const { t } = useTranslation()
+  const auth = payload.auth
+  const rows: Array<[string, string]> = auth
+    ? [
+        [t('settings.security.dashboardAuth'), auth.dashboardAuthRequired ? t('settings.security.required') : t('settings.security.notRequired')],
+        [t('settings.security.githubOAuth'), auth.githubOAuth.required ? (auth.githubOAuth.configured ? t('settings.security.requiredConfigured') : t('settings.security.requiredIncomplete')) : t('settings.security.disabled')],
+        [t('settings.security.githubWhitelist'), auth.githubOAuth.usernameWhitelistEnabled ? auth.githubOAuth.usernameWhitelist.join(', ') : t('settings.security.disabled')],
+        [t('settings.security.executorIdentity'), auth.executorIdentity.tokenScoped ? t('settings.security.tokenScoped', { count: auth.executorIdentity.tokenCount }) : auth.executorIdentity.tokenCount > 0 ? t('settings.security.tokenProtected', { count: auth.executorIdentity.tokenCount }) : t('settings.security.inviteReady')],
+      ]
+    : [
+        [t('settings.security.dashboardAuth'), t('settings.security.notRequired')],
+        [t('settings.security.githubOAuth'), t('settings.security.disabled')],
+        [t('settings.security.executorIdentity'), t('settings.security.inviteReady')],
+      ]
+  return (
+    <div>
+      <SectionHeader
+        title={t('settings.sections.security.label')}
+        subtitle={t('settings.security.subtitle')}
+      />
+      <div className="overflow-hidden rounded-md border border-border">
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map(([label, value], i) => (
+              <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
+                <th className="w-56 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">
+                  {label}
+                </th>
+                <td className="px-3 py-2.5 text-sm text-muted-foreground">{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+        <div className="font-mono">HOST_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, EXECUTOR_TOKENS, HOST_AUDIT_DIR</div>
       </div>
     </div>
   )
