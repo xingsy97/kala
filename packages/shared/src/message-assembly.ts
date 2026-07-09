@@ -7,6 +7,7 @@
 import type { Message, ToolSchema } from '@agent-kernel/kernel'
 
 import type { ArtifactRef } from './artifact-store.js'
+import { estimateMessageTokens, estimateStringTokens, estimateToolSchemaTokens } from './token-estimation.js'
 
 export type MessageAssemblyStage = {
   name: string
@@ -82,8 +83,8 @@ export type MessageAssemblyBudgetInput = {
   compactionReserveTokens?: number
 }
 
-const DEFAULT_OUTPUT_RESERVE_TOKENS = 4096
-const DEFAULT_COMPACTION_RESERVE_TOKENS = 2048
+const DEFAULT_OUTPUT_RESERVE_TOKENS = 16_384
+const DEFAULT_COMPACTION_RESERVE_TOKENS = 16_384
 
 export function createMessageAssemblyArtifact(input: {
   sessionId: string
@@ -95,7 +96,7 @@ export function createMessageAssemblyArtifact(input: {
   stages?: readonly MessageAssemblyStage[]
   budget?: MessageAssemblyBudgetInput
 }): MessageAssemblyArtifact {
-  const buckets = new Map<MessageAssemblyPartName, { messages: number; chars: number }>()
+  const buckets = new Map<MessageAssemblyPartName, { messages: number; chars: number; estimatedTokens: number }>()
   const memoryCallIds = new Set<string>()
   for (const message of input.messages) {
     for (const content of message.content) {
@@ -103,39 +104,40 @@ export function createMessageAssemblyArtifact(input: {
     }
   }
   for (const message of input.messages) {
-    const existing = buckets.get(message.role) ?? { messages: 0, chars: 0 }
+    const existing = buckets.get(message.role) ?? { messages: 0, chars: 0, estimatedTokens: 0 }
     existing.messages += 1
     existing.chars += estimateMessageChars([message])
+    existing.estimatedTokens += estimateMessageTokens([message])
     buckets.set(message.role, existing)
     for (const content of message.content) {
       const key = content.type === 'image' ? 'images' : content.type === 'thinking' ? 'thinking' : undefined
       if (!key) continue
-      const bucket = buckets.get(key) ?? { messages: 0, chars: 0 }
-      bucket.chars += estimateContentChars(content)
+      const bucket = buckets.get(key) ?? { messages: 0, chars: 0, estimatedTokens: 0 }
+      const chars = estimateContentChars(content)
+      bucket.chars += chars
+      bucket.estimatedTokens += estimateContentTokens(content)
       buckets.set(key, bucket)
     }
     const memoryChars = estimateMemoryContributionChars(message, memoryCallIds)
     if (memoryChars > 0) {
-      const bucket = buckets.get('memory') ?? { messages: 0, chars: 0 }
+      const bucket = buckets.get('memory') ?? { messages: 0, chars: 0, estimatedTokens: 0 }
       bucket.messages += 1
       bucket.chars += memoryChars
+      bucket.estimatedTokens += estimateMemoryContributionTokens(message, memoryCallIds)
       buckets.set('memory', bucket)
     }
   }
-  const toolSchemaChars = input.tools.reduce(
-    (sum, tool) => sum + tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length,
-    0,
-  )
-  buckets.set('tools', { messages: 0, chars: toolSchemaChars })
+  const toolSchemaChars = JSON.stringify(input.tools).length
+  buckets.set('tools', { messages: 0, chars: toolSchemaChars, estimatedTokens: estimateToolSchemaTokens(input.tools) })
   const parts = [...buckets.entries()]
     .filter(([, value]) => value.messages > 0 || value.chars > 0)
     .map(([name, value]) => ({
       name,
       messages: value.messages,
       chars: value.chars,
-      estimatedTokens: estimateTokensFromChars(value.chars),
+      estimatedTokens: value.estimatedTokens,
     }))
-  const estimatedTokens = parts.reduce((sum, part) => sum + part.estimatedTokens, 0)
+  const estimatedTokens = estimateMessageTokens(input.messages) + estimateToolSchemaTokens(input.tools)
   const budget = createBudget({
     messages: input.messages,
     tools: input.tools,
@@ -182,7 +184,9 @@ function createBudget(args: {
     : undefined
   const utilization = availableTokens !== undefined && availableTokens > 0
     ? args.totalEstimatedInputTokens / availableTokens
-    : undefined
+    : availableTokens === 0 && args.totalEstimatedInputTokens > 0
+      ? Infinity
+      : undefined
   const overBudget = utilization !== undefined && utilization > 1
   const reasonCodes: string[] = []
   if (contextLimit === undefined) reasonCodes.push('context_limit_unknown')
@@ -262,26 +266,14 @@ function estimateMemoryTokensFromMessages(
   messages: readonly Message[],
   memoryCallIds: ReadonlySet<string>,
 ): number {
-  let chars = 0
+  let tokens = 0
   for (const message of messages) {
     for (const content of message.content) {
-      if (content.type === 'tool_call' && content.name === 'memory') chars += estimateContentChars(content)
-      if (content.type === 'tool_result' && memoryCallIds.has(content.callId)) chars += estimateContentChars(content)
+      if (content.type === 'tool_call' && content.name === 'memory') tokens += estimateContentTokens(content)
+      if (content.type === 'tool_result' && memoryCallIds.has(content.callId)) tokens += estimateContentTokens(content)
     }
   }
-  return estimateTokensFromChars(chars)
-}
-
-function estimateToolSchemaTokens(tools: readonly ToolSchema[]): number {
-  const chars = tools.reduce(
-    (sum, tool) => sum + tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length,
-    0,
-  )
-  return estimateTokensFromChars(chars)
-}
-
-function estimateMessageTokens(messages: readonly Message[]): number {
-  return estimateTokensFromChars(estimateMessageChars(messages))
+  return tokens
 }
 
 function estimateMemoryContributionChars(message: Message, memoryCallIds: ReadonlySet<string>): number {
@@ -291,6 +283,15 @@ function estimateMemoryContributionChars(message: Message, memoryCallIds: Readon
     if (content.type === 'tool_result' && memoryCallIds.has(content.callId)) chars += estimateContentChars(content)
   }
   return chars
+}
+
+function estimateMemoryContributionTokens(message: Message, memoryCallIds: ReadonlySet<string>): number {
+  let tokens = 0
+  for (const content of message.content) {
+    if (content.type === 'tool_call' && content.name === 'memory') tokens += estimateContentTokens(content)
+    if (content.type === 'tool_result' && memoryCallIds.has(content.callId)) tokens += estimateContentTokens(content)
+  }
+  return tokens
 }
 
 function estimateMessageChars(messages: readonly Message[]): number {
@@ -311,6 +312,12 @@ function estimateContentChars(content: Message['content'][number]): number {
     : Math.round(content.source.data.length / 4)
 }
 
-export function estimateTokensFromChars(chars: number): number {
-  return Math.ceil(chars / 4)
+function estimateContentTokens(content: Message['content'][number]): number {
+  if (content.type === 'text' || content.type === 'thinking') return estimateStringTokens(content.text) + 4
+  if (content.type === 'tool_call') {
+    return estimateStringTokens(content.name) + estimateStringTokens(content.callId) + estimateStringTokens(JSON.stringify(content.input)) + 16
+  }
+  if (content.type === 'tool_result') return estimateStringTokens(content.callId) + estimateStringTokens(content.content) + 16
+  if (content.source.kind === 'file_ref') return estimateStringTokens(content.source.path) + 32
+  return Math.ceil(content.source.data.length / 3) + 32
 }

@@ -16,6 +16,7 @@ import type {
   MessageContent,
   UsageTotal,
 } from '@agent-kernel/kernel'
+import type { ContextUsageSnapshot } from './context-usage/types.js'
 import type { LLMTrace } from './log.js'
 
 // ============================================================================
@@ -47,7 +48,7 @@ export type SessionReadyEvent = {
   cursor: number
   state: AgentState
   config: AgentConfig
-  contextSnapshot?: ContextSnapshot
+  contextSnapshot: ContextUsageSnapshot
   /**
    * Why this event fired. `'load'` (default) — a dashboard subscribed to an
    * existing or ephemeral session. `'created'` — the session was just
@@ -77,13 +78,6 @@ export type SessionReadyEvent = {
 }
 
 /**
- * Fork uses the same envelope as `SessionReadyEvent`; the discriminator is
- * `reason: 'forked'`. Kept as an alias so existing type imports don't break,
- * but new code should read `reason` directly off `SessionReadyEvent`.
- */
-export type SessionForkedEvent = SessionReadyEvent
-
-/**
  * Per-session runtime preferences. Not part of `AgentConfig` (which is
  * immutable at session creation) and not part of `AgentState` (which is
  * kernel-owned and model-agnostic). Lives in a fourth category: UI-owned,
@@ -109,11 +103,6 @@ export type ClientUpdatePreferences = {
   preferences: SessionPreferences
 }
 
-export type SessionPreferencesChangedEvent = {
-  sessionId: string
-  preferences: SessionPreferences
-}
-
 // ============================================================================
 // Unified control-plane push channel
 // ============================================================================
@@ -130,15 +119,14 @@ export type SessionPreferencesChangedEvent = {
  * than throws — so a v(N+1) host can push a new kind to a v(N)
  * dashboard without crashing it).
  *
- * The legacy per-name events (`session:renamed`, `server:executor_changed`,
- * `server:bg_task_updated`, etc.) are still emitted for one release cycle
- * so mid-flight dashboard bundles keep working during rollout. New code
- * should subscribe to `server:control_update` and read from the payload.
+ * Dashboard code should subscribe to `server:control_update` and read from the
+ * payload instead of wiring one listener per metadata subsystem.
  */
 export type ControlUpdate =
   | ({ kind: 'session_meta_changed' } & SessionMetaChanged)
   | ({ kind: 'workspace_meta_changed' } & WorkspaceMetaChanged)
   | ({ kind: 'executor_changed' } & ServerExecutorChangedPayload)
+  | ({ kind: 'host_restart' } & HostRestartEvent)
   | ({ kind: 'bg_task_updated' } & ServerBgTaskUpdated)
   | ({ kind: 'bg_task_evicted' } & ServerBgTaskEvicted)
   | ({ kind: 'sub_agent_started' } & ServerSubAgentStartedEvent)
@@ -178,24 +166,74 @@ export type StateChangedEvent = {
   sessionId: string
   cursor: number
   state: AgentState
-  contextSnapshot?: ContextSnapshot
+  contextSnapshot: ContextUsageSnapshot
 }
 
-export type ContextPressureLevel = 'none' | 'soft' | 'hard'
+export type HostRestartMode = 'checkpoint' | 'when_idle' | 'force'
 
-export type ContextSnapshot = {
-  estimatedMessageTokens: number
-  estimatedToolSchemaTokens: number
-  estimatedTotalInputTokens: number
-  reserveTokens: number
-  effectiveLimit?: number
-  contextWindow?: number
-  contextTokens?: number
-  contextWindowSource?: 'model' | 'session-config' | 'unknown'
-  contextWindowModel?: string
-  pressureLevel: ContextPressureLevel
-  reasonCodes: readonly string[]
+export type HostRestartReason = 'manual' | 'deploy' | 'settings_changed'
+
+export type HostRestartPhase =
+  | 'idle'
+  | 'requested'
+  | 'draining'
+  | 'checkpoint_reached'
+  | 'restarting'
+  | 'completed'
+  | 'aborted'
+  | 'failed'
+
+export type HostRestartSessionCheckpointStatus =
+  | 'already_safe'
+  | 'waiting_llm'
+  | 'waiting_tool'
+  | 'waiting_idle'
+  | 'safe'
+  | 'failed'
+
+export type HostRestartResumeAction =
+  | 'none'
+  | 'wait_for_approval'
+  | 'continue_turn'
+  | 'drain_queue'
+
+export type HostRestartSessionPlan = {
+  sessionId: string
+  cursor: number
+  initialStatus: AgentState['status']
+  checkpointStatus: HostRestartSessionCheckpointStatus
+  resumeAction: HostRestartResumeAction
+  label?: string
+  workspaceId?: string
+  workspaceName?: string
+  error?: string
 }
+
+export type HostRestartAttempt = {
+  attemptId: string
+  phase: HostRestartPhase
+  mode: HostRestartMode
+  reason: HostRestartReason
+  requestedAt: string
+  updatedAt: string
+  oldPid: number
+  newPid?: number
+  timeoutMs?: number
+  sessions: readonly HostRestartSessionPlan[]
+  command?: readonly string[]
+  error?: string
+}
+
+export type HostRestartStatus = {
+  pid: number
+  startedAt: string
+  current: HostRestartAttempt | null
+  last: HostRestartAttempt | null
+}
+
+export type HostRestartEvent = HostRestartAttempt
+
+export type { ContextUsageSnapshot }
 
 export type EventAppendedEvent = {
   sessionId: string
@@ -349,11 +387,6 @@ export type ClientSubscribe = {
   sessionId: string
 }
 
-export type ClientSetModel = {
-  sessionId: string
-  model: string
-}
-
 export type ClientSetCwd = {
   sessionId: string
   cwd: string
@@ -396,16 +429,6 @@ export type ClientRenameWorkspace = {
   workspaceName: string
 }
 
-export type SessionRenamedEvent = {
-  sessionId: string
-  label: string
-}
-
-export type WorkspaceRenamedEvent = {
-  workspaceId: string
-  workspaceName: string
-}
-
 // ============================================================================
 // Host → Dashboard only
 // ============================================================================
@@ -415,11 +438,6 @@ export type ApprovalRequiredEvent = {
   callId: string
   name: string
   input: Record<string, unknown>
-}
-
-export type SessionModelChangedEvent = {
-  sessionId: string
-  model: string
 }
 
 // ============================================================================
@@ -541,6 +559,7 @@ export type ClientReadFile = {
   sessionId?: string
   path: string
   maxBytes?: number
+  download?: boolean
 }
 
 export type FileContentsResult = {
@@ -554,6 +573,91 @@ export type FileContentsResult = {
   mediaType?: string
   truncated?: boolean
   error?: string
+}
+
+export type GitFileStatus =
+  | 'modified'
+  | 'added'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'untracked'
+  | 'conflicted'
+  | 'typechanged'
+
+export type GitFileChange = {
+  path: string
+  oldPath?: string
+  status: GitFileStatus
+  staged: boolean
+  unstaged: boolean
+}
+
+export type ClientGitStatus = {
+  requestId: string
+  workspaceId: string
+  sessionId?: string
+  cwd?: string
+}
+
+export type GitStatusResult = {
+  requestId: string
+  workspaceId: string
+  repo?: {
+    root: string
+    branch?: string
+    head?: string
+  }
+  files: readonly GitFileChange[]
+  truncated?: {
+    reason: 'too_many_files' | 'timeout' | 'too_large'
+    limit: number
+  }
+  error?: {
+    code:
+      | 'not_git_repo'
+      | 'executor_unavailable'
+      | 'git_unavailable'
+      | 'timeout'
+      | 'workspace_not_found'
+      | 'internal_error'
+    message: string
+  }
+}
+
+export type ClientGitDiff = {
+  requestId: string
+  workspaceId: string
+  sessionId?: string
+  path: string
+  cwd?: string
+  staged?: boolean
+}
+
+export type GitDiffResult = {
+  requestId: string
+  workspaceId: string
+  file?: GitFileChange
+  oldText?: string
+  newText?: string
+  language?: string
+  truncated?: {
+    side: 'old' | 'new' | 'both'
+    maxBytes: number
+  }
+  error?: {
+    code:
+      | 'not_git_repo'
+      | 'executor_unavailable'
+      | 'git_unavailable'
+      | 'file_not_found'
+      | 'binary_file'
+      | 'too_large'
+      | 'timeout'
+      | 'workspace_not_found'
+      | 'internal_error'
+    message: string
+  }
 }
 
 /**
@@ -1023,12 +1127,12 @@ export type ServerHistoryPayload = {
  * this to populate the model picker instead of hardcoding a list.
  */
 export type ModelInfo = {
-  /** Stable selection key. Usually `id`; provider-qualified as `providerId:id` when needed. */
-  ref?: string
+  /** Stable provider-qualified selection key. This is the only value session preferences persist. */
+  ref: string
   id: string
   label: string
   provider: string
-  providerId?: string
+  providerId: string
   source?: ModelSource
   /** Model context window in tokens, when known by the host. */
   contextWindow?: number
@@ -1132,6 +1236,21 @@ export type SettingsSkillSummary = {
   diagnostics: readonly SettingsSkillDiagnostic[]
 }
 
+export type SocketConnectionAuditSnapshot = {
+  total: number
+  dashboard: number
+  executor: number
+  other: number
+  namespaces: readonly {
+    namespace: string
+    sockets: number
+    dashboard: number
+    executor: number
+    other: number
+  }[]
+  updatedAt: string
+}
+
 export type ServerSettingsPayload = {
   providers: readonly SettingsProviderSummary[]
   defaultModel: string
@@ -1141,6 +1260,8 @@ export type ServerSettingsPayload = {
     protocol: string
     build?: BuildMetadata
   }
+  runtime?: HostRestartStatus
+  socketConnections?: SocketConnectionAuditSnapshot
   agentModule?: AgentModuleMetadata
   agentPrompt?: SettingsAgentPrompt
   auth?: {
@@ -1253,7 +1374,6 @@ export type DashboardClientToServerEvents = {
   'client:load_history': (payload: ClientLoadHistory) => void
   'client:load_log_artifact': (payload: ClientLoadLogArtifact) => void
   'client:delete_session': (payload: ClientDeleteSession) => void
-  'client:set_model': (payload: ClientSetModel) => void
   'client:update_preferences': (payload: ClientUpdatePreferences) => void
   'client:set_cwd': (payload: ClientSetCwd) => void
   'client:reorder_queued_message': (payload: ClientReorderQueuedMessage) => void
@@ -1284,6 +1404,14 @@ export type DashboardClientToServerEvents = {
     payload: ClientTerminalKill,
     ack: (result: TerminalKillResult) => void,
   ) => void
+  'git:status': (
+    payload: ClientGitStatus,
+    ack: (result: GitStatusResult) => void,
+  ) => void
+  'git:diff': (
+    payload: ClientGitDiff,
+    ack: (result: GitDiffResult) => void,
+  ) => void
   'sub_agent:list': (
     payload: ClientListSubAgents,
     ack: (result: SubAgentListResult) => void,
@@ -1297,19 +1425,13 @@ export type DashboardClientToServerEvents = {
 
 export type DashboardServerToClientEvents = {
   'session:ready': (payload: SessionReadyEvent) => void
-  'session:forked': (payload: SessionForkedEvent) => void
   'state:changed': (payload: StateChangedEvent) => void
   'event:appended': (payload: EventAppendedEvent) => void
   'session:error': (payload: SessionErrorEvent) => void
   'approval:required': (payload: ApprovalRequiredEvent) => void
-  'session:model_changed': (payload: SessionModelChangedEvent) => void
-  'session:preferences_changed': (payload: SessionPreferencesChangedEvent) => void
   'session:token_delta': (payload: ServerTokenDeltaEvent) => void
-  'session:renamed': (payload: SessionRenamedEvent) => void
-  'workspace:renamed': (payload: WorkspaceRenamedEvent) => void
   'server:message_queue': (payload: ServerMessageQueueEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
-  'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
   'server:sessions': (payload: ServerSessionsPayload) => void
   'server:dir_list': (payload: DirListResult) => void
   'server:file_list': (payload: FileListResult) => void
@@ -1319,17 +1441,12 @@ export type DashboardServerToClientEvents = {
   'server:history': (payload: ServerHistoryPayload) => void
   'server:log_artifact': (payload: ServerLogArtifactPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
-  'server:bg_task_updated': (payload: ServerBgTaskUpdated) => void
-  'server:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
   'server:terminal_output': (payload: ServerTerminalOutput) => void
   'server:terminal_exit': (payload: ServerTerminalExit) => void
-  'server:sub_agent_started': (payload: ServerSubAgentStartedEvent) => void
-  'server:sub_agent_finished': (payload: ServerSubAgentFinishedEvent) => void
   /**
-   * Unified control-plane push. Every "something outside the kernel
-   * changed" push is either duplicated here (during the migration
-   * window) or emitted only here (for new features). See {@link ControlUpdate}
-   * for the discriminated payload.
+   * Unified control-plane push for metadata and runtime lifecycle changes
+   * outside the kernel event stream. See {@link ControlUpdate} for the
+   * discriminated payload.
    */
   'server:control_update': (payload: ControlUpdate) => void
 }

@@ -20,6 +20,8 @@ import type {
   ClientDeleteQueuedMessage,
   ClientDeleteSession,
   ClientFork,
+  ClientGitDiff,
+  ClientGitStatus,
   ClientInterruptSubAgent,
   ClientKillBgTask,
   ClientListAgentTypes,
@@ -39,7 +41,6 @@ import type {
   ClientReorderQueuedMessage,
   ClientSetApprovalMode,
   ClientSetCwd,
-  ClientSetModel,
   ClientSetDefaultModel,
   ClientSubscribe,
   ClientTerminalCreate,
@@ -64,12 +65,23 @@ import type {
 } from '../protocol.js'
 import { ApprovalModeSchema, MessageContentSchema } from './kernel.js'
 
+const NonEmptyStringSchema = z.string().trim().min(1)
+const SessionIdSchema = NonEmptyStringSchema
+const WorkspaceIdSchema = NonEmptyStringSchema
+const RequestIdSchema = NonEmptyStringSchema
+const WireIdSchema = NonEmptyStringSchema
+const UrlStringSchema = z.string().trim().url()
+const RelativePathSchema = z.string().trim().min(1).refine(
+  (value) => !value.startsWith('/') && !value.startsWith('\\\\') && !value.split(/[\\/]+/u).includes('..'),
+  'path must be repo-relative',
+)
+
 // ============================================================================
 // Per-session preferences
 // ============================================================================
 
 export const SessionPreferencesSchema = z.object({
-  selectedModel: z.string().optional(),
+  selectedModel: z.string().trim().optional(),
 }) satisfies z.ZodType<SessionPreferences>
 
 // ============================================================================
@@ -77,47 +89,47 @@ export const SessionPreferencesSchema = z.object({
 // ============================================================================
 
 export const ClientUserMessageSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   text: z.string(),
   mode: z.enum(['steer', 'queue']).optional(),
   content: z.array(MessageContentSchema).optional(),
 }) satisfies z.ZodType<ClientUserMessage>
 
 export const ClientUserApproveSchema = z.object({
-  sessionId: z.string(),
-  callId: z.string(),
+  sessionId: SessionIdSchema,
+  callId: WireIdSchema,
 }) satisfies z.ZodType<ClientUserApprove>
 
 export const ClientUserRejectSchema = z.object({
-  sessionId: z.string(),
-  callId: z.string(),
+  sessionId: SessionIdSchema,
+  callId: WireIdSchema,
   reason: z.string().optional(),
 }) satisfies z.ZodType<ClientUserReject>
 
 export const ClientCancelSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientCancel>
 
 export const ClientClearSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientClear>
 
 export const ClientCompactSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientCompact>
 
 export const ClientCancelStreamSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientCancelStream>
 
 export const ClientInterruptSubAgentSchema = z.object({
-  parentSessionId: z.string(),
-  parentCallId: z.string(),
-  childSessionId: z.string().optional(),
+  parentSessionId: SessionIdSchema,
+  parentCallId: WireIdSchema,
+  childSessionId: SessionIdSchema.optional(),
 }) satisfies z.ZodType<ClientInterruptSubAgent>
 
 export const ClientSetApprovalModeSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   mode: ApprovalModeSchema,
 }) satisfies z.ZodType<ClientSetApprovalMode>
 
@@ -126,15 +138,15 @@ export const ClientSetApprovalModeSchema = z.object({
 // ============================================================================
 
 export const ClientForkSchema = z.object({
-  sourceSessionId: z.string(),
+  sourceSessionId: SessionIdSchema,
   cursor: z.number().int().nonnegative(),
-  newSessionId: z.string().optional(),
+  newSessionId: SessionIdSchema.optional(),
   seedMessage: z.string().optional(),
 }) satisfies z.ZodType<ClientFork>
 
 export const ClientCreateSessionSchema = z.object({
-  sessionId: z.string(),
-  workspaceId: z.string().optional(),
+  sessionId: SessionIdSchema,
+  workspaceId: WorkspaceIdSchema.optional(),
   workspaceName: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).readonly().optional(),
@@ -142,21 +154,21 @@ export const ClientCreateSessionSchema = z.object({
 }) satisfies z.ZodType<ClientCreateSession>
 
 export const ClientSubscribeSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientSubscribe>
 
 export const ClientLoadHistorySchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   sinceCursor: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<ClientLoadHistory>
 
 export const ClientLoadLogArtifactSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   seq: z.number().int().nonnegative(),
 }) satisfies z.ZodType<ClientLoadLogArtifact>
 
 export const ClientDeleteSessionSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   cascade: z.boolean().optional(),
 }) satisfies z.ZodType<ClientDeleteSession>
 
@@ -176,18 +188,13 @@ export const ClientListExecutorsSchema = EmptyRecordSchema as unknown as z.ZodTy
 // Model / preferences / cwd
 // ============================================================================
 
-export const ClientSetModelSchema = z.object({
-  sessionId: z.string(),
-  model: z.string(),
-}) satisfies z.ZodType<ClientSetModel>
-
 export const ClientUpdatePreferencesSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   preferences: SessionPreferencesSchema,
 }) satisfies z.ZodType<ClientUpdatePreferences>
 
 export const ClientSetCwdSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   cwd: z.string(),
 }) satisfies z.ZodType<ClientSetCwd>
 
@@ -196,20 +203,20 @@ export const ClientSetCwdSchema = z.object({
 // ============================================================================
 
 export const ClientReorderQueuedMessageSchema = z.object({
-  sessionId: z.string(),
-  id: z.string(),
-  beforeId: z.string().nullable().optional(),
+  sessionId: SessionIdSchema,
+  id: WireIdSchema,
+  beforeId: WireIdSchema.nullable().optional(),
 }) satisfies z.ZodType<ClientReorderQueuedMessage>
 
 export const ClientUpdateQueuedMessageSchema = z.object({
-  sessionId: z.string(),
-  id: z.string(),
+  sessionId: SessionIdSchema,
+  id: WireIdSchema,
   text: z.string(),
 }) satisfies z.ZodType<ClientUpdateQueuedMessage>
 
 export const ClientDeleteQueuedMessageSchema = z.object({
-  sessionId: z.string(),
-  id: z.string(),
+  sessionId: SessionIdSchema,
+  id: WireIdSchema,
 }) satisfies z.ZodType<ClientDeleteQueuedMessage>
 
 // ============================================================================
@@ -217,12 +224,12 @@ export const ClientDeleteQueuedMessageSchema = z.object({
 // ============================================================================
 
 export const ClientRenameSessionSchema = z.object({
-  sessionId: z.string(),
+  sessionId: SessionIdSchema,
   label: z.string(),
 }) satisfies z.ZodType<ClientRenameSession>
 
 export const ClientRenameWorkspaceSchema = z.object({
-  workspaceId: z.string(),
+  workspaceId: WorkspaceIdSchema,
   workspaceName: z.string(),
 }) satisfies z.ZodType<ClientRenameWorkspace>
 
@@ -231,74 +238,91 @@ export const ClientRenameWorkspaceSchema = z.object({
 // ============================================================================
 
 export const ClientListDirsSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string().optional(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema.optional(),
   path: z.string().optional(),
 }) satisfies z.ZodType<ClientListDirs>
 
 export const ClientListFilesSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string().optional(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema.optional(),
   query: z.string().optional(),
   limit: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ClientListFiles>
 
 export const ClientReadFileSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string().optional(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema.optional(),
   path: z.string(),
   maxBytes: z.number().int().positive().optional(),
+  download: z.boolean().optional(),
 }) satisfies z.ZodType<ClientReadFile>
 
+export const ClientGitStatusSchema = z.object({
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema.optional(),
+  cwd: z.string().min(1).optional(),
+}) satisfies z.ZodType<ClientGitStatus>
+
+export const ClientGitDiffSchema = z.object({
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema.optional(),
+  path: RelativePathSchema,
+  cwd: z.string().min(1).optional(),
+  staged: z.boolean().optional(),
+}) satisfies z.ZodType<ClientGitDiff>
+
 export const ClientReadOverflowSchema = z.object({
-  requestId: z.string(),
-  sessionId: z.string(),
-  callId: z.string(),
+  requestId: RequestIdSchema,
+  sessionId: SessionIdSchema,
+  callId: WireIdSchema,
 }) satisfies z.ZodType<ClientReadOverflow>
 
 export const ClientTerminalCreateSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
   cwd: z.string().optional(),
   cols: z.number().int().positive().optional(),
   rows: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ClientTerminalCreate>
 
 export const ClientTerminalInputSchema = z.object({
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  terminalId: z.string(),
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  terminalId: WireIdSchema,
   data: z.string(),
 }) satisfies z.ZodType<ClientTerminalInput>
 
 export const ClientTerminalResizeSchema = z.object({
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  terminalId: z.string(),
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  terminalId: WireIdSchema,
   cols: z.number().int().positive(),
   rows: z.number().int().positive(),
 }) satisfies z.ZodType<ClientTerminalResize>
 
 export const ClientTerminalKillSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  terminalId: z.string(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  terminalId: WireIdSchema,
 }) satisfies z.ZodType<ClientTerminalKill>
 
 export const DeleteOverflowSessionSchema = z.object({
-  requestId: z.string(),
-  sessionId: z.string(),
+  requestId: RequestIdSchema,
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<DeleteOverflowSession>
 
 export const CopyOverflowSessionSchema = z.object({
-  requestId: z.string(),
-  sourceSessionId: z.string(),
-  targetSessionId: z.string(),
+  requestId: RequestIdSchema,
+  sourceSessionId: SessionIdSchema,
+  targetSessionId: SessionIdSchema,
 }) satisfies z.ZodType<CopyOverflowSession>
 
 // ============================================================================
@@ -306,25 +330,25 @@ export const CopyOverflowSessionSchema = z.object({
 // ============================================================================
 
 export const ClientListBgTasksSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientListBgTasks>
 
 export const ClientReadBgOutputSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  taskId: z.string(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  taskId: WireIdSchema,
   offset: z.number().int().nonnegative().optional(),
   maxBytes: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ClientReadBgOutput>
 
 export const ClientKillBgTaskSchema = z.object({
-  requestId: z.string(),
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  taskId: z.string(),
+  requestId: RequestIdSchema,
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  taskId: WireIdSchema,
 }) satisfies z.ZodType<ClientKillBgTask>
 
 // ============================================================================
@@ -332,12 +356,12 @@ export const ClientKillBgTaskSchema = z.object({
 // ============================================================================
 
 export const ClientListSubAgentsSchema = z.object({
-  requestId: z.string(),
-  parentSessionId: z.string(),
+  requestId: RequestIdSchema,
+  parentSessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientListSubAgents>
 
 export const ClientListAgentTypesSchema = z.object({
-  requestId: z.string(),
+  requestId: RequestIdSchema,
 }) satisfies z.ZodType<ClientListAgentTypes>
 
 // ============================================================================
@@ -345,8 +369,8 @@ export const ClientListAgentTypesSchema = z.object({
 // ============================================================================
 
 export const ClientConsolidateMemorySchema = z.object({
-  requestId: z.string(),
-  sessionId: z.string(),
+  requestId: RequestIdSchema,
+  sessionId: SessionIdSchema,
 }) satisfies z.ZodType<ClientConsolidateMemory>
 
 // ============================================================================
@@ -354,35 +378,35 @@ export const ClientConsolidateMemorySchema = z.object({
 // ============================================================================
 
 export const ManualModelInputSchema = z.object({
-  providerId: z.string(),
-  id: z.string(),
-  label: z.string().optional(),
+  providerId: NonEmptyStringSchema,
+  id: NonEmptyStringSchema,
+  label: z.string().trim().optional(),
   contextWindow: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ManualModelInput>
 
 export const ManualProviderInputSchema = z.object({
-  id: z.string(),
-  label: z.string().optional(),
+  id: NonEmptyStringSchema,
+  label: z.string().trim().optional(),
   wire: z.enum(['anthropic', 'openai']),
-  baseUrl: z.string(),
-  apiKey: z.string(),
+  baseUrl: UrlStringSchema,
+  apiKey: NonEmptyStringSchema,
 }) satisfies z.ZodType<ManualProviderInput>
 
 export const ClientAddManualProviderSchema = ManualProviderInputSchema satisfies z.ZodType<ClientAddManualProvider>
 
 export const ClientDeleteManualProviderSchema = z.object({
-  providerId: z.string(),
+  providerId: NonEmptyStringSchema,
 }) satisfies z.ZodType<ClientDeleteManualProvider>
 
 export const ClientAddManualModelSchema = ManualModelInputSchema satisfies z.ZodType<ClientAddManualModel>
 
 export const ClientDeleteManualModelSchema = z.object({
-  providerId: z.string(),
-  id: z.string(),
+  providerId: NonEmptyStringSchema,
+  id: NonEmptyStringSchema,
 }) satisfies z.ZodType<ClientDeleteManualModel>
 
 export const ClientSetDefaultModelSchema = z.object({
-  model: z.string(),
+  model: NonEmptyStringSchema,
 }) satisfies z.ZodType<ClientSetDefaultModel>
 
 export const ClientUpdateAgentPromptSettingsSchema = z.object({

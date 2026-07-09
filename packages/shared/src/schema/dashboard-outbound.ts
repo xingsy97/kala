@@ -20,8 +20,7 @@ import type {
   BgListResult,
   BgOutputResult,
   ConsolidateMemoryResult,
-  ContextPressureLevel,
-  ContextSnapshot,
+  ContextUsageSnapshot,
   ControlUpdate,
   CopyOverflowSessionResult,
   DeleteOverflowSessionResult,
@@ -32,8 +31,15 @@ import type {
   ExecutorIdentitySummary,
   ExecutorInviteSummary,
   FileContentsResult,
+  GitDiffResult,
+  GitFileChange,
+  GitStatusResult,
   FileListEntry,
   FileListResult,
+  HostRestartAttempt,
+  HostRestartEvent,
+  HostRestartSessionPlan,
+  HostRestartStatus,
   ManualModelInput,
   ModelInfo,
   ModelSource,
@@ -60,12 +66,8 @@ import type {
   ServerTokenDeltaEvent,
   SessionErrorEvent,
   SessionErrorScope,
-  SessionForkedEvent,
   SessionMetaChanged,
-  SessionModelChangedEvent,
-  SessionPreferencesChangedEvent,
   SessionReadyEvent,
-  SessionRenamedEvent,
   SessionSummary,
   SettingsHookSummary,
   SettingsAgentPrompt,
@@ -75,7 +77,6 @@ import type {
   SubAgentSummary,
   ToolProgressPayload,
   WorkspaceMetaChanged,
-  WorkspaceRenamedEvent,
 } from '../protocol.js'
 import { SESSION_ERROR_SCOPES } from '../protocol.js'
 import type { EventEntry, HeaderEntry, LLMTrace, LogEntry, MetadataEntry, RuntimeMetadataEntry, SnapshotEntry } from '../log.js'
@@ -134,32 +135,49 @@ export const LLMTraceSchema = z.object({
 // Session lifecycle events
 // ============================================================================
 
-export const ContextPressureLevelSchema: z.ZodType<ContextPressureLevel> = z.enum([
-  'none',
-  'soft',
-  'hard',
-])
-
-export const ContextSnapshotSchema = z.object({
-  estimatedMessageTokens: z.number().int().nonnegative(),
-  estimatedToolSchemaTokens: z.number().int().nonnegative(),
-  estimatedTotalInputTokens: z.number().int().nonnegative(),
-  reserveTokens: z.number().int().nonnegative(),
-  effectiveLimit: z.number().int().positive().optional(),
-  contextWindow: z.number().int().positive().optional(),
-  contextTokens: z.number().int().positive().optional(),
-  contextWindowSource: z.enum(['model', 'session-config', 'unknown']).optional(),
-  contextWindowModel: z.string().optional(),
-  pressureLevel: ContextPressureLevelSchema,
-  reasonCodes: z.array(z.string()),
-}) satisfies z.ZodType<ContextSnapshot>
+export const ContextUsageSnapshotSchema = z.object({
+  model: z.object({
+    ref: z.string(),
+    provider: z.string().optional(),
+    id: z.string().optional(),
+  }),
+  contextWindow: z.object({
+    tokens: z.number().int().positive().nullable(),
+    source: z.enum(['manual_config', 'model_registry', 'provider_default', 'api_reported', 'unknown']),
+  }),
+  usage: z.object({
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative().optional(),
+    totalTokens: z.number().int().nonnegative(),
+  }),
+  breakdown: z.object({
+    system: z.number().int().nonnegative(),
+    transcript: z.number().int().nonnegative(),
+    tools: z.number().int().nonnegative(),
+    memory: z.number().int().nonnegative(),
+    attachments: z.number().int().nonnegative(),
+    pendingUserInput: z.number().int().nonnegative(),
+  }),
+  estimator: z.object({
+    total: z.object({
+      kind: z.enum(['provider_reported', 'tokenizer', 'heuristic']),
+      confidence: z.enum(['exact', 'estimated', 'rough']),
+    }),
+    breakdown: z.object({
+      kind: z.enum(['tokenizer', 'heuristic']),
+      confidence: z.enum(['estimated', 'rough']),
+    }),
+    version: z.string(),
+  }),
+  updatedAt: z.number().int().nonnegative(),
+}) satisfies z.ZodType<ContextUsageSnapshot>
 
 export const SessionReadyEventSchema = z.object({
   sessionId: z.string(),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
   config: AgentConfigSchema,
-  contextSnapshot: ContextSnapshotSchema.optional(),
+  contextSnapshot: ContextUsageSnapshotSchema,
   reason: z.enum(['load', 'created', 'forked']).optional(),
   parentSessionId: z.string().optional(),
   parentCursor: z.number().int().nonnegative().optional(),
@@ -171,14 +189,48 @@ export const SessionReadyEventSchema = z.object({
   selectedModel: z.string().optional(),
 }) satisfies z.ZodType<SessionReadyEvent>
 
-export const SessionForkedEventSchema: z.ZodType<SessionForkedEvent> = SessionReadyEventSchema
-
 export const StateChangedEventSchema = z.object({
   sessionId: z.string(),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
-  contextSnapshot: ContextSnapshotSchema.optional(),
+  contextSnapshot: ContextUsageSnapshotSchema,
 }) satisfies z.ZodType<StateChangedEvent>
+
+export const HostRestartSessionPlanSchema = z.object({
+  sessionId: z.string(),
+  cursor: z.number().int().nonnegative(),
+  initialStatus: AgentStatusSchema,
+  checkpointStatus: z.enum(['already_safe', 'waiting_llm', 'waiting_tool', 'waiting_idle', 'safe', 'failed']),
+  resumeAction: z.enum(['none', 'wait_for_approval', 'continue_turn', 'drain_queue']),
+  label: z.string().optional(),
+  workspaceId: z.string().optional(),
+  workspaceName: z.string().optional(),
+  error: z.string().optional(),
+}) satisfies z.ZodType<HostRestartSessionPlan>
+
+export const HostRestartAttemptSchema = z.object({
+  attemptId: z.string(),
+  phase: z.enum(['idle', 'requested', 'draining', 'checkpoint_reached', 'restarting', 'completed', 'aborted', 'failed']),
+  mode: z.enum(['checkpoint', 'when_idle', 'force']),
+  reason: z.enum(['manual', 'deploy', 'settings_changed']),
+  requestedAt: z.string(),
+  updatedAt: z.string(),
+  oldPid: z.number().int().nonnegative(),
+  newPid: z.number().int().nonnegative().optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  sessions: z.array(HostRestartSessionPlanSchema),
+  command: z.array(z.string()).optional(),
+  error: z.string().optional(),
+}) satisfies z.ZodType<HostRestartAttempt>
+
+export const HostRestartStatusSchema = z.object({
+  pid: z.number().int().nonnegative(),
+  startedAt: z.string(),
+  current: HostRestartAttemptSchema.nullable(),
+  last: HostRestartAttemptSchema.nullable(),
+}) satisfies z.ZodType<HostRestartStatus>
+
+export const HostRestartEventSchema: z.ZodType<HostRestartEvent> = HostRestartAttemptSchema
 
 export const EventAppendedEventSchema = z.object({
   sessionId: z.string(),
@@ -217,30 +269,10 @@ export const ApprovalRequiredEventSchema = z.object({
   input: z.record(z.string(), z.unknown()),
 }) satisfies z.ZodType<ApprovalRequiredEvent>
 
-export const SessionModelChangedEventSchema = z.object({
-  sessionId: z.string(),
-  model: z.string(),
-}) satisfies z.ZodType<SessionModelChangedEvent>
-
-export const SessionPreferencesChangedEventSchema = z.object({
-  sessionId: z.string(),
-  preferences: SessionPreferencesSchema,
-}) satisfies z.ZodType<SessionPreferencesChangedEvent>
-
 export const ServerTokenDeltaEventSchema = z.object({
   sessionId: z.string(),
   text: z.string(),
 }) satisfies z.ZodType<ServerTokenDeltaEvent>
-
-export const SessionRenamedEventSchema = z.object({
-  sessionId: z.string(),
-  label: z.string(),
-}) satisfies z.ZodType<SessionRenamedEvent>
-
-export const WorkspaceRenamedEventSchema = z.object({
-  workspaceId: z.string(),
-  workspaceName: z.string(),
-}) satisfies z.ZodType<WorkspaceRenamedEvent>
 
 // ============================================================================
 // Control-plane push
@@ -455,6 +487,58 @@ export const CopyOverflowSessionResultSchema = z.object({
 }) satisfies z.ZodType<CopyOverflowSessionResult>
 
 // ============================================================================
+// Git read-only responses
+// ============================================================================
+
+export const GitFileChangeSchema = z.object({
+  path: z.string(),
+  oldPath: z.string().optional(),
+  status: z.enum(['modified', 'added', 'deleted', 'renamed', 'copied', 'untracked', 'conflicted', 'typechanged']),
+  staged: z.boolean(),
+  unstaged: z.boolean(),
+}) satisfies z.ZodType<GitFileChange>
+
+const GitStatusErrorSchema = z.object({
+  code: z.enum(['not_git_repo', 'executor_unavailable', 'git_unavailable', 'timeout', 'workspace_not_found', 'internal_error']),
+  message: z.string(),
+})
+
+export const GitStatusResultSchema = z.object({
+  requestId: z.string(),
+  workspaceId: z.string(),
+  repo: z.object({
+    root: z.string(),
+    branch: z.string().optional(),
+    head: z.string().optional(),
+  }).optional(),
+  files: z.array(GitFileChangeSchema),
+  truncated: z.object({
+    reason: z.enum(['too_many_files', 'timeout', 'too_large']),
+    limit: z.number().int().nonnegative(),
+  }).optional(),
+  error: GitStatusErrorSchema.optional(),
+}) satisfies z.ZodType<GitStatusResult>
+
+const GitDiffErrorSchema = z.object({
+  code: z.enum(['not_git_repo', 'executor_unavailable', 'git_unavailable', 'file_not_found', 'binary_file', 'too_large', 'timeout', 'workspace_not_found', 'internal_error']),
+  message: z.string(),
+})
+
+export const GitDiffResultSchema = z.object({
+  requestId: z.string(),
+  workspaceId: z.string(),
+  file: GitFileChangeSchema.optional(),
+  oldText: z.string().optional(),
+  newText: z.string().optional(),
+  language: z.string().optional(),
+  truncated: z.object({
+    side: z.enum(['old', 'new', 'both']),
+    maxBytes: z.number().int().positive(),
+  }).optional(),
+  error: GitDiffErrorSchema.optional(),
+}) satisfies z.ZodType<GitDiffResult>
+
+// ============================================================================
 // Background task results
 // ============================================================================
 
@@ -548,11 +632,11 @@ const ModelSourceSchema = z.enum([
 ]) satisfies z.ZodType<ModelSource>
 
 export const ModelInfoSchema = z.object({
-  ref: z.string().optional(),
+  ref: z.string(),
   id: z.string(),
   label: z.string(),
   provider: z.string(),
-  providerId: z.string().optional(),
+  providerId: z.string(),
   source: ModelSourceSchema.optional(),
   contextWindow: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ModelInfo>
@@ -610,6 +694,21 @@ export const ServerSettingsPayloadSchema = z.object({
       build: BuildMetadataSchema.optional(),
     })
     .optional(),
+  runtime: HostRestartStatusSchema.optional(),
+  socketConnections: z.object({
+    total: z.number().int().nonnegative(),
+    dashboard: z.number().int().nonnegative(),
+    executor: z.number().int().nonnegative(),
+    other: z.number().int().nonnegative(),
+    namespaces: z.array(z.object({
+      namespace: z.string(),
+      sockets: z.number().int().nonnegative(),
+      dashboard: z.number().int().nonnegative(),
+      executor: z.number().int().nonnegative(),
+      other: z.number().int().nonnegative(),
+    })),
+    updatedAt: z.string(),
+  }).optional(),
   agentModule: AgentModuleMetadataSchema.optional(),
   agentPrompt: SettingsAgentPromptSchema.optional(),
   auth: z
