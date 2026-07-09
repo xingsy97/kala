@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useState, type FormEvent, type InputHTMLAttributes } from 'react'
 import { CheckCircle2, Dices, FileText, RefreshCw, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 
-import { Button } from '../../components/ui/button.js'
-import { Input } from '../../components/ui/input.js'
+import { Button } from '../../../components/ui/button.js'
+import { Input } from '../../../components/ui/input.js'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '../../components/ui/dialog.js'
-import { ScrollArea } from '../../components/ui/scroll-area.js'
-import { JsonBlock } from '../../components/ui/json-block.js'
-import { cn } from '../../lib/utils.js'
-import { BadCasesTab } from './BadCasesTab.js'
+} from '../../../components/ui/dialog.js'
+import { ScrollArea } from '../../../components/ui/scroll-area.js'
+import { JsonBlock } from '../../../components/ui/json-block.js'
+import { cn } from '../../../lib/utils.js'
 
 export type ArtifactManifestEntry = {
   path: string
@@ -40,22 +40,13 @@ export type ArtifactManifest = {
   }
 }
 
-type Props = {
-  open: boolean
-  initialMode?: ViewMode
-  onOpenChange(open: boolean): void
-  onOpenSession?(sessionId: string): void
-}
-
-type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops' | 'badcases'
-
 type ArtifactContentResponse = {
   path: string
   mediaType: string
   body: unknown
 }
 
-type EvalRunSummary = {
+export type EvalRunSummary = {
   experimentId?: string
   dataset?: string
   model?: string
@@ -68,7 +59,7 @@ type EvalRunSummary = {
   subagentUsage?: EvalSubAgentUsage
 }
 
-type EvalSubAgentUsage = {
+export type EvalSubAgentUsage = {
   totalCount?: number
   trialsWithSubagents?: number
   maxDepth?: number
@@ -77,7 +68,7 @@ type EvalSubAgentUsage = {
   unresolvedWithSubagents?: number
 }
 
-type EvalInstanceProgress = {
+export type EvalInstanceProgress = {
   instanceId?: string
   status?: string
   durationMs?: number
@@ -86,7 +77,7 @@ type EvalInstanceProgress = {
   metrics?: Record<string, unknown>
 }
 
-type EvalRunProgress = {
+export type EvalRunProgress = {
   schemaVersion?: number
   runId?: string
   dataset?: string
@@ -107,7 +98,7 @@ type EvalRunProgress = {
   instances?: readonly EvalInstanceProgress[]
 }
 
-type EvalRunRow = {
+export type EvalRunRow = {
   key: string
   root: string
   summaryPath?: string
@@ -116,24 +107,24 @@ type EvalRunRow = {
   progress?: EvalRunProgress
 }
 
-type EvalSummaryContentRow = {
+export type EvalSummaryContentRow = {
   path: string
   summary: EvalRunSummary
 }
 
-type EvalProgressContentRow = {
+export type EvalProgressContentRow = {
   path: string
   progress: EvalRunProgress
 }
 
-type EvalTrialArtifactRef = {
+export type EvalTrialArtifactRef = {
   kind?: string
   uri?: string
   bytes?: number
   mediaType?: string
 }
 
-type EvalTrial = {
+export type EvalTrial = {
   trialId?: string
   experimentId?: string
   instanceId?: string
@@ -145,12 +136,12 @@ type EvalTrial = {
   metrics?: Record<string, unknown>
 }
 
-type EvalTrialRow = {
+export type EvalTrialRow = {
   path: string
   trial: EvalTrial
 }
 
-type EvalRunComparison = {
+export type EvalRunComparison = {
   baseline?: { experimentId?: string; resolved?: number; failed?: number; timedOut?: number }
   candidate?: { experimentId?: string; resolved?: number; failed?: number; timedOut?: number }
   deltas?: { resolved?: number; failed?: number; timedOut?: number; passRate?: number }
@@ -167,12 +158,12 @@ type EvalRunComparison = {
   }
 }
 
-type EvalComparisonRow = {
+export type EvalComparisonRow = {
   path: string
   comparison: EvalRunComparison
 }
 
-type EvalScoreSummary = {
+export type EvalScoreSummary = {
   instanceId?: string
   resolved?: boolean
   failureLabel?: string
@@ -180,24 +171,24 @@ type EvalScoreSummary = {
   results?: readonly { scorer?: string; passed?: boolean; label?: string; score?: number; explanation?: string }[]
 }
 
-type EvalScoreRow = {
+export type EvalScoreRow = {
   path: string
   summary: EvalScoreSummary
 }
 
-type EvalJudgeTrace = {
+export type EvalJudgeTrace = {
   scorer?: string
   judgeModel?: string
   inputRef?: string
   parsed?: { score?: number; passed?: boolean; label?: string; explanation?: string }
 }
 
-type EvalJudgeRow = {
+export type EvalJudgeRow = {
   path: string
   trace: EvalJudgeTrace
 }
 
-type EvalWorkerPlan = {
+export type EvalWorkerPlan = {
   runId?: string
   dataset?: string
   split?: string
@@ -215,7 +206,7 @@ type EvalWorkerPlan = {
   warnings?: readonly string[]
 }
 
-type EvalWorkerPlanRow = {
+export type EvalWorkerPlanRow = {
   path: string
   plan: EvalWorkerPlan
 }
@@ -275,7 +266,7 @@ type EnhancementActionConfig = {
   fields: readonly EnhancementActionField[]
 }
 
-type SessionProfile = {
+export type SessionProfile = {
   sessionId?: string
   llmCalls?: number
   toolCalls?: number
@@ -294,7 +285,7 @@ type SessionProfile = {
   p95TimeToFirstChunkMs?: number
 }
 
-type ProfileRow = {
+export type ProfileRow = {
   path: string
   profile: SessionProfile
 }
@@ -332,7 +323,7 @@ type MemoryConflictWarning = {
   entries?: readonly { scope?: string; key?: string; path?: string }[]
 }
 
-type MemoryIndex = {
+export type MemoryIndex = {
   generatedAt?: string
   entries?: readonly MemoryIndexEntry[]
   warnings?: readonly string[]
@@ -340,12 +331,12 @@ type MemoryIndex = {
   conflictWarnings?: readonly MemoryConflictWarning[]
 }
 
-type MemoryIndexRow = {
+export type MemoryIndexRow = {
   path: string
   index: MemoryIndex
 }
 
-type OpsArtifactKind =
+export type OpsArtifactKind =
   | 'reliability_audit'
   | 'reliability_chaos'
   | 'rl_rollout_sidecar'
@@ -357,13 +348,13 @@ type OpsArtifactKind =
   | 'router_decision'
   | 'tool_catalog'
 
-type OpsArtifactRow = {
+export type OpsArtifactRow = {
   path: string
   kind: OpsArtifactKind
   body: Record<string, unknown>
 }
 
-type ArtifactDetailRequest = {
+export type ArtifactDetailRequest = {
   path: string
   label: string
 }
@@ -380,316 +371,10 @@ type TrialArtifactCategory = 'patch' | 'trace' | 'harness' | 'log' | 'prompt' | 
 
 type TrialArtifactGroup = {
   category: TrialArtifactCategory
-  label: string
   items: readonly TrialArtifactItem[]
 }
 
-export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpenChange, onOpenSession }: Props): JSX.Element {
-  const { t } = useTranslation()
-  const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
-  const [mode, setMode] = useState<ViewMode>(initialMode)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [reloadToken, setReloadToken] = useState(0)
-  const [evalRows, setEvalRows] = useState<readonly EvalRunRow[]>([])
-  const [evalComparisons, setEvalComparisons] = useState<readonly EvalComparisonRow[]>([])
-  const [evalScores, setEvalScores] = useState<readonly EvalScoreRow[]>([])
-  const [evalJudges, setEvalJudges] = useState<readonly EvalJudgeRow[]>([])
-  const [evalWorkerPlans, setEvalWorkerPlans] = useState<readonly EvalWorkerPlanRow[]>([])
-  const [evalError, setEvalError] = useState<string | null>(null)
-  const [selectedEvalRunPath, setSelectedEvalRunPath] = useState<string | null>(null)
-  const [evalTrials, setEvalTrials] = useState<readonly EvalTrialRow[]>([])
-  const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null)
-  const [evalTrialsLoading, setEvalTrialsLoading] = useState(false)
-  const [evalTrialsError, setEvalTrialsError] = useState<string | null>(null)
-  const [profileRows, setProfileRows] = useState<readonly ProfileRow[]>([])
-  const [profileError, setProfileError] = useState<string | null>(null)
-  const [memoryRows, setMemoryRows] = useState<readonly MemoryIndexRow[]>([])
-  const [memoryError, setMemoryError] = useState<string | null>(null)
-  const [opsRows, setOpsRows] = useState<readonly OpsArtifactRow[]>([])
-  const [opsError, setOpsError] = useState<string | null>(null)
-  const [artifactDetail, setArtifactDetail] = useState<ArtifactDetailRequest | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setMode(initialMode)
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    void fetch('/artifacts/manifest', { cache: 'no-store' })
-      .then(async (res) => {
-        if (res.ok) return (await res.json()) as ArtifactManifest
-        const body = await res.json().catch(() => null) as { error?: string } | null
-        throw new Error(body?.error ?? `artifact manifest request failed: ${res.status}`)
-      })
-      .then((next) => {
-        if (cancelled) return
-        setManifest(next)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-        setManifest(null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, initialMode, reloadToken])
-
-  const kindRows = useMemo(() => {
-    if (!manifest) return []
-    return Object.entries(manifest.summary.kinds).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-  }, [manifest])
-
-  useEffect(() => {
-    if (!open || mode !== 'eval' || !manifest) return
-    const summaries = manifest.entries.filter((entry) => entry.kind === 'eval_summary' || entry.path.endsWith('/summary.json'))
-    const progresses = manifest.entries.filter((entry) => entry.kind === 'eval_progress' || entry.path.endsWith('/progress.json'))
-    const comparisons = manifest.entries.filter((entry) => entry.kind === 'eval_comparison' || entry.path.endsWith('/eval-comparison.json'))
-    const workerPlans = manifest.entries.filter((entry) => entry.kind === 'eval_worker_plan' || entry.path.endsWith('/worker-plan.json'))
-    const scores = manifest.entries.filter((entry) => entry.kind === 'eval_score' || entry.path.endsWith('/scores.json'))
-    const judges = manifest.entries.filter((entry) => entry.kind === 'eval_judge' || entry.path.endsWith('/judge-trace.json'))
-    let cancelled = false
-    setEvalError(null)
-    setEvalRows([])
-    setEvalComparisons([])
-    setEvalScores([])
-    setEvalJudges([])
-    setEvalWorkerPlans([])
-    void Promise.all([
-      Promise.all(summaries.map(async (entry): Promise<EvalSummaryContentRow> => {
-        const content = await fetchArtifactContent(entry.path)
-        return { path: entry.path, summary: content.body as EvalRunSummary }
-      })),
-      Promise.all(comparisons.map(async (entry): Promise<EvalComparisonRow> => {
-        const content = await fetchArtifactContent(entry.path)
-        return { path: entry.path, comparison: content.body as EvalRunComparison }
-      })),
-      Promise.all(progresses.map(async (entry): Promise<EvalProgressContentRow> => {
-        const content = await fetchArtifactContent(entry.path)
-        return { path: entry.path, progress: content.body as EvalRunProgress }
-      })),
-      Promise.all(workerPlans.map(async (entry): Promise<EvalWorkerPlanRow> => {
-        const content = await fetchArtifactContent(entry.path)
-        return { path: entry.path, plan: content.body as EvalWorkerPlan }
-      })),
-      Promise.all(scores.map(async (entry): Promise<EvalScoreRow> => {
-        const content = await fetchArtifactContent(entry.path)
-        return { path: entry.path, summary: content.body as EvalScoreSummary }
-      })),
-      Promise.all(judges.map(async (entry): Promise<EvalJudgeRow> => {
-        const content = await fetchArtifactContent(entry.path)
-        return { path: entry.path, trace: content.body as EvalJudgeTrace }
-      })),
-    ])
-      .then(([summaryRows, comparisonRows, progressRows, workerPlanRows, scoreRows, judgeRows]) => {
-        const rows = mergeEvalRuns(summaryRows, progressRows)
-        if (!cancelled) setEvalRows(rows)
-        if (!cancelled) setEvalComparisons(comparisonRows)
-        if (!cancelled) setEvalWorkerPlans(workerPlanRows.sort((a, b) => a.path.localeCompare(b.path)))
-        if (!cancelled) setEvalScores(scoreRows.sort((a, b) => a.path.localeCompare(b.path)))
-        if (!cancelled) setEvalJudges(judgeRows.sort((a, b) => a.path.localeCompare(b.path)))
-        if (!cancelled) setSelectedEvalRunPath((current) => current && rows.some((row: EvalRunRow) => row.key === current) ? current : rows[0]?.key ?? null)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setEvalError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, mode, manifest])
-
-  useEffect(() => {
-    if (!open || mode !== 'eval' || !manifest || !selectedEvalRunPath) {
-      setEvalTrials([])
-      setSelectedTrialId(null)
-      setEvalTrialsError(null)
-      setEvalTrialsLoading(false)
-      return
-    }
-    const root = selectedEvalRunPath
-    const trialEntries = manifest.entries.filter((entry) => entry.kind === 'eval_trial' && entry.path.startsWith(`${root}/trials/`))
-    let cancelled = false
-    setEvalTrialsLoading(true)
-    setEvalTrialsError(null)
-    void Promise.all(trialEntries.map(async (entry): Promise<EvalTrialRow> => {
-      const content = await fetchArtifactContent(entry.path)
-      return { path: entry.path, trial: content.body as EvalTrial }
-    }))
-      .then((rows) => {
-        const sorted = rows.sort((a, b) => trialInstanceId(a).localeCompare(trialInstanceId(b)))
-        if (cancelled) return
-        setEvalTrials(sorted)
-        setSelectedTrialId((current) => current && sorted.some((row) => trialStableId(row) === current) ? current : sorted[0] ? trialStableId(sorted[0]) : null)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setEvalTrialsError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setEvalTrialsLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, mode, manifest, selectedEvalRunPath])
-
-  useEffect(() => {
-    if (!open || mode !== 'profiles' || !manifest) return
-    const profiles = manifest.entries.filter((entry) => entry.kind === 'profile' || entry.path.endsWith('/profile.json'))
-    let cancelled = false
-    setProfileError(null)
-    setProfileRows([])
-    void Promise.all(profiles.map(async (entry): Promise<ProfileRow> => {
-      const content = await fetchArtifactContent(entry.path)
-      return { path: entry.path, profile: content.body as SessionProfile }
-    }))
-      .then((rows) => {
-        if (!cancelled) setProfileRows(rows.sort((a, b) => a.path.localeCompare(b.path)))
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setProfileError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, mode, manifest])
-
-  useEffect(() => {
-    if (!open || mode !== 'memory' || !manifest) return
-    const memoryIndexes = manifest.entries.filter((entry) => entry.kind === 'memory_index' || entry.path.endsWith('/memory-index.json'))
-    let cancelled = false
-    setMemoryError(null)
-    setMemoryRows([])
-    void Promise.all(memoryIndexes.map(async (entry): Promise<MemoryIndexRow> => {
-      const content = await fetchArtifactContent(entry.path)
-      return { path: entry.path, index: content.body as MemoryIndex }
-    }))
-      .then((rows) => {
-        if (!cancelled) setMemoryRows(rows.sort((a, b) => a.path.localeCompare(b.path)))
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setMemoryError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, mode, manifest])
-
-  useEffect(() => {
-    if (!open || mode !== 'ops' || !manifest) return
-    const opsArtifacts = manifest.entries.filter((entry) => isOpsArtifactKind(entry.kind))
-    let cancelled = false
-    setOpsError(null)
-    setOpsRows([])
-    void Promise.all(opsArtifacts.map(async (entry): Promise<OpsArtifactRow> => {
-      const content = await fetchArtifactContent(entry.path)
-      return { path: entry.path, kind: entry.kind as OpsArtifactKind, body: asRecord(content.body) }
-    }))
-      .then((rows) => {
-        if (!cancelled) setOpsRows(rows.sort((a, b) => opsKindOrder(a.kind) - opsKindOrder(b.kind) || a.path.localeCompare(b.path)))
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setOpsError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, mode, manifest])
-
-  return (
-    <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(760px,86dvh)] w-[min(1040px,94vw)] max-w-none flex-col overflow-hidden p-0 gap-0" data-testid="artifact-dialog">
-        <DialogHeader className="border-b border-border px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <DialogTitle>{t(`artifacts.modes.${mode}`)}</DialogTitle>
-              <DialogDescription>{mode === 'eval' ? t('artifacts.descriptions.eval') : mode === 'ops' ? t('artifacts.descriptions.ops') : mode === 'badcases' ? t('artifacts.descriptions.badcases') : t('artifacts.descriptions.default')}</DialogDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
-                <button type="button" className={tabClass(mode === 'artifacts')} onClick={() => setMode('artifacts')} data-testid="artifact-mode-artifacts">{t('artifacts.modes.artifacts')}</button>
-                <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')} data-testid="artifact-mode-eval">{t('artifacts.modes.eval')}</button>
-                <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')} data-testid="artifact-mode-profiles">{t('artifacts.modes.profiles')}</button>
-                <button type="button" className={tabClass(mode === 'memory')} onClick={() => setMode('memory')} data-testid="artifact-mode-memory">{t('artifacts.modes.memory')}</button>
-                <button type="button" className={tabClass(mode === 'ops')} onClick={() => setMode('ops')} data-testid="artifact-mode-ops">{t('artifacts.modes.ops')}</button>
-                <button type="button" className={tabClass(mode === 'badcases')} onClick={() => setMode('badcases')} data-testid="artifact-mode-badcases">{t('artifacts.modes.badcases')}</button>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setReloadToken((value) => value + 1)}
-                disabled={loading}
-              >
-                <RefreshCw className={cn('mr-2 h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden="true" />
-                Refresh
-              </Button>
-            </div>
-          </div>
-        </DialogHeader>
-        {mode === 'artifacts' ? (
-          <ArtifactInventory manifest={manifest} kindRows={kindRows} error={error} loading={loading} />
-        ) : mode === 'eval' ? (
-          <EvalRunsView
-            manifest={manifest}
-            rows={evalRows}
-            comparisons={evalComparisons}
-            scores={evalScores}
-            judges={evalJudges}
-            workerPlans={evalWorkerPlans}
-            selectedRunPath={selectedEvalRunPath}
-            onSelectRun={setSelectedEvalRunPath}
-            trials={evalTrials}
-            selectedTrialId={selectedTrialId}
-            onSelectTrial={setSelectedTrialId}
-            trialsLoading={evalTrialsLoading}
-            trialsError={evalTrialsError}
-            error={error ?? evalError}
-            loading={loading}
-            onOpenArtifact={setArtifactDetail}
-            onOpenSession={onOpenSession}
-            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
-          />
-        ) : mode === 'profiles' ? (
-          <ProfilesView
-            manifest={manifest}
-            rows={profileRows}
-            error={error ?? profileError}
-            loading={loading}
-            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
-          />
-        ) : mode === 'memory' ? (
-          <MemoryView
-            manifest={manifest}
-            rows={memoryRows}
-            error={error ?? memoryError}
-            loading={loading}
-            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
-          />
-        ) : mode === 'badcases' ? (
-          <BadCasesTab />
-        ) : (
-          <OpsView
-            manifest={manifest}
-            rows={opsRows}
-            error={error ?? opsError}
-            loading={loading}
-            onOpenArtifact={setArtifactDetail}
-            onArtifactActionComplete={() => setReloadToken((token) => token + 1)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
-    <ArtifactContentDialog request={artifactDetail} onOpenChange={(nextOpen) => !nextOpen && setArtifactDetail(null)} />
-    </>
-  )
-}
-
-function ArtifactInventory({
+export function ArtifactInventory({
   manifest,
   kindRows,
   error,
@@ -768,7 +453,7 @@ function ArtifactInventory({
   )
 }
 
-function EvalRunsView({
+export function EvalRunsView({
   manifest,
   rows,
   comparisons,
@@ -821,7 +506,7 @@ function EvalRunsView({
           <Stat label={t('artifacts.eval.workerPlans')} value={String(workerPlans.length)} />
           <Stat label={t('artifacts.eval.scores')} value={String(scores.length)} />
           <Stat label={t('artifacts.eval.judges')} value={String(judges.length)} />
-          <Stat label={t('common.artifacts')} value={String(manifest?.summary.entryCount ?? 0)} />
+          <Stat label={t('common.artifacts')} value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
       <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_auto_minmax(220px,1fr)_auto_auto] gap-3 overflow-y-auto p-3 max-lg:grid-rows-none" data-testid="eval-right-pane">
@@ -833,7 +518,6 @@ function EvalRunsView({
         {loading && !manifest ? <div className="text-xs text-muted-foreground">{t('artifacts.inventory.loadingManifest')}</div> : null}
         {manifest && rows.length === 0 && comparisons.length === 0 && !error ? <div className="text-xs text-muted-foreground">{t('artifacts.eval.noSummaries')}</div> : null}
         <EvalScorecard rows={rows} selectedRun={selectedRun} />
-        <RunBenchmarkWizard onArtifactActionComplete={onArtifactActionComplete} />
         <EnhancementActionPanel title={t('artifacts.eval.actions')} actions={evalActionConfigs} onComplete={onArtifactActionComplete} />
         <div className="min-h-0 overflow-hidden rounded-md border border-border">
           {rows.length > 0 ? (
@@ -978,7 +662,12 @@ const WIZARD_STEPS: readonly { id: WizardStepId; label: string }[] = [
   { id: 'review', label: 'Review' },
 ]
 
-function RunBenchmarkWizard({ onArtifactActionComplete }: { onArtifactActionComplete(): void }): JSX.Element {
+export function RunBenchmarkWizard({ onArtifactActionComplete }: { onArtifactActionComplete?: () => void }): JSX.Element {
+  const notify = onArtifactActionComplete ?? (() => { /* noop */ })
+  return <RunBenchmarkWizardImpl onArtifactActionComplete={notify} />
+}
+
+function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactActionComplete(): void }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [shared, setShared] = useState<WizardShared>(initialWizardShared)
@@ -2963,7 +2652,7 @@ function EvalTrialDetail({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Stat label={t('artifacts.eval.details.artifacts')} value={String(selectedTrial.trial.artifacts?.length ?? 0)} />
-              <Stat label="Session" value={selectedTrial.trial.sessionId ? 'linked' : 'none'} />
+              <Stat label={t('artifacts.eval.details.session')} value={selectedTrial.trial.sessionId ? t('artifacts.eval.details.linked') : t('artifacts.eval.details.none')} />
             </div>
             {selectedTrial.trial.sessionId ? (
               <button
@@ -2986,7 +2675,7 @@ function EvalTrialDetail({
                     onClick={() => item.path && onOpenArtifact({ path: item.path, label: item.title })}
                     className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-muted/40 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-background"
                   >
-                    <div className="truncate font-medium">{trialArtifactCategoryLabel(item.category)}</div>
+                    <div className="truncate font-medium">{t(trialArtifactCategoryLabelKey(item.category))}</div>
                     <div className="truncate font-mono text-muted-foreground" title={item.title}>{item.title}</div>
                   </button>
                 ))}
@@ -3000,7 +2689,7 @@ function EvalTrialDetail({
                     {artifactGroups.map((group) => (
                       <div key={group.category} className="grid gap-1">
                         <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                          <span className="font-medium uppercase">{group.label}</span>
+                          <span className="font-medium uppercase">{t(trialArtifactCategoryLabelKey(group.category))}</span>
                           <span className="font-mono">{group.items.length}</span>
                         </div>
                         <div className="grid gap-1.5">
@@ -3221,7 +2910,7 @@ function DeltaStat({ label, value }: { label: string; value: number }): JSX.Elem
   )
 }
 
-function ArtifactContentDialog({
+export function ArtifactContentDialog({
   request,
   onOpenChange,
 }: {
@@ -3282,7 +2971,7 @@ function ArtifactBody({ content }: { content: ArtifactContentResponse }): JSX.El
   )
 }
 
-function ProfilesView({
+export function ProfilesView({
   manifest,
   rows,
   error,
@@ -3314,7 +3003,7 @@ function ProfilesView({
           <Stat label="Input tokens" value={formatInteger(totals.inputTokens)} />
           <Stat label="Output tokens" value={formatInteger(totals.outputTokens)} />
           <Stat label="Latency calls" value={String(totals.latencyCalls)} />
-          <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
+          <Stat label="Artifacts" value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
       <div className="min-h-0 p-3">
@@ -3364,7 +3053,7 @@ function ProfilesView({
   )
 }
 
-function MemoryView({
+export function MemoryView({
   manifest,
   rows,
   error,
@@ -3401,7 +3090,7 @@ function MemoryView({
           <Stat label="Warnings" value={String(warningCount)} />
           <Stat label="Stale" value={String(staleCount)} />
           <Stat label="Conflicts" value={String(conflictCount)} />
-          <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
+          <Stat label="Artifacts" value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
       <div className="min-h-0 p-3">
@@ -3460,7 +3149,7 @@ function MemoryStatus({ status }: { status: MemoryIndexEntry['status'] | undefin
   return <div className="font-mono text-[11px] text-muted-foreground">{t('artifacts.memory.status.unknown')}</div>
 }
 
-function OpsView({
+export function OpsView({
   manifest,
   rows,
   error,
@@ -3476,7 +3165,7 @@ function OpsView({
   onArtifactActionComplete(): void
 }): JSX.Element {
   const { t } = useTranslation()
-  const groups = groupOpsRows(rows)
+  const groups = groupOpsRows(rows, t)
   const reliabilityIssues = rows.reduce((sum, row) => sum + opsIssueCount(row), 0)
   const rolloutReady = rows.filter((row) => row.kind === 'rl_adapter' && stringField(row.body, 'status') === 'ready').length
   const rolloutBlocked = rows.filter((row) => row.kind === 'rl_adapter' && stringField(row.body, 'status') === 'blocked').length
@@ -3487,12 +3176,12 @@ function OpsView({
       <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
         <div className="grid gap-2 text-xs">
           <Stat label={t('artifacts.ops.artifacts')} value={String(rows.length)} />
-          <Stat label="Reliability issues" value={String(reliabilityIssues)} />
-          <Stat label="Rollout ready" value={String(rolloutReady)} />
-          <Stat label="Rollout blocked" value={String(rolloutBlocked)} />
-          <Stat label="Trace context" value={String(traceCount)} />
-          <Stat label="Router/tool" value={String(routerCount)} />
-          <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
+          <Stat label={t('artifacts.ops.stats.reliabilityIssues')} value={String(reliabilityIssues)} />
+          <Stat label={t('artifacts.ops.stats.rolloutReady')} value={String(rolloutReady)} />
+          <Stat label={t('artifacts.ops.stats.rolloutBlocked')} value={String(rolloutBlocked)} />
+          <Stat label={t('artifacts.ops.stats.traceContext')} value={String(traceCount)} />
+          <Stat label={t('artifacts.ops.stats.routerTool')} value={String(routerCount)} />
+          <Stat label={t('artifacts.ops.stats.artifacts')} value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
       <div className="min-h-0 p-3">
@@ -3526,12 +3215,12 @@ function OpsView({
                           <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={row.path}>{row.path}</div>
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate font-medium">{opsPrimary(row)}</div>
-                          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{opsSecondary(row)}</div>
+                          <div className="truncate font-medium">{opsPrimary(row, t)}</div>
+                          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{opsSecondary(row, t)}</div>
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate font-mono text-[11px]">{opsMetricLine(row)}</div>
-                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{opsStatusLine(row)}</div>
+                          <div className="truncate font-mono text-[11px]">{opsMetricLine(row, t)}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{opsStatusLine(row, t)}</div>
                         </div>
                       </button>
                     ))}
@@ -3546,10 +3235,10 @@ function OpsView({
   )
 }
 
-function groupOpsRows(rows: readonly OpsArtifactRow[]): Array<{ label: string; rows: OpsArtifactRow[] }> {
+function groupOpsRows(rows: readonly OpsArtifactRow[], t: TFunction): Array<{ label: string; rows: OpsArtifactRow[] }> {
   const groups = new Map<string, OpsArtifactRow[]>()
   for (const row of rows) {
-    const label = opsGroupLabel(row.kind)
+    const label = opsGroupLabel(row.kind, t)
     const existing = groups.get(label) ?? []
     existing.push(row)
     groups.set(label, existing)
@@ -3557,69 +3246,72 @@ function groupOpsRows(rows: readonly OpsArtifactRow[]): Array<{ label: string; r
   return [...groups.entries()].map(([label, groupRows]) => ({ label, rows: groupRows }))
 }
 
-function isOpsArtifactKind(kind: string): kind is OpsArtifactKind {
+export function isOpsArtifactKind(kind: string): kind is OpsArtifactKind {
   return kind === 'reliability_audit' || kind === 'reliability_chaos' || kind === 'rl_rollout_sidecar' || kind === 'rl_token_segments' || kind === 'rl_adapter' || kind === 'subagent_graph' || kind === 'trace' || kind === 'message_assembly' || kind === 'router_decision' || kind === 'tool_catalog'
 }
 
-function opsKindOrder(kind: OpsArtifactKind): number {
+export function opsKindOrder(kind: OpsArtifactKind): number {
   return ['reliability_audit', 'reliability_chaos', 'rl_rollout_sidecar', 'rl_token_segments', 'rl_adapter', 'subagent_graph', 'trace', 'message_assembly', 'router_decision', 'tool_catalog'].indexOf(kind)
 }
 
-function opsGroupLabel(kind: OpsArtifactKind): string {
-  if (kind === 'reliability_audit' || kind === 'reliability_chaos') return 'Reliability'
-  if (kind === 'rl_rollout_sidecar' || kind === 'rl_token_segments' || kind === 'rl_adapter') return 'Agentic RL'
-  if (kind === 'subagent_graph') return 'Subagents'
-  if (kind === 'trace' || kind === 'message_assembly') return 'Trace and Context'
-  return 'Router and Tools'
+function opsGroupLabel(kind: OpsArtifactKind, t: TFunction): string {
+  if (kind === 'reliability_audit' || kind === 'reliability_chaos') return t('artifacts.ops.groups.reliability')
+  if (kind === 'rl_rollout_sidecar' || kind === 'rl_token_segments' || kind === 'rl_adapter') return t('artifacts.ops.groups.agenticRl')
+  if (kind === 'subagent_graph') return t('artifacts.ops.groups.subagents')
+  if (kind === 'trace' || kind === 'message_assembly') return t('artifacts.ops.groups.traceContext')
+  return t('artifacts.ops.groups.routerTools')
 }
 
 function opsKindLabel(kind: OpsArtifactKind): string {
   return kind.replace(/_/g, ' ')
 }
 
-function opsPrimary(row: OpsArtifactRow): string {
-  if (row.kind === 'reliability_audit') return stringField(row.body, 'sessionId') ?? 'session audit'
-  if (row.kind === 'reliability_chaos') return `${numberField(row.body, 'sessionCount') ?? 0} sessions`
-  if (row.kind === 'rl_rollout_sidecar') return stringField(row.body, 'rollout_id') ?? 'rollout sidecar'
-  if (row.kind === 'rl_token_segments') return stringField(row.body, 'sessionId') ?? 'token segments'
-  if (row.kind === 'rl_adapter') return `${stringField(row.body, 'frameworkTarget') ?? stringField(row.body, 'framework_target') ?? 'adapter'} ${stringField(row.body, 'status') ?? ''}`.trim()
-  if (row.kind === 'subagent_graph') return `${arrayLength(row.body.nodes)} nodes / ${arrayLength(row.body.edges)} edges`
-  if (row.kind === 'message_assembly') return stringField(row.body, 'sessionId') ?? 'message assembly'
-  if (row.kind === 'router_decision') return stringField(row.body, 'selectedModel') ?? 'router decision'
-  if (row.kind === 'tool_catalog') return `${numberField(row.body, 'toolCount') ?? arrayLength(row.body.tools)} tools`
+function opsPrimary(row: OpsArtifactRow, t: TFunction): string {
+  if (row.kind === 'reliability_audit') return stringField(row.body, 'sessionId') ?? t('artifacts.ops.labels.sessionAudit')
+  if (row.kind === 'reliability_chaos') return t('artifacts.ops.labels.sessions', { count: numberField(row.body, 'sessionCount') ?? 0 })
+  if (row.kind === 'rl_rollout_sidecar') return stringField(row.body, 'rollout_id') ?? t('artifacts.ops.labels.rolloutSidecar')
+  if (row.kind === 'rl_token_segments') return stringField(row.body, 'sessionId') ?? t('artifacts.ops.labels.tokenSegments')
+  if (row.kind === 'rl_adapter') return `${stringField(row.body, 'frameworkTarget') ?? stringField(row.body, 'framework_target') ?? t('artifacts.ops.labels.adapter')} ${stringField(row.body, 'status') ?? ''}`.trim()
+  if (row.kind === 'subagent_graph') return t('artifacts.ops.labels.nodesEdges', { nodes: arrayLength(row.body.nodes), edges: arrayLength(row.body.edges) })
+  if (row.kind === 'message_assembly') return stringField(row.body, 'sessionId') ?? t('artifacts.ops.labels.messageAssembly')
+  if (row.kind === 'router_decision') return stringField(row.body, 'selectedModel') ?? t('artifacts.ops.labels.routerDecision')
+  if (row.kind === 'tool_catalog') return t('artifacts.ops.labels.tools', { count: numberField(row.body, 'toolCount') ?? arrayLength(row.body.tools) })
   return stringField(row.body, 'sessionId') ?? 'trace'
 }
 
-function opsSecondary(row: OpsArtifactRow): string {
-  if (row.kind === 'reliability_audit') return `status ${stringField(row.body, 'status') ?? 'unknown'} / dangling ${booleanField(row.body, 'dangling') ? stringField(row.body, 'danglingKind') ?? 'yes' : 'no'}`
-  if (row.kind === 'reliability_chaos') return `${numberField(row.body, 'danglingCount') ?? 0} dangling / ${numberField(row.body, 'recoveryEventCount') ?? 0} recovery events`
-  if (row.kind === 'rl_rollout_sidecar') return `${stringField(row.body, 'task_id') ?? 'task'} / ${stringField(row.body, 'framework_target') ?? 'framework'}`
-  if (row.kind === 'rl_token_segments') return `${arrayLength(row.body.segments)} segments / token ids ${booleanField(row.body, 'tokenIdsCaptured') ? 'captured' : 'not captured'}`
-  if (row.kind === 'rl_adapter') return stringField(row.body, 'reason') ?? stringField(row.body, 'entrypoint') ?? 'adapter artifact'
-  if (row.kind === 'subagent_graph') return `${arrayLength(row.body.warnings)} warnings`
-  if (row.kind === 'message_assembly') return `${numberField(row.body, 'messageCount') ?? 0} messages / ${numberField(row.body, 'toolCount') ?? 0} tools`
-  if (row.kind === 'router_decision') return `${stringField(row.body, 'selectedProvider') ?? 'provider unknown'} / ${(arrayField(row.body, 'reasonCodes') ?? []).join(', ')}`
-  if (row.kind === 'tool_catalog') return `${arrayLength(row.body.tools)} registered tools`
-  return `${arrayLength(row.body.spans)} spans`
+function opsSecondary(row: OpsArtifactRow, t: TFunction): string {
+  if (row.kind === 'reliability_audit') {
+    const dangling = booleanField(row.body, 'dangling') ? stringField(row.body, 'danglingKind') ?? t('artifacts.ops.labels.yes') : t('artifacts.ops.labels.no')
+    return t('artifacts.ops.labels.statusDangling', { status: stringField(row.body, 'status') ?? t('artifacts.ops.labels.unknown'), dangling })
+  }
+  if (row.kind === 'reliability_chaos') return t('artifacts.ops.labels.danglingRecovery', { dangling: numberField(row.body, 'danglingCount') ?? 0, recovery: numberField(row.body, 'recoveryEventCount') ?? 0 })
+  if (row.kind === 'rl_rollout_sidecar') return t('artifacts.ops.labels.taskFramework', { task: stringField(row.body, 'task_id') ?? t('artifacts.ops.labels.task'), framework: stringField(row.body, 'framework_target') ?? t('artifacts.ops.labels.framework') })
+  if (row.kind === 'rl_token_segments') return t('artifacts.ops.labels.segmentsTokenIds', { segments: arrayLength(row.body.segments), captureStatus: booleanField(row.body, 'tokenIdsCaptured') ? t('artifacts.ops.labels.captured') : t('artifacts.ops.labels.notCaptured') })
+  if (row.kind === 'rl_adapter') return stringField(row.body, 'reason') ?? stringField(row.body, 'entrypoint') ?? t('artifacts.ops.labels.adapterArtifact')
+  if (row.kind === 'subagent_graph') return t('artifacts.ops.labels.warnings', { count: arrayLength(row.body.warnings) })
+  if (row.kind === 'message_assembly') return t('artifacts.ops.labels.messagesTools', { messages: numberField(row.body, 'messageCount') ?? 0, tools: numberField(row.body, 'toolCount') ?? 0 })
+  if (row.kind === 'router_decision') return `${stringField(row.body, 'selectedProvider') ?? t('artifacts.ops.labels.providerUnknown')} / ${(arrayField(row.body, 'reasonCodes') ?? []).join(', ')}`
+  if (row.kind === 'tool_catalog') return t('artifacts.ops.labels.registeredTools', { count: arrayLength(row.body.tools) })
+  return t('artifacts.ops.labels.spans', { count: arrayLength(row.body.spans) })
 }
 
-function opsMetricLine(row: OpsArtifactRow): string {
-  if (row.kind === 'reliability_audit') return `${opsIssueCount(row)} integrity issues`
-  if (row.kind === 'rl_token_segments') return `${numberField(asRecord(row.body.topology), 'compactionCount') ?? 0} compactions / ${numberField(asRecord(row.body.topology), 'subAgentCallCount') ?? 0} subagents`
+function opsMetricLine(row: OpsArtifactRow, t: TFunction): string {
+  if (row.kind === 'reliability_audit') return t('artifacts.ops.labels.integrityIssues', { count: opsIssueCount(row) })
+  if (row.kind === 'rl_token_segments') return t('artifacts.ops.labels.compactionsSubagents', { compactions: numberField(asRecord(row.body.topology), 'compactionCount') ?? 0, subagents: numberField(asRecord(row.body.topology), 'subAgentCallCount') ?? 0 })
   if (row.kind === 'router_decision') {
     const policy = asRecord(row.body.toolPolicy)
-    return `${numberField(policy, 'toolCount') ?? 0} tools / ${numberField(policy, 'skillBackedCount') ?? 0} skill-backed`
+    return t('artifacts.ops.labels.toolsSkillBacked', { tools: numberField(policy, 'toolCount') ?? 0, skillBacked: numberField(policy, 'skillBackedCount') ?? 0 })
   }
-  if (row.kind === 'message_assembly') return `${numberField(row.body, 'estimatedTokens') ?? 0} est tokens`
-  if (row.kind === 'tool_catalog') return `${arrayField(row.body, 'tools')?.filter((tool) => asRecord(tool).skillBacked === true).length ?? 0} skill-backed`
+  if (row.kind === 'message_assembly') return t('artifacts.ops.labels.estimatedTokens', { count: numberField(row.body, 'estimatedTokens') ?? 0 })
+  if (row.kind === 'tool_catalog') return t('artifacts.ops.labels.skillBacked', { count: arrayField(row.body, 'tools')?.filter((tool) => asRecord(tool).skillBacked === true).length ?? 0 })
   return `${formatBytesMetric(numberField(row.body, 'bytes'))}`
 }
 
-function opsStatusLine(row: OpsArtifactRow): string {
-  if (row.kind === 'rl_adapter') return stringField(row.body, 'status') ?? 'unknown'
-  if (row.kind === 'reliability_audit') return arrayLength(row.body.recoveryEventDetails) > 0 ? 'recovered' : 'no recovery events'
-  if (row.kind === 'subagent_graph') return 'derived parent-child graph'
-  if (row.kind === 'trace') return 'OpenInference trace artifact'
+function opsStatusLine(row: OpsArtifactRow, t: TFunction): string {
+  if (row.kind === 'rl_adapter') return stringField(row.body, 'status') ?? t('artifacts.ops.labels.unknown')
+  if (row.kind === 'reliability_audit') return arrayLength(row.body.recoveryEventDetails) > 0 ? t('artifacts.ops.labels.recovered') : t('artifacts.ops.labels.noRecoveryEvents')
+  if (row.kind === 'subagent_graph') return t('artifacts.ops.labels.derivedGraph')
+  if (row.kind === 'trace') return t('artifacts.ops.labels.openInferenceTrace')
   return row.path
 }
 
@@ -3630,7 +3322,7 @@ function opsIssueCount(row: OpsArtifactRow): number {
   return arrayLength(integrity.duplicateToolCallIds) + arrayLength(integrity.duplicateToolResultIds) + arrayLength(integrity.toolResultsWithoutCall) + arrayLength(integrity.toolCallsWithoutResult)
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+export function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
@@ -3706,7 +3398,7 @@ function formatPercent(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : 'n/a'
 }
 
-function evalRunRoot(summaryPath: string): string {
+export function evalRunRoot(summaryPath: string): string {
   if (summaryPath.endsWith('/summary.json')) return summaryPath.slice(0, -'/summary.json'.length)
   if (summaryPath.endsWith('/progress.json')) return summaryPath.slice(0, -'/progress.json'.length)
   return summaryPath.replace(/\/[^/]+$/, '')
@@ -3718,7 +3410,7 @@ function resolveTrialArtifactPath(runRoot: string, uri: string): string {
   return `${runRoot}/${uri}`
 }
 
-function groupTrialArtifacts(runRoot: string, artifacts: readonly EvalTrialArtifactRef[]): TrialArtifactGroup[] {
+export function groupTrialArtifacts(runRoot: string, artifacts: readonly EvalTrialArtifactRef[]): TrialArtifactGroup[] {
   const byCategory = new Map<TrialArtifactCategory, TrialArtifactItem[]>()
   for (const artifact of artifacts) {
     const uri = artifact.uri
@@ -3733,7 +3425,7 @@ function groupTrialArtifacts(runRoot: string, artifacts: readonly EvalTrialArtif
   return trialArtifactCategoryOrder
     .map((category) => {
       const items = byCategory.get(category) ?? []
-      return { category, label: trialArtifactCategoryLabel(category), items }
+      return { category, items }
     })
     .filter((group) => group.items.length > 0)
 }
@@ -3753,19 +3445,19 @@ function classifyTrialArtifact(artifact: EvalTrialArtifactRef): TrialArtifactCat
   return 'other'
 }
 
-function trialArtifactCategoryLabel(category: TrialArtifactCategory): string {
+function trialArtifactCategoryLabelKey(category: TrialArtifactCategory): string {
   switch (category) {
-    case 'patch': return 'Final Patch'
-    case 'trace': return 'Trace'
-    case 'harness': return 'Harness Evidence'
-    case 'log': return 'Agent Logs'
-    case 'prompt': return 'Prompt'
-    case 'metadata': return 'Metadata'
-    case 'other': return 'Other'
+    case 'patch': return 'artifacts.eval.artifactCategories.patch'
+    case 'trace': return 'artifacts.eval.artifactCategories.trace'
+    case 'harness': return 'artifacts.eval.artifactCategories.harness'
+    case 'log': return 'artifacts.eval.artifactCategories.log'
+    case 'prompt': return 'artifacts.eval.artifactCategories.prompt'
+    case 'metadata': return 'artifacts.eval.artifactCategories.metadata'
+    case 'other': return 'artifacts.eval.artifactCategories.other'
   }
 }
 
-function mergeEvalRuns(
+export function mergeEvalRuns(
   summaries: readonly EvalSummaryContentRow[],
   progresses: readonly EvalProgressContentRow[],
 ): EvalRunRow[] {
@@ -3785,11 +3477,11 @@ function mergeEvalRuns(
   })
 }
 
-function trialStableId(row: EvalTrialRow): string {
+export function trialStableId(row: EvalTrialRow): string {
   return row.trial.trialId ?? row.trial.instanceId ?? row.path
 }
 
-function trialInstanceId(row: EvalTrialRow): string {
+export function trialInstanceId(row: EvalTrialRow): string {
   return row.trial.instanceId ?? row.trial.trialId ?? row.path.split('/').pop()?.replace(/\.json$/, '') ?? row.path
 }
 
@@ -3821,7 +3513,7 @@ function formatConfidence(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : 'n/a'
 }
 
-async function fetchArtifactContent(path: string): Promise<ArtifactContentResponse> {
+export async function fetchArtifactContent(path: string): Promise<ArtifactContentResponse> {
   const res = await fetch(`/artifacts/content?path=${encodeURIComponent(path)}`, { cache: 'no-store' })
   if (res.ok) return (await res.json()) as ArtifactContentResponse
   const body = await res.json().catch(() => null) as { error?: string } | null

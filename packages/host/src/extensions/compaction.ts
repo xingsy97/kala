@@ -9,7 +9,7 @@
  * event through the normal loop path.
  */
 
-import type { AgentEvent, Message } from '@agent-kernel/kernel'
+import type { AgentEvent, AgentState, Message } from '@agent-kernel/kernel'
 import {
   createArtifactStore,
   validateCompactionSummary,
@@ -54,8 +54,13 @@ Rules:
 - Do not claim work is done unless the provided messages establish it.
 - Keep the whole response under 1600 tokens.`
 const COMPACT_TIMEOUT_MS = 60_000
-const TARGET_RECENT_TAIL_TOKENS = 12_000
 const MAX_COMPACT_TOOL_RESULT_CHARS = 8_000
+const RETRY_COMPACT_TOOL_RESULT_CHARS = 2_000
+const MIN_RECENT_TAIL_TOKENS = 4_000
+const TARGET_RECENT_TAIL_RATIO = 0.15
+const MAX_RECENT_TAIL_TOKENS = 24_000
+
+type CompactTrigger = 'manual' | 'auto' | 'preflight' | 'tool_result'
 
 export async function maybeAutoCompact(
   deps: HostLoopDeps,
@@ -78,7 +83,7 @@ export async function maybeAutoCompact(
 export async function runCompact(
   deps: HostLoopDeps,
   sessionId: string,
-  trigger: 'manual' | 'auto' | 'preflight',
+  trigger: CompactTrigger,
   inFlight: Set<string>,
   aborts: Map<string, AbortController>,
 ): Promise<void> {
@@ -86,7 +91,7 @@ export async function runCompact(
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
   const s = record.state.status
-  if (s !== 'idle' && s !== 'done' && s !== 'error' && !isPreflightCompactable(trigger, record.state)) {
+  if (s !== 'idle' && s !== 'done' && s !== 'error' && !isBusyCompactable(trigger, record.state)) {
     throw new Error('cannot compact while the session is busy')
   }
   if (!hasCompactableContent(record.state.messages)) {
@@ -97,10 +102,10 @@ export async function runCompact(
   try {
     const tokensBefore = record.state.usage.inputTokens
     const replacedCount = record.state.messages.length
-    const preserveFrom = choosePreserveFrom(record.state.messages)
+    const preserveFrom = choosePreserveFrom(record.state, trigger, record.config.contextLimit)
     const compactedPrefix = prepareCompactionInput(record.state.messages.slice(0, preserveFrom))
     const preservedTail = record.state.messages.slice(preserveFrom)
-    const compact = await summarize(deps, sessionId, compactedPrefix)
+    const compact = await summarizeWithRetry(deps, sessionId, compactedPrefix)
     // No provider gives a reliable prompt-token count for the summary alone
     // before it's used. Estimate cheaply: 4 chars ≈ 1 token. Refined on the
     // next real LLM call where usage.inputTokens is reported by the provider.
@@ -134,7 +139,7 @@ export async function runCompact(
 async function maybeWriteCompactionSummaryValidation(
   deps: HostLoopDeps,
   sessionId: string,
-  trigger: 'manual' | 'auto' | 'preflight',
+  trigger: CompactTrigger,
   validation: CompactionSummaryValidation,
   summary: string,
 ): Promise<void> {
@@ -204,26 +209,54 @@ async function summarize(
   }
 }
 
+async function summarizeWithRetry(
+  deps: HostLoopDeps,
+  sessionId: string,
+  messages: readonly Message[],
+): ReturnType<typeof summarize> {
+  try {
+    return await summarize(deps, sessionId, messages)
+  } catch (err) {
+    if (!isContextOverflowError(err)) throw err
+    const retriedMessages = prepareCompactionInputWithLimit(messages, RETRY_COMPACT_TOOL_RESULT_CHARS)
+    return await summarize(deps, sessionId, retriedMessages)
+  }
+}
+
+function isContextOverflowError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err)
+  return /context|window|token|too large|maximum input|input exceeds/i.test(text)
+}
+
 function hasCompactableContent(messages: readonly Message[]): boolean {
   return messages.some((m) => m.role !== 'system')
 }
 
 function isPreflightCompactable(
-  trigger: 'manual' | 'auto' | 'preflight',
-  state: { status: string; pendingCalls: readonly unknown[] },
+  trigger: CompactTrigger,
+  state: AgentState,
 ): boolean {
   return trigger === 'preflight' && state.status === 'thinking' && state.pendingCalls.length === 0
 }
 
+function isBusyCompactable(trigger: CompactTrigger, state: AgentState): boolean {
+  if (isPreflightCompactable(trigger, state)) return true
+  return trigger === 'tool_result' && state.status === 'executing_tools' && state.pendingCalls.length > 0 && findActiveToolBatchIndex(state) !== undefined
+}
+
 function prepareCompactionInput(messages: readonly Message[]): Message[] {
+  return prepareCompactionInputWithLimit(messages, MAX_COMPACT_TOOL_RESULT_CHARS)
+}
+
+function prepareCompactionInputWithLimit(messages: readonly Message[], maxToolResultChars: number): Message[] {
   return messages.map((message) => ({
     ...message,
     content: message.content.map((content) => {
       if (content.type !== 'tool_result') return content
-      if (content.content.length <= MAX_COMPACT_TOOL_RESULT_CHARS) return content
+      if (content.content.length <= maxToolResultChars) return content
       return {
         ...content,
-        content: compactToolResult(content.content, MAX_COMPACT_TOOL_RESULT_CHARS),
+        content: compactToolResult(content.content, maxToolResultChars),
       }
     }),
   }))
@@ -241,16 +274,58 @@ function compactToolResult(content: string, maxChars: number): string {
   ].join('\n')
 }
 
-function choosePreserveFrom(messages: readonly Message[]): number {
+function choosePreserveFrom(state: AgentState, trigger: CompactTrigger, contextLimit: number | undefined): number {
+  if (trigger === 'tool_result') {
+    const safe = choosePendingSafePreserveFrom(state, contextLimit)
+    if (safe !== undefined) return safe
+  }
+  return chooseRecentUserPreserveFrom(state.messages, contextLimit)
+}
+
+function chooseRecentUserPreserveFrom(messages: readonly Message[], contextLimit: number | undefined): number {
+  const targetRecentTailTokens = recentTailTargetTokens(contextLimit)
   let candidate = messages.length
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]!.role !== 'user') continue
     if (!hasCompactableContent(messages.slice(0, i))) continue
     candidate = i
     const tail = messages.slice(i)
-    if (estimateTokens(tail) <= TARGET_RECENT_TAIL_TOKENS) return i
+    if (estimateTokens(tail) <= targetRecentTailTokens) return i
   }
   return candidate
+}
+
+function choosePendingSafePreserveFrom(state: AgentState, contextLimit: number | undefined): number | undefined {
+  const activeAssistant = findActiveToolBatchIndex(state)
+  if (activeAssistant === undefined) return undefined
+  for (let i = activeAssistant; i >= 0; i--) {
+    if (state.messages[i]?.role !== 'user') continue
+    if (!hasCompactableContent(state.messages.slice(0, i))) continue
+    const tail = state.messages.slice(i)
+    if (estimateTokens(tail) <= recentTailTargetTokens(contextLimit) || i === activeAssistant - 1) return i
+  }
+  return hasCompactableContent(state.messages.slice(0, activeAssistant)) ? activeAssistant : undefined
+}
+
+function findActiveToolBatchIndex(state: AgentState): number | undefined {
+  const pending = new Set(state.pendingCalls.map((call) => call.callId))
+  if (pending.size === 0) return undefined
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const message = state.messages[i]
+    if (!message || message.role !== 'assistant') continue
+    for (const content of message.content) {
+      if (content.type === 'tool_call' && pending.has(content.callId)) return i
+    }
+  }
+  return undefined
+}
+
+function recentTailTargetTokens(contextLimit: number | undefined): number {
+  if (!contextLimit || contextLimit <= 0) return 12_000
+  return Math.min(
+    MAX_RECENT_TAIL_TOKENS,
+    Math.max(MIN_RECENT_TAIL_TOKENS, Math.round(contextLimit * TARGET_RECENT_TAIL_RATIO)),
+  )
 }
 
 function estimateTokens(messages: readonly Message[]): number {

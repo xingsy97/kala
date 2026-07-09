@@ -295,7 +295,7 @@ export type ClearEvent = {
  */
 export type CompactReplacedEvent = {
   kind: 'compact_replaced'
-  trigger?: 'manual' | 'auto' | 'preflight'
+  trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'
   preserveFrom: number
   request?: {
     model?: string
