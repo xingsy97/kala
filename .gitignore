@@ -35,6 +35,8 @@ pnpm-debug.log*
 # Test / coverage
 coverage/
 .nyc_output/
+__pycache__/
+*.py[cod]
 
 # Session data (event logs will land here)
 sessions/

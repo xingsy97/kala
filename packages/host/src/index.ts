@@ -18,6 +18,8 @@ export { anthropicAdapter } from './llm/anthropic.js'
 export type { AnthropicOptions } from './llm/anthropic.js'
 export { openaiAdapter, OpenAIHTTPError } from './llm/openai.js'
 export type { OpenAIOptions } from './llm/openai.js'
+export { policyGatewayAdapter } from './llm/policy-gateway.js'
+export type { PolicyGatewayOptions } from './llm/policy-gateway.js'
 
 export { SessionStore } from './store/session.js'
 export type { SessionRecord } from './store/session.js'
