@@ -39,7 +39,10 @@ export function backgroundTerminalTasks(
         callId: call.callId,
         command: typeof call.input.command === 'string' ? call.input.command : '(unknown command)',
         ...(typeof call.input.cwd === 'string' ? { cwd: call.input.cwd } : {}),
-        status: 'running',
+        // Fallback (timeline-derived) cannot prove liveness. We only mark 'done'
+        // or 'killed' when we later see an explicit signal. Anything else stays
+        // 'unknown' so the UI does not report stale tasks as running.
+        status: 'unknown',
         output: '',
       })
       continue

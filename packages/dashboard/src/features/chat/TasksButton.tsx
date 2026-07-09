@@ -72,7 +72,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
         <ListChecks className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
         <span className="tabular-nums">
           {total} <span className="hidden sm:inline">{t('tasks.count', { count: total }).replace(/^\d+\s*/, '')}</span>
-          <span className="ml-1 text-muted-foreground">
+          <span className="ml-1 hidden text-muted-foreground sm:inline">
             · {done}/{total}
           </span>
         </span>
@@ -88,7 +88,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
         <div
           role="dialog"
           aria-label={t('tasks.label')}
-          className="absolute left-0 bottom-full z-20 mb-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
+          className="fixed inset-x-2 bottom-[5.5rem] z-20 max-w-[calc(100vw-1rem)] overflow-hidden overflow-x-hidden rounded-lg border border-border/60 bg-popover shadow-lg sm:absolute sm:inset-x-auto sm:bottom-full sm:mb-2 sm:w-[min(22rem,calc(100vw-1rem))] sm:right-auto sm:left-0"
           data-testid="tasks-popover"
         >
           <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2 text-xs">

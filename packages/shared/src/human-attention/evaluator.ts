@@ -89,6 +89,14 @@ function evaluatePoint(input: {
   const risk = riskExposure(input.entries, input.review.lastReviewSeq ?? input.review.lastSubstantiveSeq)
   const recentContinueOnly = humanScores.filter((score) => score.continueOnly).length
   const latestHuman = humanScores.at(-1)
+  const lastHumanSeq = humanMessages.at(-1)?.seq ?? null
+  // If the human never had a chance to interject since their last input — the
+  // agent has been running non-stop with no approval prompts or explicit idle
+  // waits — we should not fully penalize risk exposure. "Attention is low" is
+  // meant to nudge the user, not punish them for a workflow they don't control.
+  // We detect this by checking whether any approval was requested (auto-approve
+  // still counts as "there was a chance") after the last human message.
+  const uninterruptedAgentRun = lastHumanSeq !== null && !hasInterjectionOpportunity(input.entries, lastHumanSeq)
   const blendLatest = (value: number, latest: number | undefined): number => latest === undefined ? value : Math.max(value, latest)
   const inputQuality = Math.max(blendLatest(avg((score) => score.intentQuality, 35), latestHuman?.intentQuality), input.anchors.constraints * 0.78)
   const reviewDepth = blendLatest(avg((score) => score.reviewDepth, input.review.lastReviewSeq === null ? 20 : 35), latestHuman?.reviewDepth)
@@ -115,7 +123,12 @@ function evaluatePoint(input: {
     ? 10
     : Math.min(18, Math.max(0, input.cursor - input.review.lastSubstantiveSeq - 16) * 0.75)
   const attentionMitigation = Math.min(0.55, (semanticQuality + reviewBonus) / 180)
-  const riskPenalty = Math.min(42, risk.score * (0.36 - attentionMitigation * 0.18))
+  const rawRiskPenalty = Math.min(42, risk.score * (0.36 - attentionMitigation * 0.18))
+  // Agent-driven long runs (no approvals since last human input) should not
+  // fully count against the human — they had no chance to intervene. Scale the
+  // penalty down heavily so the score reflects "waiting for a checkpoint"
+  // rather than "user is disengaged".
+  const riskPenalty = uninterruptedAgentRun ? rawRiskPenalty * 0.3 : rawRiskPenalty
   const rawScore = semanticQuality + reviewBonus - continuePenalty - stalenessPenalty - riskPenalty
   const score = clampScore(Math.max(rawScore, lowRiskFreshTaskFloor({ risk, review: input.review, cursor: input.cursor, recentContinueOnly })))
   return {
@@ -125,10 +138,22 @@ function evaluatePoint(input: {
     level: humanAttentionLevel(score),
     confidence: confidenceFor(humanMessages.length, risk.events),
     dimensions,
-    reasons: reasonsFor({ score, dimensions, risk, recentContinueOnly, review: input.review, cursor: input.cursor, humanScores }),
+    reasons: reasonsFor({ score, dimensions, risk, recentContinueOnly, review: input.review, cursor: input.cursor, humanScores, uninterruptedAgentRun }),
     evaluatedAt: input.evaluatedAt,
     evaluator: 'heuristic',
   }
+}
+
+function hasInterjectionOpportunity(entries: readonly HumanAttentionTimelineEntry[], sinceSeq: number): boolean {
+  for (const entry of entries) {
+    if (entry.seq <= sinceSeq) continue
+    if (entry.event.kind === 'approval_mode_changed') return true
+    if (entry.event.kind === 'user_message') return true
+    for (const effect of entry.effects ?? []) {
+      if (effect.kind === 'request_approval') return true
+    }
+  }
+  return false
 }
 
 function lowRiskFreshTaskFloor(input: {
@@ -246,6 +271,7 @@ function reasonsFor(input: {
   review: ReviewState
   cursor: number
   humanScores: readonly ReturnType<typeof scoreHumanText>[]
+  uninterruptedAgentRun?: boolean
 }): HumanAttentionReason[] {
   const reasons: HumanAttentionReason[] = []
   if (input.humanScores.length === 0) reasons.push({ kind: 'insufficient_evidence', severity: 'warning', message: 'No recent human input in the evaluation window.' })
@@ -254,9 +280,17 @@ function reasonsFor(input: {
   if (input.dimensions.correctionQuality >= 55 || input.humanScores.some((score) => score.correctionQuality >= 55)) reasons.push({ kind: 'corrected_agent_assumption', severity: 'info', message: 'Human corrected agent assumptions or behavior.' })
   if (input.dimensions.riskAwareness >= 60) reasons.push({ kind: 'risk_awareness', severity: 'info', message: 'Human input mentions testing, deployment, schema, restart, or similar risk.' })
   if (input.recentContinueOnly > 0) reasons.push({ kind: 'continue_only', severity: 'warning', message: 'Recent input delegates continuation without new constraints.', evidence: `${input.recentContinueOnly} continue-only message${input.recentContinueOnly === 1 ? '' : 's'}` })
-  if (input.risk.score >= 45) reasons.push({ kind: 'high_agent_activity', severity: input.risk.score >= 75 ? 'critical' : 'warning', message: 'Agent activity has accumulated since the last substantive review.', evidence: `${input.risk.events} risk-weighted event${input.risk.events === 1 ? '' : 's'}` })
+  if (input.risk.score >= 45) {
+    const severity: HumanAttentionReason['severity'] = input.uninterruptedAgentRun
+      ? 'info'
+      : input.risk.score >= 75 ? 'critical' : 'warning'
+    const message = input.uninterruptedAgentRun
+      ? 'Agent has been running without a checkpoint since the last human input.'
+      : 'Agent activity has accumulated since the last substantive review.'
+    reasons.push({ kind: 'high_agent_activity', severity, message, evidence: `${input.risk.events} risk-weighted event${input.risk.events === 1 ? '' : 's'}` })
+  }
   if (input.risk.highRisk > 0) reasons.push({ kind: 'high_risk_action', severity: 'critical', message: 'High-risk tool or operation was detected in this session window.' })
-  if (input.review.lastSubstantiveSeq !== null && input.cursor - input.review.lastSubstantiveSeq > 18) reasons.push({ kind: 'stale_review', severity: 'warning', message: 'No recent substantive human review after continued session activity.' })
+  if (input.review.lastSubstantiveSeq !== null && input.cursor - input.review.lastSubstantiveSeq > 18 && !input.uninterruptedAgentRun) reasons.push({ kind: 'stale_review', severity: 'warning', message: 'No recent substantive human review after continued session activity.' })
   return reasons
     .sort((a, b) => reasonPriority(a.kind) - reasonPriority(b.kind))
     .slice(0, 5)

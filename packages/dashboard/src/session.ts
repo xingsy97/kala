@@ -14,11 +14,14 @@ import type {
   AgentEvent,
   AgentState,
   Effect,
+  Message,
 } from '@agent-kernel/kernel'
 import { createInitialState, step } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
   AttachedExecutor,
+  CompactStatusEvent,
+  CompactionMetadata,
   ContextUsageSnapshot,
   ControlUpdate,
   DashboardClientToServerEvents,
@@ -32,7 +35,7 @@ import type {
   HostRestartEvent,
   HumanAttentionTimeline,
 } from '@agent-kernel/shared'
-import { PROTOCOL_VERSION, buildHumanAttentionTimeline } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION, buildHumanAttentionTimeline, estimateMessageTokens, estimateToolSchemaTokens } from '@agent-kernel/shared'
 import { io, type Socket } from 'socket.io-client'
 
 import { decideSessionHydration } from './session-hydration-policy.js'
@@ -52,6 +55,12 @@ export type TimelineEntry = {
   hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
+  /**
+   * Rich metadata for `messages_replaced (compaction)` events. Sourced
+   * from the wire `event:appended` / `server:history` payload; the kernel
+   * event itself only carries `replaceRange` + `replacementMessages`.
+   */
+  compactionMetadata?: CompactionMetadata
 }
 
 export type ConnectionStatus =
@@ -66,6 +75,13 @@ export type SessionView = {
   state: AgentState | null
   config: AgentConfig | null
   contextSnapshot: ContextUsageSnapshot | null
+  /**
+   * Latest compaction lifecycle event received from the host. Every
+   * attached dashboard receives the same broadcast; consumers use it to
+   * render "Compacting…" without needing to have originated the request.
+   * Null until the first attempt of the session.
+   */
+  compactStatus: CompactStatusEvent | null
   timeline: readonly TimelineEntry[]
   humanAttention: HumanAttentionTimeline
   streamingText: string
@@ -114,6 +130,7 @@ export function useSession({
   const [state, setState] = useState<AgentState | null>(null)
   const [config, setConfig] = useState<AgentConfig | null>(null)
   const [contextSnapshot, setContextUsageSnapshot] = useState<ContextUsageSnapshot | null>(null)
+  const [remoteCompactStatus, setRemoteCompactStatus] = useState<CompactStatusEvent | null>(null)
   const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
@@ -128,6 +145,7 @@ export function useSession({
   // which lives inside a stable useEffect closure and can't read the React
   // `config` state directly.
   const configRef = useRef<AgentConfig | null>(null)
+  const contextSnapshotRef = useRef<ContextUsageSnapshot | null>(null)
   // Streaming smoother: token_delta events land in `streamBufferRef`, and a
   // requestAnimationFrame loop drains a chunk per frame into React state. This
   // collapses 60-100 setState calls/sec into ~60 frames/sec AND paces bursty
@@ -136,6 +154,7 @@ export function useSession({
   const streamRafRef = useRef<number | null>(null)
   const onForkedRef = useRef(onForked)
   onForkedRef.current = onForked
+  contextSnapshotRef.current = contextSnapshot
 
   useEffect(() => {
     if (sessionId === null) {
@@ -146,6 +165,7 @@ export function useSession({
       setState(null)
       setConfig(null)
       setContextUsageSnapshot(null)
+      setRemoteCompactStatus(null)
       configRef.current = null
       setTimeline([])
       setStreamingText('')
@@ -161,6 +181,7 @@ export function useSession({
     setState(null)
     setConfig(null)
     setContextUsageSnapshot(null)
+    setRemoteCompactStatus(null)
     configRef.current = null
     setTimeline([])
     setStreamingText('')
@@ -333,6 +354,7 @@ export function useSession({
         ...(e.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
         ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
         ...(e.model ? { model: e.model } : {}),
+        ...(e.compactionMetadata ? { compactionMetadata: e.compactionMetadata } : {}),
       }))
       setTimeline((prev) => {
         const base = resetHistoryBaseOnNextReplay ? [] : prev
@@ -370,6 +392,22 @@ export function useSession({
         writeCacheSnapshot({ state: next })
         return next
       })
+      // For messages_replaced (compaction), recompute the client-side
+      // contextSnapshot from the just-folded state so the context-window
+      // indicator drops immediately, without waiting for the server's
+      // `state:changed` correction (which does arrive but can lag due to
+      // socket ordering + our own re-render timing).
+      if (p.event.kind === 'messages_replaced' && p.event.reason === 'compaction' && configRef.current) {
+        const cfg = configRef.current
+        const priorSnapshot = contextSnapshotRef.current
+        setState((prev) => {
+          if (prev === null) return prev
+          const snapshot = reprojectContextSnapshotAfterCompaction(cfg, prev.messages, priorSnapshot)
+          setContextUsageSnapshot(snapshot)
+          writeCacheSnapshot({ contextSnapshot: snapshot })
+          return prev
+        })
+      }
       setTimeline((prev) => {
         const next = mergeBySeq(prev, [
           {
@@ -381,6 +419,7 @@ export function useSession({
             ...(p.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
             ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
             ...(p.model ? { model: p.model } : {}),
+            ...(p.compactionMetadata ? { compactionMetadata: p.compactionMetadata } : {}),
           },
         ])
         writeCacheSnapshot({ timeline: next })
@@ -451,6 +490,10 @@ export function useSession({
       }
       setStatus('disconnected')
     })
+    socket.on('server:compact_status', (p: CompactStatusEvent) => {
+      if (!isCurrentSocket() || p.sessionId !== sessionId) return
+      setRemoteCompactStatus(p)
+    })
 
     return () => {
       if (streamRafRef.current !== null) {
@@ -492,6 +535,7 @@ export function useSession({
       state,
       config,
       contextSnapshot,
+      compactStatus: remoteCompactStatus,
       timeline,
       humanAttention,
       streamingText,
@@ -509,6 +553,8 @@ export function useSession({
       status,
       state,
       config,
+      contextSnapshot,
+      remoteCompactStatus,
       timeline,
       humanAttention,
       streamingText,
@@ -1004,3 +1050,52 @@ function sameTimelineEvent(a: TimelineEntry, b: TimelineEntry): boolean {
   }
   return true
 }
+
+/**
+ * Recompute a fresh `ContextUsageSnapshot` after the client folds a
+ * `messages_replaced (compaction)` event. Mirrors host `snapshotFromConfig`
+ * so the numbers agree with the server's follow-up `state:changed`; keeps
+ * `contextWindow` / `model` / `estimator` from the prior snapshot so we
+ * don't accidentally regress to `unknown` mid-flight.
+ *
+ * The `system` (reserve) bucket is intentionally left at its prior value:
+ * the reserve heuristic doesn't depend on message count, and we don't have
+ * `contextLimit` handy without importing more from the host. It'll be
+ * corrected on the next `state:changed`.
+ */
+function reprojectContextSnapshotAfterCompaction(
+  cfg: AgentConfig,
+  messages: readonly Message[],
+  prior: ContextUsageSnapshot | null,
+): ContextUsageSnapshot {
+  const transcriptTokens = estimateMessageTokens(messages)
+  const toolTokens = estimateToolSchemaTokens(cfg.tools)
+  const priorReserve = prior?.breakdown.system ?? 0
+  const priorMemory = prior?.breakdown.memory ?? 0
+  const priorAttachments = prior?.breakdown.attachments ?? 0
+  const priorPending = prior?.breakdown.pendingUserInput ?? 0
+  const inputTokens = transcriptTokens + toolTokens + priorReserve
+  return {
+    model: prior?.model ?? { ref: 'unknown' },
+    contextWindow: prior?.contextWindow ?? { tokens: null, source: 'unknown' },
+    usage: {
+      inputTokens,
+      totalTokens: inputTokens,
+    },
+    breakdown: {
+      system: priorReserve,
+      transcript: transcriptTokens,
+      tools: toolTokens,
+      memory: priorMemory,
+      attachments: priorAttachments,
+      pendingUserInput: priorPending,
+    },
+    estimator: prior?.estimator ?? {
+      total: { kind: 'heuristic', confidence: 'rough' },
+      breakdown: { kind: 'heuristic', confidence: 'rough' },
+      version: 'heuristic-v1',
+    },
+    updatedAt: Date.now(),
+  }
+}
+

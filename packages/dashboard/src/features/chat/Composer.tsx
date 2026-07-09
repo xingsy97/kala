@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, Square, Trash2, X } from 'lucide-react'
+import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, SlidersHorizontal, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
@@ -29,7 +29,6 @@ import { RuntimeMetrics } from './RuntimeMetrics.js'
 import { HumanAttentionIndicator } from './HumanAttentionIndicator.js'
 import type { TimelineEntry } from '../../session.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
-import { ComposerModeToggle } from './composer/ComposerModeToggle.js'
 import { SimpleComposerInput } from './composer/SimpleComposerInput.js'
 import { useComposerMode } from './composer/useComposerMode.js'
 
@@ -422,6 +421,30 @@ export function Composer({
           onUpdate={onQueuedUpdate}
           onDelete={onQueuedDelete}
         />
+        <button
+          type="button"
+          onClick={toggleMode}
+          aria-pressed={mode === 'full'}
+          aria-label={mode === 'simple' ? t('composer.mode.toFull') : t('composer.mode.toSimple')}
+          title={mode === 'simple' ? t('composer.mode.toFull') : t('composer.mode.toSimple')}
+          data-testid="composer-mode-toggle"
+          data-composer-mode={mode}
+          className={cn(
+            // Hidden on mobile — touch devices can't hover so the invisible
+            // pill was pure padding waste above the input.
+            'group hidden h-4 w-full items-center justify-center rounded-t-lg sm:flex',
+            'border border-b-0 border-transparent -mb-px',
+            'text-muted-foreground/0 transition-colors',
+            'hover:border-border/60 hover:bg-accent/40 hover:text-foreground',
+            'focus-visible:border-border/60 focus-visible:bg-accent/40 focus-visible:text-foreground focus-visible:outline-none',
+          )}
+        >
+          {mode === 'simple' ? (
+            <ChevronUp className="h-3 w-3" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="h-3 w-3" aria-hidden="true" />
+          )}
+        </button>
         {mode === 'simple' ? (
           <div className="relative flex items-center gap-2" data-testid="composer-simple-shell">
             <div className="min-w-0 flex-1">
@@ -455,11 +478,6 @@ export function Composer({
               onSendModeChange={updateSendMode}
               density="simple"
               stop={showStopButton ? { onClick: onCancel } : undefined}
-            />
-            <ComposerModeToggle
-              mode={mode}
-              onToggle={toggleMode}
-              className="h-9 w-9 flex-none rounded-full border border-border/50 bg-muted/45 text-muted-foreground hover:bg-muted hover:text-foreground sm:h-9 sm:w-9"
             />
           </div>
         ) : (
@@ -620,9 +638,21 @@ export function Composer({
             ) : null}
           </div>
           <div
-            className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-border/50 px-2 py-2"
+            className="flex min-w-0 flex-row flex-wrap items-center gap-1.5 border-t border-border/50 px-2 py-2 sm:gap-2"
             data-testid="composer-footer"
           >
+            <ComposerConfigButton
+              model={model}
+              models={models}
+              onModelChange={onModelChange}
+              approvalMode={approvalMode}
+              approvalModeLabel={approvalModeLabel}
+              onApprovalModeChange={onApprovalModeChange}
+              composerMode={mode}
+              onComposerModeChange={toggleMode}
+              className="flex sm:hidden"
+            />
+            <div className="hidden min-w-0 items-center gap-1.5 sm:flex" data-testid="composer-footer-config">
             <Select
               value={modelInfoFor(models, model ?? '') ? model : ''}
               onValueChange={onModelChange}
@@ -689,8 +719,9 @@ export function Composer({
                 )})}
               </SelectContent>
             </Select>
+            </div>
             {footerExtras}
-            <div className="ml-auto flex min-w-0 flex-none items-center gap-1.5 max-[420px]:basis-full max-[420px]:justify-end">
+            <div className="ml-auto flex min-w-0 max-w-full items-center gap-1.5 max-sm:w-full max-sm:justify-end" data-testid="composer-footer-actions">
               <RuntimeMetrics
                 state={state}
                 config={config}
@@ -707,11 +738,6 @@ export function Composer({
                 sendMode={sendMode}
                 onSendModeChange={updateSendMode}
                 stop={showStopButton ? { onClick: onCancel } : undefined}
-              />
-              <ComposerModeToggle
-                mode={mode}
-                onToggle={toggleMode}
-                className="h-8 w-8 flex-none rounded-full border border-border/50 bg-muted/45 text-muted-foreground hover:bg-muted hover:text-foreground"
               />
             </div>
           </div>
@@ -784,13 +810,13 @@ function SendButton({
         data-testid="composer-stop"
         className={cn(
           'flex-none rounded-full bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-          isSimple ? 'h-9 px-3.5 text-xs font-medium' : 'h-8 px-3 text-xs font-medium',
+          isSimple ? 'h-9 text-xs font-medium max-sm:px-3 sm:px-3.5' : 'h-8 text-xs font-medium max-sm:px-3 sm:px-3',
         )}
         aria-label={t('chatStatus.stopTitle')}
         title={t('chatStatus.stopTitle')}
       >
-        <Square className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-        {t('chatStatus.stop')}
+        <Square className={cn('h-3.5 w-3.5', 'sm:mr-1.5')} aria-hidden="true" />
+        <span className="hidden sm:inline">{t('chatStatus.stop')}</span>
       </Button>
     )
   }
@@ -807,15 +833,15 @@ function SendButton({
         data-testid="composer-send"
         className={cn(
           isSimple
-            ? 'h-9 rounded-r-none rounded-l-full pl-3.5 pr-3 text-xs font-medium shadow-sm'
-            : 'h-8 rounded-r-none rounded-l-full pl-4 pr-3 text-xs font-medium',
+            ? 'h-9 rounded-r-none rounded-l-full text-xs font-medium shadow-sm max-sm:pl-3 max-sm:pr-2.5 sm:pl-3.5 sm:pr-3'
+            : 'h-8 rounded-r-none rounded-l-full text-xs font-medium max-sm:pl-3 max-sm:pr-2.5 sm:pl-4 sm:pr-3',
           disabled ? 'opacity-50' : '',
         )}
         aria-label={t('composer.sendMessage', { mode: modeLabel })}
         title={modeHint}
       >
-        <ModeIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-        {t('composer.send')}
+        <ModeIcon className={cn('h-3.5 w-3.5', 'sm:mr-1.5')} aria-hidden="true" />
+        <span className="hidden sm:inline">{t('composer.send')}</span>
       </Button>
       <button
         type="button"
@@ -837,7 +863,7 @@ function SendButton({
       </button>
       {menuOpen ? (
         <div
-          className="absolute right-0 bottom-full z-20 mb-2 min-w-[15rem] overflow-hidden rounded-lg border border-border/60 bg-popover text-xs shadow-lg"
+          className="absolute right-0 bottom-full z-20 mb-2 min-w-[15rem] w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden overflow-x-hidden rounded-lg border border-border/60 bg-popover text-xs shadow-lg"
           role="listbox"
           data-testid="send-mode-menu"
         >
@@ -880,6 +906,179 @@ function SendButton({
               </button>
             )
           })}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ComposerConfigButton({
+  model,
+  models,
+  onModelChange,
+  approvalMode,
+  approvalModeLabel,
+  onApprovalModeChange,
+  composerMode,
+  onComposerModeChange,
+  className,
+}: {
+  model: string
+  models: readonly ModelInfo[]
+  onModelChange(next: string): void
+  approvalMode: ApprovalMode
+  approvalModeLabel: string
+  onApprovalModeChange(next: ApprovalMode): void
+  composerMode: 'simple' | 'full'
+  onComposerModeChange(): void
+  className?: string
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (event: MouseEvent): void => {
+      if (!containerRef.current) return
+      if (!containerRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const activeModel = modelInfoFor(models, model ?? '')
+  const modelSummary = activeModel?.label ?? t('common.model')
+  const approvalTone =
+    approvalMode === 'allow_all'
+      ? 'text-rose-600 dark:text-rose-300'
+      : approvalMode === 'ask'
+        ? 'text-amber-600 dark:text-amber-300'
+        : 'text-muted-foreground'
+
+  return (
+    <div className={cn('relative flex-none', className)} ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={t('composer.config.open')}
+        title={t('composer.config.open')}
+        aria-expanded={open}
+        data-testid="composer-config-trigger"
+        className={cn(
+          'inline-flex h-9 w-9 flex-none items-center justify-center rounded-full border border-border/50 bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+          open && 'bg-accent text-foreground',
+          approvalTone,
+        )}
+      >
+        <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label={t('composer.config.title')}
+          className="fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-border/60 bg-popover p-3 text-xs shadow-lg sm:absolute sm:inset-x-auto sm:bottom-full sm:left-0 sm:mb-2 sm:w-[min(20rem,calc(100vw-1rem))]"
+          data-testid="composer-config-popover"
+        >
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('composer.config.title')}
+          </div>
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                {t('common.model')}
+                <span className="ml-auto truncate text-[10px] text-muted-foreground">{modelSummary}</span>
+              </span>
+              <Select
+                value={activeModel ? model : ''}
+                onValueChange={onModelChange}
+                disabled={models.length === 0}
+              >
+                <SelectTrigger className="h-9 w-full" aria-label={t('common.model')}>
+                  <SelectValue placeholder={models.length === 0 ? t('common.noModels') : t('common.model')} />
+                </SelectTrigger>
+                <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
+                  {models.map((m) => {
+                    const key = modelKey(m)
+                    return (
+                      <SelectItem key={key} value={key}>
+                        {m.label}
+                        {m.providerId ? <span className="ml-1 text-[10px] text-muted-foreground">{m.providerId}</span> : null}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                <ShieldCheck className={cn('h-3.5 w-3.5', approvalTone)} aria-hidden="true" />
+                {t('composer.approvalMode')}
+                <span className={cn('ml-auto truncate text-[10px]', approvalTone)}>{approvalModeLabel}</span>
+              </span>
+              <Select
+                value={approvalMode}
+                onValueChange={(v) => onApprovalModeChange(v as ApprovalMode)}
+              >
+                <SelectTrigger className="h-9 w-full" aria-label={t('composer.approvalMode')}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
+                  {APPROVAL_MODES.map((m) => {
+                    const display = approvalModeDisplay(m.value, t)
+                    return (
+                      <SelectItem key={m.value} value={m.value} textValue={display.label}>
+                        <div className="flex flex-col">
+                          <span>{display.label}</span>
+                          <span className="text-[10px] text-muted-foreground">{display.hint}</span>
+                        </div>
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="flex flex-col gap-1" data-testid="composer-config-mode">
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                <span>Composer layout</span>
+                <span className="ml-auto truncate text-[10px] text-muted-foreground">
+                  {composerMode === 'simple' ? t('composer.mode.toFull').replace(/[（(].*[)）]/, '').trim() : t('composer.mode.toSimple').replace(/[（(].*[)）]/, '').trim()}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  onComposerModeChange()
+                  setOpen(false)
+                }}
+                data-testid="composer-config-mode-toggle"
+                className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-border/60 bg-background px-3 text-[11px] font-medium text-foreground hover:bg-accent"
+              >
+                {composerMode === 'simple' ? (
+                  <>
+                    <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{t('composer.mode.toFull')}</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{t('composer.mode.toSimple')}</span>
+                  </>
+                )}
+              </button>
+            </label>
+          </div>
         </div>
       ) : null}
     </div>

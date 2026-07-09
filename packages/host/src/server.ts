@@ -425,7 +425,7 @@ export async function startHostServer(
   }
 
   const broadcast: LoopBroadcast = {
-    onEvent(sessionId, seq, event, effects, state, llmTrace, model) {
+    onEvent(sessionId, seq, event, effects, state, llmTrace, model, extras) {
       const room = sessionRoom(sessionId)
       const slimEffects = effects.map(slimEffect)
       const hasEffectsArtifact = effects.some((effect) => effect.kind === 'call_llm')
@@ -441,6 +441,7 @@ export async function startHostServer(
         ...(hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
         ...(llmTrace ? { hasLlmTraceArtifact: true } : {}),
         ...(model ? { model } : {}),
+        ...(extras?.compactionMetadata ? { compactionMetadata: extras.compactionMetadata } : {}),
       })
       io.of('/dashboard').to(room).emit('state:changed', {
         sessionId,
@@ -462,6 +463,7 @@ export async function startHostServer(
         ...(hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
         ...(llmTrace ? { hasLlmTraceArtifact: true } : {}),
         ...(model ? { model } : {}),
+        ...(extras?.compactionMetadata ? { compactionMetadata: extras.compactionMetadata } : {}),
       })
       io.of('/executor').to(room).emit('state:changed', {
         sessionId,
@@ -542,6 +544,9 @@ export async function startHostServer(
         kind: 'sub_agent_finished',
         ...payload,
       })
+    },
+    onCompactStatus(payload) {
+      io.of('/dashboard').to(sessionRoom(payload.sessionId)).emit('server:compact_status', payload)
     },
   }
 

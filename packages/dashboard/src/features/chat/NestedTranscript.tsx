@@ -501,7 +501,7 @@ function NestedMarkdown({ text, compact }: { text: string; compact: boolean }): 
         '[&_h3]:my-1.5 [&_h3]:text-[11px] [&_h3]:font-semibold',
         '[&_h4]:my-1.5 [&_h4]:text-[11px] [&_h4]:font-semibold',
         '[&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-2 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted/70 [&_code]:px-1 [&_code]:py-0 [&_code]:text-foreground',
+        '[&_code]:rounded [&_code]:bg-muted/70 [&_code]:px-1 [&_code]:py-0 [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere] [&_code]:[word-break:break-word]',
         '[&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4',
         '[&_li]:my-0.5 [&_li>p]:my-0.5',
         '[&_pre]:my-1 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/60 [&_pre]:p-2 [&_pre]:text-[10px]',

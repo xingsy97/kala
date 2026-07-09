@@ -64,7 +64,7 @@ describe('useSessionToasts', () => {
     expect(mockedNotify.error).not.toHaveBeenCalled()
   })
 
-  it('fires an approval toast the first time an approval appears', () => {
+  it('does not fire approval toast when the tab is visible (banner suffices)', () => {
     const { rerender } = render(
       <SessionToastHarness
         sessionId="s"
@@ -83,61 +83,133 @@ describe('useSessionToasts', () => {
         lastError={null}
       />,
     )
-    expect(mockedNotify.info).toHaveBeenCalledTimes(1)
-    const [msg, opts] = mockedNotify.info.mock.calls[0]!
-    expect(msg).toContain('Approval requested — bash')
-    expect(opts.id).toBe('approval-s-c1')
-    expect(opts.description).toBe('Session')
+    expect(mockedNotify.info).not.toHaveBeenCalled()
   })
 
-  it('reports queue length when multiple approvals pending', () => {
-    const { rerender } = render(
-      <SessionToastHarness
-        sessionId="s"
-        sessionLabel="Session"
-        connectionStatus="ready"
-        pendingApprovals={[]}
-        lastError={null}
-      />,
-    )
-    rerender(
-      <SessionToastHarness
-        sessionId="s"
-        sessionLabel="Session"
-        connectionStatus="ready"
-        pendingApprovals={[
-          { sessionId: 's', callId: 'c1', name: 'bash', input: {} },
-          { sessionId: 's', callId: 'c2', name: 'edit', input: {} },
-        ]}
-        lastError={null}
-      />,
-    )
-    const [, opts] = mockedNotify.info.mock.calls[0]!
-    expect(opts.description).toBe('Session: 1 more request pending')
+  it('fires an approval toast when the tab is hidden', () => {
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    try {
+      const { rerender } = render(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={[]}
+          lastError={null}
+        />,
+      )
+      rerender(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={[{ sessionId: 's', callId: 'c1', name: 'bash', input: {} }]}
+          lastError={null}
+        />,
+      )
+      expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+      const [msg, opts] = mockedNotify.info.mock.calls[0]!
+      expect(msg).toContain('Approval requested — bash')
+      expect(opts.id).toBe('approval-s-c1')
+      expect(opts.description).toBe('Session')
+    } finally {
+      if (original) Object.defineProperty(Document.prototype, 'visibilityState', original)
+    }
   })
 
-  it('does not re-fire the same approval on unrelated re-renders', () => {
-    const approvals = [{ sessionId: 's', callId: 'c1', name: 'bash', input: {} }]
-    const { rerender } = render(
-      <SessionToastHarness
-        sessionId="s"
-        sessionLabel="Session"
-        connectionStatus="ready"
-        pendingApprovals={approvals}
-        lastError={null}
-      />,
-    )
-    // Same approvals, unrelated rerender.
-    rerender(
-      <SessionToastHarness
-        sessionId="s"
-        sessionLabel="Session"
-        connectionStatus="ready"
-        pendingApprovals={approvals}
-        lastError={null}
-      />,
-    )
-    expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+  it('suppresses approval toast when approvalMode is allow_all (tab hidden)', () => {
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    try {
+      const { rerender } = render(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={[]}
+          lastError={null}
+          approvalMode="allow_all"
+        />,
+      )
+      rerender(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={[{ sessionId: 's', callId: 'c1', name: 'bash', input: {} }]}
+          lastError={null}
+          approvalMode="allow_all"
+        />,
+      )
+      // In allow_all mode the kernel auto-dispatches; any pending calls the
+      // client still observes are transient — do not pester the operator.
+      expect(mockedNotify.info).not.toHaveBeenCalled()
+    } finally {
+      if (original) Object.defineProperty(Document.prototype, 'visibilityState', original)
+    }
+  })
+
+  it('reports queue length when multiple approvals pending (tab hidden)', () => {
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    try {
+      const { rerender } = render(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={[]}
+          lastError={null}
+        />,
+      )
+      rerender(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={[
+            { sessionId: 's', callId: 'c1', name: 'bash', input: {} },
+            { sessionId: 's', callId: 'c2', name: 'edit', input: {} },
+          ]}
+          lastError={null}
+        />,
+      )
+      const [, opts] = mockedNotify.info.mock.calls[0]!
+      expect(opts.description).toBe('Session: 1 more request pending')
+    } finally {
+      if (original) Object.defineProperty(Document.prototype, 'visibilityState', original)
+    }
+  })
+
+  it('does not re-fire the same approval on unrelated re-renders (tab hidden)', () => {
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    try {
+      const approvals = [{ sessionId: 's', callId: 'c1', name: 'bash', input: {} }]
+      const { rerender } = render(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={approvals}
+          lastError={null}
+        />,
+      )
+      // Same approvals, unrelated rerender.
+      rerender(
+        <SessionToastHarness
+          sessionId="s"
+          sessionLabel="Session"
+          connectionStatus="ready"
+          pendingApprovals={approvals}
+          lastError={null}
+        />,
+      )
+      expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+    } finally {
+      if (original) Object.defineProperty(Document.prototype, 'visibilityState', original)
+    }
   })
 
   it('fires warning + success on disconnect / reconnect transitions', () => {
@@ -174,7 +246,7 @@ describe('useSessionToasts', () => {
     expect(mockedNotify.success.mock.calls[0][0]).toBe('Reconnected')
   })
 
-  it('fires error toast for a new session error and dedupes duplicates', () => {
+  it('does not fire toast for focused session errors (banner surfaces them)', () => {
     const err = { sessionId: 's', scope: 'llm', message: 'boom' } as const
     const { rerender } = render(
       <SessionToastHarness
@@ -194,18 +266,7 @@ describe('useSessionToasts', () => {
         lastError={err as unknown as Parameters<typeof useSessionToasts>[0]['lastError']}
       />,
     )
-    rerender(
-      <SessionToastHarness
-        sessionId="s"
-        sessionLabel="Session"
-        connectionStatus="ready"
-        pendingApprovals={[]}
-        lastError={err as unknown as Parameters<typeof useSessionToasts>[0]['lastError']}
-      />,
-    )
-    expect(mockedNotify.error).toHaveBeenCalledTimes(1)
-    expect(mockedNotify.error.mock.calls[0][0]).toContain('Session: session error')
-    expect(mockedNotify.error.mock.calls[0][1].description).toBe('boom')
+    expect(mockedNotify.error).not.toHaveBeenCalled()
   })
 })
 

@@ -38,6 +38,15 @@ export type SessionToastInput = {
   connectionStatus: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
   lastError: SessionErrorEvent | null
+  /**
+   * Current approval mode of the session. When `'allow_all'`, incoming tool
+   * calls are auto-dispatched by the kernel and the operator never needs to
+   * act — so any `pendingApprovals` we still observe are either transient
+   * (races between mode change and call arrival) or pre-existing calls that
+   * were parked before the switch. Either way surfacing an "Approval
+   * requested" toast is misleading; suppress it in this mode.
+   */
+  approvalMode?: string
   /** Called when the user clicks the "Review" action on an approval toast. */
   onFocusApprovals?: () => void
 }
@@ -52,9 +61,11 @@ export function useSessionToasts({
   connectionStatus,
   pendingApprovals,
   lastError,
+  approvalMode,
   onFocusApprovals,
 }: SessionToastInput): void {
   const firstApproval = pendingApprovals[0]
+  const suppressApprovalToast = approvalMode === 'allow_all'
   const approvalSig = firstApproval
     ? `${sessionId}:${firstApproval.callId}:${pendingApprovals.length}`
     : `${sessionId}:none`
@@ -72,27 +83,35 @@ export function useSessionToasts({
     }
     prev.current = { approvalSig, errorSig, connectionStatus }
 
-    if (firstApproval && approvalSig !== previous?.approvalSig) {
-      const extras = pendingApprovals.length - 1
-      notify.info(`Approval requested — ${firstApproval.name}`, {
-        id: `approval-${sessionId}-${firstApproval.callId}`,
-        description:
-          extras > 0
-            ? `${sessionLabel}: ${extras} more request${extras === 1 ? '' : 's'} pending`
-            : sessionLabel,
-        ...(focusRef.current
-          ? { action: { label: 'Review', onClick: () => focusRef.current?.() } }
-          : {}),
-        duration: 8000,
-      })
+    if (firstApproval && approvalSig !== previous?.approvalSig && !suppressApprovalToast) {
+      // Skip the toast when the tab is focused — the composer already flips to
+      // an approval card and the pending list is visible, so a right-corner
+      // toast is a third copy of the same signal. When the user is away
+      // (hidden tab), the toast is what they'll see on return.
+      const tabVisible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+      if (!tabVisible) {
+        const extras = pendingApprovals.length - 1
+        notify.info(`Approval requested — ${firstApproval.name}`, {
+          id: `approval-${sessionId}-${firstApproval.callId}`,
+          description:
+            extras > 0
+              ? `${sessionLabel}: ${extras} more request${extras === 1 ? '' : 's'} pending`
+              : sessionLabel,
+          ...(focusRef.current
+            ? { action: { label: 'Review', onClick: () => focusRef.current?.() } }
+            : {}),
+          duration: 8000,
+        })
+      }
     }
 
     if (lastError && errorSig !== previous?.errorSig) {
-      notify.error(`${sessionLabel}: session error`, {
-        id: `session-error-${sessionId}-${lastError.scope}`,
-        description: lastError.message,
-        duration: 10000,
-      })
+      // Intentionally no in-app toast for the focused session's own error:
+      // <SessionErrorBanner> already surfaces it right above the composer, and
+      // stacking a right-corner toast on top felt like the same event shouting
+      // twice. Non-focused sessions still get a toast via
+      // useInactiveSessionSummaryToasts. Desktop notifications (when tab is
+      // backgrounded) come from useInterventionDesktopNotifications.
     }
 
     const wasLost = previous?.connectionStatus === 'disconnected' || previous?.connectionStatus === 'error'
@@ -120,6 +139,7 @@ export function useSessionToasts({
     pendingApprovals.length,
     sessionId,
     sessionLabel,
+    suppressApprovalToast,
   ])
 }
 

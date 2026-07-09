@@ -243,7 +243,6 @@ describe('Composer', () => {
     const indicator = screen.getByTestId('context-usage-indicator')
     const send = screen.getByTestId('composer-send')
     const sendMode = screen.getByTestId('send-mode-toggle')
-    const modeToggle = screen.getByTestId('composer-mode-toggle')
 
     expect(shell.contains(indicator)).toBe(true)
     expect(shell.contains(send)).toBe(true)
@@ -251,8 +250,13 @@ describe('Composer', () => {
     expect(indicator.className).toContain('h-9')
     expect(send.className).toContain('h-9')
     expect(sendMode.className).toContain('h-9')
-    expect(modeToggle.className).toContain('h-9')
-    expect(modeToggle.className).toContain('sm:h-9')
+
+    // The composer-mode toggle is now a standalone bar above the composer,
+    // and no longer part of the send-mode dropdown menu.
+    const modeToggle = screen.getByTestId('composer-mode-toggle')
+    expect(modeToggle).toBeTruthy()
+    fireEvent.click(sendMode)
+    expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
   })
 
   it('shows queued message management in simple mode', () => {

@@ -44,7 +44,7 @@ import {
   type CompactionSummaryValidation,
 } from '@agent-kernel/shared/enhancement'
 
-import type { HostLoopDeps, LoopHandle } from '../loop-types.js'
+import type { CompactStatusPayload, HostLoopDeps, LoopHandle } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
 import { appendRuntimeMetadataEntry } from '../store/log.js'
 import { contextSnapshot, shouldAutoCompact } from '../context/manager.js'
@@ -134,12 +134,6 @@ const RECENT_RAW_USER_TOKEN_CAP = 20_000
  * five headings + "(none)" bodies is already ~350 chars, so anything below
  * this is guaranteed to be either a conversational reply or a truncation. */
 const MIN_SUMMARY_CHARS = 400
-
-/** Reject summaries whose compression ratio exceeds this. tokensBefore /
- * tokensAfter > 200× has historically indicated the summarizer collapsed the
- * transcript to a one-line reply (real observed on box: 427k → 6.5k with a
- * 50-char body). Never happens for a legitimate handoff. */
-const MAX_COMPRESSION_RATIO = 200
 
 const COMPACT_TIMEOUT_MS = 10 * 60_000
 const MIN_RECENT_TAIL_TOKENS = 4_000
@@ -270,6 +264,12 @@ export async function runCompact(
     const head = record.state.messages.slice(0, preserveFrom)
     const leadingSystemCount = record.state.messages[0]?.role === 'system' ? 1 : 0
 
+    // Broadcast the running state so every attached dashboard (not just
+    // the one that clicked /compact) can render "Compacting…".
+    broadcastCompactStatus(deps, {
+      sessionId, kind: 'running', trigger, tokensBefore, attemptId, startedAt: new Date().toISOString(),
+    })
+
     // Codex-style anchored summary: if the previous compaction wrote a summary
     // user-message at the head (identified by SUMMARY_PREFIX), pull it out and
     // hand it to the summarizer as `<previous-summary>` so it can update
@@ -369,6 +369,17 @@ export async function runCompact(
       aborts,
       compact.trace,
       compact.model,
+      undefined,
+      undefined,
+      {
+        compactionMetadata: {
+          trigger,
+          attemptId,
+          tokensBefore,
+          tokensAfter,
+          replacedCount,
+        },
+      },
     )
     await appendCompactionMetadata(deps, sessionId, 'compaction_applied', {
       trigger,
@@ -386,6 +397,10 @@ export async function runCompact(
       ...(compact.usage ? { responseUsage: compact.usage } : {}),
     })
 
+    broadcastCompactStatus(deps, {
+      sessionId, kind: 'done', attemptId, tokensBefore, tokensAfter, endedAt: new Date().toISOString(),
+    })
+
     // Success: reset counters and back-off.
     rt.consecutiveFailures = 0
     rt.mutedForBatch = undefined
@@ -399,23 +414,21 @@ export async function runCompact(
  * Return a machine-readable reason code if the summary is unfit to replace
  * the transcript, or `undefined` if it passes all quality gates. Not called
  * for the empty-summary case (handled separately upstream).
+ *
+ * Deliberately no compression-ratio gate: the earlier 200× cap was set to
+ * catch the 42w→50char pathological case, but it also rejected legitimate
+ * 400k→2k handoffs. The schema + min-length + conversational-reply checks
+ * already catch every real-world bad summary observed.
  */
 function evaluateSummaryQuality(
   summary: string,
   tokensBefore: number,
   validation: CompactionSummaryValidation,
-): 'summary_schema_invalid' | 'summary_too_short' | 'summary_too_lossy' | 'summary_conversational' | undefined {
+): 'summary_schema_invalid' | 'summary_too_short' | 'summary_conversational' | undefined {
+  void tokensBefore
   if (!validation.ok) return 'summary_schema_invalid'
   if (summary.trim().length < MIN_SUMMARY_CHARS) return 'summary_too_short'
   if (looksLikeConversationalReply(summary)) return 'summary_conversational'
-  // Compression ratio is measured against the SUMMARY body only — we approximate
-  // its post-compaction footprint by the summary text tokens. tokensAfter will
-  // include preserved-tail + recent raw users too, which would inflate the
-  // ratio artificially; the ratio's job here is to catch "42w tokens -> 50
-  // chars" pathological compressions, not fine-grained accounting.
-  const summaryTokensApprox = Math.max(1, Math.ceil(summary.length / 4))
-  const ratio = tokensBefore / summaryTokensApprox
-  if (ratio > MAX_COMPRESSION_RATIO) return 'summary_too_lossy'
   return undefined
 }
 
@@ -441,7 +454,6 @@ async function recordFailure(
     | 'empty_summary'
     | 'summary_schema_invalid'
     | 'summary_too_short'
-    | 'summary_too_lossy'
     | 'summary_conversational',
 ): Promise<void> {
   rt.consecutiveFailures += 1
@@ -461,7 +473,6 @@ async function dispatchSkip(
     | 'empty_summary'
     | 'summary_schema_invalid'
     | 'summary_too_short'
-    | 'summary_too_lossy'
     | 'summary_conversational'
     | 'no_compactable_content'
     | 'session_busy',
@@ -474,6 +485,11 @@ async function dispatchSkip(
     attemptId,
     reason,
     ...(errorMessageText ? { errorMessage: errorMessageText } : {}),
+  })
+  broadcastCompactStatus(deps, {
+    sessionId, kind: 'skipped', attemptId, reason,
+    ...(errorMessageText ? { message: errorMessageText } : {}),
+    endedAt: new Date().toISOString(),
   })
 }
 
@@ -491,6 +507,18 @@ async function dispatchRejected(
     reason,
     ...extra,
   })
+  broadcastCompactStatus(deps, {
+    sessionId, kind: 'skipped', attemptId, reason, endedAt: new Date().toISOString(),
+  })
+}
+
+function broadcastCompactStatus(deps: HostLoopDeps, payload: CompactStatusPayload): void {
+  try {
+    deps.broadcast.onCompactStatus?.(payload)
+  } catch {
+    // Broadcast is fire-and-forget observability; a bad listener never
+    // taints the compaction path itself.
+  }
 }
 
 async function appendCompactionMetadata(

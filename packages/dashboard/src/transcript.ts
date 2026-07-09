@@ -8,8 +8,15 @@ export type CompactBoundary = {
   seq: number
   trigger: 'manual' | 'auto' | 'preflight' | 'tool_result' | 'unknown'
   replacedCount: number
-  tokensBefore: number
-  tokensAfter: number
+  /**
+   * Tokens before/after the compaction. `null` means the metadata was not
+   * available to us (e.g. sessions logged before compaction metadata was
+   * plumbed onto the wire, or a runtime that dropped the record). The UI
+   * must not fall back to `0` in that case — display "—" instead so we
+   * don't imply a nonsense "0 → 0 tokens" result.
+   */
+  tokensBefore: number | null
+  tokensAfter: number | null
   summary: string
 }
 
@@ -147,13 +154,14 @@ export function visibleTranscript(
         },
       })
     } else if (event.kind === 'messages_replaced' && event.reason === 'compaction') {
+      const meta = entry.compactionMetadata
       out.push({
         kind: 'compact_boundary',
         seq: entry.seq,
-        trigger: 'unknown',
-        replacedCount: event.replaceRange.end - event.replaceRange.start,
-        tokensBefore: 0,
-        tokensAfter: 0,
+        trigger: meta?.trigger ?? 'unknown',
+        replacedCount: meta?.replacedCount ?? Math.max(0, event.replaceRange.end - event.replaceRange.start),
+        tokensBefore: meta?.tokensBefore ?? null,
+        tokensAfter: meta?.tokensAfter ?? null,
         summary: event.replacementMessages.map((message) => message.content.map((content) => content.type === 'text' ? content.text : '').join('')).join('\n'),
       })
     }

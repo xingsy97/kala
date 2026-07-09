@@ -1,27 +1,24 @@
 /**
- * PWA update + offline banners, wired to BannerStack.
+ * PWA lifecycle host + top-anchored update banner + composer-adjacent
+ * offline banner.
  *
- * Kept in one file so the two composer-adjacent notices that come from the
- * PWA layer (see docs/planning/roadmap-notes/pwa-mobile-and-push.md §4)
- * live together and both use the shared BannerSlot registration protocol.
+ * The update banner used to live inside BannerStack (chat pane bottom),
+ * but users on a broken cached build might never scroll down to see it.
+ * It's now rendered at the top of the app shell (below AppShellNav) so a
+ * fresh SW install is always in the user's face and one tap away from
+ * activation.
  *
- * Update banner: appears when a new service worker is `waiting`. Reload is
- * user-initiated so mid-session composer drafts and open approvals aren't
- * dropped by an implicit page reload.
- *
- * Offline banner: appears when useOnlineStatus reports the dashboard cannot
- * reach the host. Uses BannerSlot so it participates in the stack's
- * collapse-when-crowded logic instead of always pushing the composer down.
+ * Offline banner stays in the composer-adjacent BannerStack — being
+ * offline while the app itself works is a secondary signal, not a
+ * pop-up-worthy interruption.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { RefreshCw, WifiOff, X } from 'lucide-react'
 
 import { BannerSlot } from './BannerStack.js'
 import { initPwa, type PwaController } from '../../lib/pwa.js'
 import { useOnlineStatus } from '../../lib/useOnlineStatus.js'
-
-let cachedController: PwaController | null = null
 
 type PwaState = {
   needRefresh: boolean
@@ -31,14 +28,34 @@ type PwaState = {
 
 const PWA_INITIAL_STATE: PwaState = { needRefresh: false, offlineReady: false, dismissed: false }
 
-export function PwaUpdateBanner(): JSX.Element | null {
+type PwaLifecycleContextValue = {
+  state: PwaState
+  controller: PwaController | null
+  dismiss: () => void
+}
+
+const PwaLifecycleContext = createContext<PwaLifecycleContextValue>({
+  state: PWA_INITIAL_STATE,
+  controller: null,
+  dismiss: () => {},
+})
+
+let cachedController: PwaController | null = null
+
+/**
+ * Mounts once near the app root and owns the SW registration lifecycle.
+ * All PWA-driven UI (top banner, composer-adjacent notices, etc.) reads
+ * status from this provider instead of registering a second controller.
+ */
+export function PwaLifecycleHost({ children }: { children: ReactNode }): JSX.Element {
   const [state, setState] = useState<PwaState>(PWA_INITIAL_STATE)
-  const [reloading, setReloading] = useState(false)
+  const [controller, setController] = useState<PwaController | null>(cachedController)
 
   useEffect(() => {
-    // Register once per document lifetime; multiple mounts (e.g. hot reload
-    // in dev) reuse the same controller instead of doubling the poll timer.
-    if (cachedController) return
+    if (cachedController) {
+      setController(cachedController)
+      return
+    }
     cachedController = initPwa({
       onNeedRefresh: () => setState((prev) => ({ ...prev, needRefresh: true, dismissed: false })),
       onOfflineReady: () => setState((prev) => ({ ...prev, offlineReady: true })),
@@ -47,55 +64,73 @@ export function PwaUpdateBanner(): JSX.Element | null {
         console.warn('[pwa] registration failed', error)
       },
     })
+    setController(cachedController)
   }, [])
 
+  const dismiss = useCallback(() => {
+    setState((prev) => ({ ...prev, dismissed: true }))
+  }, [])
+
+  return (
+    <PwaLifecycleContext.Provider value={{ state, controller, dismiss }}>
+      {children}
+    </PwaLifecycleContext.Provider>
+  )
+}
+
+/**
+ * Top-anchored PWA update banner. Displayed sticky under AppShellNav so a
+ * new SW install can never be missed regardless of scroll position or chat
+ * pane state. One tap on Reload activates the waiting worker (through
+ * `applyUpdate`) which posts SKIP_WAITING to the SW, controls it, and
+ * hard-reloads the page.
+ */
+export function PwaUpdateGlobalBanner(): JSX.Element | null {
+  const { state, controller, dismiss } = useContext(PwaLifecycleContext)
+  const [reloading, setReloading] = useState(false)
+
   const onReload = useCallback(async () => {
-    if (!cachedController) return
+    if (!controller) return
     setReloading(true)
     try {
-      await cachedController.applyUpdate()
+      await controller.applyUpdate()
     } catch {
       setReloading(false)
     }
-  }, [])
-
-  const onDismiss = useCallback(() => {
-    setState((prev) => ({ ...prev, dismissed: true }))
-  }, [])
+  }, [controller])
 
   if (!state.needRefresh || state.dismissed) return null
 
   return (
-    <BannerSlot>
-      <div
-        className="flex items-center justify-between gap-2 border-t border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200"
-        data-testid="pwa-update-banner"
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <RefreshCw className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-          <span className="truncate">A new dashboard version is available.</span>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={onReload}
-            disabled={reloading}
-            className="rounded border border-sky-300 bg-white/70 px-2 py-0.5 text-[11px] font-medium text-sky-800 transition-colors hover:bg-white disabled:cursor-progress disabled:opacity-60 dark:border-sky-800 dark:bg-sky-900/40 dark:text-sky-100 dark:hover:bg-sky-900"
-            data-testid="pwa-update-reload"
-          >
-            {reloading ? 'Reloading…' : 'Reload'}
-          </button>
-          <button
-            type="button"
-            onClick={onDismiss}
-            aria-label="Dismiss update notice"
-            className="rounded p-0.5 text-sky-700 hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900"
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
+    <div
+      className="flex flex-none items-center justify-between gap-2 border-b border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/60 dark:text-sky-100"
+      data-testid="pwa-update-global-banner"
+      role="status"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <RefreshCw className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+        <span className="min-w-0 truncate font-medium">New dashboard version available.</span>
       </div>
-    </BannerSlot>
+      <div className="flex flex-none items-center gap-1">
+        <button
+          type="button"
+          onClick={onReload}
+          disabled={reloading}
+          className="rounded-md border border-sky-400/60 bg-sky-500 px-3 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-sky-600 disabled:cursor-progress disabled:opacity-60 dark:border-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500"
+          data-testid="pwa-update-reload"
+        >
+          {reloading ? 'Reloading…' : 'Reload'}
+        </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss update notice"
+          className="rounded p-0.5 text-sky-800 hover:bg-sky-100 dark:text-sky-200 dark:hover:bg-sky-900"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -105,7 +140,7 @@ export function OfflineBanner(): JSX.Element | null {
   return (
     <BannerSlot>
       <div
-        className="flex items-center gap-2 border-t border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+        className="flex min-w-0 items-center gap-2 border-t border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
         data-testid="offline-banner"
       >
         <WifiOff className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />

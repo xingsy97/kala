@@ -63,11 +63,25 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
         onRegisteredSW: (_url: string, registration: ServiceWorkerRegistration | undefined) => {
           handlers.onRegistered?.(registration)
           if (registration) {
+            // Poll periodically for very long-lived tabs.
             pollTimer = setInterval(() => {
               // Ignore rejections: a transient network failure just means we
               // retry in 30 minutes.
               registration.update().catch(() => {})
             }, UPDATE_POLL_INTERVAL_MS)
+            // Trigger an immediate update check whenever the tab regains
+            // visibility (returning from another app, unlocking the phone,
+            // switching back from a background tab). This catches new
+            // deploys in ~seconds instead of ~minutes in the common case
+            // where the user briefly left the app.
+            const onVisibility = (): void => {
+              if (document.visibilityState !== 'visible') return
+              registration.update().catch(() => {})
+            }
+            document.addEventListener('visibilitychange', onVisibility)
+            // Same idea for `focus`, which fires in browsers where
+            // visibilitychange doesn't (some older WebKit standalone builds).
+            window.addEventListener('focus', onVisibility)
           }
         },
         onRegisterError: (error: unknown) => handlers.onRegisterError?.(error),

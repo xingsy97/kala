@@ -62,8 +62,49 @@ describe('visibleMessages', () => {
       kind: 'compact_boundary',
       seq: 3,
       trigger: 'unknown',
-      tokensBefore: 0,
-      tokensAfter: 0,
+      tokensBefore: null,
+      tokensAfter: null,
+    })
+  })
+
+  it('honours compactionMetadata attached to the timeline entry (live path)', () => {
+    const timeline: TimelineEntry[] = [
+      {
+        seq: 1,
+        ts: '2026-07-05T00:00:00.000Z',
+        event: { kind: 'user_message', text: 'hello' },
+        effects: [],
+      },
+      {
+        seq: 2,
+        ts: '2026-07-05T00:00:02.000Z',
+        event: {
+          kind: 'messages_replaced',
+          reason: 'compaction',
+          replaceRange: { start: 1, end: 5 },
+          replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'summary' }] }],
+        },
+        effects: [],
+        compactionMetadata: {
+          trigger: 'auto',
+          tokensBefore: 12400,
+          tokensAfter: 3800,
+          replacedCount: 4,
+          attemptId: 'cmp_01',
+        },
+      },
+    ]
+    const transcript = visibleTranscript(
+      [system, { role: 'system', content: [{ type: 'text', text: 'summary' }] }],
+      timeline,
+      '',
+    )
+    const boundary = transcript.find((item) => item.kind === 'compact_boundary')
+    expect(boundary).toMatchObject({
+      trigger: 'auto',
+      tokensBefore: 12400,
+      tokensAfter: 3800,
+      replacedCount: 4,
     })
   })
 

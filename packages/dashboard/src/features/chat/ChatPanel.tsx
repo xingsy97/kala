@@ -39,6 +39,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 
 import type {
   Message,
@@ -880,6 +881,38 @@ function EmptyState({
   )
 }
 
+type CompactTrigger = Extract<TranscriptItem, { kind: 'compact_boundary' }>['trigger']
+
+function compactTriggerLabel(trigger: CompactTrigger, t: TFunction): string {
+  switch (trigger) {
+    case 'auto': return t('chat.transcript.automaticCompact')
+    case 'manual': return t('chat.transcript.manualCompact')
+    case 'preflight': return t('chat.transcript.preflightCompact')
+    case 'tool_result': return t('chat.transcript.toolResultCompact')
+    default: return t('chat.transcript.contextCompacted')
+  }
+}
+
+function compactTriggerLabelShort(trigger: CompactTrigger, t: TFunction): string {
+  switch (trigger) {
+    case 'auto': return t('chat.transcript.automaticCompactShort')
+    case 'manual': return t('chat.transcript.manualCompactShort')
+    case 'preflight': return t('chat.transcript.preflightCompactShort')
+    case 'tool_result': return t('chat.transcript.toolResultCompactShort')
+    default: return t('chat.transcript.contextCompactedShort')
+  }
+}
+
+/**
+ * Format a token count for the compact-boundary label. `null` means the
+ * runtime didn't emit the metadata (older sessions or in-flight upgrade);
+ * render `—` rather than `0` so we don't imply the compaction was a no-op.
+ */
+function formatCompactTokens(value: number | null): string {
+  if (value === null) return '—'
+  return formatTokens(value)
+}
+
 function CompactBoundaryRow({
   boundary,
 }: {
@@ -887,8 +920,10 @@ function CompactBoundaryRow({
 }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const trigger = boundary.trigger === 'auto' ? t('chat.transcript.automaticCompact') : t('chat.transcript.manualCompact')
-  const shortTrigger = boundary.trigger === 'auto' ? t('chat.transcript.automaticCompactShort') : t('chat.transcript.manualCompactShort')
+  const trigger = compactTriggerLabel(boundary.trigger, t)
+  const shortTrigger = compactTriggerLabelShort(boundary.trigger, t)
+  const before = formatCompactTokens(boundary.tokensBefore)
+  const after = formatCompactTokens(boundary.tokensAfter)
   return (
     <div className="flex items-center gap-3 py-2" data-testid="compact-boundary">
       <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
@@ -901,10 +936,10 @@ function CompactBoundaryRow({
         <Archive className="h-3 w-3 flex-none" aria-hidden="true" />
         <span className="font-medium text-foreground">{t('chat.transcript.contextCompacted')}</span>
         <span className="hidden truncate sm:inline">
-          · {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter), count: boundary.replacedCount })}
+          · {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before, after, count: boundary.replacedCount })}
         </span>
         <span className="truncate sm:hidden">
-          {t('chat.transcript.compactSummaryShort', { trigger: shortTrigger, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter) })}
+          {t('chat.transcript.compactSummaryShort', { trigger: shortTrigger, before, after })}
         </span>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -915,7 +950,7 @@ function CompactBoundaryRow({
               {t('chat.transcript.contextCompacted')}
             </DialogTitle>
             <DialogDescription>
-              {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter), count: boundary.replacedCount })}
+              {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before, after, count: boundary.replacedCount })}
             </DialogDescription>
           </DialogHeader>
           <ScrollArea className="min-h-0 bg-background">
@@ -1507,7 +1542,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = fa
         '[&_h3]:mb-1.5 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:font-semibold',
         '[&_h4]:mb-1.5 [&_h4]:mt-4 [&_h4]:text-sm [&_h4]:font-semibold',
         '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere]',
+        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere] [&_code]:[word-break:break-word]',
         '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg sm:[&_img]:max-w-xs',
         '[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5',
         '[&_li]:my-1 [&_li>p]:my-1',

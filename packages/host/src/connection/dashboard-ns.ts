@@ -51,6 +51,7 @@ import type {
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
   EventAppendedEvent,
+  CompactionMetadata,
   HandshakeAuth,
   AttachedExecutor,
   ServerHistoryPayload,
@@ -60,6 +61,7 @@ import type {
   SubAgentSummary,
 } from '@agent-kernel/shared'
 import { isCompatibleVersion, schema } from '@agent-kernel/shared'
+import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
 import type {
   WorkspaceExecRequest,
   WorkspaceReadBinaryRequest,
@@ -251,19 +253,27 @@ export function configureDashboardNamespace(
         }
         const parsed = await readSessionLog(target.logPath)
         const since = p.sinceCursor ?? 0
+        const compactionMetadataByReplaceRange = buildCompactionMetadataIndex(parsed.runtimeMetadata)
         const entries: EventAppendedEvent[] = parsed.events
           .filter((e) => e.seq > since)
-          .map((e) => ({
-            sessionId: p.sessionId,
-            seq: e.seq,
-            ts: e.ts,
-            event: e.event,
-            effects: e.effects,
-            ...(e.effectsArtifact ? { hasEffectsArtifact: true } : {}),
-            ...(e.llmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
-            ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
-            ...(e.model ? { model: e.model } : {}),
-          }))
+          .map((e) => {
+            const meta =
+              e.event.kind === 'messages_replaced' && e.event.reason === 'compaction'
+                ? consumeCompactionMetadata(compactionMetadataByReplaceRange, e.event.replaceRange)
+                : undefined
+            return {
+              sessionId: p.sessionId,
+              seq: e.seq,
+              ts: e.ts,
+              event: e.event,
+              effects: e.effects,
+              ...(e.effectsArtifact ? { hasEffectsArtifact: true } : {}),
+              ...(e.llmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
+              ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
+              ...(e.model ? { model: e.model } : {}),
+              ...(meta ? { compactionMetadata: meta } : {}),
+            }
+          })
         const payload: ServerHistoryPayload = { sessionId: p.sessionId, entries }
         socket.emit('server:history', payload)
       } catch (err) {
@@ -1320,5 +1330,82 @@ export function ephemeralReadyEventFor(
     config: defaultConfig,
     contextSnapshot: snapshotFromConfig(defaultConfig, state.messages, contextOverride, selectedModel),
     ...(selectedModel ? { selectedModel } : {}),
+  }
+}
+
+/**
+ * Build a lookup from `runtime_metadata` entries so that each historical
+ * `messages_replaced (compaction)` event can be re-united with the
+ * `compaction_applied` record that carries its token deltas and trigger.
+ *
+ * Keying uses `replaceRange` because that's the only identifier both sides
+ * always agree on: the kernel event carries `replaceRange`, and the
+ * compaction extension writes the same `replaceRange` into the metadata
+ * payload right after `dispatchOne` returns. `attemptId` isn't on the
+ * kernel event, so it can't be the key.
+ *
+ * When multiple compactions in the same session happen to share an
+ * identical `replaceRange` (rare but possible over long sessions), we keep
+ * them ordered as a queue and pop the head per consumption — preserving
+ * append order so replay matches live.
+ *
+ * Exported for tests; not intended as a public API.
+ */
+export function buildCompactionMetadataIndex(
+  entries: readonly RuntimeMetadataEntry[],
+): Map<string, CompactionMetadata[]> {
+  const byRange = new Map<string, CompactionMetadata[]>()
+  for (const entry of entries) {
+    if (entry.action !== 'compaction_applied') continue
+    const meta = extractCompactionMetadata(entry.payload)
+    if (!meta) continue
+    const key = compactionRangeKey(meta.__rangeStart, meta.__rangeEnd)
+    const bucket = byRange.get(key) ?? []
+    bucket.push(meta.value)
+    byRange.set(key, bucket)
+  }
+  return byRange
+}
+
+export function consumeCompactionMetadata(
+  index: Map<string, CompactionMetadata[]>,
+  range: { start: number; end: number },
+): CompactionMetadata | undefined {
+  const key = compactionRangeKey(range.start, range.end)
+  const bucket = index.get(key)
+  if (!bucket || bucket.length === 0) return undefined
+  const [head, ...rest] = bucket
+  if (rest.length === 0) index.delete(key)
+  else index.set(key, rest)
+  return head
+}
+
+function compactionRangeKey(start: number, end: number): string {
+  return `${start}:${end}`
+}
+
+function extractCompactionMetadata(
+  payload: Record<string, unknown>,
+): { value: CompactionMetadata; __rangeStart: number; __rangeEnd: number } | null {
+  const trigger = payload.trigger
+  if (trigger !== 'manual' && trigger !== 'auto' && trigger !== 'preflight' && trigger !== 'tool_result') return null
+  const range = payload.replaceRange as { start?: unknown; end?: unknown } | undefined
+  if (!range || typeof range.start !== 'number' || typeof range.end !== 'number') return null
+  const tokensBefore = typeof payload.tokensBefore === 'number' ? payload.tokensBefore : 0
+  const tokensAfter = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0
+  const replacedCount = typeof payload.replacedCount === 'number'
+    ? payload.replacedCount
+    : Math.max(0, range.end - range.start)
+  const attemptId = typeof payload.attemptId === 'string' ? payload.attemptId : undefined
+  return {
+    __rangeStart: range.start,
+    __rangeEnd: range.end,
+    value: {
+      trigger,
+      tokensBefore,
+      tokensAfter,
+      replacedCount,
+      ...(attemptId ? { attemptId } : {}),
+    },
   }
 }

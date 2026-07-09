@@ -61,7 +61,15 @@ export function BackgroundShellsButton({
   const hasWorkspaceRegistry = Boolean(socket && workspaceId)
   const visibleRows = useMemo(() => {
     if (hasWorkspaceRegistry) return rows.filter((row) => row.status === 'running')
-    return rows
+    // Fallback (offline) can only prove completion when the timeline recorded
+    // an explicit done/killed signal. Any task still marked 'unknown' is stale
+    // (we lost the executor before it reported completion), so we hide it from
+    // the visible count instead of falsely reporting it as running.
+    return rows.filter((row) => row.status !== 'unknown')
+  }, [hasWorkspaceRegistry, rows])
+  const unknownFallbackCount = useMemo(() => {
+    if (hasWorkspaceRegistry) return 0
+    return rows.filter((row) => row.status === 'unknown').length
   }, [hasWorkspaceRegistry, rows])
   const scopeLabel = hasWorkspaceRegistry ? t('chat.backgroundShells.workspace') : t('chat.backgroundShells.sessionReplay')
 
@@ -74,10 +82,13 @@ export function BackgroundShellsButton({
     }
   }, [rows, selectedTaskId, open])
 
-  const showTrigger = hasWorkspaceRegistry || rows.length > 0
+  const showTrigger = hasWorkspaceRegistry || visibleRows.length > 0 || unknownFallbackCount > 0
   if (!showTrigger && !open) return null
 
-  const running = rows.filter((r) => r.status === 'running').length
+  // running: live-registered tasks still running, or (in fallback) tasks with
+  // an explicit 'running' signal. 'unknown' fallback tasks are surfaced
+  // separately so the UI never claims they are running.
+  const running = visibleRows.filter((r) => r.status === 'running').length
   const selectedRow = selectedTaskId
     ? rows.find((r) => r.taskId === selectedTaskId) ?? null
     : null
@@ -102,9 +113,13 @@ export function BackgroundShellsButton({
           )}
         >
           <TerminalSquare className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-          <span className="tabular-nums">
-            {visibleRows.length} <span className="hidden sm:inline">{t('chat.backgroundShells.shell', { count: visibleRows.length }).replace(/^\d+\s*/, '')}</span>
-          </span>
+          {visibleRows.length > 0 ? (
+            <span className="tabular-nums">
+              {visibleRows.length} <span className="hidden sm:inline">{t('chat.backgroundShells.shell', { count: visibleRows.length }).replace(/^\d+\s*/, '')}</span>
+            </span>
+          ) : (
+            <span className="hidden sm:inline">{t('chat.backgroundShells.shell', { count: 0 }).replace(/^\d+\s*/, '')}</span>
+          )}
           {running > 0 ? (
             <span
               className="h-1.5 w-1.5 flex-none rounded-full bg-sky-500 shadow-[0_0_0_2px_hsl(var(--background))]"
@@ -116,11 +131,11 @@ export function BackgroundShellsButton({
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          className="grid max-w-[80rem] gap-0 p-0 sm:rounded-xl"
+          className="grid max-h-[92dvh] w-[96vw] max-w-[min(80rem,96vw)] gap-0 overflow-hidden p-0 sm:rounded-xl grid-rows-[auto_minmax(0,1fr)]"
           data-testid="background-terminal-panel"
         >
           <DialogHeader className="border-b border-border/50 px-4 py-3">
-            <DialogTitle className="flex items-center gap-2 text-sm">
+            <DialogTitle className="flex flex-wrap items-center gap-2 text-sm">
               <TerminalSquare className="h-4 w-4" aria-hidden="true" />
               {t('chat.backgroundShells.dialogTitle', { scope: scopeLabel })}
               <span className="text-[11px] font-normal text-muted-foreground">
@@ -128,9 +143,18 @@ export function BackgroundShellsButton({
                   ? t('chat.backgroundShells.summaryRunning', { running, total: rows.length })
                   : t('chat.backgroundShells.summaryTotal', { count: rows.length })}
               </span>
+              {unknownFallbackCount > 0 ? (
+                <span
+                  className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                  title={t('chat.backgroundShells.unknownHint')}
+                  data-testid="bg-unknown-note"
+                >
+                  {t('chat.backgroundShells.unknownNote', { count: unknownFallbackCount })}
+                </span>
+              ) : null}
             </DialogTitle>
           </DialogHeader>
-          <div className="grid gap-0 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
+          <div className="grid min-h-0 grid-rows-[minmax(0,38dvh)_minmax(0,1fr)] gap-0 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)] md:grid-rows-1">
             <TaskList
               rows={rows}
               error={error}
@@ -326,7 +350,7 @@ function OutputPane({
   const canKill = Boolean(onKill && row.origin === 'live' && row.status === 'running')
 
   return (
-    <div className="flex min-w-0 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-col">
       <div className="flex min-w-0 flex-col gap-2 border-b border-border/50 bg-background/50 px-3 py-2 text-[11px] text-muted-foreground">
         <div className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-mono">task {row.taskId}</span>
@@ -388,7 +412,7 @@ function OutputPane({
         </div>
         <ProcessDetails row={row} />
       </div>
-      <ScrollArea className="h-[26rem] bg-background" viewportRef={viewportRef} data-testid="bg-task-output">
+      <ScrollArea className="min-h-0 flex-1 bg-background" viewportRef={viewportRef} data-testid="bg-task-output">
         <pre className="min-w-max whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed text-foreground">
           {truncatedNote}
           {output.length > 0

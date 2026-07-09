@@ -30,6 +30,9 @@ describe('HumanAttentionIndicator', () => {
     expect(popover.textContent ?? '').toContain('Risk exposure')
     expect(popover.textContent ?? '').toContain('Cursor 7')
     expect(screen.getByTestId('human-attention-chart')).toBeTruthy()
+    // Reasons are collapsed by default; expand via the toggle button.
+    expect(screen.queryByTestId('human-attention-reasons')).toBeNull()
+    fireEvent.click(screen.getByTestId('human-attention-reasons-toggle'))
     expect(screen.getByTestId('human-attention-reasons').textContent ?? '').toContain('Recent human input includes specific intent or scope.')
   })
 
@@ -42,6 +45,50 @@ describe('HumanAttentionIndicator', () => {
 
     rerender(<HumanAttentionLowBanner timeline={attentionTimeline(18, 'absent', 52)} />)
     expect(screen.getByTestId('human-attention-low-banner').textContent ?? '').toContain('Attention is low.')
+  })
+
+  it('stays dismissed while the agent keeps advancing without a new risk category', () => {
+    // Initial low-attention snapshot: absent + mid-bucket risk (52).
+    const { rerender } = render(
+      <HumanAttentionLowBanner timeline={attentionTimeline(18, 'absent', 52)} />,
+    )
+    const banner = screen.getByTestId('human-attention-low-banner')
+    fireEvent.click(screen.getByTestId('human-attention-low-banner-dismiss'))
+    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
+
+    // Agent produces more messages: cursor advances, riskExposure wiggles
+    // within the same bucket, reason kinds unchanged. Banner must stay hidden.
+    rerender(
+      <HumanAttentionLowBanner
+        timeline={{
+          ...attentionTimeline(18, 'absent', 55),
+          latest: { ...point(11, 18, 'absent', 55) },
+        }}
+      />,
+    )
+    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
+    rerender(
+      <HumanAttentionLowBanner
+        timeline={{
+          ...attentionTimeline(18, 'absent', 58),
+          latest: { ...point(15, 18, 'absent', 58) },
+        }}
+      />,
+    )
+    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
+
+    // But if riskExposure crosses into a coarser bucket (mid → high at 60+),
+    // the situation has escalated and the banner reappears.
+    rerender(
+      <HumanAttentionLowBanner
+        timeline={{
+          ...attentionTimeline(18, 'absent', 70),
+          latest: { ...point(19, 18, 'absent', 70) },
+        }}
+      />,
+    )
+    expect(screen.getByTestId('human-attention-low-banner')).toBeTruthy()
+    void banner
   })
 })
 
