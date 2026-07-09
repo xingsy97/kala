@@ -355,6 +355,72 @@ describe('host loop', () => {
     expect(rec.state.usage.inputTokens).toBeLessThan(10)
   })
 
+  it('manual compact() rejects empty sessions before calling the summarizer', async () => {
+    let llmCalls = 0
+    const llm: LLMAdapter = {
+      name: 'compact-counter',
+      async call() {
+        llmCalls += 1
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'unused' }],
+          },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await expect(loop.compact(sessionId)).rejects.toThrow('nothing to compact yet')
+    expect(llmCalls).toBe(0)
+  })
+
+  it('manual compact() rejects busy sessions before calling the summarizer', async () => {
+    let release: (() => void) | undefined
+    const llm: LLMAdapter = {
+      name: 'blocked-turn',
+      async call() {
+        return await new Promise<LLMResponse>((resolve) => {
+          release = () =>
+            resolve({
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'done' }],
+              },
+            })
+        })
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    const turn = loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    await new Promise<void>((resolve, reject) => {
+      const start = Date.now()
+      const tick = (): void => {
+        if (store.get(sessionId)?.state.status === 'thinking') return resolve()
+        if (Date.now() - start > 1000) return reject(new Error('never thinking'))
+        setTimeout(tick, 10)
+      }
+      tick()
+    })
+
+    await expect(loop.compact(sessionId)).rejects.toThrow(
+      'cannot compact while the session is busy',
+    )
+    release?.()
+    await turn
+  })
+
   it('auto-fires compact when context pressure hits hard tier', async () => {
     // Build a session whose contextLimit is tiny so a single assistant reply
     // pushes inputTokens/contextLimit past the hard threshold. The loop's

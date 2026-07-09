@@ -80,12 +80,17 @@ function announceOf(
   }
 }
 
-function callEffect(callId: string, name = 'bash'): CallToolEffect {
+function callEffect(
+  callId: string,
+  name = 'bash',
+  cwd?: string,
+): CallToolEffect {
   return {
     kind: 'call_tool',
     callId,
     name,
     input: { command: 'echo hi' },
+    ...(cwd !== undefined ? { cwd } : {}),
   }
 }
 
@@ -99,9 +104,10 @@ describe('ExecutorRegistry', () => {
     const sock = makeFakeSocket('s1')
     reg.attach(sock as never, announceOf('e1'))
 
-    const p = reg.callTool('sess-1', callEffect('c1'))
+    const p = reg.callTool('sess-1', callEffect('c1', 'bash', '/tmp/work'))
     expect(sock.emitted).toHaveLength(1)
     expect(sock.emitted[0]!.event).toBe('tool:call')
+    expect((sock.emitted[0]!.payload as ToolCallMessage).cwd).toBe('/tmp/work')
 
     // Ack via the callback (host-side path used before executor:tool_result).
     sock.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'hi\n' })
@@ -157,7 +163,7 @@ describe('ExecutorRegistry', () => {
     const oldSock = makeFakeSocket('old')
     reg.attach(oldSock as never, announceOf('e-reconnect'))
 
-    const p = reg.callTool('sess-4', callEffect('c1', 'bash'))
+    const p = reg.callTool('sess-4', callEffect('c1', 'bash', '/tmp/retry'))
     expect(oldSock.emitted).toHaveLength(1)
 
     // Reconnect: same executorId, fresh socket.
@@ -178,6 +184,7 @@ describe('ExecutorRegistry', () => {
     expect(rePayload.callId).toBe('c1')
     expect(rePayload.sessionId).toBe('sess-4')
     expect(rePayload.name).toBe('bash')
+    expect(rePayload.cwd).toBe('/tmp/retry')
     expect(rePayload.input).toEqual({ command: 'echo hi' })
 
     // Old executor's late ACK is ignored (its bind was removed).

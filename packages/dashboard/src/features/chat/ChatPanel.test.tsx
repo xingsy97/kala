@@ -42,9 +42,11 @@ describe('ChatPanel', () => {
     )
     expect(screen.getByText('hello')).toBeTruthy()
     expect(screen.getByText('about to write')).toBeTruthy()
-    // Tool call header is always visible; details expand on click.
-    expect(screen.getByText(/→ write/)).toBeTruthy()
-    expect(screen.getByText(/← ok/)).toBeTruthy()
+    // Tool call/result headers are explicit enough to understand without opening details.
+    expect(screen.getByText('Assistant requested tool')).toBeTruthy()
+    expect(screen.getAllByText('write')).toHaveLength(2)
+    expect(screen.getAllByText('Tool result')).toHaveLength(2)
+    expect(screen.getByText('Succeeded')).toBeTruthy()
     // Body is collapsed by default — expanding the tool_result reveals it.
     expect(screen.queryByText('wrote 3 bytes')).toBeNull()
     fireEvent.click(screen.getByTestId('tool-result-toggle-c1'))
@@ -73,7 +75,8 @@ describe('ChatPanel', () => {
     // inline `code` → <code>, and fenced block → <pre><code>
     const codes = container.querySelectorAll('code')
     expect(codes.length).toBeGreaterThanOrEqual(2)
-    expect(container.querySelector('pre')?.textContent).toContain('console.log(1)')
+    expect(container.textContent ?? '').toContain('console.log(1)')
+    expect(container.querySelector('[data-radix-scroll-area-viewport]')).toBeTruthy()
   })
 
   it('leaves user text as literal (no markdown parsing)', () => {

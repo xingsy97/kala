@@ -41,9 +41,9 @@ per hour, not most important overall:
 
 ### 1. Context compaction / summarization
 
-**agent-kernel:** No compaction. Kernel tracks token usage in `state.usage`
-but does not gate on context-window size. When the model runs out, requests
-just fail.
+**agent-kernel:** Implemented. Kernel tracks token usage and derives
+`state.contextPressureLevel`; host owns the LLM summarization step and records
+deterministic `compact_replaced` events for replay/fork.
 
 - **claude-code-collection**: `maybe_compact(state, config)` runs before each
   streaming call, checks against context window, calls a compaction model.
@@ -55,19 +55,16 @@ just fail.
 - **opencode**: Emits a `session.compacted` event so extensions can implement
   the reduction strategy of their choice.
 
-**How `/compact` would work in agent-kernel:**
+**Implemented shape in agent-kernel:**
 
-- Kernel emits a new `CompactionSuggested` observation event when
-  `state.usage.inputTokens > config.contextLimit * 0.8`.
-- New host tool `compact` invokes the LLM with a fixed summarizer prompt over
-  the current message list, replaces `state.messages` with a single
-  `system-summary` message, resets `usage`.
-- Slash command `/compact` in the composer emits an executor-side action
-  (`client:compact { sessionId }`) that runs the same reducer step.
-- The event log records `{ kind: 'compacted', summary, replacedMessages: N,
+- Host manual compaction invokes the LLM with a fixed summarizer prompt over
+  the current message list, then dispatches `compact_replaced`.
+- Composer exposes a compact icon button and exact `/compact` command; both
+  emit `client:compact { sessionId }` and do not append a user message.
+- The event log records `{ kind: 'compact_replaced', summary, replacedCount,
   tokensBefore, tokensAfter }` so replay/fork is deterministic.
-- Optionally auto-fire when the observation event lands, guarded by a
-  config toggle. Manual first, auto second.
+- Host also auto-fires compaction when `contextPressureLevel` reaches the hard
+  tier while the session is at rest.
 
 ### 2. Slash commands
 
@@ -85,14 +82,17 @@ already in the composer) or as a wire event (`/compact`, `/fork`, `/help`).
 
 ### 3. Sub-agent spawning
 
-**agent-kernel:** Not supported. Kernel has no recursion mechanism.
+**agent-kernel:** Implemented as a host-side `agent` tool, not as kernel
+recursion. Host opens a child session in the same workspace, applies a depth
+guard, drives the child loop, and returns the child assistant text as the
+parent tool result.
 
 - **claude-code-collection**: `Agent` tool spawns subagents with tracked
   nesting depth.
 - Refs: mostly implemented as a special tool, not a kernel primitive.
 
-Deferable — implement as a tool that opens a nested session bound to the
-same workspace, returns its final assistant message as tool output.
+This matches the intended boundary: the pure kernel still does not recurse,
+while orchestration lives in Host.
 
 ### 4. Persistent memory / project memory
 
@@ -109,44 +109,41 @@ loaded as system message prefix. No kernel change required.
 
 **agent-kernel:** Fork already works (dashboard "fork from cursor" +
 `session:forked` protocol event). Resume works implicitly (page reload
-replays the JSONL via `server:history`). What's missing: a **UI to list
-past sessions**, which the Explorer already does per-workspace, and
-resume-from-crash — currently a session that dies mid-tool-call has a
-pending call frozen forever.
+replays the JSONL via `server:history`). Explorer lists sessions per
+workspace. Crash recovery for pending tool calls is implemented by appending
+synthetic failed `tool_result` events when loading a stuck session.
 
 - **pi**: `SessionManager.forkFrom(sourcePath, cwd)` with `parentId`
   tracking on every JSONL entry. We already match this shape via the
   fork protocol event.
 - **codex**: `~/.codex/sessions/`, resume via `threadId`.
 
-Gap to close: on host restart, scan sessions with `state === 'awaiting_tool'`
-and either mark the pending calls failed or re-emit them. Currently the
-`awaiting_tool` state persists across restart but the pending call
-promise is lost.
+Remaining gap: richer resume UI for old sessions and cross-host session
+management. The log-level recovery path is no longer a gap.
 
 ### 6. Approval / permission modes
 
-**agent-kernel:** Kernel marks tools with `requiresApproval`. Host gates on
-that flag. There is no per-user "auto-approve safe ops" mode — every
-approval-requiring call goes through the dashboard `approval:required` event.
+**agent-kernel:** Kernel owns per-session approval mode
+(`auto` | `ask` | `deny` | `allow_all`). Host gates `allow_all` behind
+`AK_ALLOW_ALL_OK=1`; dashboard still needs a picker UI.
 
 - **claude-code-collection**: `auto` / `manual` / `accept-all` modes.
 - **codex**: `--config approval_policy=auto|ask|always_deny`.
 - **opencode**: Layered permission system with glob rules per tool.
 
-Small gap. A per-session "approvals mode" enum passed through
-`agent_config` would slot in cleanly.
+Remaining gap: expose the mode selector in dashboard and add an explicit
+confirmation for `allow_all`.
 
 ### 7. MCP (Model Context Protocol)
 
-**agent-kernel:** Not supported. Tool set is fixed by the executor at build
-time.
+**agent-kernel:** Stubbed only. `McpServerConfig` and `initMcp()` exist, but
+runtime MCP server spawning and dynamic tool registration are not implemented.
 
 - **opencode**: MCP context module, hot-reload.
 - **claude-code-collection**: `/mcp` commands, stdio-based servers.
 
-Executor-side task: accept `mcp_servers` in the config, spawn stdio
-processes, add their advertised tools to the announce message.
+Future executor-side task: accept MCP server config, spawn stdio processes,
+and add their advertised tools to the announce message.
 
 ### 8. Diff / edit tool
 
@@ -186,19 +183,18 @@ picks tools, big model writes code") is out of scope.
 
 ### 12. Streaming UX
 
-**agent-kernel:** LLM adapters call `.stream()` and the host emits
-`event:appended` after each turn is complete. There is no incremental
-token stream to the dashboard — the assistant message appears all at
-once when the turn finishes.
+**agent-kernel:** Host adapters stream and emit `session:token_delta`; the
+event log remains authoritative through the final `llm_response`. Dashboard
+does not yet render deltas incrementally, so the visible chat row still lands
+at turn completion.
 
 - **claude-code-collection**: Yields `TextChunk` / `ThinkingChunk` for
   live rendering.
 - **pi**: Rendered in-place via TUI component model.
 - **opencode**: `scrollback.surface.ts` handles it.
 
-Gap. Would require a `token:delta` protocol event and an incremental
-message renderer. Not tiny, but not architecturally awkward — the
-event log stays authoritative because deltas are UI-only.
+Remaining gap: dashboard incremental message renderer and ESC keybinding. The
+protocol/host side is already implemented.
 
 ---
 
@@ -265,22 +261,22 @@ Grouped by cost/value ratio:
 1. **`/cost` and token footer** — data already in `state.usage`, just needs
    dashboard chrome. Under an hour.
 2. **Command history (↑ key)** — session-local buffer + Composer keyhandler.
-3. **Cancel-in-flight (ESC)** — protocol event exists conceptually, host
-   just needs to abort the streaming request. ~2 hours.
-4. **Slash-command layer** (`/help`, `/clear`, `/model`, `/compact`, `/cost`)
-   in the composer parser. ~half a day.
+3. **Slash-command layer beyond `/compact`** (`/help`, `/clear`, `/model`,
+   `/cost`) in the composer parser. ~half a day.
+4. **Compact pressure banner** — surface `contextPressureLevel` in chat and
+   offer a visible compact-now action at the soft tier. ~half a day.
 
 **High leverage, moderate effort:**
-5. **Compaction hook + `/compact`** — see §1 above. Requires new event
-   kind + host tool + reducer step. ~1 day.
-6. **Streaming tokens** — new `token:delta` protocol event, incremental
-   renderer. Kernel/event log unaffected. ~1 day.
+5. **Streaming render in dashboard** — host already emits
+   `session:token_delta`; dashboard still needs the incremental renderer. ~1 day.
+6. **ESC cancel UI** — host supports `client:cancel_stream`; dashboard still
+   needs the keybinding and visible state. ~2 hours.
 7. **`@file` reference in composer** — fuzzy finder + auto-inject. ~1 day.
-8. **Persistent bash shell** in executor — spawn one `bash -i` per session
-   and pipe commands through it. ~half a day + edge-case testing.
+8. **Richer background shell UI** — executor background `bash` polling exists;
+   dashboard does not yet surface long-running task status. ~half a day.
 9. **Diff preview in approval card** — when the pending tool is `edit`
    or `write`, render a diff instead of raw JSON. ~half a day.
-10. **Resume-from-crash** for `awaiting_tool` sessions on host restart.
+10. **Resume/session management UX** for older/offline sessions across hosts.
 
 **Structural, higher effort:**
 11. **MCP in executor** — spawn stdio processes from config, merge their
@@ -311,6 +307,6 @@ already match the reference agents.
 
 The following gaps above are now closed or partially closed in code:
 
-- Closed: context compaction core/host path, streaming tokens, cancel-in-flight, crash recovery for pending tool calls, permission modes, image content type, sub-agent tool, session cwd, and background shell polling.
+- Closed: context compaction core/host path, manual compact UI (`/compact` and compact icon), visible runtime activity feedback, streaming tokens, cancel-in-flight, crash recovery for pending tool calls, permission modes, image content type, sub-agent tool, session cwd, and background shell polling.
 - Stubbed only: MCP config shape and `initMcp()` exist, but no MCP runtime is implemented.
-- Still open for Batch B: slash command UX, compact banner, streaming render in dashboard, permission picker UI, message edit/rerun, image paste UI, `@file` picker, hooks, settings UI, session rename, cwd toolbar/metadata modal, diff preview, web tools, memory.
+- Still open for Batch B: broader slash command UX beyond `/compact`, compact pressure banner, streaming render in dashboard, permission picker UI, message edit/rerun, image paste UI, `@file` picker, hooks, settings UI, session rename, cwd toolbar/metadata modal, diff preview, web tools, memory.

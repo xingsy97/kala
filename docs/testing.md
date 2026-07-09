@@ -71,7 +71,7 @@ If a kernel test needs any of the above, the kernel has grown IO and violated [A
 
 ### 2.5 Current state
 
-23 tests in `packages/kernel/src/core.test.ts`. See file for concrete examples.
+43 tests in `packages/kernel/src/core.test.ts`. See file for concrete examples.
 
 ---
 

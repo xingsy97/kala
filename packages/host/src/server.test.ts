@@ -690,6 +690,132 @@ describe('wire protocol', () => {
 
     dashboard.close()
   })
+
+  it('client:set_cwd validates sandbox roots and updates session summaries', async () => {
+    const sessionId = 'wire-set-cwd'
+    const root = resolve(dir, 'workspace')
+    const child = resolve(root, 'child')
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', {
+      executorId: 'ex-cwd',
+      workspaceId: 'ws-cwd',
+      workspaceName: 'cwd-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    await waitForAnyExecutor(server)
+
+    const created = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.on('server:sessions', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-cwd',
+      workspaceName: 'cwd-box',
+    })
+    await created
+
+    const changed = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.off('server:sessions')
+      dashboard.on('server:sessions', resolve)
+    })
+    dashboard.emit('client:set_cwd', { sessionId, cwd: child })
+    const list = await changed
+    const summary = list.sessions.find((s) => s.sessionId === sessionId)
+    expect(summary?.currentCwd).toBe(child)
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    const err = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.on('session:error', resolve)
+    })
+    dashboard.emit('client:set_cwd', { sessionId, cwd: resolve(dir, 'outside') })
+    await expect(err).resolves.toMatchObject({
+      scope: 'host',
+      message: 'cwd outside sandbox roots',
+    })
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    dashboard.close()
+    executor.close()
+  })
+
+  it('client:compact rejects an empty session without calling the summarizer', async () => {
+    const sessionId = 'wire-empty-compact'
+    let llmCalls = 0
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'compact-counter',
+        async call() {
+          llmCalls += 1
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'summary' }],
+            },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const err = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.on('session:error', resolve)
+    })
+    dashboard.emit('client:compact', { sessionId })
+
+    await expect(err).resolves.toMatchObject({
+      scope: 'kernel',
+      message: 'nothing to compact yet',
+    })
+    expect(llmCalls).toBe(0)
+
+    dashboard.close()
+  })
 })
 
 describe('protocol doc drift', () => {
