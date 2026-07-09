@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, BarChart3, Boxes, ChevronLeft, ChevronRight, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
@@ -47,14 +47,20 @@ import { tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
 import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
-import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import { AppShellNav } from './app-shell/AppShellNav.js'
 import { useAppSection, type AppSection } from './app-shell/section.js'
-import { BenchmarksPage } from './features/benchmarks/BenchmarksPage.js'
-import { OperationsPage } from './features/operations/OperationsPage.js'
-import { ArtifactsPage } from './features/artifacts-browser/ArtifactsPage.js'
-import { DocsPage } from './features/docs/DocsPage.js'
-import { PipelinePage } from './features/pipeline/PipelinePage.js'
+// Page-level lazy loading: the app boots into the "agent" section by default,
+// so the five other top-level pages plus SettingsDialog are pulled in only
+// when their tab (or the settings icon) is opened. Each import() becomes its
+// own async chunk (see vite build output) and drops the initial JS payload
+// substantially. Fallback is a bare blank div so we don't flash a skeleton
+// while the chunk arrives on a fast connection.
+const BenchmarksPage = lazy(() => import('./features/benchmarks/BenchmarksPage.js').then((m) => ({ default: m.BenchmarksPage })))
+const OperationsPage = lazy(() => import('./features/operations/OperationsPage.js').then((m) => ({ default: m.OperationsPage })))
+const ArtifactsPage = lazy(() => import('./features/artifacts-browser/ArtifactsPage.js').then((m) => ({ default: m.ArtifactsPage })))
+const DocsPage = lazy(() => import('./features/docs/DocsPage.js').then((m) => ({ default: m.DocsPage })))
+const PipelinePage = lazy(() => import('./features/pipeline/PipelinePage.js').then((m) => ({ default: m.PipelinePage })))
+const SettingsDialog = lazy(() => import('./features/settings/SettingsDialog.js').then((m) => ({ default: m.SettingsDialog })))
 import {
   cancelSession,
   clearSession,
@@ -196,9 +202,9 @@ export function App(): JSX.Element {
       }
       return
     }
-    const params = new URLSearchParams({ sessionId: config.sessionId })
-    if (config.token) params.set('token', config.token)
-    const next = `?${params.toString()}`
+    // Only sessionId belongs in the URL. The bootstrap token stays in
+    // memory (see readInitialConfig) so it can't leak via history/referrer.
+    const next = `?${new URLSearchParams({ sessionId: config.sessionId }).toString()}`
     if (window.location.search !== next) {
       window.history.replaceState(null, '', next)
     }
@@ -958,15 +964,25 @@ export function App(): JSX.Element {
       <div className="flex-1 min-h-0">
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'benchmarks' ? (
-        <BenchmarksPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+        <Suspense fallback={<div className="h-full w-full" />}>
+          <BenchmarksPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+        </Suspense>
       ) : section === 'operations' ? (
-        <OperationsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+        <Suspense fallback={<div className="h-full w-full" />}>
+          <OperationsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+        </Suspense>
       ) : section === 'artifacts' ? (
-        <ArtifactsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+        <Suspense fallback={<div className="h-full w-full" />}>
+          <ArtifactsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+        </Suspense>
       ) : section === 'docs' ? (
-        <DocsPage />
+        <Suspense fallback={<div className="h-full w-full" />}>
+          <DocsPage />
+        </Suspense>
       ) : section === 'pipeline' ? (
-        <PipelinePage />
+        <Suspense fallback={<div className="h-full w-full" />}>
+          <PipelinePage />
+        </Suspense>
       ) : (
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
@@ -1209,6 +1225,7 @@ export function App(): JSX.Element {
                               <BackgroundShellsButton
                                 socket={session.socket}
                                 workspaceId={currentSession?.workspaceId}
+                                sessionId={config.sessionId}
                                 fallbackTasks={backgroundTasks}
                               />
                               <TasksButton todos={taskItems} />
@@ -1409,7 +1426,11 @@ export function App(): JSX.Element {
         onSave={submitCwd}
         onOpenChange={setCwdDialogOpen}
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
+      {settingsOpen ? (
+        <Suspense fallback={null}>
+          <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
+        </Suspense>
+      ) : null}
       <SessionMetadataDialog
         open={metadataOpen}
         onOpenChange={setMetadataOpen}
@@ -1538,6 +1559,12 @@ function readInitialConfig(): Config {
   const sessionId = fromUrl ?? crypto.randomUUID()
   const explicit = fromUrl !== null
   const token = url.searchParams.get('token') ?? undefined
+  if (token !== undefined) {
+    // Strip the bootstrap token from the address bar so it doesn't leak
+    // into browser history, referrer headers, screenshots, or bookmarks.
+    url.searchParams.delete('token')
+    window.history.replaceState(null, '', url.toString())
+  }
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
