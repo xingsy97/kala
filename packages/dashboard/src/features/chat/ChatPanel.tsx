@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Archive, CheckCircle2, ChevronDown, ChevronRight, Wrench, XCircle } from 'lucide-react'
+import { Archive, CheckCircle2, ChevronDown, ChevronRight, Pencil, Sparkles, Wrench, X, XCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -10,17 +10,24 @@ import type {
   ToolResultContent,
 } from '@agent-kernel/kernel'
 
+import { Button } from '../../components/ui/button.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
+import { Textarea } from '../../components/ui/textarea.js'
 import type { TranscriptItem } from '../../transcript.js'
 
 type Props = {
   messages?: readonly Message[]
   items?: readonly TranscriptItem[]
   highlightIndex?: number | null
+  onEditAndRerun?: (seq: number, text: string) => void
 }
 
-export function ChatPanel({ messages, items, highlightIndex }: Props): JSX.Element {
-  const transcriptItems = items ?? (messages ?? []).map((message) => ({ kind: 'message' as const, message }))
+export function ChatPanel({ messages, items, highlightIndex, onEditAndRerun }: Props): JSX.Element {
+  const fallbackItems: TranscriptItem[] = (messages ?? []).map((message) => ({
+    kind: 'message',
+    message,
+  }))
+  const transcriptItems = items ?? fallbackItems
   const toolNameByCallId = new Map<string, string>()
   for (const item of transcriptItems) {
     if (item.kind !== 'message') continue
@@ -48,6 +55,8 @@ export function ChatPanel({ messages, items, highlightIndex }: Props): JSX.Eleme
             message={item.message}
             highlighted={highlightIndex === currentMessageIndex}
             toolNameByCallId={toolNameByCallId}
+            seq={item.seq}
+            onEditAndRerun={onEditAndRerun}
           />
         )
       })}
@@ -85,11 +94,15 @@ function MessageRow({
   message,
   highlighted,
   toolNameByCallId,
+  seq,
+  onEditAndRerun,
 }: {
   index: number
   message: Message
   highlighted: boolean
   toolNameByCallId: ReadonlyMap<string, string>
+  seq?: number
+  onEditAndRerun?: (seq: number, text: string) => void
 }): JSX.Element {
   const label = roleLabel(message.role)
   const labelColor =
@@ -98,11 +111,23 @@ function MessageRow({
       : message.role === 'tool'
         ? 'text-emerald-700 dark:text-emerald-400'
       : 'text-amber-700 dark:text-amber-400'
+  const editable =
+    message.role === 'user' &&
+    seq !== undefined &&
+    typeof onEditAndRerun === 'function'
+  const initialText = editable
+    ? message.content
+        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+        .map((c) => c.text)
+        .join('\n')
+    : ''
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(initialText)
   return (
     <div
       id={`msg-${index}`}
       data-message-index={index}
-      className={`min-w-0 overflow-hidden px-6 py-4 transition-colors ${
+      className={`group relative min-w-0 overflow-hidden px-6 py-4 transition-colors ${
         highlighted ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
       }`}
     >
@@ -111,16 +136,70 @@ function MessageRow({
       >
         {label}
       </div>
-      <div className="flex min-w-0 flex-col gap-2">
-        {message.content.map((c, i) => (
-          <ContentBlock
-            key={i}
-            content={c}
-            role={message.role}
-            toolNameByCallId={toolNameByCallId}
+      {editing && editable ? (
+        <div className="flex flex-col gap-2">
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="min-h-[80px] text-sm"
+            data-testid={`edit-message-input-${index}`}
+            autoFocus
           />
-        ))}
-      </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-7 px-3 text-xs"
+              onClick={() => {
+                setEditing(false)
+                setDraft(initialText)
+              }}
+              data-testid={`edit-message-cancel-${index}`}
+            >
+              <X className="mr-1 h-3.5 w-3.5" />
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="h-7 px-3 text-xs"
+              disabled={draft.trim().length === 0}
+              onClick={() => {
+                if (seq === undefined) return
+                onEditAndRerun?.(seq, draft.trim())
+                setEditing(false)
+              }}
+              data-testid={`edit-message-submit-${index}`}
+            >
+              Rerun
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex min-w-0 flex-col gap-2">
+          {message.content.map((c, i) => (
+            <ContentBlock
+              key={i}
+              content={c}
+              role={message.role}
+              toolNameByCallId={toolNameByCallId}
+            />
+          ))}
+        </div>
+      )}
+      {editable && !editing ? (
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(initialText)
+            setEditing(true)
+          }}
+          className="absolute right-3 top-3 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          title="Edit and rerun"
+          data-testid={`edit-message-${index}`}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -151,6 +230,7 @@ function ContentBlock({
       />
     )
   }
+  if (content.type === 'thinking') return <ThinkingBlock content={content} />
   return <ImageBlock content={content} />
 }
 
@@ -172,6 +252,39 @@ function ImageBlock({ content }: { content: import('@agent-kernel/kernel').Image
       alt=""
       className="max-w-xs max-h-64 rounded border border-slate-200 dark:border-slate-800"
     />
+  )
+}
+
+function ThinkingBlock({
+  content,
+}: {
+  content: import('@agent-kernel/kernel').ThinkingContent
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="min-w-0 max-w-full overflow-hidden rounded border border-violet-200 bg-violet-50/60 text-xs dark:border-violet-900/60 dark:bg-violet-950/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-violet-800 hover:bg-violet-100/70 dark:text-violet-200 dark:hover:bg-violet-900/30"
+      >
+        <Sparkles className="h-3.5 w-3.5 flex-none" />
+        <span className="font-medium">Thinking</span>
+        <span className="flex-1" />
+        {open ? (
+          <ChevronDown className="h-3 w-3 flex-none" />
+        ) : (
+          <ChevronRight className="h-3 w-3 flex-none" />
+        )}
+      </button>
+      {open ? (
+        <ScrollArea className="border-t border-violet-200 dark:border-violet-900/60">
+          <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-violet-900/90 [overflow-wrap:anywhere] dark:text-violet-100/80">
+            {content.text}
+          </pre>
+        </ScrollArea>
+      ) : null}
+    </div>
   )
 }
 

@@ -48,7 +48,7 @@ try {
 
   const finalUrl = page.url()
   const status = await page
-    .$eval('[data-testid="connection-status"]', (el) => el.textContent?.trim())
+    .$eval('[data-testid="connection-status"]', (el) => el.getAttribute('data-status'))
     .catch(() => null)
 
   const check = (name, pass, detail) => {

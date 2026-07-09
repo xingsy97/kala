@@ -51,4 +51,51 @@ describe('ApprovalsPanel', () => {
     expect(screen.getByText(/path="\/tmp\/x"/)).toBeTruthy()
     expect(screen.getByText(/mode="append"/)).toBeTruthy()
   })
+
+  it('renders a write preview by default for a write approval', () => {
+    render(
+      <ApprovalsPanel
+        approvals={[
+          {
+            sessionId: 's',
+            callId: 'c1',
+            name: 'write',
+            input: { path: '/tmp/hello.txt', content: 'line1\nline2\n' },
+          },
+        ]}
+        onDecision={() => {}}
+      />,
+    )
+    const preview = screen.getByTestId('diff-preview')
+    expect(preview).toBeTruthy()
+    expect(preview.textContent ?? '').toContain('/tmp/hello.txt')
+    expect(preview.textContent ?? '').toContain('+ line1')
+    expect(preview.textContent ?? '').toContain('+ line2')
+  })
+
+  it('renders an edit diff with + / - markers for an edit approval', () => {
+    render(
+      <ApprovalsPanel
+        approvals={[
+          {
+            sessionId: 's',
+            callId: 'c1',
+            name: 'edit',
+            input: {
+              path: '/tmp/hello.txt',
+              old_string: 'foo\nbar\nbaz',
+              new_string: 'foo\nBAR\nbaz',
+            },
+          },
+        ]}
+        onDecision={() => {}}
+      />,
+    )
+    const preview = screen.getByTestId('diff-preview')
+    expect(preview).toBeTruthy()
+    // Old and new lines render inside distinct rows.
+    expect(screen.getByText('bar', { selector: 'span.block' })).toBeTruthy()
+    expect(screen.getByText('BAR', { selector: 'span.block' })).toBeTruthy()
+    expect(screen.getByText('foo', { selector: 'span.block' })).toBeTruthy()
+  })
 })

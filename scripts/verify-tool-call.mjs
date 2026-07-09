@@ -61,7 +61,7 @@ try {
   })
   await page.waitForFunction(
     () =>
-      document.querySelector('[data-testid="connection-status"]')?.textContent?.trim() ===
+      document.querySelector('[data-testid="connection-status"]')?.getAttribute('data-status') ===
       'ready',
     { timeout: 8_000 },
   )
