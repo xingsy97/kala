@@ -19,7 +19,7 @@ import { readSessionLog } from '../store/log.js'
 import { runHostLoop } from '../loop.js'
 import type { LoopBroadcast, ToolDispatcher } from '../loop.js'
 import type { LLMAdapter, LLMCallParams } from '../llm/adapter.js'
-import { resetCompactRuntime } from './compaction.js'
+import { SUMMARY_PREFIX, resetCompactRuntime } from './compaction.js'
 
 function silentBroadcast(): LoopBroadcast {
   return { onEvent() {}, onApprovalRequired() {}, onError() {} }
@@ -62,18 +62,35 @@ async function readRejectedEvents(logPath: string): Promise<CompactionMetadata[]
   return parsed.runtimeMetadata.filter((e) => e.action === 'compaction_rejected')
 }
 
-/** A minimal summary that passes validateCompactionSummary (all required sections present). */
+/** A summary that passes validateCompactionSummary and the new quality gates
+ * (min length, non-conversational, template-shaped). Length is deliberately
+ * padded above MIN_SUMMARY_CHARS so tests exercise the happy path. */
 const OK_SUMMARY = `# Compacted Context
 ## User Intent And Constraints
-Do the thing.
+- User wants the thing done exactly as specified in prior turns.
+- No approvals required for read-only tools.
+
 ## Repository And Runtime State
-Repo state.
+- cwd: /workspace/example
+- Active files: src/index.ts, src/lib/foo.ts
+- Model: claude-opus / provider: anthropic
+
 ## Decisions And Rationale
-Decided.
+- Chose approach A over B because B breaks the streaming contract.
+- Kept existing message shape to avoid a kernel migration.
+
 ## Work Completed
-Done.
+- Edited src/index.ts (added feature flag)
+- Ran pnpm test -- --run: 42 passed, 0 failed
+- Verified behavior end-to-end via scripts/verify.mjs
+
 ## Open Work
-None.`
+- 1. Wire the feature flag into the dashboard prefs UI
+- 2. Add regression test for the empty-list path
+- Blockers: (none)
+
+## Preserved Verbatim
+- User: "keep the existing wire protocol untouched"`
 
 function summaryReply(text: string = OK_SUMMARY, extra: Record<string, unknown> = {}) {
   return {
@@ -235,15 +252,27 @@ describe('compaction extension', () => {
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
     await loop.compact(sessionId)
 
+    // After the first compaction: leading system + anchored summary as a user
+    // message + preserved recent user tail ("hi"). Codex-style: summary lands
+    // as a user message prefixed with SUMMARY_PREFIX rather than a system
+    // message, and raw recent user turns survive verbatim.
     let rec = store.get(sessionId)!
-    expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'system'])
-    expect(rec.state.messages[1]?.content).toEqual([{ type: 'text', text: `${OK_SUMMARY}\n\nFirst pass.` }])
+    expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
+    expect(rec.state.messages[1]?.content).toEqual([
+      { type: 'text', text: `${SUMMARY_PREFIX}\n\n${OK_SUMMARY}\n\nFirst pass.` },
+    ])
+    expect(rec.state.messages[2]?.content).toEqual([{ type: 'text', text: 'hi' }])
 
     await loop.compact(sessionId)
 
+    // Second compaction updates the anchored summary in place. Shape and tail
+    // are unchanged; only the summary body changes.
     rec = store.get(sessionId)!
-    expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'system'])
-    expect(rec.state.messages[1]?.content).toEqual([{ type: 'text', text: `${OK_SUMMARY}\n\nSecond pass.` }])
+    expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
+    expect(rec.state.messages[1]?.content).toEqual([
+      { type: 'text', text: `${SUMMARY_PREFIX}\n\n${OK_SUMMARY}\n\nSecond pass.` },
+    ])
+    expect(rec.state.messages[2]?.content).toEqual([{ type: 'text', text: 'hi' }])
     const replaced = await readReplacedEvents(rec.logPath)
     expect(replaced).toHaveLength(2)
     expect(replaced[1]?.replaceRange).toEqual({ start: 1, end: 2 })
@@ -387,5 +416,92 @@ describe('compaction extension', () => {
 
     // Only one summarizer call was made because the error was non-PTL.
     expect(call).toBe(2)
+  })
+
+  it('rejects a conversational reply masquerading as a summary (root cause of the box regression)', async () => {
+    // This is exactly the shape observed in box session dcc5879b… seq 1488:
+    // the summarizer replied to the user with a question instead of writing
+    // a handoff. Before this fix, that reply was accepted and overwrote 300
+    // messages with a two-sentence chat turn.
+    const badReply = '你上一条只说了 "Please continue"，没指方向。你要哪个？'
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'conversational-mock',
+      async call() {
+        call += 1
+        if (call === 1) return turnReply()
+        return summaryReply(badReply)
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    const before = store.get(sessionId)!.state.messages.length
+
+    await expect(loop.compact(sessionId)).rejects.toThrow(/invalid handoff/i)
+
+    const rec = store.get(sessionId)!
+    // No messages were replaced.
+    expect(rec.state.messages.length).toBe(before)
+    expect(await readReplacedEvents(rec.logPath)).toHaveLength(0)
+    // The skip metadata carries a specific reason so we can alert on it.
+    const skips = await readSkipEvents(rec.logPath)
+    const reasons = skips.map((s) => s.payload.reason)
+    expect(
+      reasons.some(
+        (r) =>
+          r === 'summary_conversational'
+          || r === 'summary_too_short'
+          || r === 'summary_schema_invalid',
+      ),
+    ).toBe(true)
+  })
+
+  it('rejects a summary with all required sections missing (schema gate)', async () => {
+    const missingSections = 'This is a moderately long reply that has no template headings whatsoever and is definitely not a handoff summary. It just keeps going for a while so the length gate does not catch it first. Padding padding padding padding padding padding padding padding padding padding padding padding padding padding padding padding padding padding padding padding.'
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'schema-mock',
+      async call() {
+        call += 1
+        if (call === 1) return turnReply()
+        return summaryReply(missingSections)
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    const before = store.get(sessionId)!.state.messages.length
+
+    await expect(loop.compact(sessionId)).rejects.toThrow(/invalid handoff/i)
+
+    const rec = store.get(sessionId)!
+    expect(rec.state.messages.length).toBe(before)
+    expect(await readReplacedEvents(rec.logPath)).toHaveLength(0)
+    const skips = await readSkipEvents(rec.logPath)
+    expect(skips.some((s) => s.payload.reason === 'summary_schema_invalid')).toBe(true)
+  })
+
+  it('applied metadata records compressionRatio and recentRawUsersCount', async () => {
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'metadata-mock',
+      async call() {
+        call += 1
+        if (call === 1) return turnReply()
+        return summaryReply()
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    await loop.compact(sessionId)
+
+    const rec = store.get(sessionId)!
+    const parsed = await readSessionLog(rec.logPath)
+    const meta = parsed.runtimeMetadata.find((entry) => entry.action === 'compaction_applied')
+    expect(meta?.payload).toMatchObject({
+      trigger: 'manual',
+      previousSummaryChars: 0,
+    })
+    expect(typeof meta?.payload.compressionRatio).toBe('number')
+    expect(typeof meta?.payload.recentRawUsersCount).toBe('number')
   })
 })

@@ -49,35 +49,97 @@ import { dispatchOne } from '../loop.js'
 import { appendRuntimeMetadataEntry } from '../store/log.js'
 import { contextSnapshot, shouldAutoCompact } from '../context/manager.js'
 
-const SUMMARIZER_PROMPT = `You are compacting an agent-kernel coding-agent session.
+/**
+ * Compaction summarizer prompt.
+ *
+ * Design mirrors codex's local compact (`references/codex/codex-rs/core/src/compact.rs`
+ * + `prompts/templates/compact/prompt.md`) and opencode's anchored `<template>`
+ * summary (`references/opencode/packages/core/src/session/compaction.ts`).
+ *
+ * Two things the previous prompt didn't defend against and this one does:
+ *
+ * 1. The summarizer used to receive the raw multi-turn history as `messages`.
+ *    Some models — especially when the last assistant turn was a question —
+ *    would ignore the "summarize" instruction and simply *continue the
+ *    conversation*, producing a two-sentence reply asking the user what to do
+ *    next. We now hand the transcript to the summarizer as a single `user`
+ *    message containing `<transcript>…</transcript>`, so the model no longer
+ *    sees an open assistant turn it can extend.
+ *
+ * 2. There was no schema pressure and no "how should the next model receive
+ *    this" framing. Codex tags handoff summaries with a fixed prefix
+ *    ({@link SUMMARY_PREFIX}) so the resuming model recognises them as
+ *    external context, not as its own past output. We do the same.
+ */
+const SUMMARIZER_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION for an agent-kernel coding session. Another LLM will resume the session using ONLY your output plus the recent messages preserved verbatim after it.
 
-Summarize ONLY the messages provided in this compaction request. A recent suffix of the conversation will be kept verbatim after your summary, so do not invent or describe messages you cannot see.
+You will be given the conversation history to compact inside <transcript>…</transcript>. If the input also contains <previous-summary>…</previous-summary>, treat it as the current handoff summary and update it: preserve still-true facts, remove stale facts, merge in new facts from the transcript. Otherwise, write a fresh summary.
 
-Write a concise but complete engineering handoff in Markdown with exactly these sections:
+Output exactly the Markdown structure inside <template>, in this order, keeping every section even when the body is "(none)". Do not include the <template> tags in your response.
 
-# Compacted Context
+<template>
+## Objective
+- [one or two brief sentences describing what the user is trying to accomplish]
+
 ## User Intent And Constraints
-Capture explicit user requests, corrections, preferences, and constraints that should continue to govern future work.
+- [explicit user requests, corrections, preferences, constraints that must continue to govern future work]
 
 ## Repository And Runtime State
-Capture relevant project architecture, current working directory if known, important files/modules, active session state, selected model/provider facts if they matter, and durable environment assumptions.
+- [cwd if known, key files/modules, active session state, selected model/provider facts, durable environment assumptions]
 
 ## Decisions And Rationale
-Capture decisions already made and why, especially rejected alternatives or constraints that prevent rework.
+- [decisions already made and why; rejected alternatives; constraints that prevent rework]
 
 ## Work Completed
-List concrete changes, file paths, commands run, tests run, and observed outcomes. Include failures and partial attempts when they matter.
+- [concrete changes, exact file paths, commands run with exit status, tests run with outcome; include failures]
 
 ## Open Work
-List remaining tasks, blockers, uncertainties, and the next best action.
+- 1. [immediate concrete next action, or "(none)"]
+- 2. [next action after that if known, or "(none)"]
+- Blockers: [blockers/uncertainties, or "(none)"]
+
+## Preserved Verbatim
+- [exact user quotes, questions, or requests that MUST survive verbatim; otherwise "(none)"]
+</template>
 
 Rules:
 - Preserve exact file paths, command names, tool names, identifiers, error messages, test names, API shapes, and user wording when important.
 - Preserve todo/task state from todowrite or equivalent tool calls.
 - Preserve tool-result evidence, but summarize noisy logs to the command, exit/status, and decisive lines.
-- Do not include generic advice, filler, or commentary about being a summary.
-- Do not claim work is done unless the provided messages establish it.
+- Use terse bullets, not prose paragraphs.
+- Do NOT address the user. Do NOT ask questions. Do NOT describe that you are summarizing or continuing anything.
+- Do not claim work is done unless the transcript establishes it.
 - Keep the whole response under 1600 tokens.`
+
+/**
+ * Prefix prepended to a successful summary when it is written back into the
+ * conversation as a `user` message. Matches codex's `SUMMARY_PREFIX` role:
+ * signals to the resuming model that what follows is an external handoff from
+ * a previous LLM, not its own prior output. Also used to detect the anchored
+ * summary on subsequent compactions.
+ */
+export const SUMMARY_PREFIX =
+  'Another LLM produced the following handoff summary of earlier work in this session. ' +
+  'Use it to continue without duplicating work.'
+
+/**
+ * Cap on the total tokens of raw user messages we preserve alongside the
+ * summary (codex: 20k). These are the actual user turns from the compacted
+ * region, kept verbatim so exact wording of requests survives even if the
+ * summarizer paraphrased them.
+ */
+const RECENT_RAW_USER_TOKEN_CAP = 20_000
+
+/** Reject summaries shorter than this (chars). A well-formed template with
+ * five headings + "(none)" bodies is already ~350 chars, so anything below
+ * this is guaranteed to be either a conversational reply or a truncation. */
+const MIN_SUMMARY_CHARS = 400
+
+/** Reject summaries whose compression ratio exceeds this. tokensBefore /
+ * tokensAfter > 200× has historically indicated the summarizer collapsed the
+ * transcript to a one-line reply (real observed on box: 427k → 6.5k with a
+ * 50-char body). Never happens for a legitimate handoff. */
+const MAX_COMPRESSION_RATIO = 200
 
 const COMPACT_TIMEOUT_MS = 10 * 60_000
 const MIN_RECENT_TAIL_TOKENS = 4_000
@@ -205,10 +267,18 @@ export async function runCompact(
     const replacedCount = record.state.messages.length
     const preserveFrom = choosePreserveFrom(record.state, trigger, contextLimit)
     const preservedTail = record.state.messages.slice(preserveFrom)
+    const head = record.state.messages.slice(0, preserveFrom)
+    const leadingSystemCount = record.state.messages[0]?.role === 'system' ? 1 : 0
+
+    // Codex-style anchored summary: if the previous compaction wrote a summary
+    // user-message at the head (identified by SUMMARY_PREFIX), pull it out and
+    // hand it to the summarizer as `<previous-summary>` so it can update
+    // rather than rewrite. Prevents drift across successive compactions.
+    const { previousSummary, remainingHead } = extractAnchoredSummary(head)
 
     let compact: SummarizeOk
     try {
-      compact = await summarizeWithLadder(deps, sessionId, record.state.messages.slice(0, preserveFrom))
+      compact = await summarizeWithLadder(deps, sessionId, remainingHead, previousSummary)
     } catch (err) {
       await recordFailure(deps, sessionId, trigger, attemptId, rt, err, aborts)
       if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
@@ -233,10 +303,41 @@ export async function runCompact(
       return false
     }
 
-    const leadingSystemCount = record.state.messages[0]?.role === 'system' ? 1 : 0
-    const replacementMessages: Message[] = [
-      { role: 'system', content: [{ type: 'text', text: compact.summary }] },
-    ]
+    // Schema / size / drift gate. Any of these means the summarizer produced
+    // something unfit to replace the transcript — treat as a normal failure
+    // (increments consecutiveFailures, triggers circuit breaker after 3, and
+    // for manual bubbles the error so the human sees it) rather than
+    // silently overwriting hundreds of messages with a bad summary.
+    const rejectionReason = evaluateSummaryQuality(compact.summary, tokensBefore, validation)
+    if (rejectionReason) {
+      await recordFailure(
+        deps,
+        sessionId,
+        trigger,
+        attemptId,
+        rt,
+        new Error(`summary rejected: ${rejectionReason}`),
+        aborts,
+        rejectionReason,
+      )
+      if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
+      if (trigger === 'manual') throw new Error(`summarizer returned invalid handoff: ${rejectionReason}`)
+      return false
+    }
+
+    // Codex-style replacement: the summary lands as a user message prefixed
+    // with SUMMARY_PREFIX (so the resuming model sees it as an external
+    // handoff, not its own past output), followed by up to 20k tokens of
+    // recent raw user messages preserved verbatim. This differs from the
+    // previous implementation which wrote the summary as a `system` message
+    // and dropped every raw user quote from the compacted region.
+    const summaryUserMessage: Message = {
+      role: 'user',
+      content: [{ type: 'text', text: `${SUMMARY_PREFIX}\n\n${compact.summary}` }],
+    }
+    const recentRawUsers = pickRecentRawUserMessages(head.slice(leadingSystemCount), RECENT_RAW_USER_TOKEN_CAP)
+    const replacementMessages: Message[] = [summaryUserMessage, ...recentRawUsers]
+
     const tokensAfter = estimateMessageTokens([
       ...record.state.messages.slice(0, leadingSystemCount),
       ...replacementMessages,
@@ -278,6 +379,10 @@ export async function runCompact(
       tokensBefore,
       tokensAfter,
       summaryChars: compact.summary.length,
+      compressionRatio: tokensAfter > 0 ? Math.round((tokensBefore / tokensAfter) * 10) / 10 : null,
+      previousSummaryChars: previousSummary?.length ?? 0,
+      recentRawUsersCount: recentRawUsers.length,
+      validationReasonCodes: validation.reasonCodes,
       ...(compact.usage ? { responseUsage: compact.usage } : {}),
     })
 
@@ -288,6 +393,30 @@ export async function runCompact(
   } finally {
     inFlight.delete(sessionId)
   }
+}
+
+/**
+ * Return a machine-readable reason code if the summary is unfit to replace
+ * the transcript, or `undefined` if it passes all quality gates. Not called
+ * for the empty-summary case (handled separately upstream).
+ */
+function evaluateSummaryQuality(
+  summary: string,
+  tokensBefore: number,
+  validation: CompactionSummaryValidation,
+): 'summary_schema_invalid' | 'summary_too_short' | 'summary_too_lossy' | 'summary_conversational' | undefined {
+  if (!validation.ok) return 'summary_schema_invalid'
+  if (summary.trim().length < MIN_SUMMARY_CHARS) return 'summary_too_short'
+  if (looksLikeConversationalReply(summary)) return 'summary_conversational'
+  // Compression ratio is measured against the SUMMARY body only — we approximate
+  // its post-compaction footprint by the summary text tokens. tokensAfter will
+  // include preserved-tail + recent raw users too, which would inflate the
+  // ratio artificially; the ratio's job here is to catch "42w tokens -> 50
+  // chars" pathological compressions, not fine-grained accounting.
+  const summaryTokensApprox = Math.max(1, Math.ceil(summary.length / 4))
+  const ratio = tokensBefore / summaryTokensApprox
+  if (ratio > MAX_COMPRESSION_RATIO) return 'summary_too_lossy'
+  return undefined
 }
 
 function contextWindowOverrideForSession(deps: HostLoopDeps, sessionId: string): { model?: string; contextWindow?: number } | undefined {
@@ -308,7 +437,12 @@ async function recordFailure(
   rt: CompactSessionRuntime,
   err: unknown,
   aborts: Map<string, AbortController>,
-  reasonOverride?: 'empty_summary',
+  reasonOverride?:
+    | 'empty_summary'
+    | 'summary_schema_invalid'
+    | 'summary_too_short'
+    | 'summary_too_lossy'
+    | 'summary_conversational',
 ): Promise<void> {
   rt.consecutiveFailures += 1
   const reason = reasonOverride ?? 'summarizer_failed'
@@ -325,6 +459,10 @@ async function dispatchSkip(
     | 'back_off_same_batch'
     | 'summarizer_failed'
     | 'empty_summary'
+    | 'summary_schema_invalid'
+    | 'summary_too_short'
+    | 'summary_too_lossy'
+    | 'summary_conversational'
     | 'no_compactable_content'
     | 'session_busy',
   aborts: Map<string, AbortController>,
@@ -456,12 +594,28 @@ async function summarize(
   deps: HostLoopDeps,
   sessionId: string,
   messages: readonly Message[],
+  previousSummary: string | undefined,
 ): Promise<SummarizeOk> {
   const model = deps.models?.get(sessionId)
+  const transcript = renderTranscriptForSummarizer(messages)
+  const userText =
+    (previousSummary
+      ? `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`
+      : '')
+    + `<transcript>\n${transcript}\n</transcript>\n\n`
+    + 'Produce the handoff summary per the system instructions. Fill every section; use "(none)" for sections with no content. Do not address the user, do not ask questions.'
+  // Codex-style: hand the transcript to the summarizer as ONE user message so
+  // the model never sees an open assistant turn it can extend. Previously we
+  // passed the raw message array, which caused Claude Opus to occasionally
+  // reply "you only said 'please continue', which do you want?" and that
+  // conversational reply was then written back as the compacted summary,
+  // destroying 400k tokens of history. See references/codex/codex-rs/core/src/compact.rs.
   const request = {
     ...(model ? { model } : {}),
     systemPrompt: SUMMARIZER_PROMPT,
-    messages,
+    messages: [
+      { role: 'user' as const, content: [{ type: 'text' as const, text: userText }] },
+    ],
     tools: [],
   }
   const ctrl = new AbortController()
@@ -492,10 +646,158 @@ async function summarize(
   }
 }
 
+/**
+ * Serialise a slice of messages into a tagged plain-text transcript that the
+ * summarizer receives as a single user turn. Format mirrors opencode's
+ * `serialize()` in `packages/core/src/session/compaction.ts` — `[User]:`,
+ * `[Assistant]:`, `[Assistant reasoning]:`, `[Assistant tool call]:`, and
+ * `[Tool result]:` prefixes so a text-only summarizer can still reconstruct
+ * turn boundaries. Images are stripped (indicated inline); tool_results were
+ * already truncated by the retry ladder via `prepareCompactionInputWithLimit`.
+ */
+function renderTranscriptForSummarizer(messages: readonly Message[]): string {
+  const lines: string[] = []
+  for (const message of messages) {
+    if (message.role === 'system') {
+      const text = collectText(message.content)
+      if (text) lines.push(`[System]: ${text}`)
+      continue
+    }
+    if (message.role === 'user') {
+      const parts: string[] = []
+      for (const content of message.content) {
+        if (content.type === 'text' && content.text.trim().length > 0) {
+          parts.push(content.text)
+        } else if (content.type === 'image') {
+          parts.push('[Attached image]')
+        } else if (content.type === 'tool_result') {
+          // Kernel occasionally stores tool_result on user-role messages.
+          const status = content.ok ? 'Tool result' : 'Tool error'
+          parts.push(`[${status} ${content.callId}]: ${content.content}`)
+        }
+      }
+      if (parts.length > 0) lines.push(`[User]: ${parts.join('\n')}`)
+      continue
+    }
+    if (message.role === 'tool') {
+      for (const content of message.content) {
+        if (content.type !== 'tool_result') continue
+        const status = content.ok ? 'Tool result' : 'Tool error'
+        lines.push(`[${status} ${content.callId}]: ${content.content}`)
+      }
+      continue
+    }
+    // assistant
+    for (const content of message.content) {
+      if (content.type === 'text') {
+        if (content.text.trim().length > 0) lines.push(`[Assistant]: ${content.text}`)
+      } else if (content.type === 'thinking') {
+        if (content.text.trim().length > 0) lines.push(`[Assistant reasoning]: ${content.text}`)
+      } else if (content.type === 'tool_call') {
+        let input: string
+        try {
+          input = JSON.stringify(content.input)
+        } catch {
+          input = '{...unserialisable input...}'
+        }
+        lines.push(`[Assistant tool call ${content.callId}]: ${content.name}(${input})`)
+      } else if (content.type === 'image') {
+        lines.push('[Assistant image]')
+      }
+    }
+  }
+  return lines.join('\n\n')
+}
+
+function collectText(content: readonly MessageContent[]): string {
+  return content
+    .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+    .map((c) => c.text)
+    .join('\n')
+    .trim()
+}
+
+/**
+ * If the most recent leading messages of the compaction head are an anchored
+ * summary produced by a prior compaction (recognised by {@link SUMMARY_PREFIX}),
+ * return it as `previousSummary` and drop it from the head so it isn't
+ * re-serialised into the new transcript. This is opencode's anchored-summary
+ * pattern: each compaction updates the previous handoff rather than rewriting
+ * it from zero.
+ */
+function extractAnchoredSummary(
+  head: readonly Message[],
+): { previousSummary: string | undefined; remainingHead: readonly Message[] } {
+  // The anchor lives right after the leading system prompt (if any).
+  const leadingSystem = head[0]?.role === 'system' ? 1 : 0
+  const candidate = head[leadingSystem]
+  if (!candidate) return { previousSummary: undefined, remainingHead: head }
+  if (candidate.role !== 'user') return { previousSummary: undefined, remainingHead: head }
+  const text = collectText(candidate.content)
+  if (!text.startsWith(SUMMARY_PREFIX)) return { previousSummary: undefined, remainingHead: head }
+  const previousSummary = text.slice(SUMMARY_PREFIX.length).replace(/^\s*\n?/, '')
+  const remainingHead = [...head.slice(0, leadingSystem), ...head.slice(leadingSystem + 1)]
+  return { previousSummary, remainingHead }
+}
+
+/**
+ * Pick the most recent raw user messages from the compacted region, in
+ * original order, up to a total token budget (default 20k, matching
+ * codex `COMPACT_USER_MESSAGE_MAX_TOKENS`). The anchored summary user
+ * message (identified by {@link SUMMARY_PREFIX}) is skipped: it isn't a
+ * "real" user turn.
+ */
+function pickRecentRawUserMessages(head: readonly Message[], tokenBudget: number): Message[] {
+  const users: Message[] = []
+  for (let i = head.length - 1; i >= 0; i--) {
+    const message = head[i]!
+    if (message.role !== 'user') continue
+    const text = collectText(message.content)
+    if (text.startsWith(SUMMARY_PREFIX)) continue
+    users.push(message)
+  }
+  users.reverse()
+  const kept: Message[] = []
+  let usedTokens = 0
+  for (let i = users.length - 1; i >= 0; i--) {
+    const message = users[i]!
+    const tokens = estimateMessageTokens([message])
+    if (kept.length > 0 && usedTokens + tokens > tokenBudget) break
+    kept.push(message)
+    usedTokens += tokens
+    if (usedTokens >= tokenBudget) break
+  }
+  kept.reverse()
+  return kept
+}
+
+/**
+ * Detect the failure mode observed on box: the summarizer replies to the user
+ * ("you said 'please continue', which do you want?") instead of writing a
+ * handoff. These replies typically end in a question mark, contain second-person
+ * imperative Chinese/English phrasing, and lack the required Markdown headings
+ * — but by the time we get here the schema check has already fired, so this
+ * function's role is to catch borderline cases where the model produced a few
+ * headings but the body still reads as a chat reply. Conservative: only
+ * flag when strong signals overlap.
+ */
+function looksLikeConversationalReply(summary: string): boolean {
+  const trimmed = summary.trim()
+  if (trimmed.length === 0) return true
+  const endsWithQuestion = /[?？]\s*$/.test(trimmed)
+  const secondPersonPrompting = /(告诉我|你要哪个|哪个方向|which (option|one) do you want|please (tell|let) me|let me know|you tell me)/i.test(
+    trimmed,
+  )
+  const tinyBody = trimmed.length < 300
+  return (endsWithQuestion && (secondPersonPrompting || tinyBody))
+    || (secondPersonPrompting && tinyBody)
+}
+
 async function summarizeWithLadder(
   deps: HostLoopDeps,
   sessionId: string,
   messages: readonly Message[],
+  previousSummary: string | undefined,
 ): Promise<SummarizeOk> {
   let lastErr: unknown
   for (let attempt = 0; attempt < RETRY_LADDER.length; attempt++) {
@@ -504,7 +806,7 @@ async function summarizeWithLadder(
     const withHeadDropped = dropHeadGroups(trimmed, rung.dropHeadGroups)
     if (withHeadDropped.length === 0) continue
     try {
-      return await summarize(deps, sessionId, withHeadDropped)
+      return await summarize(deps, sessionId, withHeadDropped, previousSummary)
     } catch (err) {
       lastErr = err
       if (!isContextOverflowError(err)) throw err
