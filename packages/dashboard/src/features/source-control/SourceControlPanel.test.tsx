@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { WorkspaceExecResponse } from '@agent-kernel/shared/workspace-exec'
 
@@ -19,6 +19,10 @@ const PORCELAIN = '## main\0 M src/z.ts\0 M src/app.ts\0?? new.txt\0'
 const REPO_ROOT = '/repo'
 
 describe('SourceControlPanel', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   it('renders grouped git changes and opens a read-only diff dialog', async () => {
     const socket = makeWorkspaceExecSocket({
       onExec: (argv) => {
@@ -46,10 +50,19 @@ describe('SourceControlPanel', () => {
     expect(await screen.findByText('main')).toBeTruthy()
     expect(screen.getByText('Changes')).toBeTruthy()
     expect(screen.getByText('Untracked')).toBeTruthy()
+    expect(screen.queryByTestId('source-control-order-by-path')).toBeNull()
+    expect(screen.getByTestId('source-control-view-mode-toggle').getAttribute('data-view-mode')).toBe('tree')
+    expect(screen.getAllByTestId('source-control-dir').map((node) => node.textContent)).toEqual(['src'])
+    expect(screen.getAllByTestId('source-control-file').map((node) => node.textContent)).toEqual(['Mapp.ts', 'Mz.ts', '?new.txt'])
+    fireEvent.click(screen.getByTestId('source-control-view-mode-toggle'))
+    expect(screen.queryByTestId('source-control-dir')).toBeNull()
     expect(screen.getAllByTestId('source-control-file').map((node) => node.textContent)).toEqual(['Msrc/z.ts', 'Msrc/app.ts', '?new.txt'])
-    fireEvent.click(screen.getByTestId('source-control-order-by-path'))
-    expect(screen.getAllByTestId('source-control-file').map((node) => node.textContent)).toEqual(['Msrc/app.ts', 'Msrc/z.ts', '?new.txt'])
-    fireEvent.click(screen.getByText('src/app.ts'))
+    expect(localStorage.getItem('ak-source-control-view-mode:session:s-1')).toBe('list')
+    fireEvent.click(screen.getByTestId('source-control-view-mode-toggle'))
+    fireEvent.click(screen.getByText('src'))
+    expect(screen.getAllByTestId('source-control-file').map((node) => node.textContent)).toEqual(['?new.txt'])
+    fireEvent.click(screen.getByText('src'))
+    fireEvent.click(screen.getByText('app.ts'))
 
     await waitFor(() => expect(screen.getByTestId('mock-diff-editor').textContent).toContain('old::new'))
     expect(screen.getByTestId('mock-diff-editor').getAttribute('data-side-by-side')).toBe('true')
@@ -60,6 +73,29 @@ describe('SourceControlPanel', () => {
     expect(execCalls.length).toBeGreaterThanOrEqual(3)
     expect(execCalls.some(([, payload]) => JSON.stringify((payload as { argv: string[] }).argv).includes('status'))).toBe(true)
     expect(execCalls.some(([, payload]) => JSON.stringify((payload as { argv: string[] }).argv).includes('show'))).toBe(true)
+  })
+
+  it('persists list or tree view per session', async () => {
+    const socket = makeWorkspaceExecSocket({
+      onExec: (argv) => {
+        if (argv[0] === 'git' && argv[1] === 'rev-parse') return { stdout: REPO_ROOT, stderr: '', exitCode: 0, durationMs: 1 }
+        if (argv[0] === 'git' && argv[1] === 'status') return { stdout: PORCELAIN, stderr: '', exitCode: 0, durationMs: 1 }
+        return { stdout: '', stderr: '', exitCode: 0, durationMs: 1 }
+      },
+    })
+
+    const { rerender } = render(<SourceControlPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="s-1" cwd="/repo" />)
+    expect(await screen.findByText('main')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('source-control-view-mode-toggle'))
+    expect(localStorage.getItem('ak-source-control-view-mode:session:s-1')).toBe('list')
+
+    rerender(<SourceControlPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="s-1" cwd="/repo" />)
+    await waitFor(() => expect(screen.getByTestId('source-control-view-mode-toggle').getAttribute('data-view-mode')).toBe('list'))
+    expect(screen.queryByTestId('source-control-dir')).toBeNull()
+
+    rerender(<SourceControlPanel socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="s-2" cwd="/repo" />)
+    await waitFor(() => expect(screen.getByTestId('source-control-view-mode-toggle').getAttribute('data-view-mode')).toBe('tree'))
+    expect(screen.getByTestId('source-control-dir').textContent).toBe('src')
   })
 })
 

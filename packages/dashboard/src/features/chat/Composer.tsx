@@ -26,11 +26,12 @@ import { Textarea } from '../../components/ui/textarea.js'
 import { cn } from '../../lib/utils.js'
 import { PREF_COMPOSER_SEND_MODE_PREFIX } from '../../lib/prefs.js'
 import { RuntimeMetrics } from './RuntimeMetrics.js'
-import { HumanAttentionIndicator } from './HumanAttentionIndicator.js'
+import { HumanAttentionIndicator, shouldShowLowAttentionHint } from './HumanAttentionIndicator.js'
 import type { TimelineEntry } from '../../session.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { SimpleComposerInput } from './composer/SimpleComposerInput.js'
 import { useComposerMode } from './composer/useComposerMode.js'
+import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 
 type Props = {
   disabled?: boolean
@@ -50,6 +51,7 @@ type Props = {
   humanAttention: HumanAttentionTimeline
   queuedMessages: readonly QueuedMessagePreview[]
   timeline?: readonly TimelineEntry[]
+  displayPrefs?: ChatDisplayPrefs
   onQueuedReorder?(id: string, beforeId?: string | null): void
   onQueuedUpdate?(id: string, text: string): void
   onQueuedDelete?(id: string): void
@@ -161,6 +163,7 @@ export function Composer({
   humanAttention,
   queuedMessages,
   timeline,
+  displayPrefs,
   onQueuedReorder,
   onQueuedUpdate,
   onQueuedDelete,
@@ -172,12 +175,18 @@ export function Composer({
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const isNarrow = useIsNarrow()
+  const lowAttentionHint = shouldShowLowAttentionHint(humanAttention)
   const placeholderText = disabled
     ? t('composer.waitingForHost')
+    : lowAttentionHint
+      ? isNarrow
+        ? t('composer.placeholderLowAttentionShort')
+        : t('composer.placeholderLowAttention')
     : isNarrow
       ? t('composer.placeholderShort')
       : t('composer.placeholder')
   const { mode, toggle: toggleMode } = useComposerMode()
+  const displayStyle = chatDisplayStyle(displayPrefs)
   const sessionId = state?.sessionId ?? null
   const [text, setText] = useState('')
   const [sendMode, setSendMode] = useState<SendMode>(() => readStoredSendMode(sessionId))
@@ -409,12 +418,13 @@ export function Composer({
       onSubmit={handleSubmit}
       className={cn(
         'bg-card px-3 sm:px-6 lg:px-8',
-        mode === 'simple' ? 'py-1.5 sm:py-2' : 'py-2.5 sm:py-4',
+        mode === 'simple' ? 'pb-1.5 pt-1 sm:pb-2 sm:pt-1.5' : 'pb-2.5 pt-1.5 sm:pb-4 sm:pt-2',
       )}
+      style={displayStyle}
       data-testid="composer"
       data-composer-mode={mode}
     >
-      <motion.div layout transition={{ type: 'spring', stiffness: 320, damping: 30 }} className="mx-auto max-w-[68rem]">
+      <motion.div layout transition={{ type: 'spring', stiffness: 320, damping: 30 }} className="ak-chat-container relative mx-auto w-full">
         <QueuedMessagesDock
           items={queuedMessages}
           onReorder={onQueuedReorder}
@@ -431,8 +441,8 @@ export function Composer({
           data-composer-mode={mode}
           className={cn(
             // Hidden on mobile — touch devices can't hover so the invisible
-            // pill was pure padding waste above the input.
-            'group hidden h-4 w-full items-center justify-center rounded-t-lg sm:flex',
+            // handle would be hard to discover and easy to tap accidentally.
+            'group absolute inset-x-0 -top-2 z-10 hidden h-3 items-center justify-center rounded-t-lg sm:flex',
             'border border-b-0 border-transparent -mb-px',
             'text-muted-foreground/0 transition-colors',
             'hover:border-border/60 hover:bg-accent/40 hover:text-foreground',

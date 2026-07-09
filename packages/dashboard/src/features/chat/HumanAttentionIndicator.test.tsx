@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { HumanAttentionTimeline } from '@agent-kernel/shared'
 
-import { HumanAttentionIndicator, HumanAttentionLowBanner } from './HumanAttentionIndicator.js'
+import { HumanAttentionIndicator, shouldShowLowAttentionHint } from './HumanAttentionIndicator.js'
 
 describe('HumanAttentionIndicator', () => {
   it('shows an empty attention state before evaluation points exist', () => {
@@ -36,59 +36,20 @@ describe('HumanAttentionIndicator', () => {
     expect(screen.getByTestId('human-attention-reasons').textContent ?? '').toContain('Recent human input includes specific intent or scope.')
   })
 
-  it('renders the low-attention banner only when absent has risk or repeated delegation evidence', () => {
-    const { rerender } = render(<HumanAttentionLowBanner timeline={attentionTimeline()} />)
-    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
+  it('flags low-attention placeholder only when absent has risk or repeated delegation evidence', () => {
+    expect(shouldShowLowAttentionHint(attentionTimeline())).toBe(false)
+    expect(shouldShowLowAttentionHint(attentionTimeline(18, 'absent'))).toBe(false)
+    expect(shouldShowLowAttentionHint(attentionTimeline(18, 'absent', 52))).toBe(true)
 
-    rerender(<HumanAttentionLowBanner timeline={attentionTimeline(18, 'absent')} />)
-    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
-
-    rerender(<HumanAttentionLowBanner timeline={attentionTimeline(18, 'absent', 52)} />)
-    expect(screen.getByTestId('human-attention-low-banner').textContent ?? '').toContain('Attention is low.')
-  })
-
-  it('stays dismissed while the agent keeps advancing without a new risk category', () => {
-    // Initial low-attention snapshot: absent + mid-bucket risk (52).
-    const { rerender } = render(
-      <HumanAttentionLowBanner timeline={attentionTimeline(18, 'absent', 52)} />,
-    )
-    const banner = screen.getByTestId('human-attention-low-banner')
-    fireEvent.click(screen.getByTestId('human-attention-low-banner-dismiss'))
-    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
-
-    // Agent produces more messages: cursor advances, riskExposure wiggles
-    // within the same bucket, reason kinds unchanged. Banner must stay hidden.
-    rerender(
-      <HumanAttentionLowBanner
-        timeline={{
-          ...attentionTimeline(18, 'absent', 55),
-          latest: { ...point(11, 18, 'absent', 55) },
-        }}
-      />,
-    )
-    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
-    rerender(
-      <HumanAttentionLowBanner
-        timeline={{
-          ...attentionTimeline(18, 'absent', 58),
-          latest: { ...point(15, 18, 'absent', 58) },
-        }}
-      />,
-    )
-    expect(screen.queryByTestId('human-attention-low-banner')).toBeNull()
-
-    // But if riskExposure crosses into a coarser bucket (mid → high at 60+),
-    // the situation has escalated and the banner reappears.
-    rerender(
-      <HumanAttentionLowBanner
-        timeline={{
-          ...attentionTimeline(18, 'absent', 70),
-          latest: { ...point(19, 18, 'absent', 70) },
-        }}
-      />,
-    )
-    expect(screen.getByTestId('human-attention-low-banner')).toBeTruthy()
-    void banner
+    const repeatedDelegation = attentionTimeline(18, 'absent')
+    repeatedDelegation.points = [
+      point(1, 18, 'absent', 12, 'continue_only'),
+      point(2, 18, 'absent', 12),
+      point(3, 18, 'absent', 12, 'continue_only'),
+      point(4, 18, 'absent', 12),
+    ]
+    repeatedDelegation.latest = repeatedDelegation.points.at(-1) ?? null
+    expect(shouldShowLowAttentionHint(repeatedDelegation)).toBe(true)
   })
 })
 
@@ -104,7 +65,13 @@ function attentionTimeline(score = 82, level: HumanAttentionTimeline['latest']['
   }
 }
 
-function point(cursor: number, score: number, level: NonNullable<HumanAttentionTimeline['latest']>['level'], riskExposure = 21): NonNullable<HumanAttentionTimeline['latest']> {
+function point(
+  cursor: number,
+  score: number,
+  level: NonNullable<HumanAttentionTimeline['latest']>['level'],
+  riskExposure = 21,
+  reasonKind: NonNullable<HumanAttentionTimeline['latest']>['reasons'][number]['kind'] = 'specific_intent',
+): NonNullable<HumanAttentionTimeline['latest']> {
   return {
     sessionId: 's1',
     messageCursor: cursor,
@@ -121,7 +88,7 @@ function point(cursor: number, score: number, level: NonNullable<HumanAttentionT
     },
     reasons: [
       {
-        kind: 'specific_intent',
+        kind: reasonKind,
         severity: 'info',
         message: 'Recent human input includes specific intent or scope.',
       },

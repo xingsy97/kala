@@ -2,9 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState, type ImageContent, type TextContent } from '@agent-kernel/kernel'
-import type { FileListEntry } from '@agent-kernel/shared'
+import type { FileListEntry, HumanAttentionTimeline } from '@agent-kernel/shared'
 
 import { Composer } from './Composer.js'
+import type { ChatDisplayPrefs } from './chatDisplayPrefs.js'
 
 const EMPTY_HUMAN_ATTENTION = { sessionId: '', points: [], latest: null } as const
 
@@ -23,6 +24,9 @@ function renderComposer(props?: {
   queuedMessages?: React.ComponentProps<typeof Composer>['queuedMessages']
   onQueuedDelete?: (id: string) => void
   state?: React.ComponentProps<typeof Composer>['state']
+  disabled?: boolean
+  humanAttention?: React.ComponentProps<typeof Composer>['humanAttention']
+  displayPrefs?: ChatDisplayPrefs
   awaitingAck?: boolean
 }) {
   return render(
@@ -34,8 +38,10 @@ function renderComposer(props?: {
       onApprovalModeChange={() => {}}
       state={props?.state ?? null}
       config={null}
-      humanAttention={EMPTY_HUMAN_ATTENTION}
+      humanAttention={props?.humanAttention ?? EMPTY_HUMAN_ATTENTION}
       queuedMessages={props?.queuedMessages ?? []}
+      displayPrefs={props?.displayPrefs}
+      disabled={props?.disabled}
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
@@ -73,6 +79,26 @@ describe('Composer', () => {
     expect(indicator.textContent ?? '').not.toContain('Events')
     expect(indicator.textContent ?? '').not.toContain('Tools')
     expect(indicator.textContent ?? '').not.toContain('Tokens')
+  })
+
+  it('uses the low-attention hint as the empty input placeholder', () => {
+    renderComposer({ humanAttention: attentionTimeline(18, 'absent', 52) })
+
+    expect(screen.getByTestId('composer-input').getAttribute('placeholder')).toBe('Review recent changes before broad instructions…')
+  })
+
+  it('keeps the disabled placeholder above the low-attention hint', () => {
+    renderComposer({ disabled: true, humanAttention: attentionTimeline(18, 'absent', 52) })
+
+    expect(screen.getByTestId('composer-input').getAttribute('placeholder')).toBe('waiting for host...')
+  })
+
+  it('aligns composer width with the chat content width preference', () => {
+    renderComposer({ displayPrefs: { fontSize: 3, contentWidth: 2, sideSpace: 1, lineHeight: 1 } })
+
+    const composer = screen.getByTestId('composer')
+    expect(composer.style.getPropertyValue('--ak-chat-content-width')).toBe('84rem')
+    expect(composer.querySelector('.ak-chat-container')).toBeTruthy()
   })
 
   it('shows slash command suggestions for /compact', () => {
@@ -251,10 +277,12 @@ describe('Composer', () => {
     expect(send.className).toContain('h-9')
     expect(sendMode.className).toContain('h-9')
 
-    // The composer-mode toggle is now a standalone bar above the composer,
-    // and no longer part of the send-mode dropdown menu.
+    // The composer-mode toggle is a hover handle, but it must not reserve a
+    // standalone row above either composer mode.
     const modeToggle = screen.getByTestId('composer-mode-toggle')
     expect(modeToggle).toBeTruthy()
+    expect(modeToggle.className).toContain('absolute')
+    expect(modeToggle.className).toContain('-top-2')
     fireEvent.click(sendMode)
     expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
   })
@@ -581,4 +609,32 @@ function dataTransferFor(id: string): DataTransfer {
     getData: vi.fn(() => id),
     setData: vi.fn(),
   } as unknown as DataTransfer
+}
+
+function attentionTimeline(score: number, level: NonNullable<HumanAttentionTimeline['latest']>['level'], riskExposure: number): HumanAttentionTimeline {
+  const latest: NonNullable<HumanAttentionTimeline['latest']> = {
+    sessionId: 's1',
+    messageCursor: 7,
+    score,
+    level,
+    confidence: 0.72,
+    dimensions: {
+      inputQuality: 24,
+      reviewDepth: 18,
+      correctionQuality: 12,
+      riskAwareness: 20,
+      continuity: 30,
+      riskExposure,
+    },
+    reasons: [
+      {
+        kind: 'high_risk_action',
+        severity: 'warning',
+        message: 'Recent changes need review.',
+      },
+    ],
+    evaluatedAt: '2026-07-23T00:00:00.000Z',
+    evaluator: 'heuristic',
+  }
+  return { sessionId: 's1', points: [latest], latest }
 }
