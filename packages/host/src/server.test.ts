@@ -148,6 +148,37 @@ describe('wire protocol', () => {
     bad.close()
   })
 
+  it('answers first-paint dashboard requests sent before session:ready', async () => {
+    const sessionId = 'wire-first-paint'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+
+    const sessionsPromise = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.once('server:sessions', resolve)
+    })
+    const historyPromise = new Promise<ServerHistoryPayload>((resolve) => {
+      dashboard.once('server:history', resolve)
+    })
+    await new Promise<void>((resolve) => dashboard.once('connect', resolve))
+    dashboard.emit('client:list_sessions', {})
+    dashboard.emit('client:load_history', { sessionId })
+
+    const [sessions, history] = await Promise.all([sessionsPromise, historyPromise])
+    expect(sessions.sessions.some((s) => s.sessionId === sessionId)).toBe(true)
+    expect(history.sessionId).toBe(sessionId)
+    expect(history.entries).toEqual([])
+
+    dashboard.close()
+  })
+
   it('drives a full round-trip with dashboard + executor', async () => {
     const sessionId = 'wire-1'
     // Pre-materialize the session: dashboard handshakes are now lazy (they
@@ -787,6 +818,70 @@ describe('wire protocol', () => {
     executor.close()
   })
 
+  it('client:create_session backfills workspace and cwd on an existing unbound session', async () => {
+    const sessionId = 'wire-create-session-backfill-cwd'
+    const root = resolve(dir, 'backfill-root')
+    const child = resolve(root, 'child')
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', {
+      executorId: 'ex-create-backfill-cwd',
+      workspaceId: 'ws-create-backfill-cwd',
+      workspaceName: 'cwd-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+    await waitForWorkspace(dashboard, 'ws-create-backfill-cwd')
+
+    const ready = new Promise<SessionReadyEvent>((resolve) => {
+      dashboard.off('session:ready')
+      dashboard.on('session:ready', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-create-backfill-cwd',
+      workspaceName: 'cwd-box',
+      cwd: child,
+    })
+
+    const createdReady = await ready
+    expect(createdReady.workspaceId).toBe('ws-create-backfill-cwd')
+    expect(createdReady.state.cwd).toBe(child)
+    expect(server.store.get(sessionId)?.workspaceId).toBe('ws-create-backfill-cwd')
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    const reloaded = await server.store.load(sessionId)
+    expect(reloaded.workspaceId).toBe('ws-create-backfill-cwd')
+    expect(reloaded.state.cwd).toBe(child)
+
+    dashboard.close()
+    executor.close()
+  })
+
   it('client:list_dirs returns directory entries from the selected executor', async () => {
     const sessionId = 'wire-list-dirs'
     const root = resolve(dir, 'dir-root')
@@ -1068,6 +1163,106 @@ describe('wire protocol', () => {
     expect(queueEvents.map((e) => e.pending)).toContain(0)
     expect(queueEvents.some((e) => e.pending === 1 && e.text === 'second' && e.mode === 'queue' && typeof e.id === 'string')).toBe(true)
     expect(seenPrompts).toEqual(['first', 'first|second'])
+
+    dashboard.close()
+  })
+
+  it('lets dashboard reorder, edit, and delete queued user messages before drain', async () => {
+    const sessionId = 'wire-message-queue-edit'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-edit-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: `answer ${seenPrompts.length}` }],
+            },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    let latestQueue: ServerMessageQueueEvent | undefined
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) latestQueue = p
+    })
+    const waitForQueue = async (count: number): Promise<ServerMessageQueueEvent> => {
+      const deadline = Date.now() + 2000
+      while (Date.now() < deadline) {
+        if (latestQueue?.pending === count) return latestQueue
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      throw new Error(`queue did not reach ${count}`)
+    }
+    const finalDone = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('edited queued turn never finished')), 4000)
+      dashboard.on('state:changed', (p) => {
+        if (p.state.status === 'done' && p.state.messages.length >= 7) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'third', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'delete me', mode: 'queue' })
+    const queued = await waitForQueue(3)
+    const second = queued.items.find((item) => item.text === 'second')!
+    const third = queued.items.find((item) => item.text === 'third')!
+    const deleteMe = queued.items.find((item) => item.text === 'delete me')!
+    dashboard.emit('client:update_queued_message', { sessionId, id: third.id, text: 'third edited' })
+    dashboard.emit('client:delete_queued_message', { sessionId, id: deleteMe.id })
+    dashboard.emit('client:reorder_queued_message', { sessionId, id: third.id, beforeId: second.id })
+    await waitForQueue(2)
+    releaseFirst()
+    await finalDone
+
+    expect(seenPrompts).toEqual(['first', 'first|third edited', 'first|third edited|second'])
 
     dashboard.close()
   })

@@ -15,6 +15,17 @@ import { realpath } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, isAbsolute, resolve, sep } from 'node:path'
 
+export type ResolveOptions = {
+  /**
+   * Base directory for resolving relative `path` inputs. Overrides the
+   * default (`roots[0]` or `process.cwd()`). Absolute inputs ignore this.
+   * Set by the executor client from the per-call `cwd` on `tool:call`, so
+   * that `ls "."` behaves consistently with `bash pwd` under the same
+   * `state.cwd`.
+   */
+  readonly cwd?: string
+}
+
 export type Sandbox = {
   /**
    * Configured sandbox roots. Empty array means "no path restriction" — the
@@ -28,10 +39,10 @@ export type Sandbox = {
    * `EACCES: outside sandbox` is thrown. Non-existent leaves are allowed as
    * long as their nearest existing ancestor is inside the whitelist
    * (needed for write/edit tools that create new files). Relative inputs
-   * are resolved against `roots[0]` if configured, otherwise against
-   * `process.cwd()`.
+   * are resolved against `opts.cwd` if supplied, else against `roots[0]`
+   * if configured, else against `process.cwd()`.
    */
-  resolve(path: string): Promise<string>
+  resolve(path: string, opts?: ResolveOptions): Promise<string>
 }
 
 export type SandboxOptions = {
@@ -74,11 +85,11 @@ export function createSandbox(options: SandboxOptions): Sandbox {
 
   return {
     roots: canonicalRoots,
-    async resolve(input: string) {
+    async resolve(input: string, opts?: ResolveOptions) {
       if (typeof input !== 'string' || input.length === 0) {
         throw new SandboxError('EACCES: empty path', 'EACCES')
       }
-      const base = canonicalRoots[0] ?? process.cwd()
+      const base = opts?.cwd ?? canonicalRoots[0] ?? process.cwd()
       const absolute = isAbsolute(input) ? input : resolve(base, input)
       const canonical = await canonicalizeMaybeMissing(absolute)
       if (canonicalRoots.length === 0) return canonical

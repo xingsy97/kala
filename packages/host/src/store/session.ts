@@ -15,6 +15,7 @@ import type {
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
+import type { LLMTrace } from '@agent-kernel/shared'
 import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
@@ -180,10 +181,14 @@ export class SessionStore {
     initialCwd?: string
   }): Promise<{ record: SessionRecord; created: boolean }> {
     const cached = this.records.get(params.sessionId)
-    if (cached) return { record: cached, created: false }
+    if (cached) {
+      await this.applyMissingCreateMetadata(cached, params)
+      return { record: cached, created: false }
+    }
     const inflight = this.inFlight.get(params.sessionId)
     if (inflight) {
       const record = await inflight
+      await this.applyMissingCreateMetadata(record, params)
       return { record, created: false }
     }
     let created = false
@@ -211,7 +216,15 @@ export class SessionStore {
     markCreated: () => void,
   ): Promise<SessionRecord> {
     try {
-      return await this.loadInner(sessionId)
+      const record = await this.loadInner(sessionId)
+      await this.applyMissingCreateMetadata(record, {
+        sessionId,
+        defaultConfig,
+        ...(workspaceId !== undefined ? { workspaceId } : {}),
+        ...(workspaceName !== undefined ? { workspaceName } : {}),
+        ...(initialCwd !== undefined ? { initialCwd } : {}),
+      })
+      return record
     } catch {
       // No existing log — create a fresh one. `create` itself performs a
       // single writeHeader() which is the atomic commit point; if it
@@ -228,12 +241,52 @@ export class SessionStore {
     }
   }
 
+  private async applyMissingCreateMetadata(
+    record: SessionRecord,
+    params: {
+      sessionId: string
+      defaultConfig: AgentConfig
+      workspaceId?: string
+      workspaceName?: string
+      initialCwd?: string
+    },
+  ): Promise<void> {
+    if (record.sessionId !== params.sessionId) return
+    let metadataChanged = false
+    if (record.workspaceId === undefined && params.workspaceId !== undefined) {
+      ;(record as { workspaceId?: string }).workspaceId = params.workspaceId
+      metadataChanged = true
+    }
+    if (record.workspaceName === undefined && params.workspaceName !== undefined) {
+      ;(record as { workspaceName?: string }).workspaceName = params.workspaceName
+      metadataChanged = true
+    }
+    if (metadataChanged) {
+      await appendMetadataEntry(record.logPath, {
+        ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
+        ...(record.workspaceName !== undefined ? { workspaceName: record.workspaceName } : {}),
+      })
+    }
+    if (record.state.cwd === undefined && params.initialCwd !== undefined) {
+      const event: AgentEvent = { kind: 'cwd_changed', cwd: params.initialCwd }
+      const { next, effects } = step(record.state, event, record.config)
+      await appendEventEntry({
+        path: record.logPath,
+        seq: next.cursor,
+        event,
+        effects,
+      })
+      record.state = next
+    }
+  }
+
   async record(
     sessionId: string,
     event: AgentEvent,
     effects: readonly Effect[],
     nextState: AgentState,
     usageDelta?: UsageTotal,
+    llmTrace?: LLMTrace,
   ): Promise<void> {
     const rec = this.records.get(sessionId)
     if (!rec) throw new Error(`Cannot record on unknown session: ${sessionId}`)
@@ -243,6 +296,7 @@ export class SessionStore {
       event,
       effects,
       ...(usageDelta ? { usage: usageDelta } : {}),
+      ...(llmTrace ? { llmTrace } : {}),
     })
     rec.state = nextState
   }
@@ -342,9 +396,13 @@ export class SessionStore {
         // move the call into `dispatched`, then feed the failure — the
         // reducer will accept it and settle the pending list.
         if (pending.status === 'awaiting_approval') {
-          const { next } = step(
+          const approveEvent: AgentEvent = {
+            kind: 'user_approve',
+            callId: pending.callId,
+          }
+          const { next, effects } = step(
             finalState,
-            { kind: 'user_approve', callId: pending.callId },
+            approveEvent,
             parsed.header.config,
           )
           finalState = next
@@ -352,18 +410,18 @@ export class SessionStore {
           await appendEventEntry({
             path,
             seq: cursor,
-            event: { kind: 'user_approve', callId: pending.callId },
-            effects: [],
+            event: approveEvent,
+            effects,
           })
         }
-        const { next } = step(finalState, recoveryEvent, parsed.header.config)
+        const { next, effects } = step(finalState, recoveryEvent, parsed.header.config)
         finalState = next
         cursor = next.cursor
         await appendEventEntry({
           path,
           seq: cursor,
           event: recoveryEvent,
-          effects: [],
+          effects,
         })
       }
     }
@@ -392,16 +450,24 @@ export class SessionStore {
           content: [{ type: 'text', text: '[interrupted]' }],
         },
       }
-      const { next } = step(finalState, recoveryEvent, parsed.header.config)
+      const { next, effects } = step(finalState, recoveryEvent, parsed.header.config)
       finalState = next
       cursor = next.cursor
       await appendEventEntry({
         path,
         seq: cursor,
         event: recoveryEvent,
-        effects: [],
+        effects,
       })
     }
+
+    const latestWorkspaceId =
+      latestStringFromMetadata(parsed.metadata, 'workspaceId') ??
+      parsed.header.workspaceId
+    const latestWorkspaceName =
+      latestStringFromMetadata(parsed.metadata, 'workspaceName') ??
+      parsed.header.workspaceName
+    const label = latestStringFromMetadata(parsed.metadata, 'label')
 
     const record: SessionRecord = {
       sessionId,
@@ -414,14 +480,14 @@ export class SessionStore {
       ...(parsed.header.parentCursor !== undefined
         ? { parentCursor: parsed.header.parentCursor }
         : {}),
-      ...(parsed.header.workspaceId !== undefined
-        ? { workspaceId: parsed.header.workspaceId }
+      ...(latestWorkspaceId !== undefined
+        ? { workspaceId: latestWorkspaceId }
         : {}),
-      ...(parsed.header.workspaceName !== undefined
-        ? { workspaceName: parsed.header.workspaceName }
+      ...(latestWorkspaceName !== undefined
+        ? { workspaceName: latestWorkspaceName }
         : {}),
-      ...(latestLabelFromMetadata(parsed.metadata)
-        ? { label: latestLabelFromMetadata(parsed.metadata) }
+      ...(label
+        ? { label }
         : {}),
     }
     this.records.set(sessionId, record)
@@ -444,7 +510,11 @@ function summarizeLog(
     firstUserEvent && firstUserEvent.event.kind === 'user_message'
       ? firstUserEvent.event.text
       : undefined
-  const label = latestLabelFromMetadata(parsed.metadata)
+  const label = latestStringFromMetadata(parsed.metadata, 'label')
+  const workspaceId =
+    latestStringFromMetadata(parsed.metadata, 'workspaceId') ?? header.workspaceId
+  const workspaceName =
+    latestStringFromMetadata(parsed.metadata, 'workspaceName') ?? header.workspaceName
   // executorId is deliberately not inferred from the log — the JSONL doesn't
   // record which executor produced each tool_result, so any inference here
   // would be a guess. Host can layer it on later by tracking attach history.
@@ -461,11 +531,11 @@ function summarizeLog(
     eventCount: events.length,
     ...(lastEvent ? { lastEventAt: lastEvent.ts } : {}),
     ...(header.parentSessionId ? { parentSessionId: header.parentSessionId } : {}),
-    ...(header.workspaceId !== undefined
-      ? { workspaceId: header.workspaceId }
+    ...(workspaceId !== undefined
+      ? { workspaceId }
       : {}),
-    ...(header.workspaceName !== undefined
-      ? { workspaceName: header.workspaceName }
+    ...(workspaceName !== undefined
+      ? { workspaceName }
       : {}),
     ...(status ? { status } : {}),
     ...(foldedState.cwd
@@ -478,19 +548,16 @@ function summarizeLog(
   }
 }
 
-/**
- * Walk metadata entries in reverse to find the most recent `label` value.
- * Returns undefined when no entry set `label` yet — the summariser then falls
- * back to `firstUserMessage`. An explicit empty string acts as a clear signal
- * and returns undefined too.
- */
-function latestLabelFromMetadata(
-  metadata: readonly { label?: string }[],
+/** Walk metadata entries in reverse to find the most recent string value. */
+function latestStringFromMetadata(
+  metadata: readonly Record<string, string | undefined>[],
+  key: 'label' | 'workspaceId' | 'workspaceName',
 ): string | undefined {
   for (let i = metadata.length - 1; i >= 0; i--) {
     const entry = metadata[i]!
-    if (entry.label === undefined) continue
-    const trimmed = entry.label.trim()
+    const value = entry[key]
+    if (value === undefined) continue
+    const trimmed = value.trim()
     return trimmed.length === 0 ? undefined : trimmed
   }
   return undefined

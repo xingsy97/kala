@@ -93,11 +93,18 @@ describe('loadRuntimeConfig', () => {
       expect(cfg.defaultModel).toBe('gpt-5.5')
       expect(cfg.models.map((m) => m.id)).toEqual([
         'claude-opus-4.7-1m-internal',
+        'claude-haiku-4-5',
         'gpt-5.5',
       ])
       expect(cfg.models.map((m) => m.contextWindow)).toEqual([
         1_000_000,
+        undefined,
         400_000,
+      ])
+      expect(cfg.models.map((m) => m.source)).toEqual([
+        'claude-settings',
+        'claude-settings',
+        'codex-config',
       ])
       // Model list is the sanitized DTO — no `apiKey` field on ModelInfo.
       for (const m of cfg.models) {
@@ -116,6 +123,39 @@ describe('loadRuntimeConfig', () => {
     } finally {
       delete process.env.AK_TEST_TK_KEY
     }
+  })
+
+  it('does not let manual models override auto-discovered model sources', () => {
+    const claudePath = join(dir, 'claude.json')
+    const manualPath = join(dir, 'models.json')
+    writeFileSync(
+      claudePath,
+      JSON.stringify({
+        apiKeyHelper: 'echo test-anthropic-key',
+        env: { ANTHROPIC_MODEL: 'claude-sonnet-4-6' },
+      }),
+    )
+    writeFileSync(
+      manualPath,
+      JSON.stringify({
+        models: [
+          { providerId: 'anthropic', id: 'claude-sonnet-4-6' },
+          { providerId: 'anthropic', id: 'claude-haiku-4-6' },
+        ],
+      }),
+    )
+
+    const cfg = loadRuntimeConfig({
+      claudeSettingsPath: claudePath,
+      codexConfigPath: join(dir, 'missing-codex.toml'),
+      manualModelsPath: manualPath,
+    })
+
+    expect(cfg.models.map((m) => [m.id, m.source])).toEqual([
+      ['claude-sonnet-4-6', 'claude-settings'],
+      ['claude-haiku-4-6', 'manual'],
+    ])
+    expect(cfg.manualModels).toEqual([{ providerId: 'anthropic', id: 'claude-haiku-4-6' }])
   })
 
   it('drops providers whose env key is unset (so nothing loud fails when TK_API_KEY is missing)', () => {

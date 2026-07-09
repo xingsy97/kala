@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { bashTool } from './bash.js'
 import { bashOutputTool } from './bash-output.js'
-import { makeCtx } from './_test-helpers.js'
+import { makeCtx, makeCtxWithCwd } from './_test-helpers.js'
 import { createSandbox } from '../sandbox.js'
 
 describe('bash', () => {
@@ -30,6 +30,34 @@ describe('bash', () => {
       makeCtx(root),
     )
     expect(out).toContain('--- exit code: 3')
+  })
+
+  it('runs commands from the session cwd when no tool-local cwd is supplied', async () => {
+    const child = join(root, 'child')
+    mkdirSync(child)
+
+    const out = await bashTool.run(
+      { command: 'pwd' },
+      makeCtxWithCwd(root, child),
+    )
+
+    expect(out.split('\n')[0]).toBe(child)
+    expect(out).toContain('--- exit code: 0')
+  })
+
+  it('uses the session cwd instead of process.cwd() when no sandbox root is configured', async () => {
+    const out = await bashTool.run(
+      { command: 'pwd' },
+      {
+        sandbox: createSandbox({ roots: [] }),
+        cwd: root,
+        signal: new AbortController().signal,
+      },
+    )
+
+    expect(out.split('\n')[0]).toBe(root)
+    expect(out.split('\n')[0]).not.toBe(process.cwd())
+    expect(out).toContain('--- exit code: 0')
   })
 
   it('honours timeoutMs by killing the process', async () => {

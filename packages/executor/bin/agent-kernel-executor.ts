@@ -22,6 +22,9 @@
 import process from 'node:process'
 
 import { startExecutor } from '../src/client.js'
+import { createRuntimeLogger } from '../src/logger.js'
+
+const logger = createRuntimeLogger('agent-kernel-executor')
 
 type Args = {
   host?: string
@@ -75,8 +78,9 @@ async function main(): Promise<void> {
   const executorId = args.id ?? process.env.EXECUTOR_ID
 
   if (!host) {
-    console.error('usage: agent-kernel-executor --host <url> [--name <workspace>] [--sandbox-root <path>]...')
-    console.error('or set HOST_URL env var')
+    logger.error(
+      'usage: agent-kernel-executor --host <url> [--name <workspace>] [--sandbox-root <path>]...; or set HOST_URL env var',
+    )
     process.exit(1)
   }
 
@@ -89,22 +93,28 @@ async function main(): Promise<void> {
   })
 
   handle.socket.on('connect', () => {
-    console.log(
-      `executor ${handle.executorId} (workspace=${handle.workspaceName} [${handle.workspaceId}]) connected to ${host}`,
+    logger.info(
+      {
+        executorId: handle.executorId,
+        workspaceId: handle.workspaceId,
+        workspaceName: handle.workspaceName,
+        host,
+      },
+      'executor connected',
     )
   })
   handle.socket.on('disconnect', (reason) => {
-    console.log(`executor disconnected: ${reason}`)
+    logger.info({ reason }, 'executor disconnected')
   })
   handle.socket.on('session:error', (e) => {
-    console.error(`[${e.scope}] ${e.message}`)
+    logger.error({ scope: e.scope }, e.message)
   })
 
   await handle.ready
-  console.log('executor announced; awaiting tool calls...')
+  logger.info('executor announced; awaiting tool calls')
 
   const shutdown = (): void => {
-    console.log('shutting down...')
+    logger.info('shutting down')
     handle.close()
     process.exit(0)
   }
@@ -113,6 +123,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err)
+  logger.error({ err }, 'fatal error')
   process.exit(1)
 })

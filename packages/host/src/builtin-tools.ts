@@ -9,7 +9,16 @@
 
 import type { ToolSchema } from '@agent-kernel/kernel'
 
-export const builtinTools: readonly ToolSchema[] = [
+import { skillToolSchema } from './skills.js'
+import type { SkillInfo } from './skills.js'
+
+export function createBuiltinTools(
+  skills: readonly SkillInfo[] = [],
+): readonly ToolSchema[] {
+  return [skillToolSchema(skills), ...executorAndHostTools]
+}
+
+const executorAndHostTools: readonly ToolSchema[] = [
   {
     name: 'read',
     description:
@@ -223,4 +232,33 @@ export const builtinTools: readonly ToolSchema[] = [
     },
     requiresApproval: false,
   },
+  {
+    name: 'memory',
+    description:
+      'Read, list, write, or delete the agent\'s persistent notepad. Use operation=`list` to list keys, `read` to fetch one entry, `write` to upsert, and `delete` to remove. Scopes: `session` (in AgentState, forkable), `workspace` (on disk in this workspace), `global` (on disk for this machine).',
+    inputSchema: {
+      type: 'object',
+      required: ['operation', 'scope'],
+      properties: {
+        operation: { type: 'string', enum: ['list', 'read', 'write', 'delete'] },
+        scope: { type: 'string', enum: ['session', 'workspace', 'global'] },
+        key: {
+          type: 'string',
+          description: 'Required for read/write/delete. Pattern: ^[a-zA-Z0-9_-]{1,64}$.',
+        },
+        content: {
+          type: 'string',
+          description: 'Required for write. Text/markdown content, capped at 128 KB per entry.',
+        },
+        updatedAt: {
+          type: 'string',
+          description:
+            'ISO-8601 timestamp for session-scope writes. The kernel uses this when lifting memory into AgentState.',
+        },
+      },
+    },
+    requiresApproval: false,
+  },
 ]
+
+export const builtinTools: readonly ToolSchema[] = createBuiltinTools()

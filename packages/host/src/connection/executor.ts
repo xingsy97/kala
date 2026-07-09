@@ -25,6 +25,7 @@ import type {
   ClientListDirs,
   ClientListFiles,
   ClientReadFile,
+  ClientReadOverflow,
   DirListResult,
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
@@ -32,6 +33,7 @@ import type {
   ExecutorToolResult,
   FileContentsResult,
   FileListResult,
+  OverflowContentsResult,
   ServerExecutorChangedPayload,
   ToolResultAck,
 } from '@agent-kernel/shared'
@@ -66,6 +68,7 @@ export type ExecutorLookup = {
   listDirs(workspaceId: string, path: string | undefined, requestId: string): Promise<DirListResult>
   listFiles(payload: ClientListFiles): Promise<FileListResult>
   readFile(payload: ClientReadFile): Promise<FileContentsResult>
+  readOverflow(payload: ClientReadOverflow, workspaceId: string): Promise<OverflowContentsResult>
 }
 
 export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
@@ -414,6 +417,31 @@ export function createExecutorRegistry(
           })
         }, toolTimeoutMs)
         bind.socket.emit('fs:read_file', payload, (result: FileContentsResult) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
+      })
+    },
+    async readOverflow(payload, workspaceId) {
+      const bind = findBindByWorkspace(workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          sessionId: payload.sessionId,
+          callId: payload.callId,
+          error: 'workspace offline',
+        }
+      }
+      return await new Promise<OverflowContentsResult>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve({
+            requestId: payload.requestId,
+            sessionId: payload.sessionId,
+            callId: payload.callId,
+            error: 'overflow read timed out',
+          })
+        }, toolTimeoutMs)
+        bind.socket.emit('fs:read_overflow', payload, (result: OverflowContentsResult) => {
           clearTimeout(timer)
           resolve(result)
         })

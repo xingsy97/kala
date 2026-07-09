@@ -28,11 +28,12 @@ Every executor bundled in this repo MUST implement the tools below. Third-party 
 | `bash` | Execute shell command; can start background tasks with `run_in_background` | ✅ | Mutating |
 | `todowrite` | Replace the session todo list | ❌ | Planning state |
 | `web_search` | DuckDuckGo HTML search | ❌ | Network |
+| `memory` | List, read, write, or delete memory entries (session / workspace / global scope) | ❌ | Memory |
 | `agent` | Spawn a host-side child agent session | ❌ | Host builtin |
 | `bash_output` | Poll background shell task output | ❌ | Background shell |
 | `kill_shell` | Stop a background shell task | ✅ | Background shell |
 
-`todowrite` is both an executor tool and a reducer special case: successful results promote `input.todos` into `state.todos`. `agent` is declared as a tool schema but runs inside Host, not Executor — it creates a child JSONL session in the same workspace and returns the child assistant text.
+`todowrite` is both an executor tool and a reducer special case: successful results promote `input.todos` into `state.todos`. `memory` behaves the same way when `scope: 'session'` and `operation` is `write` or `delete` — the reducer lifts `(key, content)` into `state.memory`; workspace/global scope go to disk under the executor. `agent` is declared as a tool schema but runs inside Host, not Executor — it creates a child JSONL session in the same workspace and returns the child assistant text.
 
 ---
 
@@ -297,7 +298,49 @@ Search the web via DuckDuckGo. No API key required.
 
 **Implementation**: `packages/executor/src/tools/websearch.ts` hits `https://html.duckduckgo.com/html/?q=<query>` and parses the anchor/snippet HTML. No Serper / Brave / Google API key is used.
 
-### 2.10 `agent` (host builtin)
+### 2.10 `memory`
+
+Three-tier persistent scratchpad the agent maintains for itself across turns and — for workspace/global scope — across sessions and even reboots. Modelled after Claude Code's `CLAUDE.md` and opencode's memory tools, but with an explicit scope selector rather than filename conventions.
+
+**Scopes** (broadest → narrowest):
+
+- `global` — `~/.agent-kernel/memory/<key>.md` on the executor host. Shared across every workspace on that machine. Use for personal preferences, coding style, machine-wide facts.
+- `workspace` — `<firstSandboxRoot>/.agent-kernel/memory/<key>.md`. Shared across every session in that workspace. Falls back to `process.cwd()/.agent-kernel/memory/` when no sandbox root is configured. Use for project conventions, build commands, service URLs.
+- `session` — **not on disk**. The kernel reducer intercepts a successful `memory { operation: 'write', scope: 'session' }` result and lifts the `(key, content)` into `state.memory[]`; `memory { operation: 'delete', scope: 'session' }` removes it. Session memory dies with the session unless forked (fork copies state, so it carries over). Use for scratch notes valid only for this conversation.
+
+**Keys**: constrained to `/^[a-zA-Z0-9_-]{1,64}$/` to prevent path traversal and keep listings sortable.
+**Content**: plain text / markdown, capped at **128 KB per entry**.
+
+**Schema**:
+```json
+{
+  "type": "object",
+  "required": ["operation", "scope"],
+  "properties": {
+    "operation": { "type": "string", "enum": ["list", "read", "write", "delete"] },
+    "scope": { "type": "string", "enum": ["session", "workspace", "global"] },
+    "key": { "type": "string", "description": "Required for read/write/delete." },
+    "content": { "type": "string" },
+    "updatedAt": { "type": "string", "description": "ISO-8601 timestamp for session-scope entries; workspace/global use file mtime." }
+  }
+}
+```
+
+Use `operation: "list"` to list all keys in the scope. Reading a `session` scope entry returns a pointer to `state.memory` (which the LLM already sees inlined in transcripts) rather than duplicating.
+
+**Approval**: `requiresApproval: false`. Memory writes are treated like `todowrite` — the agent is note-taking for itself, not mutating user files.
+
+**Reducer coupling**: session-scope memory is a first-class piece of `AgentState` — the reducer lifts `input.key`/`input.content` into `state.memory` when `tool_result.ok === true`, `tool.name === 'memory'`, `input.scope === 'session'`, and `input.operation === 'write'`. `operation === 'delete'` removes the matching key. Parsing from `input` (not `content`) means a broken executor cannot corrupt kernel state. Workspace/global scope round-trip normally through executor IO and produce opaque tool_result strings; kernel state is untouched.
+
+**Errors** (`ok: false, content: <string>`):
+- `EINVAL: field "scope" must be one of: session, workspace, global`
+- `EINVAL: field "key" must match /^[a-zA-Z0-9_-]{1,64}$/`
+- `E2BIG: content exceeds memory entry cap (128 KB)`
+- `ENOENT: no memory entry: scope=<s> key=<k>` (read only; delete is idempotent)
+
+**Implementation**: `packages/executor/src/tools/memory.ts`. Session lift happens in `packages/kernel/src/core.ts` (`applyMemoryOp`).
+
+### 2.11 `agent` (host builtin)
 
 Spawn a child agent session and return its final assistant text.
 
@@ -322,7 +365,7 @@ Spawn a child agent session and return its final assistant text.
 
 The `agent` tool is declared in the config's tool list but never dispatched to the executor — Host intercepts it in `performCallTool`.
 
-### 2.11 `bash_output`
+### 2.12 `bash_output`
 
 Poll a background shell task's logs.
 
@@ -342,7 +385,7 @@ Poll a background shell task's logs.
 
 **Output**: the log slice since `offset`, plus task status trailer.
 
-### 2.12 `kill_shell`
+### 2.13 `kill_shell`
 
 Stop a background shell task by id.
 

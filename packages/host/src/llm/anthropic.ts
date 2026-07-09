@@ -17,6 +17,7 @@ import type {
   MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
+import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
 
@@ -103,6 +104,7 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
           apiUrl,
           opts.apiKey,
           body,
+          effectiveModel,
           fetchImpl,
           params.signal,
           params.onTextDelta,
@@ -123,7 +125,14 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
         throw new AnthropicHTTPError(res.status, detail)
       }
       const json = (await res.json()) as AnthropicResponseBody
-      return parseResponse(json)
+      const parsed = parseResponse(json)
+      return {
+        ...parsed,
+        trace: makeAnthropicTrace(apiUrl, effectiveModel, body, {
+          status: res.status,
+          body: json,
+        }),
+      }
     },
   }
 }
@@ -143,6 +152,7 @@ async function callStreaming(
   apiUrl: string,
   apiKey: string,
   body: Record<string, unknown>,
+  model: string,
   fetchImpl: typeof fetch,
   signal: AbortSignal | undefined,
   onTextDelta: (delta: string) => void,
@@ -169,6 +179,7 @@ async function callStreaming(
   let outputTokens = 0
   let cacheCreationTokens = 0
   let cacheReadTokens = 0
+  const streamEventTypes: string[] = []
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -191,6 +202,7 @@ async function callStreaming(
       } catch {
         continue
       }
+      if (typeof evt.type === 'string') streamEventTypes.push(evt.type)
       handleStreamEvent(
         evt,
         blocks,
@@ -217,7 +229,46 @@ async function callStreaming(
     cacheReadTokens > 0
       ? { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens }
       : undefined
-  return { message, usage }
+  return {
+    message,
+    usage,
+    trace: makeAnthropicTrace(apiUrl, model, body, {
+      status: res.status,
+      streamEventTypes,
+      body: {
+        role: 'assistant',
+        content: blocks,
+        usage: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          cache_creation_input_tokens: cacheCreationTokens,
+          cache_read_input_tokens: cacheReadTokens,
+        },
+      },
+    }),
+  }
+}
+
+function makeAnthropicTrace(
+  apiUrl: string,
+  model: string,
+  body: Record<string, unknown>,
+  response: NonNullable<LLMTrace['response']>,
+): LLMTrace {
+  return {
+    provider: 'anthropic',
+    model,
+    request: {
+      url: apiUrl,
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': ANTHROPIC_VERSION,
+        'x-api-key': 'test-redacted-api-key',
+      },
+      body,
+    },
+    response,
+  }
 }
 
 function handleStreamEvent(

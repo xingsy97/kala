@@ -24,6 +24,7 @@ import type {
   SessionErrorEvent,
   SessionForkedEvent,
   SessionSummary,
+  LLMTrace,
 } from '@agent-kernel/shared'
 import { io, type Socket } from 'socket.io-client'
 
@@ -37,6 +38,7 @@ export type TimelineEntry = {
   ts: string
   event: AgentEvent
   effects: readonly Effect[]
+  llmTrace?: LLMTrace
 }
 
 export type ConnectionStatus =
@@ -120,8 +122,10 @@ export function useSession({
       reconnectionDelay: 500,
     }) as DashboardSocket
     socketRef.current = socket
+    const isCurrentSocket = (): boolean => socketRef.current === socket
 
     socket.on('session:ready', (p) => {
+      if (!isCurrentSocket() || p.sessionId !== sessionId) return
       setStatus('ready')
       setState(p.state)
       setConfig(p.config)
@@ -136,33 +140,39 @@ export function useSession({
       socket.emit('client:load_history', { sessionId: p.sessionId })
     })
     socket.on('server:history', (p) => {
+      if (!isCurrentSocket() || p.sessionId !== sessionId) return
       const entries: TimelineEntry[] = p.entries.map((e) => ({
         seq: e.seq,
         ts: e.ts,
         event: e.event,
         effects: e.effects,
+        ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
       }))
-      setTimeline((prev) => mergeByseq(prev, entries))
+      setTimeline((prev) => mergeBySeq(prev, entries))
     })
     socket.on('session:forked', (p) => {
+      if (!isCurrentSocket()) return
       onForkedRef.current?.(p)
     })
     socket.on('state:changed', (p) => {
+      if (!isCurrentSocket() || p.sessionId !== sessionId) return
       setState(p.state)
       if (p.state.status !== 'thinking') setStreamingText('')
     })
     socket.on('event:appended', (p) => {
+      if (!isCurrentSocket() || p.sessionId !== sessionId) return
       setLastError(null)
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
         setStreamingText('')
       }
       setTimeline((prev) =>
-        mergeByseq(prev, [
+        mergeBySeq(prev, [
           {
             seq: p.seq,
             ts: p.ts,
             event: p.event,
             effects: p.effects,
+            ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
           },
         ]),
       )
@@ -175,24 +185,30 @@ export function useSession({
       // banner-vs-card mismatch across reloads comes back.
     })
     socket.on('server:message_queue', (p) => {
+      if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) setQueuedMessages(p.items ?? [])
     })
     socket.on('session:error', (p) => {
+      if (!isCurrentSocket() || p.sessionId !== sessionId) return
       setStreamingText('')
       setLastError(p)
     })
     socket.on('session:token_delta', (p) => {
+      if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) setStreamingText((prev) => prev + p.text)
     })
     socket.on('session:model_changed', (p) => {
+      if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) {
         setSelectedModel(p.model.length > 0 ? p.model : null)
       }
     })
     socket.on('connect_error', () => {
+      if (!isCurrentSocket()) return
       setStatus('error')
     })
     socket.on('disconnect', () => {
+      if (!isCurrentSocket()) return
       setStatus('disconnected')
     })
 
@@ -307,6 +323,36 @@ export function setSessionApprovalMode(
   socket.emit('client:set_approval_mode', { sessionId, mode })
 }
 
+export function reorderQueuedMessage(
+  socket: DashboardSocket,
+  sessionId: string,
+  id: string,
+  beforeId?: string | null,
+): void {
+  socket.emit('client:reorder_queued_message', {
+    sessionId,
+    id,
+    ...(beforeId !== undefined ? { beforeId } : {}),
+  })
+}
+
+export function updateQueuedMessage(
+  socket: DashboardSocket,
+  sessionId: string,
+  id: string,
+  text: string,
+): void {
+  socket.emit('client:update_queued_message', { sessionId, id, text })
+}
+
+export function deleteQueuedMessage(
+  socket: DashboardSocket,
+  sessionId: string,
+  id: string,
+): void {
+  socket.emit('client:delete_queued_message', { sessionId, id })
+}
+
 export function renameSession(
   socket: DashboardSocket,
   sessionId: string,
@@ -343,15 +389,20 @@ export function useControlPlane(
       setSessions([])
       return
     }
+    let active = true
+    const isActive = (): boolean => active
     const onExecutors = (p: { executors: readonly AttachedExecutor[] }): void => {
+      if (!isActive()) return
       setExecutors(p.executors)
     }
     const onSessions = (p: { sessions: readonly SessionSummary[] }): void => {
+      if (!isActive()) return
       setSessions(p.sessions)
     }
     const onExecutorChanged: DashboardServerToClientEvents['server:executor_changed'] = (
       change,
     ) => {
+      if (!isActive()) return
       setExecutors((prev) => {
         if (change.change === 'detached') {
           return prev.filter((e) => e.executorId !== change.executorId)
@@ -367,11 +418,13 @@ export function useControlPlane(
     const onSessionDeleted: DashboardServerToClientEvents['server:session_deleted'] = (
       payload,
     ) => {
+      if (!isActive()) return
       setSessions((prev) => prev.filter((s) => s.sessionId !== payload.sessionId))
     }
     socket.on('server:session_deleted', onSessionDeleted)
 
     const requestBoth = (): void => {
+      if (!isActive()) return
       socket.emit('client:list_executors', {})
       socket.emit('client:list_sessions', {})
     }
@@ -379,6 +432,7 @@ export function useControlPlane(
     socket.on('connect', requestBoth)
 
     return () => {
+      active = false
       socket.off('server:executors', onExecutors)
       socket.off('server:sessions', onSessions)
       socket.off('server:executor_changed', onExecutorChanged)
@@ -397,15 +451,30 @@ export function useControlPlane(
   return { executors, sessions, refreshSessions }
 }
 
-function mergeByseq(
+export function mergeBySeq(
   prev: readonly TimelineEntry[],
   add: readonly TimelineEntry[],
 ): readonly TimelineEntry[] {
   if (add.length === 0) return prev
   const map = new Map<number, TimelineEntry>()
   for (const e of prev) map.set(e.seq, e)
-  for (const e of add) map.set(e.seq, e)
+  for (const e of add) {
+    const existing = map.get(e.seq)
+    if (!existing) {
+      map.set(e.seq, e)
+      continue
+    }
+    if (sameTimelineEvent(existing, e)) map.set(e.seq, { ...existing, ...e })
+  }
   const out = [...map.values()]
   out.sort((a, b) => a.seq - b.seq)
   return out
+}
+
+function sameTimelineEvent(a: TimelineEntry, b: TimelineEntry): boolean {
+  if (a.event.kind !== b.event.kind) return false
+  if ('callId' in a.event || 'callId' in b.event) {
+    return 'callId' in a.event && 'callId' in b.event && a.event.callId === b.event.callId
+  }
+  return true
 }

@@ -25,7 +25,7 @@ export function ActivityBar({ state, compactStatus }: Props): JSX.Element | null
   return (
     <div
       className={cn(
-        'border-t px-3 py-2 text-xs flex items-center gap-2 min-w-0',
+        'px-3 py-2 text-xs flex items-center gap-2 min-w-0',
         activity.className,
       )}
       data-testid="activity-bar"
@@ -103,7 +103,7 @@ function activityFor(
       detail: compactStatus.message,
       icon: Check,
       className:
-        'border-border bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
+        'bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
     }
   }
   if (!state) {
@@ -112,7 +112,7 @@ function activityFor(
       detail: 'waiting for session state',
       icon: Clock,
       className:
-        'border-border bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
+        'bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
     }
   }
   if (state.status === 'thinking') {
@@ -151,7 +151,7 @@ function activityFor(
     label: `Agent ${agentStatusLabel(state.status)}`,
     icon: Check,
     className:
-      'border-border bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
+      'bg-muted text-foreground dark:bg-card/60 dark:text-foreground',
   }
 }
 

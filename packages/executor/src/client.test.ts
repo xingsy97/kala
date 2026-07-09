@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ulid } from 'ulid'
 
 import { createConfig } from '@agent-kernel/kernel'
-import type { AgentConfig } from '@agent-kernel/kernel'
+import type { AgentConfig, Message } from '@agent-kernel/kernel'
 import { startHostServer, type HostServer } from '@agent-kernel/host'
 import type { LLMAdapter } from '@agent-kernel/host'
 import type {
@@ -20,26 +20,28 @@ import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 import { startExecutor } from './client.js'
 
 function scriptedLlm(targetPath: string): LLMAdapter {
+  return scriptedMessages([
+    {
+      role: 'assistant' as const,
+      content: [
+        {
+          type: 'tool_call' as const,
+          callId: 'c1',
+          name: 'write',
+          input: { path: targetPath, content: 'from-llm' },
+        },
+      ],
+    },
+    {
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'done' }],
+    },
+  ])
+}
+
+function scriptedMessages(messages: Message[]): LLMAdapter {
   const queue = [
-    {
-      message: {
-        role: 'assistant' as const,
-        content: [
-          {
-            type: 'tool_call' as const,
-            callId: 'c1',
-            name: 'write',
-            input: { path: targetPath, content: 'from-llm' },
-          },
-        ],
-      },
-    },
-    {
-      message: {
-        role: 'assistant' as const,
-        content: [{ type: 'text' as const, text: 'done' }],
-      },
-    },
+    ...messages.map((message) => ({ message })),
   ]
   return {
     name: 'scripted',
@@ -57,6 +59,56 @@ const WRITE_SCHEMA = {
   inputSchema: { type: 'object' },
   requiresApproval: false,
 } as const
+
+const LS_SCHEMA = {
+  name: 'ls',
+  description: 'list files',
+  inputSchema: { type: 'object' },
+  requiresApproval: false,
+} as const
+
+const BASH_SCHEMA = {
+  name: 'bash',
+  description: 'run bash',
+  inputSchema: { type: 'object' },
+  requiresApproval: false,
+} as const
+
+async function waitForDone(
+  dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('never done')), 5000)
+    dashboard.on('state:changed', (p) => {
+      if (p.state.status === 'done') {
+        clearTimeout(timer)
+        resolve()
+      }
+      if (p.state.status === 'error') {
+        clearTimeout(timer)
+        reject(new Error('kernel error: ' + p.state.error))
+      }
+    })
+  })
+}
+
+function toolResultContent(logPath: string, callId: string): string | undefined {
+  const lines = readFileSync(logPath, 'utf8').trim().split('\n')
+  for (const line of lines) {
+    const parsed = JSON.parse(line) as {
+      kind: string
+      event?: { kind: string; callId?: string; content?: string }
+    }
+    if (
+      parsed.kind === 'event' &&
+      parsed.event?.kind === 'tool_result' &&
+      parsed.event.callId === callId
+    ) {
+      return parsed.event.content
+    }
+  }
+  return undefined
+}
 
 describe('executor end-to-end', () => {
   let server: HostServer
@@ -137,29 +189,106 @@ describe('executor end-to-end', () => {
       tick()
     })
 
-    const done = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('never done')), 5000)
-      dashboard.on('state:changed', (p) => {
-        if (p.state.status === 'done') {
-          clearTimeout(timer)
-          resolve()
-        }
-        if (p.state.status === 'error') {
-          clearTimeout(timer)
-          reject(new Error('kernel error: ' + p.state.error))
-        }
-      })
-    })
-
     dashboard.emit('client:user_message', {
       sessionId,
       text: 'please write',
     })
 
-    await done
+    await waitForDone(dashboard)
 
     expect(existsSync(targetPath)).toBe(true)
     expect(readFileSync(targetPath, 'utf8')).toBe('from-llm')
+
+    dashboard.close()
+    executor.close()
+  })
+
+  it('honors session cwd for real ls and bash tool calls', async () => {
+    await server.close()
+
+    const sessionId = 'e2e-cwd'
+    const workspaceId = ulid()
+    const child = join(sandboxRoot, 'child')
+    mkdirSync(child)
+    writeFileSync(join(sandboxRoot, 'root-only.txt'), '')
+    writeFileSync(join(child, 'child-only.txt'), '')
+    config = createConfig({ tools: [LS_SCHEMA, BASH_SCHEMA], systemPrompt: 'sys' })
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir,
+      llm: scriptedMessages([
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'ls-cwd',
+              name: 'ls',
+              input: { path: '.', hidden: true },
+            },
+            {
+              type: 'tool_call',
+              callId: 'pwd-cwd',
+              name: 'bash',
+              input: { command: 'pwd' },
+            },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+        },
+      ]),
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 3000,
+    })
+    url = `http://localhost:${server.port}`
+
+    await server.store.ensure({
+      sessionId,
+      defaultConfig: config,
+      workspaceId,
+      workspaceName: 'test-ws',
+      initialCwd: child,
+    })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const executor = startExecutor({
+      host: url,
+      workspaceId,
+      workspaceName: 'test-ws',
+      sandboxRoots: [sandboxRoot],
+    })
+    await executor.ready
+
+    dashboard.emit('client:user_message', {
+      sessionId,
+      text: 'show cwd',
+    })
+
+    await waitForDone(dashboard)
+
+    const rec = server.store.get(sessionId)!
+    expect(toolResultContent(rec.logPath, 'ls-cwd')).toBe('child-only.txt')
+    const pwd = toolResultContent(rec.logPath, 'pwd-cwd')
+    expect(pwd?.split('\n')[0]).toBe(child)
+    expect(pwd).not.toContain(sandboxRoot + '\n--- exit code')
 
     dashboard.close()
     executor.close()
