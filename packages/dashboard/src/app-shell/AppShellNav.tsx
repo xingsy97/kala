@@ -40,35 +40,37 @@ export function AppShellNav({
     <nav
       aria-label={t('appShell.nav.aria')}
       data-testid="app-shell-nav"
-      className="sticky top-0 z-30 flex h-11 items-center gap-1 border-b border-border/60 bg-background/95 px-3 backdrop-blur"
+      className="sticky top-0 z-30 flex h-11 items-center gap-1 border-b border-border/60 bg-background/95 px-2 backdrop-blur sm:px-3"
     >
-      <span className="mr-2 text-xs font-semibold tracking-wide text-muted-foreground">
+      <span className="mr-2 hidden text-xs font-semibold tracking-wide text-muted-foreground sm:inline">
         agent-kernel
       </span>
-      {NAV_ITEMS.map(({ id, labelKey, Icon, testid }) => {
-        const active = section === id
-        return (
-          <Button
-            key={id}
-            variant="ghost"
-            size="sm"
-            data-testid={testid}
-            aria-current={active ? 'page' : undefined}
-            title={t(labelKey)}
-            onClick={() => onSelect(id)}
-            className={cn(
-              'h-8 gap-1.5 px-2.5 text-xs',
-              active
-                ? 'bg-primary/10 text-primary ring-1 ring-primary/25'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <Icon className="h-4 w-4 flex-none" aria-hidden />
-            <span>{t(labelKey)}</span>
-          </Button>
-        )
-      })}
-      <span className="ml-auto flex items-center gap-1">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto snap-x snap-mandatory [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:overflow-visible">
+        {NAV_ITEMS.map(({ id, labelKey, Icon, testid }) => {
+          const active = section === id
+          return (
+            <Button
+              key={id}
+              variant="ghost"
+              size="sm"
+              data-testid={testid}
+              aria-current={active ? 'page' : undefined}
+              title={t(labelKey)}
+              onClick={() => onSelect(id)}
+              className={cn(
+                'h-9 flex-none snap-start gap-1.5 px-2 text-xs sm:h-8 sm:px-2.5',
+                active
+                  ? 'bg-primary/10 text-primary ring-1 ring-primary/25'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="h-4 w-4 flex-none" aria-hidden />
+              <span className="hidden sm:inline">{t(labelKey)}</span>
+            </Button>
+          )
+        })}
+      </div>
+      <span className="ml-auto flex flex-none items-center gap-1">
         <LanguageSwitcher />
         <Button
           variant="ghost"
@@ -77,7 +79,7 @@ export function AppShellNav({
           onClick={onOpenSettings}
           title={t('app.openSettings')}
           aria-label={t('app.openSettings')}
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+          className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
         >
           <SettingsIcon className="h-4 w-4" aria-hidden />
         </Button>

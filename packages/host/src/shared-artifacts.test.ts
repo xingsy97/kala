@@ -142,6 +142,101 @@ describe('enhancement foundation', () => {
     expect(spans.every((span) => span.traceId === spans[0]!.traceId)).toBe(true)
   })
 
+  it('emits MEMORY-kind spans for memory tool calls and propagates parent-session attrs', () => {
+    const events: EventEntry[] = [
+      {
+        kind: 'event',
+        seq: 1,
+        ts: '2026-07-09T00:00:01.000Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [] } },
+        effects: [
+          { kind: 'call_tool', callId: 'm1', name: 'memory', input: { operation: 'read' } },
+        ],
+      },
+      {
+        kind: 'event',
+        seq: 2,
+        ts: '2026-07-09T00:00:02.000Z',
+        event: { kind: 'tool_result', callId: 'm1', ok: true, content: 'ok' },
+        effects: [],
+      },
+    ]
+    const forked: HeaderEntry = {
+      ...header,
+      parentSessionId: 'parent-1',
+      parentCursor: 7,
+    }
+    const spans = exportSessionSpans({ header: forked, events })
+    const root = spans.find((s) => s.kind === 'AGENT')!
+    expect(root.attributes['agent_kernel.parent_session_id']).toBe('parent-1')
+    expect(root.attributes['agent_kernel.parent_cursor']).toBe(7)
+    const mem = spans.find((s) => s.kind === 'MEMORY')!
+    expect(mem).toBeDefined()
+    expect(mem.name).toBe('memory memory')
+    expect(mem.attributes['gen_ai.operation.name']).toBe('memory_operation')
+    expect(mem.attributes['gen_ai.tool.name']).toBe('memory')
+  })
+
+  it('emits CHAIN spans for each compaction outcome with matching status', () => {
+    const events: EventEntry[] = [
+      {
+        kind: 'event',
+        seq: 1,
+        ts: '2026-07-09T00:00:01.000Z',
+        event: {
+          kind: 'compact_replaced',
+          trigger: 'auto',
+          attemptId: 'a1',
+          preserveFrom: 3,
+          summary: 's',
+          replacedCount: 4,
+          tokensBefore: 10_000,
+          tokensAfter: 2_000,
+        },
+        effects: [],
+      },
+      {
+        kind: 'event',
+        seq: 2,
+        ts: '2026-07-09T00:00:02.000Z',
+        event: {
+          kind: 'compact_skipped',
+          trigger: 'auto',
+          attemptId: 'a2',
+          reason: 'circuit_breaker_open',
+        },
+        effects: [],
+      },
+      {
+        kind: 'event',
+        seq: 3,
+        ts: '2026-07-09T00:00:03.000Z',
+        event: {
+          kind: 'compact_rejected',
+          attemptId: 'a3',
+          reason: 'pending_call_orphaned',
+        },
+        effects: [],
+      },
+    ]
+    const spans = exportSessionSpans({ header, events })
+    const chains = spans.filter((s) => s.kind === 'CHAIN')
+    expect(chains).toHaveLength(3)
+    const replaced = chains.find((s) => s.attributes['agent_kernel.compact.attempt_id'] === 'a1')!
+    expect(replaced.status).toBe('OK')
+    expect(replaced.attributes['agent_kernel.compact.outcome']).toBe('replaced')
+    expect(replaced.attributes['agent_kernel.compact.tokens_before']).toBe(10_000)
+    expect(replaced.attributes['agent_kernel.compact.tokens_after']).toBe(2_000)
+    expect(replaced.attributes['agent_kernel.compact.replaced_count']).toBe(4)
+    const skipped = chains.find((s) => s.attributes['agent_kernel.compact.attempt_id'] === 'a2')!
+    expect(skipped.status).toBe('ERROR')
+    expect(skipped.attributes['agent_kernel.compact.outcome']).toBe('skipped')
+    expect(skipped.attributes['agent_kernel.compact.reason']).toBe('circuit_breaker_open')
+    const rejected = chains.find((s) => s.attributes['agent_kernel.compact.attempt_id'] === 'a3')!
+    expect(rejected.status).toBe('ERROR')
+    expect(rejected.attributes['agent_kernel.compact.outcome']).toBe('rejected')
+  })
+
   it('creates official SWE-bench prediction rows and harness command args', () => {
     const row = createSweBenchPrediction({
       instanceId: 'sympy__sympy-20590',

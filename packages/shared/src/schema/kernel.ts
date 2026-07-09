@@ -1,0 +1,344 @@
+/**
+ * Zod schemas for @agent-kernel/kernel core types.
+ *
+ * types-first: TypeScript definitions in `@agent-kernel/kernel/src/types.ts`
+ * remain authoritative. Each schema below is typed as `z.ZodType<TheType>`
+ * so any drift between the schema and the TS type surfaces as a compile
+ * error, not a runtime surprise.
+ *
+ * These schemas are consumed by wire-boundary validators
+ * (see `dashboard-inbound.ts`, `executor.ts`) — do NOT call `.parse()` on
+ * them inside pure internal functions.
+ */
+
+import { z } from 'zod'
+
+import type {
+  AgentConfig,
+  AgentEvent,
+  AgentState,
+  AgentStatus,
+  ApprovalMode,
+  ContextPressureLevel,
+  Effect,
+  ImageContent,
+  ImageSource,
+  Message,
+  MessageContent,
+  PendingToolCall,
+  ReasoningContent,
+  Role,
+  TextContent,
+  ToolCallContent,
+  ToolResultContent,
+  ToolSchema,
+  UsageDelta,
+  UsageTotal,
+} from '@agent-kernel/kernel'
+
+// ============================================================================
+// Enums / scalars
+// ============================================================================
+
+export const RoleSchema: z.ZodType<Role> = z.enum(['system', 'user', 'assistant', 'tool'])
+
+export const AgentStatusSchema: z.ZodType<AgentStatus> = z.enum([
+  'idle',
+  'thinking',
+  'awaiting_approval',
+  'executing_tools',
+  'done',
+  'error',
+])
+
+export const ApprovalModeSchema: z.ZodType<ApprovalMode> = z.enum([
+  'auto',
+  'ask',
+  'deny',
+  'allow_all',
+])
+
+export const ContextPressureLevelSchema: z.ZodType<ContextPressureLevel> = z.enum([
+  'none',
+  'soft',
+  'hard',
+])
+
+const ImageMediaTypeSchema = z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+
+// ============================================================================
+// MessageContent variants + union
+// ============================================================================
+
+export const TextContentSchema = z.object({
+  type: z.literal('text'),
+  text: z.string(),
+})
+
+export const ToolCallContentSchema = z.object({
+  type: z.literal('tool_call'),
+  callId: z.string(),
+  name: z.string(),
+  input: z.record(z.string(), z.unknown()),
+})
+
+export const ToolResultContentSchema = z.object({
+  type: z.literal('tool_result'),
+  callId: z.string(),
+  ok: z.boolean(),
+  content: z.string(),
+})
+
+export const ImageSourceSchema: z.ZodType<ImageSource> = z.union([
+  z.object({
+    kind: z.literal('base64'),
+    mediaType: ImageMediaTypeSchema,
+    data: z.string(),
+  }),
+  z.object({
+    kind: z.literal('file_ref'),
+    path: z.string(),
+    mediaType: ImageMediaTypeSchema.optional(),
+  }),
+])
+
+export const ImageContentSchema = z.object({
+  type: z.literal('image'),
+  source: ImageSourceSchema,
+})
+
+export const ReasoningContentSchema = z.object({
+  type: z.literal('thinking'),
+  text: z.string(),
+  signature: z.string().optional(),
+  provider: z.string().optional(),
+})
+
+export const MessageContentSchema = z.discriminatedUnion('type', [
+  TextContentSchema,
+  ToolCallContentSchema,
+  ToolResultContentSchema,
+  ImageContentSchema,
+  ReasoningContentSchema,
+]) satisfies z.ZodType<MessageContent>
+
+export const MessageSchema: z.ZodType<Message> = z.object({
+  role: RoleSchema,
+  content: z.array(MessageContentSchema),
+})
+
+// ============================================================================
+// ToolSchema
+// ============================================================================
+
+export const ToolSchemaSchema: z.ZodType<ToolSchema> = z.object({
+  name: z.string(),
+  description: z.string(),
+  inputSchema: z.record(z.string(), z.unknown()),
+  requiresApproval: z.boolean(),
+})
+
+// ============================================================================
+// AgentConfig
+// ============================================================================
+
+export const AgentConfigSchema: z.ZodType<AgentConfig> = z.object({
+  tools: z.array(ToolSchemaSchema),
+  systemPrompt: z.string().optional(),
+  contextLimit: z.number().int().nonnegative().optional(),
+  softThreshold: z.number().min(0).max(1).optional(),
+  hardThreshold: z.number().min(0).max(1).optional(),
+  maxAgentDepth: z.number().int().nonnegative().optional(),
+  maxAgentFanOut: z.number().int().nonnegative().optional(),
+  thinkingBudget: z.number().int().nonnegative().optional(),
+})
+
+// ============================================================================
+// PendingToolCall / UsageTotal / AgentState
+// ============================================================================
+
+export const PendingToolCallSchema: z.ZodType<PendingToolCall> = z.object({
+  callId: z.string(),
+  name: z.string(),
+  input: z.record(z.string(), z.unknown()),
+  status: z.enum(['awaiting_approval', 'approved', 'rejected', 'dispatched']),
+})
+
+export const UsageTotalSchema: z.ZodType<UsageTotal> = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheCreationTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative(),
+})
+
+export const UsageDeltaSchema: z.ZodType<UsageDelta> = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheCreationTokens: z.number().int().nonnegative().optional(),
+  cacheReadTokens: z.number().int().nonnegative().optional(),
+})
+
+export const AgentStateSchema: z.ZodType<AgentState> = z.object({
+  sessionId: z.string(),
+  messages: z.array(MessageSchema),
+  pendingCalls: z.array(PendingToolCallSchema),
+  status: AgentStatusSchema,
+  usage: UsageTotalSchema,
+  cursor: z.number().int().nonnegative(),
+  cwd: z.string().optional(),
+  contextPressureLevel: ContextPressureLevelSchema,
+  approvalMode: ApprovalModeSchema,
+  error: z.string().optional(),
+})
+
+// ============================================================================
+// AgentEvent — every kind
+// ============================================================================
+
+const UserMessageEventSchema = z.object({
+  kind: z.literal('user_message'),
+  text: z.string().optional(),
+  content: z.array(MessageContentSchema).optional(),
+})
+
+const LlmResponseEventSchema = z.object({
+  kind: z.literal('llm_response'),
+  message: MessageSchema,
+  usage: UsageDeltaSchema.optional(),
+})
+
+const LlmErrorEventSchema = z.object({
+  kind: z.literal('llm_error'),
+  error: z.string(),
+})
+
+const UserApproveEventSchema = z.object({
+  kind: z.literal('user_approve'),
+  callId: z.string(),
+})
+
+const UserRejectEventSchema = z.object({
+  kind: z.literal('user_reject'),
+  callId: z.string(),
+  reason: z.string().optional(),
+})
+
+const ToolResultEventSchema = z.object({
+  kind: z.literal('tool_result'),
+  callId: z.string(),
+  ok: z.boolean(),
+  content: z.string(),
+})
+
+const CancelEventSchema = z.object({ kind: z.literal('cancel') })
+
+const ClearEventSchema = z.object({ kind: z.literal('clear') })
+
+const CompactTriggerSchema = z.enum(['manual', 'auto', 'preflight', 'tool_result'])
+
+const CompactReplacedEventSchema = z.object({
+  kind: z.literal('compact_replaced'),
+  trigger: CompactTriggerSchema.optional(),
+  attemptId: z.string().optional(),
+  preserveFrom: z.number().int().nonnegative(),
+  request: z
+    .object({
+      model: z.string().optional(),
+      systemPrompt: z.string(),
+      messages: z.array(MessageSchema),
+      tools: z.array(ToolSchemaSchema),
+    })
+    .optional(),
+  responseUsage: UsageDeltaSchema.optional(),
+  summary: z.string(),
+  replacedCount: z.number().int().nonnegative(),
+  tokensBefore: z.number().int().nonnegative(),
+  tokensAfter: z.number().int().nonnegative(),
+})
+
+const CompactSkippedEventSchema = z.object({
+  kind: z.literal('compact_skipped'),
+  trigger: CompactTriggerSchema,
+  attemptId: z.string(),
+  reason: z.enum([
+    'circuit_breaker_open',
+    'back_off_same_batch',
+    'summarizer_failed',
+    'empty_summary',
+    'no_compactable_content',
+    'session_busy',
+  ]),
+  errorMessage: z.string().optional(),
+})
+
+const CompactRejectedEventSchema = z.object({
+  kind: z.literal('compact_rejected'),
+  attemptId: z.string(),
+  reason: z.enum(['pending_call_orphaned', 'invalid_preserve_from']),
+})
+
+const ApprovalModeChangedEventSchema = z.object({
+  kind: z.literal('approval_mode_changed'),
+  mode: ApprovalModeSchema,
+})
+
+const CwdChangedEventSchema = z.object({
+  kind: z.literal('cwd_changed'),
+  cwd: z.string(),
+})
+
+export const AgentEventSchema = z.discriminatedUnion('kind', [
+  UserMessageEventSchema,
+  LlmResponseEventSchema,
+  LlmErrorEventSchema,
+  UserApproveEventSchema,
+  UserRejectEventSchema,
+  ToolResultEventSchema,
+  CancelEventSchema,
+  ClearEventSchema,
+  CompactReplacedEventSchema,
+  CompactSkippedEventSchema,
+  CompactRejectedEventSchema,
+  ApprovalModeChangedEventSchema,
+  CwdChangedEventSchema,
+]) satisfies z.ZodType<AgentEvent>
+
+// ============================================================================
+// Effect — every kind
+// ============================================================================
+
+const CallLlmEffectSchema = z.object({
+  kind: z.literal('call_llm'),
+  messages: z.array(MessageSchema),
+  tools: z.array(ToolSchemaSchema),
+})
+
+const CallToolEffectSchema = z.object({
+  kind: z.literal('call_tool'),
+  callId: z.string(),
+  name: z.string(),
+  input: z.record(z.string(), z.unknown()),
+  cwd: z.string().optional(),
+})
+
+const RequestApprovalEffectSchema = z.object({
+  kind: z.literal('request_approval'),
+  callId: z.string(),
+  name: z.string(),
+  input: z.record(z.string(), z.unknown()),
+})
+
+const FinishEffectSchema = z.object({ kind: z.literal('finish') })
+
+const EmitErrorEffectSchema = z.object({
+  kind: z.literal('emit_error'),
+  error: z.string(),
+})
+
+export const EffectSchema = z.discriminatedUnion('kind', [
+  CallLlmEffectSchema,
+  CallToolEffectSchema,
+  RequestApprovalEffectSchema,
+  FinishEffectSchema,
+  EmitErrorEffectSchema,
+]) satisfies z.ZodType<Effect>

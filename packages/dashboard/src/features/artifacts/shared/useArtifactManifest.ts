@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 
 import type { ArtifactManifest } from './internals.js'
 
@@ -10,49 +11,46 @@ export type ManifestState = {
   reloadToken: number
 }
 
-export function useArtifactManifest(): ManifestState {
-  const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [reloadToken, setReloadToken] = useState(0)
+export const ARTIFACT_MANIFEST_QUERY_KEY = ['artifact-manifest'] as const
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    void fetch('/artifacts/manifest', { cache: 'no-store' })
-      .then(async (res) => {
-        if (res.ok) return (await res.json()) as ArtifactManifest
-        const body = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(body?.error ?? `artifact manifest request failed: ${res.status}`)
-      })
-      .then((next) => {
-        if (cancelled) return
-        if (!next || typeof next !== 'object' || !('summary' in next) || !('entries' in next)) {
-          // Ignore stray responses (e.g. shared fetch mocks that return artifact-content payloads).
-          return
-        }
-        setManifest(next)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err))
-          setManifest(null)
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [reloadToken])
-
-  return {
-    manifest,
-    loading,
-    error,
-    reload: () => setReloadToken((token) => token + 1),
-    reloadToken,
+async function fetchArtifactManifest(): Promise<ArtifactManifest | null> {
+  const res = await fetch('/artifacts/manifest', { cache: 'no-store' })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new Error(body?.error ?? `artifact manifest request failed: ${res.status}`)
   }
+  const next = (await res.json()) as ArtifactManifest
+  if (!next || typeof next !== 'object' || !('summary' in next) || !('entries' in next)) {
+    return null
+  }
+  return next
+}
+
+export function useArtifactManifest(): ManifestState {
+  const client = useQueryClient()
+  const query = useQuery({
+    queryKey: ARTIFACT_MANIFEST_QUERY_KEY,
+    queryFn: fetchArtifactManifest,
+    staleTime: 15_000,
+  })
+
+  return useMemo(
+    () => ({
+      manifest: query.data ?? null,
+      loading: query.isLoading || query.isFetching,
+      error: query.error ? (query.error as Error).message : null,
+      reload: () => {
+        void client.invalidateQueries({ queryKey: ARTIFACT_MANIFEST_QUERY_KEY })
+      },
+      reloadToken: query.dataUpdatedAt,
+    }),
+    [
+      query.data,
+      query.isLoading,
+      query.isFetching,
+      query.error,
+      query.dataUpdatedAt,
+      client,
+    ],
+  )
 }
