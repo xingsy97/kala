@@ -466,6 +466,7 @@ async function run(cmd, args) {
       cwd: root,
       stdio: 'inherit',
       env: process.env,
+      shell: process.platform === 'win32',
     })
     child.on('exit', (code) => {
       if (code === 0) resolve()

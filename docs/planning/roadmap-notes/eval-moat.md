@@ -1,19 +1,19 @@
-# Roadmap · Part A · translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（3 translated historical texttranslated historical texttranslated historical texttranslated historical text）
+# Roadmap · Part A · Evaluation moat (3-week delivery)
 
-## translated historical texttranslated historical text
+## Goal
 
-Benchmark translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text SWE-bench。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 4 translated historical texttranslated historical texttranslated historical text agent translated historical texttranslated historical texttranslated historical text：
+Benchmarks cannot stop at SWE-bench. The target set covers four mainstream agent capability axes:
 
-| Benchmark | translated historical texttranslated historical texttranslated historical text | translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text | agent-kernel translated historical texttranslated historical text |
+| Benchmark | Capability axis | Why chosen | agent-kernel value |
 |---|---|---|---|
-| SWE-bench | Coding agent / real GitHub issue repair | ICLR 2024 oral，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text | patch、trace、official harness、bad-case translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text |
-| Terminal-Bench | Terminal agent / long-running CLI tasks | translated historical texttranslated historical texttranslated historical texttranslated historical text shell translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical text executor translated historical texttranslated historical text | translated historical texttranslated historical texttranslated historical texttranslated historical text cwd、shell、file edit、test script、recording |
-| WebArena | Web agent / browser navigation | translated historical texttranslated historical text self-hosted web agent benchmark | translated historical texttranslated historical text browser runtime、trajectory replay、page evaluator |
-| τ-bench / τ³-bench | General tool-use / user-interaction agent | translated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical text、policy compliance translated historical texttranslated historical texttranslated historical texttranslated historical text benchmark | translated historical texttranslated historical text tool protocol、multi-turn state、reward breakdown |
+| SWE-bench | Coding agent / real GitHub issue repair | ICLR 2024 oral, de-facto industry standard | patch, trace, official harness, bad-case all first-class |
+| Terminal-Bench | Terminal agent / long-running CLI tasks | Real shell workflows, exercises executor | Directly validates cwd, shell, file edit, test script, recording |
+| WebArena | Web agent / browser navigation | Classic self-hosted web agent benchmark | Maps to browser runtime, trajectory replay, page evaluator |
+| τ-bench / τ³-bench | General tool-use / user-interaction agent | Representative benchmark for tool calls, user simulation, policy compliance | Maps to tool protocol, multi-turn state, reward breakdown |
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：OSWorld translated historical texttranslated historical text desktop/computer-use benchmark translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical text GUI/VM，translated historical texttranslated historical texttranslated historical texttranslated historical text）。
+**Explicitly not chosen**: OSWorld-class desktop/computer-use benchmarks are not in the first batch (GUI/VM-heavy, dilutes the main thread).
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical text benchmark translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text domain doc translated historical texttranslated historical texttranslated historical text：
+**Domain reading**: each benchmark must start from its domain doc before implementation:
 
 - [SWE-bench Evaluation](../../evals/domain-knowledge/swe-bench-evaluation.md)
 - [Terminal-Bench Evaluation](../../evals/domain-knowledge/terminal-bench-evaluation.md)
@@ -24,7 +24,7 @@ Benchmark translated historical texttranslated historical texttranslated histori
 
 ## A.1 BenchmarkAdapter interface
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text adapter contract，translated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text benchmark translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text artifact translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text verifier/scoring semantics。
+Extract a unified adapter contract, but **do not flatten different benchmarks' scoring semantics**. Unify the run lifecycle and artifact management; do not unify verifier/scoring semantics.
 
 ```typescript
 type BenchmarkKind = "swe-bench" | "terminal-bench" | "webarena" | "tau-bench" | "custom-jsonl";
@@ -40,78 +40,82 @@ interface BenchmarkAdapter {
 }
 ```
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：
+**Key constraints**:
 
-- `runVerifier`：SWE-bench translated historical texttranslated historical text official Docker harness；Terminal-Bench translated historical text `run-tests.sh` + parser；WebArena translated historical text evaluator router；τ-bench translated historical text reward evaluator。
-- `explainScore` translated historical texttranslated historical texttranslated historical texttranslated historical text benchmark translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `passed` translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text adapter translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text normalized failure categories，translated historical text raw official result translated historical texttranslated historical texttranslated historical texttranslated historical text。
+- `runVerifier`: in SWE-bench it is the official Docker harness; in Terminal-Bench it is `run-tests.sh` + parser; in WebArena it is the evaluator router; in τ-bench it is the reward evaluator.
+- `explainScore` must express each benchmark's official semantics — do not collapse everything into a single `passed` boolean.
+- All adapters must emit normalized failure categories, but the raw official result is kept verbatim.
 
 ---
 
 ## A.2 Terminal-Bench adapter
 
-**translated historical texttranslated historical texttranslated historical text**：
+**Why it matters**: real shell/CLI capability is the differentiator between "code-completion demo" and "agent that operates a terminal".
 
-- translated historical texttranslated historical text `packages/host/src/eval/terminal-bench.ts`，translated historical texttranslated historical text `run-registry`、`content-inputs`、`sweBenchRunLayout` translated historical texttranslated historical text。
-- Dashboard 「Run Benchmark」translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text benchmark translated historical texttranslated historical text。
-- Terminal-Bench translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `packages/executor`（translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text）。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 5-10 translated historical text，pass rate translated historical texttranslated historical text registry。
+**What to do**:
 
-**translated historical texttranslated historical text**：Benchmark translated historical text → translated historical text Terminal-Bench → translated historical texttranslated historical text 5 translated historical text → translated historical texttranslated historical text pass rate，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Add `packages/host/src/eval/terminal-bench.ts`, reusing the `run-registry`, `content-inputs`, and `sweBenchRunLayout` patterns.
+- The dashboard's "Run Benchmark" entry point picks benchmark type first.
+- Terminal-Bench executor reuses the existing `packages/executor` (no new sandbox).
+- Run through 5-10 official tasks and store pass rate in the registry.
+
+**Acceptance**: Benchmarks page → pick Terminal-Bench → run 5 tasks → see pass rate, all without touching the command line.
 
 ---
 
 ## A.3 WebArena adapter
 
-**translated historical texttranslated historical texttranslated historical text**：
+**What to do**:
 
-- translated historical texttranslated historical text `packages/host/src/eval/webarena.ts`，translated historical texttranslated historical texttranslated historical texttranslated historical text config、translated historical text task ID translated historical texttranslated historical text、translated historical text site env vars、translated historical texttranslated historical text auth readiness。
-- Wizard translated historical texttranslated historical texttranslated historical text WebArena translated historical texttranslated historical texttranslated historical texttranslated historical text：sites reachable / auth state present / Playwright ready。
-- Run Agent translated historical texttranslated historical texttranslated historical texttranslated historical text observations/actions/screenshots/trace zip。
-- Run Verifier translated historical texttranslated historical text evaluator type：`string_match` / `url_match` / `program_html` + score。
-- Review translated historical texttranslated historical text trajectory replay。
+- Add `packages/host/src/eval/webarena.ts` with config import, task ID range selection, site env var configuration, and auth readiness reporting.
+- Wizard gains a WebArena environment check: sites reachable / auth state present / Playwright ready.
+- Run Agent stage saves observations/actions/screenshots/trace zip.
+- Run Verifier displays evaluator type: `string_match` / `url_match` / `program_html` + score.
+- Review supports trajectory replay.
 
-**translated historical texttranslated historical text**：translated historical text 3-5 translated historical text WebArena config，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text task translated historical text intent / site / evaluator type / score / trace。
+**Acceptance**: run 3-5 WebArena configs, see each task's intent / site / evaluator type / score / trace.
 
 ---
 
 ## A.4 τ-bench / τ³-bench adapter
 
-**translated historical texttranslated historical texttranslated historical text**：
+**What to do**:
 
-- translated historical texttranslated historical text `packages/host/src/eval/tau-bench.ts`，translated historical texttranslated historical texttranslated historical texttranslated historical text `sierra-research/tau2-bench`。
-- Wizard translated historical texttranslated historical texttranslated historical text domain（airline / retail / telecom / banking_knowledge），translated historical texttranslated historical texttranslated historical text evaluated agent model translated historical text user simulator model。
-- Result translated historical texttranslated historical text reward basis：`DB` / `COMMUNICATE` / `ENV_ASSERTION` / `NL_ASSERTION` / `ACTION`。
-- UI translated historical texttranslated historical texttranslated historical texttranslated historical text `actions` translated historical text reference trajectory，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical text `ACTION` translated historical text `reward_basis`。
-- Review translated historical texttranslated historical text conversation / tool calls / tool arguments / reward breakdown。
+- Add `packages/host/src/eval/tau-bench.ts`, targeting `sierra-research/tau2-bench` by default.
+- Wizard picks domain (airline / retail / telecom / banking_knowledge) and configures evaluated agent model + user simulator model separately.
+- Result view shows reward basis: `DB` / `COMMUNICATE` / `ENV_ASSERTION` / `NL_ASSERTION` / `ACTION`.
+- UI explicitly marks `actions` as reference trajectory (not required) unless `ACTION` is in `reward_basis`.
+- Review shows conversation / tool calls / tool arguments / reward breakdown.
 
-**translated historical texttranslated historical text**：translated historical text `tau2 run --domain airline --num-tasks 5 --num-trials 1` translated historical texttranslated historical texttranslated historical texttranslated historical text，dashboard translated historical texttranslated historical text task reward、reward breakdown、agent/user/tool trajectory。
+**Acceptance**: equivalent of `tau2 run --domain airline --num-tasks 5 --num-trials 1`, dashboard shows task reward, reward breakdown, agent/user/tool trajectory.
 
 ---
 
-## A.5 Bad-case translated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text）
+## A.5 Bad-case feedback loop (moat core)
 
-**translated historical texttranslated historical texttranslated historical text**：
+**Why it matters**: bad-case mining turns evaluation from "score a run" into "systematically produce training data". This is the piece that scales.
 
-- translated historical texttranslated historical text `packages/host/src/eval/badcase-mining.ts`：translated historical texttranslated historical text runId → translated historical texttranslated historical texttranslated historical texttranslated historical text trial → translated historical text `status ∈ {failed, errored}` translated historical texttranslated historical text → translated historical texttranslated historical text：
+**What to do**:
+
+- Add `packages/host/src/eval/badcase-mining.ts`: input runId → scan all trials → filter by `status ∈ {failed, errored}` → output:
   ```
   { instanceId, failureCategory, trace[], toolCallErrors[], verifierReason,
     expectedPatchSlot: null, minimalRepro?: string }
   ```
-- translated historical texttranslated historical text `packages/host/src/eval/badcase-export.ts`：translated historical text SFT/RL translated historical texttranslated historical texttranslated historical texttranslated historical text（SFT: instruction + trace + gold；RL: prompt + rollout + reward=0 signal）。
-- Run translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text **Bad Cases** tab：
-  - translated historical text failureCategory translated historical texttranslated historical text（patch-apply-failure / test-timeout / agent-error / infra-error / ...）
-  - Trace translated historical texttranslated historical text（translated historical text 20 translated historical text + translated historical texttranslated historical text 10 translated historical text）
-  - translated historical texttranslated historical texttranslated historical texttranslated historical text：`[not-a-bug / needs-more-context / model-limitation / infra-flake / worth-retraining]`
-  - 「translated historical texttranslated historical texttranslated historical texttranslated historical text case translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text」translated historical texttranslated historical text → JSONL translated historical texttranslated historical text
-- translated historical texttranslated historical texttranslated historical texttranslated historical text `run-registry`，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- `docs/evals/badcase-mining.md` translated historical texttranslated historical text category translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text case。
+- Add `packages/host/src/eval/badcase-export.ts`: convert into two formats — SFT (instruction + trace + gold) and RL (prompt + rollout + reward=0 signal).
+- Run detail page gains a **Bad Cases** tab:
+  - Grouped by failureCategory (patch-apply-failure / test-timeout / agent-error / infra-error / ...)
+  - Trace summary (first 20 steps + last 10 steps)
+  - Labeling dropdown: `[not-a-bug / needs-more-context / model-limitation / infra-flake / worth-retraining]`
+  - "Export selected cases as training data" button → JSONL download
+- Labels persist in the existing `run-registry`; no new store.
+- `docs/evals/badcase-mining.md` describes category definitions and canonical cases.
 
-**translated historical texttranslated historical text**：SWE-bench Lite 5 translated historical text → Bad Cases → translated historical texttranslated historical text → translated historical text 3 translated historical text → translated historical texttranslated historical text JSONL → translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Acceptance**: SWE-bench Lite 5 tasks → Bad Cases → categorized → label 3 → export JSONL → all fields present and trainable.
 
 ---
 
-## A.6 translated historical texttranslated historical texttranslated historical texttranslated historical text
+## A.6 Demo script
 
-- `scripts/demo-benchmark-to-badcase.mjs`：headless translated historical texttranslated historical texttranslated historical texttranslated historical text demo。
-- README translated historical texttranslated historical text 60s GIF：wizard → Bad Cases → translated historical texttranslated historical text。
+- `scripts/demo-benchmark-to-badcase.mjs`: headless driver for the full demo.
+- README-top 60s GIF: wizard → Bad Cases → export.

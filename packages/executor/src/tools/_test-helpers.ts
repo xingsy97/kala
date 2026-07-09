@@ -10,7 +10,7 @@ import type { ToolContext } from './registry.js'
  *
  * The fs tools resolve caller paths through the sandbox, which canonicalizes
  * them (symlinks resolved, and on Windows 8.3 short names like
- * `C:\Users\USER\…` expanded to their long form). `os.tmpdir()` can itself
+ * `C:\Users\USERNAM~1\…` expanded to their long form). `os.tmpdir()` can itself
  * be an 8.3 path, so a raw `mkdtempSync` result is not canonical and won't
  * match tool output. Canonicalizing here — the same way the sandbox does —
  * keeps test assertions comparing like with like on any TEMP configuration.

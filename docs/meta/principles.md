@@ -1,214 +1,220 @@
-# agent-kernel translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+# agent-kernel design and implementation principles
 
-Last updated: 2026-07-11
+These are hard constraints. Any new PR that violates one of them is considered incomplete and must be revised before merging. Each principle maps to at least one lint, test, or e2e enforcement so it can be checked mechanically.
+
+Read before starting work; self-check after writing; use as a review checklist.
 
 ---
 
-## A. translated historical texttranslated historical texttranslated historical texttranslated historical text（User-facing）
+## A. User-facing surface
 
-### A1. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+### A1. Fully hide implementation paths
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text、artifact hash、jsonl translated historical texttranslated historical texttranslated historical text、instance_id translated historical texttranslated historical texttranslated historical texttranslated historical text，**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text dashboard translated historical texttranslated historical text UI**。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `<details>` "Show technical details" translated historical texttranslated historical texttranslated historical text。
+Server absolute paths, artifact hashes, JSONL filenames, and raw `instance_id` strings must not appear in the main dashboard UI. They may only appear inside an explicit `<details>` "Show technical details" fold.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：
-- `packages/dashboard/scripts/verify-visual-pages.mjs` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text DOM translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text：`/\/home\//`、`/\/tmp\//`、`/\.agent-kernel/`、`/\.jsonl\b/` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text：Artifacts translated historical texttranslated historical text Raw JSON viewer、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `<details>` translated historical texttranslated historical text。
+**Enforcement**:
+- `packages/dashboard/scripts/verify-visual-pages.mjs` scans each page's main-body DOM: matches for `/\/home\//`, `/\/tmp\//`, `/\.agent-kernel/`, `/\.jsonl\b/` cause a failure.
+- The only allowed exceptions are the Artifacts page Raw JSON viewer and content inside an explicit `<details>` element.
 
-### A2. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+### A2. User language, not component names
 
-UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"，translated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"。
+UI copy must answer "what is the user trying to do at this step", not "which internal component is being invoked".
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`resources.ts` review translated historical texttranslated historical texttranslated historical text [roadmap/product-polish.md](../planning/roadmap-notes/product-polish.md) translated historical texttranslated historical texttranslated historical texttranslated historical text；`executor`、`predictions`、`ingest`、`patchesDir` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text DOM translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Enforcement**: on review, cross-check `resources.ts` against the rename table in [../planning/roadmap-notes/product-polish.md](../planning/roadmap-notes/product-polish.md); internal vocabulary such as `executor`, `predictions`, `ingest`, `patchesDir` appearing in the default view DOM causes a failure.
 
-### A3. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+### A3. Distinct vocabulary per state transition
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text：
+Each layer of state transition must use its own vocabulary; do not reuse a term from a higher layer:
 
 - `prediction ready` ≠ `patch applies` ≠ `tests passed` ≠ `resolved`
-- SWE-bench translated historical texttranslated historical text `resolved`；Terminal-Bench translated historical text `resolved/unresolved` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text parser；WebArena translated historical text `score`；τ-bench translated historical text `reward`。
-- **`resolved` translated historical texttranslated historical texttranslated historical text Import Results translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**。
+- Only SWE-bench uses `resolved`. Terminal-Bench uses `resolved/unresolved` but must annotate the source parser. WebArena uses `score`. τ-bench uses `reward`.
+- `resolved` may only appear after Import Results has completed.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`BenchmarksPage.test.tsx` translated historical texttranslated historical text：translated historical text `Run Agent completed` translated historical texttranslated historical texttranslated historical text DOM translated historical texttranslated historical texttranslated historical text `resolved` translated historical texttranslated historical text；benchmark copy matrix translated historical texttranslated historical texttranslated historical texttranslated historical text Terminal-Bench translated historical texttranslated historical texttranslated historical text `Official Score`、WebArena translated historical texttranslated historical texttranslated historical text `resolved`、τ-bench translated historical texttranslated historical texttranslated historical text `Required actions`（translated historical texttranslated historical text `ACTION` in reward basis）。
+**Enforcement**: `BenchmarksPage.test.tsx` asserts that when the state is `Run Agent completed`, the DOM does not contain the word `resolved`. The benchmark copy matrix test asserts Terminal-Bench does not surface `Official Score`, WebArena does not surface `resolved`, and τ-bench does not surface `Required actions` (except when `ACTION` is in the reward basis).
 
-### A4. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+### A4. English and Chinese kept in sync
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text en + zh translated historical texttranslated historical texttranslated historical text。
+Every new UI string must be added in both `en` and `zh`.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`resources.ts` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text en translated historical text zh translated historical text key set translated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical text PR CI fail。
+**Enforcement**: a structure test in `resources.ts` asserts that the `en` and `zh` key sets are exactly equal; a single-language PR fails CI.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical text review translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；D.3 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### A5. Readable by a first-time reader
 
----
+After writing UI copy, re-read it as a reader with no prior context. If a phrase is not self-explanatory, rewrite it.
 
-## B. translated historical texttranslated historical texttranslated historical text（Ground-truth）
-
-### B1. UI translated historical texttranslated historical texttranslated historical texttranslated historical text headless browser translated historical texttranslated historical text
-
-translated historical texttranslated historical texttranslated historical texttranslated historical text dashboard translated historical text PR translated historical texttranslated historical texttranslated historical text puppeteer/playwright translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。HTTP probe、translated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`scripts/verify-wizard-e2e.mjs` translated historical texttranslated historical texttranslated historical texttranslated historical text `verify-visual-pages.mjs`、`verify-benchmarks-page.mjs`、`verify-operations-page.mjs` translated historical text gate；PR translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-
-### B2. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
-
-translated historical texttranslated historical text UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text CI translated historical text e2e translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。"executor" translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical text wizard/translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text recipe translated historical texttranslated historical texttranslated historical text e2e translated historical texttranslated historical text exercised；default recipe translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-
-### B3. translated historical texttranslated historical texttranslated historical text mock translated historical texttranslated historical text
-
-translated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text mock，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `mock`、`fake`、`stub`、`TODO: replace with real` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text why translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-
-### B4. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
-
-translated historical texttranslated historical texttranslated historical texttranslated historical text 3 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text UI translated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text / translated historical texttranslated historical texttranslated historical texttranslated historical text / translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text。progress.json translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：e2e translated historical texttranslated historical text"translated historical texttranslated historical text Run → 3s translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text progress element"translated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `progress.json` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text hook。
+**Enforcement**: no automation; enforced during review against the rename table in D.3.
 
 ---
 
-## C. translated historical texttranslated historical texttranslated historical texttranslated historical text（Product shape）
+## B. Ground-truth
 
-### C1. Modal vs Page translated historical texttranslated historical text
+### B1. UI changes must be exercised by a headless browser
 
-translated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text / translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text / translated historical texttranslated historical texttranslated historical text"——translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text page；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text modal。
+Any PR that touches the dashboard must be exercised by puppeteer or playwright and produce a screenshot. HTTP probes, unit tests, and typechecks are not equivalent evidence.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：new dialog PR translated historical texttranslated historical texttranslated historical text description translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical text revert。ArtifactExplorerDialog translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Enforcement**: `scripts/verify-wizard-e2e.mjs` and the follow-up `verify-visual-pages.mjs`, `verify-benchmarks-page.mjs`, `verify-operations-page.mjs` are gates. The PR description must include the screenshot path.
 
-### C2. translated historical texttranslated historical texttranslated historical text StepCard
+### B2. Default choices must be exercised end-to-end
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `Input / Action / Output` translated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `<details>` translated historical texttranslated historical text。
+Every default value in the UI must be exercised in CI or an e2e run and must succeed. A default that breaks the primary flow is unacceptable.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`StepCard.tsx` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text StepCard translated historical texttranslated historical texttranslated historical texttranslated historical text section。
+**Enforcement**: every wizard or form default recipe must be exercised in e2e. Default names must answer "what does this choice do", not name an internal component.
 
-### C3. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+### B3. No mock fallbacks
 
-translated historical texttranslated historical texttranslated historical text card-in-card、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text scrollbar、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tooltip）。
+"Mock now, real implementation later" is not accepted. A feature either runs for real or does not ship.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`verify-visual-pages.mjs` translated historical texttranslated historical text + translated historical texttranslated historical text/AI translated historical texttranslated historical text；native scrollbar translated historical texttranslated historical texttranslated historical texttranslated historical text computed style。
+**Enforcement**: occurrences of `mock`, `fake`, `stub`, or `TODO: replace with real` in new code must document why and must be confined to test paths. Production paths containing them fail review.
 
-### C4. Sticky header + deep-link
+### B4. Progress visibility
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text sticky header；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text deep-link，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text run/artifact/executor。
+Any operation longer than 3 seconds must have UI progress feedback that includes three elements: what is being processed now, total count, completed count. A `progress.json` file that the frontend does not read does not count.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：page-level e2e translated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical text hash → translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"。
-
-### C5. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
-
-- Icon-only action translated historical texttranslated historical texttranslated historical text tooltip translated historical text aria-label。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text icon translated historical texttranslated historical texttranslated historical text。
-- 1024+ translated historical texttranslated historical text；768-1023 translated historical texttranslated historical text；<768 Inspector translated historical text drawer。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：Playwright translated historical texttranslated historical texttranslated historical texttranslated historical text desktop + mobile translated historical texttranslated historical text viewport；aria-label lint。
+**Enforcement**: e2e coverage of "click Run → within 3s a progress element appears in the page"; every long-running backend task has a `progress.json` and a corresponding frontend hook.
 
 ---
 
-## D. translated historical texttranslated historical texttranslated historical texttranslated historical text（Engineering cadence）
+## C. Product shape
 
-### D1. translated historical texttranslated historical texttranslated historical texttranslated historical text commit
+### C1. Modal vs page
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text commit；translated historical texttranslated historical text session translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text >20 uncommitted files。
+If a user will spend more than a few minutes, compare multiple objects, or return later — any one of those means it must be a page, not a modal. Only when all three are false is a modal appropriate.
 
-### D2. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+**Enforcement**: any new dialog PR must answer these three questions in its description; violations get reverted.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical text 3 translated historical texttranslated historical texttranslated historical text case translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### C2. Three-section StepCard
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical text"translated historical texttranslated historical text" / "generic" / "framework" translated historical texttranslated historical texttranslated historical text PR translated historical texttranslated historical texttranslated historical texttranslated historical text 3 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical text。`enhancement-*` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+Every step's output panel must follow an `Input / Action / Output` structure. Technical detail goes inside a `<details>` fold.
 
-### D3. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+**Enforcement**: `StepCard.tsx` is the only entry point; bypassing it is prohibited. A structure test asserts every StepCard has three sections.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical text API）translated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text fallback、feature flag、backwards-compat shim。
+### C3. Visual consistency
 
-### D4. translated historical texttranslated historical texttranslated historical texttranslated historical text what translated historical texttranslated historical texttranslated historical text
+No card-in-card. No native scrollbars. No long explanatory prose inside the main workflow area (fold it or move it to a tooltip).
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text why：translated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text、workaround、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Enforcement**: `verify-visual-pages.mjs` takes screenshots for comparison; native scrollbars are detected via computed style.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：review translated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical text `// increment i` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### C4. Sticky header and deep-link
 
-### D5. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+Every page must have a sticky header. Every major page state must be deep-linkable so a refresh returns the user to the same run, artifact, or executor.
 
-translated historical texttranslated historical text、translated historical texttranslated historical text、translated historical texttranslated historical text、hooks、translated historical texttranslated historical text RPC、benchmark ops translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text host translated historical texttranslated historical texttranslated historical text extension translated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text kernel reducer translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text agent translated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical text、translated historical texttranslated historical text、UI translated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Enforcement**: page-level e2e that exercises "load hash directly → restore the correct state".
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical texttranslated historical text `AgentEvent` / reducer translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text agent transcript translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text host/control-plane translated historical texttranslated historical text。
+### C5. Accessibility and responsive design
 
-### D6. Executor translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+- Icon-only actions must have a tooltip or aria-label.
+- Primary navigation must have both an icon and a text label.
+- Layout: 3-column at 1024+; 2-column at 768–1023; Inspector becomes a drawer below 768.
 
-Executor wire protocol translated historical texttranslated historical texttranslated historical text kernel/direct/internal mode。executor translated historical texttranslated historical texttranslated historical text `tool:call` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text message list、session JSONL、audit log、dashboard RPC response，translated historical text host translated historical texttranslated historical text。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`ToolCallMessage` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `dispatchMode` / `directMode` translated historical texttranslated historical texttranslated historical texttranslated historical text；executor translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tool result translated historical text transcript translated historical texttranslated historical text。
-
-### D7. Audit log translated historical text session JSONL translated historical texttranslated historical text
-
-Session JSONL translated historical text agent execution trace / replay log。Audit log translated historical text control-plane accountability log。Audit log translated historical texttranslated historical texttranslated historical text actor、action、target、outcome、translated historical texttranslated historical text metadata translated historical text `sessionId` / `sessionSeq` / `callId` / artifact URI translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text LLM body、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tool output。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text session JSONL source of truth；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text payload。
-
-### D8. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
-
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `[1]`、`[2]` translated historical texttranslated historical text；translated historical texttranslated historical text URL translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `## References`。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text commit hash translated historical text GitHub permalink，translated historical texttranslated historical texttranslated historical texttranslated historical text `references/...` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：review translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text URL translated historical texttranslated historical texttranslated historical text reference path translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Enforcement**: Playwright screenshots cover desktop and mobile viewports; an aria-label lint runs on the DOM.
 
 ---
 
-## E. translated historical texttranslated historical texttranslated historical texttranslated historical text（Narrative discipline）
+## D. Engineering cadence
 
-### E1. translated historical texttranslated historical texttranslated historical text `docs/planning/enhancement/*.md`
+### D1. Small, frequent commits
 
-translated historical texttranslated historical text 12 translated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `docs/planning/roadmap-notes/` translated historical texttranslated historical texttranslated historical texttranslated historical text issue。
+Commit each independently reviewable change as it lands. Intermediate-state commits are fine; do not wait for "complete" or "perfect" batches.
 
-### E2. translated historical texttranslated historical text design doc translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text commit hash
+**Enforcement**: each agent task defaults to committing on completion; a session must not end with more than 20 uncommitted files.
 
-translated historical texttranslated historical text 2 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text issue。
+### D2. No premature abstraction
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：`scripts/verify-doc-code-binding.mjs`（translated historical texttranslated historical texttranslated historical text）translated historical texttranslated historical text `docs/planning/enhancement/` translated historical texttranslated historical texttranslated historical text frontmatter translated historical text `commit:` translated historical texttranslated historical text。
+Write the concrete implementation first. Extract a shared interface only after a third similar case appears.
 
-### E3. README translated historical texttranslated historical texttranslated historical texttranslated historical text
+**Enforcement**: any PR named "generic" or "framework" must list three concrete consumers; otherwise it is rejected.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text + 60s GIF + "translated historical texttranslated historical texttranslated historical texttranslated historical text AI Coding translated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"。translated historical text [roadmap/narrative.md](../planning/roadmap-notes/narrative.md)。
+### D3. No unneeded error handling
+
+Validate only at system boundaries (user input, external APIs); trust framework guarantees internally. Defensive fallbacks, feature flags, and backwards-compatibility shims are prohibited.
+
+### D4. No "what" comments
+
+Comments describe non-obvious "why": hidden constraints, subtle invariants, workarounds, surprising behavior. A comment such as `// increment i` should be deleted on review.
+
+**Enforcement**: enforced during review.
+
+### D5. Cross-cutting capabilities do not enter the core state machine
+
+Authentication, audit, notifications, hooks, internal RPC, benchmark ops, and similar cross-cutting concerns must live at the host boundary or in an extension layer. They must not pollute the kernel reducer or the core state machine, which expresses agent execution semantics only. Observation, accountability, UI controls, and external side effects belong in independent modules that subscribe to or wrap the kernel.
+
+**Enforcement**: any new `AgentEvent` variant or reducer branch must document why it is agent transcript semantics rather than a host or control-plane event.
+
+### D6. Executor performs environment adaptation only
+
+The executor wire protocol does not carry `kernel` / `direct` / `internal` mode. The executor executes `tool:call` and returns the result. Whether that result enters the message list, session JSONL, audit log, or dashboard RPC response is a host decision.
+
+**Enforcement**: `ToolCallMessage` must not contain fields such as `dispatchMode` / `directMode`; executor code must not branch on the transcript destination of a tool result.
+
+### D7. Audit log and session JSONL have distinct roles
+
+The session JSONL is the agent execution trace and replay log. The audit log is a control-plane accountability log. The audit log records actor, action, target, outcome, summary metadata, and reference IDs (`sessionId`, `sessionSeq`, `callId`, artifact URIs). It does not duplicate full LLM bodies, full user messages, or full tool outputs.
+
+**Enforcement**: when introducing an audit event, check whether a session JSONL source of truth already exists; reference it rather than copying the payload.
+
+### D8. Document reference format
+
+Design documents use paper-style `[1]`, `[2]` numbered references in the body. Full URLs live in a `## References` section at the end. External source references use commit-hash GitHub permalinks; avoid local `references/...` paths or floating branch links.
+
+**Enforcement**: bare inline URLs and local reference paths as citation sources are rejected on review.
 
 ---
 
-## F. translated historical texttranslated historical text（translated historical texttranslated historical texttranslated historical texttranslated historical text）
+## E. Documentation discipline
+
+### E1. No new `docs/planning/enhancement/*.md`
+
+Twelve design documents is the ceiling. Additional design ideas go under `docs/planning/roadmap-notes/` or straight into an issue.
+
+### E2. Every design document must bind to at least one shipped commit hash
+
+A design document with no corresponding code after two weeks is deleted or downgraded to an issue.
+
+**Enforcement**: `scripts/verify-doc-code-binding.mjs` (to be added) scans the frontmatter of each `docs/planning/enhancement/*.md` for a `commit:` field.
 
 ---
 
-## G. translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+## F. Non-goals
 
-### G1. MEMORY.md translated historical texttranslated historical texttranslated historical texttranslated historical text
-
-translated historical texttranslated historical text ≤150 translated historical texttranslated historical texttranslated historical texttranslated historical text hook，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text memory translated historical texttranslated historical text。
-
-### G2. Serper translated historical texttranslated historical text
-
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text Serper API（key translated historical text `~/.claude/secrets.env`），translated historical texttranslated historical texttranslated historical texttranslated historical text WebSearch。
-
-### G3. translated historical texttranslated historical texttranslated historical texttranslated historical text
-
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text [past-mistakes.md](past-mistakes.md) + translated historical texttranslated historical text memory translated historical texttranslated historical text。
+- **F1** No standalone sandbox executor abstraction layer.
+- **F2** No pure-infrastructure direction (HDFS / Kubernetes / MQ). This project is a product plus evaluation platform, and infrastructure work does not belong here.
+- **F3** No mock-first implementations or placeholder stubs.
+- **F4** No new `docs/planning/enhancement/*.md`.
+- **F5** No OSWorld-class desktop or computer-use benchmarks. They are not in the first four benchmarks and are too GUI/VM-heavy for the executor + browser + tool-protocol thread.
 
 ---
 
-## translated historical text：Review checklist
+## G. Memory and external dependencies
 
-translated historical text PR merge translated historical texttranslated historical texttranslated historical text：
+### G1. `MEMORY.md` is an index only
 
-- [ ] translated historical texttranslated historical text DOM translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text / instance_id / jsonl translated historical texttranslated historical texttranslated historical text（A1）
-- [ ] translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（A2）
-- [ ] `resolved` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text benchmark + translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（A3）
-- [ ] en + zh translated historical texttranslated historical texttranslated historical texttranslated historical text（A4）
-- [ ] UI translated historical texttranslated historical texttranslated historical text headless translated historical texttranslated historical texttranslated historical texttranslated historical text（B1）
-- [ ] translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text e2e translated historical texttranslated historical texttranslated historical texttranslated historical text（B2）
-- [ ] translated historical texttranslated historical text mock / fake / TODO-replace translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（B3）
-- [ ] translated historical text 3s translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（B4）
-- [ ] Dialog vs Page translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（C1）
-- [ ] StepCard translated historical texttranslated historical texttranslated historical text（C2）
-- [ ] translated historical text card-in-card / translated historical text native scrollbar（C3）
-- [ ] Sticky header + deep-link（C4）
-- [ ] a11y translated historical texttranslated historical texttranslated historical texttranslated historical text（C5）
-- [ ] translated historical texttranslated historical texttranslated historical text commit（D1）
-- [ ] translated historical texttranslated historical texttranslated historical texttranslated historical text（D2）
-- [ ] translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（D3）
-- [ ] translated historical text what-translated historical texttranslated historical text（D4）
-- [ ] translated historical texttranslated historical texttranslated historical text `docs/planning/enhancement/*.md`（E1、F5）
+Each entry is a single line no longer than 150 characters; the substantive content lives in a separate memory file.
+
+### G2. Web search uses Serper
+
+When a web search is needed, use the Serper API (key in `~/.claude/secrets.env`), not the built-in `WebSearch` tool.
+
+---
+
+## Appendix: review checklist
+
+Before merging a PR:
+
+- [ ] Main-body DOM contains no server paths, `instance_id`, or JSONL filenames (A1)
+- [ ] Copy uses user language, not component names (A2)
+- [ ] `resolved` appears only for the correct benchmark at the correct stage (A3)
+- [ ] `en` and `zh` updated together (A4)
+- [ ] UI changes include a headless-browser screenshot (B1)
+- [ ] Default choices are exercised in e2e (B2)
+- [ ] No `mock` / `fake` / `TODO-replace` on the production path (B3)
+- [ ] Operations longer than 3 seconds have frontend progress feedback (B4)
+- [ ] Dialog vs page decision is justified (C1)
+- [ ] StepCard structure is three-section (C2)
+- [ ] No card-in-card, no native scrollbar (C3)
+- [ ] Sticky header and deep-link (C4)
+- [ ] Accessibility and responsive coverage (C5)
+- [ ] Independent small commit (D1)
+- [ ] No premature abstraction (D2)
+- [ ] No defensive code (D3)
+- [ ] No "what" comments (D4)
+- [ ] No new `docs/planning/enhancement/*.md` (E1, F4)

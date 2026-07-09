@@ -53,7 +53,7 @@ All wireframes below use one concrete teaching session:
 sessionId: sess_20260706_cwd_fix
 provider: anthropic
 model: claude-sonnet-4-6
-cwd: /workspace/project
+cwd: /path/to/agent-kernel
 approvalMode: ask
 status: executing_tools
 cursor: 128
@@ -71,7 +71,7 @@ contextLimit: 128000
 ┌────────────────────────────────────────────────────────────────────┐
 │ Agent Kernel Debugger                                         #128 │
 │ executing_tools · approval ask · anthropic/claude-sonnet-4-6       │
-│ cwd /workspace/project     │
+│ cwd /path/to/agent-kernel                                          │
 ├────────────────────────────────────────────────────────────────────┤
 │ Overview                                                           │
 │ ┌──────────────┬──────────────┬──────────────┬───────────────────┐ │
@@ -236,7 +236,7 @@ State shows compact grouped `AgentState` fields in the sidebar. The full JSON is
 │ │ status executing_tools     │ messages 24                       │ │
 │ │ cursor 128                 │ todos 3                           │ │
 │ │ approval ask               │ pending edit · dispatched         │ │
-│ │ cwd /workspace/...       │ context pressure soft             │ │
+│ │ cwd /path/to/repo          │ context pressure soft             │ │
 │ ├────────────────────────────┼───────────────────────────────────┤ │
 │ │ Usage                      │ Memory                            │ │
 │ │ input 42180                │ session entries 2                 │ │
@@ -259,7 +259,7 @@ After clicking `View JSON`:
 │     { "role": "user", "content": [{ "type": "text", "text": "Fix executor relative paths so they follow cwd." }] }
 │   ],                                                               │
 │   "pendingCalls": [{ "callId": "toolu_01J4...", "name": "edit", "status": "dispatched" }],
-│   "cwd": "/workspace/project"
+│   "cwd": "/path/to/agent-kernel"
 │ }                                                                  │
 └────────────────────────────────────────────────────────────────────┘
 ```

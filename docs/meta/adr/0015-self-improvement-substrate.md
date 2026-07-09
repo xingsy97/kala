@@ -5,6 +5,10 @@ Date: 2026-07-11
 
 ## Context
 
+`agent-kernel` is an open-source coding-agent reference implementation: a pure
+FSM kernel, an event-sourced host, a sandboxed executor. Its priority-1 promise
+is *readability* — small enough to read in an afternoon.
+
 We want it to also serve as a **substrate**: a base platform on which a
 *meta-agent* — an agent that improves an agent — can run a real
 **auto-evolve** loop. The meta-agent inspects how a coding agent performed on a

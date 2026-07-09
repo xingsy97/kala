@@ -32,7 +32,7 @@
  *   await browser.close()
  */
 
-import puppeteer from '/workspace/project/node_modules/.pnpm/puppeteer-core@25.3.0/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js'
+import puppeteer from 'puppeteer-core'
 import { existsSync, mkdirSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
