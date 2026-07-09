@@ -503,6 +503,13 @@ export function configureDashboardNamespace(
         })
         const parentModel = deps.selectedModels.get(p.sourceSessionId)
         if (parentModel) deps.selectedModels.set(record.sessionId, parentModel)
+        if (source.workspaceId) {
+          await deps.executors.copyOverflowSession(
+            source.workspaceId,
+            p.sourceSessionId,
+            record.sessionId,
+          ).catch(() => undefined)
+        }
         await socket.join(`session:${record.sessionId}`)
         const forked: SessionForkedEvent = {
           sessionId: record.sessionId,
@@ -544,6 +551,9 @@ export function configureDashboardNamespace(
           } catch {
             // Lifecycle hook errors are advisory — swallow.
           }
+        }
+        if (record?.workspaceId) {
+          await deps.executors.deleteOverflowSession(record.workspaceId, p.sessionId).catch(() => undefined)
         }
         await deps.store.delete(p.sessionId)
         deps.selectedModels.delete(p.sessionId)

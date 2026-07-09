@@ -437,10 +437,21 @@ describe('wire protocol', () => {
       tick()
     })
 
+    const cancelled = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('cancel never settled')), 2000)
+      dashboard.on('state:changed', (payload) => {
+        if (payload.state.status === 'done' && payload.state.pendingCalls.length === 0) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+
     dashboard.emit('client:cancel', { sessionId })
     const cancelPayload = await cancelSeen
     expect(cancelPayload.sessionId).toBe(sessionId)
     expect(cancelPayload.callId).toBe(toolCalls[0]!.callId)
+    await cancelled
 
     // Kernel side: state must be `done`, pendingCalls empty.
     const rec = server.store.get(sessionId)

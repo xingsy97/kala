@@ -32,14 +32,14 @@ const includeDashboard = component === 'all' || component === 'host' || componen
 const expectedAssets = [
   ...allEntries.map((entry) => `${entry.name}.cjs`),
   'agent-kernel-dashboard-dist.tar.gz',
-  'run-host.sh',
-  'run-executor.sh',
+  'run.sh',
   'RELEASE_NOTES.md',
   'manifest.json',
   'SHA256SUMS',
 ]
+const legacyAssets = ['run-host.sh', 'run-executor.sh']
 
-for (const asset of expectedAssets) {
+for (const asset of [...expectedAssets, ...legacyAssets]) {
   rmSync(join(outDir, asset), { force: true })
 }
 
@@ -77,17 +77,11 @@ if (includeDashboard) {
 }
 
 const bootstrapAssets = []
-if (component === 'all' || component === 'host') {
-  const path = join(outDir, 'run-host.sh')
-  writeFileSync(path, hostBootstrap({ repo, tag }))
+if (component !== 'dashboard') {
+  const path = join(outDir, 'run.sh')
+  writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
   chmodSync(path, 0o755)
-  bootstrapAssets.push('run-host.sh')
-}
-if (component === 'all' || component === 'executor') {
-  const path = join(outDir, 'run-executor.sh')
-  writeFileSync(path, executorBootstrap({ repo, tag }))
-  chmodSync(path, 0o755)
-  bootstrapAssets.push('run-executor.sh')
+  bootstrapAssets.push('run.sh')
 }
 
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -104,7 +98,7 @@ const manifest = {
     .concat(bootstrapAssets),
   notes: [
     'host and executor assets are single-file Node.js executables, not native binaries',
-    'run-host.sh and run-executor.sh are bash bootstraps that download, verify, and run the matching Node.js asset',
+    'run.sh is a wget-only bash bootstrap that downloads, verifies, and runs the selected component',
     'host releases include the dashboard dist because agent-kernel-host serves it when DASHBOARD_DIR is set',
   ],
 }
@@ -159,32 +153,39 @@ function optionValue(args, name) {
   return undefined
 }
 
-function hostBootstrap({ repo, tag }) {
+function unifiedBootstrap({ repo, tag, component }) {
   return bash([
     '#!/usr/bin/env bash',
     'set -euo pipefail',
     '',
     `REPO="${repo}"`,
     `TAG="${tag}"`,
+    `DEFAULT_COMPONENT="${component === 'all' ? '' : component}"`,
     'BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"',
     'if [ "$TAG" = "latest" ]; then',
     '  BASE_URL="https://github.com/${REPO}/releases/latest/download"',
     'fi',
+    'COMPONENT="${COMPONENT:-${AGENT_KERNEL_COMPONENT:-${1:-$DEFAULT_COMPONENT}}}"',
     'WORK_DIR="${AGENT_KERNEL_RUN_DIR:-$(mktemp -d)}"',
     'DASHBOARD_DIR="${AGENT_KERNEL_DASHBOARD_DIR:-${WORK_DIR}/dashboard}"',
     'mkdir -p "$WORK_DIR" "$DASHBOARD_DIR"',
     '',
+    'case "$COMPONENT" in',
+    '  host|executor) ;;',
+    '  *)',
+    '    echo "Set COMPONENT=host or COMPONENT=executor. Example: wget -qO- ${BASE_URL}/run.sh | COMPONENT=host bash" >&2',
+    '    exit 1',
+    '    ;;',
+    'esac',
+    '',
     'download() {',
     '  local name="$1"',
     '  local url="${BASE_URL}/${name}"',
-    '  if command -v curl >/dev/null 2>&1; then',
-    '    curl -fsSL "$url" -o "${WORK_DIR}/${name}"',
-    '  elif command -v wget >/dev/null 2>&1; then',
-    '    wget -qO "${WORK_DIR}/${name}" "$url"',
-    '  else',
-    '    echo "curl or wget is required" >&2',
+    '  if ! command -v wget >/dev/null 2>&1; then',
+    '    echo "wget is required" >&2',
     '    exit 1',
     '  fi',
+    '  wget -qO "${WORK_DIR}/${name}" "$url"',
     '}',
     '',
     'hash_file() {',
@@ -219,86 +220,27 @@ function hostBootstrap({ repo, tag }) {
     '  exit 1',
     '}',
     '',
+    'download SHA256SUMS',
+    '',
+    'if [ "$COMPONENT" = "host" ]; then',
     'download agent-kernel-host.cjs',
     'download agent-kernel-dashboard-dist.tar.gz',
-    'download SHA256SUMS',
     'verify_file agent-kernel-host.cjs',
     'verify_file agent-kernel-dashboard-dist.tar.gz',
     'chmod +x "${WORK_DIR}/agent-kernel-host.cjs"',
     'tar -xzf "${WORK_DIR}/agent-kernel-dashboard-dist.tar.gz" -C "$DASHBOARD_DIR"',
     'echo "Starting agent-kernel host on http://localhost:${HOST_PORT:-3000}"',
     'DASHBOARD_DIR="$DASHBOARD_DIR" exec node "${WORK_DIR}/agent-kernel-host.cjs" "$@"',
-  ])
-}
-
-function executorBootstrap({ repo, tag }) {
-  return bash([
-    '#!/usr/bin/env bash',
-    'set -euo pipefail',
-    '',
-    `REPO="${repo}"`,
-    `TAG="${tag}"`,
-    'BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"',
-    'if [ "$TAG" = "latest" ]; then',
-    '  BASE_URL="https://github.com/${REPO}/releases/latest/download"',
     'fi',
-    'WORK_DIR="${AGENT_KERNEL_RUN_DIR:-$(mktemp -d)}"',
-    'mkdir -p "$WORK_DIR"',
-    '',
-    'download() {',
-    '  local name="$1"',
-    '  local url="${BASE_URL}/${name}"',
-    '  if command -v curl >/dev/null 2>&1; then',
-    '    curl -fsSL "$url" -o "${WORK_DIR}/${name}"',
-    '  elif command -v wget >/dev/null 2>&1; then',
-    '    wget -qO "${WORK_DIR}/${name}" "$url"',
-    '  else',
-    '    echo "curl or wget is required" >&2',
-    '    exit 1',
-    '  fi',
-    '}',
-    '',
-    'hash_file() {',
-    '  if command -v shasum >/dev/null 2>&1; then',
-    '    shasum -a 256 "$1" | awk \'{print $1}\'',
-    '  elif command -v sha256sum >/dev/null 2>&1; then',
-    '    sha256sum "$1" | awk \'{print $1}\'',
-    '  else',
-    '    echo "shasum or sha256sum is required" >&2',
-    '    exit 1',
-    '  fi',
-    '}',
-    '',
-    'verify_file() {',
-    '  local name="$1"',
-    '  local expected',
-    '  expected=$(awk -v file="$name" \'$2 == file {print $1}\' "${WORK_DIR}/SHA256SUMS")',
-    '  if [ -z "$expected" ]; then',
-    '    echo "missing checksum for $name" >&2',
-    '    exit 1',
-    '  fi',
-    '  local actual',
-    '  actual=$(hash_file "${WORK_DIR}/${name}")',
-    '  if [ "$actual" != "$expected" ]; then',
-    '    echo "checksum mismatch for $name" >&2',
-    '    exit 1',
-    '  fi',
-    '}',
-    '',
-    'node -e \'const major=Number(process.versions.node.split(".")[0]); process.exit(major >= 22 ? 0 : 1)\' || {',
-    '  echo "Node.js 22 or newer is required" >&2',
-    '  exit 1',
-    '}',
     '',
     'download agent-kernel-executor.cjs',
-    'download SHA256SUMS',
     'verify_file agent-kernel-executor.cjs',
     'chmod +x "${WORK_DIR}/agent-kernel-executor.cjs"',
     'if [ -z "${HOST_URL:-}" ] && [ "$#" -eq 0 ]; then',
-    '  echo "Set HOST_URL or pass --host <url>. Example: HOST_URL=http://localhost:3000 bash run-executor.sh" >&2',
+    '  echo "Set HOST_URL or pass --host <url>. Example: wget -qO- ${BASE_URL}/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 bash" >&2',
     '  exit 1',
     'fi',
-    'exec node "${WORK_DIR}/agent-kernel-executor.cjs" "$@"',
+    'AGENT_KERNEL_RELEASE_TAG="$TAG" AGENT_KERNEL_UPDATE_REPO="$REPO" exec node "${WORK_DIR}/agent-kernel-executor.cjs" "$@"',
   ])
 }
 
@@ -308,19 +250,31 @@ function releaseNotes(manifest) {
   const lines = [
     `# agent-kernel ${manifest.tag}`,
     '',
-    'Release assets are Node.js 22 single-file executables plus bash bootstraps that download and verify the matching asset before running it.',
+    'Release assets are Node.js 22 single-file executables plus a wget-only bash bootstrap that downloads and verifies the selected asset before running it.',
     '',
     '## One-line startup',
     '',
   ]
-  if (manifest.assets.includes('run-host.sh')) {
-    lines.push('Run Host with curl:', '', '```bash', `curl -fsSL ${base}/run-host.sh | bash`, '```', '')
-    lines.push('Run Host with wget:', '', '```bash', `wget -qO- ${base}/run-host.sh | bash`, '```', '')
+  if (manifest.assets.includes('run.sh')) {
+    if (manifest.component === 'all' || manifest.component === 'host') {
+      lines.push('Run Host:', '', '```bash', `wget -qO- ${base}/run.sh | COMPONENT=host bash`, '```', '')
+    }
+    if (manifest.component === 'all' || manifest.component === 'executor') {
+      lines.push('Run Executor:', '', '```bash', `wget -qO- ${base}/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 bash`, '```', '')
+      lines.push('Run Executor with auto-update:', '', '```bash', `wget -qO- ${base}/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 AGENT_KERNEL_AUTO_UPDATE=1 bash`, '```', '')
+    }
   }
-  if (manifest.assets.includes('run-executor.sh')) {
-    lines.push('Run Executor with curl:', '', '```bash', `curl -fsSL ${base}/run-executor.sh | HOST_URL=http://localhost:3000 bash`, '```', '')
-    lines.push('Run Executor with wget:', '', '```bash', `wget -qO- ${base}/run-executor.sh | HOST_URL=http://localhost:3000 bash`, '```', '')
-  }
+  const verifyTargets = manifest.assets.filter((asset) => asset !== 'RELEASE_NOTES.md' && asset !== 'manifest.json' && asset !== 'SHA256SUMS')
+  lines.push(
+    'Verify release checksums:',
+    '',
+    '```bash',
+    `wget -q ${base}/SHA256SUMS`,
+    ...verifyTargets.map((asset) => `wget -q ${base}/${asset}`),
+    'sha256sum -c SHA256SUMS --ignore-missing',
+    '```',
+    '',
+  )
   lines.push('## Assets', '', ...manifest.assets.map((asset) => `- \`${asset}\``), '- `manifest.json`', '- `SHA256SUMS`', '')
   return `${lines.join('\n')}\n`
 }

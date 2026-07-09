@@ -1,6 +1,6 @@
 # Tool-output overflow
 
-**Status**: design accepted, implementation in progress.
+**Status**: implemented.
 
 ## 1. Why
 
@@ -20,7 +20,7 @@ Opencode's fix: cap in-history tool output size, spill overflow to a separate fi
 Every `tool_result` payload is measured (UTF-8 byte length) at the executor before it crosses the wire. Two thresholds:
 
 - **`inline` (default 32 KB, 400 lines)**: below this, no change. Result flows into `state.messages` exactly as today.
-- **`overflow` (above `inline`)**: the executor writes the full payload to disk under a per-session overflow directory, and returns a *truncated preview* + a pointer. The kernel sees only the preview.
+- **`overflow` (above `inline`)**: the executor writes the full payload to disk under a per-session overflow directory, and returns a *head+tail preview* + a pointer. The kernel sees only the preview.
 
 ### 2.2 Storage layout
 
@@ -34,21 +34,27 @@ Every `tool_result` payload is measured (UTF-8 byte length) at the executor befo
 - Files are read by:
   - the dashboard, via a new `client:read_overflow` message that acks with the full content
   - subsequent tool calls (agent asks `read` to open the overflow file itself)
-- Files are pruned when the session's JSONL log is deleted (session lifecycle already runs cleanup — extend it).
-- Fork clones the overflow directory (copy-on-write via hardlinks where the FS supports it, plain copy otherwise). Independent sessions must not share overflow files, since deleting one session's log shouldn't corrupt another's message history.
+- Files are pruned when the session's JSONL log is deleted through a best-effort
+  executor RPC.
+- Fork clones the overflow directory through a best-effort executor RPC.
+  Independent sessions do not share overflow files, since deleting one session's
+  log should not corrupt another's message history.
 
 ### 2.3 Preview shape
 
 The message content the LLM sees:
 
 ```
-{first N lines of output, up to `previewLines`}
+{first roughly N/2 lines of output}
+[... omitted lines ...]
+{last roughly N/2 lines of output}
 
 --- output truncated: 8712 / 45210 lines, 268134 / 1418072 bytes stored at overflow://call_01J6...
 --- use `read { path: '<workspaceRoot>/.agent-kernel/overflow/<sessionId>/<callId>.txt' }` to read more
 ```
 
-- `previewLines` default: 400. Same threshold opencode uses.
+- `previewLines` default: 400. The budget is split between head and tail so the
+  model sees command setup plus terminal failures or summaries.
 - The `overflow://` URI is opaque to the LLM — it's a marker for the dashboard, not a resolvable scheme. The concrete file path is what the LLM acts on.
 - If a tool produced structured JSON (e.g. `web_search`), we still overflow whole-string; we do not truncate inside a JSON value and risk producing invalid JSON. The `previewLines` guarantee is best-effort — if the first line already exceeds `inline` (single-line JSON blob), we fall back to a byte-truncated preview.
 
@@ -177,9 +183,9 @@ Downside: a user's actual tool output could contain the exact marker string. Thi
 
 ## 10. Cleanup
 
-- Session deletion (existing `client:delete_session` path): after unlinking the JSONL log, `rmdir --force <overflow>/<sessionId>/`.
+- Session deletion (existing `client:delete_session` path): before unlinking the JSONL log, host asks the owning workspace executor to remove `<overflow>/<sessionId>/`.
 - Executor startup: no cleanup. Stale overflow dirs cost disk, not correctness. Users can `rm -rf .agent-kernel/overflow` at any time.
-- Fork: `<overflow>/<parent>/` → `<overflow>/<child>/`, hardlink files where possible. Falls back to full copy.
+- Fork: host asks the owning workspace executor to copy `<overflow>/<parent>/` → `<overflow>/<child>/`.
 
 ## 11. Testing plan
 
@@ -189,7 +195,7 @@ Downside: a user's actual tool output could contain the exact marker string. Thi
   - Preview always truncates at line boundary except when a single line exceeds threshold.
   - Missing sessionId/callId → error propagates (invariant, shouldn't happen from real callers).
 - **Client wiring test:** feed the executor a tool that returns 100 KB → assert overflow file exists, wire result contains marker + first 400 lines.
-- **Host:** new handler `client:read_overflow` → returns file bytes; refuses path escapes; returns error for missing files.
+- **Host:** `client:read_overflow` returns file bytes; lifecycle RPCs copy/delete session overflow directories on fork/delete; all executor-side path resolution stays under the sandbox.
 - **Dashboard:** ChatPanel renders the "View full output" button when marker is present. Modal fetches and displays content.
 
 ## 12. Migration
