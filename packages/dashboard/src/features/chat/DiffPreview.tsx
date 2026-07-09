@@ -18,6 +18,7 @@
 
 import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
@@ -61,6 +62,7 @@ export function DiffPreview({
 }
 
 function EditDiff({ input }: { input: EditInput }): JSX.Element {
+  const { t } = useTranslation()
   const path = filePathOf(input)
   const oldLines = (input.old_string ?? input.oldText ?? '').split('\n')
   const newLines = (input.new_string ?? input.newText ?? '').split('\n')
@@ -76,10 +78,10 @@ function EditDiff({ input }: { input: EditInput }): JSX.Element {
       <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{path}</span>
         <span className="flex items-center gap-2">
-          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">modified</span>
+          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">{t('chat.diff.modified')}</span>
           <span className="font-mono text-emerald-700 dark:text-emerald-300">+{added}</span>
           <span className="font-mono text-rose-700 dark:text-rose-300">-{deleted}</span>
-          <span>{changedHunks} changed</span>
+          <span>{t('chat.diff.changed', { count: changedHunks })}</span>
           <span>{replaceAll ? 'edit · replace_all' : 'edit'}</span>
         </span>
       </div>
@@ -95,6 +97,7 @@ function EditDiff({ input }: { input: EditInput }): JSX.Element {
 }
 
 function WritePreview({ input }: { input: WriteInput }): JSX.Element {
+  const { t } = useTranslation()
   const path = filePathOf(input)
   const content = typeof input.content === 'string' ? input.content : ''
   const bytes = new TextEncoder().encode(content).byteLength
@@ -109,9 +112,9 @@ function WritePreview({ input }: { input: WriteInput }): JSX.Element {
       <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground" data-testid="diff-preview-header">
         <span className="min-w-0 truncate font-mono normal-case text-foreground">{path}</span>
         <span className="flex items-center gap-2">
-          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">created/overwrite</span>
+          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">{t('chat.diff.createdOverwrite')}</span>
           write · {formatBytes(bytes)}
-          {truncated ? ` · showing ${WRITE_PREVIEW_LINES} of ${lines.length} lines` : ''}
+          {truncated ? t('chat.diff.showingLines', { shown: WRITE_PREVIEW_LINES, total: lines.length }) : ''}
         </span>
       </div>
       <ScrollArea className="max-h-80">
@@ -124,7 +127,7 @@ function WritePreview({ input }: { input: WriteInput }): JSX.Element {
           ))}
           {truncated ? (
             <span className="mt-1 block px-2 text-muted-foreground italic">
-              …{lines.length - WRITE_PREVIEW_LINES} more lines
+              ...{t('chat.diff.moreLines', { count: lines.length - WRITE_PREVIEW_LINES })}
             </span>
           ) : null}
         </pre>
@@ -134,6 +137,7 @@ function WritePreview({ input }: { input: WriteInput }): JSX.Element {
 }
 
 function DiffLineRow({ row }: { row: LineDiffRow }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   if (row.kind === 'gap') {
     return (
@@ -146,10 +150,10 @@ function DiffLineRow({ row }: { row: LineDiffRow }): JSX.Element {
         >
         {open ? <ChevronDown className="h-3 w-3" aria-hidden="true" /> : <ChevronRight className="h-3 w-3" aria-hidden="true" />}
         <span className="flex-1 border-t border-dashed border-border/60" aria-hidden="true" />
-        <span>⋯ {row.count} unchanged line{row.count === 1 ? '' : 's'} ⋯</span>
+        <span>... {t('chat.diff.unchangedLine', { count: row.count })} ...</span>
         <span className="flex-1 border-t border-dashed border-border/60" aria-hidden="true" />
         </button>
-        {open ? <span className="px-2 pb-1 text-[10px] normal-case tracking-normal">Collapsed unchanged context is hidden to keep the approval diff compact.</span> : null}
+        {open ? <span className="px-2 pb-1 text-[10px] normal-case tracking-normal">{t('chat.diff.compactNote')}</span> : null}
       </span>
     )
   }

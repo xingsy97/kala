@@ -19,6 +19,7 @@
 import { Children, isValidElement, useCallback, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useTranslation } from 'react-i18next'
 
 import type {
   Message,
@@ -228,6 +229,7 @@ function NestedGroupItem({
 }
 
 function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
+  const { t } = useTranslation()
   const renderer = pickRenderer(group.toolName)
   const rows = renderer({ calls: group.calls, results: group.results })
   return (
@@ -257,7 +259,7 @@ function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
               {row.primary}
             </span>
             {!ok ? (
-              <span className="flex-none text-[9px] uppercase tracking-wider">failed</span>
+              <span className="flex-none text-[9px] uppercase tracking-wider">{t('chat.transcript.failed')}</span>
             ) : null}
           </div>
         )

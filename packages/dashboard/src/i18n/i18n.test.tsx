@@ -3,6 +3,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { LanguageSwitcher } from '../features/i18n/LanguageSwitcher.js'
 import { i18n } from './index.js'
+import { resources } from './resources.js'
+
+function collectKeys(node: unknown, prefix = ''): string[] {
+  if (node === null || typeof node !== 'object') return [prefix]
+  const out: string[] = []
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    const next = prefix ? `${prefix}.${k}` : k
+    out.push(...collectKeys(v, next))
+  }
+  return out
+}
 
 describe('dashboard i18n', () => {
   beforeEach(async () => {
@@ -36,6 +47,28 @@ describe('dashboard i18n', () => {
       expect(document.documentElement.lang).toBe('zh-CN')
     })
     expect(screen.getByTestId('language-switcher').textContent).toContain('ZH')
+  })
+
+  it('keeps en and zh translation key sets in sync (principle A4)', () => {
+    const enKeys = new Set(collectKeys(resources.en.translation))
+    const zhKeys = new Set(collectKeys(resources.zh.translation))
+    const onlyEn = [...enKeys].filter((k) => !zhKeys.has(k))
+    const onlyZh = [...zhKeys].filter((k) => !enKeys.has(k))
+    expect({ onlyEn, onlyZh }).toEqual({ onlyEn: [], onlyZh: [] })
+  })
+
+  it('never claims resolved status at the Run Agent stage (principle A3)', () => {
+    // `inferDescription` covers the Run Agent step — before official grading.
+    // It may reference `resolved` only to say the status is *unknown* until
+    // the official harness runs. It must not assert that predictions imply
+    // resolved outcomes.
+    for (const lang of ['en', 'zh'] as const) {
+      const infer = resources[lang].translation.artifacts?.eval?.wizard?.inferDescription
+      expect(infer, `${lang}.inferDescription must exist`).toBeDefined()
+      const text = String(infer)
+      const bad = /\b(?:has been|is|are)\s+resolved\b|已经\s*resolved|已解决/i
+      expect(bad.test(text), `${lang}.inferDescription must not claim resolved status: ${text}`).toBe(false)
+    }
   })
 })
 

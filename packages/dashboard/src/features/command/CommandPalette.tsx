@@ -33,6 +33,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Command } from 'cmdk'
 import { Search, type LucideIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
@@ -56,9 +57,11 @@ type Props = {
   commands: readonly CommandPaletteItem[]
 }
 
-const DEFAULT_GROUP = 'Actions'
+const DEFAULT_GROUP_KEY = '__default__'
+const DEFAULT_GROUP_LABEL = 'Actions'
 
 export function CommandPalette({ open, onOpenChange, commands }: Props): JSX.Element {
+  const { t } = useTranslation()
   const previouslyFocused = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
@@ -85,11 +88,11 @@ export function CommandPalette({ open, onOpenChange, commands }: Props): JSX.Ele
         data-testid="command-palette"
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>Command palette</DialogTitle>
-          <DialogDescription>Dashboard-local navigation commands</DialogDescription>
+          <DialogTitle>{t('commandPalette.title')}</DialogTitle>
+          <DialogDescription>{t('commandPalette.description')}</DialogDescription>
         </DialogHeader>
         <Command
-          label="Command palette"
+          label={t('commandPalette.title')}
           shouldFilter
           loop
           className="flex flex-col"
@@ -97,7 +100,7 @@ export function CommandPalette({ open, onOpenChange, commands }: Props): JSX.Ele
           <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
             <Search className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
             <Command.Input
-              placeholder="Search commands"
+              placeholder={t('commandPalette.searchPlaceholder')}
               className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               data-testid="command-palette-search"
               autoFocus
@@ -105,12 +108,12 @@ export function CommandPalette({ open, onOpenChange, commands }: Props): JSX.Ele
           </div>
           <Command.List className="max-h-80 overflow-y-auto p-1">
             <Command.Empty className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No commands match.
+              {t('commandPalette.empty')}
             </Command.Empty>
             {grouped.map(({ group, items }) => (
               <Command.Group
                 key={group}
-                heading={group}
+                heading={isDefaultGroup(group) ? t('common.actions') : group}
                 className={cn(
                   'px-1 py-1',
                   '[&_[cmdk-group-heading]]:mb-0.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground',
@@ -195,17 +198,21 @@ function groupCommands(
 ): ReadonlyArray<{ group: string; items: readonly CommandPaletteItem[] }> {
   const buckets = new Map<string, CommandPaletteItem[]>()
   for (const cmd of commands) {
-    const g = cmd.group ?? DEFAULT_GROUP
+    const g = cmd.group ?? DEFAULT_GROUP_KEY
     const bucket = buckets.get(g)
     if (bucket) bucket.push(cmd)
     else buckets.set(g, [cmd])
   }
   const order = [...buckets.keys()].sort((a, b) => {
-    if (a === DEFAULT_GROUP) return 1
-    if (b === DEFAULT_GROUP) return -1
+    if (isDefaultGroup(a)) return 1
+    if (isDefaultGroup(b)) return -1
     return a.localeCompare(b)
   })
   return order.map((group) => ({ group, items: buckets.get(group) ?? [] }))
+}
+
+function isDefaultGroup(group: string): boolean {
+  return group === DEFAULT_GROUP_KEY || group === DEFAULT_GROUP_LABEL
 }
 
 /**

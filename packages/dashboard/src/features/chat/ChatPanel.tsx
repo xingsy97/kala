@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useTranslation } from 'react-i18next'
 
 import type {
   Message,
@@ -316,6 +317,7 @@ function EmptyState({
 }: {
   onSuggest?: (text: string) => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center gap-6 py-10 text-center sm:gap-8 sm:py-16">
       <div className="flex flex-col items-center gap-3">
@@ -323,10 +325,10 @@ function EmptyState({
           <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
-          What can I help with?
+          {t('chat.transcript.emptyTitle')}
         </h1>
         <p className="max-w-md text-sm text-muted-foreground">
-          Ask a question, request code changes, or pick one of the suggestions below to get started.
+          {t('chat.transcript.emptyDescription')}
         </p>
       </div>
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
@@ -359,7 +361,7 @@ function EmptyState({
         })}
       </div>
       <div className="text-xs text-muted-foreground" data-testid="empty-state-hint">
-        No messages yet — type below to begin.
+        {t('chat.transcript.empty')}
       </div>
     </div>
   )
@@ -370,20 +372,20 @@ function CompactBoundaryRow({
 }: {
   boundary: Extract<TranscriptItem, { kind: 'compact_boundary' }>
 }): JSX.Element {
+  const { t } = useTranslation()
+  const trigger = boundary.trigger === 'auto' ? t('chat.transcript.automaticCompact') : t('chat.transcript.manualCompact')
+  const shortTrigger = boundary.trigger === 'auto' ? t('chat.transcript.automaticCompactShort') : t('chat.transcript.manualCompactShort')
   return (
     <div className="flex items-center gap-3 py-2" data-testid="compact-boundary">
       <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
       <div className="flex min-w-0 items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground">
         <Archive className="h-3 w-3 flex-none" />
-        <span className="font-medium text-foreground">Context compacted</span>
+        <span className="font-medium text-foreground">{t('chat.transcript.contextCompacted')}</span>
         <span className="hidden truncate sm:inline">
-          · {boundary.trigger === 'auto' ? 'Automatic compact' : 'Manual compact'} · event #{boundary.seq} ·{' '}
-          {formatTokens(boundary.tokensBefore)} → {formatTokens(boundary.tokensAfter)} tokens ·{' '}
-          {boundary.replacedCount} messages summarized
+          · {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter), count: boundary.replacedCount })}
         </span>
         <span className="truncate sm:hidden">
-          {boundary.trigger === 'auto' ? 'Auto' : 'Manual'} · {formatTokens(boundary.tokensBefore)} →{' '}
-          {formatTokens(boundary.tokensAfter)}
+          {t('chat.transcript.compactSummaryShort', { trigger: shortTrigger, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter) })}
         </span>
       </div>
       <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
@@ -418,6 +420,7 @@ function MessageRow({
   parentSessionId?: string
   socket?: DashboardSocket | null
 }): JSX.Element | null {
+  const { t } = useTranslation()
   const editable =
     message.role === 'user' &&
     seq !== undefined &&
@@ -512,7 +515,7 @@ function MessageRow({
               setEditing(true)
             }}
             className="absolute -left-8 top-2 rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
-            title="Edit and rerun"
+            title={t('chat.transcript.editRerun')}
             data-testid={`edit-message-${index}`}
           >
             <Pencil className="h-3.5 w-3.5" />
@@ -687,6 +690,7 @@ function ThinkingBlock({
 }: {
   content: import('@agent-kernel/kernel').ThinkingContent
 }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   return (
     <div className="min-w-0 max-w-full">
@@ -696,7 +700,7 @@ function ThinkingBlock({
         className="inline-flex min-w-0 items-center gap-2 rounded-full bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground hover:bg-muted"
       >
         <Sparkles className="h-3 w-3 flex-none" />
-        <span className="font-medium">Thinking</span>
+        <span className="font-medium">{t('chat.transcript.thinking')}</span>
         {open ? (
           <ChevronDown className="h-3 w-3 flex-none" />
         ) : (
@@ -786,6 +790,7 @@ function ToolCallBlock({
   approval: ApprovalRequiredEvent | null
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
   const hasDiffPreview = isPendingApproval && (call.name === 'edit' || call.name === 'write')
   const [open, setOpen] = useState(false)
@@ -828,7 +833,7 @@ function ToolCallBlock({
               : 'text-muted-foreground',
           )}
         >
-          {isPendingApproval ? 'Approval needed' : 'Assistant requested tool'}
+          {isPendingApproval ? t('chat.transcript.approvalNeeded') : t('chat.transcript.assistantRequestedTool')}
         </span>
         <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
           {call.name}
@@ -858,7 +863,7 @@ function ToolCallBlock({
           )}
           {isPendingApproval ? (
             <p className="pt-1 text-[11px] italic text-amber-700 dark:text-amber-300">
-              Approve or reject in the composer area below.
+              {t('chat.transcript.approveRejectBelow')}
             </p>
           ) : null}
         </div>
@@ -876,6 +881,7 @@ function ToolResultBlock({
   toolName?: string
   defaultOpen?: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(defaultOpen)
   const overflowReader = useContext(OverflowReaderContext)
   const isOverflowed = detectOverflowMarker(result.content)
@@ -910,7 +916,7 @@ function ToolResultBlock({
         data-testid={`tool-result-toggle-${result.callId}`}
       >
         <Icon className={cn('h-3.5 w-3.5 flex-none', statusTone)} />
-        <span className="font-medium text-muted-foreground">Tool result</span>
+        <span className="font-medium text-muted-foreground">{t('chat.transcript.toolResult')}</span>
         {toolName ? (
           <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
             {toolName}

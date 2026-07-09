@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import type { ModelInfo } from '@agent-kernel/shared'
 
@@ -19,6 +20,7 @@ export function RuntimeMetrics({
   modelInfo,
   queuedMessages,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -46,8 +48,13 @@ export function RuntimeMetrics({
       ? 'text-amber-600 dark:text-amber-300'
       : 'text-sky-600 dark:text-sky-300'
   const title = userContextWindow && userContextWindow > 0
-    ? `Context window: ${formatTokens(inputTokens)} of ${formatTokens(userContextWindow)} user tokens (${percent}%). Total model context window: ${totalContextWindow ? formatTokens(totalContextWindow) : 'unknown'} tokens. User context window: ${formatTokens(userContextWindow)} tokens.`
-    : `Context window usage unavailable. Input tokens seen: ${formatTokens(inputTokens)}.`
+    ? t('chat.runtimeMetrics.title', {
+      input: formatTokens(inputTokens),
+      userWindow: formatTokens(userContextWindow),
+      percent,
+      totalWindow: totalContextWindow ? formatTokens(totalContextWindow) : t('chat.runtimeMetrics.unknown'),
+    })
+    : t('chat.runtimeMetrics.unavailableTitle', { input: formatTokens(inputTokens) })
 
   return (
     <div className="relative flex-none" ref={ref}>
@@ -93,21 +100,21 @@ export function RuntimeMetrics({
         data-testid="context-pressure-popover"
       >
         <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="font-medium text-foreground">Context pressure</span>
+          <span className="font-medium text-foreground">{t('chat.runtimeMetrics.contextPressure')}</span>
           <span className={cn('rounded px-1.5 py-0.5 font-mono text-[10px]', tone, 'bg-background/70')}>
             {state?.contextPressureLevel ?? 'none'}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
-          <MetricNumber label="input" value={inputTokens} format={formatTokens} />
-          <MetricNumber label="output" value={outputTokens} format={formatTokens} />
-          <Metric label="user window" value={userContextWindow ? formatTokens(userContextWindow) : 'unknown'} />
-          <Metric label="model window" value={totalContextWindow ? formatTokens(totalContextWindow) : 'unknown'} />
-          <MetricNumber label="queued" value={queuedMessages} format={(n) => String(Math.round(n))} />
-          <MetricNumber label="cached" value={cachedTokens} format={(n) => (n > 0 ? formatTokens(n) : '0')} />
+          <MetricNumber label={t('chat.runtimeMetrics.input')} value={inputTokens} format={formatTokens} />
+          <MetricNumber label={t('chat.runtimeMetrics.output')} value={outputTokens} format={formatTokens} />
+          <Metric label={t('chat.runtimeMetrics.userWindow')} value={userContextWindow ? formatTokens(userContextWindow) : t('chat.runtimeMetrics.unknown')} />
+          <Metric label={t('chat.runtimeMetrics.modelWindow')} value={totalContextWindow ? formatTokens(totalContextWindow) : t('chat.runtimeMetrics.unknown')} />
+          <MetricNumber label={t('chat.runtimeMetrics.queued')} value={queuedMessages} format={(n) => String(Math.round(n))} />
+          <MetricNumber label={t('chat.runtimeMetrics.cached')} value={cachedTokens} format={(n) => (n > 0 ? formatTokens(n) : '0')} />
         </div>
         <div className="mt-2 rounded bg-muted/50 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
-          Contributor numbers are estimates from current runtime counters and captured request metadata when available.
+          {t('chat.runtimeMetrics.contributorNote')}
         </div>
       </div>
     ) : null}

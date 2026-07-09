@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ApprovalMode } from '@agent-kernel/kernel'
@@ -47,11 +48,11 @@ type Props = {
   onChangeApprovalMode(mode: ApprovalMode): void
 }
 
-const APPROVAL_MODE_ITEMS: ReadonlyArray<{ value: ApprovalMode; label: string }> = [
-  { value: 'auto', label: 'Auto (ask on unsafe tools)' },
-  { value: 'ask', label: 'Ask everything' },
-  { value: 'deny', label: 'Deny unsafe' },
-  { value: 'allow_all', label: 'Allow all' },
+const APPROVAL_MODE_ITEMS: ReadonlyArray<{ value: ApprovalMode; labelKey: string }> = [
+  { value: 'auto', labelKey: 'dialogs.approvalModes.auto' },
+  { value: 'ask', labelKey: 'dialogs.approvalModes.ask' },
+  { value: 'deny', labelKey: 'dialogs.approvalModes.deny' },
+  { value: 'allow_all', labelKey: 'dialogs.approvalModes.allowAll' },
 ]
 
 export function SessionMetadataDialog({
@@ -66,6 +67,7 @@ export function SessionMetadataDialog({
   onOpenChangeCwdDialog,
   onChangeApprovalMode,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const initialLabel = summary?.label ?? ''
   const initialCwd = state?.cwd ?? summary?.currentCwd ?? ''
   const approvalMode = state?.approvalMode ?? 'auto'
@@ -91,49 +93,49 @@ export function SessionMetadataDialog({
         className="max-w-xl"
       >
         <DialogHeader>
-          <DialogTitle>Session info</DialogTitle>
+          <DialogTitle>{t('dialogs.sessionInfo')}</DialogTitle>
           <DialogDescription>
-            Read-only identifiers on the left, live-editable settings below. Changes save on blur.
+            {t('dialogs.sessionInfoDescription')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3 text-sm">
-          <ReadOnlyRow label="Session ID" value={sessionId} mono />
+          <ReadOnlyRow label={t('dialogs.sessionId')} value={sessionId} mono />
           {summary?.parentSessionId ? (
             <ReadOnlyRow
-              label="Parent session"
+              label={t('dialogs.parentSession')}
               value={summary.parentSessionId}
               mono
             />
           ) : null}
-          <ReadOnlyRow label="Created" value={formatTs(summary?.createdAt)} />
+          <ReadOnlyRow label={t('dialogs.created')} value={formatTs(summary?.createdAt)} />
           <ReadOnlyRow
-            label="Last activity"
+            label={t('dialogs.lastActivity')}
             value={formatTs(summary?.lastEventAt ?? summary?.createdAt)}
           />
           <ReadOnlyRow
-            label="Workspace"
+            label={t('dialogs.workspace')}
             value={
               summary?.workspaceName
                 ? `${summary.workspaceName}${summary.workspaceId ? ` · ${summary.workspaceId.slice(0, 8)}` : ''}`
-                : summary?.workspaceId ?? 'unassigned'
+                : summary?.workspaceId ?? t('dialogs.unassigned')
             }
           />
           {executorHost ? (
-            <ReadOnlyRow label="Executor host" value={executorHost} />
+            <ReadOnlyRow label={t('dialogs.executorHost')} value={executorHost} />
           ) : null}
           <ReadOnlyRow
-            label="Model"
-            value={selectedModel ?? 'default'}
+            label={t('common.model')}
+            value={selectedModel ?? t('dialogs.defaultModel')}
             mono
           />
           <ReadOnlyRow
-            label="Events"
+            label={t('dialogs.events')}
             value={String(summary?.eventCount ?? state?.messages.length ?? 0)}
           />
           {state?.usage ? (
             <ReadOnlyRow
-              label="Tokens (in / out)"
+              label={t('dialogs.tokensInOut')}
               value={`${state.usage.inputTokens.toLocaleString()} / ${state.usage.outputTokens.toLocaleString()}`}
             />
           ) : null}
@@ -142,7 +144,7 @@ export function SessionMetadataDialog({
         <div className="border-t border-border/50 pt-3" />
 
         <div className="grid gap-4 text-sm">
-          <FieldRow label="Label" htmlFor="session-metadata-label">
+          <FieldRow label={t('dialogs.label')} htmlFor="session-metadata-label">
             <Input
               id="session-metadata-label"
               data-testid="session-metadata-label"
@@ -155,19 +157,19 @@ export function SessionMetadataDialog({
                   ;(e.currentTarget as HTMLInputElement).blur()
                 }
               }}
-              placeholder="clears override when empty"
+              placeholder={t('dialogs.clearOverridePlaceholder')}
             />
           </FieldRow>
-          <FieldRow label="Working directory" htmlFor="session-metadata-cwd">
+          <FieldRow label={t('dialogs.workingDirectory')} htmlFor="session-metadata-cwd">
             <div className="flex items-center gap-2">
               <div
                 id="session-metadata-cwd"
                 data-testid="session-metadata-cwd"
                 className="min-w-0 flex-1 truncate rounded-md border border-input bg-muted/40 px-3 py-2 font-mono text-xs text-foreground"
-                title={initialCwd || 'no cwd set'}
+                title={initialCwd || t('dialogs.noCwdSet')}
               >
                 {initialCwd || (
-                  <span className="text-muted-foreground">no cwd set</span>
+                  <span className="text-muted-foreground">{t('dialogs.noCwdSet')}</span>
                 )}
               </div>
               <Button
@@ -180,11 +182,11 @@ export function SessionMetadataDialog({
                 }}
                 data-testid="session-metadata-cwd-change"
               >
-                Change…
+                {t('dialogs.change')}
               </Button>
             </div>
           </FieldRow>
-          <FieldRow label="Approvals">
+          <FieldRow label={t('dialogs.approvals')}>
             <Select
               value={approvalMode}
               onValueChange={(v) => onChangeApprovalMode(v as ApprovalMode)}
@@ -195,7 +197,7 @@ export function SessionMetadataDialog({
               <SelectContent>
                 {APPROVAL_MODE_ITEMS.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
-                    {item.label}
+                    {t(item.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -206,7 +208,7 @@ export function SessionMetadataDialog({
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline">
-              Close
+              {t('common.close')}
             </Button>
           </DialogClose>
         </DialogFooter>
