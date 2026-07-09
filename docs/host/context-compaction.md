@@ -421,7 +421,10 @@ Compaction flow:
 7. Host dispatches either `compact_replaced` (success) or a `compact_skipped`
    event (bounded failure / circuit-breaker / no-op) with a reason code.
 8. The reducer keeps the leading system prompt, inserts the synthetic compacted
-   summary as a system message, and appends the preserved tail. If the
+   summary as a system message, and appends the preserved tail. A prior compact
+   summary is normal compactable context even though it is represented as a
+   `system` message; only the durable leading system prompt is protected from
+   summarization. If the
    proposed `preserveFrom` would orphan a pending tool_result, the reducer
    rejects the event (returns a `compact_rejected` step) and the host records
    the rejection reason.
@@ -438,6 +441,13 @@ The reducer invariant is:
 - preserve messages at or after `preserveFrom`,
 - **reject** compact replacements that would violate pending tool-call pairing,
   and surface the rejection as `compact_rejected` (not a silent no-op).
+
+The leading system prompt is durable setup and is never summarizer input. Any
+later `system` message, including a previous compact summary, is model-visible
+history and is therefore compactable. Manual compaction may be run repeatedly:
+each successful run can summarize an earlier compact summary into a newer one.
+The host must not report `no_compactable_content` merely because the remaining
+old context is stored as a synthetic compact-summary `system` message.
 
 When the session is `executing_tools`, a `compact_replaced` event is valid only
 if every pending tool call still has its originating assistant `tool_call` in
@@ -489,10 +499,14 @@ tight looping.
 
 The pivot must satisfy all of:
 
-1. It is a `user` message index (not a `tool_result`, not an assistant with a
-   pending call).
-2. All messages `[0, preserveFrom)` contain compactable content
-   (i.e. there is something worth summarizing).
+1. For ordinary transcript compaction, it is a `user` message index (not a
+   `tool_result`, not an assistant with a pending call). For summary-only
+   compaction, where the only compactable content is one or more prior compact
+   summaries after the durable leading system prompt, `preserveFrom` may equal
+   `messages.length`.
+2. Messages `[0, preserveFrom)` contain compactable content after excluding
+   only the durable leading system prompt. A previous compact summary counts as
+   compactable content even though its role is `system`.
 3. If the session is `executing_tools`, every pending tool call's originating
    assistant `tool_call` message is inside `[preserveFrom, len)`.
 4. The tail `[preserveFrom, len)` fits inside `recentTailTargetTokens`,

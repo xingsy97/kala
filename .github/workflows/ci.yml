@@ -22,5 +22,5 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run test
       - run: pnpm run verify:swebench-smoke
-      - run: pnpm run build:release-assets
+      - run: pnpm run build:release-assets -- --no-native --repo ${{ github.repository }}
       - run: pnpm run verify:release-assets

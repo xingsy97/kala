@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
@@ -17,7 +17,7 @@ import type {
   ToolDispatcher,
 } from './loop.js'
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
-import { discoverSkills } from './extensions/skills.js'
+import { createSkillManager, discoverSkills } from './extensions/skills.js'
 
 function silentBroadcast(): LoopBroadcast {
   return {
@@ -345,11 +345,11 @@ describe('host loop', () => {
       provider: 'openai' as const,
       model: 'gpt-5.5',
       request: {
-        url: 'https://api.example.test/v1/chat/completions',
-        headers: { authorization: 'Bearer test-redacted-api-key' },
+        url: 'https://api.example.test/v1/chat/completions?api_key=query-secret',
+        headers: { authorization: 'Bearer test-redacted-api-key', 'x-api-key': 'header-secret' },
         body: { model: 'gpt-5.5', messages: [{ role: 'user', content: 'hi' }] },
       },
-      response: { status: 200, body: { choices: [] } },
+      response: { status: 200, body: { choices: [], url: 'https://api.example.test/v1/chat/completions' } },
     }
     const llm = scriptedLlm([
       {
@@ -361,7 +361,7 @@ describe('host loop', () => {
         trace,
       },
     ])
-    const seen: Array<{ hasTrace: boolean; model?: string }> = []
+    const seen: Array<{ llmTrace?: typeof trace; model?: string }> = []
     const loop = runHostLoop({
       store,
       llm,
@@ -369,7 +369,7 @@ describe('host loop', () => {
       broadcast: {
         ...silentBroadcast(),
         onEvent(_sessionId, _seq, event, _effects, _state, llmTrace, model) {
-          if (event.kind === 'llm_response') seen.push({ hasTrace: Boolean(llmTrace), model })
+          if (event.kind === 'llm_response') seen.push({ ...(llmTrace ? { llmTrace: llmTrace as typeof trace } : {}), model })
         },
       },
     })
@@ -378,9 +378,18 @@ describe('host loop', () => {
 
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     const response = parsed.events.find((entry) => entry.event.kind === 'llm_response')
-    expect(response?.llmTrace).toEqual(trace)
+    expect(response?.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
+    expect(response?.llmTrace?.request.headers.authorization).toBe('[redacted]')
+    expect(response?.llmTrace?.request.headers['x-api-key']).toBe('[redacted]')
+    expect(JSON.stringify(response?.llmTrace)).not.toContain('api.example.test')
+    expect(JSON.stringify(response?.llmTrace)).not.toContain('test-redacted-api-key')
     expect(response?.model).toBe('gpt-5.5')
-    expect(seen).toEqual([{ hasTrace: true, model: 'gpt-5.5' }])
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
+    expect(seen[0]?.llmTrace?.request.headers.authorization).toBe('[redacted]')
+    expect(JSON.stringify(seen[0]?.llmTrace)).not.toContain('api.example.test')
+    expect(JSON.stringify(seen[0]?.llmTrace)).not.toContain('header-secret')
+    expect(seen[0]?.model).toBe('gpt-5.5')
   })
 
   it('drives a tool call round-trip', async () => {
@@ -504,6 +513,97 @@ describe('host loop', () => {
         ? toolMessage.content[0].content
         : '',
     ).toContain('DEMO SKILL BODY')
+  })
+
+  it('refreshes the skill tool schema before the next LLM call in the same session', async () => {
+    const workspace = join(dir, 'workspace')
+    const skillDir = join(workspace, '.agents', 'skills', 'fresh-skill')
+    const skillPath = join(skillDir, 'SKILL.md')
+    mkdirSync(workspace, { recursive: true })
+    const skillConfig = createConfig({
+      tools: [
+        {
+          name: 'skill',
+          description: '<available_skills />',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+        },
+        {
+          name: 'write',
+          description: 'write',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+        },
+      ],
+      systemPrompt: 'sys',
+    })
+    const record = await store.create({
+      sessionId: 'sess-refresh-skill',
+      config: skillConfig,
+      initialCwd: workspace,
+    })
+    const toolDescriptions: string[] = []
+    const llm: LLMAdapter = {
+      name: 'capture-tools',
+      async call(params) {
+        toolDescriptions.push(params.tools.find((tool) => tool.name === 'skill')?.description ?? '')
+        if (toolDescriptions.length === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_call',
+                  callId: 'write-skill',
+                  name: 'write',
+                  input: {
+                    path: skillPath,
+                    content: [
+                      '---',
+                      'name: fresh-skill',
+                      'description: Use for same-session refresh testing.',
+                      '---',
+                      '',
+                      'Fresh instructions.',
+                    ].join('\n'),
+                  },
+                },
+              ],
+            },
+          }
+        }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async (_sessionId, effect) => {
+          const path = effect.input.path
+          const content = effect.input.content
+          if (typeof path === 'string' && typeof content === 'string') {
+            mkdirSync(dirname(path), { recursive: true })
+            writeFileSync(path, content, 'utf8')
+          }
+          return { ok: true, content: 'written' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+      skills: createSkillManager(store, skillConfig),
+    })
+
+    await loop.dispatch(record.sessionId, { kind: 'user_message', text: 'create a skill' })
+
+    expect(toolDescriptions[0]).toContain('<available_skills />')
+    expect(toolDescriptions[1]).toContain('<name>fresh-skill</name>')
+    const parsed = await readSessionLog(record.logPath)
+    const secondCallLlm = parsed.events
+      .flatMap((entry) => entry.effects)
+      .filter((effect) => effect.kind === 'call_llm')[1]
+    expect(secondCallLlm?.kind === 'call_llm'
+      ? secondCallLlm.tools.find((tool) => tool.name === 'skill')?.description
+      : '').toContain('<name>fresh-skill</name>')
   })
 
   it('translates LLM throw into llm_error event', async () => {

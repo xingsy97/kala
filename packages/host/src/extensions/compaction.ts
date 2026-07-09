@@ -36,6 +36,7 @@ import type {
   Message,
   MessageContent,
 } from '@agent-kernel/kernel'
+import type { LLMTrace } from '@agent-kernel/shared'
 import {
   createArtifactStore,
   validateCompactionSummary,
@@ -250,6 +251,8 @@ export async function runCompact(
         tokensAfter,
       },
       aborts,
+      compact.trace,
+      compact.model,
     )
 
     // Reducer-rejection detection: if the reducer refused the pivot (would
@@ -395,6 +398,8 @@ type SummarizeOk = {
   summary: string
   request: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['request']>
   usage?: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['responseUsage']>
+  trace?: LLMTrace
+  model?: string
 }
 
 async function summarize(
@@ -432,6 +437,8 @@ async function summarize(
     summary: text.trim(),
     request,
     ...(res.usage ? { usage: res.usage } : {}),
+    ...(res.trace ? { trace: res.trace } : {}),
+    ...(res.trace?.model ?? model ? { model: res.trace?.model ?? model } : {}),
   }
 }
 
@@ -501,7 +508,13 @@ function isContextOverflowError(err: unknown): boolean {
 }
 
 function hasCompactableContent(messages: readonly Message[]): boolean {
-  return messages.some((m) => m.role !== 'system')
+  return messages.some((m, index) => isCompactableMessage(m, index))
+}
+
+function isCompactableMessage(message: Message, index: number): boolean {
+  // The durable leading system prompt is setup, not history. Later system
+  // messages are synthetic compact summaries and may be compacted again.
+  return !(index === 0 && message.role === 'system')
 }
 
 function isPreflightCompactable(
@@ -553,14 +566,19 @@ function choosePreserveFrom(state: AgentState, trigger: CompactTrigger, contextL
 function chooseRecentUserPreserveFrom(messages: readonly Message[], contextLimit: number | undefined): number {
   const targetRecentTailTokens = recentTailTargetTokens(contextLimit)
   let candidate = messages.length
+  let foundUserPivot = false
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]!.role !== 'user') continue
     if (!hasCompactableContent(messages.slice(0, i))) continue
+    foundUserPivot = true
     candidate = i
     const tail = messages.slice(i)
     if (estimateTokens(tail) <= targetRecentTailTokens) return i
   }
-  return candidate
+  // Summary-only compaction: after one or more successful compactions, the
+  // remaining old context may be stored only as synthetic system summaries.
+  // Re-summarize those messages instead of reporting "nothing to compact".
+  return foundUserPivot ? candidate : messages.length
 }
 
 function choosePendingSafePreserveFrom(state: AgentState, contextLimit: number | undefined): number | undefined {

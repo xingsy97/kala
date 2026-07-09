@@ -37,6 +37,7 @@ export type LiveBackgroundTask = BackgroundTaskSummary & {
 type Params = {
   socket: DashboardSocket | null
   workspaceId: string | undefined
+  sessionId: string
   selectedTaskId: string | null
   /** Poll interval for the selected task's tail. Injectable for tests. */
   pollIntervalMs?: number
@@ -52,6 +53,7 @@ export type UseBackgroundTasksResult = {
 export function useBackgroundTasks({
   socket,
   workspaceId,
+  sessionId,
   selectedTaskId,
   pollIntervalMs = DEFAULT_POLL_MS,
 }: Params): UseBackgroundTasksResult {
@@ -78,7 +80,7 @@ export function useBackgroundTasks({
   )
 
   useEffect(() => {
-    if (!socket || !workspaceId) {
+    if (!socket || !workspaceId || !sessionId) {
       setTasks(new Map())
       return
     }
@@ -88,7 +90,7 @@ export function useBackgroundTasks({
     // Baseline: fetch the full list once the workspace binding is known.
     socket.emit(
       'bg:list',
-      { requestId: requestId(), workspaceId },
+      { requestId: requestId(), workspaceId, sessionId },
       (result) => {
         if (cancelled || result.error || !result.tasks) return
         setTasks((prev) => {
@@ -108,7 +110,7 @@ export function useBackgroundTasks({
     )
 
     const onUpdate = (payload: ServerBgTaskUpdated): void => {
-      if (payload.workspaceId !== workspaceId) return
+      if (payload.workspaceId !== workspaceId || payload.sessionId !== sessionId) return
       setTask(payload.task.taskId, (prev) => {
         const base: LiveBackgroundTask = prev ?? {
           ...payload.task,
@@ -145,7 +147,7 @@ export function useBackgroundTasks({
     }
 
     const onEvicted = (payload: ServerBgTaskEvicted): void => {
-      if (payload.workspaceId !== workspaceId) return
+      if (payload.workspaceId !== workspaceId || payload.sessionId !== sessionId) return
       setTask(payload.taskId, () => null)
     }
 
@@ -157,13 +159,13 @@ export function useBackgroundTasks({
       socket.off('server:bg_task_updated', onUpdate)
       socket.off('server:bg_task_evicted', onEvicted)
     }
-  }, [socket, workspaceId, setTask])
+  }, [socket, workspaceId, sessionId, setTask])
 
   // Poll the selected task's tail. Push events fill in most updates, but the
   // poll closes gaps (e.g. we just selected a task that had been idle) and
   // gives users a predictable refresh cadence when the executor is quiet.
   useEffect(() => {
-    if (!socket || !workspaceId || !selectedTaskId) return
+    if (!socket || !workspaceId || !sessionId || !selectedTaskId) return
     let disposed = false
 
     const tick = (): void => {
@@ -171,7 +173,7 @@ export function useBackgroundTasks({
       const offset = current?.nextOffset ?? 0
       socket.emit(
         'bg:output',
-        { requestId: requestId(), workspaceId, taskId: selectedTaskId, offset },
+        { requestId: requestId(), workspaceId, sessionId, taskId: selectedTaskId, offset },
         (result: BgOutputResult) => {
           if (disposed || result.error) return
           setTask(selectedTaskId, (prev) => {
@@ -197,16 +199,16 @@ export function useBackgroundTasks({
       disposed = true
       window.clearInterval(handle)
     }
-  }, [socket, workspaceId, selectedTaskId, pollIntervalMs, setTask])
+  }, [socket, workspaceId, sessionId, selectedTaskId, pollIntervalMs, setTask])
 
   const killTask = useCallback(
     async (taskId: string): Promise<BgKillResult | null> => {
-      if (!socket || !workspaceId) return null
+      if (!socket || !workspaceId || !sessionId) return null
       setTask(taskId, (prev) => (prev ? { ...prev, killing: true } : prev ?? null))
       return await new Promise<BgKillResult | null>((resolve) => {
         socket.emit(
           'bg:kill',
-          { requestId: requestId(), workspaceId, taskId },
+          { requestId: requestId(), workspaceId, sessionId, taskId },
           (result: BgKillResult) => {
             if (!result.killed) {
               setTask(taskId, (prev) => (prev ? { ...prev, killing: false } : prev ?? null))
@@ -216,7 +218,7 @@ export function useBackgroundTasks({
         )
       })
     },
-    [socket, workspaceId, setTask],
+    [socket, workspaceId, sessionId, setTask],
   )
 
   const list = useMemo(() => {

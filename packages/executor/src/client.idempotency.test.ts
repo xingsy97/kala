@@ -3,8 +3,7 @@
  *
  * Ensures that when the host re-emits the same `tool:call` (which happens
  * on the reconnect path via `redispatchPending`), the executor doesn't
- * re-run the tool. Instead it returns the cached result and re-emits
- * `executor:tool_result` so the host reliably re-observes the settle.
+ * re-run the tool. Instead it returns the cached result via ack.
  *
  * Regression guard against duplicate side effects: `bash rm foo`, `write`,
  * anything with observable state — a naive re-emit would run twice.
@@ -97,14 +96,6 @@ describe('executor idempotency', () => {
 
     expect(runs).toHaveBeenCalledTimes(1) // still 1 — didn't re-run
     expect(ack2).toHaveBeenCalledWith({ callId: 'call-A', ok: true, content: 'ran-tool' })
-
-    // executor:tool_result should have been emitted twice — once for each
-    // tool:call — so the host reliably re-observes the settle on the
-    // reconnect path.
-    const resultEmits = socket.__emitted.filter((e) => e.event === 'executor:tool_result')
-    expect(resultEmits).toHaveLength(2)
-    expect(resultEmits[0]?.args[0]).toMatchObject({ callId: 'call-A', ok: true })
-    expect(resultEmits[1]?.args[0]).toMatchObject({ callId: 'call-A', ok: true })
   })
 
   it('ignores a duplicate tool:call for a call still in flight (no double-spawn)', async () => {

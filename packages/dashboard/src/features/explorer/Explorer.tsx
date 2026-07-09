@@ -270,7 +270,7 @@ function Header({
             className="h-7 gap-1 rounded-full px-2.5 text-xs"
           >
             <Cable className="h-3 w-3" />
-            {t('explorer.workspace')}
+            {t('explorer.addWorkspace')}
           </Button>
           {onCollapse ? (
             <Button

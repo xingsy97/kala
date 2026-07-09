@@ -64,6 +64,7 @@ describe('NewSessionDialog', () => {
         workspaces={[wsA]}
         socket={makeSocket().socket as never}
         onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -79,6 +80,7 @@ describe('NewSessionDialog', () => {
         workspaces={[wsA]}
         socket={harness.socket as never}
         onCreate={onCreate}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -138,6 +140,7 @@ describe('NewSessionDialog', () => {
         workspaces={[wsA]}
         socket={harness.socket as never}
         onCreate={onCreate}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -165,6 +168,7 @@ describe('NewSessionDialog', () => {
         error="cwd is not a readable directory"
         submitting
         onCreate={onCreate}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -188,6 +192,7 @@ describe('NewSessionDialog', () => {
         initialWorkspaceId="ws-b"
         socket={harness.socket as never}
         onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -211,6 +216,7 @@ describe('NewSessionDialog', () => {
         initialWorkspaceId="ws-deleted"
         socket={harness.socket as never}
         onCreate={onCreate}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -237,6 +243,7 @@ describe('NewSessionDialog', () => {
         initialWorkspaceId="ws-deleted"
         socket={harness.socket as never}
         onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -251,6 +258,7 @@ describe('NewSessionDialog', () => {
         initialWorkspaceId="ws-deleted"
         socket={harness.socket as never}
         onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -267,6 +275,7 @@ describe('NewSessionDialog', () => {
         workspaces={[wsA]}
         socket={harness.socket as never}
         onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -313,6 +322,7 @@ describe('NewSessionDialog', () => {
         workspaces={[wsA]}
         socket={harness.socket as never}
         onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -387,7 +397,8 @@ describe('NewSessionDialog', () => {
           workspaces={[wsA]}
           socket={harness.socket as never}
           onCreate={() => {}}
-          onCancel={() => {}}
+          onCreateSimpleChat={() => {}}
+        onCancel={() => {}}
         />,
       )
 
@@ -429,6 +440,7 @@ describe('NewSessionDialog', () => {
         workspaces={[wsA]}
         socket={harness.socket as never}
         onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
         onCancel={() => {}}
       />,
     )
@@ -482,5 +494,22 @@ describe('NewSessionDialog', () => {
       'client:list_dirs',
       expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
     )
+  })
+
+  it('invokes onCreateSimpleChat when the simple chat tile is clicked', () => {
+    const onCreateSimpleChat = vi.fn()
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={() => {}}
+        onCreateSimpleChat={onCreateSimpleChat}
+        onCancel={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('new-session-simple-chat'))
+    expect(onCreateSimpleChat).toHaveBeenCalledTimes(1)
   })
 })

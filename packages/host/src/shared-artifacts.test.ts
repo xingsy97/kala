@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { EventEntry, HeaderEntry, LLMTrace } from '@agent-kernel/shared'
+import { redactLlmTrace } from '@agent-kernel/shared'
 import {
   buildSweBenchEvaluationCommand,
   createArtifactStore,
@@ -77,6 +78,30 @@ describe('enhancement foundation', () => {
     expect(result.summary.rules).toContain('url.base')
     expect(result.summary.rules).toContain('secret.key')
     expect(result.summary.rules).toContain('path.workspace_root')
+  })
+
+  it('redacts LLM trace endpoint and credential headers while preserving body', () => {
+    const trace: LLMTrace = {
+      provider: 'openai',
+      model: 'gpt-test',
+      request: {
+        url: 'https://gateway.example.com/v1/chat/completions?api_key=abc',
+        headers: {
+          authorization: 'Bearer test-redacted-api-key',
+          'x-api-key': 'anthropic-secret',
+          'content-type': 'application/json',
+        },
+        body: { model: 'gpt-test', messages: [{ role: 'user', content: 'hello' }] },
+      },
+      response: { status: 200, body: { id: 'cmpl_1' } },
+    }
+
+    const redacted = redactLlmTrace(trace)
+    expect(redacted.request.url).toBe('https://<redacted>/v1/chat/completions')
+    expect(redacted.request.headers.authorization).toBe('[redacted]')
+    expect(redacted.request.headers['x-api-key']).toBe('[redacted]')
+    expect(redacted.request.headers['content-type']).toBe('application/json')
+    expect(redacted.request.body).toEqual(trace.request.body)
   })
 
   it('writes redacted artifacts with hashes and relative refs', async () => {

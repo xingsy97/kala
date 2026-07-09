@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../components/ui/button.js'
+import type { ServerSettingsPayload } from '@agent-kernel/shared'
 import {
   Dialog,
   DialogContent,
@@ -19,7 +20,6 @@ type Props = {
 
 type OsTab = 'unix' | 'windows'
 
-const RELEASE_BASE = 'https://github.com/OWNER/REPO/releases/latest/download'
 const OS_TABS: ReadonlyArray<{ value: OsTab; label: string; icon: typeof Terminal }> = [
   { value: 'unix', label: 'Mac/Linux', icon: Terminal },
   { value: 'windows', label: 'Windows', icon: Monitor },
@@ -30,6 +30,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [tab, setTab] = useState<OsTab>(() => detectCurrentOs())
   const [copied, setCopied] = useState(false)
   const hostUrl = useMemo(() => hostUrlFromLocation(), [])
+  const fallbackBootstrapBaseUrl = useMemo(() => `${hostUrl}/release-assets`, [hostUrl])
 
   // Executor invites are single-use tokens minted by the host. We mint one
   // per dialog session (keyed by `open`) so re-opening the dialog issues a
@@ -46,8 +47,19 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
     gcTime: 0,
   })
   const invite = inviteQuery.data ?? null
+  const settingsQuery = useQuery({
+    queryKey: ['settings', 'release-bootstrap'],
+    queryFn: async (): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings')
+      if (!res.ok) throw new Error(await res.text())
+      return (await res.json()) as ServerSettingsPayload
+    },
+    enabled: open,
+    staleTime: 30_000,
+  })
+  const bootstrapBaseUrl = resolveBootstrapBaseUrl(settingsQuery.data?.release, hostUrl, fallbackBootstrapBaseUrl)
   const error = inviteQuery.error ? (inviteQuery.error as Error).message : null
-  const command = commandFor(tab, hostUrl, invite?.inviteToken)
+  const command = commandFor(tab, hostUrl, bootstrapBaseUrl, invite?.inviteToken)
 
   const copy = async (): Promise<void> => {
     await navigator.clipboard.writeText(command)
@@ -175,15 +187,16 @@ function powershellQuote(value: string): string {
   return `"${escaped}"`
 }
 
-function commandFor(tab: OsTab, hostUrl: string, invite?: string): string {
+function commandFor(tab: OsTab, hostUrl: string, bootstrapBaseUrl: string, invite?: string): string {
   const invitePart = invite ? invite : 'preparing-invite'
+  const base = bootstrapBaseUrl.replace(/\/+$/, '')
   if (tab === 'windows') {
     const quotedHost = powershellQuote(hostUrl)
     const quotedInvite = powershellQuote(invitePart)
     return [
       `$dir = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "agent-kernel-$([guid]::NewGuid())");`,
-      `iwr ${RELEASE_BASE}/agent-kernel-executor.cjs -OutFile "$dir/agent-kernel-executor.cjs";`,
-      `iwr ${RELEASE_BASE}/SHA256SUMS -OutFile "$dir/SHA256SUMS";`,
+      `iwr ${base}/agent-kernel-executor.cjs -OutFile "$dir/agent-kernel-executor.cjs";`,
+      `iwr ${base}/SHA256SUMS -OutFile "$dir/SHA256SUMS";`,
       `$exp = (Get-Content "$dir/SHA256SUMS" | Where-Object { $_ -match 'agent-kernel-executor.cjs$' }).Split()[0];`,
       `if ((Get-FileHash "$dir/agent-kernel-executor.cjs" -Algorithm SHA256).Hash -ne $exp.ToUpper()) { throw 'checksum mismatch' };`,
       `$env:HOST_URL=${quotedHost};`,
@@ -192,7 +205,27 @@ function commandFor(tab: OsTab, hostUrl: string, invite?: string): string {
       `node "$dir/agent-kernel-executor.cjs"`,
     ].join('\n')
   }
-  return `wget -qO- ${RELEASE_BASE}/run.sh | COMPONENT=executor HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(invitePart)} SANDBOX_ROOTS="$PWD" bash`
+  return `wget -O- ${base}/run.sh | COMPONENT=executor AGENT_KERNEL_RELEASE_BASE_URL=${shellQuote(base)} HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(invitePart)} SANDBOX_ROOTS="$PWD" bash`
+}
+
+function resolveBootstrapBaseUrl(
+  release: ServerSettingsPayload['release'] | undefined,
+  hostUrl: string,
+  fallback: string,
+): string {
+  if (!release) return fallback
+  if (release.source !== 'local') return release.bootstrapBaseUrl
+  const path = localReleaseAssetPath(release.bootstrapBaseUrl)
+  return `${hostUrl}${path}`
+}
+
+function localReleaseAssetPath(value: string): string {
+  try {
+    const parsed = new URL(value)
+    return parsed.pathname || '/release-assets'
+  } catch {
+    return value.startsWith('/') ? value : '/release-assets'
+  }
 }
 
 function detectCurrentOs(): OsTab {

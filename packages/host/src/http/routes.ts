@@ -1732,6 +1732,18 @@ export function attachStaticHandler(server: HttpServer, staticDir: string): void
   })
 }
 
+export function attachReleaseAssetsHandler(server: HttpServer, releaseDir: string): void {
+  const root = resolvePath(releaseDir)
+  server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const url = req.url ?? '/'
+    if (!url.startsWith('/release-assets/')) return
+    if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (routeClaimed(req) || res.headersSent || res.writableEnded) return
+    claimRoute(req)
+    void serveReleaseAsset(root, req, res)
+  })
+}
+
 export function attachRequestHandler(
   server: HttpServer,
   handler: (req: IncomingMessage, res: ServerResponse) => void,
@@ -1780,6 +1792,41 @@ async function serveStatic(
     return
   }
   createReadStream(filePath).pipe(res)
+}
+
+async function serveReleaseAsset(
+  root: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://x')
+  const requested = decodeURIComponent(url.pathname.replace(/^\/release-assets\//, ''))
+  if (!requested || requested.includes('/')) {
+    res.writeHead(404).end('not found')
+    return
+  }
+  const abs = join(root, normalize(requested).replace(/^[/\\]+/, ''))
+  if (!abs.startsWith(root + sep) && abs !== root) {
+    res.writeHead(403).end()
+    return
+  }
+  try {
+    const st = await stat(abs)
+    if (!st.isFile()) {
+      res.writeHead(404).end('not found')
+      return
+    }
+  } catch {
+    res.writeHead(404).end('not found')
+    return
+  }
+  const mime = MIME[extname(abs).toLowerCase()] ?? 'application/octet-stream'
+  res.writeHead(200, { 'content-type': mime, 'cache-control': 'no-cache, must-revalidate' })
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  createReadStream(abs).pipe(res)
 }
 
 async function pickFile(abs: string, root: string): Promise<string | null> {

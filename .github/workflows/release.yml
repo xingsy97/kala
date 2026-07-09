@@ -25,22 +25,12 @@ on:
         default: ''
 
 jobs:
-  release-assets:
+  resolve:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      component: ${{ steps.release.outputs.component }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
       - name: Resolve release target
         id: release
         run: |
@@ -76,29 +66,125 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "component=$COMPONENT" >> "$GITHUB_OUTPUT"
 
+  native-assets:
+    needs: resolve
+    if: needs.resolve.outputs.component != 'dashboard'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: macos-13
+            target: darwin-x64
+          - os: windows-latest
+            target: win32-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: release/agent-kernel-*-${{ matrix.target }}*
+          if-no-files-found: error
+
+  cjs-release:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test
-      - run: pnpm run build:release-assets -- --component ${{ steps.release.outputs.component }} --tag ${{ steps.release.outputs.tag }} --repo ${{ github.repository }}
+      - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --no-native
       - run: pnpm run verify:release-assets
       - name: Install-time smoke on release assets (host + dashboard bundle)
-        if: steps.release.outputs.component == 'all' || steps.release.outputs.component == 'host'
+        if: needs.resolve.outputs.component == 'all' || needs.resolve.outputs.component == 'host'
         run: pnpm run verify:release-install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cjs-release-assets
+          path: release/*
+          if-no-files-found: error
 
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
-          COMPONENT: ${{ steps.release.outputs.component }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          COMPONENT: ${{ needs.resolve.outputs.component }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
             gh release delete-asset "$TAG" run-host.sh --yes || true
             gh release delete-asset "$TAG" run-executor.sh --yes || true
+            for asset in \
+              agent-kernel-host-linux-x64 agent-kernel-host-linux-arm64 agent-kernel-host-darwin-x64 agent-kernel-host-darwin-arm64 agent-kernel-host-win32-x64.exe agent-kernel-host-win32-arm64.exe \
+              agent-kernel-executor-linux-x64 agent-kernel-executor-linux-arm64 agent-kernel-executor-darwin-x64 agent-kernel-executor-darwin-arm64 agent-kernel-executor-win32-x64.exe agent-kernel-executor-win32-arm64.exe; do
+              gh release delete-asset "$TAG" "$asset" --yes || true
+            done
             gh release upload "$TAG" release/* --clobber
           else
             gh release create "$TAG" release/* \
               --title "$TAG" \
               --notes-file release/RELEASE_NOTES.md
           fi
+
+  native-release:
+    needs: [resolve, cjs-release, native-assets]
+    if: always() && needs.resolve.result == 'success' && needs.cjs-release.result == 'success' && needs.native-assets.result == 'success' && needs.resolve.outputs.component != 'dashboard'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: cjs-release-assets
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: release
+          merge-multiple: true
+      - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --finalize-only
+      - run: pnpm run verify:release-assets
+      - name: Upload native assets and refreshed metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
+          gh release upload "$TAG" release/* --clobber

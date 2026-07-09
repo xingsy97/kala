@@ -40,7 +40,6 @@ import type {
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
   ExecutorServerToClientEvents,
-  ExecutorToolResult,
   FileContentsResult,
   FileListResult,
   OverflowContentsResult,
@@ -52,6 +51,15 @@ import type { ToolDispatcher } from '../loop.js'
 import type { AuditLogger } from '../audit-log.js'
 
 export const DEFAULT_TOOL_TIMEOUT_MS = 60_000
+
+/**
+ * How long to hold a detached executor's pending calls and its "attached"
+ * state visible to dashboards, waiting for the process to reconnect with the
+ * same workspaceId. Covers routine executor restarts (systemd/tmux respawn,
+ * user Ctrl+C+re-run, transient socket drops) so in-flight tool calls survive
+ * and the UI doesn't flicker offline.
+ */
+export const DETACH_GRACE_MS = 5_000
 
 type Pending = {
   sessionId: string
@@ -102,7 +110,6 @@ export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
       ExecutorServerToClientEvents
     >,
   ): void
-  fulfill(sessionId: string, result: ExecutorToolResult): void
   activeSessions(): string[]
   snapshot(): AttachedExecutor[]
   renameWorkspace(workspaceId: string, workspaceName: string): AttachedExecutor | undefined
@@ -114,6 +121,7 @@ export function createExecutorRegistry(
   resolver: WorkspaceResolver,
   toolTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS,
   audit?: AuditLogger,
+  detachGraceMs = DETACH_GRACE_MS,
 ): ExecutorRegistry {
   type Bind = {
     socket: Socket<
@@ -129,6 +137,16 @@ export function createExecutorRegistry(
   const byExecutor = new Map<string, Bind>()
   const socketToExecutor = new Map<string, string>()
   const listeners = new Set<ExecutorChangeListener>()
+
+  /**
+   * Workspaces whose executor socket just went away but where we're still
+   * within the grace window. Pending calls are kept in `bind.pending` so a
+   * fast reconnect can pick them up via `redispatchPending`. Keyed by
+   * workspaceId so a restarted process with a fresh executorId can find its
+   * predecessor.
+   */
+  type Detaching = { bind: Bind; timer: NodeJS.Timeout }
+  const detaching = new Map<string, Detaching>()
 
   function emitChange(change: ServerExecutorChangedPayload): void {
     for (const l of listeners) l(change)
@@ -332,11 +350,32 @@ export function createExecutorRegistry(
         return
       }
 
-      // Case 2: different executorId but same workspaceId → a *different*
-      // process is claiming the same workspace. That happens when a
-      // duplicate `~/.agent-kernel/workspace-id` file was copied to another
-      // machine, or when two processes on the same host started before the
-      // local-instance lockfile could take effect.
+      // Case 1b: an earlier bind for this workspaceId is inside the detach
+      // grace window (process restarted with a fresh executorId, or the
+      // socket dropped and reconnected before the timer fired). Cancel the
+      // pending detach, move any in-flight pending calls to the new bind,
+      // and surface the swap as `updated` — the dashboard never sees a
+      // detach flicker.
+      const pendingDetach = detaching.get(workspaceId)
+      if (pendingDetach) {
+        clearTimeout(pendingDetach.timer)
+        detaching.delete(workspaceId)
+        redispatchPending(pendingDetach.bind, newBind)
+        byExecutor.set(executorId, newBind)
+        socketToExecutor.set(socket.id, executorId)
+        emitChange({
+          change: 'updated',
+          executorId,
+          executor: toAttached(newBind),
+        })
+        return
+      }
+
+      // Case 2: different executorId but same workspaceId AND the previous
+      // claimant is still actively attached (no detach in flight). A
+      // *different* process is claiming the same workspace — duplicate
+      // `~/.agent-kernel/workspace-id` copied to another machine, or two
+      // processes racing before the local lockfile takes effect.
       //
       // Arbitration: if the current claimant's socket is still connected,
       // reject the newcomer with a permanent error. If it's already gone
@@ -385,26 +424,29 @@ export function createExecutorRegistry(
       if (!executorId) return
       const bind = byExecutor.get(executorId)
       if (!bind || bind.socket.id !== socket.id) return
-      synthesizeFailure(bind, 'executor disconnected')
+      const workspaceId = bind.announcement.workspaceId
+
+      // Move the bind out of the active registry and into the grace window.
+      // We keep `bind.pending` intact so `redispatchPending` can resurrect
+      // in-flight tool calls if the executor reconnects within DETACH_GRACE_MS.
+      // Routing (findBindByWorkspace / pickBindFor) skips detaching binds —
+      // new tool calls fail with "workspace offline" until reconnect.
       byExecutor.delete(executorId)
       socketToExecutor.delete(socket.id)
-      emitChange({
-        change: 'detached',
-        executorId,
-      })
-    },
-    fulfill(_sessionId, result) {
-      // A callId is unique across the host; scan all executors is O(N executors),
-      // but N is tiny (usually 1). Keeping this simple avoids a second index.
-      for (const bind of byExecutor.values()) {
-        const pending = bind.pending.get(result.callId)
-        if (!pending) continue
-        clearTimeout(pending.timer)
-        bind.pending.delete(result.callId)
-        audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId: pending.sessionId, callId: result.callId, toolName: pending.name }, outcome: result.ok ? 'ok' : 'error', metadata: { contentBytes: Buffer.byteLength(result.content, 'utf8') }, ...(result.ok ? {} : { error: result.content.slice(0, 200) }) })
-        pending.resolve({ ok: result.ok, content: result.content })
-        return
+      const prior = detaching.get(workspaceId)
+      if (prior) {
+        clearTimeout(prior.timer)
+        synthesizeFailure(prior.bind, 'executor disconnected')
       }
+      const timer = setTimeout(() => {
+        detaching.delete(workspaceId)
+        synthesizeFailure(bind, 'executor disconnected')
+        emitChange({
+          change: 'detached',
+          executorId,
+        })
+      }, detachGraceMs)
+      detaching.set(workspaceId, { bind, timer })
     },
     async callTool(sessionId, eff: CallToolEffect) {
       const picked = pickBindFor(sessionId)
@@ -612,6 +654,7 @@ export function createExecutorRegistry(
         return {
           requestId: payload.requestId,
           workspaceId: payload.workspaceId,
+          sessionId: payload.sessionId,
           tasks: [],
           error: 'workspace offline',
         }
@@ -624,6 +667,7 @@ export function createExecutorRegistry(
         (msg) => ({
           requestId: payload.requestId,
           workspaceId: payload.workspaceId,
+          sessionId: payload.sessionId,
           tasks: [],
           error: msg,
         }),
@@ -635,6 +679,7 @@ export function createExecutorRegistry(
         return {
           requestId: payload.requestId,
           workspaceId: payload.workspaceId,
+          sessionId: payload.sessionId,
           taskId: payload.taskId,
           content: '',
           nextOffset: 0,
@@ -652,6 +697,7 @@ export function createExecutorRegistry(
         (msg) => ({
           requestId: payload.requestId,
           workspaceId: payload.workspaceId,
+          sessionId: payload.sessionId,
           taskId: payload.taskId,
           content: '',
           nextOffset: 0,
@@ -668,6 +714,7 @@ export function createExecutorRegistry(
         return {
           requestId: payload.requestId,
           workspaceId: payload.workspaceId,
+          sessionId: payload.sessionId,
           taskId: payload.taskId,
           killed: false,
           error: 'workspace offline',
@@ -681,6 +728,7 @@ export function createExecutorRegistry(
         (msg) => ({
           requestId: payload.requestId,
           workspaceId: payload.workspaceId,
+          sessionId: payload.sessionId,
           taskId: payload.taskId,
           killed: false,
           error: msg,

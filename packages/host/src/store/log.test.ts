@@ -57,6 +57,59 @@ describe('readSessionLog', () => {
     expect(parsed.warnings).toEqual([])
   })
 
+  it('redacts LLM trace endpoint and credentials before writing event logs', async () => {
+    const path = join(dir, 'llm-trace-redaction.jsonl')
+    await writeHeader({ path, sessionId: 's-redaction', config, initialState })
+    await appendEventEntry({
+      path,
+      seq: 1,
+      event: {
+        kind: 'llm_response',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+      },
+      effects: [],
+      llmTrace: {
+        provider: 'openai',
+        model: 'gpt-test',
+        request: {
+          url: 'https://gateway.example.com/v1/chat/completions?api_key=query-secret',
+          headers: {
+            authorization: 'Bearer test-redacted-api-key',
+            'x-api-key': 'anthropic-secret',
+            'content-type': 'application/json',
+          },
+          body: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: 'hello' }],
+            baseUrl: 'https://gateway.example.com/v1',
+            metadata: { token: 'body-secret' },
+          },
+        },
+        response: {
+          status: 401,
+          body: {
+            error: 'OPENAI_API_KEY=test-redacted-api-key rejected',
+            url: 'https://gateway.example.com/v1/chat/completions',
+          },
+        },
+      },
+    })
+
+    const raw = await readFile(path, 'utf8')
+    expect(raw).not.toContain('gateway.example.com')
+    expect(raw).not.toContain('test-redacted-api-key')
+    expect(raw).not.toContain('anthropic-secret')
+    expect(raw).not.toContain('body-secret')
+    expect(raw).toContain('https://<redacted>/v1/chat/completions')
+
+    const parsed = await readSessionLog(path)
+    const entry = parsed.events[0]!
+    expect(entry.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
+    expect(entry.llmTrace?.request.headers.authorization).toBe('[redacted]')
+    expect(entry.llmTrace?.request.headers['x-api-key']).toBe('[redacted]')
+    expect(entry.llmTrace?.request.headers['content-type']).toBe('application/json')
+  })
+
   it('recovers from a truncated final line (crash mid-append)', async () => {
     // Simulate the exact failure: valid header + valid event, then a partial
     // JSON blob with no trailing newline. This is what a SIGKILL between the

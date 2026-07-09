@@ -78,16 +78,6 @@ describe('wire contract — round-trip parses', () => {
     expect(out.workspaceId).toBe('ws-1')
   })
 
-  it('parses ExecutorToolResult (ok)', () => {
-    const out = schema.ExecutorToolResultSchema.parse({
-      sessionId: 's-1',
-      callId: 'c-1',
-      ok: true,
-      content: 'done',
-    })
-    expect(out.callId).toBe('c-1')
-  })
-
   it('parses ClientCreateSession with and without cwd', () => {
     expect(schema.ClientCreateSessionSchema.parse({
       sessionId: 's', workspaceId: 'ws',

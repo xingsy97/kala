@@ -154,7 +154,7 @@ async function main(): Promise<void> {
   const executorId = args.id ?? process.env.EXECUTOR_ID
   const autoUpdate = args.autoUpdate === true || process.env.AGENT_KERNEL_AUTO_UPDATE === '1'
   const noUpdateCheck = args.noUpdateCheck === true || process.env.AGENT_KERNEL_NO_UPDATE_CHECK === '1'
-  const updateRepo = args.updateRepo ?? process.env.AGENT_KERNEL_UPDATE_REPO ?? 'OWNER/REPO'
+  const updateRepo = args.updateRepo ?? process.env.AGENT_KERNEL_UPDATE_REPO
 
   if (!host) {
     logger.error(
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     void lockfile.unlock(lockPath, { realpath: false }).catch(() => undefined)
   })
 
-  if (!noUpdateCheck && process.env.AGENT_KERNEL_SKIP_UPDATE_ONCE !== '1') {
+  if (updateRepo && !noUpdateCheck && process.env.AGENT_KERNEL_SKIP_UPDATE_ONCE !== '1') {
     try {
       await checkExecutorUpdate({
         repo: updateRepo,
