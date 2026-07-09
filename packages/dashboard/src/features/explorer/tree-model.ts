@@ -1,6 +1,6 @@
 /**
  * Pure tree-shaping for the Explorer view: fold (executors, sessions) into a
- * hierarchy — workspace parents, optional time-bucket groups, session leaves.
+ * hierarchy — workspace parents with flat session leaves.
  *
  * Kept DOM-free so we can unit-test grouping and sort order without a
  * component harness. Explorer.tsx feeds the output directly to react-arborist.
@@ -22,16 +22,6 @@ export type WorkspaceNode = {
   children: WorkspaceChild[]
 }
 
-export type TimeBucketKey = 'today' | 'yesterday' | 'last7' | 'last30' | 'older'
-
-export type TimeBucketNode = {
-  id: string
-  kind: 'bucket'
-  bucket: TimeBucketKey
-  label: string
-  children: SessionNode[]
-}
-
 export type SessionNode = {
   id: string
   kind: 'session'
@@ -46,35 +36,15 @@ export type SessionNode = {
   /**
    * Forked children. A session is a child of another when its
    * `parentSessionId` matches a session in the same workspace. Children
-   * nest directly under the parent — they bypass time-bucketing because a
-   * fork's structural home is its parent, not its own activity bucket.
+   * nest directly under the parent so fork relationships stay visible.
    */
   children: SessionNode[]
 }
 
-export type WorkspaceChild = TimeBucketNode | SessionNode
-export type TreeNode = WorkspaceNode | TimeBucketNode | SessionNode
+export type WorkspaceChild = SessionNode
+export type TreeNode = WorkspaceNode | SessionNode
 
 const UNASSIGNED_KEY = '__unassigned__'
-
-const BUCKET_ORDER: readonly TimeBucketKey[] = [
-  'today',
-  'yesterday',
-  'last7',
-  'last30',
-  'older',
-]
-
-const BUCKET_LABEL: Record<TimeBucketKey, string> = {
-  today: 'Today',
-  yesterday: 'Yesterday',
-  last7: 'Previous 7 days',
-  last30: 'Previous 30 days',
-  older: 'Older',
-}
-
-/** Sessions per workspace below this stay flat — bucketing 1–2 items is noise. */
-const BUCKET_THRESHOLD = 3
 
 export type BuildTreeOptions = {
   /** Injected clock for deterministic tests. Defaults to `Date.now()`. */
@@ -86,7 +56,7 @@ export function buildTree(
   sessions: readonly SessionSummary[],
   options: BuildTreeOptions = {},
 ): WorkspaceNode[] {
-  const now = options.now ?? Date.now
+  void options
   const workspacesByKey = new Map<string, WorkspaceNode>()
 
   for (const ex of executors) {
@@ -137,10 +107,7 @@ export function buildTree(
     const roots = nestForkedSessions(workspaceSessions, key, allNodes, workspaceKeyBySession)
     const workspace = workspacesByKey.get(key)
     if (!workspace) continue
-    workspace.children =
-      roots.length >= BUCKET_THRESHOLD
-        ? groupByTime(roots, now())
-        : roots
+    workspace.children = roots
   }
 
   return [...workspacesByKey.values()].sort(compareWorkspaces)
@@ -164,56 +131,7 @@ function nestForkedSessions(
     else roots.push(node)
   }
 
-  sortSessionsByActivity(roots)
-  for (const node of sessions) sortSessionsByActivity(node.children)
   return roots
-}
-
-function sortSessionsByActivity(sessions: SessionNode[]): void {
-  sessions.sort((a, b) => b.lastActivityIso.localeCompare(a.lastActivityIso))
-}
-
-export function groupByTime(
-  sessions: readonly SessionNode[],
-  nowMs: number,
-): TimeBucketNode[] {
-  const grouped = new Map<TimeBucketKey, SessionNode[]>()
-  for (const s of sessions) {
-    const key = classify(s.lastActivityIso, nowMs)
-    const list = grouped.get(key) ?? []
-    list.push(s)
-    grouped.set(key, list)
-  }
-  const nodes: TimeBucketNode[] = []
-  for (const key of BUCKET_ORDER) {
-    const list = grouped.get(key)
-    if (!list || list.length === 0) continue
-    nodes.push({
-      id: `bucket:${key}`,
-      kind: 'bucket',
-      bucket: key,
-      label: BUCKET_LABEL[key],
-      children: list,
-    })
-  }
-  return nodes
-}
-
-function classify(iso: string, nowMs: number): TimeBucketKey {
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return 'older'
-  const now = new Date(nowMs)
-  const startOfToday = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  )
-  const dayMs = 86_400_000
-  if (t >= startOfToday) return 'today'
-  if (t >= startOfToday - dayMs) return 'yesterday'
-  if (t >= startOfToday - 7 * dayMs) return 'last7'
-  if (t >= startOfToday - 30 * dayMs) return 'last30'
-  return 'older'
 }
 
 function sessionNode(s: SessionSummary): SessionNode {

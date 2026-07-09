@@ -24,6 +24,9 @@ import type {
   ClientDeleteManualModel,
   ServerExecutorIdentitiesPayload,
   ServerExecutorIdentityRevokedPayload,
+  ServerExecutorInvitePayload,
+  ServerExecutorInviteRevokedPayload,
+  ServerExecutorInvitesPayload,
   ModelInfo,
   ServerModelsPayload,
   ServerSettingsPayload,
@@ -374,6 +377,18 @@ export function attachJsonRoutes(
       sendJson(req, res, { ok: true })
       return
     }
+    if (path === '/auth/executor-invites' && req.method === 'GET') {
+      claimRoute(req)
+      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      if (!auth.ok) {
+        payloads.audit?.log({ action: 'executor_invite.list', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
+        sendError(res, 401, auth.reason)
+        return
+      }
+      const body: ServerExecutorInvitesPayload = { invites: payloads.auth?.executorIdentityStore?.inviteSnapshot() ?? [] }
+      sendJson(req, res, body)
+      return
+    }
     if (path === '/auth/executor-invites' && req.method === 'POST') {
       claimRoute(req)
       const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
@@ -382,13 +397,73 @@ export function attachJsonRoutes(
         sendError(res, 401, auth.reason)
         return
       }
-      const invite = payloads.auth?.executorIdentityStore?.createInvite()
-      if (!invite) {
-        sendError(res, 500, 'executor identity store is not configured')
+      void readJson(req)
+        .then((body) => {
+          const input = typeof body === 'object' && body !== null ? body as { label?: unknown; workspaceId?: unknown } : {}
+          const invite = payloads.auth?.executorIdentityStore?.createInvite({ label: cleanString(input.label), workspaceId: cleanString(input.workspaceId) })
+          if (!invite) {
+            sendError(res, 500, 'executor identity store is not configured')
+            return
+          }
+          const response: ServerExecutorInvitePayload = invite
+          payloads.audit?.log({ action: 'executor_invite.create', actor: httpActor(req, payloads.auth), outcome: 'ok', target: invite.workspaceId ? { workspaceId: invite.workspaceId } : undefined, metadata: { id: invite.id } })
+          sendJson(req, res, response)
+        })
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    const invitePathMatch = path.match(/^\/auth\/executor-invites\/([^/]+)(?:\/(regenerate))?$/u)
+    if (invitePathMatch && (req.method === 'PATCH' || req.method === 'DELETE' || req.method === 'POST')) {
+      claimRoute(req)
+      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      if (!auth.ok) {
+        payloads.audit?.log({ action: 'executor_invite.manage', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
+        sendError(res, 401, auth.reason)
         return
       }
-      payloads.audit?.log({ action: 'executor_invite.create', actor: httpActor(req, payloads.auth), outcome: 'ok', metadata: { expiresAt: invite.expiresAt } })
-      sendJson(req, res, invite)
+      const id = decodeURIComponent(invitePathMatch[1] ?? '').trim()
+      const action = invitePathMatch[2]
+      if (!id) {
+        sendError(res, 400, 'invite id is required')
+        return
+      }
+      if (req.method === 'PATCH' && !action) {
+        void readJson(req)
+          .then((body) => {
+            const input = typeof body === 'object' && body !== null ? body as { label?: unknown; workspaceId?: unknown } : {}
+            const updated = payloads.auth?.executorIdentityStore?.updateInvite(id, {
+              ...(Object.prototype.hasOwnProperty.call(input, 'label') ? { label: cleanString(input.label) ?? '' } : {}),
+              ...(Object.prototype.hasOwnProperty.call(input, 'workspaceId') ? { workspaceId: input.workspaceId === null ? null : cleanString(input.workspaceId) ?? '' } : {}),
+            })
+            if (!updated) {
+              sendError(res, 404, 'invite not found')
+              return
+            }
+            payloads.audit?.log({ action: 'executor_invite.update', actor: httpActor(req, payloads.auth), outcome: 'ok', metadata: { id } })
+            sendJson(req, res, updated)
+          })
+          .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+        return
+      }
+      if (req.method === 'DELETE' && !action) {
+        const revoked = payloads.auth?.executorIdentityStore?.revokeInvite(id) ?? false
+        payloads.audit?.log({ action: 'executor_invite.revoke', actor: httpActor(req, payloads.auth), outcome: revoked ? 'ok' : 'denied', ...(revoked ? {} : { error: 'invite_not_found' }), metadata: { id } })
+        const body: ServerExecutorInviteRevokedPayload = { ok: true, id, revoked }
+        sendJson(req, res, body)
+        return
+      }
+      if (req.method === 'POST' && action === 'regenerate') {
+        const invite = payloads.auth?.executorIdentityStore?.regenerateInvite(id)
+        if (!invite) {
+          sendError(res, 404, 'invite not found')
+          return
+        }
+        const response: ServerExecutorInvitePayload = invite
+        payloads.audit?.log({ action: 'executor_invite.regenerate', actor: httpActor(req, payloads.auth), outcome: 'ok', metadata: { id } })
+        sendJson(req, res, response)
+        return
+      }
+      sendError(res, 405, 'method not allowed')
       return
     }
     if (path === '/auth/executor-identities' && req.method === 'GET') {
@@ -559,6 +634,7 @@ function isProtectedJsonRoute(path: string): boolean {
     path === '/settings' ||
     path === '/settings/models' ||
     path === '/auth/executor-invites' ||
+    path.startsWith('/auth/executor-invites/') ||
     path === '/auth/executor-identities' ||
     path.startsWith('/eval/') ||
     path.startsWith('/enhancement/') ||

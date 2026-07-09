@@ -180,8 +180,11 @@ The docs are layered by intent — pick your entry point:
 **Want to implement something on top of the kernel?** (~1 hour)
 1. [docs/kernel/spec.md](docs/kernel/spec.md) — the *only* normative kernel contract. Types, state machine, invariants.
 2. [docs/protocol/wire-protocol.md](docs/protocol/wire-protocol.md) — every Socket.IO event between Dashboard, Host, and Executor
-3. [docs/protocol/event-log.md](docs/protocol/event-log.md) — the JSONL format that makes replay/fork work
+3. [docs/protocol/event-log.md](docs/protocol/event-log.md) — the current JSONL format that makes replay/fork work
 4. [docs/executor/tools.md](docs/executor/tools.md) — the executor tool set
+
+**Working on session storage or context accounting?**
+- [docs/host/session-log-context-persistence.md](docs/host/session-log-context-persistence.md) — the breaking v2 session-log design, including the current JSONL growth root cause and Codex/Claude Code reference formats
 
 **Want to see where the project stands vs. reference agents?**
 1. [docs/planning/feature-gaps.md](docs/planning/feature-gaps.md) — shipped features, deliberately-out items, and comparison table (pi / opencode / codex / claude-code)

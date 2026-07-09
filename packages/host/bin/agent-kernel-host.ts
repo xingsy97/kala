@@ -39,6 +39,7 @@ import process from 'node:process'
 
 import type { ManualModelInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
 
+import packageJson from '../package.json'
 import { anthropicAdapter } from '../src/llm/anthropic.js'
 import { openaiAdapter } from '../src/llm/openai.js'
 import {
@@ -68,6 +69,7 @@ import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench-cli.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
+const VERSION = packageJson.version
 
 function argValue(argv: readonly string[], name: string): string | undefined {
   for (let i = 0; i < argv.length; i++) {
@@ -79,8 +81,58 @@ function argValue(argv: readonly string[], name: string): string | undefined {
   return undefined
 }
 
+function hasFlag(argv: readonly string[], ...names: readonly string[]): boolean {
+  return argv.some((arg) => names.includes(arg))
+}
+
+function printHelp(): void {
+  process.stdout.write(`agent-kernel-host
+
+Usage:
+  agent-kernel-host [options]
+  agent-kernel-host eval swebench <command> [options]
+  agent-kernel-host enhancement <area> <command> [options]
+
+Options:
+  -h, --help                 Show this help and exit.
+  -v, --version              Print version and exit.
+  --port <port>              HTTP/WebSocket port. Defaults to HOST_PORT or 3000.
+
+Common environment:
+  HOST_PORT                  Port used when --port is omitted.
+  SESSIONS_DIR               Session JSONL directory. Default: ~/.agent-kernel/sessions.
+  AGENT_KERNEL_ARTIFACTS_DIR Artifact root. Set to 0 to disable artifact writes.
+  DASHBOARD_DIR              Static dashboard directory to serve.
+  HOST_AUTH_TOKEN            Optional shared token required by clients.
+  EXECUTOR_TOKENS            Optional JSON array of executor tokens.
+  HOST_MODEL                 Override the default model.
+  LOG_LEVEL                  trace, debug, info, warn, error. Default: info.
+  LOG_FORMAT                 pretty/human or json. Default: pretty.
+
+Examples:
+  agent-kernel-host --port 3000
+  HOST_PORT=3001 DASHBOARD_DIR=/opt/agent-kernel/dashboard agent-kernel-host
+  LOG_FORMAT=json agent-kernel-host --port 3000
+  agent-kernel-host eval swebench --help
+  agent-kernel-host enhancement --help
+`)
+}
+
+function printVersion(): void {
+  process.stdout.write(`agent-kernel-host ${VERSION}\n`)
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2)
+  if (hasFlag(argv, '--help', '-h')) {
+    printHelp()
+    return
+  }
+  if (hasFlag(argv, '--version', '-v')) {
+    printVersion()
+    return
+  }
+
   const enhancementCommand = parseEnhancementCli(argv)
   if (await runEnhancementCli(enhancementCommand)) return
 
@@ -195,23 +247,22 @@ async function main(): Promise<void> {
   })
   release = releaseSettings(server.port)
 
-  logger.info(
-    {
-      port: server.port,
-      sessionsDir,
-      llm: llm.name,
-      models: registry.models.map((m) => m.id),
-      defaultModel,
-      dashboard: dashboard.kind,
-      ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
-      hooks: hooks.length,
-      skills: skills.skills.length,
-      artifactRootDir,
-      auditDir,
-      executorIdentityPath,
-    },
-    'host listening',
-  )
+  const startupDetails = {
+    port: server.port,
+    sessionsDir,
+    llm: llm.name,
+    models: registry.models.map((m) => m.id),
+    defaultModel,
+    dashboard: dashboard.kind,
+    ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
+    hooks: hooks.length,
+    skills: skills.skills.length,
+    artifactRootDir,
+    auditDir,
+    executorIdentityPath,
+  }
+  logger.info(`host listening on http://127.0.0.1:${server.port} (${dashboard.kind} dashboard, ${registry.models.length} models)`)
+  logger.debug(startupDetails, 'host startup details')
   if (registry.models.length === 0) {
     logger.warn(
       'no models configured; check ~/.claude/settings.json and ~/.codex/config.toml',

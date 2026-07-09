@@ -118,11 +118,13 @@ describe('BenchmarksPage', () => {
     await i18n.changeLanguage('zh')
     render(<BenchmarksPage />)
     await waitFor(() => expect(screen.getByTestId('benchmarks-page-title').textContent).toContain('评测'))
-    expect(screen.getByTestId('benchmarks-launcher').textContent).toContain('启动新的 benchmark')
+    expect(screen.getByTestId('benchmarks-launcher').textContent).toContain('启动新的评测')
+    expect(screen.getByTestId('benchmarks-launcher-swebench').textContent).toContain('SWE-bench')
+    expect(screen.getByTestId('benchmarks-launcher-terminal-bench').textContent).toContain('Terminal-Bench')
 
     fireEvent.click(screen.getByTestId('benchmarks-launcher-swebench'))
     await waitFor(() => expect(screen.getByTestId('run-benchmark-wizard-modal')).toBeTruthy())
-    expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行 benchmark 向导')
+    expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行评测向导')
     expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行 Benchmark（引导式）')
 
     await waitFor(() => expect(screen.getByTestId('eval-inline-panel')).toBeTruthy())

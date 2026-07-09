@@ -15,8 +15,9 @@ visible in the JSONL ledger and dashboard debugger.
 Long-running coding-agent sessions fail in three ways, and a robust compaction
 system must handle all three without human intervention:
 
-1. **Cumulative pressure**. Old chat, tool results, file excerpts, memory, and
-   tool schemas gradually fill the model context window.
+1. **Current-window pressure**. Old chat, tool results, file excerpts, memory,
+   and tool schemas gradually fill the *next provider request*. This is not the
+   same thing as cumulative token spend for the session.
 2. **Single-turn blowups**. One shell/search/test result can be large enough to
    make the next LLM request or even the compaction request itself exceed the
    model window.
@@ -390,18 +391,46 @@ The references converge on these concrete requirements:
 
 ## Current Agent-Kernel Mechanism
 
+### Token Accounting Model
+
+Agent-kernel tracks two different token concepts and they MUST NOT be mixed:
+
+| Concept | Meaning | Stored/derived from | Used for |
+| --- | --- | --- | --- |
+| Cumulative usage | Cost/traffic over the whole session. The same stable history is counted again on every LLM call because providers bill or report it again. | Provider `llm_response.usage` deltas accumulated in `state.usage`. | Cost display, session metadata, profiling. |
+| Current context estimate | Estimated model-visible input for the next provider request, after host caps/trims model-visible tool results and before provider-specific serialization overhead. | Host/kernel estimate of current `state.messages`, plus known per-request contributors where available. | `contextPressureLevel`, auto/preflight/tool-result compaction, compact before/after summaries, context-window UI. |
+
+`state.usage.inputTokens` is cumulative. It is intentionally allowed to grow
+past the model context window and can reach millions of tokens in a long tool
+loop. It MUST NOT be divided by `contextLimit` to decide whether the current
+context window is full. A value like `1.5M input tokens` means the session has
+spent that much aggregate input across many requests; it does not mean a single
+request containing 1.5M tokens was sent.
+
+`state.contextTokens` is the current-window estimate. It is reset by
+compaction to the estimated summary + preserved tail size, and it changes when
+messages are appended or replaced. Until exact provider tokenizers are
+available for every adapter, this value is an estimate, but it is the source of
+truth for pressure and UI semantics.
+
+`compact_replaced.tokensBefore` and `tokensAfter` describe current-window
+tokens before and after the replacement. They do not describe cumulative
+provider usage. If an operator needs cumulative cost around a compaction, use
+`state.usage` or the event log's usage records, not the compact boundary.
+
 Agent-kernel has four compaction triggers:
 
 | Trigger | Implemented behavior |
 | --- | --- |
 | `manual` | `/compact` sends `client:compact`; host runs compaction when the session is at rest. |
-| `auto` | Host compacts when `state.contextPressureLevel === 'hard'` and the session is at rest (`idle`, `done`, or `error`). |
+| `auto` | Host compacts when `state.contextPressureLevel === 'hard'` and the session is at rest (`idle`, `done`, or `error`). Pressure is based on `state.contextTokens`, not cumulative usage. |
 | `preflight` | Immediately before a provider request, host estimates prompt size and compacts if the request would violate reserved headroom. |
 | `tool_result` | After an individual tool result in a multi-tool batch, host can compact before executing the next pending sibling tool call. |
 
-The reducer derives `contextPressureLevel` from provider-reported usage and the
-configured context limit. The host consumes that signal, but the reducer never
-calls an LLM or decides thresholds.
+The reducer derives `contextPressureLevel` from current-window token estimates
+and the configured context limit. The host consumes that signal, but the
+reducer never calls an LLM. Provider-reported usage updates cumulative
+`state.usage`; it does not directly drive pressure.
 
 Compaction flow:
 
@@ -687,7 +716,15 @@ Reserve budgeting accounts for:
 Preflight reserve = `min(max(8000, 0.12 * contextLimit), 0.25 * contextLimit)`.
 
 Hard pressure threshold defaults to 0.92, soft to 0.75. These are configurable
-via `AgentConfig.hardThreshold` / `softThreshold`.
+via `AgentConfig.hardThreshold` / `softThreshold`. Thresholds are applied to
+`state.contextTokens / contextLimit`; cumulative `state.usage.inputTokens` is
+not part of threshold policy.
+
+If the current-window estimate exceeds the configured context limit, UI and
+debugger surfaces must show the true overage (for example `137%` or
+`175k / 128k`) rather than clamping the visible percentage to `100%`. Visual
+meters may saturate at full for readability, but text labels and tooltips must
+preserve the overage.
 
 Budget partition observability lives in message assembly artifacts; partitions
 are not yet enforced as hard gates for every provider request (tracked in
@@ -741,7 +778,8 @@ text so operators can debug.
   reducer accepted the pivot. Carries `trigger`, `preserveFrom`, summarizer
   `request`, optional `responseUsage`, `summary`, `replacedCount`,
   `tokensBefore`, `tokensAfter`, and (new) optional `attemptId` for
-  cross-referencing telemetry.
+  cross-referencing telemetry. `tokensBefore` / `tokensAfter` are
+  current-window estimates, not cumulative provider usage.
 - `compact_skipped` (new): applied for every compaction attempt that was
   declined or failed at the host before dispatch. Fields: `trigger`,
   `reason` (one of `circuit_breaker_open`, `back_off_same_batch`,
@@ -764,6 +802,8 @@ Required coverage:
 
 - manual compaction from a resting session,
 - automatic compaction at hard context pressure,
+- context pressure derived from current context estimate rather than cumulative
+  provider usage,
 - preflight compaction before oversized model requests,
 - multi-tool batch where the first result is huge and pending sibling calls
   remain,
@@ -778,6 +818,8 @@ Required coverage:
 - small-context-model thresholds do not preserve an oversized fixed tail,
 - unknown-context-limit path uses fallback in preflight and disables auto,
 - reasoning-model summarizer request has reasoning disabled.
+- dashboard indicator displays current-window usage and exposes cumulative
+  usage separately.
 
 ## Known Gaps
 
@@ -789,9 +831,10 @@ Required coverage:
 - **Budget partitions are not enforced gates**. They are visible in message
   assembly artifacts, but host policy does not yet use every partition reason
   to downshift, compact, or reject a request.
-- **Token estimation is approximate**. It is sufficient for headroom
-  decisions, but it is not a replacement for provider-reported usage. Reserve
-  math should be recomputed against actual usage after every real turn.
+- **Token estimation is approximate**. It is sufficient for headroom decisions,
+  but it is not a provider tokenizer. Provider-reported usage remains the
+  cumulative cost source; it should be used to refine future estimators, not as
+  a replacement for current-window accounting.
 - **Cross-session boundary IDs**: the ledger records `compact_replaced` but
   does not yet carry a compaction-window ID that survives replay. This makes
   it harder to attribute post-compaction behavior to a specific compaction.

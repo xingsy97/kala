@@ -15,12 +15,14 @@ import type {
   AgentState,
   Effect,
 } from '@agent-kernel/kernel'
-import { step } from '@agent-kernel/kernel'
+import { createInitialState, step } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
   AttachedExecutor,
+  ControlUpdate,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
+  EventAppendedEvent,
   QueuedMessagePreview,
   SessionErrorEvent,
   SessionForkedEvent,
@@ -534,6 +536,7 @@ export type ControlPlaneView = {
   executors: readonly AttachedExecutor[]
   sessions: readonly SessionSummary[]
   executorsLoaded: boolean
+  sessionsLoaded: boolean
   refreshSessions(): void
 }
 
@@ -554,12 +557,14 @@ export function useControlPlane(
   const [executors, setExecutors] = useState<readonly AttachedExecutor[]>([])
   const [sessions, setSessions] = useState<readonly SessionSummary[]>([])
   const [executorsLoaded, setExecutorsLoaded] = useState(false)
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
 
   useEffect(() => {
     if (!socket) {
       setExecutors([])
       setSessions([])
       setExecutorsLoaded(false)
+      setSessionsLoaded(false)
       return
     }
     let active = true
@@ -571,7 +576,8 @@ export function useControlPlane(
     }
     const onSessions = (p: { sessions: readonly SessionSummary[] }): void => {
       if (!isActive()) return
-      setSessions(p.sessions)
+      setSessions((prev) => mergeSessionSummaries(prev, p.sessions))
+      setSessionsLoaded(true)
     }
     const onExecutorChanged: DashboardServerToClientEvents['server:executor_changed'] = (
       change,
@@ -599,9 +605,51 @@ export function useControlPlane(
         return next
       })
     }
+    const onControlUpdate = (payload: ControlUpdate): void => {
+      if (!isActive()) return
+      if (payload.kind === 'session_meta_changed') {
+        setSessions((prev) => prev.map((s) => (
+          s.sessionId === payload.sessionId
+            ? {
+                ...s,
+                ...(payload.label !== undefined && payload.label.trim().length > 0
+                  ? { label: payload.label }
+                  : payload.label !== undefined
+                    ? { label: undefined }
+                    : {}),
+              }
+            : s
+        )))
+      }
+    }
+    const onEventAppended: DashboardServerToClientEvents['event:appended'] = (p) => {
+      if (!isActive()) return
+      setSessions((prev) => updateSessionSummaryFromEvent(prev, p))
+    }
+    const onStateChanged: DashboardServerToClientEvents['state:changed'] = (p) => {
+      if (!isActive()) return
+      setSessions((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
+        ...s,
+        status: p.state.status,
+        ...(p.state.cwd ? { currentCwd: p.state.cwd } : { currentCwd: undefined }),
+      })))
+    }
+    const onMessageQueue: DashboardServerToClientEvents['server:message_queue'] = (p) => {
+      if (!isActive()) return
+      if (p.pending > 0) {
+        setSessions((prev) => updateSessionSummary(prev, p.sessionId, (s) => ({
+          ...s,
+          status: isRestingSessionStatus(s.status) ? 'idle' : s.status,
+        })))
+      }
+    }
     socket.on('server:executors', onExecutors)
     socket.on('server:sessions', onSessions)
     socket.on('server:executor_changed', onExecutorChanged)
+    socket.on('server:control_update', onControlUpdate)
+    socket.on('event:appended', onEventAppended)
+    socket.on('state:changed', onStateChanged)
+    socket.on('server:message_queue', onMessageQueue)
     const onSessionDeleted: DashboardServerToClientEvents['server:session_deleted'] = (
       payload,
     ) => {
@@ -623,6 +671,10 @@ export function useControlPlane(
       socket.off('server:executors', onExecutors)
       socket.off('server:sessions', onSessions)
       socket.off('server:executor_changed', onExecutorChanged)
+      socket.off('server:control_update', onControlUpdate)
+      socket.off('event:appended', onEventAppended)
+      socket.off('state:changed', onStateChanged)
+      socket.off('server:message_queue', onMessageQueue)
       socket.off('server:session_deleted', onSessionDeleted)
       socket.off('connect', requestBoth)
     }
@@ -635,7 +687,84 @@ export function useControlPlane(
     [socket],
   )
 
-  return { executors, sessions, executorsLoaded, refreshSessions }
+  return { executors, sessions, executorsLoaded, sessionsLoaded, refreshSessions }
+}
+
+function mergeSessionSummaries(
+  prev: readonly SessionSummary[],
+  incoming: readonly SessionSummary[],
+): readonly SessionSummary[] {
+  if (prev.length === 0) return incoming
+  const incomingById = new Map(incoming.map((s) => [s.sessionId, s]))
+  const prevById = new Map(prev.map((s) => [s.sessionId, s]))
+  const next: SessionSummary[] = []
+  for (const old of prev) {
+    const fresh = incomingById.get(old.sessionId)
+    if (!fresh) continue
+    next.push({ ...fresh, status: fresherStatus(old.status, fresh.status) })
+  }
+  for (const fresh of incoming) {
+    if (!prevById.has(fresh.sessionId)) next.push(fresh)
+  }
+  return next
+}
+
+function fresherStatus(
+  oldStatus: SessionSummary['status'] | undefined,
+  newStatus: SessionSummary['status'] | undefined,
+): SessionSummary['status'] | undefined {
+  if (isRunningSessionStatus(oldStatus) && isRestingSessionStatus(newStatus)) return oldStatus
+  return newStatus
+}
+
+function updateSessionSummary(
+  sessions: readonly SessionSummary[],
+  sessionId: string,
+  update: (summary: SessionSummary) => SessionSummary,
+): readonly SessionSummary[] {
+  let changed = false
+  const next = sessions.map((summary) => {
+    if (summary.sessionId !== sessionId) return summary
+    changed = true
+    return update(summary)
+  })
+  return changed ? next : sessions
+}
+
+function updateSessionSummaryFromEvent(
+  sessions: readonly SessionSummary[],
+  entry: EventAppendedEvent,
+): readonly SessionSummary[] {
+  return updateSessionSummary(sessions, entry.sessionId, (summary) => {
+    const previousState = {
+      ...createInitialState({ sessionId: summary.sessionId }),
+      status: summary.status ?? 'idle',
+      cursor: Math.max(0, entry.seq - 1),
+      ...(summary.currentCwd ? { cwd: summary.currentCwd } : {}),
+    }
+    const { next } = step(previousState, entry.event, {
+      systemPrompt: '',
+      tools: [],
+    })
+    return {
+      ...summary,
+      status: next.status,
+      lastEventAt: entry.ts,
+      eventCount: Math.max(summary.eventCount, entry.seq),
+      ...(next.cwd ? { currentCwd: next.cwd } : { currentCwd: undefined }),
+      ...(summary.firstUserMessage || entry.event.kind !== 'user_message' || !entry.event.text
+        ? {}
+        : { firstUserMessage: entry.event.text.slice(0, 120) }),
+    }
+  })
+}
+
+function isRunningSessionStatus(status: SessionSummary['status'] | undefined): boolean {
+  return status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval'
+}
+
+function isRestingSessionStatus(status: SessionSummary['status'] | undefined): boolean {
+  return status === undefined || status === 'idle' || status === 'done' || status === 'error'
 }
 
 export function mergeBySeq(

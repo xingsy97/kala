@@ -16,6 +16,7 @@ const state: AgentState = {
   ...createInitialState({ sessionId: 's1' }),
   cwd: '/tmp',
   usage: { inputTokens: 80, outputTokens: 10, cacheCreationTokens: 0, cacheReadTokens: 0 },
+  contextTokens: 80,
   contextPressureLevel: 'soft',
 }
 

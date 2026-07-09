@@ -70,11 +70,6 @@ function VirtualTranscriptInner<Item>(
   ref: React.ForwardedRef<VirtualTranscriptHandle>,
 ): JSX.Element {
   const virtuoso = useRef<VirtuosoHandle | null>(null)
-  const footerRef = useRef<{
-    slot: JSX.Element | null | undefined
-    itemClassName: string | undefined
-  }>({ slot: footerSlot, itemClassName })
-  footerRef.current = { slot: footerSlot, itemClassName }
 
   useImperativeHandle(
     ref,
@@ -87,11 +82,18 @@ function VirtualTranscriptInner<Item>(
         })
       },
       scrollToBottom: () => {
-        virtuoso.current?.scrollToIndex({
+        const handle = virtuoso.current
+        if (!handle) return
+        handle.scrollToIndex({
           index: Math.max(items.length - 1, 0),
           align: 'end',
           behavior: 'auto',
         })
+        // The live status row ("Assistant is thinking", approvals, etc.) is a
+        // Virtuoso Footer, not part of totalCount. scrollToIndex lands on the
+        // last transcript item, so explicitly jump to the scroll container end
+        // as well; otherwise the footer can remain partially hidden.
+        handle.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
       },
     }),
     [items.length],
@@ -148,12 +150,18 @@ function VirtualTranscriptInner<Item>(
       Scroller: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function TranscriptScroller(props, scrollerRef) {
         return <div {...props} ref={scrollerRef} className={cn(props.className, 'virtual-transcript-scroller')} data-virtuoso-scroller="true" />
       }),
-      Footer: function TranscriptFooter() {
-        const { slot, itemClassName: footerClassName } = footerRef.current
+      Footer: function TranscriptFooter({ context }: { context?: { slot: JSX.Element | null | undefined; itemClassName: string | undefined } }) {
+        const slot = context?.slot
+        const footerClassName = context?.itemClassName
         return slot ? <div className={footerClassName}>{slot}</div> : null
       },
     }),
     [],
+  )
+
+  const footerContext = useMemo(
+    () => ({ slot: footerSlot, itemClassName }),
+    [footerSlot, itemClassName],
   )
 
   return (
@@ -173,6 +181,7 @@ function VirtualTranscriptInner<Item>(
         atBottomThreshold={64}
         defaultItemHeight={defaultItemHeight}
         components={components}
+        context={footerContext}
         increaseViewportBy={{ top: 400, bottom: 400 }}
       />
     </div>

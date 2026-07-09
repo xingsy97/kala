@@ -553,7 +553,7 @@ describe('context pressure', () => {
     expect(next.contextPressureLevel).toBe('none')
   })
 
-  it('rises to "soft" then "hard" as inputTokens grow past thresholds', () => {
+  it('uses current context tokens, not cumulative input usage, for pressure', () => {
     const c: AgentConfig = createConfig({
       tools: TOOLS,
       systemPrompt: 'x',
@@ -562,29 +562,37 @@ describe('context pressure', () => {
       hardThreshold: 0.92,
     })
     const s0: AgentState = { ...initial(), status: 'thinking' }
-    // 70 → still none
+    const next = step(
+      s0,
+      { kind: 'llm_response', message: asst({ type: 'text', text: 'tiny' }), usage: { inputTokens: 10_000, outputTokens: 0 } },
+      c,
+    ).next
+    expect(next.usage.inputTokens).toBe(10_000)
+    expect(next.contextPressureLevel).toBe('none')
+  })
+
+  it('rises to "soft" then "hard" as current context grows past thresholds', () => {
+    const c: AgentConfig = createConfig({
+      tools: TOOLS,
+      systemPrompt: 'x',
+      contextLimit: 100,
+      softThreshold: 0.75,
+      hardThreshold: 0.92,
+    })
+    const s0: AgentState = { ...initial(), status: 'thinking' }
     const r1 = step(
       s0,
-      { kind: 'llm_response', message: asst({ type: 'text', text: 'a' }), usage: { inputTokens: 70, outputTokens: 0 } },
+      { kind: 'llm_response', message: asst({ type: 'text', text: 'a'.repeat(300) }), usage: { inputTokens: 1, outputTokens: 0 } },
       c,
     )
-    expect(r1.next.contextPressureLevel).toBe('none')
+    expect(r1.next.contextPressureLevel).toBe('soft')
 
-    // Add 10 → 80, soft
     const r2 = step(
       { ...r1.next, status: 'thinking' },
-      { kind: 'llm_response', message: asst({ type: 'text', text: 'b' }), usage: { inputTokens: 10, outputTokens: 0 } },
+      { kind: 'llm_response', message: asst({ type: 'text', text: 'b'.repeat(120) }), usage: { inputTokens: 1, outputTokens: 0 } },
       c,
     )
-    expect(r2.next.contextPressureLevel).toBe('soft')
-
-    // Add 15 → 95, hard
-    const r3 = step(
-      { ...r2.next, status: 'thinking' },
-      { kind: 'llm_response', message: asst({ type: 'text', text: 'c' }), usage: { inputTokens: 15, outputTokens: 0 } },
-      c,
-    )
-    expect(r3.next.contextPressureLevel).toBe('hard')
+    expect(r2.next.contextPressureLevel).toBe('hard')
   })
 })
 
@@ -595,7 +603,7 @@ describe('step: compact_replaced', () => {
     contextLimit: 100,
   })
 
-  it('replaces messages, keeps leading system, resets inputTokens', () => {
+  it('replaces messages, keeps leading system, and updates context tokens', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'done',
@@ -626,7 +634,8 @@ describe('step: compact_replaced', () => {
     expect(next.messages[1]?.content).toEqual([
       { type: 'text', text: 'we discussed X and Y' },
     ])
-    expect(next.usage).toEqual({ inputTokens: 10, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0 })
+    expect(next.usage).toEqual({ inputTokens: 95, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0 })
+    expect(next.contextTokens).toBeLessThan(100)
     expect(next.contextPressureLevel).toBe('none')
   })
 
@@ -665,7 +674,8 @@ describe('step: compact_replaced', () => {
       { role: 'system', content: [{ type: 'text', text: 'you are' }] },
       { role: 'system', content: [{ type: 'text', text: 'summary only' }] },
     ])
-    expect(next.usage.inputTokens).toBe(3)
+    expect(next.usage.inputTokens).toBe(90)
+    expect(next.contextTokens).toBeLessThan(100)
   })
 
   it('replaces only the old prefix when preserveFrom is provided', () => {
@@ -700,7 +710,8 @@ describe('step: compact_replaced', () => {
       { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
       { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
     ])
-    expect(next.usage.inputTokens).toBe(20)
+    expect(next.usage.inputTokens).toBe(90)
+    expect(next.contextTokens).toBeLessThan(100)
   })
 
   it('is a no-op while awaiting_approval (unsafe to drop pending calls)', () => {
@@ -834,7 +845,8 @@ describe('step: compact_replaced', () => {
       },
       c,
     )
-    expect(next.usage.inputTokens).toBe(5)
+    expect(next.usage.inputTokens).toBe(100)
+    expect(next.contextTokens).toBeLessThan(100)
   })
 })
 

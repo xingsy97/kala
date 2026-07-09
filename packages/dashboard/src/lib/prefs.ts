@@ -71,4 +71,51 @@ export function useBooleanPref(
   return [value, set]
 }
 
+export function useNumberPref(
+  key: string,
+  defaultValue: number,
+  options: { min?: number; max?: number } = {},
+): [number, (next: number) => void] {
+  const normalize = (next: number): number => {
+    if (!Number.isFinite(next)) return defaultValue
+    const rounded = Math.round(next)
+    const min = options.min ?? Number.NEGATIVE_INFINITY
+    const max = options.max ?? Number.POSITIVE_INFINITY
+    return Math.min(max, Math.max(min, rounded))
+  }
+  const parse = (raw: string | null): number => {
+    if (raw === null) return defaultValue
+    return normalize(Number(raw))
+  }
+  const [value, setValue] = useState<number>(() => parse(readRaw(key)))
+
+  useEffect(() => {
+    const onCustom = (e: Event): void => {
+      const detail = (e as CustomEvent<PrefChangeDetail>).detail
+      if (detail.key !== key) return
+      setValue(parse(detail.value))
+    }
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key !== key) return
+      setValue(parse(e.newValue))
+    }
+    window.addEventListener(CHANGE_EVENT, onCustom)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(CHANGE_EVENT, onCustom)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [key, defaultValue, options.min, options.max])
+
+  const set = (next: number): void => {
+    const normalized = normalize(next)
+    writeRaw(key, String(normalized))
+    setValue(normalized)
+  }
+
+  return [value, set]
+}
+
 export const PREF_SHOW_TOOL_CALL_TAB = 'ak-show-tool-call-tab'
+export const PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT = 'ak-live-tool-activity-tail-count'
+export const DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT = 3

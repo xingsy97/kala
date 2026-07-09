@@ -4,7 +4,7 @@
  * a cache for hot access.
  */
 
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -32,11 +32,13 @@ import { step } from '@agent-kernel/kernel'
 export type SessionRecord = {
   readonly sessionId: string
   readonly logPath: string
+  readonly createdAt: string
   readonly config: AgentConfig
   readonly parentSessionId?: string
   readonly parentCursor?: number
   readonly workspaceId?: string
   readonly workspaceName?: string
+  lastEventAt?: string
   state: AgentState
   /**
    * Operator-set display label from the most recent `client:rename_session`.
@@ -71,6 +73,7 @@ export type CreateSessionParams = {
 
 export class SessionStore {
   private readonly records = new Map<string, SessionRecord>()
+  private readonly summaryCache = new Map<string, CachedSessionSummary>()
   /**
    * De-duplicates concurrent `ensure` / `load` requests for the same
    * sessionId. Two dashboard + executor sockets arriving for a fresh
@@ -107,7 +110,7 @@ export class SessionStore {
       ? { ...stateWithCwd, approvalMode: params.initialApprovalMode }
       : stateWithCwd
     const logPath = this.pathFor(sessionId)
-    await writeHeader({
+    const header = await writeHeader({
       path: logPath,
       sessionId,
       config: params.config,
@@ -131,6 +134,7 @@ export class SessionStore {
     const record: SessionRecord = {
       sessionId,
       logPath,
+      createdAt: header.ts,
       config: params.config,
       state: stateWithApproval,
       ...(params.parentSessionId
@@ -150,6 +154,7 @@ export class SessionStore {
         : {}),
     }
     this.records.set(sessionId, record)
+    this.summaryCache.delete(logPath)
     return record
   }
 
@@ -290,17 +295,20 @@ export class SessionStore {
         ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
         ...(record.workspaceName !== undefined ? { workspaceName: record.workspaceName } : {}),
       })
+      this.summaryCache.delete(record.logPath)
     }
     if (record.state.cwd === undefined && params.initialCwd !== undefined) {
       const event: AgentEvent = { kind: 'cwd_changed', cwd: params.initialCwd }
       const { next, effects } = step(record.state, event, record.config)
-      await appendEventEntry({
+      const entry = await appendEventEntry({
         path: record.logPath,
         seq: next.cursor,
         event,
         effects,
       })
       record.state = next
+      record.lastEventAt = entry.ts
+      this.summaryCache.delete(record.logPath)
     }
   }
 
@@ -315,7 +323,7 @@ export class SessionStore {
   ): Promise<void> {
     const rec = this.records.get(sessionId)
     if (!rec) throw new Error(`Cannot record on unknown session: ${sessionId}`)
-    await appendEventEntry({
+    const entry = await appendEventEntry({
       path: rec.logPath,
       seq: nextState.cursor,
       event,
@@ -325,6 +333,8 @@ export class SessionStore {
       ...(model ? { model } : {}),
     })
     rec.state = nextState
+    rec.lastEventAt = entry.ts
+    this.summaryCache.delete(rec.logPath)
   }
 
   list(): SessionRecord[] {
@@ -354,6 +364,7 @@ export class SessionStore {
     await appendMetadataEntry(rec.logPath, { label: trimmed })
     if (trimmed.length === 0) delete rec.label
     else rec.label = trimmed
+    this.summaryCache.delete(rec.logPath)
     return trimmed
   }
 
@@ -368,6 +379,7 @@ export class SessionStore {
       const rec = this.records.get(summary.sessionId) ?? (await this.load(summary.sessionId))
       await appendMetadataEntry(rec.logPath, { workspaceName: trimmed })
       ;(rec as { workspaceName?: string }).workspaceName = trimmed
+      this.summaryCache.delete(rec.logPath)
       count += 1
     }
     return count
@@ -378,6 +390,7 @@ export class SessionStore {
     const path = cached?.logPath ?? this.findLogByPrefix(sessionId)
     this.records.delete(sessionId)
     this.inFlight.delete(sessionId)
+    if (path) this.summaryCache.delete(path)
     if (path && existsSync(path)) await unlink(path)
   }
 
@@ -390,8 +403,10 @@ export class SessionStore {
     for (const file of files) {
       const path = join(this.sessionsDir, file)
       try {
-        const parsed = await readSessionLog(path)
-        const summary = summarizeLog(parsed)
+        const loaded = loadedRecordForPath(this.records, path)
+        const summary = loaded
+          ? summarizeRecord(loaded)
+          : await this.cachedSummaryFor(path)
         out.push(summary)
       } catch {
         // Skip malformed files — a first-line-missing-header log means the
@@ -403,6 +418,22 @@ export class SessionStore {
       (b.lastEventAt ?? b.createdAt).localeCompare(a.lastEventAt ?? a.createdAt),
     )
     return out
+  }
+
+  private async cachedSummaryFor(path: string): Promise<SessionSummary> {
+    const stat = statSync(path)
+    const cached = this.summaryCache.get(path)
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.summary
+    }
+    const parsed = await readSessionLog(path)
+    const summary = summarizeLog(parsed)
+    this.summaryCache.set(path, {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      summary,
+    })
+    return summary
   }
 
   private pathFor(sessionId: string): string {
@@ -461,22 +492,24 @@ export class SessionStore {
           )
           finalState = next
           cursor = next.cursor
-          await appendEventEntry({
+          const entry = await appendEventEntry({
             path,
             seq: cursor,
             event: approveEvent,
             effects,
           })
+          parsed.events.push(entry)
         }
         const { next, effects } = step(finalState, recoveryEvent, parsed.header.config)
         finalState = next
         cursor = next.cursor
-        await appendEventEntry({
+        const entry = await appendEventEntry({
           path,
           seq: cursor,
           event: recoveryEvent,
           effects,
         })
+        parsed.events.push(entry)
       }
     }
 
@@ -507,12 +540,13 @@ export class SessionStore {
       const { next, effects } = step(finalState, recoveryEvent, parsed.header.config)
       finalState = next
       cursor = next.cursor
-      await appendEventEntry({
+      const entry = await appendEventEntry({
         path,
         seq: cursor,
         event: recoveryEvent,
         effects,
       })
+      parsed.events.push(entry)
     }
 
     const latestWorkspaceId =
@@ -526,7 +560,11 @@ export class SessionStore {
     const record: SessionRecord = {
       sessionId,
       logPath: path,
+      createdAt: parsed.header.ts,
       config: parsed.header.config,
+      ...(parsed.events.length > 0
+        ? { lastEventAt: parsed.events[parsed.events.length - 1]!.ts }
+        : {}),
       state: finalState,
       ...(parsed.header.parentSessionId
         ? { parentSessionId: parsed.header.parentSessionId }
@@ -545,8 +583,55 @@ export class SessionStore {
         : {}),
     }
     this.records.set(sessionId, record)
+    this.summaryCache.delete(path)
     return record
   }
+}
+
+type CachedSessionSummary = {
+  mtimeMs: number
+  size: number
+  summary: SessionSummary
+}
+
+function loadedRecordForPath(
+  records: ReadonlyMap<string, SessionRecord>,
+  path: string,
+): SessionRecord | undefined {
+  for (const record of records.values()) {
+    if (record.logPath === path) return record
+  }
+  return undefined
+}
+
+function summarizeRecord(record: SessionRecord): SessionSummary {
+  const firstUserMessage = firstUserMessageFromState(record.state)
+  return {
+    sessionId: record.sessionId,
+    createdAt: record.createdAt,
+    eventCount: record.state.cursor,
+    ...(record.lastEventAt ? { lastEventAt: record.lastEventAt } : {}),
+    ...(record.parentSessionId ? { parentSessionId: record.parentSessionId } : {}),
+    ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
+    ...(record.workspaceName !== undefined ? { workspaceName: record.workspaceName } : {}),
+    status: record.state.status,
+    ...(record.state.cwd ? { currentCwd: record.state.cwd } : {}),
+    ...(firstUserMessage ? { firstUserMessage: firstUserMessage.slice(0, 120) } : {}),
+    ...(record.label ? { label: record.label } : {}),
+  }
+}
+
+function firstUserMessageFromState(state: AgentState): string | undefined {
+  for (const message of state.messages) {
+    if (message.role !== 'user') continue
+    const text = message.content
+      .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+      .trim()
+    if (text.length > 0) return text
+  }
+  return undefined
 }
 
 function summarizeLog(

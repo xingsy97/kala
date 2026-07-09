@@ -1,5 +1,6 @@
 import type { AgentConfig, AgentState, Message, ToolSchema } from './types.js'
 import { DEFAULT_APPROVAL_MODE } from './types.js'
+import { estimateMessageTokens } from './helpers.js'
 
 export function createInitialState(params: {
   sessionId: string
@@ -19,6 +20,7 @@ export function createInitialState(params: {
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     },
+    contextTokens: estimateMessageTokens(messages),
     cursor: 0,
     contextPressureLevel: 'none',
     approvalMode: DEFAULT_APPROVAL_MODE,

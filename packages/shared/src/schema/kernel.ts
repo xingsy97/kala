@@ -184,6 +184,7 @@ export const AgentStateSchema: z.ZodType<AgentState> = z.object({
   pendingCalls: z.array(PendingToolCallSchema),
   status: AgentStatusSchema,
   usage: UsageTotalSchema,
+  contextTokens: z.number().int().nonnegative(),
   cursor: z.number().int().nonnegative(),
   cwd: z.string().optional(),
   contextPressureLevel: ContextPressureLevelSchema,
