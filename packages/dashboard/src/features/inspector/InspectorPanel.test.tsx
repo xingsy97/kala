@@ -202,6 +202,7 @@ describe('InspectorPanel', () => {
   })
 
   it('keeps trace minimap, state diff, and reducer rows on the same active event', () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView')
     render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
@@ -218,12 +219,27 @@ describe('InspectorPanel', () => {
     expect(minimapItems[0]?.getAttribute('aria-current')).toBe('true')
     expect(rows[0]?.getAttribute('data-selected')).toBe('true')
     expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#120')
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' })
 
     fireEvent.click(rows[2]!.querySelector('[data-testid="timeline-row-header"]')!)
 
     expect(minimapItems[2]?.getAttribute('aria-current')).toBe('true')
     expect(rows[2]?.getAttribute('data-selected')).toBe('true')
     expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#122')
+  })
+
+  it('scrolls the reducer trace list when the replay scrubber changes selection', () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView')
+    render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+    const rows = screen.getAllByTestId('timeline-row')
+
+    fireEvent.change(screen.getByTestId('replay-scrubber'), { target: { value: '1' } })
+
+    expect(rows[1]?.getAttribute('data-selected')).toBe('true')
+    expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#121')
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' })
   })
 
   it('collapses and expands the state diff body', () => {

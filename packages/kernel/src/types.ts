@@ -130,6 +130,13 @@ export type AgentConfig = {
   /** Maximum nested `agent` tool depth. Host default is 3. */
   readonly maxAgentDepth?: number
   /**
+   * Maximum concurrent sibling sub-agents under a single parent. Host default
+   * is 4. The host loop dispatches effects serially per session, so this cap
+   * is a safety net for future schedulers or for cross-parent chained
+   * delegation.
+   */
+  readonly maxAgentFanOut?: number
+  /**
    * Extended-thinking budget in tokens (Anthropic-only). When set to a
    * positive integer, the adapter requests the model's private reasoning
    * blocks up to this many tokens. Undefined = extended thinking off.

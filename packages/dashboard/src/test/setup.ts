@@ -2,6 +2,8 @@ import '@testing-library/react'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
+import { i18n } from '../i18n/index.js'
+
 class ResizeObserverStub implements ResizeObserver {
   observe(): void {}
   unobserve(): void {}
@@ -56,6 +58,8 @@ vi.mock('react-virtuoso', async () => {
 
 afterEach(() => {
   cleanup()
+  void i18n.changeLanguage('en')
+  try { localStorage.removeItem('ak-dashboard-language') } catch {}
   virtuosoScrollToIndexMock.mockClear()
   virtuosoScrollToMock.mockClear()
   virtuosoScrollByMock.mockClear()

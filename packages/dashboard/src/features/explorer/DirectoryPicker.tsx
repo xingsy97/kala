@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowUp, ChevronRight, Folder, Home, Loader2, RefreshCw, Slash } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { DirListResult } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -35,6 +36,7 @@ export function DirectoryPicker({
   inputId,
   inputTestId,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [columns, setColumns] = useState<DirColumn[]>([])
   const [loadingPath, setLoadingPath] = useState<string | null>(null)
   const [rootPath, setRootPath] = useState<string | null>(null)
@@ -168,7 +170,7 @@ export function DirectoryPicker({
             className="h-8 px-2"
             onClick={goUp}
             disabled={!canGoUp}
-            title="Go up one level"
+            title={t('directory.goUp')}
             data-testid="dir-picker-up"
           >
             <ArrowUp className="h-3.5 w-3.5" />
@@ -180,7 +182,7 @@ export function DirectoryPicker({
             className="h-8 px-2"
             onClick={goRoot}
             disabled={!rootPath}
-            title={rootPath ? `Jump to workspace root ${rootPath}` : 'Workspace root unknown'}
+            title={rootPath ? t('directory.jumpRoot', { root: rootPath }) : t('directory.rootUnknown')}
             data-testid="dir-picker-root"
           >
             <Home className="h-3.5 w-3.5" />
@@ -192,7 +194,7 @@ export function DirectoryPicker({
             className="h-8 px-2"
             onClick={refresh}
             disabled={value.trim().length === 0}
-            title="Refresh current directory"
+            title={t('directory.refresh')}
             data-testid="dir-picker-refresh"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -208,7 +210,7 @@ export function DirectoryPicker({
               }
             }}
             onBlur={commitManualPath}
-            placeholder="/tmp/project"
+            placeholder={t('directory.placeholder')}
             data-testid={inputTestId}
             title={value}
             className="min-w-0 flex-1 truncate font-mono"
@@ -253,7 +255,7 @@ export function DirectoryPicker({
           <div className="flex min-h-full w-max min-w-full">
             {columns.length === 0 ? (
               <div className="flex h-48 w-full items-center justify-center text-sm text-muted-foreground">
-                {loadingPath !== null ? 'Loading directories...' : 'Select a workspace.'}
+                {loadingPath !== null ? t('directory.loading') : t('directory.selectWorkspace')}
               </div>
             ) : null}
             {columns.map((column) => (
@@ -283,6 +285,7 @@ function DirectoryColumn({
   loadingPath: string | null
   onOpen(path: string): void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="w-64 shrink-0 border-r border-border/50" data-testid="finder-column">
       <div
@@ -294,7 +297,7 @@ function DirectoryColumn({
       {column.error ? (
         <div className="px-3 py-2 text-xs text-rose-600 dark:text-rose-300">{column.error}</div>
       ) : column.entries.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-muted-foreground">No subdirectories</div>
+        <div className="px-3 py-2 text-xs text-muted-foreground">{t('directory.noSubdirectories')}</div>
       ) : (
         <div className="py-1">
           {column.entries.map((entry) => (

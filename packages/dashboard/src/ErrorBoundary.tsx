@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { Trans } from 'react-i18next'
 
 import { ScrollArea } from './components/ui/scroll-area.js'
 
@@ -26,9 +27,9 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
         <div className="flex max-w-lg flex-col gap-3 rounded-lg border border-border bg-card p-5 shadow-sm">
-          <div className="text-sm font-semibold">Dashboard crashed while rendering</div>
+          <div className="text-sm font-semibold"><Trans i18nKey="errorBoundary.title" /></div>
           <div className="text-sm text-muted-foreground">
-            Reload the page to reconnect to the host. The session log is stored on the host, so a render failure does not affect the agent state.
+            <Trans i18nKey="errorBoundary.body" />
           </div>
           <ScrollArea className="max-h-40 rounded bg-muted">
             <pre className="p-3 text-xs text-muted-foreground">
@@ -40,7 +41,7 @@ export class ErrorBoundary extends Component<Props, State> {
             className="self-start rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
             onClick={() => window.location.reload()}
           >
-            Reload
+            <Trans i18nKey="common.reload" />
           </button>
         </div>
       </div>

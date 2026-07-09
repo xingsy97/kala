@@ -3,6 +3,7 @@ import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Search, X } from 'lucide-r
 import JsonView from '@uiw/react-json-view'
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark'
 import { githubLightTheme } from '@uiw/react-json-view/githubLight'
+import { useTranslation } from 'react-i18next'
 
 import { cn } from '../../lib/utils.js'
 import { ScrollArea } from './scroll-area.js'
@@ -23,6 +24,7 @@ export function JsonBlock({
   collapsed = 2,
   className,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [query, setQuery] = useState('')
@@ -67,13 +69,13 @@ export function JsonBlock({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="search"
+            placeholder={t('jsonBlock.search')}
             className="h-4 w-20 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground sm:w-28"
-            aria-label="search JSON"
+            aria-label={t('jsonBlock.searchJson')}
             data-testid="json-block-search"
           />
           {query ? (
-            <button type="button" onClick={() => setQuery('')} aria-label="clear JSON search" className="rounded hover:text-foreground">
+            <button type="button" onClick={() => setQuery('')} aria-label={t('jsonBlock.clearSearch')} className="rounded hover:text-foreground">
               <X className="h-3 w-3" />
             </button>
           ) : null}
@@ -82,17 +84,17 @@ export function JsonBlock({
           type="button"
           onClick={() => setExpanded((v) => !v)}
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] normal-case tracking-normal text-muted-foreground hover:text-foreground hover:bg-accent"
-          aria-label={expanded ? 'collapse all JSON' : 'expand all JSON'}
+          aria-label={expanded ? t('jsonBlock.collapseAllJson') : t('jsonBlock.expandAllJson')}
         >
           {expanded ? (
             <>
               <ChevronsDownUp className="h-3.5 w-3.5" />
-              collapse all
+              {t('jsonBlock.collapseAll')}
             </>
           ) : (
             <>
               <ChevronsUpDown className="h-3.5 w-3.5" />
-              expand all
+              {t('jsonBlock.expandAll')}
             </>
           )}
         </button>
@@ -100,24 +102,24 @@ export function JsonBlock({
           type="button"
           onClick={onCopy}
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] normal-case tracking-normal text-muted-foreground hover:text-foreground hover:bg-accent"
-          aria-label="copy JSON"
+          aria-label={t('jsonBlock.copyJson')}
         >
           {copied ? (
             <>
               <Check className="h-3.5 w-3.5 text-emerald-500" />
-              copied
+              {t('jsonBlock.copied')}
             </>
           ) : (
             <>
               <Copy className="h-3.5 w-3.5" />
-              copy
+              {t('jsonBlock.copy')}
             </>
           )}
         </button>
       </div>
       {query.trim() ? (
         <div className="sticky top-0 z-10 border-b border-border/40 bg-background/95 px-2 py-1 text-[11px] text-muted-foreground" data-testid="json-block-search-status">
-          {matches > 0 ? `${matches} text ${matches === 1 ? 'match' : 'matches'} in serialized JSON` : 'No serialized JSON matches'}
+          {matches > 0 ? t('jsonBlock.match', { count: matches }) : t('jsonBlock.noMatches')}
         </div>
       ) : null}
       <ScrollArea

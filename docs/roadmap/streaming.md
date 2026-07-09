@@ -1,0 +1,15 @@
+# Roadmap · Part C · translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（2 translated historical texttranslated historical texttranslated historical texttranslated historical text）
+
+## C.1 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tokens
+
+**translated historical texttranslated historical text**：translated historical texttranslated historical text kernel loop translated historical texttranslated historical text——tool call translated historical texttranslated historical texttranslated historical texttranslated historical text token。translated historical texttranslated historical text SSE，translated historical text LLM token translated historical texttranslated historical texttranslated historical texttranslated historical text、tool call partial args translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text dashboard。
+
+**translated historical texttranslated historical texttranslated historical text**：
+
+- `packages/host/src/loop.ts` translated historical texttranslated historical text `AsyncIterable<LoopEvent>` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- `packages/host/src/http/sse.ts`：translated historical texttranslated historical text SSE endpoint `/session/:id/stream`。
+- Dashboard chat panel translated historical texttranslated historical texttranslated historical texttranslated historical text SSE，token translated historical texttranslated historical texttranslated historical texttranslated historical text，tool call args translated historical text partial translated historical texttranslated historical text。
+- **translated historical text TTFT (time-to-first-token) translated historical text tokens/s translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical text RuntimeMetrics translated historical texttranslated historical text。
+- translated historical text `docs/streaming-architecture.md`：kernel → host → SSE → dashboard translated historical text backpressure / error / reconnect translated historical texttranslated historical text。
+
+**translated historical texttranslated historical text**：translated historical texttranslated historical text chat panel translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text token 200ms translated historical texttranslated historical texttranslated historical text，RuntimeMetrics translated historical texttranslated historical texttranslated historical texttranslated historical text TTFT=XXms、tokens/s=YY。

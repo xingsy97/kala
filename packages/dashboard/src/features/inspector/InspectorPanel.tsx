@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   Bot,
@@ -29,6 +29,7 @@ import type {
   ToolSchema,
 } from '@agent-kernel/kernel'
 import type { LLMTrace, ServerHistoryPayload } from '@agent-kernel/shared'
+import { useTranslation } from 'react-i18next'
 
 import type { DashboardSocket, TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
@@ -245,6 +246,22 @@ export function InspectorPanel({
   }, [replaySnapshots, replaySeq])
   const activeTraceSeq = replaySnapshot?.seq ?? null
   const replayState = replaySeq === null ? state : (replaySnapshot?.after ?? state)
+  const selectTraceSeq = (seq: number | null): void => {
+    setReplaySeq(seq)
+    if (seq === null) {
+      setSelected(null)
+      return
+    }
+    const entryIndex = timeline.findIndex((entry) => entry.seq === seq)
+    const entry = timeline[entryIndex]
+    if (!entry) return
+    setSelected({
+      kind: 'event',
+      entry,
+      priorCallLlm: findPriorCallLlm(timeline, entryIndex),
+      flow: flow.find((step) => step.seq === entry.seq),
+    })
+  }
 
   useEffect(() => {
     if (replaySnapshots.length === 0) {
@@ -313,7 +330,7 @@ export function InspectorPanel({
             replaySnapshots={replaySnapshots}
             replaySnapshot={replaySnapshot}
             activeReplaySeq={activeTraceSeq}
-            onReplaySeqChange={setReplaySeq}
+            onReplaySeqChange={selectTraceSeq}
             parentHistory={parentHistory}
             parentSessionId={parentSessionId ?? null}
             parentCursor={parentCursor ?? null}
@@ -341,17 +358,15 @@ export function InspectorPanel({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Fork session?</AlertDialogTitle>
+            <ForkDialogTitle />
             <AlertDialogDescription>
-              A new session will branch at cursor{' '}
-              <span className="font-mono text-foreground">{pendingForkSeq ?? ''}</span>. Its
-              history up to this row is copied, then the new session diverges.
+              <ForkDialogDescription cursor={pendingForkSeq ?? ''} />
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <ForkDialogCancel />
             <AlertDialogAction onClick={confirmFork} data-testid="confirm-fork-button">
-              Fork
+              <ForkDialogActionLabel />
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -369,12 +384,13 @@ function InspectorTabs({
   onChange(view: InspectorView): void
   showToolCallTab: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   const options: Array<[InspectorView, string, typeof Activity]> = [
-    ['trace', 'Trace', GitBranch],
-    ['llm', 'LLM API', Bot],
+    ['trace', t('inspector.tabs.trace'), GitBranch],
+    ['llm', t('inspector.tabs.llmApi'), Bot],
   ]
-  if (showToolCallTab) options.push(['tools', 'Tool Call', Hammer])
-  options.push(['status', 'Status', Activity])
+  if (showToolCallTab) options.push(['tools', t('inspector.tabs.toolCall'), Hammer])
+  options.push(['status', t('inspector.tabs.status'), Activity])
   const cols = options.length
   return (
     <div className="flex-none bg-card px-3 pb-3" data-testid="inspector-sidebar-tabs">
@@ -398,6 +414,26 @@ function InspectorTabs({
       </div>
     </div>
   )
+}
+
+function ForkDialogTitle(): JSX.Element {
+  const { t } = useTranslation()
+  return <AlertDialogTitle>{t('inspector.fork.title')}</AlertDialogTitle>
+}
+
+function ForkDialogDescription({ cursor }: { cursor: number | string }): JSX.Element {
+  const { t } = useTranslation()
+  return <>{t('inspector.fork.description', { cursor })}</>
+}
+
+function ForkDialogCancel(): JSX.Element {
+  const { t } = useTranslation()
+  return <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+}
+
+function ForkDialogActionLabel(): JSX.Element {
+  const { t } = useTranslation()
+  return <>{t('inspector.fork.action')}</>
 }
 
 type HistoryTimelineState =
@@ -448,13 +484,14 @@ function DebuggerHeader({
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex-none bg-card px-3 py-2.5">
       <div className="flex min-w-0 items-center gap-2">
         <ServerCog className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2 text-xs">
-            <span className="font-semibold text-foreground">Agent Kernel Debugger</span>
+            <span className="font-semibold text-foreground">{t('inspector.title')}</span>
             <span className="ml-auto font-mono text-[11px] text-muted-foreground">
               #{state?.cursor ?? timeline.at(-1)?.seq ?? 0}
             </span>
@@ -462,8 +499,8 @@ function DebuggerHeader({
         </div>
       </div>
       <div className="sr-only">
-        {visibleMessagesCount ?? state?.messages.length ?? 0} visible messages
-        {config?.tools.length ?? 0} tools
+        {t('inspector.visibleMessages', { count: visibleMessagesCount ?? state?.messages.length ?? 0 })}
+        {t('inspector.toolsCount', { count: config?.tools.length ?? 0 })}
       </div>
     </div>
   )
@@ -480,18 +517,19 @@ function Overview({
   timeline: readonly TimelineEntry[]
   visibleMessagesCount?: number
 }): JSX.Element {
+  const { t } = useTranslation()
   const contextLimit = config?.contextLimit
   const context = contextLimit
     ? `${state?.usage.inputTokens ?? 0} / ${contextLimit}`
     : `${state?.usage.inputTokens ?? 0} input`
   const pending = state?.pendingCalls.find((c) => c.status !== 'rejected')
   return (
-    <section className="flex-none bg-card px-3 pb-3" aria-label="debugger overview">
+    <section className="flex-none bg-card px-3 pb-3" aria-label={t('inspector.overview')}>
       <div className="grid grid-cols-2 gap-1.5 text-xs xl:grid-cols-4">
-        <Metric label="Status" value={shortStatus(state?.status)} tone={statusTone(state?.status)} />
-        <Metric label="Events" value={String(timeline.length)} />
-        <Metric label="Context" value={context} />
-        <Metric label="Pending" value={pending?.name ?? 'none'} tone={pending ? 'text-amber-600 dark:text-amber-300' : undefined} />
+        <Metric label={t('inspector.metrics.status')} value={shortStatus(state?.status)} tone={statusTone(state?.status)} />
+        <Metric label={t('inspector.metrics.events')} value={String(timeline.length)} />
+        <Metric label={t('inspector.metrics.context')} value={context} />
+        <Metric label={t('inspector.metrics.pending')} value={pending?.name ?? t('inspector.metrics.none')} tone={pending ? 'text-amber-600 dark:text-amber-300' : undefined} />
       </div>
     </section>
   )
@@ -643,8 +681,9 @@ function ReducerTrace({
   onReplaySeqChange(seq: number | null): void
   activeReplaySeq: number | null
 }): JSX.Element {
+  const { t } = useTranslation()
   if (timeline.length === 0) {
-    return <EmptyBlock label="No reducer events yet." />
+    return <EmptyBlock label={t('inspector.empty.noReducerEvents')} />
   }
   const parsedQuery = parseTraceQuery(query)
   const visible = timeline.filter((entry) => {
@@ -653,7 +692,7 @@ function ReducerTrace({
     return entryMatchesFilter(entry, filter) && traceEntryMatchesQuery(entry, parsedQuery, inbound.source, eventSummary(entry.event, prior))
   })
   if (visible.length === 0) {
-    return <EmptyBlock label="No events match the current filter." />
+    return <EmptyBlock label={t('inspector.empty.noEventsMatch')} />
   }
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_1rem] gap-1 bg-sidebar">
@@ -710,11 +749,18 @@ function ReducerTraceRow({
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
 }): JSX.Element {
+  const { t } = useTranslation()
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!selected) return
+    rowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selected])
   const inbound = inboundOf(entry.event)
   const jumpable = messageIndex !== null && onJumpToMessage !== undefined
   const effectLabels = entry.effects.map((eff, i) => ({ key: `${eff.kind}-${i}`, effect: eff, target: effectTarget(eff) }))
   return (
     <div
+      ref={rowRef}
       className={cn(
         traceListItemClass,
         selected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80',
@@ -762,16 +808,16 @@ function ReducerTraceRow({
       </button>
       <div className="mt-0.5 flex justify-end gap-1 pl-10 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
         {jumpable ? (
-          <MiniAction onClick={() => onJumpToMessage!(messageIndex!)} title={`scroll chat to message #${messageIndex}`}>
-            jump chat
+          <MiniAction onClick={() => onJumpToMessage!(messageIndex!)} title={t('inspector.actions.jumpChatTitle', { index: messageIndex })}>
+            {t('inspector.actions.jumpChat')}
           </MiniAction>
         ) : null}
         {onForkRequest ? (
-          <MiniAction onClick={() => onForkRequest(entry.seq)} title={`fork a new session at cursor ${entry.seq}`} ariaLabel={`fork at cursor ${entry.seq}`}>
-            <GitBranch className="h-3 w-3" aria-hidden="true" /> fork
+          <MiniAction onClick={() => onForkRequest(entry.seq)} title={t('inspector.actions.forkTitle', { cursor: entry.seq })} ariaLabel={t('inspector.actions.forkAria', { cursor: entry.seq })}>
+            <GitBranch className="h-3 w-3" aria-hidden="true" /> {t('inspector.actions.fork')}
           </MiniAction>
         ) : null}
-        <MiniAction onClick={onSelect} title="inspect raw JSON">inspect json</MiniAction>
+        <MiniAction onClick={onSelect} title={t('inspector.actions.inspectRawJson')}>{t('inspector.actions.inspectJson')}</MiniAction>
       </div>
     </div>
   )
@@ -786,7 +832,8 @@ function LlmCallsView({
   selected: DetailSelection
   onSelect(selection: DetailSelection): void
 }): JSX.Element {
-  if (calls.length === 0) return <EmptyBlock label="No LLM calls emitted yet." />
+  const { t } = useTranslation()
+  if (calls.length === 0) return <EmptyBlock label={t('inspector.empty.noLlmCalls')} />
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="space-y-1 px-2 pb-3 pt-1" data-testid="llm-calls-list">
@@ -811,10 +858,10 @@ function LlmCallsView({
                 <span className={cn('flex-none font-mono text-[10px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{status}</span>
               </div>
               <div className="mt-0.5 truncate pl-[4.75rem] text-[10px] text-muted-foreground">
-                request {call.effect.messages.length} messages · {call.effect.tools.length} tools · response {llmResponseSummary(call)}
+                {t('inspector.llm.requestSummary', { messages: call.effect.messages.length, tools: call.effect.tools.length, response: llmResponseSummary(call) })}
               </div>
               <div className="mt-0.5 truncate pl-[4.75rem] font-mono text-[10px] text-muted-foreground">
-                usage {usage ? `${usage.inputTokens}/${usage.outputTokens}` : 'not reported'} · provider trace {call.trace ? 'captured' : 'not captured'}
+                {t('inspector.llm.usageSummary', { usage: usage ? `${usage.inputTokens}/${usage.outputTokens}` : t('inspector.llm.notReported'), trace: call.trace ? t('inspector.llm.captured') : t('inspector.llm.notCaptured') })}
               </div>
             </button>
           )
@@ -833,7 +880,8 @@ function ToolCallsView({
   selected: DetailSelection
   onSelect(selection: DetailSelection): void
 }): JSX.Element {
-  if (calls.length === 0) return <EmptyBlock label="No tool calls emitted yet." />
+  const { t } = useTranslation()
+  if (calls.length === 0) return <EmptyBlock label={t('inspector.empty.noToolCalls')} />
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="space-y-1 px-2 pb-3 pt-1" data-testid="tool-calls-list">
@@ -890,21 +938,22 @@ function ProtocolFlowView({
   query: string
   teachingMode: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   const parsedQuery = parseTraceQuery(query)
   const visible = timeline.filter((entry) => {
     const inbound = inboundOf(entry.event)
     const prior = findPriorCallLlm(timeline, timeline.indexOf(entry))
     return entryMatchesFilter(entry, filter) && traceEntryMatchesQuery(entry, parsedQuery, inbound.source, eventSummary(entry.event, prior))
   })
-  if (visible.length === 0) return <EmptyBlock label="No protocol rows match the current filters." />
+  if (visible.length === 0) return <EmptyBlock label={t('inspector.trace.noRows')} />
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="space-y-1 px-2 pb-3 pt-1" data-testid="protocol-flow-view">
         <div className="grid grid-cols-[2.25rem_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.1fr)] gap-1.5 rounded bg-card/70 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-border/30">
-          <span className="text-right">Seq</span>
-          <span>Input Event</span>
-          <span>State Machine</span>
-          <span>Output Actions</span>
+          <span className="text-right">{t('inspector.trace.headers.seq')}</span>
+          <span>{t('inspector.trace.headers.inputEvent')}</span>
+          <span>{t('inspector.trace.headers.stateMachine')}</span>
+          <span>{t('inspector.trace.headers.outputActions')}</span>
         </div>
         {visible.map((entry) => {
           const i = timeline.indexOf(entry)
@@ -926,12 +975,12 @@ function ProtocolFlowView({
               <div className="grid grid-cols-[2.25rem_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.1fr)] items-center gap-1.5">
                 <span className="text-right font-mono text-[10px] text-muted-foreground">#{entry.seq}</span>
                 <FlowCell label={inbound.source} value={entry.event.kind} tone={inbound.tone} />
-                <FlowCell label="state" value={step ? `${step.from} -> ${step.to}` : 'state step'} tone="text-muted-foreground" />
+                <FlowCell label={t('inspector.trace.state')} value={step ? `${step.from} -> ${step.to}` : t('inspector.trace.stateStep')} tone="text-muted-foreground" />
                 <div className="flex min-w-0 flex-wrap gap-1">
                   {entry.effects.length > 0 ? entry.effects.map((effect, index) => {
                     const target = effectTarget(effect)
                     return <span key={`${effect.kind}-${index}`} className="rounded bg-background/80 px-1 py-px font-mono text-[9px] ring-1 ring-border/35"><span className={target.tone}>{target.target}</span> · {effect.kind}</span>
-                  }) : <span className="font-mono text-[10px] text-muted-foreground">no effects</span>}
+                  }) : <span className="font-mono text-[10px] text-muted-foreground">{t('inspector.trace.noEffects')}</span>}
                 </div>
               </div>
               {teachingMode ? <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/30">{teachingText(entry, step)}</div> : null}
@@ -963,9 +1012,10 @@ function ForkCompareView({
   parentSessionId: string | null
   parentCursor: number | null
 }): JSX.Element {
-  if (!parentSessionId) return <EmptyBlock label="This session has no parent fork to compare." />
-  if (parentHistory.status === 'idle' || parentHistory.status === 'loading') return <EmptyBlock label="Loading parent session history..." />
-  if (parentHistory.status === 'unavailable') return <EmptyBlock label="Parent session history is unavailable. The parent may have been deleted." />
+  const { t } = useTranslation()
+  if (!parentSessionId) return <EmptyBlock label={t('inspector.trace.noParentFork')} />
+  if (parentHistory.status === 'idle' || parentHistory.status === 'loading') return <EmptyBlock label={t('inspector.trace.loadingParent')} />
+  if (parentHistory.status === 'unavailable') return <EmptyBlock label={t('inspector.trace.parentUnavailable')} />
   const parentTimeline = parentHistory.timeline
   const divergence = firstDivergence(parentTimeline, timeline)
   const shared = divergence === -1 ? Math.min(parentTimeline.length, timeline.length) : divergence
@@ -982,19 +1032,20 @@ function ForkCompareView({
             <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{parentSessionId}{parentCursor !== null ? ` @${parentCursor}` : ''}</div>
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
-            <Metric label="Shared" value={String(shared)} />
-            <Metric label="Parent tail" value={String(parentTail)} />
-            <Metric label="Child tail" value={String(childTail)} />
+            <Metric label={t('inspector.trace.shared')} value={String(shared)} />
+            <Metric label={t('inspector.trace.parentTail')} value={String(parentTail)} />
+            <Metric label={t('inspector.trace.childTail')} value={String(childTail)} />
           </div>
         </div>
-        <CompareColumn title="First parent row" entry={firstParent} />
-        <CompareColumn title="First child row" entry={firstChild} />
+        <CompareColumn title={t('inspector.trace.firstParentRow')} entry={firstParent} />
+        <CompareColumn title={t('inspector.trace.firstChildRow')} entry={firstChild} />
       </div>
     </ScrollArea>
   )
 }
 
 function CompareColumn({ title, entry }: { title: string; entry: TimelineEntry | null }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="rounded bg-background/70 p-2 text-xs ring-1 ring-border/30">
       <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{title}</div>
@@ -1003,7 +1054,7 @@ function CompareColumn({ title, entry }: { title: string; entry: TimelineEntry |
           <div className="font-mono text-[11px] text-foreground">#{entry.seq} {entry.event.kind}</div>
           <div className="mt-1 truncate text-[10px] text-muted-foreground">{eventSummary(entry.event, null)}</div>
         </>
-      ) : <div className="text-[11px] text-muted-foreground">no divergence</div>}
+      ) : <div className="text-[11px] text-muted-foreground">{t('inspector.trace.noDivergence')}</div>}
     </div>
   )
 }
@@ -1032,17 +1083,18 @@ function RuntimeSection({
   subAgentRelation: SubAgentRelationSummary
   topology: readonly StatusTopologyNode[]
 }): JSX.Element {
+  const { t } = useTranslation()
   const health = useMemo(() => buildRunHealth(state, config, timeline), [state, config, timeline])
   return (
-    <section className="flex h-full min-h-0 flex-col" aria-label="runtime objects">
-      <SectionHeader icon={Database} title="Runtime Objects">
+    <section className="flex h-full min-h-0 flex-col" aria-label={t('inspector.runtime.aria')}>
+      <SectionHeader icon={Database} title={t('inspector.runtime.title')}>
         <Segmented<RuntimeView>
           value={view}
           onChange={onViewChange}
           options={[
-            ['state', 'State', CircleDot],
-            ['tools', 'Tools', Hammer],
-            ['memory', 'Memory', Brain],
+            ['state', t('inspector.runtime.state'), CircleDot],
+            ['tools', t('inspector.runtime.tools'), Hammer],
+            ['memory', t('inspector.runtime.memory'), Brain],
           ]}
           testId="runtime-view-switch"
         />
@@ -1095,9 +1147,10 @@ function StateRuntime({
   replaySeq: number | null
   subAgentRelation: SubAgentRelationSummary
 }): JSX.Element {
+  const { t } = useTranslation()
   const [jsonOpen, setJsonOpen] = useState(false)
   const inspectedState = replayState ?? state
-  if (!state) return <EmptyBlock label="No AgentState loaded." />
+  if (!state) return <EmptyBlock label={t('inspector.runtime.noAgentState')} />
   const pendingCalls = inspectedState?.pendingCalls.map((c) => `${c.name} · ${c.status}`) ?? []
   // Session memory used to live on state.memory; it moved out of the kernel
   // in the protocol refactor and now flows via a host-side shadow-state
@@ -1113,7 +1166,7 @@ function StateRuntime({
               <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={state.sessionId}>{replaySeq !== null ? `replay #${replaySeq}` : state.sessionId}</div>
             </div>
             <Button variant="outline" size="sm" onClick={() => setJsonOpen(true)}>
-              View JSON
+              {t('inspector.runtime.viewJson')}
             </Button>
           </div>
 
@@ -1121,7 +1174,7 @@ function StateRuntime({
 
           <div className="grid gap-2 xl:grid-cols-2">
             <StateGroup
-              title="Core"
+              title={t('inspector.runtime.core')}
               rows={[
                 ['status', inspectedState?.status ?? 'none'],
                 ['cursor', String(inspectedState?.cursor ?? 0)],
@@ -1130,7 +1183,7 @@ function StateRuntime({
               ]}
             />
             <StateGroup
-              title="Workload"
+              title={t('inspector.runtime.workload')}
               rows={[
                 ['messages', String(inspectedState?.messages.length ?? 0)],
                 ['pending', pendingCalls.length > 0 ? pendingCalls.join(', ') : 'none'],
@@ -1138,7 +1191,7 @@ function StateRuntime({
               ]}
             />
             <StateGroup
-              title="Usage"
+              title={t('inspector.runtime.usage')}
               rows={[
                 ['input', String(inspectedState?.usage.inputTokens ?? 0)],
                 ['output', String(inspectedState?.usage.outputTokens ?? 0)],
@@ -1147,7 +1200,7 @@ function StateRuntime({
               ]}
             />
             <StateGroup
-              title="Memory"
+              title={t('inspector.runtime.memory')}
               rows={[
                 ['session entries', String(memoryKeys.length)],
                 ['keys', memoryKeys.length > 0 ? memoryKeys.join(', ') : 'none'],
@@ -1159,17 +1212,17 @@ function StateRuntime({
       <Dialog open={jsonOpen} onOpenChange={setJsonOpen}>
         <DialogContent className="h-[86vh] max-w-5xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
           <DialogHeader className="bg-card px-4 py-3">
-            <DialogTitle className="text-base">AgentState JSON</DialogTitle>
-            <DialogDescription>Full raw runtime state for the current session.</DialogDescription>
+            <DialogTitle className="text-base">{t('inspector.runtime.agentStateJson')}</DialogTitle>
+            <DialogDescription>{t('inspector.runtime.rawStateDescription')}</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 bg-background p-4" data-testid="agent-state-json-dialog">
             <ScrollArea className="h-full">
-              <JsonBlock label="Full AgentState JSON" value={inspectedState} collapsed={2} />
+              <JsonBlock label={t('inspector.runtime.fullAgentStateJson')} value={inspectedState} collapsed={2} />
             </ScrollArea>
           </div>
           <DialogFooter className="bg-card px-4 py-3">
             <DialogClose asChild>
-              <Button variant="outline" className="mt-0">Close</Button>
+              <Button variant="outline" className="mt-0">{t('common.close')}</Button>
             </DialogClose>
           </DialogFooter>
         </DialogContent>
@@ -1190,22 +1243,23 @@ function StateGroup({ title, rows }: { title: string; rows: readonly (readonly [
 }
 
 function SubAgentRelationPanel({ summary }: { summary: SubAgentRelationSummary }): JSX.Element | null {
+  const { t } = useTranslation()
   if (!summary.parentSessionId && summary.total === 0) return null
   return (
     <div className="rounded bg-background/70 p-2 text-xs ring-1 ring-border/30" data-testid="sub-agent-relation-panel">
       <div className="mb-1.5 flex min-w-0 items-center gap-2">
         <Network className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-        <span className="font-medium text-foreground">Sub-agent relations</span>
+        <span className="font-medium text-foreground">{t('inspector.runtime.subAgentRelations')}</span>
       </div>
       <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Parent" value={summary.parentSessionId ? `${summary.parentSessionId}${summary.parentCursor !== null ? ` @${summary.parentCursor}` : ''}` : 'none'} />
-        <Metric label="Children" value={String(summary.total)} />
-        <Metric label="Completed" value={String(summary.completed)} />
-        <Metric label="Running" value={String(summary.running)} />
+        <Metric label={t('inspector.runtime.parent')} value={summary.parentSessionId ? `${summary.parentSessionId}${summary.parentCursor !== null ? ` @${summary.parentCursor}` : ''}` : 'none'} />
+        <Metric label={t('inspector.runtime.children')} value={String(summary.total)} />
+        <Metric label={t('inspector.runtime.completed')} value={String(summary.completed)} />
+        <Metric label={t('inspector.runtime.running')} value={String(summary.running)} />
       </div>
       {summary.failed > 0 ? (
         <div className="mt-1.5 rounded bg-rose-500/10 px-2 py-1 text-[11px] text-rose-700 dark:text-rose-300">
-          {summary.failed} sub-agent call{summary.failed === 1 ? '' : 's'} failed.
+          {t('inspector.runtime.subAgentFailed', { count: summary.failed })}
         </div>
       ) : null}
     </div>
@@ -1227,9 +1281,10 @@ function RunHealthPanel({ items }: { items: readonly RunHealthItem[] }): JSX.Ele
 }
 
 function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; toolCalls: readonly ToolCallLifecycle[] }): JSX.Element {
+  const { t } = useTranslation()
   const [selectedName, setSelectedName] = useState<string | null>(tools[0]?.name ?? null)
   const selectedTool = tools.find((t) => t.name === selectedName) ?? tools[0]
-  if (tools.length === 0) return <EmptyBlock label="No tools registered for this session." />
+  if (tools.length === 0) return <EmptyBlock label={t('inspector.runtime.noTools')} />
   const recent = selectedTool ? toolCalls.filter((c) => c.name === selectedTool.name).slice(-5).reverse() : []
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(7rem,0.85fr)_minmax(0,1.15fr)] gap-2">
@@ -1245,10 +1300,10 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
               {isSkillTool(tool) ? (
-                <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">skill</span>
+                <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span>
               ) : null}
               <span className={cn('flex-none text-[10px]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
-                {tool.requiresApproval ? 'gated' : 'auto'}
+                {tool.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')}
               </span>
             </button>
           ))}
@@ -1262,14 +1317,14 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
                 <div className="flex min-w-0 items-center gap-2">
                   <div className="min-w-0 truncate font-mono text-foreground">{selectedTool.name}</div>
                   {isSkillTool(selectedTool) ? (
-                    <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">Skill loader</span>
+                    <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skillLoader')}</span>
                   ) : null}
                 </div>
-                <div className="mt-1 text-muted-foreground">{selectedTool.requiresApproval ? 'approval required' : 'auto allowed'}</div>
-                <p className="mt-2 text-muted-foreground">{selectedTool.description || 'No description provided.'}</p>
+                <div className="mt-1 text-muted-foreground">{selectedTool.requiresApproval ? t('inspector.runtime.approvalRequired') : t('inspector.runtime.autoAllowed')}</div>
+                <p className="mt-2 text-muted-foreground">{selectedTool.description || t('inspector.runtime.noDescription')}</p>
               </div>
               <div>
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Recent calls</div>
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t('inspector.runtime.recentCalls')}</div>
                 {recent.length > 0 ? (
                   <ul className="space-y-1">
                     {recent.map((call) => (
@@ -1279,7 +1334,7 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
                     ))}
                   </ul>
                 ) : (
-                  <div className="text-[11px] text-muted-foreground">No calls in this timeline.</div>
+                  <div className="text-[11px] text-muted-foreground">{t('inspector.runtime.noCalls')}</div>
                 )}
               </div>
               <JsonBlock label={`Input schema · ${selectedTool.name}`} value={selectedTool.inputSchema} collapsed={2} className="[&>div:last-child]:max-h-56 [&_[data-radix-scroll-area-viewport]]:max-h-56" />
@@ -1296,6 +1351,7 @@ function isSkillTool(tool: ToolSchema): boolean {
 }
 
 function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Element {
+  const { t } = useTranslation()
   // Session memory moved out of kernel state; the dashboard will consume a
   // host-shadow-state channel in a follow-up. Empty for now.
   const memory: ReadonlyArray<{ key: string; content: string; updatedAt: string }> = []
@@ -1321,12 +1377,12 @@ function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Ele
             memory.length > 0 ? (
               memory.map((entry) => <MemoryEntryRow key={entry.key} entry={entry} />)
             ) : (
-              <div className="text-muted-foreground">No session memory entries.</div>
+              <div className="text-muted-foreground">{t('inspector.runtime.noMemory')}</div>
             )
           ) : (
             <div className="space-y-2 text-muted-foreground">
               <div className="font-mono text-foreground">{scope}</div>
-              <p>{scope} memory is executor-owned disk state. The kernel keeps only session memory in AgentState.</p>
+              <p>{t('inspector.runtime.workspaceMemoryNote', { scope })}</p>
               <p className="font-mono text-[11px]">{scope === 'workspace' ? '<workspace>/.agent-kernel/memory/' : '~/.agent-kernel/memory/'}</p>
             </div>
           )}
@@ -1345,6 +1401,7 @@ function DetailDialog({
   timeline: readonly TimelineEntry[]
   onOpenChange(open: boolean): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const title = detailTitle(selection)
   const description = detailDescription(selection)
   return (
@@ -1372,7 +1429,7 @@ function DetailDialog({
         </div>
         <DialogFooter className="bg-card px-4 py-3">
           <DialogClose asChild>
-            <Button variant="outline" className="mt-0">Close</Button>
+            <Button variant="outline" className="mt-0">{t('common.close')}</Button>
           </DialogClose>
         </DialogFooter>
       </DialogContent>
@@ -1471,10 +1528,11 @@ function PrimaryDetailTabs({ value, onChange }: { value: LlmDetailView; onChange
 }
 
 function MessageAssemblerView({ call, provider, model }: { call: LlmCall; provider: string; model: string }): JSX.Element {
+  const { t } = useTranslation()
   const [selectedContextKind, setSelectedContextKind] = useState<ContextProportionKind | null>(null)
   return (
     <div className="grid min-h-0 flex-1 gap-3 2xl:grid-cols-[minmax(22rem,0.92fr)_minmax(0,1.08fr)]" data-testid="message-assembler-view">
-      <DetailPane title="Assembly Pipeline" subtitle="How kernel context is assembled before adapter conversion">
+      <DetailPane title={t('inspector.llm.assemblyPipeline')} subtitle={t('inspector.llm.assemblySubtitle')}>
         <LlmAssemblyView
           call={call}
           provider={provider}
@@ -1483,7 +1541,7 @@ function MessageAssemblerView({ call, provider, model }: { call: LlmCall; provid
           onSelectContextKind={setSelectedContextKind}
         />
       </DetailPane>
-      <DetailPane title="Kernel Messages & Tools" subtitle="Exact call_llm messages and tool registry sent by the kernel">
+      <DetailPane title={t('inspector.llm.kernelMessagesTools')} subtitle={t('inspector.llm.kernelMessagesToolsSubtitle')}>
         <LlmContextView
           messages={call.effect.messages}
           tools={call.effect.tools}
@@ -1521,6 +1579,7 @@ function LlmAssemblyView({
   selectedContextKind: ContextProportionKind | null
   onSelectContextKind(kind: ContextProportionKind | null): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const systemInfo = describeSystemInjection(call)
   const toolNames = call.effect.tools.map((tool) => `${tool.name}${tool.requiresApproval ? ' gated' : ' auto'}`)
   const proportions = contextProportions(call)
@@ -1539,28 +1598,28 @@ function LlmAssemblyView({
         />
         {!call.trace ? (
           <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
-            HTTP trace is missing for this log entry. The actual API request is only available when `llmTrace.request` was captured.
+            {t('inspector.llm.missingTrace')}
           </div>
         ) : null}
         <ContextProportionBar items={proportions} selectedKind={selectedContextKind} onSelect={onSelectContextKind} />
         <AssemblyStep
           index="1"
-          title="System Prompt"
+          title={t('inspector.llm.systemPrompt')}
           result={systemInfo}
         />
         <AssemblyStep
           index="2"
-          title="Kernel Messages"
+          title={t('inspector.llm.kernelMessages')}
           result={`${call.effect.messages.length} messages: ${roleCounts(call.effect.messages)}`}
         />
         <AssemblyStep
           index="3"
-          title="Tool Registry"
+          title={t('inspector.llm.toolRegistry')}
           result={toolNames.length > 0 ? toolNames.join(', ') : 'no tools sent'}
         />
         <AssemblyStep
           index="4"
-          title="Adapter Transform"
+          title={t('inspector.llm.adapterTransform')}
           result={adapterTransformSummary(provider)}
         />
       </div>
@@ -1577,12 +1636,13 @@ function ContextProportionBar({
   selectedKind: ContextProportionKind | null
   onSelect(kind: ContextProportionKind | null): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const nonZero = items.filter((item) => item.bytes > 0)
   return (
     <div className="rounded bg-background/70 p-3 text-xs ring-1 ring-border/30" data-testid="context-proportion-bar">
       <div className="flex items-center justify-between gap-2">
-        <div className="font-medium text-foreground">Context Composition</div>
-        <div className="font-mono text-[10px] text-muted-foreground">approx by serialized size</div>
+        <div className="font-medium text-foreground">{t('inspector.llm.contextComposition')}</div>
+        <div className="font-mono text-[10px] text-muted-foreground">{t('inspector.llm.approxSerialized')}</div>
       </div>
       <div className="mt-2 flex h-3 overflow-hidden rounded bg-muted">
         {nonZero.length > 0 ? nonZero.map((item) => (
@@ -1655,6 +1715,7 @@ function LlmContextView({
   tools: readonly ToolSchema[]
   selectedContextKind: ContextProportionKind | null
 }): JSX.Element {
+  const { t } = useTranslation()
   const [kind, setKind] = useState<'messages' | 'tools'>(selectedContextKind === 'tools' ? 'tools' : 'messages')
   useEffect(() => {
     if (selectedContextKind === 'tools') setKind('tools')
@@ -1664,7 +1725,7 @@ function LlmContextView({
     <div className="flex h-full min-h-0 flex-1 flex-col gap-2" data-testid="llm-context-view">
       <div className="flex flex-none items-center gap-2">
         <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-          Kernel context includes both conversation messages and the tool registry sent with this LLM call.
+          {t('inspector.llm.contextDescription')}
         </div>
         <Segmented<'messages' | 'tools'>
           value={kind}
@@ -1692,6 +1753,7 @@ function KernelMessagesView({
   messages: readonly Message[]
   selectedContextKind: ContextProportionKind | null
 }): JSX.Element {
+  const { t } = useTranslation()
   const [selectedIndex, setSelectedIndex] = useState(0)
   const selected = messages[selectedIndex]
   return (
@@ -1739,7 +1801,7 @@ function KernelMessagesView({
               <JsonBlock label={`Kernel Message #${selectedIndex}`} value={selected} collapsed={2} />
             </>
           ) : (
-            <EmptyBlock label="No kernel messages in this LLM request." />
+            <EmptyBlock label={t('inspector.empty.noKernelMessages')} />
           )}
         </div>
       </ScrollArea>
@@ -1754,9 +1816,10 @@ function ToolRegistryContextView({
   tools: readonly ToolSchema[]
   selectedContextKind: ContextProportionKind | null
 }): JSX.Element {
+  const { t } = useTranslation()
   const [selectedName, setSelectedName] = useState<string | null>(tools[0]?.name ?? null)
   const selected = tools.find((tool) => tool.name === selectedName) ?? tools[0]
-  if (tools.length === 0) return <EmptyBlock label="No tools were sent with this LLM request." />
+  if (tools.length === 0) return <EmptyBlock label={t('inspector.empty.noLlmTools')} />
   return (
     <div className="grid h-full min-h-0 flex-1 grid-cols-[minmax(12rem,0.85fr)_minmax(0,1.15fr)] gap-2" data-testid="tool-registry-context-view">
       <ScrollArea className="h-full min-h-0 rounded bg-background/70 ring-1 ring-border/30">
@@ -1777,9 +1840,9 @@ function ToolRegistryContextView({
               data-highlighted={highlighted ? 'true' : 'false'}
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
-              {isSkillTool(tool) ? <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">skill</span> : null}
+              {isSkillTool(tool) ? <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span> : null}
               <span className={cn('flex-none text-[10px]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
-                {tool.requiresApproval ? 'gated' : 'auto'}
+                {tool.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')}
               </span>
             </button>
           )})}
@@ -1792,11 +1855,11 @@ function ToolRegistryContextView({
               <KeyValueTable
                 rows={[
                   ['tool', selected.name],
-                  ['approval', selected.requiresApproval ? 'gated' : 'auto'],
+                  ['approval', selected.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')],
                   ['description bytes', String(selected.description.length)],
                 ]}
               />
-              <p className="rounded bg-muted/50 px-2 py-1.5 text-muted-foreground">{selected.description || 'No description provided.'}</p>
+              <p className="rounded bg-muted/50 px-2 py-1.5 text-muted-foreground">{selected.description || t('inspector.runtime.noDescription')}</p>
               <JsonBlock label={`Tool Schema · ${selected.name}`} value={selected} collapsed={2} />
             </>
           ) : null}
@@ -1807,13 +1870,14 @@ function ToolRegistryContextView({
 }
 
 function ApiCallView({ call, kernelEffect, parsedResponse }: { call: LlmCall; kernelEffect: CallLlmEffect; parsedResponse: unknown }): JSX.Element {
+  const { t } = useTranslation()
   const request = call.trace ? redactedApiRequest(call.trace) : null
   const body = call.trace?.request.body
   return (
     <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3" data-testid="api-call-view">
       <ApiSummaryStrip call={call} />
       <div className="grid min-h-0 gap-3 2xl:grid-cols-2">
-      <DetailPane title="API Request" subtitle="Captured outbound HTTP request with concrete base URL redacted">
+      <DetailPane title={t('inspector.llm.apiRequest')} subtitle={t('inspector.llm.apiRequestSubtitle')}>
         <ScrollArea className="h-full min-h-0 flex-1" data-testid="api-request-view">
           <div className="space-y-2">
             {call.trace && request ? (
@@ -1829,15 +1893,15 @@ function ApiCallView({ call, kernelEffect, parsedResponse }: { call: LlmCall; ke
                 />
                 <AssemblyStep
                   index="A"
-                  title="API Body Sections"
-                  result="system/messages/tools are in the single captured API request below; concrete base URL is redacted in the UI."
+                  title={t('inspector.llm.apiBodySections')}
+                  result={t('inspector.llm.apiBodyResult')}
                 />
-                <JsonBlock label="Captured API Request" value={request} collapsed={2} />
+                <JsonBlock label={t('inspector.llm.capturedApiRequest')} value={request} collapsed={2} />
               </>
             ) : (
               <>
                 <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
-                  HTTP trace was not captured for this LLM call. Showing the kernel `call_llm` effect instead; this is not the actual API request body.
+                  {t('inspector.llm.missingRequest')}
                 </div>
                 <JsonBlock label={`Kernel call_llm Effect @ #${call.requestSeq}`} value={kernelEffect} collapsed={1} />
               </>
@@ -1845,17 +1909,17 @@ function ApiCallView({ call, kernelEffect, parsedResponse }: { call: LlmCall; ke
           </div>
         </ScrollArea>
       </DetailPane>
-      <DetailPane title="API Response" subtitle="Captured provider response plus parsed kernel event">
+      <DetailPane title={t('inspector.llm.apiResponse')} subtitle={t('inspector.llm.apiResponseSubtitle')}>
         <ScrollArea className="h-full min-h-0 flex-1" data-testid="api-response-view">
           <div className="space-y-2">
             {call.trace ? (
-              <JsonBlock label="Captured API Response" value={call.trace.response ?? null} collapsed={2} />
+              <JsonBlock label={t('inspector.llm.capturedApiResponse')} value={call.trace.response ?? null} collapsed={2} />
             ) : (
               <div className="rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                This log has kernel-level LLM I/O only. HTTP request/response trace is available for new calls recorded after trace capture was added.
+                {t('inspector.llm.oldTraceOnly')}
               </div>
             )}
-            <JsonBlock label="Parsed Kernel Response" value={parsedResponse} collapsed={2} />
+            <JsonBlock label={t('inspector.llm.parsedKernelResponse')} value={parsedResponse} collapsed={2} />
           </div>
         </ScrollArea>
       </DetailPane>
@@ -2203,6 +2267,7 @@ function TraceToolbar({
   teachingMode: boolean
   onTeachingModeChange(value: boolean): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const allSelected = filter.size === TRACE_CATEGORY_ORDER.length
   const toggle = (cat: TraceCategory): void => {
     const next = new Set(filter)
@@ -2223,9 +2288,9 @@ function TraceToolbar({
           value={mode}
           onChange={onModeChange}
           options={[
-            ['list', 'List', ListFilter],
-            ['flow', 'Flow', Network],
-            ['compare', 'Compare', Diff],
+            ['list', t('inspector.trace.list'), ListFilter],
+            ['flow', t('inspector.trace.flow'), Network],
+            ['compare', t('inspector.trace.compare'), Diff],
           ]}
           testId="trace-mode-switch"
         />
@@ -2244,7 +2309,7 @@ function TraceToolbar({
           onClick={() => onTeachingModeChange(!teachingMode)}
           aria-pressed={teachingMode}
           className={cn('inline-flex h-6 w-6 flex-none items-center justify-center rounded ring-1 transition-colors', teachingMode ? 'bg-primary/10 text-primary ring-primary/40' : 'bg-background/70 text-muted-foreground ring-border/30 hover:bg-accent hover:text-foreground')}
-          title="Teaching mode"
+          title={t('inspector.trace.teachingMode')}
           data-testid="teaching-mode-toggle"
         >
           <Info className="h-3.5 w-3.5" aria-hidden="true" />
@@ -2263,7 +2328,7 @@ function TraceToolbar({
               : 'bg-background/70 text-muted-foreground ring-border/40 hover:bg-accent hover:text-foreground',
           )}
         >
-          All
+          {t('inspector.trace.all')}
         </button>
         {TRACE_CATEGORY_ORDER.map((cat) => {
           const active = filter.has(cat)
@@ -2300,6 +2365,7 @@ function ReplayPanel({
   selected: ReplaySnapshot | null
   onSelect(seq: number | null): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(true)
   if (snapshots.length === 0 || !selected) return <div className="flex-none bg-card/50 px-2 pb-1" />
   const diff = diffStates(selected.before, selected.after, 6)
@@ -2319,17 +2385,17 @@ function ReplayPanel({
             data-testid="state-diff-toggle"
           >
             <Diff className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-            <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">State Diff</div>
+            <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{t('inspector.trace.stateDiff')}</div>
             <ChevronDown className={cn('h-3.5 w-3.5 flex-none text-muted-foreground transition-transform', open ? '' : '-rotate-90')} aria-hidden="true" />
           </button>
           <span className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/25">#{selected.seq}</span>
-          <button type="button" disabled={!previous} onClick={() => previous && onSelect(previous.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title="Previous event">
+          <button type="button" disabled={!previous} onClick={() => previous && onSelect(previous.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title={t('inspector.trace.previousEvent')}>
             <ChevronLeft className="h-3 w-3" aria-hidden="true" />
           </button>
-          <button type="button" disabled={!next} onClick={() => next && onSelect(next.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title="Next event">
+          <button type="button" disabled={!next} onClick={() => next && onSelect(next.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title={t('inspector.trace.nextEvent')}>
             <ChevronRight className="h-3 w-3" aria-hidden="true" />
           </button>
-          <button type="button" onClick={() => onSelect(null)} className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground">live</button>
+          <button type="button" onClick={() => onSelect(null)} className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground">{t('inspector.trace.live')}</button>
         </div>
         <div className="px-2 pb-1.5">
           <input
@@ -2339,17 +2405,17 @@ function ReplayPanel({
             value={currentIndex}
             onChange={(event) => onSelect(snapshots[Number(event.currentTarget.value)]?.seq ?? null)}
             className="h-2 w-full accent-primary"
-            aria-label="Replay cursor"
+            aria-label={t('inspector.trace.replayCursor')}
             data-testid="replay-scrubber"
           />
         </div>
         {open ? <div id="state-diff-body" className="border-t border-border/30 bg-card/35 px-2 py-1.5">
           <div className="mb-1 flex min-w-0 items-center gap-2 text-[10px]">
             <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={selected.event.kind}>{selected.event.kind}</span>
-            <span className="flex-none text-muted-foreground">{diff.length} changes</span>
+            <span className="flex-none text-muted-foreground">{t('inspector.trace.changes', { count: diff.length })}</span>
           </div>
           <div className="min-w-0 space-y-1" data-testid="state-diff-view">
-            {diff.length > 0 ? diff.map((item) => <DiffRow key={`${item.path}-${item.before}-${item.after}`} item={item} />) : <div className="rounded bg-background/55 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/20">No state changes</div>}
+            {diff.length > 0 ? diff.map((item) => <DiffRow key={`${item.path}-${item.before}-${item.after}`} item={item} />) : <div className="rounded bg-background/55 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/20">{t('inspector.trace.noStateChanges')}</div>}
           </div>
         </div> : null}
       </div>
