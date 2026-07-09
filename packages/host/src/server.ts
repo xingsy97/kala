@@ -300,6 +300,16 @@ export async function startHostServer(
         text,
       })
     },
+    onSubAgentStarted(payload) {
+      io.of('/dashboard')
+        .to(`session:${payload.parentSessionId}`)
+        .emit('server:sub_agent_started', payload)
+    },
+    onSubAgentFinished(payload) {
+      io.of('/dashboard')
+        .to(`session:${payload.parentSessionId}`)
+        .emit('server:sub_agent_finished', payload)
+    },
   }
 
   const loopDeps = {

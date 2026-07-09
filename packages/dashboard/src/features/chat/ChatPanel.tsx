@@ -1,4 +1,13 @@
-import { createContext, memo, useContext, useState } from 'react'
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   Archive,
   CheckCircle2,
@@ -32,13 +41,17 @@ import { formatTokens } from '../../lib/format.js'
 import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview } from './DiffPreview.js'
+import { CodeBlock } from './CodeBlock.js'
 import {
   type GroupedContentItem,
   type ToolCallGroup,
   collectAllToolResults,
   groupConsecutiveToolCalls,
 } from './grouping.js'
-import { GroupSummaryRow, pickRenderer } from './toolSummaries/index.js'
+import { SubAgentCard } from './SubAgentCard.js'
+import { GroupSummaryRow, firstLine, pickRenderer, truncate } from './toolSummaries/index.js'
+import type { DashboardSocket } from '../../session.js'
+import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 
 type Props = {
   messages?: readonly Message[]
@@ -50,6 +63,25 @@ type Props = {
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   onReadOverflow?: (callId: string) => Promise<{ content?: string; error?: string }>
   footerSlot?: JSX.Element | null
+  /**
+   * Wiring for inline `SubAgentCard`s. When both are present, tool_call
+   * groups with `toolName === 'agent'` render as a live nested view (with
+   * child transcript mirrored via socket) instead of the generic
+   * ToolCallGroupBlock. Optional so nested read-only panels — which pass
+   * no socket — degrade to a static replay from the `<sub_agent>` envelope.
+   */
+  parentSessionId?: string
+  socket?: DashboardSocket | null
+  /**
+   * Two-way pinned-to-bottom binding. `pinned` starts true and flips as the
+   * user scrolls away from / back to the bottom. When true, appending items
+   * (new messages, streaming) auto-scrolls. Caller resets this when the
+   * session changes so a fresh conversation starts pinned.
+   */
+  pinnedToBottom?: boolean
+  onPinnedChange?: (pinned: boolean) => void
+  /** Bump this to make ChatPanel scroll to the current bottom. */
+  scrollToBottomToken?: number
 }
 
 type OverflowReader = (callId: string) => Promise<{ content?: string; error?: string }>
@@ -92,6 +124,11 @@ export function ChatPanel({
   onApprovalDecision,
   onReadOverflow,
   footerSlot,
+  parentSessionId,
+  socket,
+  pinnedToBottom,
+  onPinnedChange,
+  scrollToBottomToken,
 }: Props): JSX.Element {
   const fallbackItems: TranscriptItem[] = (messages ?? [])
     .filter((message) => message.role !== 'system')
@@ -124,43 +161,139 @@ export function ChatPanel({
   }
   const approvalByCallId = new Map<string, ApprovalRequiredEvent>()
   for (const a of pendingApprovals ?? []) approvalByCallId.set(a.callId, a)
-  let messageIndex = -1
+
+  // Map each transcript item back to the message-index a `MessageRow`
+  // expects. `messageIndex` is not the same as the item index because
+  // compact-boundary items don't consume one; we need a stable mapping
+  // so highlightIndex still refers to the Nth *message*.
+  const messageIndexByItem = useMemo(() => {
+    const arr = new Array<number>(transcriptItems.length)
+    let mi = -1
+    for (let i = 0; i < transcriptItems.length; i += 1) {
+      const it = transcriptItems[i]!
+      if (it.kind === 'message') {
+        mi += 1
+        arr[i] = mi
+      } else {
+        arr[i] = -1
+      }
+    }
+    return arr
+  }, [transcriptItems])
+
+  // Translate message-index highlight into item-index so VirtualTranscript
+  // can scroll to the right row. -1 means "no highlight" or unresolved.
+  const highlightItemIndex = useMemo(() => {
+    if (highlightIndex == null || highlightIndex < 0) return null
+    for (let i = 0; i < messageIndexByItem.length; i += 1) {
+      if (messageIndexByItem[i] === highlightIndex) return i
+    }
+    return null
+  }, [highlightIndex, messageIndexByItem])
+
   const isEmpty = transcriptItems.length === 0
+
+  const renderItem = useCallback(
+    (item: TranscriptItem, itemIndex: number): JSX.Element => {
+      if (item.kind === 'compact_boundary') {
+        return <CompactBoundaryRow boundary={item} />
+      }
+      const currentMessageIndex = messageIndexByItem[itemIndex] ?? 0
+      return (
+        <MessageRow
+          index={currentMessageIndex}
+          message={item.message}
+          highlighted={highlightIndex === currentMessageIndex}
+          toolNameByCallId={toolNameByCallId}
+          approvalByCallId={approvalByCallId}
+          onApprovalDecision={onApprovalDecision}
+          resultsByCallId={resultsByCallId}
+          groupedCallIds={groupedCallIds}
+          seq={item.seq}
+          onEditAndRerun={onEditAndRerun}
+          parentSessionId={parentSessionId}
+          socket={socket ?? null}
+        />
+      )
+    },
+    [
+      messageIndexByItem,
+      highlightIndex,
+      toolNameByCallId,
+      approvalByCallId,
+      onApprovalDecision,
+      resultsByCallId,
+      groupedCallIds,
+      onEditAndRerun,
+      parentSessionId,
+      socket,
+    ],
+  )
+
+  const keyFor = useCallback(
+    (item: TranscriptItem, itemIndex: number): string =>
+      item.kind === 'compact_boundary' ? `compact-${item.seq}` : `message-${itemIndex}`,
+    [],
+  )
+
+  const transcriptRef = useVirtualTranscriptScrollToken(scrollToBottomToken)
+
+  // Uncontrolled fallback so tests / callers that don't wire the pin state
+  // still work. When both props are absent we own the state locally.
+  const [localPinned, setLocalPinned] = useState(true)
+  const effectivePinned = pinnedToBottom ?? localPinned
+  const effectiveOnPinnedChange = onPinnedChange ?? setLocalPinned
+
   return (
     <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
-      <div className="mx-auto flex w-full min-w-0 max-w-[68rem] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {isEmpty ? <EmptyState onSuggest={onSuggest} /> : null}
-        {transcriptItems.map((item, itemIndex) => {
-          if (item.kind === 'compact_boundary') {
-            return <CompactBoundaryRow key={`compact-${item.seq}`} boundary={item} />
-          }
-          messageIndex += 1
-          const currentMessageIndex = messageIndex
-          return (
-            <MessageRow
-              key={`message-${itemIndex}`}
-              index={currentMessageIndex}
-              message={item.message}
-              highlighted={highlightIndex === currentMessageIndex}
-              toolNameByCallId={toolNameByCallId}
-              approvalByCallId={approvalByCallId}
-              onApprovalDecision={onApprovalDecision}
-              resultsByCallId={resultsByCallId}
-              groupedCallIds={groupedCallIds}
-              seq={item.seq}
-              onEditAndRerun={onEditAndRerun}
-            />
-          )
-        })}
-        {footerSlot ? (
-          // Align with the assistant-message content column: avatar (w-7) +
-          // gap-3 = 2.5rem left inset, so the running/status/approval rows sit
-          // flush under the message body above them instead of the full column.
-          <div className="pl-10">{footerSlot}</div>
-        ) : null}
+      <div className="flex h-full w-full min-w-0 flex-1 flex-col">
+        {isEmpty ? (
+          <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+            <EmptyState onSuggest={onSuggest} />
+            {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
+          </div>
+        ) : (
+          <VirtualTranscript<TranscriptItem>
+            ref={transcriptRef}
+            items={transcriptItems}
+            renderItem={renderItem}
+            keyFor={keyFor}
+            pinnedToBottom={effectivePinned}
+            onPinnedChange={effectiveOnPinnedChange}
+            highlightIndex={highlightItemIndex}
+            footerSlot={
+              footerSlot ? (
+                // Align with the assistant-message content column: avatar (w-7) +
+                // gap-3 = 2.5rem left inset, so the running/status/approval rows sit
+                // flush under the message body above them instead of the full column.
+                <div className="pl-0 pt-4 sm:pl-10">{footerSlot}</div>
+              ) : null
+            }
+            itemClassName="mx-auto w-full max-w-[68rem] px-3 py-2 sm:px-6 sm:py-3 lg:px-8"
+            defaultItemHeight={80}
+            dataTestId="virtual-transcript"
+          />
+        )}
       </div>
     </OverflowReaderContext.Provider>
   )
+}
+
+/**
+ * Bumping `scrollToBottomToken` forces the transcript to jump to the
+ * bottom (e.g. after a session switch). Ignored on first mount.
+ */
+function useVirtualTranscriptScrollToken(
+  scrollToBottomToken: number | undefined,
+): React.RefObject<VirtualTranscriptHandle> {
+  const ref = useRef<VirtualTranscriptHandle>(null)
+  const lastToken = useRef<number | undefined>(scrollToBottomToken)
+  useEffect(() => {
+    if (scrollToBottomToken === lastToken.current) return
+    lastToken.current = scrollToBottomToken
+    ref.current?.scrollToBottom()
+  }, [scrollToBottomToken])
+  return ref
 }
 
 function EmptyState({
@@ -169,12 +302,12 @@ function EmptyState({
   onSuggest?: (text: string) => void
 }): JSX.Element {
   return (
-    <div className="flex flex-col items-center gap-8 py-16 text-center">
+    <div className="flex flex-col items-center gap-6 py-10 text-center sm:gap-8 sm:py-16">
       <div className="flex flex-col items-center gap-3">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted/60">
           <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
           What can I help with?
         </h1>
         <p className="max-w-md text-sm text-muted-foreground">
@@ -192,7 +325,7 @@ function EmptyState({
               onClick={() => onSuggest?.(s.prompt)}
               disabled={!clickable}
               className={cn(
-                'group flex min-w-0 items-start gap-3 rounded-xl bg-muted/40 p-4 text-left transition-colors',
+                'group flex min-w-0 items-start gap-3 rounded-xl bg-muted/40 p-3 text-left transition-colors sm:p-4',
                 clickable
                   ? 'hover:bg-muted cursor-pointer'
                   : 'cursor-default opacity-70',
@@ -254,6 +387,8 @@ function MessageRow({
   groupedCallIds,
   seq,
   onEditAndRerun,
+  parentSessionId,
+  socket,
 }: {
   index: number
   message: Message
@@ -265,6 +400,8 @@ function MessageRow({
   groupedCallIds: ReadonlySet<string>
   seq?: number
   onEditAndRerun?: (seq: number, text: string) => void
+  parentSessionId?: string
+  socket?: DashboardSocket | null
 }): JSX.Element | null {
   const editable =
     message.role === 'user' &&
@@ -425,6 +562,17 @@ function MessageRow({
         <div className="flex min-w-0 flex-col gap-3">
           {groupedItems.map((item, i) => {
             if (item.kind === 'tool_call_group') {
+              if (item.toolName === 'agent' && parentSessionId) {
+                return (
+                  <SubAgentCard
+                    key={`sub-agent-${item.firstCallId}`}
+                    parentSessionId={parentSessionId}
+                    socket={socket ?? null}
+                    group={item}
+                    approvalByCallId={approvalByCallId}
+                  />
+                )
+              }
               return (
                 <ToolCallGroupBlock
                   key={`group-${item.firstCallId}`}
@@ -574,10 +722,30 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
         remarkPlugins={[remarkGfm]}
         components={{
           pre({ children }) {
+            // Fenced blocks route through <CodeBlock> via the `code` slot
+            // below, which returns a shiki-highlighted <div>. We keep the
+            // <pre> slot as a plain passthrough so we don't stack an extra
+            // ScrollArea inside a CodeBlock that already scrolls.
+            return <>{children}</>
+          },
+          code({ inline, className, children, ...rest }: {
+            inline?: boolean
+            className?: string
+            children?: React.ReactNode
+          }) {
+            const match = /language-(\w+)/.exec(className ?? '')
+            const raw = Array.isArray(children) ? children.join('') : String(children ?? '')
+            const trimmed = raw.replace(/\n$/, '')
+            if (!inline && match) {
+              return <CodeBlock code={trimmed} lang={match[1]} />
+            }
+            if (!inline) {
+              return <CodeBlock code={trimmed} />
+            }
             return (
-              <ScrollArea className="my-3 max-w-full rounded-lg bg-muted/60">
+              <code className={className} {...rest}>
                 {children}
-              </ScrollArea>
+              </code>
             )
           },
         }}
@@ -815,30 +983,15 @@ function ToolCallGroupBlock({
   const singleResult = singleCall ? group.results.get(singleCall.callId) ?? null : null
   const singlePending = singleCall ? approvalByCallId.get(singleCall.callId) ?? null : null
   const singleStatus = singlePending
-    ? {
-        label: 'Needs approval',
-        className:
-          'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
-      }
+    ? toolLifecycleBadge('approval')
     : singleResult
       ? singleResult.ok
-        ? {
-            label: 'Succeeded',
-            className:
-              'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
-          }
-        : {
-            label: 'Failed',
-            className:
-              'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
-          }
+        ? toolLifecycleBadge('succeeded')
+        : toolLifecycleBadge('failed')
       : singleCall
-        ? {
-            label: 'Pending',
-            className:
-              'bg-background/80 text-muted-foreground',
-          }
+        ? toolLifecycleBadge('running')
         : null
+  const groupLifecycle = summarizeToolGroupLifecycle(group, approvalByCallId)
 
   const toggleOpen = (): void => {
     setOpen((v) => {
@@ -890,11 +1043,17 @@ function ToolCallGroupBlock({
             {singleRow.primary}
           </span>
         ) : null}
+        {singleResult ? (
+          <span className="hidden min-w-0 flex-[0.8] truncate text-[11px] text-muted-foreground md:inline" title={singleResult.content}>
+            → {truncate(firstLine(singleResult.content), 72)}
+          </span>
+        ) : null}
         {group.calls.length > 1 ? (
           <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
             × {group.calls.length}
           </span>
         ) : null}
+        {!singleCall ? <ToolLifecycleSummaryBadges summary={groupLifecycle} /> : null}
         {singleStatus ? (
           <span
             className={cn(
@@ -976,5 +1135,60 @@ function ToolCallGroupBlock({
         })}
       </div>
     </div>
+  )
+}
+
+type ToolLifecycleKind = 'approval' | 'running' | 'succeeded' | 'failed' | 'orphaned'
+
+function toolLifecycleBadge(kind: ToolLifecycleKind): { label: string; className: string } {
+  if (kind === 'approval') {
+    return { label: 'Needs approval', className: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' }
+  }
+  if (kind === 'running') {
+    return { label: 'Running', className: 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300' }
+  }
+  if (kind === 'failed') {
+    return { label: 'Failed', className: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' }
+  }
+  if (kind === 'orphaned') {
+    return { label: 'Orphaned', className: 'bg-background/80 text-muted-foreground' }
+  }
+  return { label: 'Succeeded', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' }
+}
+
+function summarizeToolGroupLifecycle(
+  group: ToolCallGroup,
+  approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>,
+): Partial<Record<ToolLifecycleKind, number>> {
+  const summary: Partial<Record<ToolLifecycleKind, number>> = {}
+  for (const call of group.calls) {
+    const result = group.results.get(call.callId)
+    const kind: ToolLifecycleKind = approvalByCallId.has(call.callId)
+      ? 'approval'
+      : result
+        ? result.ok
+          ? 'succeeded'
+          : 'failed'
+        : 'running'
+    summary[kind] = (summary[kind] ?? 0) + 1
+  }
+  return summary
+}
+
+function ToolLifecycleSummaryBadges({ summary }: { summary: Partial<Record<ToolLifecycleKind, number>> }): JSX.Element {
+  const kinds: readonly ToolLifecycleKind[] = ['approval', 'running', 'failed', 'succeeded', 'orphaned']
+  return (
+    <span className="flex min-w-0 flex-none items-center gap-1">
+      {kinds.map((kind) => {
+        const count = summary[kind] ?? 0
+        if (count === 0) return null
+        const badge = toolLifecycleBadge(kind)
+        return (
+          <span key={kind} className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider', badge.className)}>
+            {count > 1 ? `${count} ` : ''}{badge.label}
+          </span>
+        )
+      })}
+    </span>
   )
 }

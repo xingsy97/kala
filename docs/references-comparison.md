@@ -55,8 +55,8 @@ clawspring has an "Agent" tool that spawns child agents (depth tracking). pi/ope
 ### 8. **Steering & Follow-up Messages Are UI Concerns, Not Kernel**
 pi tracks `_steeringMessages[]` and `_followUpMessages[]` inside the session. These are UI state (pending on-screen messages), not core loop state. **Lesson**: Queue mode (steering/follow-up) should be external config passed to the loop, not internal state. Output a `queue_update` event; let the UI consume it.
 
-### 9. **Cost/Token Tracking Should Be Observable, Not Hardcoded**
-clawspring tracks `total_input_tokens`, `total_output_tokens` in `AgentState`; pi wraps it via events. codex/opencode don't show token tracking in agent code. **Lesson**: Emit a `turn_done` event with token counts. Let observers (CLI, web dashboard, plugins) decide what to do (log, alert, enforce budget). Don't bake hard token limits into loop.
+### 9. **Token / Context Tracking Should Be Observable, Not Hardcoded**
+clawspring tracks `total_input_tokens`, `total_output_tokens` in `AgentState`; pi wraps it via events. codex/opencode don't show token tracking in agent code. **Lesson**: Emit usage/context signals as observable state. Let observers (CLI, web dashboard, plugins) decide what to do (log, prompt, compact). Do not expose or hardcode token cost / money metrics in the product UI.
 
 ### 10. **RPC/Multi-Process Communication Should Be Event-Based**
 pi's RPC mode uses JSON-RPC over stdin/stdout; codex uses child_process + JSON events. **Lesson**: If splitting kernel from UI/executor, serialize the event stream (each turn yields events that can be JSON-stringified). Send over WebSocket, HTTP, or raw socket. Receiver replays events to update local state.

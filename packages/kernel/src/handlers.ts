@@ -24,7 +24,6 @@ import type {
   ToolCallContent,
   UsageDelta,
 } from './types.js'
-import { TODOWRITE_TOOL_NAME } from './types.js'
 import {
   addUsage,
   afterPendingSettled,
@@ -34,7 +33,6 @@ import {
 import {
   applyMemoryOp,
   isSessionMemoryOp,
-  parseTodosFromInput,
 } from './tool-lift.js'
 
 export function onUserMessage(
@@ -290,16 +288,7 @@ export function onToolResult(
   const pendingCalls = state.pendingCalls.filter((c) => c.callId !== callId)
   const messages = [...state.messages, toolResultMsg]
 
-  // Special case: `todowrite` promotes its input to first-class state. The
-  // tool's own return value is just an ack; the authoritative todos list is
-  // what the LLM passed in. Parsing from `target.input` (not `content`) means
-  // a broken executor can't corrupt the todo state.
-  const nextTodos =
-    ok && target.name === TODOWRITE_TOOL_NAME
-      ? parseTodosFromInput(target.input, state.todos)
-      : state.todos
-
-  // Same pattern for session-scoped memory. `memory { operation: 'write', scope: 'session', key, content }`
+  // Session-scoped memory. `memory { operation: 'write', scope: 'session', key, content }`
   // upserts an entry; `memory { operation: 'delete', scope: 'session', key }` removes one.
   // Workspace/global scope operations touch disk in the executor and don't
   // reach the kernel — this branch only fires for scope='session'.
@@ -308,7 +297,7 @@ export function onToolResult(
       ? applyMemoryOp(state.memory, target.name, target.input)
       : state.memory
 
-  return afterPendingSettled(state, messages, pendingCalls, config, nextTodos, nextMemory)
+  return afterPendingSettled(state, messages, pendingCalls, config, nextMemory)
 }
 
 export function onCancel(state: AgentState): StepResult {
@@ -327,11 +316,10 @@ export function onClear(state: AgentState): StepResult {
       status: 'idle',
       usage: {
         inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-      },
-      todos: [],
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    },
       memory: [],
       error: undefined,
     },

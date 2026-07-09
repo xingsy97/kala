@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
@@ -36,5 +36,14 @@ describe('RuntimeMetrics', () => {
     expect(indicator.textContent ?? '').not.toContain('Tools')
     expect(indicator.textContent ?? '').not.toContain('Tokens')
     expect(indicator.getAttribute('title') ?? '').toContain('Context window')
+
+    fireEvent.click(indicator)
+    const popover = screen.getByTestId('context-pressure-popover')
+    expect(popover.textContent ?? '').toContain('Context pressure')
+    expect(popover.textContent ?? '').toContain('user window')
+    expect(popover.textContent ?? '').toContain('model window')
+    expect(popover.textContent ?? '').toContain('queued')
+    expect(popover.textContent ?? '').toContain('2')
+    expect(popover.textContent ?? '').toContain('estimates')
   })
 })

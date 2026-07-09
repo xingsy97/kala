@@ -38,7 +38,7 @@ type TextContent = {
 
 type ImageSource =
   | { kind: 'base64'; mediaType: string; data: string }
-  | { kind: 'file'; path: string; mediaType?: string }
+  | { kind: 'file_ref'; path: string; mediaType?: string }
 
 type ImageContent = {
   type: 'image'
@@ -59,7 +59,13 @@ type ToolResultContent = {
   content: string                   // stringified result; encoding is host's responsibility
 }
 
-type MessageContent = TextContent | ImageContent | ToolCallContent | ToolResultContent
+type ThinkingContent = {
+  type: 'thinking'
+  text: string
+  signature?: string
+}
+
+type MessageContent = TextContent | ImageContent | ThinkingContent | ToolCallContent | ToolResultContent
 
 type Message = {
   role: Role
@@ -73,7 +79,7 @@ type Message = {
 - `role: 'assistant'` messages contain `TextContent` and/or `ToolCallContent`.
 - `role: 'tool'` messages contain only `ToolResultContent`.
 
-`ImageContent.source.kind` distinguishes inline base64 payloads (`base64`, with `data` and `mediaType`) from workspace-relative file references (`file`, with `path` and optional `mediaType`). The kernel treats image blocks as opaque: they are appended, folded, and forwarded to `call_llm` unchanged; providers that do not support vision are the host's problem.
+`ImageContent.source.kind` distinguishes inline base64 payloads (`base64`, with `data` and `mediaType`) from workspace-relative file references (`file_ref`, with `path` and optional `mediaType`). The kernel treats image blocks as opaque: they are appended, folded, and forwarded to `call_llm` unchanged; providers that do not support vision are the host's problem. `ThinkingContent` is also opaque reducer data, preserved so adapters that require thinking-block echo can round-trip it.
 
 ### 1.2 ToolSchema
 
@@ -100,6 +106,7 @@ type AgentConfig = {
   readonly softThreshold?: number       // default 0.75
   readonly hardThreshold?: number       // default 0.92
   readonly maxAgentDepth?: number       // host-side sub-agent nesting limit
+  readonly thinkingBudget?: number      // host adapter hint for extended thinking
 }
 ```
 
@@ -128,19 +135,13 @@ type PendingToolCall = {
 type UsageTotal = {
   readonly inputTokens: number
   readonly outputTokens: number
+  readonly cacheCreationTokens: number
+  readonly cacheReadTokens: number
 }
 
 type ApprovalMode = 'auto' | 'ask' | 'deny' | 'allow_all'
 
-type ContextPressureLevel = 'ok' | 'soft' | 'hard'
-
-type TodoStatus = 'pending' | 'in_progress' | 'completed'
-
-type TodoItem = {
-  readonly id: string
-  readonly content: string
-  readonly status: TodoStatus
-}
+type ContextPressureLevel = 'none' | 'soft' | 'hard'
 
 type AgentState = {
   readonly sessionId: string
@@ -151,7 +152,6 @@ type AgentState = {
   readonly cursor: number               // event counter; increments by exactly 1 per step()
   readonly approvalMode: ApprovalMode   // per-session gate for tools with requiresApproval
   readonly contextPressureLevel: ContextPressureLevel  // derived from usage vs config thresholds
-  readonly todos: readonly TodoItem[]   // set by the todowrite tool
   readonly memory: readonly MemoryEntry[]  // session-scope entries lifted by memory operation=write/delete
   readonly cwd?: string                 // session working directory (absolute); mutated by cwd_changed
   readonly error?: string
@@ -162,7 +162,7 @@ type AgentState = {
 
 **Approval modes**:
 - `auto` (default): tools with `requiresApproval: true` prompt the user; approved calls are dispatched.
-- `ask`: same as `auto`. The name is a UI hint that the user wants to be prompted; the reducer treats it identically.
+- `ask`: every tool call prompts the user, even if the tool schema has `requiresApproval: false`.
 - `deny`: the reducer synthesizes a failed `tool_result` (`ok: false`, content = "denied by approval policy") for every gated call, without emitting `request_approval`.
 - `allow_all`: gated calls are dispatched immediately, as if they had `requiresApproval: false`. `AgentEvent` `user_approve` / `user_reject` never fire.
 
@@ -176,6 +176,8 @@ Approval mode is reducer-owned state, not host state; it is set by `approval_mod
 type UsageDelta = {
   inputTokens: number
   outputTokens: number
+  cacheCreationTokens?: number
+  cacheReadTokens?: number
 }
 
 type UserMessageEvent   = {
@@ -192,7 +194,7 @@ type CancelEvent        = { kind: 'cancel' }
 type ClearEvent         = { kind: 'clear' }
 type CompactReplacedEvent = {
   kind: 'compact_replaced'
-  trigger?: 'manual' | 'auto'
+  trigger?: 'manual' | 'auto' | 'preflight'
   preserveFrom: number
   request?: {
     model?: string
@@ -346,11 +348,11 @@ Any pair not listed below is a **no-op**.
 | `llm_error` | `thinking` | → `error`, emit `emit_error` |
 | `user_approve` | `awaiting_approval` | Flip that call to `dispatched`, emit `call_tool`; if no more awaiting → `executing_tools` |
 | `user_reject` | `awaiting_approval` | Append synthetic `tool_result` (ok=false), remove from pending; if all settled → `thinking` + `call_llm`, else stay |
-| `tool_result` | `executing_tools`, `awaiting_approval` | Append tool_result, remove from pending; if all settled → `thinking` + `call_llm`, else stay. `todowrite` also promotes `input.todos` into `state.todos`. |
+| `tool_result` | `executing_tools`, `awaiting_approval` | Append tool_result, remove from pending; if all settled → `thinking` + `call_llm`, else stay. |
 | `cancel` | any except `done`/`error` | → `done`, drop pendingCalls, emit `finish` |
-| `compact_replaced` | any | Replace pre-summary `messages` prefix with a single assistant summary block; usage / cursor unchanged |
+| `compact_replaced` | `idle`, `thinking`, `done`, `error` | Replace pre-summary `messages` prefix with a single assistant summary block; usage updated from `tokensAfter`; no effects |
 | `approval_mode_changed` | any | Set `approvalMode = event.mode`; no effects |
-| `cwd_changed` | any | Set `cwd = event.cwd`; no effects |
+| `cwd_changed` | `idle`, `done` | Set `cwd = event.cwd`; no effects |
 
 ---
 
@@ -394,7 +396,8 @@ For each event, this section specifies:
 **Case B**: `toolCalls.length > 0`
 - For each tool call, look up `requiresApproval` in `config.tools`. If tool name is unknown, treat `requiresApproval` as `true` (safe default).
 - Apply `state.approvalMode`:
-  - `auto` / `ask`: gated calls (`requiresApproval: true`) start as `'awaiting_approval'`; ungated calls start as `'approved'`.
+  - `auto`: gated calls (`requiresApproval: true`) start as `'awaiting_approval'`; ungated calls start as `'approved'`.
+  - `ask`: every call starts as `'awaiting_approval'`.
   - `allow_all`: every call starts as `'approved'` regardless of `requiresApproval`.
   - `deny`: every gated call is settled inline — the reducer appends a synthetic `tool_result` (`ok: false`, content = "denied by approval policy") for that call and does NOT put it in `pendingCalls`. Ungated calls still start as `'approved'`.
 - Emit one effect per pending call: `request_approval` for `'awaiting_approval'`, `call_tool` (with `cwd = state.cwd`) for `'approved'`.
@@ -409,6 +412,8 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
   return {
     inputTokens: total.inputTokens + delta.inputTokens,
     outputTokens: total.outputTokens + delta.outputTokens,
+    cacheCreationTokens: total.cacheCreationTokens + (delta.cacheCreationTokens ?? 0),
+    cacheReadTokens: total.cacheReadTokens + (delta.cacheReadTokens ?? 0),
   }
 }
 ```
@@ -471,8 +476,7 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
 **Transition**
 - Append tool_result message with `{ callId, ok, content }` from the event.
 - Remove the call from `pendingCalls`.
-- **`todowrite` special case**: if the settled call's `name === 'todowrite'` and `event.ok === true`, promote `pendingCall.input.todos` into `state.todos` (replacing the whole list).
-- **`memory` special case (scope='session' only)**: if the settled call's `name === 'memory'`, `event.ok === true`, `input.scope === 'session'`, and `input.operation === 'write'`, upsert `{ key: input.key, content: input.content, updatedAt: input.updatedAt }` into `state.memory` (replacing any entry with the same key). Symmetric for `input.operation === 'delete'` — remove the matching entry. Workspace / global scope produce ordinary tool_results and never touch `state.memory`. These are the only tools the reducer looks inside; every other tool result is opaque.
+- **`memory` special case (scope='session' only)**: if the settled call's `name === 'memory'`, `event.ok === true`, `input.scope === 'session'`, and `input.operation === 'write'`, upsert `{ key: input.key, content: input.content, updatedAt: input.updatedAt }` into `state.memory` (replacing any entry with the same key). Symmetric for `input.operation === 'delete'` — remove the matching entry. Workspace / global scope produce ordinary tool_results and never touch `state.memory`. This is the only tool the reducer looks inside; every other tool result is opaque.
 - Apply pending-settled transition (§4.6.1).
 
 #### 4.6.1 Pending-settled transition
@@ -497,7 +501,8 @@ After removing a settled call, examine remaining `pendingCalls`:
 ### 4.8 `compact_replaced`
 
 **Preconditions**
-- None on `status` — compaction may be applied at any point in the log. The host is responsible for choosing a safe moment (typically `idle` / `done`).
+- `state.status ∈ { 'idle', 'thinking', 'done', 'error' }`. Compaction is a no-op while calls are awaiting approval or executing, because changing message history around unresolved tool calls can orphan pending calls.
+- Host is responsible for choosing a safe moment and a safe `preserveFrom` pivot.
 
 **Transition**
 - Preserve the leading system prompt when present.
@@ -639,10 +644,10 @@ These are all valid concerns for an agent system, but the kernel does not handle
 | Approval UI | Would require IO / async | Dashboard, via `request_approval` effect |
 | Rate limiting / retry | Would introduce time | Host, wrapping LLM adapter |
 | Context compaction (auto-shrinking messages) | Would introduce heuristics + IO | Host, as a pre-`call_llm` step |
-| Planning / TodoWrite | Kernel doesn't know about tasks | External tool or extension |
+| Planning / TodoWrite | Kernel doesn't know about tasks | External tool; dashboard may derive task display from ordinary tool calls |
 | Memory / CLAUDE.md loading | Would require FS | Host, pre-inject into `systemPrompt` |
 | Subagent spawning | Kernel doesn't recurse | Host, orchestrate multiple sessions |
-| Cost tracking beyond accumulation | Just accumulates delta | Host decides thresholds, alerts |
+| Token / context policy beyond accumulation | Just accumulates usage deltas and context pressure | Host / Dashboard decide prompts, alerts, and compaction policy |
 | Cancellation of in-flight tools | Only handles state | Host cancels IO |
 | Session persistence | Would require IO | Host writes JSONL event log |
 | Streaming partial LLM tokens | Complicates purity | Host may buffer and emit one `llm_response` |
@@ -656,7 +661,7 @@ These are all valid concerns for an agent system, but the kernel does not handle
 ## 8. Reference implementation
 
 - Source: `packages/kernel/src/`
-- Tests: `packages/kernel/src/core.test.ts` — 50 tests covering transitions, purity, fold, fork, compaction, approval modes, todos, cwd, memory, and image content preservation.
+- Tests: `packages/kernel/src/core.test.ts` — tests covering transitions, purity, fold, fork, compaction, approval modes, cwd, memory, ordinary tool results, and image content preservation.
 
 The reference implementation is the tie-breaker only for things this spec is silent about. Where they conflict, spec wins and the ref impl should be patched.
 

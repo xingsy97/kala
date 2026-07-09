@@ -129,7 +129,6 @@ function writeFixture() {
     status: 'idle',
     usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     cursor: 0,
-    todos: [],
     memory: [
       { key: 'project_goal', content: 'Keep kernel pure; host owns LLM/event log; executor owns workspace tools.', updatedAt: '2026-07-06T14:22:18.000Z' },
       { key: 'ui_debugger_preference', content: 'Show reducer transitions, LLM calls, tool lifecycle, and raw JSON without making the panel look like an unstyled dump.', updatedAt: '2026-07-06T14:41:03.000Z' },
@@ -180,7 +179,7 @@ try {
   await page.waitForSelector('[data-testid="inspector-sidebar-tab-trace"]', { timeout: 15000 })
   await page.click('[data-testid="inspector-sidebar-tab-trace"]')
   try {
-    await page.waitForSelector('[data-testid="trace-view-switch"]', { timeout: 15000 })
+    await page.waitForSelector('[data-testid="trace-toolbar"]', { timeout: 15000 })
   } catch (err) {
     const diag = await page.evaluate(() => ({
       url: location.href,
@@ -197,47 +196,67 @@ try {
   }
   await verifySurfaceContrast(page, 'dark')
   await page.screenshot({ path: join(shotsDir, '01-debugger-reducer.png'), fullPage: false })
-  const reducerText = await page.$eval('[aria-label="trace view"]', el => el.textContent || '')
+  const reducerText = await page.$eval('[data-testid="inspector-view-panel-trace"]', el => el.textContent || '')
   check('reducer trace shows state transition', reducerText.includes('idle → thinking') && reducerText.includes('request_approval'), reducerText.slice(0, 300))
-  await page.click('[data-testid="theme-toggle"]')
+  check(
+    'trace advanced controls render',
+    ['List', 'Flow', 'Compare'].every((s) => reducerText.includes(s)) &&
+      Boolean(await page.$('[data-testid="timeline-minimap"]')) &&
+      Boolean(await page.$('[data-testid="replay-panel"]')) &&
+      Boolean(await page.$('[data-testid="state-diff-view"]')),
+    reducerText.slice(0, 300),
+  )
+  await page.$eval('[data-testid="teaching-mode-toggle"]', (el) => el.click())
+  await page.waitForFunction(() => (document.querySelector('[data-testid="inspector-view-panel-trace"]')?.textContent || '').includes('state machine moves'))
+  const teachingText = await page.$eval('[data-testid="inspector-view-panel-trace"]', el => el.textContent || '')
+  check('teaching mode explains state machine protocol', teachingText.includes('state machine moves') && teachingText.includes('output actions'), teachingText.slice(0, 300))
+  await page.$eval('[data-testid="trace-mode-switch-flow"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="protocol-flow-view"]')
+  const flowText = await page.$eval('[data-testid="protocol-flow-view"]', el => el.textContent || '')
+  check('protocol flow view shows event state machine action lanes', flowText.includes('Input Event') && flowText.includes('State Machine') && flowText.includes('Output Actions') && flowText.includes('call_tool'), flowText.slice(0, 300))
+  await page.$eval('[data-testid="trace-mode-switch-list"]', (el) => el.click())
+  await page.$eval('[data-testid="theme-toggle"]', (el) => el.click())
   await page.waitForFunction(() => !document.documentElement.classList.contains('dark'))
   await verifySurfaceContrast(page, 'light')
   await page.screenshot({ path: join(shotsDir, '01-debugger-reducer-light.png'), fullPage: false })
-  await page.click('[data-testid="theme-toggle"]')
+  await page.$eval('[data-testid="theme-toggle"]', (el) => el.click())
   await page.waitForFunction(() => document.documentElement.classList.contains('dark'))
-  await page.click('[data-testid="trace-view-switch-llm"]')
+  await page.$eval('[data-testid="inspector-sidebar-tab-llm"]', (el) => el.click())
   await page.waitForSelector('[data-testid="llm-call-row"]')
-  await page.click('[data-testid="llm-call-row"]')
+  await page.$eval('[data-testid="llm-call-row"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="llm-detail"]')
+  await page.waitForSelector('[data-testid="message-assembler-view"]')
   await page.screenshot({ path: join(shotsDir, '02-debugger-llm.png'), fullPage: false })
   const llmAssemblyText = await page.$eval('[data-testid="llm-assembly-view"]', el => el.textContent || '')
   check('llm detail explains message assembly', llmAssemblyText.includes('System Prompt') && llmAssemblyText.includes('Kernel Messages') && llmAssemblyText.includes('Adapter Transform'), llmAssemblyText.slice(0, 300))
-  await page.click('[data-testid="llm-detail-view-switch-context"]')
   await page.waitForSelector('[data-testid="kernel-messages-view"]')
   const kernelMessagesText = await page.$eval('[data-testid="kernel-messages-view"]', el => el.textContent || '')
   check('llm detail shows kernel messages', kernelMessagesText.includes('user') && kernelMessagesText.includes('Fix executor'), kernelMessagesText.slice(0, 300))
-  await page.click('[data-testid="llm-detail-view-switch-payload"]')
-  await page.waitForSelector('[data-testid="provider-payload-view"]')
-  const payloadText = await page.$eval('[data-testid="provider-payload-view"]', el => el.textContent || '')
-  check('llm detail shows provider payload', payloadText.includes('Provider Request') && payloadText.includes('Kernel Request') && payloadText.includes('test-redacted-api-key'), payloadText.slice(0, 300))
-  await page.click('[data-testid="llm-detail-view-switch-response"]')
-  await page.waitForSelector('[data-testid="llm-response-view"]')
-  const responseText = await page.$eval('[data-testid="llm-response-view"]', el => el.textContent || '')
-  check('llm detail shows provider response and parsed response', responseText.includes('Provider Response') && responseText.includes('Parsed Kernel Response'), responseText.slice(0, 300))
+  await page.$eval('[data-testid="llm-detail-view-switch-api"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="api-call-view"]')
+  const apiText = await page.$eval('[data-testid="api-call-view"]', el => el.textContent || '')
+  check('llm detail shows captured API request and response', apiText.includes('Captured API Request') && apiText.includes('Captured API Response') && apiText.includes('Parsed Kernel Response') && apiText.includes('test-redacted-api-key'), apiText.slice(0, 300))
+  check('llm API summary strip renders', apiText.includes('request keys') && apiText.includes('stream events') && apiText.includes('HTTP trace'), apiText.slice(0, 300))
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="llm-detail"]'))
-  await page.click('[data-testid="trace-view-switch-tools"]')
+  await page.$eval('[data-testid="inspector-sidebar-tab-tools"]', (el) => el.click())
   await page.waitForSelector('[data-testid="tool-call-row"]')
-  await page.click('[data-testid="tool-call-row"]')
+  await page.$eval('[data-testid="tool-call-row"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="tool-detail"]')
   await page.screenshot({ path: join(shotsDir, '03-debugger-tool.png'), fullPage: false })
   const toolText = await page.$eval('[data-testid="tool-detail"]', el => el.textContent || '')
   check('tool detail shows lifecycle raw data', toolText.includes('Tool Input') && toolText.includes('Tool Result Event'), toolText.slice(0, 300))
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="tool-detail"]'))
-  await page.click('[data-testid="inspector-sidebar-tab-debugger"]')
-  await page.click('[data-testid="runtime-view-switch-state"]')
+  await page.$eval('[data-testid="inspector-sidebar-tab-status"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="runtime-view-switch"]')
+  await page.$eval('[data-testid="runtime-view-switch-state"]', (el) => el.click())
   await page.waitForSelector('[data-testid="state-runtime"]')
   const stateRuntimeText = await page.$eval('[data-testid="state-runtime"]', el => el.textContent || '')
   check('state runtime shows compact grouped summary', ['Core', 'Workload', 'Usage', 'Memory', 'View JSON'].every((s) => stateRuntimeText.includes(s)), stateRuntimeText.slice(0, 300))
+  const healthText = await page.$eval('[data-testid="run-health-panel"]', el => el.textContent || '')
+  check('run health panel shows non-cost run health', healthText.includes('Run status') && healthText.includes('Missing HTTP traces') && !/cost|money/i.test(healthText), healthText.slice(0, 300))
+  check('watch expressions panel removed', await page.$('[data-testid="watch-expressions"]') === null)
   check('state runtime keeps full JSON out of sidebar', !stateRuntimeText.includes('Full AgentState JSON'), stateRuntimeText.slice(0, 300))
   await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'View JSON')
@@ -250,7 +269,8 @@ try {
   check('state JSON modal exposes full AgentState', stateJsonText.includes('Full AgentState JSON') && stateJsonText.includes(sessionId), stateJsonText.slice(0, 300))
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="agent-state-json-dialog"]'))
-  await page.click('[data-testid="runtime-view-switch-tools"]')
+  await page.waitForSelector('[data-testid="runtime-view-switch"]')
+  await page.$eval('[data-testid="runtime-view-switch-tools"]', (el) => el.click())
   await page.waitForSelector('[data-testid="tool-registry"]')
   await page.screenshot({ path: join(shotsDir, '05-debugger-runtime-tools.png'), fullPage: false })
   check('no page errors', errors.length === 0, errors.join(' | '))
@@ -293,8 +313,8 @@ async function verifySurfaceContrast(page, theme) {
       app: bg('body'),
       inspector: bg('[data-testid="inspector-panel"]'),
       sidebarTabs: bg('[data-testid="inspector-sidebar-tabs"]'),
-      traceHeader: bg('[aria-label="trace view"] > div:first-child'),
-      traceSwitcher: bg('[data-testid="trace-view-switch"]'),
+      traceHeader: bg('[data-testid="trace-toolbar"]'),
+      traceSwitcher: bg('[data-testid="trace-mode-switch"]'),
     }
   })
   const pairs = [

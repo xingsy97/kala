@@ -75,7 +75,15 @@ Cards inside cards use half-opacity muted (`bg-muted/40`, `bg-muted/60`) to nest
 - Sanity-check in dark mode with the composer, the Explorer, and the New Session dialog open at the same time. That's the "three surfaces + a modal" cross-section where regressions surface fastest.
 - Run the existing dashboard tests (`pnpm --filter @agent-kernel/dashboard test`) — they don't test appearance but they catch the class of "I removed a divider that some test grepped for by className" mistake.
 
-## 9. Anti-patterns — do not do these
+## 9. Scrollbars
+
+Never expose native browser scrollbars as raw UI chrome. Scrollable dashboard surfaces should use `components/ui/scroll-area.tsx` so the scrollbar is part of the design system and works consistently in dark and light themes.
+
+Allowed exceptions are content-level overflow inside rendered markdown/code (`pre`, long inline traces) and the document root; those are covered by the global thin scrollbar skin in `src/index.css`. If you add `overflow-auto`, `overflow-y-auto`, or `overflow-x-auto`, either replace it with `ScrollArea` or confirm it is a content-level fallback that will inherit the global skin. Do not leave a large panel, popover, dialog body, list, or terminal output on native scrollbar defaults.
+
+For scroll containers that need imperative control, such as auto-following terminal output, use `ScrollArea`'s `viewportRef` rather than putting `overflow-auto` on the content element.
+
+## 10. Anti-patterns — do not do these
 
 - `border` (bare) — always specify color + transparency
 - `dark:border-border` — redundant, the token already adapts; adds noise
@@ -83,8 +91,9 @@ Cards inside cards use half-opacity muted (`bg-muted/40`, `bg-muted/60`) to nest
 - Hardcoded Tailwind gray scales in dark mode (`dark:border-slate-*`, `dark:bg-zinc-*`) — use the semantic tokens instead
 - `shadow-sm` in dark mode as a depth signal — nearly invisible; use `shadow-lg` for floaters and background steps for panels
 - Achromatic HSL (`0 0% N%`) — reverts to the debug look
+- Bare native scrollbars on panels, popovers, dialogs, lists, or terminal output
 
-## 10. Audit command
+## 11. Audit command
 
 To find remaining hard borders:
 
@@ -97,4 +106,7 @@ rg -n "border-border[^/-]" packages/dashboard/src
 
 # hard directional borders — inspect each hit to decide bg-step vs /50
 rg -n "\bborder-[tblr]\b" packages/dashboard/src
+
+# naked overflow scroll containers — replace with ScrollArea unless content-level fallback
+rg -n "overflow-(auto|scroll|x-auto|y-auto|x-scroll|y-scroll)" packages/dashboard/src
 ```

@@ -39,8 +39,15 @@ export async function runAgentTool(
   }
   const depth = depthOf(deps.store, parent)
   const maxDepth = parent.config.maxAgentDepth ?? DEFAULT_MAX_AGENT_DEPTH
-  if (depth >= maxDepth) return { ok: false, content: 'agent depth exceeded' }
+  if (depth >= maxDepth) {
+    // Depth failure has no child session, so we can't emit a start/finish
+    // pair. Just return the enveloped error so the parent's timeline still
+    // shows the SubAgentCard in failed state.
+    return failEnvelope('depth-exceeded', agentTypeOf(effect), 'agent depth exceeded', 0, 0)
+  }
 
+  const agentType = agentTypeOf(effect)
+  const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
   const child = await deps.store.create({
     config: filteredAgentConfig(parent.config, effect.input.tools),
     parentSessionId,
@@ -53,11 +60,23 @@ export async function runAgentTool(
     // of the parent's mode. See docs/adr/0014-subagent-approval-mode.md.
     initialApprovalMode: 'allow_all',
   })
-  const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
+
+  const startedAt = new Date()
+  deps.broadcast.onSubAgentStarted?.({
+    parentSessionId,
+    parentCallId: effect.callId,
+    childSessionId: child.sessionId,
+    ...(agentType !== undefined ? { agentType } : {}),
+    prompt,
+    ...(model !== undefined ? { model } : {}),
+    startedAt: startedAt.toISOString(),
+  })
+
   const priorModel = model ? deps.models?.get(child.sessionId) : undefined
   if (model && isSettableModelResolver(deps.models)) {
     deps.models.set(child.sessionId, model)
   }
+  let dispatchError: string | undefined
   try {
     await dispatchOne(
       deps,
@@ -65,17 +84,105 @@ export async function runAgentTool(
       { kind: 'user_message', text: prompt },
       aborts,
     )
+  } catch (err) {
+    dispatchError = err instanceof Error ? err.message : String(err)
   } finally {
     if (model && isSettableModelResolver(deps.models)) {
       if (priorModel) deps.models.set(child.sessionId, priorModel)
       else deps.models.delete(child.sessionId)
     }
   }
+  const finishedAt = new Date()
+  const durationMs = finishedAt.getTime() - startedAt.getTime()
   const final = deps.store.get(child.sessionId)?.state
-  if (!final || final.status !== 'done') {
-    return { ok: false, content: `agent ended with status ${final?.status ?? 'unknown'}` }
+  const turns = final?.cursor ?? 0
+
+  if (dispatchError || !final || final.status !== 'done') {
+    const error = dispatchError ?? `agent ended with status ${final?.status ?? 'unknown'}`
+    deps.broadcast.onSubAgentFinished?.({
+      parentSessionId,
+      parentCallId: effect.callId,
+      childSessionId: child.sessionId,
+      status: 'failed',
+      turns,
+      durationMs,
+      finishedAt: finishedAt.toISOString(),
+      error,
+    })
+    return failEnvelope(child.sessionId, agentType, error, turns, durationMs)
   }
-  return { ok: true, content: finalAssistantText(final) }
+
+  deps.broadcast.onSubAgentFinished?.({
+    parentSessionId,
+    parentCallId: effect.callId,
+    childSessionId: child.sessionId,
+    status: 'completed',
+    turns,
+    durationMs,
+    finishedAt: finishedAt.toISOString(),
+  })
+  return okEnvelope(child.sessionId, agentType, finalAssistantText(final), turns, durationMs)
+}
+
+function agentTypeOf(effect: CallToolEffect): string | undefined {
+  const raw = (effect.input as Record<string, unknown>)['agent_type']
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+}
+
+function okEnvelope(
+  childSessionId: string,
+  agentType: string | undefined,
+  resultText: string,
+  turns: number,
+  durationMs: number,
+): { ok: true; content: string } {
+  const header = envelopeHeader(childSessionId, agentType, 'completed', turns, durationMs)
+  return {
+    ok: true,
+    content: `${header}\n<result>\n${escapeEnvelopeBody(resultText)}\n</result>\n</sub_agent>`,
+  }
+}
+
+function failEnvelope(
+  childSessionId: string,
+  agentType: string | undefined,
+  error: string,
+  turns: number,
+  durationMs: number,
+): { ok: false; content: string } {
+  const header = envelopeHeader(childSessionId, agentType, 'failed', turns, durationMs)
+  return {
+    ok: false,
+    content: `${header}\n<error>\n${escapeEnvelopeBody(error)}\n</error>\n</sub_agent>`,
+  }
+}
+
+function envelopeHeader(
+  childSessionId: string,
+  agentType: string | undefined,
+  status: 'completed' | 'failed',
+  turns: number,
+  durationMs: number,
+): string {
+  const attrs = [
+    `session_id="${escapeAttr(childSessionId)}"`,
+    ...(agentType ? [`agent_type="${escapeAttr(agentType)}"`] : []),
+    `status="${status}"`,
+    `turns="${turns}"`,
+    `duration_ms="${durationMs}"`,
+  ]
+  return `<sub_agent\n  ${attrs.join('\n  ')}\n>`
+}
+
+function escapeAttr(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function escapeEnvelopeBody(text: string): string {
+  // Escape only `<` and `>` so a child that returns literal HTML/XML doesn't
+  // confuse the envelope parser. `&` is preserved so entities the child wrote
+  // still render normally when the dashboard unescapes.
+  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function filteredAgentConfig(

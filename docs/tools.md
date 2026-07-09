@@ -26,14 +26,14 @@ Every executor bundled in this repo MUST implement the tools below. Third-party 
 | `write` | Overwrite entire file | ✅ | Mutating |
 | `edit` | Precise string replace | ✅ | Mutating |
 | `bash` | Execute shell command; can start background tasks with `run_in_background` | ✅ | Mutating |
-| `todowrite` | Replace the session todo list | ❌ | Planning state |
+| `todowrite` | Replace the session todo list | ❌ | Planning tool |
 | `web_search` | DuckDuckGo HTML search | ❌ | Network |
 | `memory` | List, read, write, or delete memory entries (session / workspace / global scope) | ❌ | Memory |
 | `agent` | Spawn a host-side child agent session | ❌ | Host builtin |
 | `bash_output` | Poll background shell task output | ❌ | Background shell |
 | `kill_shell` | Stop a background shell task | ✅ | Background shell |
 
-`todowrite` is both an executor tool and a reducer special case: successful results promote `input.todos` into `state.todos`. `memory` behaves the same way when `scope: 'session'` and `operation` is `write` or `delete` — the reducer lifts `(key, content)` into `state.memory`; workspace/global scope go to disk under the executor. `agent` is declared as a tool schema but runs inside Host, not Executor — it creates a child JSONL session in the same workspace and returns the child assistant text.
+`todowrite` is an ordinary executor tool. The kernel records it as a normal `call_tool` / `tool_result`; Dashboard task UI derives its display from the event/effect trace. `memory` is the only current reducer-lifted tool when `scope: 'session'` and `operation` is `write` or `delete` — the reducer lifts `(key, content)` into `state.memory`; workspace/global scope go to disk under the executor. `agent` is declared as a tool schema but runs inside Host, not Executor — it creates a child JSONL session in the same workspace and returns the child assistant text.
 
 ---
 
@@ -254,12 +254,12 @@ Replace the session's todo list.
       "type": "array",
       "items": {
         "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "content": { "type": "string" },
-          "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
-        },
-        "required": ["id", "content", "status"]
+            "properties": {
+              "content": { "type": "string" },
+              "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"] },
+              "priority": { "type": "string", "enum": ["high", "medium", "low"] }
+            },
+            "required": ["content", "status"]
       }
     }
   },
@@ -267,9 +267,9 @@ Replace the session's todo list.
 }
 ```
 
-**Output**: `Updated <n> todos`.
+**Output**: `todos updated: <n> item(s)`.
 
-**Reducer behavior**: the kernel's `onToolResult` special-cases this tool name — when `ok: true`, it promotes `pendingCall.input.todos` into `state.todos`. No new event kind is required.
+**Reducer behavior**: none. This is a normal tool call. The dashboard may derive a task display from successful `todowrite` calls in the timeline, but `AgentState` does not contain todos.
 
 ### 2.9 `web_search`
 
@@ -470,7 +470,7 @@ Tools are pure functions of `(input, filesystem, network)` → `(output)`. Tests
 | Tool | Why |
 |---|---|
 | `web_fetch` | Position overlaps `web_search` (agent typically discovers URLs via search; users can paste page content directly), and the SSRF / length-cap / auth-policy design cost outweighs the payoff. |
-| `todo_read` | `todowrite` is implemented; state already carries `todos`. |
+| `todo_read` | `todowrite` replaces the complete list, so a separate read tool adds little value. |
 | third-party `subagent` / `task` executors | `agent` is a host-side builtin, not an executor-side recursive primitive. |
 | `memory` / `remember` | Persistence layer for cross-session context is a separate subsystem. |
 | Third-party MCP servers at runtime | Configuration accepted, runtime not implemented yet. |

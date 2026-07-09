@@ -57,6 +57,43 @@ export type LoopBroadcast = {
    * simply doesn't fire.
    */
   onTokenDelta?(sessionId: string, text: string): void
+  /**
+   * A sub-agent (via the `agent` builtin) has just been created. Fired into
+   * the parent's dashboard room so the SubAgentCard can transition from
+   * "spawning" to "running" and open a subscription to the child's own room
+   * before the child starts streaming. Optional so hosts without a dashboard
+   * can drop it.
+   */
+  onSubAgentStarted?(payload: SubAgentStartedPayload): void
+  /**
+   * The sub-agent's inner loop returned (success or failure). Fired into the
+   * parent's dashboard room just before `runAgentTool()` returns the wrapped
+   * envelope as the tool_result — arrives ahead of the parent's
+   * `event:appended` for that tool_result, so the card can freeze its timer
+   * without waiting for the parent turn to advance.
+   */
+  onSubAgentFinished?(payload: SubAgentFinishedPayload): void
+}
+
+export type SubAgentStartedPayload = {
+  parentSessionId: string
+  parentCallId: string
+  childSessionId: string
+  agentType?: string
+  prompt: string
+  model?: string
+  startedAt: string
+}
+
+export type SubAgentFinishedPayload = {
+  parentSessionId: string
+  parentCallId: string
+  childSessionId: string
+  status: 'completed' | 'failed'
+  turns: number
+  durationMs: number
+  finishedAt: string
+  error?: string
 }
 
 export type ToolDispatcher = {

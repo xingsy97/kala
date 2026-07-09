@@ -50,6 +50,7 @@ describe('SettingsDialog', () => {
   beforeEach(() => {
     fetchMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
+    localStorage.clear()
   })
 
   afterEach(() => {
@@ -178,5 +179,44 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open onOpenChange={() => {}} />)
 
     await screen.findByText(/network down/i)
+  })
+
+  it('configures desktop notification permission and per-kind toggles', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    const requestPermission = vi.fn().mockResolvedValue('granted')
+    const NotificationMock = vi.fn()
+    Object.assign(NotificationMock, { permission: 'default', requestPermission })
+    vi.stubGlobal('Notification', NotificationMock)
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await screen.findByText('<home>/.claude/settings.json')
+
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    expect(screen.getByTestId('desktop-notification-permission').textContent).toContain('not requested')
+
+    fireEvent.click(screen.getByTestId('settings-toggle-desktop-notifications'))
+    await waitFor(() => {
+      expect(requestPermission).toHaveBeenCalledTimes(1)
+    })
+    expect(localStorage.getItem('ak-desktop-notifications-enabled')).toBe('1')
+
+    fireEvent.click(screen.getByTestId('settings-toggle-notification-ak-desktop-notification-sound'))
+    expect(localStorage.getItem('ak-desktop-notification-sound')).toBe('0')
+
+    fireEvent.click(screen.getByTestId('settings-toggle-notification-ak-desktop-notification-session-error'))
+    expect(localStorage.getItem('ak-desktop-notification-session-error')).toBe('0')
+  })
+
+  it('keeps desktop notifications disabled when browser permission is denied', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    const NotificationMock = vi.fn()
+    Object.assign(NotificationMock, { permission: 'denied', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await screen.findByText('<home>/.claude/settings.json')
+
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    const toggle = screen.getByTestId('settings-toggle-desktop-notifications') as HTMLButtonElement
+    expect(toggle.disabled).toBe(true)
+    expect(screen.getByText(/Notifications are blocked/i)).toBeTruthy()
   })
 })
