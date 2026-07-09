@@ -42,6 +42,7 @@ describe('Explorer', () => {
         onSelect={() => {}}
         onNewSession={() => {}}
         onDelete={() => {}}
+        onRename={() => {}}
       />,
     )
     expect(screen.getByText(/no daemons attached/i)).toBeTruthy()
@@ -58,6 +59,7 @@ describe('Explorer', () => {
         onSelect={() => {}}
         onNewSession={onNewSession}
         onDelete={() => {}}
+        onRename={() => {}}
       />,
     )
     fireEvent.click(screen.getByTestId('new-session-button'))
@@ -73,6 +75,7 @@ describe('Explorer', () => {
         onSelect={() => {}}
         onNewSession={() => {}}
         onDelete={() => {}}
+        onRename={() => {}}
       />,
     )
     const wsRow = screen.getByTestId('workspace-row')
@@ -90,6 +93,7 @@ describe('Explorer', () => {
         onSelect={() => {}}
         onNewSession={() => {}}
         onDelete={() => {}}
+        onRename={() => {}}
       />,
     )
     const sessionRow = screen.getByTestId('session-row')
@@ -116,6 +120,7 @@ describe('Explorer', () => {
         onSelect={() => {}}
         onNewSession={() => {}}
         onDelete={() => {}}
+        onRename={() => {}}
       />,
     )
     const wsRow = screen.getByTestId('workspace-row')
@@ -136,6 +141,7 @@ describe('Explorer', () => {
         onSelect={onSelect}
         onNewSession={() => {}}
         onDelete={() => {}}
+        onRename={() => {}}
       />,
     )
     fireEvent.click(screen.getByTestId('session-row'))
@@ -152,11 +158,35 @@ describe('Explorer', () => {
         onSelect={() => {}}
         onNewSession={() => {}}
         onDelete={onDelete}
+        onRename={() => {}}
       />,
     )
     fireEvent.click(screen.getByTestId('session-delete-button'))
     fireEvent.click(screen.getByTestId('confirm-delete-button'))
     expect(onDelete).toHaveBeenCalledWith(sessionSummary.sessionId)
+  })
+
+  it('double-clicking a session enters rename mode; Enter fires onRename', () => {
+    const onRename = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onDelete={() => {}}
+        onRename={onRename}
+      />,
+    )
+    fireEvent.doubleClick(screen.getByTestId('session-row'))
+    const input = screen.getByTestId('session-rename-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'renamed thing' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onRename).toHaveBeenCalledWith(
+      sessionSummary.sessionId,
+      'renamed thing',
+    )
   })
 
   it('marks the selected session with the highlight class', () => {
@@ -168,6 +198,7 @@ describe('Explorer', () => {
         onSelect={() => {}}
         onNewSession={() => {}}
         onDelete={() => {}}
+        onRename={() => {}}
       />,
     )
     const sessionRow = screen.getByTestId('session-row')

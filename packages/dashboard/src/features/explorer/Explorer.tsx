@@ -8,7 +8,7 @@
  * sessions without a workspaceId (older logs) group under "Unassigned".
  */
 
-import { useMemo, useState, type ReactElement, type RefCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
 import type { RowRendererProps } from 'react-arborist'
@@ -20,6 +20,7 @@ import {
   Clock3,
   Folder,
   GitFork,
+  Info,
   Loader2,
   MessageSquare,
   Plus,
@@ -54,6 +55,8 @@ type Props = {
   onSelect(sessionId: string): void
   onNewSession(): void
   onDelete(sessionId: string): void
+  onRename(sessionId: string, label: string): void
+  onWorkspaceInfo?(workspaceId: string): void
 }
 
 const SESSION_ROW_HEIGHT = 88
@@ -67,8 +70,11 @@ export function Explorer({
   onSelect,
   onNewSession,
   onDelete,
+  onRename,
+  onWorkspaceInfo,
 }: Props): JSX.Element {
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
   const data = useMemo(
@@ -127,7 +133,17 @@ export function Explorer({
               <Row
                 node={node}
                 style={style}
+                editingSessionId={editingSessionId}
                 onDeleteRequest={(sess) => setPendingDelete(sess)}
+                onStartEdit={(sess) => setEditingSessionId(sess.sessionId)}
+                onCancelEdit={() => setEditingSessionId(null)}
+                onSubmitEdit={(sess, next) => {
+                  setEditingSessionId(null)
+                  if (next.trim() !== sess.label.trim()) {
+                    onRename(sess.sessionId, next)
+                  }
+                }}
+                onWorkspaceInfo={onWorkspaceInfo}
               />
             )}
           </Tree>
@@ -214,15 +230,29 @@ function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
 function Row({
   node,
   style,
+  editingSessionId,
   onDeleteRequest,
+  onStartEdit,
+  onCancelEdit,
+  onSubmitEdit,
+  onWorkspaceInfo,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
+  editingSessionId: string | null
   onDeleteRequest(sess: SessionNode): void
+  onStartEdit(sess: SessionNode): void
+  onCancelEdit(): void
+  onSubmitEdit(sess: SessionNode, label: string): void
+  onWorkspaceInfo?(workspaceId: string): void
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
-      <WorkspaceRow node={node as NodeApi<WorkspaceNode>} style={style} />
+      <WorkspaceRow
+        node={node as NodeApi<WorkspaceNode>}
+        style={style}
+        onWorkspaceInfo={onWorkspaceInfo}
+      />
     )
   }
   if (node.data.kind === 'bucket') {
@@ -232,7 +262,11 @@ function Row({
     <SessionRow
       node={node as NodeApi<SessionNode>}
       style={style}
+      editing={editingSessionId === (node.data as SessionNode).sessionId}
       onDeleteRequest={onDeleteRequest}
+      onStartEdit={onStartEdit}
+      onCancelEdit={onCancelEdit}
+      onSubmitEdit={onSubmitEdit}
     />
   )
 }
@@ -240,9 +274,11 @@ function Row({
 function WorkspaceRow({
   node,
   style,
+  onWorkspaceInfo,
 }: {
   node: NodeApi<WorkspaceNode>
   style: React.CSSProperties
+  onWorkspaceInfo?(workspaceId: string): void
 }): JSX.Element {
   const w = node.data
   const dotCls = w.online
@@ -254,6 +290,7 @@ function WorkspaceRow({
       : [w.os, w.runtime, w.runtimeVersion, w.ip]
           .filter((s) => typeof s === 'string' && s.length > 0)
           .join(' · ') || 'offline'
+  const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
   return (
     <div
       style={style}
@@ -270,9 +307,24 @@ function WorkspaceRow({
           <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
         <span className={cn('inline-block h-2 w-2 flex-none rounded-full', dotCls)} />
-        <span className="truncate text-[13px] font-semibold text-foreground">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
           {w.name}
         </span>
+        {canShowInfo ? (
+          <button
+            type="button"
+            data-testid={`workspace-info-${w.workspaceId}`}
+            title="Workspace info"
+            aria-label="Workspace info"
+            className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/ws:opacity-100"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (w.workspaceId !== null) onWorkspaceInfo?.(w.workspaceId)
+            }}
+          >
+            <Info className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </div>
       <div className="mt-0.5 truncate pl-6 text-[11px] text-muted-foreground">
         {meta}
@@ -311,11 +363,19 @@ function BucketRow({
 function SessionRow({
   node,
   style,
+  editing,
   onDeleteRequest,
+  onStartEdit,
+  onCancelEdit,
+  onSubmitEdit,
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
+  editing: boolean
   onDeleteRequest(sess: SessionNode): void
+  onStartEdit(sess: SessionNode): void
+  onCancelEdit(): void
+  onSubmitEdit(sess: SessionNode, label: string): void
 }): JSX.Element {
   const s = node.data
   const selected = node.isSelected
@@ -331,6 +391,10 @@ function SessionRow({
           'bg-accent border-l-2 border-l-primary',
       )}
       onClick={() => node.activate()}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        onStartEdit(s)
+      }}
     >
       <div className="min-w-0 cursor-pointer px-3 py-2.5 pl-6 pr-9">
         <div className="flex min-w-0 items-center gap-2">
@@ -340,14 +404,23 @@ function SessionRow({
               selected ? 'text-primary' : 'text-muted-foreground',
             )}
           />
-          <div
-            className={cn(
-              'min-w-0 flex-1 truncate text-[13px] font-medium',
-              selected ? 'text-foreground' : 'text-foreground/90',
-            )}
-          >
-            {s.label}
-          </div>
+          {editing ? (
+            <RenameInput
+              initial={s.label}
+              onSubmit={(next) => onSubmitEdit(s, next)}
+              onCancel={onCancelEdit}
+            />
+          ) : (
+            <div
+              className={cn(
+                'min-w-0 flex-1 truncate text-[13px] font-medium',
+                selected ? 'text-foreground' : 'text-foreground/90',
+              )}
+              title="Double-click to rename"
+            >
+              {s.label}
+            </div>
+          )}
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-[11px] text-muted-foreground">
           <StatusChip status={s.status} />
@@ -461,4 +534,44 @@ function formatWhen(iso: string): string {
   } catch {
     return iso
   }
+}
+
+function RenameInput({
+  initial,
+  onSubmit,
+  onCancel,
+}: {
+  initial: string
+  onSubmit(label: string): void
+  onCancel(): void
+}): JSX.Element {
+  const [value, setValue] = useState(initial)
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [])
+  return (
+    <input
+      ref={ref}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          onSubmit(value)
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          onCancel()
+        }
+      }}
+      onBlur={() => onSubmit(value)}
+      data-testid="session-rename-input"
+      aria-label="Rename session"
+      spellCheck={false}
+      className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-[13px] font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
+    />
+  )
 }

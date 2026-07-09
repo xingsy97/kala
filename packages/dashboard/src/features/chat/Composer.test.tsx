@@ -1,13 +1,21 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ImageContent } from '@agent-kernel/kernel'
+import type { ImageContent, TextContent } from '@agent-kernel/kernel'
+import type { FileListEntry } from '@agent-kernel/shared'
 
 import { Composer } from './Composer.js'
 
 function renderComposer(props?: {
-  onSubmit?: (text: string, mode: 'steer' | 'queue', images?: readonly ImageContent[]) => void
+  onSubmit?: (
+    text: string,
+    mode: 'steer' | 'queue',
+    images?: readonly ImageContent[],
+    extraBlocks?: readonly TextContent[],
+  ) => void
   onCompact?: () => void
+  onListFiles?: (query: string) => Promise<readonly FileListEntry[]>
+  onReadFile?: (path: string) => Promise<{ content?: string; error?: string }>
 }) {
   return render(
     <Composer
@@ -21,6 +29,8 @@ function renderComposer(props?: {
       queuedMessages={[]}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
+      {...(props?.onListFiles ? { onListFiles: props.onListFiles } : {})}
+      {...(props?.onReadFile ? { onReadFile: props.onReadFile } : {})}
     />,
   )
 }
@@ -97,7 +107,7 @@ describe('Composer', () => {
     })
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
-    expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined)
+    expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined, undefined)
   })
 
   it('explains send modes and shows pending delivery previews', () => {
@@ -219,5 +229,63 @@ describe('Composer', () => {
     expect(removeBtn).toBeTruthy()
     fireEvent.click(removeBtn as Element)
     expect(screen.queryByTestId('pasted-image-tray')).toBeNull()
+  })
+
+  it('opens the mention picker when the user types @ and inserts the picked path', async () => {
+    const onListFiles = vi.fn().mockResolvedValue([
+      { path: 'packages/host/src/server.ts', size: 0 },
+      { path: 'packages/kernel/src/core.ts', size: 0 },
+    ] as readonly FileListEntry[])
+    renderComposer({ onListFiles })
+
+    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement
+    fireEvent.change(input, { target: { value: 'look at @host' } })
+    input.selectionStart = 'look at @host'.length
+    fireEvent.select(input)
+
+    await waitFor(() => expect(onListFiles).toHaveBeenCalled())
+    const list = await screen.findByTestId('mention-list')
+    expect(list.textContent ?? '').toContain('packages/host/src/server.ts')
+
+    fireEvent.click(screen.getByTestId('mention-option-0'))
+    expect(input.value).toContain('@packages/host/src/server.ts')
+    expect(screen.queryByTestId('mention-menu')).toBeNull()
+  })
+
+  it('inlines the referenced file contents on submit and drops the mention block on error', async () => {
+    const onSubmit = vi.fn()
+    const onListFiles = vi.fn().mockResolvedValue([
+      { path: 'a.ts', size: 0 },
+      { path: 'b.ts', size: 0 },
+    ] as readonly FileListEntry[])
+    const onReadFile = vi.fn(async (path: string) => {
+      if (path === 'a.ts') return { content: 'export const A = 1' }
+      return { error: 'EFBIG: too large' }
+    })
+    renderComposer({ onSubmit, onListFiles, onReadFile })
+
+    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement
+    fireEvent.change(input, {
+      target: { value: 'diff @a.ts and @b.ts please' },
+    })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    const [text, mode, images, extras] = onSubmit.mock.calls[0] as [
+      string,
+      'steer' | 'queue',
+      readonly ImageContent[] | undefined,
+      readonly TextContent[] | undefined,
+    ]
+    expect(text).toBe('diff @a.ts and @b.ts please')
+    expect(mode).toBe('steer')
+    expect(images).toBeUndefined()
+    expect(extras).toBeDefined()
+    expect(extras).toHaveLength(1)
+    expect(extras?.[0]?.text).toContain('--- a.ts ---')
+    expect(extras?.[0]?.text).toContain('export const A = 1')
+    expect(onReadFile).toHaveBeenCalledWith('a.ts')
+    expect(onReadFile).toHaveBeenCalledWith('b.ts')
+    await screen.findByTestId('composer-toast')
   })
 })

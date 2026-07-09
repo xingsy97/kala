@@ -19,9 +19,12 @@ import type {
   ClientFork,
   ClientListDirs,
   ClientListExecutors,
+  ClientListFiles,
   ClientListSessions,
   ClientLoadHistory,
   ClientDeleteSession,
+  ClientReadFile,
+  ClientRenameSession,
   ClientSetApprovalMode,
   ClientSetCwd,
   ClientSetModel,
@@ -580,9 +583,33 @@ function configureDashboardNamespace(ns: DashboardNs, deps: DashboardDeps): void
       })
       await broadcastSessionList(deps)
     })
+    socket.on('client:rename_session', async (p: ClientRenameSession) => {
+      try {
+        const applied = await deps.store.rename(p.sessionId, p.label)
+        deps.dashboardNs.emit('session:renamed', {
+          sessionId: p.sessionId,
+          label: applied,
+        })
+        await broadcastSessionList(deps)
+      } catch (err) {
+        deps.broadcastError(
+          p.sessionId,
+          'host',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
+    })
     socket.on('client:list_dirs', async (p: ClientListDirs) => {
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
       socket.emit('server:dir_list', result)
+    })
+    socket.on('client:list_files', async (p: ClientListFiles) => {
+      const result = await deps.executors.listFiles(p)
+      socket.emit('server:file_list', result)
+    })
+    socket.on('client:read_file', async (p: ClientReadFile) => {
+      const result = await deps.executors.readFile(p)
+      socket.emit('server:file_contents', result)
     })
     socket.on('client:create_session', async (p: ClientCreateSession) => {
       try {
@@ -1111,7 +1138,16 @@ async function serveStatic(
     return
   }
   const mime = MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
-  res.writeHead(200, { 'content-type': mime })
+  const headers: Record<string, string> = { 'content-type': mime }
+  // Vite emits `assets/*.<hash>.<ext>` — safe to cache forever. Everything
+  // else (index.html, favicon, etc.) must revalidate so stale dashboard
+  // builds don't survive a redeploy in the user's browser.
+  if (/[/\\]assets[/\\][^/\\]+\.[0-9a-f]{6,}\./i.test(filePath)) {
+    headers['cache-control'] = 'public, max-age=31536000, immutable'
+  } else {
+    headers['cache-control'] = 'no-cache, must-revalidate'
+  }
+  res.writeHead(200, headers)
   if (req.method === 'HEAD') {
     res.end()
     return

@@ -104,6 +104,62 @@ describe('SessionStore.ensure', () => {
   })
 })
 
+describe('SessionStore.rename', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-rename-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('persists a label as a metadata entry and reflects it in summaries', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({
+      sessionId: 'sess-rename',
+      defaultConfig: config,
+    })
+    await store.rename(record.sessionId, '  My debugging session  ')
+
+    // In-memory record is trimmed and updated in place.
+    expect(record.label).toBe('My debugging session')
+
+    // Persisted metadata line contains the trimmed label.
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.metadata).toHaveLength(1)
+    expect(parsed.metadata[0]!.label).toBe('My debugging session')
+
+    // listSummaries picks up the label from metadata.
+    const [summary] = await store.listSummaries()
+    expect(summary?.label).toBe('My debugging session')
+  })
+
+  it('clears the override when the trimmed label is empty', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({
+      sessionId: 'sess-clear',
+      defaultConfig: config,
+    })
+    await store.rename(record.sessionId, 'temporary')
+    await store.rename(record.sessionId, '   ')
+
+    expect(record.label).toBeUndefined()
+    const [summary] = await store.listSummaries()
+    expect(summary?.label).toBeUndefined()
+  })
+
+  it('rehydrates the label from disk after a fresh SessionStore', async () => {
+    const store1 = new SessionStore(dir)
+    const { record } = await store1.ensure({
+      sessionId: 'sess-persist-label',
+      defaultConfig: config,
+    })
+    await store1.rename(record.sessionId, 'Persisted title')
+
+    const store2 = new SessionStore(dir)
+    const rec2 = await store2.load('sess-persist-label')
+    expect(rec2.label).toBe('Persisted title')
+  })
+})
+
 describe('SessionStore crash recovery', () => {
   let dir: string
   beforeEach(() => {

@@ -98,7 +98,7 @@ export function ChatPanel({
   let messageIndex = -1
   const isEmpty = transcriptItems.length === 0
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
+    <div className="mx-auto flex w-full min-w-0 max-w-[68rem] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
       {isEmpty ? <EmptyState onSuggest={onSuggest} /> : null}
       {transcriptItems.map((item, itemIndex) => {
         if (item.kind === 'compact_boundary') {
