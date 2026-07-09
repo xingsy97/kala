@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -11,6 +11,8 @@ import { createConfig } from '@agent-kernel/kernel'
 import type { AgentConfig } from '@agent-kernel/kernel'
 import type {
   DashboardServerToClientEvents,
+  ClientListDirs,
+  DirListResult,
   DashboardClientToServerEvents,
   ExecutorClientToServerEvents,
   ExecutorServerToClientEvents,
@@ -85,6 +87,35 @@ async function waitForAnyExecutor(
     await new Promise((r) => setTimeout(r, 10))
   }
   throw new Error('announce wait timeout')
+}
+
+function attachDirListHandler(
+  executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>,
+  roots: readonly string[],
+  existingDirs: readonly string[],
+): void {
+  const known = new Set(existingDirs.map((p) => resolve(p)))
+  executor.on('fs:list_dirs', (payload: ClientListDirs, ack: (result: DirListResult) => void) => {
+    const requested = resolve(payload.path ?? roots[0] ?? process.cwd())
+    if (!known.has(requested)) {
+      ack({
+        requestId: payload.requestId,
+        workspaceId: payload.workspaceId,
+        path: requested,
+        roots,
+        entries: [],
+        error: `ENOENT: no such file or directory, scandir '${requested}'`,
+      })
+      return
+    }
+    ack({
+      requestId: payload.requestId,
+      workspaceId: payload.workspaceId,
+      path: requested,
+      roots,
+      entries: [],
+    })
+  })
 }
 
 async function waitForWorkspace(
@@ -793,6 +824,7 @@ describe('wire protocol', () => {
     const sessionId = 'wire-create-session-cwd'
     const root = resolve(dir, 'workspace-root')
     const child = resolve(root, 'child')
+    await mkdir(child, { recursive: true })
 
     const executor: ClientSocket<
       ExecutorServerToClientEvents,
@@ -812,6 +844,7 @@ describe('wire protocol', () => {
       runtime: 'node',
       runtimeVersion: '22',
     })
+    attachDirListHandler(executor, [root], [root, child])
     const dashboard: ClientSocket<
       DashboardServerToClientEvents,
       DashboardClientToServerEvents
@@ -853,6 +886,21 @@ describe('wire protocol', () => {
       message: 'cwd outside sandbox roots',
     })
 
+    const missingErr = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.once('session:error', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId: 'wire-create-session-cwd-missing',
+      workspaceId: 'ws-create-cwd',
+      workspaceName: 'cwd-box',
+      cwd: resolve(root, 'missing'),
+    })
+    await expect(missingErr).resolves.toMatchObject({
+      scope: 'host',
+      message: expect.stringContaining('cwd is not a readable directory'),
+    })
+    expect(server.store.get('wire-create-session-cwd-missing')).toBeUndefined()
+
     dashboard.close()
     executor.close()
   })
@@ -861,6 +909,7 @@ describe('wire protocol', () => {
     const sessionId = 'wire-create-session-backfill-cwd'
     const root = resolve(dir, 'backfill-root')
     const child = resolve(root, 'child')
+    await mkdir(child, { recursive: true })
 
     const executor: ClientSocket<
       ExecutorServerToClientEvents,
@@ -880,6 +929,7 @@ describe('wire protocol', () => {
       runtime: 'node',
       runtimeVersion: '22',
     })
+    attachDirListHandler(executor, [root], [root, child])
 
     await server.store.ensure({ sessionId, defaultConfig: config })
 
@@ -991,6 +1041,7 @@ describe('wire protocol', () => {
     const sessionId = 'wire-set-cwd'
     const root = resolve(dir, 'workspace')
     const child = resolve(root, 'child')
+    await mkdir(child, { recursive: true })
 
     const dashboard: ClientSocket<
       DashboardServerToClientEvents,
@@ -1022,6 +1073,7 @@ describe('wire protocol', () => {
       runtime: 'node',
       runtimeVersion: '22',
     })
+    attachDirListHandler(executor, [root], [root, child])
     await waitForAnyExecutor(server)
 
     const created = new Promise<ServerSessionsPayload>((resolve) => {
@@ -1051,6 +1103,16 @@ describe('wire protocol', () => {
     await expect(err).resolves.toMatchObject({
       scope: 'host',
       message: 'cwd outside sandbox roots',
+    })
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    const missingErr = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.once('session:error', resolve)
+    })
+    dashboard.emit('client:set_cwd', { sessionId, cwd: resolve(root, 'missing') })
+    await expect(missingErr).resolves.toMatchObject({
+      scope: 'host',
+      message: expect.stringContaining('cwd is not a readable directory'),
     })
     expect(server.store.get(sessionId)?.state.cwd).toBe(child)
 

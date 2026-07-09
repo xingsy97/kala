@@ -119,7 +119,6 @@ describe('step: clear', () => {
       ],
       pendingCalls: [{ callId: 'c1', name: 'bash', input: {}, status: 'dispatched' }],
       usage: { inputTokens: 100, outputTokens: 20, cacheCreationTokens: 4, cacheReadTokens: 8 },
-      todos: [{ content: 'old todo', status: 'in_progress' }],
       memory: [{ key: 'old', content: 'value', updatedAt: '2026-07-07T00:00:00.000Z' }],
       cwd: '/tmp/project',
       approvalMode: 'ask',
@@ -133,7 +132,6 @@ describe('step: clear', () => {
     expect(next.status).toBe('idle')
     expect(next.messages).toEqual([])
     expect(next.pendingCalls).toEqual([])
-    expect(next.todos).toEqual([])
     expect(next.memory).toEqual([])
     expect(next.usage).toEqual({ inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 })
     expect(effects).toEqual([])
@@ -433,11 +431,10 @@ describe('step: tool_result', () => {
   })
 })
 
-describe('step: tool_result — todowrite promotes to state.todos', () => {
-  it('replaces state.todos with the input list on ok result', () => {
+describe('step: tool_result — todowrite is an ordinary tool', () => {
+  it('does not promote todowrite input into kernel state', () => {
     const s0: AgentState = {
       ...initial(),
-      todos: [{ content: 'old', status: 'pending' }],
       status: 'executing_tools',
       pendingCalls: [
         {
@@ -458,79 +455,11 @@ describe('step: tool_result — todowrite promotes to state.todos', () => {
       { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
       CONFIG,
     )
-    expect(next.todos).toEqual([
-      { content: 'ship v1', status: 'in_progress', priority: 'high' },
-      { content: 'write tests', status: 'pending' },
-    ])
-  })
-
-  it('leaves state.todos untouched when the tool call failed (ok=false)', () => {
-    const prior = [{ content: 'keep me', status: 'pending' as const }]
-    const s0: AgentState = {
-      ...initial(),
-      todos: prior,
-      status: 'executing_tools',
-      pendingCalls: [
-        {
-          callId: 'c1',
-          name: 'todowrite',
-          input: { todos: [{ content: 'new', status: 'pending' }] },
-          status: 'dispatched',
-        },
-      ],
-    }
-    const { next } = step(
-      s0,
-      { kind: 'tool_result', callId: 'c1', ok: false, content: 'EINVAL' },
-      CONFIG,
-    )
-    expect(next.todos).toEqual(prior)
-  })
-
-  it('other tools do not touch state.todos', () => {
-    const prior = [{ content: 'keep me', status: 'pending' as const }]
-    const s0: AgentState = {
-      ...initial(),
-      todos: prior,
-      status: 'executing_tools',
-      pendingCalls: [
-        { callId: 'c1', name: 'read', input: {}, status: 'dispatched' },
-      ],
-    }
-    const { next } = step(
-      s0,
-      { kind: 'tool_result', callId: 'c1', ok: true, content: 'stuff' },
-      CONFIG,
-    )
-    expect(next.todos).toEqual(prior)
-  })
-
-  it('drops malformed todo entries silently', () => {
-    const s0: AgentState = {
-      ...initial(),
-      status: 'executing_tools',
-      pendingCalls: [
-        {
-          callId: 'c1',
-          name: 'todowrite',
-          input: {
-            todos: [
-              { content: 'ok', status: 'pending' },
-              { content: 'bad status', status: 'weird' },
-              { status: 'pending' }, // missing content
-              null,
-            ],
-          },
-          status: 'dispatched',
-        },
-      ],
-    }
-    const { next } = step(
-      s0,
-      { kind: 'tool_result', callId: 'c1', ok: true, content: 'ok' },
-      CONFIG,
-    )
-    expect(next.todos).toEqual([{ content: 'ok', status: 'pending' }])
+    expect(next.messages.at(-1)).toEqual({
+      role: 'tool',
+      content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'ok' }],
+    })
+    expect(next.pendingCalls).toEqual([])
   })
 })
 

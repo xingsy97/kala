@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, Moon, PanelRight, PanelRightClose, Settings, Sparkles, Sun } from 'lucide-react'
+import { Archive, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun } from 'lucide-react'
+import { Toaster } from 'sonner'
 
 import type {
   ConsolidateMemoryResult,
@@ -9,27 +10,36 @@ import type {
   ModelInfo,
   OverflowContentsResult,
   ServerModelsPayload,
+  SessionSummary,
 } from '@agent-kernel/shared'
 
 import { Button } from './components/ui/button.js'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './components/ui/dialog.js'
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from './components/ui/resizable.js'
-import { ScrollArea } from './components/ui/scroll-area.js'
 import { InlineStatusRow, CompactFeedbackRow, type CompactStatus } from './features/chat/InlineStatusRow.js'
 import { ApprovalCard } from './features/chat/ApprovalCard.js'
-import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel.js'
+import { BackgroundShellsButton } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
-import { Composer } from './features/chat/Composer.js'
+import { APPROVAL_MODES, Composer } from './features/chat/Composer.js'
 import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
+import { CommandPalette, type CommandPaletteItem } from './features/command/CommandPalette.js'
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
 import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
 import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDialog.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
-import { TasksPeek } from './features/chat/TasksPeek.js'
+import { TasksButton } from './features/chat/TasksButton.js'
+import { tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
 import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
@@ -37,7 +47,7 @@ import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import {
   cancelSession,
   clearSession,
-  createSession,
+  createSessionWithAck,
   deleteQueuedMessage,
   deleteSession,
   reorderQueuedMessage,
@@ -52,7 +62,14 @@ import {
 } from './session.js'
 import { backgroundTerminalTasks } from './background-terminal.js'
 import { cn } from './lib/utils.js'
+import { withViewTransition } from './lib/viewTransition.js'
 import { visibleMessages, visibleTranscript } from './transcript.js'
+import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
+import {
+  useBackgroundShellToasts,
+  useSessionToasts,
+  useSubAgentToasts,
+} from './session-toasts.js'
 
 type Theme = 'dark' | 'light'
 
@@ -128,16 +145,20 @@ export function App(): JSX.Element {
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string; workspaceId?: string } | null
   >(null)
+  const [workspacePickError, setWorkspacePickError] = useState<string | null>(null)
+  const [workspacePickSubmitting, setWorkspacePickSubmitting] = useState(false)
   const [connectWorkspaceOpen, setConnectWorkspaceOpen] = useState(false)
+  const [explorerDrawerOpen, setExplorerDrawerOpen] = useState(false)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
   const [theme, toggleTheme] = useTheme()
-  const wideLayout = useMinWidth(1024)
+  const wideLayout = useMinWidth(1180)
   const { models, defaultModel, reload: reloadModels } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
     try {
@@ -154,6 +175,21 @@ export function App(): JSX.Element {
     if (defaultModel && models.some((m) => m.id === defaultModel)) return defaultModel
     return models[0]?.id ?? ''
   }, [storedModel, models, defaultModel])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLocaleLowerCase() !== 'k') return
+      // Skip when the user is typing in an editable element. Cmd+K is a
+      // browser-provided shortcut in some contexts (search bar) and we don't
+      // want to hijack it when the composer already owns focus.
+      const target = event.target as HTMLElement | null
+      if (target && isEditable(target) && !commandPaletteOpen) return
+      event.preventDefault()
+      setCommandPaletteOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [commandPaletteOpen])
 
   useEffect(() => {
     if (!config.explicit) {
@@ -320,9 +356,11 @@ export function App(): JSX.Element {
   const control = useControlPlane(session.socket)
 
   const selectSession = (sessionId: string): void => {
-    setConfig((prev) => ({ ...prev, sessionId, explicit: true }))
+    withViewTransition(() => setConfig((prev) => ({ ...prev, sessionId, explicit: true })))
   }
   const newSession = (workspaceId?: string): void => {
+    setWorkspacePickError(null)
+    setWorkspacePickSubmitting(false)
     setPendingWorkspacePick({
       sessionId: crypto.randomUUID(),
       ...(workspaceId !== undefined ? { workspaceId } : {}),
@@ -332,24 +370,40 @@ export function App(): JSX.Element {
     if (!session.socket) return
     clearSession(session.socket, config.sessionId)
   }
-  const pickWorkspaceForNew = (
+  const pickWorkspaceForNew = async (
     workspaceId: string,
     workspaceName: string | undefined,
     cwd: string,
-  ): void => {
+  ): Promise<void> => {
     if (!pendingWorkspacePick) return
     const { sessionId } = pendingWorkspacePick
-    if (session.socket) {
-      createSession(session.socket, sessionId, workspaceId, workspaceName, cwd)
+    if (!session.socket) {
+      setWorkspacePickError('dashboard socket is not connected')
+      return
     }
-    selectSession(sessionId)
-    setPendingWorkspacePick(null)
+    setWorkspacePickSubmitting(true)
+    setWorkspacePickError(null)
+    try {
+      await createSessionWithAck(session.socket, sessionId, workspaceId, workspaceName, cwd)
+      selectSession(sessionId)
+      setPendingWorkspacePick(null)
+    } catch (err) {
+      setWorkspacePickError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setWorkspacePickSubmitting(false)
+    }
   }
   const deleteSessionAt = (sessionId: string): void => {
     if (!session.socket) return
     deleteSession(session.socket, sessionId)
     if (sessionId === config.sessionId) {
-      const next = control.sessions.find((s) => s.sessionId !== sessionId)
+      const next = nextSessionSelection({
+        sessions: control.sessions.filter((s) => s.sessionId !== sessionId),
+        currentSessionId: sessionId,
+        explicit: true,
+      })
+      setMetadataOpen(false)
+      setCwdDialogOpen(false)
       if (next) {
         selectSession(next.sessionId)
       } else {
@@ -377,15 +431,39 @@ export function App(): JSX.Element {
     )
   }, [currentSession?.workspaceId, control.executors])
 
+  const workspaceInfoExecutor = useMemo(
+    () => control.executors.find((e) => e.workspaceId === workspaceInfoId),
+    [control.executors, workspaceInfoId],
+  )
+  const workspaceInfoSessions = useMemo(
+    () => control.sessions.filter((s) => s.workspaceId === workspaceInfoId),
+    [control.sessions, workspaceInfoId],
+  )
+  const workspaceInfoExists = Boolean(
+    workspaceInfoId && (workspaceInfoExecutor || workspaceInfoSessions.length > 0),
+  )
+
   useEffect(() => {
-    if (config.explicit) return
-    if (control.sessions.length === 0) return
-    const latest = control.sessions.find((s) => s.eventCount > 0) ?? control.sessions[0]
-    if (!latest) return
-    if (latest.sessionId === config.sessionId) return
+    if (hasSelectedSession) return
+    setMetadataOpen(false)
+    setCwdDialogOpen(false)
+  }, [hasSelectedSession])
+
+  useEffect(() => {
+    if (workspaceInfoId === null || workspaceInfoExists) return
+    setWorkspaceInfoId(null)
+  }, [workspaceInfoExists, workspaceInfoId])
+
+  useEffect(() => {
+    const next = nextSessionSelection({
+      sessions: control.sessions,
+      currentSessionId: config.sessionId,
+      explicit: config.explicit,
+    })
+    if (!next) return
     setConfig((prev) => ({
       ...prev,
-      sessionId: latest.sessionId,
+      sessionId: next.sessionId,
       explicit: true,
     }))
   }, [config.explicit, config.sessionId, control.sessions])
@@ -414,43 +492,37 @@ export function App(): JSX.Element {
     session.streamingText,
   )
   const backgroundTasks = backgroundTerminalTasks(session.timeline)
+  const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
 
-  const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const chatItemsCount = chatItems.length
   const streamingLen = session.streamingText.length
   const pendingApprovalsCount = session.pendingApprovals.length
-  // Auto-scroll: pin to bottom while the user is already at (or near) the
-  // bottom, but stop yanking them back if they've deliberately scrolled up
-  // to read history. Switching sessions resets pinning.
-  const pinnedToBottomRef = useRef(true)
+  // Pinned-to-bottom is owned by ChatPanel/VirtualTranscript now; we mirror
+  // it up here only so a session switch or a first-load reset can force a
+  // jump-to-bottom (see scrollToBottomToken below). Virtuoso reports
+  // `atBottom` back to us via `onChatPinnedChange` — we forward that but
+  // do NOT drive scrollTop manually anymore.
+  const [chatPinnedToBottom, setChatPinnedToBottom] = useState(true)
   useEffect(() => {
-    pinnedToBottomRef.current = true
+    setChatPinnedToBottom(true)
+  }, [config.sessionId])
+  // Bumping this forces VirtualTranscript to jump-to-bottom. We do that on
+  // session switch and whenever new items append while the user was pinned.
+  // The pinned check happens inside VirtualTranscript so we can bump
+  // liberally without yanking the user.
+  const [chatScrollToBottomToken, setChatScrollToBottomToken] = useState(0)
+  useEffect(() => {
+    setChatScrollToBottomToken((t) => t + 1)
   }, [config.sessionId])
   useEffect(() => {
-    const root = chatScrollRef.current
-    if (!root) return
-    const viewport = root.querySelector<HTMLElement>(
-      '[data-radix-scroll-area-viewport]',
-    )
-    if (!viewport) return
-    const onScroll = (): void => {
-      const distanceFromBottom =
-        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
-      pinnedToBottomRef.current = distanceFromBottom < 64
-    }
-    viewport.addEventListener('scroll', onScroll, { passive: true })
-    return () => viewport.removeEventListener('scroll', onScroll)
-  }, [config.sessionId])
-  useEffect(() => {
-    if (!pinnedToBottomRef.current) return
-    const root = chatScrollRef.current
-    if (!root) return
-    const viewport = root.querySelector<HTMLElement>(
-      '[data-radix-scroll-area-viewport]',
-    )
-    if (!viewport) return
-    viewport.scrollTop = viewport.scrollHeight
-  }, [chatItemsCount, streamingLen, pendingApprovalsCount, config.sessionId])
+    if (!chatPinnedToBottom) return
+    setChatScrollToBottomToken((t) => t + 1)
+  }, [
+    chatItemsCount,
+    streamingLen,
+    pendingApprovalsCount,
+    chatPinnedToBottom,
+  ])
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
@@ -462,9 +534,218 @@ export function App(): JSX.Element {
     )
   }, [currentSession?.workspaceId, control.executors])
 
+  useInterventionDesktopNotifications({
+    sessionId: config.sessionId,
+    sessionLabel,
+    pendingApprovalsCount,
+    pendingApprovalSummary: session.pendingApprovals[0],
+    lastError: session.lastError,
+    connectionStatus: session.status,
+    workspaceOnline: hasSelectedSession ? sessionWorkspaceOnline : null,
+    workspaceLabel: currentSession?.workspaceName ?? currentSession?.workspaceId,
+  })
+
+  useSessionToasts({
+    sessionId: config.sessionId,
+    sessionLabel,
+    connectionStatus: session.status,
+    pendingApprovals: session.pendingApprovals,
+    lastError: session.lastError,
+  })
+  useSubAgentToasts(session.socket)
+  useBackgroundShellToasts(backgroundTasks)
+
   const openCwdDialog = (): void => {
     setCwdDialogOpen(true)
   }
+
+  const commandPaletteCommands = useMemo<readonly CommandPaletteItem[]>(() => {
+    const cmds: CommandPaletteItem[] = []
+    const socket = session.socket
+    const canRun = hasSelectedSession && socket !== null
+
+    cmds.push(
+      {
+        id: 'session.new',
+        group: 'Session',
+        label: 'New session',
+        hint: 'Create a session in an attached workspace.',
+        icon: Plus,
+        keywords: ['create', 'start'],
+        disabled: control.executors.length === 0,
+        disabledReason: 'No workspace online',
+        run: () => newSession(),
+      },
+      {
+        id: 'session.info',
+        group: 'Session',
+        label: 'Session info',
+        hint: 'Open metadata for the selected session.',
+        icon: Info,
+        keywords: ['metadata', 'details'],
+        disabled: !hasSelectedSession,
+        disabledReason: 'No session selected',
+        run: () => setMetadataOpen(true),
+      },
+      {
+        id: 'session.change-cwd',
+        group: 'Session',
+        label: 'Change cwd',
+        hint: 'Change the current workspace directory.',
+        icon: FolderOpen,
+        keywords: ['directory', 'folder'],
+        disabled: !hasSelectedSession || !sessionWorkspaceOnline,
+        disabledReason: !hasSelectedSession ? 'No session selected' : 'Workspace is offline',
+        run: openCwdDialog,
+      },
+      {
+        id: 'session.compact',
+        group: 'Session',
+        label: 'Compact context',
+        hint: 'Summarise older transcript context.',
+        icon: Archive,
+        keywords: ['summarize', 'shrink'],
+        disabled: !canRun || !hasCompactableContent(session.state),
+        disabledReason: !canRun ? 'No active session' : 'Nothing to compact yet',
+        run: runCompactNow,
+      },
+      {
+        id: 'session.consolidate-memory',
+        group: 'Session',
+        label: 'Consolidate memory',
+        hint: 'Merge durable memory notes through the memory flow.',
+        icon: ListChecks,
+        keywords: ['memory'],
+        disabled: !canRun,
+        disabledReason: 'No active session',
+        run: () => runConsolidateMemory(),
+      },
+      {
+        id: 'session.cancel',
+        group: 'Session',
+        label: 'Stop current turn',
+        hint: 'Ask the host to cancel the active run.',
+        icon: Square,
+        keywords: ['stop', 'abort'],
+        disabled: !canRun,
+        disabledReason: 'No active session',
+        run: () => {
+          if (socket) cancelSession(socket, config.sessionId)
+        },
+      },
+      {
+        id: 'session.clear',
+        group: 'Session',
+        label: 'Clear session',
+        hint: 'Reset the transcript and runtime state for this session.',
+        icon: Eraser,
+        keywords: ['reset'],
+        disabled: !canRun,
+        disabledReason: 'No active session',
+        run: () => {
+          if (socket) clearSession(socket, config.sessionId)
+        },
+      },
+    )
+
+    cmds.push({
+      id: 'workspace.connect',
+      group: 'Workspace',
+      label: 'Connect workspace…',
+      hint: 'Attach an executor to a workspace directory.',
+      icon: FolderOpen,
+      keywords: ['attach', 'executor'],
+      run: () => setConnectWorkspaceOpen(true),
+    })
+
+    cmds.push(
+      {
+        id: 'view.settings',
+        group: 'View',
+        label: 'Open settings',
+        hint: 'Configure models and dashboard settings.',
+        icon: Settings,
+        keywords: ['preferences', 'config'],
+        run: () => setSettingsOpen(true),
+      },
+      {
+        id: 'view.toggle-theme',
+        group: 'View',
+        label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+        hint: 'Toggle dashboard color scheme.',
+        icon: theme === 'dark' ? Sun : Moon,
+        keywords: ['dark', 'light', 'appearance'],
+        run: () => toggleTheme(),
+      },
+      {
+        id: 'view.toggle-inspector',
+        group: 'View',
+        label: inspectorOpen ? 'Hide inspector' : 'Show inspector',
+        hint: 'Toggle the debugger side panel.',
+        icon: inspectorOpen ? PanelRightClose : PanelRight,
+        keywords: ['debug', 'panel'],
+        disabled: !wideLayout || !hasSelectedSession,
+        disabledReason: !wideLayout ? 'Inspector is only available on wide layouts' : 'No session selected',
+        run: () => setInspectorOpen((value) => !value),
+      },
+      {
+        id: 'view.open-explorer',
+        group: 'View',
+        label: 'Open explorer',
+        hint: wideLayout ? 'Explorer is already visible.' : 'Open the workspace/session drawer.',
+        icon: Menu,
+        keywords: ['sidebar', 'drawer'],
+        run: () => setExplorerDrawerOpen(true),
+      },
+    )
+
+    for (const mode of APPROVAL_MODES) {
+      cmds.push({
+        id: `runtime.approval-${mode.value}`,
+        group: 'Runtime',
+        label: `Approval: ${mode.label}`,
+        hint: mode.hint,
+        icon: ShieldCheck,
+        keywords: ['approval', 'safety', mode.value],
+        disabled: !canRun,
+        disabledReason: 'No active session',
+        run: () => {
+          if (socket) setSessionApprovalMode(socket, config.sessionId, mode.value)
+        },
+      })
+    }
+
+    for (const modelInfo of models) {
+      cmds.push({
+        id: `runtime.model-${modelInfo.id}`,
+        group: 'Runtime',
+        label: `Model: ${modelInfo.label ?? modelInfo.id}`,
+        hint: `Use ${modelInfo.id} for the active session.`,
+        icon: Sparkles,
+        keywords: ['model', 'switch', modelInfo.id],
+        disabled: !canRun,
+        disabledReason: 'No active session',
+        run: () => onModelChange(modelInfo.id),
+      })
+    }
+
+    return cmds
+  }, [
+    config.sessionId,
+    control.executors.length,
+    hasSelectedSession,
+    inspectorOpen,
+    models,
+    onModelChange,
+    runCompactNow,
+    runConsolidateMemory,
+    session.socket,
+    session.state,
+    sessionWorkspaceOnline,
+    theme,
+    toggleTheme,
+    wideLayout,
+  ])
 
   const submitCwd = (cwd: string): void => {
     if (!cwd || !session.socket) return
@@ -573,7 +854,7 @@ export function App(): JSX.Element {
   )
 
   return (
-    <div className="h-screen w-screen bg-background text-foreground overflow-hidden">
+    <div className="h-dvh w-screen bg-background text-foreground overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
@@ -617,6 +898,8 @@ export function App(): JSX.Element {
               sessionLabel={sessionLabel}
               cwd={currentCwd}
               status={session.status}
+              onOpenExplorer={() => setExplorerDrawerOpen(true)}
+              explorerAvailable={!wideLayout}
               onChangeCwd={openCwdDialog}
               onOpenSettings={() => setSettingsOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
@@ -644,26 +927,30 @@ export function App(): JSX.Element {
                     <LineageBar
                       parentSessionId={session.parentSessionId}
                       parentCursor={session.parentCursor}
-                      onGoParent={() =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          sessionId: session.parentSessionId ?? prev.sessionId,
-                        }))
-                      }
+                      parentAvailable={sessionExists(control.sessions, session.parentSessionId)}
+                      onGoParent={() => {
+                        const parentId = session.parentSessionId
+                        if (!parentId) return
+                        if (!sessionExists(control.sessions, parentId)) return
+                        selectSession(parentId)
+                      }}
                     />
                   ) : null}
-                  <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
-                    <TasksPeek todos={session.state?.todos ?? []} />
-                    <ScrollArea
-                      ref={chatScrollRef}
-                      className="flex-1 min-h-0 bg-background"
+                  <div className="relative grid flex-1 min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden">
+                    <div
+                      className="flex min-h-0 flex-col bg-background"
                       data-testid="chat-panel"
                     >
                       <ChatPanel
                         items={chatItems}
                         highlightIndex={highlightIndex}
+                        pinnedToBottom={chatPinnedToBottom}
+                        onPinnedChange={setChatPinnedToBottom}
+                        scrollToBottomToken={chatScrollToBottomToken}
                         pendingApprovals={session.pendingApprovals}
                         onReadOverflow={readOverflow}
+                        parentSessionId={config.sessionId}
+                        socket={session.socket}
                         onApprovalDecision={(callId, decision) => {
                           if (!session.socket) return
                           respondApproval(session.socket, config.sessionId, callId, decision)
@@ -719,53 +1006,49 @@ export function App(): JSX.Element {
                           </>
                         }
                       />
-                    </ScrollArea>
-                    <BackgroundTerminalPanel
-                      socket={session.socket}
-                      workspaceId={currentSession?.workspaceId}
-                      fallbackTasks={backgroundTasks}
-                    />
-                    {session.lastError ? (
-                      <div
-                        className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
-                        data-testid="session-error"
-                      >
-                        [{session.lastError.scope}] {session.lastError.message}
-                      </div>
-                    ) : null}
-                    {!sessionWorkspaceOnline ? (
-                      <div
-                        className="px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900"
-                        data-testid="workspace-offline-banner"
-                      >
-                        workspace <span className="font-mono">{currentSession?.workspaceName ?? currentSession?.workspaceId}</span> is offline — start its executor to send messages.
-                      </div>
-                    ) : null}
-                    {consolidateToast ? (
-                      <div
-                        className={cn(
-                          'px-3 py-2 text-xs border-t',
-                          consolidateToast.kind === 'success' &&
-                            'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900',
-                          consolidateToast.kind === 'error' &&
-                            'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900',
-                          consolidateToast.kind === 'info' &&
-                            'text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-900',
-                        )}
-                        data-testid="consolidate-toast"
-                      >
-                        {consolidateToast.message}
-                      </div>
-                    ) : null}
-                    <ContextPressureBanner
-                      state={session.state}
-                      compactRunning={compactStatus.kind === 'running'}
-                      onCompactNow={runCompactNow}
-                    />
-                    <ComposerFlipContainer
-                      showApproval={session.pendingApprovals.length > 0}
-                      front={
-                        <Composer
+                    </div>
+                    <div className="min-h-0">
+                      {session.lastError ? (
+                        <div
+                          className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
+                          data-testid="session-error"
+                        >
+                          [{session.lastError.scope}] {session.lastError.message}
+                        </div>
+                      ) : null}
+                      {!sessionWorkspaceOnline ? (
+                        <div
+                          className="px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900"
+                          data-testid="workspace-offline-banner"
+                        >
+                          workspace <span className="font-mono">{currentSession?.workspaceName ?? currentSession?.workspaceId}</span> is offline — start its executor to send messages.
+                        </div>
+                      ) : null}
+                      {consolidateToast ? (
+                        <div
+                          className={cn(
+                            'px-3 py-2 text-xs border-t',
+                            consolidateToast.kind === 'success' &&
+                              'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900',
+                            consolidateToast.kind === 'error' &&
+                              'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900',
+                            consolidateToast.kind === 'info' &&
+                              'text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-900',
+                          )}
+                          data-testid="consolidate-toast"
+                        >
+                          {consolidateToast.message}
+                        </div>
+                      ) : null}
+                      <ContextPressureBanner
+                        state={session.state}
+                        compactRunning={compactStatus.kind === 'running'}
+                        onCompactNow={runCompactNow}
+                      />
+                      <ComposerFlipContainer
+                        showApproval={session.pendingApprovals.length > 0}
+                        front={
+                          <Composer
                           disabled={session.status !== 'ready' || !sessionWorkspaceOnline}
                           model={session.selectedModel ?? preferredModel}
                           models={models}
@@ -794,6 +1077,16 @@ export function App(): JSX.Element {
                           workspaceOnline={sessionWorkspaceOnline}
                           onListFiles={listWorkspaceFiles}
                           onReadFile={readWorkspaceFile}
+                          footerExtras={
+                            <>
+                              <BackgroundShellsButton
+                                socket={session.socket}
+                                workspaceId={currentSession?.workspaceId}
+                                fallbackTasks={backgroundTasks}
+                              />
+                              <TasksButton todos={taskItems} />
+                            </>
+                          }
                           onSubmit={(text, mode, images, extraBlocks) => {
                             const imageBlocks = images ?? []
                             const extras = extraBlocks ?? []
@@ -813,20 +1106,27 @@ export function App(): JSX.Element {
                               mode,
                               ...(content ? { content } : {}),
                             })
+                            // Sending is an explicit "I'm at the end" signal:
+                            // re-pin and force a jump even if the user had
+                            // scrolled up (or was never pinned because the
+                            // composer took most of the viewport on load).
+                            setChatPinnedToBottom(true)
+                            setChatScrollToBottomToken((t) => t + 1)
                             if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
                           }}
-                        />
-                      }
-                      back={
-                        <ApprovalCard
+                          />
+                        }
+                        back={
+                          <ApprovalCard
                           approvals={session.pendingApprovals}
                           onDecision={(callId, decision) => {
                             if (!session.socket) return
                             respondApproval(session.socket, config.sessionId, callId, decision)
                           }}
-                        />
-                      }
-                    />
+                          />
+                        }
+                      />
+                    </div>
                   </div>
                 </div>
               </ResizablePanel>
@@ -840,6 +1140,9 @@ export function App(): JSX.Element {
                         config={session.config}
                         timeline={session.timeline}
                         visibleMessagesCount={chatMessages.length}
+                        socket={session.socket}
+                        parentSessionId={session.parentSessionId}
+                        parentCursor={session.parentCursor}
                         onFork={(cursor) => {
                           session.socket?.emit('client:fork', { sourceSessionId: config.sessionId, cursor })
                         }}
@@ -861,6 +1164,45 @@ export function App(): JSX.Element {
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
+        <DialogContent
+          className="left-0 top-0 h-dvh w-[min(22rem,100vw)] max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 sm:rounded-none"
+          data-testid="explorer-drawer"
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Explorer</DialogTitle>
+            <DialogDescription>Workspace and session navigation</DialogDescription>
+          </DialogHeader>
+          <Explorer
+            executors={control.executors}
+            sessions={control.sessions}
+            selectedSessionId={config.sessionId}
+            onSelect={(sid) => {
+              selectSession(sid)
+              setExplorerDrawerOpen(false)
+            }}
+            onNewSession={(workspaceId) => {
+              newSession(workspaceId)
+              setExplorerDrawerOpen(false)
+            }}
+            onConnectWorkspace={() => {
+              setExplorerDrawerOpen(false)
+              setConnectWorkspaceOpen(true)
+            }}
+            onDelete={deleteSessionAt}
+            onRename={renameSessionAt}
+            onOpenSessionInfo={(sid) => {
+              if (sid !== config.sessionId) selectSession(sid)
+              setExplorerDrawerOpen(false)
+              setMetadataOpen(true)
+            }}
+            onWorkspaceInfo={(workspaceId) => {
+              setExplorerDrawerOpen(false)
+              setWorkspaceInfoId(workspaceId)
+            }}
+          />
+        </DialogContent>
+      </Dialog>
       <ChangeCwdDialog
         open={cwdDialogOpen}
         socket={session.socket}
@@ -887,10 +1229,16 @@ export function App(): JSX.Element {
         workspaces={control.executors}
         initialWorkspaceId={pendingWorkspacePick?.workspaceId}
         socket={session.socket}
+        error={workspacePickError}
+        submitting={workspacePickSubmitting}
         onCreate={({ workspaceId, workspaceName, cwd }) =>
-          pickWorkspaceForNew(workspaceId, workspaceName, cwd)
+          void pickWorkspaceForNew(workspaceId, workspaceName, cwd)
         }
-        onCancel={() => setPendingWorkspacePick(null)}
+        onCancel={() => {
+          setPendingWorkspacePick(null)
+          setWorkspacePickError(null)
+          setWorkspacePickSubmitting(false)
+        }}
       />
       <ConnectWorkspaceDialog
         open={connectWorkspaceOpen}
@@ -902,9 +1250,15 @@ export function App(): JSX.Element {
           if (!open) setWorkspaceInfoId(null)
         }}
         workspaceId={workspaceInfoId ?? ''}
-        executor={control.executors.find((e) => e.workspaceId === workspaceInfoId)}
-        sessions={control.sessions.filter((s) => s.workspaceId === workspaceInfoId)}
+        executor={workspaceInfoExecutor}
+        sessions={workspaceInfoSessions}
       />
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        commands={commandPaletteCommands}
+      />
+      <Toaster position="bottom-right" richColors closeButton theme={theme} />
     </div>
   )
 }
@@ -913,8 +1267,37 @@ function hasCompactableContent(state: import('@agent-kernel/kernel').AgentState 
   return state?.messages.some((m) => m.role !== 'system') ?? false
 }
 
+function isEditable(el: HTMLElement): boolean {
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return true
+  if (el.isContentEditable) return true
+  return false
+}
+
 function isResting(status: import('@agent-kernel/kernel').AgentState['status']): boolean {
   return status === 'idle' || status === 'done' || status === 'error'
+}
+
+export function sessionExists(
+  sessions: readonly SessionSummary[],
+  sessionId: string | null | undefined,
+): boolean {
+  return Boolean(sessionId && sessions.some((s) => s.sessionId === sessionId))
+}
+
+export function nextSessionSelection({
+  sessions,
+  currentSessionId,
+  explicit,
+}: {
+  sessions: readonly SessionSummary[]
+  currentSessionId: string
+  explicit: boolean
+}): SessionSummary | null {
+  if (sessions.length === 0) return null
+  const currentExists = sessionExists(sessions, currentSessionId)
+  if (explicit && currentExists) return null
+  const candidates = currentExists ? sessions : sessions.filter((s) => s.sessionId !== currentSessionId)
+  return candidates.find((s) => s.eventCount > 0) ?? candidates[0] ?? null
 }
 
 type Config = {
@@ -968,6 +1351,8 @@ function WorkbenchToolbar({
   sessionLabel,
   cwd,
   status,
+  onOpenExplorer,
+  explorerAvailable,
   onChangeCwd,
   onOpenSettings,
   onToggleInspector,
@@ -980,6 +1365,8 @@ function WorkbenchToolbar({
   sessionLabel: string
   cwd: string
   status: string
+  onOpenExplorer(): void
+  explorerAvailable: boolean
   onChangeCwd(): void
   onOpenSettings(): void
   onToggleInspector(): void
@@ -991,11 +1378,24 @@ function WorkbenchToolbar({
 }): JSX.Element {
   return (
     <div
-      className="h-12 flex-none px-3 bg-card text-card-foreground backdrop-blur-md flex items-center gap-2 text-sm min-w-0"
+      className="flex min-h-12 flex-none items-center gap-1.5 bg-card px-2 py-2 text-sm text-card-foreground backdrop-blur-md sm:gap-2 sm:px-3"
       data-testid="workbench-toolbar"
     >
+      {explorerAvailable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenExplorer}
+          title="Open explorer"
+          aria-label="open explorer"
+          data-testid="explorer-toggle"
+          className="flex-none"
+        >
+          <Menu className="h-4 w-4" />
+        </Button>
+      ) : null}
       <span
-        className="truncate font-medium min-w-0"
+        className="min-w-0 max-w-[38vw] truncate font-medium sm:max-w-none"
         title={sessionSelected ? sessionLabel : 'no session selected'}
         data-testid="session-label"
       >
@@ -1009,7 +1409,7 @@ function WorkbenchToolbar({
         onClick={onChangeCwd}
         title={cwd ? `change session cwd: ${cwd}` : 'set session cwd'}
         data-testid="cwd-button"
-        className="min-w-0 max-w-[45%] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground"
+        className="hidden min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
       >
         <FolderOpen className="h-3.5 w-3.5 flex-none" />
         <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
@@ -1096,10 +1496,12 @@ function statusDot(status: string): string {
 function LineageBar({
   parentSessionId,
   parentCursor,
+  parentAvailable,
   onGoParent,
 }: {
   parentSessionId: string
   parentCursor: number | null
+  parentAvailable: boolean
   onGoParent(): void
 }): JSX.Element {
   return (
@@ -1112,12 +1514,18 @@ function LineageBar({
         </span>
       </span>
       <Button
-        variant="link"
+        variant={parentAvailable ? 'link' : 'ghost'}
         size="sm"
         onClick={onGoParent}
-        className="ml-auto h-auto p-0 text-amber-700 dark:text-amber-300"
+        disabled={!parentAvailable}
+        data-testid="go-parent-session"
+        title={parentAvailable ? 'Open parent session' : 'Parent session is no longer available'}
+        className={cn(
+          'ml-auto h-auto p-0 text-amber-700 dark:text-amber-300',
+          !parentAvailable && 'cursor-not-allowed text-amber-700/60 hover:bg-transparent hover:text-amber-700/60 dark:text-amber-300/60 dark:hover:text-amber-300/60',
+        )}
       >
-        go to parent
+        {parentAvailable ? 'go to parent' : 'parent deleted'}
       </Button>
     </div>
   )

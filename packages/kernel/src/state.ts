@@ -20,7 +20,6 @@ export function createInitialState(params: {
       cacheReadTokens: 0,
     },
     cursor: 0,
-    todos: [],
     memory: [],
     contextPressureLevel: 'none',
     approvalMode: DEFAULT_APPROVAL_MODE,

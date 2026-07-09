@@ -1,11 +1,10 @@
 /**
  * Tool-result → state lift.
  *
- * A handful of tool results carry data that belongs in first-class kernel
+ * A narrow set of tool results carry data that belongs in first-class kernel
  * state, not just in the transcript. The reducer looks inside `tool_result`
- * for exactly these tools:
+ * for exactly this tool:
  *
- *   - `todowrite`      → promote `input.todos` into `state.todos`
  *   - `memory`         with `operation === 'write' | 'delete'` and
  *                      `input.scope === 'session'`
  *                      → upsert/remove `{ key, content, updatedAt }` in `state.memory`
@@ -21,50 +20,8 @@
 
 import type {
   MemoryEntry,
-  TodoItem,
-  TodoPriority,
-  TodoStatus,
 } from './types.js'
 import { MEMORY_TOOL_NAME } from './types.js'
-
-// ============================================================================
-// todowrite
-// ============================================================================
-
-const TODO_STATUSES: readonly TodoStatus[] = [
-  'pending',
-  'in_progress',
-  'completed',
-  'cancelled',
-]
-const TODO_PRIORITIES: readonly TodoPriority[] = ['high', 'medium', 'low']
-
-export function parseTodosFromInput(
-  input: Record<string, unknown>,
-  fallback: readonly TodoItem[],
-): readonly TodoItem[] {
-  const raw = (input as { todos?: unknown }).todos
-  if (!Array.isArray(raw)) return fallback
-  const out: TodoItem[] = []
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
-    const rec = entry as Record<string, unknown>
-    const content = typeof rec.content === 'string' ? rec.content : null
-    const status =
-      typeof rec.status === 'string' &&
-      (TODO_STATUSES as readonly string[]).includes(rec.status)
-        ? (rec.status as TodoStatus)
-        : null
-    if (!content || !status) continue
-    const priority =
-      typeof rec.priority === 'string' &&
-      (TODO_PRIORITIES as readonly string[]).includes(rec.priority)
-        ? (rec.priority as TodoPriority)
-        : undefined
-    out.push(priority ? { content, status, priority } : { content, status })
-  }
-  return out
-}
 
 // ============================================================================
 // memory (session scope only; workspace/global stay on-disk in the executor)

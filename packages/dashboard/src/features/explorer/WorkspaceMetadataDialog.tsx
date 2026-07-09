@@ -57,7 +57,7 @@ export function WorkspaceMetadataDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-2xl overflow-hidden p-0 gap-0"
+        className="max-h-[90dvh] max-w-2xl overflow-hidden p-0 gap-0"
         data-testid="workspace-metadata-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-5 py-4">

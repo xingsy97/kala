@@ -76,6 +76,7 @@ describe('Composer', () => {
     expect(screen.getByTestId('slash-command-menu')).toBeTruthy()
     expect(screen.getByText('/compact')).toBeTruthy()
     expect(screen.getByText('Compact context')).toBeTruthy()
+    expect(screen.getByText('Summarize older transcript context for the current session.')).toBeTruthy()
     fireEvent.click(screen.getByText('/compact'))
     expect(onCompact).toHaveBeenCalledTimes(1)
   })
@@ -353,6 +354,7 @@ describe('Composer', () => {
     await waitFor(() => expect(onListFiles).toHaveBeenCalled())
     const list = await screen.findByTestId('mention-list')
     expect(list.textContent ?? '').toContain('packages/host/src/server.ts')
+    expect(screen.getByTestId('mention-match-highlight').textContent).toBe('host')
 
     fireEvent.click(screen.getByTestId('mention-option-0'))
     expect(input.value).toContain('@packages/host/src/server.ts')

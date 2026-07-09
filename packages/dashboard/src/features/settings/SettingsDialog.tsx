@@ -13,6 +13,13 @@ import {
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import { PREF_SHOW_TOOL_CALL_TAB, useBooleanPref } from '../../lib/prefs.js'
+import {
+  DESKTOP_NOTIFICATION_PREFS,
+  PREF_DESKTOP_NOTIFICATIONS_ENABLED,
+  PREF_DESKTOP_NOTIFICATION_SOUND,
+  notificationPermission,
+  requestNotificationPermission,
+} from '../../lib/desktop-notifications.js'
 
 type Props = {
   open: boolean
@@ -61,7 +68,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-4xl h-[80vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)]"
+        className="h-[min(90dvh,44rem)] max-w-4xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)]"
         data-testid="settings-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-4 py-3">
@@ -70,30 +77,18 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
             Runtime config, provider sources, hooks, and manually managed model ids.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid min-h-0 grid-cols-[200px_minmax(0,1fr)]">
-          <aside className="min-h-0 border-r border-border/50 bg-muted/60">
-            <nav className="space-y-1 p-2" aria-label="Settings sections">
-              {SECTIONS.map((s) => (
-                <button
-                  key={s.key}
-                  type="button"
-                  onClick={() => setSection(s.key)}
-                  data-testid={`settings-tab-${s.key}`}
-                  className={cn(
-                    'w-full rounded-md px-3 py-2 text-left text-sm transition-colors',
-                    section === s.key
-                      ? 'bg-primary/10 text-foreground shadow-inner ring-1 ring-primary/30'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                  )}
-                >
-                  <div className="font-medium">{s.label}</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">{s.hint}</div>
-                </button>
-              ))}
-            </nav>
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
+          <aside className="min-h-0 border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r">
+            <ScrollArea className="h-full">
+              <nav className="flex gap-1 p-2 md:block md:space-y-1" aria-label="Settings sections">
+                {SECTIONS.map((s) => (
+                  <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
+                ))}
+              </nav>
+            </ScrollArea>
           </aside>
           <ScrollArea className="min-h-0">
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               {loadError ? (
                 <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   Failed to load settings: {loadError}
@@ -118,6 +113,33 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function SettingsSectionButton({
+  section,
+  active,
+  onClick,
+}: {
+  section: (typeof SECTIONS)[number]
+  active: boolean
+  onClick(): void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={`settings-tab-${section.key}`}
+      className={cn(
+        'w-36 flex-none rounded-md px-3 py-2 text-left text-sm transition-colors md:w-full',
+        active
+          ? 'bg-primary/10 text-foreground shadow-inner ring-1 ring-primary/30'
+          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+      )}
+    >
+      <div className="font-medium">{section.label}</div>
+      <div className="mt-0.5 hidden text-[11px] text-muted-foreground md:block">{section.hint}</div>
+    </button>
   )
 }
 
@@ -506,9 +528,119 @@ function InterfaceSection(): JSX.Element {
             testId="settings-toggle-tool-call-tab"
           />
         </li>
+        <DesktopNotificationsSettings />
       </ul>
     </div>
   )
+}
+
+function DesktopNotificationsSettings(): JSX.Element {
+  const [enabled, setEnabled] = useBooleanPref(PREF_DESKTOP_NOTIFICATIONS_ENABLED, false)
+  const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => notificationPermission())
+  const [busy, setBusy] = useState(false)
+
+  const setDesktopNotifications = async (next: boolean): Promise<void> => {
+    if (!next) {
+      setEnabled(false)
+      return
+    }
+    const current = notificationPermission()
+    if (current === 'granted') {
+      setPermission(current)
+      setEnabled(true)
+      return
+    }
+    if (current === 'denied' || current === 'unsupported') {
+      setPermission(current)
+      setEnabled(false)
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await requestNotificationPermission()
+      setPermission(result)
+      setEnabled(result === 'granted')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const unavailable = permission === 'denied' || permission === 'unsupported'
+  return (
+    <li className="rounded-md border border-border bg-card/60 px-4 py-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="font-medium">Desktop notifications</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Notify when the active session needs user intervention. Browser permission is required.
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground" data-testid="desktop-notification-permission">
+            Permission: {permissionLabel(permission)}
+          </p>
+        </div>
+        <Toggle
+          checked={enabled && permission === 'granted'}
+          onChange={(next) => { void setDesktopNotifications(next) }}
+          ariaLabel="Enable desktop notifications"
+          testId="settings-toggle-desktop-notifications"
+          disabled={busy || unavailable}
+        />
+      </div>
+      {unavailable ? (
+        <div className="mt-3 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {permission === 'unsupported'
+            ? 'This browser does not support desktop notifications.'
+            : 'Notifications are blocked in the browser. Re-enable them from site settings.'}
+        </div>
+      ) : null}
+      <div className="mt-3 grid gap-2 border-t border-border/50 pt-3">
+        <NotificationKindToggle
+          prefKey={PREF_DESKTOP_NOTIFICATION_SOUND}
+          label="Sound"
+          description="Play a short local sound when a desktop notification is sent."
+          disabled={!enabled || permission !== 'granted'}
+        />
+        {DESKTOP_NOTIFICATION_PREFS.map((pref) => (
+          <NotificationKindToggle key={pref.kind} prefKey={pref.key} label={pref.label} description={pref.description} disabled={!enabled || permission !== 'granted'} />
+        ))}
+      </div>
+    </li>
+  )
+}
+
+function NotificationKindToggle({
+  prefKey,
+  label,
+  description,
+  disabled,
+}: {
+  prefKey: string
+  label: string
+  description: string
+  disabled: boolean
+}): JSX.Element {
+  const [checked, setChecked] = useBooleanPref(prefKey, true)
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md bg-muted/30 px-3 py-2">
+      <div className="min-w-0">
+        <div className="text-xs font-medium text-foreground">{label}</div>
+        <div className="text-[11px] text-muted-foreground">{description}</div>
+      </div>
+      <Toggle
+        checked={checked}
+        onChange={setChecked}
+        ariaLabel={`Notify: ${label}`}
+        testId={`settings-toggle-notification-${prefKey}`}
+        disabled={disabled}
+      />
+    </div>
+  )
+}
+
+function permissionLabel(permission: NotificationPermission | 'unsupported'): string {
+  if (permission === 'default') return 'not requested'
+  if (permission === 'unsupported') return 'unsupported'
+  return permission
 }
 
 function Toggle({
@@ -516,11 +648,13 @@ function Toggle({
   onChange,
   ariaLabel,
   testId,
+  disabled = false,
 }: {
   checked: boolean
   onChange(next: boolean): void
   ariaLabel: string
   testId?: string
+  disabled?: boolean
 }): JSX.Element {
   return (
     <button
@@ -529,10 +663,12 @@ function Toggle({
       aria-checked={checked}
       aria-label={ariaLabel}
       data-testid={testId}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
         'relative inline-flex h-5 w-9 flex-none items-center rounded-full transition-colors',
         checked ? 'bg-primary' : 'bg-muted',
+        disabled && 'cursor-not-allowed opacity-50',
       )}
     >
       <span

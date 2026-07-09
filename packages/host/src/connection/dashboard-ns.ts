@@ -21,11 +21,13 @@ import type {
   ClientDeleteSession,
   ClientFork,
   ClientKillBgTask,
+  ClientListAgentTypes,
   ClientListBgTasks,
   ClientListDirs,
   ClientListExecutors,
   ClientListFiles,
   ClientListSessions,
+  ClientListSubAgents,
   ClientLoadHistory,
   ClientReadBgOutput,
   ClientReadFile,
@@ -50,6 +52,7 @@ import type {
   SessionErrorScope,
   SessionForkedEvent,
   SessionReadyEvent,
+  SubAgentSummary,
 } from '@agent-kernel/shared'
 import type {
   AgentConfig,
@@ -333,7 +336,7 @@ export function configureDashboardNamespace(
         )
         return
       }
-      const validation = validateSessionCwd(deps, record, p.cwd)
+      const validation = await validateSessionCwd(deps, record, p.cwd)
       if (!validation.ok) {
         deps.broadcastError(p.sessionId, 'host', validation.reason)
         return
@@ -409,6 +412,37 @@ export function configureDashboardNamespace(
       const result = await deps.executors.killBg(p)
       ack(result)
     })
+    socket.on('sub_agent:list', (p: ClientListSubAgents, ack) => {
+      // Cheap scan — we don't expect many thousands of sessions in memory,
+      // and each row is a plain object. An index by parentSessionId is a
+      // follow-up if this shows up in a profile.
+      //
+      // Optional fields (parentCallId, agentType, startedAt) are omitted here
+      // because SessionRecord does not carry them today. Push events
+      // (`server:sub_agent_started/_finished`) DO carry them for live runs; this
+      // RPC is the log-replay fallback and returns only what the record has.
+      const children: SubAgentSummary[] = []
+      for (const rec of deps.store.list()) {
+        if (rec.parentSessionId !== p.parentSessionId) continue
+        const status: SubAgentSummary['status'] =
+          rec.state.status === 'done'
+            ? 'completed'
+            : rec.state.status === 'error'
+              ? 'failed'
+              : 'running'
+        children.push({
+          childSessionId: rec.sessionId,
+          status,
+        })
+      }
+      ack({ requestId: p.requestId, parentSessionId: p.parentSessionId, children })
+    })
+    socket.on('agent_types:list', (p: ClientListAgentTypes, ack) => {
+      // Registry loader lives behind a follow-up (docs/sub-agent-design.md §6).
+      // Return an empty list so dashboards that call this on mount don't crash;
+      // the Composer '@agent-name' menu shows an empty state until the loader ships.
+      ack({ requestId: p.requestId, types: [] })
+    })
     socket.on('client:consolidate_memory', async (p: ClientConsolidateMemory) => {
       const outcome = await consolidateMemory(deps.loopDeps, p.sessionId).catch(
         (err: unknown): ConsolidationOutcome => ({
@@ -431,7 +465,7 @@ export function configureDashboardNamespace(
       try {
         const cwd = p.cwd?.trim()
         if (cwd && cwd.length > 0) {
-          const validation = validateWorkspaceCwd(deps, p.workspaceId, cwd)
+          const validation = await validateWorkspaceCwd(deps, p.workspaceId, cwd)
           if (!validation.ok) {
             socket.emit('session:error', {
               sessionId: p.sessionId,
@@ -665,24 +699,24 @@ async function loadRecordForDashboard(
   return record
 }
 
-function validateSessionCwd(
+async function validateSessionCwd(
   deps: DashboardDeps,
   record: SessionRecord,
   cwd: string,
-): { ok: true; cwd: string } | { ok: false; reason: string } {
+): Promise<{ ok: true; cwd: string } | { ok: false; reason: string }> {
   const trimmed = cwd.trim()
   if (trimmed.length === 0) return { ok: false, reason: 'cwd is empty' }
   const resolved = resolvePath(trimmed)
   const executor = record.workspaceId
     ? deps.executors.snapshot().find((e) => e.workspaceId === record.workspaceId)
     : deps.executors.executorForSession(record.sessionId)
-  if (record.workspaceId && !executor) return { ok: false, reason: 'workspace offline' }
+  if (!executor) return { ok: false, reason: record.workspaceId ? 'workspace offline' : 'no executor connected' }
   const roots = executor?.sandboxRoots ?? []
-  if (roots.length === 0) return { ok: true, cwd: resolved }
+  if (roots.length === 0) return await validateDirectoryExists(deps, executor.workspaceId, resolved)
   for (const root of roots) {
     const r = resolvePath(root)
     if (resolved === r || resolved.startsWith(r + sep)) {
-      return { ok: true, cwd: resolved }
+      return await validateDirectoryExists(deps, executor.workspaceId, resolved)
     }
   }
   return {
@@ -691,28 +725,40 @@ function validateSessionCwd(
   }
 }
 
-function validateWorkspaceCwd(
+async function validateWorkspaceCwd(
   deps: DashboardDeps,
   workspaceId: string,
   cwd: string,
-): { ok: true; cwd: string } | { ok: false; reason: string } {
+): Promise<{ ok: true; cwd: string } | { ok: false; reason: string }> {
   const trimmed = cwd.trim()
   if (trimmed.length === 0) return { ok: false, reason: 'cwd is empty' }
   const resolved = resolvePath(trimmed)
   const executor = deps.executors.snapshot().find((e) => e.workspaceId === workspaceId)
   if (!executor) return { ok: false, reason: 'workspace offline' }
   const roots = executor.sandboxRoots ?? []
-  if (roots.length === 0) return { ok: true, cwd: resolved }
+  if (roots.length === 0) return await validateDirectoryExists(deps, workspaceId, resolved)
   for (const root of roots) {
     const r = resolvePath(root)
     if (resolved === r || resolved.startsWith(r + sep)) {
-      return { ok: true, cwd: resolved }
+      return await validateDirectoryExists(deps, workspaceId, resolved)
     }
   }
   return {
     ok: false,
     reason: 'cwd outside sandbox roots',
   }
+}
+
+async function validateDirectoryExists(
+  deps: DashboardDeps,
+  workspaceId: string,
+  cwd: string,
+): Promise<{ ok: true; cwd: string } | { ok: false; reason: string }> {
+  const listed = await deps.executors.listDirs(workspaceId, cwd, ulid())
+  if (listed.error) {
+    return { ok: false, reason: `cwd is not a readable directory: ${listed.error}` }
+  }
+  return { ok: true, cwd: listed.path || cwd }
 }
 
 async function broadcastSessionList(deps: DashboardDeps): Promise<void> {

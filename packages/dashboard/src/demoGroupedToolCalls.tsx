@@ -115,7 +115,7 @@ const DEMO_MESSAGES: Message[] = [
 
 export function GroupedToolCallsDemo(): JSX.Element {
   return (
-    <div className="h-screen w-screen overflow-auto bg-background text-foreground">
+    <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
       <ChatPanel messages={DEMO_MESSAGES} />
     </div>
   )
