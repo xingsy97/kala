@@ -21,6 +21,7 @@ import type {
 import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
+import { ProviderHTTPError, wrapProviderFetchError } from './provider-error.js'
 
 export type OpenAIOptions = {
   apiKey: string
@@ -37,7 +38,6 @@ export type OpenAIOptions = {
 }
 
 const DEFAULT_MODEL = 'gpt-4o-mini'
-const DEFAULT_MAX_TOKENS = 4096
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
 
 type OpenAIToolCall = {
@@ -91,7 +91,7 @@ type OpenAIUserContentBlock =
 export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
   const fetchImpl = opts.fetchImpl ?? fetch
   const model = opts.model ?? DEFAULT_MODEL
-  const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS
+  const maxTokens = opts.maxTokens
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '')
   const url = `${baseUrl}/chat/completions`
   const weightVersion = opts.weightVersion
@@ -123,10 +123,10 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
         },
         body: JSON.stringify(body),
         signal: params.signal,
-      })
+      }).catch((err: unknown) => wrapProviderFetchError('OpenAI', url, err))
       if (!res.ok) {
         const detail = await safeText(res)
-        throw new OpenAIHTTPError(res.status, detail)
+        throw new OpenAIHTTPError(res.status, detail, url)
       }
       const json = (await res.json()) as OpenAIResponseBody
       const parsed = parseResponse(json)
@@ -134,6 +134,7 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
         ...parsed,
         trace: makeOpenAITrace(url, effectiveModel, body, {
           status: res.status,
+          ...(parsed.finishReason ? { finishReason: parsed.finishReason } : {}),
           body: json,
         }, {
           gatewayRequestId: extractOpenAIRequestId(res.headers, json),
@@ -181,10 +182,10 @@ async function callStreaming(
     },
     body: JSON.stringify(body),
     signal,
-  })
+  }).catch((err: unknown) => wrapProviderFetchError('OpenAI', url, err))
   if (!res.ok || !res.body) {
     const detail = await safeText(res)
-    throw new OpenAIHTTPError(res.status, detail)
+    throw new OpenAIHTTPError(res.status, detail, url)
   }
 
   let textBuf = ''
@@ -193,6 +194,7 @@ async function callStreaming(
   let completionTokens = 0
   let cachedTokens = 0
   let streamChatId: string | undefined
+  let finishReason: string | undefined
   const streamEventTypes: string[] = []
   let firstChunkAt: number | undefined
 
@@ -213,6 +215,7 @@ async function callStreaming(
       let evt: {
         id?: string
         choices?: Array<{
+          finish_reason?: string
           delta?: {
             content?: string
             tool_calls?: Array<{
@@ -236,6 +239,7 @@ async function callStreaming(
       streamEventTypes.push('chat.completion.chunk')
       if (!streamChatId && typeof evt.id === 'string' && evt.id) streamChatId = evt.id
       const choice = evt.choices?.[0]
+      if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
       const delta = choice?.delta
       if (delta?.content) {
         firstChunkAt ??= performance.now()
@@ -293,8 +297,10 @@ async function callStreaming(
   return {
     message,
     usage,
+    ...(finishReason ? { finishReason } : {}),
     trace: makeOpenAITrace(url, model, body, {
       status: res.status,
+      ...(finishReason ? { finishReason } : {}),
       streamEventTypes,
       metrics: streamMetrics(startedAt, firstChunkAt),
       body: {
@@ -366,12 +372,13 @@ function extractOpenAIRequestId(
   return bodyOrStreamId?.id
 }
 
-export class OpenAIHTTPError extends Error {
+export class OpenAIHTTPError extends ProviderHTTPError {
   constructor(
     readonly status: number,
     readonly bodyText: string,
+    readonly endpoint = 'OpenAI-compatible endpoint',
   ) {
-    super(`OpenAI HTTP ${status}: ${bodyText.slice(0, 200)}`)
+    super({ provider: 'OpenAI', endpoint, status, bodyText })
     this.name = 'OpenAIHTTPError'
   }
 }
@@ -379,7 +386,7 @@ export class OpenAIHTTPError extends Error {
 async function buildRequestBody(
   params: LLMCallParams,
   model: string,
-  maxTokens: number,
+  maxTokens: number | undefined,
 ): Promise<Record<string, unknown>> {
   const { messages, tools, systemPrompt } = params
   const openaiMessages: OpenAIMessage[] = []
@@ -391,9 +398,9 @@ async function buildRequestBody(
   }
   const body: Record<string, unknown> = {
     model,
-    max_tokens: maxTokens,
     messages: openaiMessages,
   }
+  if (maxTokens !== undefined) body.max_tokens = maxTokens
   if (tools.length > 0) {
     body.tools = tools.map(toOpenAITool)
     body.tool_choice = 'auto'
@@ -535,7 +542,11 @@ function parseResponse(body: OpenAIResponseBody): LLMResponse {
         ),
       }
     : undefined
-  return { message, usage }
+  return {
+    message,
+    usage,
+    ...(choice.finish_reason ? { finishReason: choice.finish_reason } : {}),
+  }
 }
 
 function numOr(v: unknown, fallback: number): number {

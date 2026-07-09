@@ -111,8 +111,10 @@ describe('policyGatewayAdapter', () => {
       endpoint: 'chat-completions',
       rolloutId: 'rollout-chat',
       requireLogprobs: true,
-      fetchImpl: async (url) => {
+      fetchImpl: async (url, init) => {
         expect(String(url)).toBe('http://sglang.test/v1/chat/completions')
+        const body = JSON.parse(String(init?.body))
+        expect(body.max_tokens).toBeUndefined()
         return jsonResponse({
           prompt_token_ids: [11, 12, 13],
           choices: [{

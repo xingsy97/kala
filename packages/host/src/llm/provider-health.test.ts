@@ -12,12 +12,12 @@ import {
 } from './provider-health.js'
 import { routerAdapter, toFallbackArtifact } from './router.js'
 
-function stubAdapter(name: string, impl?: (params: unknown) => Promise<unknown>): LLMAdapter {
+function stubAdapter(name: string, impl?: (params: Parameters<LLMAdapter['call']>[0]) => Promise<unknown>): LLMAdapter {
   return {
     name,
-    async call() {
+    async call(params) {
       const runner = impl ?? (async () => ({ message: { role: 'assistant', content: [] } }))
-      const value = await runner(undefined)
+      const value = await runner(params)
       return value as never
     },
   }
@@ -99,6 +99,41 @@ describe('routerAdapter fallback', () => {
     const router = routerAdapter({ defaultAdapter: first, byPrefix: [{ prefix: 'gpt-', adapter: second }], healthRegistry: registry })
     const response = await router.call({ messages: [], tools: [], model: 'claude-4' })
     expect((response.message.content[0] as { text: string }).text).toBe('healthy path')
+  })
+
+  it('routes provider-qualified refs even when model ids collide', async () => {
+    const anthropic = stubAdapter('anthropic:shared', async () => ({ message: { role: 'assistant', content: [{ type: 'text', text: 'anthropic' }] } }))
+    const openai = stubAdapter('openai:shared', async () => ({ message: { role: 'assistant', content: [{ type: 'text', text: 'openai' }] } }))
+    const router = routerAdapter({
+      defaultAdapter: anthropic,
+      byPrefix: [
+        { prefix: 'anthropic:shared-model', adapter: anthropic },
+        { prefix: 'openai-local:shared-model', adapter: openai },
+      ],
+    })
+
+    const response = await router.call({ messages: [], tools: [], model: 'openai-local:shared-model' })
+    expect((response.message.content[0] as { text: string }).text).toBe('openai')
+    expect(router.lastDecision()?.selectedAdapter).toBe('openai:shared')
+  })
+
+  it('routes by provider-qualified ref without sending the ref as the provider model id', async () => {
+    const seenModels: Array<string | undefined> = []
+    const openai = stubAdapter('openai:gpt-5.5', async (params) => {
+      seenModels.push(params.model)
+      return { message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }
+    })
+    const router = routerAdapter({
+      defaultAdapter: openai,
+      byPrefix: [
+        { prefix: 'newapi:gpt-5.5', adapter: openai, routedModel: 'gpt-5.5' },
+        { prefix: 'gpt-5.5', adapter: openai },
+      ],
+    })
+
+    await router.call({ messages: [], tools: [], model: 'newapi:gpt-5.5' })
+    expect(seenModels).toEqual(['gpt-5.5'])
+    expect(router.lastDecision()?.selectedModel).toBe('newapi:gpt-5.5')
   })
 })
 

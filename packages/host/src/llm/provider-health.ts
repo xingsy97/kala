@@ -184,7 +184,15 @@ export function classifyProviderError(err: unknown): ProviderErrorLabel {
   if (message.includes('context length') || message.includes('token limit') || message.includes('prompt is too long')) return 'context_length_exceeded'
   if (message.includes('model not found') || message.includes('unknown model')) return 'model_not_found'
   if (message.includes('invalid request') || message.includes('validation') || message.includes('bad request')) return 'schema_error'
-  if (message.includes('timed out') || message.includes('timeout') || message.includes('aborted') || message.includes('econnreset')) return 'retryable'
+  if (
+    message.includes('timed out') ||
+    message.includes('timeout') ||
+    message.includes('aborted') ||
+    message.includes('econnreset') ||
+    message.includes('fetch failed') ||
+    message.includes('network') ||
+    message.includes('socket')
+  ) return 'retryable'
   return 'unknown'
 }
 

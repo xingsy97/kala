@@ -26,21 +26,21 @@ import {
   type JudgeScoreInput,
   type ProfileSessionInput,
   type ScoreSessionInput,
-} from './eval/generic.js'
+} from './eval/session/generic.js'
 import {
   evaluateRegressionGate,
   parseFailureCapArgs,
   type RegressionGateInput,
-} from './eval/regression-gate.js'
+} from './eval/session/regression-gate.js'
 import {
   aggregateProfiles,
   type ProfileAggregateInput,
-} from './eval/cost-aggregate.js'
+} from './eval/session/cost-aggregate.js'
 import {
   evaluateProfileBudget,
   parseThresholdArgs,
   type ProfileBudgetInput,
-} from './eval/profile-budget.js'
+} from './eval/session/profile-budget.js'
 import { auditSessionReliability, replayReliabilityChaos, type AuditSessionReliabilityInput, type ReliabilityChaosReplayInput } from './reliability.js'
 import {
   evaluateReliabilityGate,
@@ -785,7 +785,7 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
       tools,
       rolloutId,
       requireLogprobs: command.requireLogprobs,
-      config: { tools: rlToolSchemas(), systemPrompt: rlSystemPrompt, noToolCallNudges: task.verifier.kind === 'command' ? 0 : 3 },
+      config: { tools: rlToolSchemas(), systemPrompt: rlSystemPrompt },
       ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),
       ...(command.maxTurns !== undefined ? { maxTurns: command.maxTurns } : {}),
     })
