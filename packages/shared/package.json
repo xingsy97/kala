@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./enhancement": {
+      "types": "./dist/enhancement.d.ts",
+      "import": "./dist/enhancement.js"
     }
   },
   "files": ["dist", "src", "README.md"],

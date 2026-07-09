@@ -1,5 +1,6 @@
 import {
   exportRolloutSidecar,
+  exportRolloutSegments,
   exportSessionTraceArtifacts,
   type ExportRolloutSidecarInput,
   type ExportSessionTraceInput,
@@ -28,6 +29,7 @@ export type EnhancementCliCommand =
   | ({ kind: 'artifacts-manifest' } & BuildArtifactManifestInput)
   | ({ kind: 'trace-export-session' } & ExportSessionTraceInput)
   | ({ kind: 'rollout-export-session' } & ExportRolloutSidecarInput)
+  | ({ kind: 'rollout-export-segments' } & ExportSessionTraceInput)
 
 export function parseEnhancementCli(argv: readonly string[]): EnhancementCliCommand {
   if (argv[0] !== 'enhancement') return { kind: 'none' }
@@ -114,6 +116,17 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       tokenSegmentsPath: value(rest, '--token-segments'),
     }
   }
+  if (argv[1] === 'rollout' && argv[2] === 'export-segments') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'rollout-export-segments',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rollouts',
+      sessionLogPath: required(rest, '--session-log'),
+      runId: value(rest, '--run-id'),
+      evalInstanceId: value(rest, '--eval-instance-id'),
+      workspaceRoot: value(rest, '--workspace-root'),
+    }
+  }
   if (argv[1] === 'artifacts' && argv[2] === 'manifest') {
     const rest = argv.slice(3)
     const maxHashBytes = numberValue(rest, '--max-hash-bytes')
@@ -167,6 +180,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
   if (command.kind === 'artifacts-manifest') {
     const result = await buildArtifactManifest(command)
     console.log(JSON.stringify({ manifestPath: result.manifestPath, summary: result.manifest.summary }, null, 2))
+    return true
+  }
+  if (command.kind === 'rollout-export-segments') {
+    const result = await exportRolloutSegments(command)
+    console.log(JSON.stringify({ artifact: result.artifact, segmentCount: result.segments.segments.length }, null, 2))
     return true
   }
   const result = await exportRolloutSidecar(command)

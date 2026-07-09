@@ -25,6 +25,13 @@ or model-router change becomes anecdotal.
 Evals should be an adapter layer over real sessions and traces. The kernel must
 not know about datasets, scoring, or benchmark names.
 
+Browser and host boundaries matter here. Eval and artifact writers use Node IO,
+hashing, and filesystem paths, so they are exported from
+`@agent-kernel/shared/enhancement`. The default `@agent-kernel/shared` entry is
+kept browser-safe for dashboard protocol types. This prevents product UI code
+from depending on evaluator internals and keeps CI able to catch accidental
+cross-boundary imports through the dashboard production build.
+
 ## Core Concepts
 
 Dataset: a versioned collection of tasks. A task has input, optional fixture
@@ -164,9 +171,20 @@ fixtures. Implemented for session logs and patch files.
 Phase 2: SWE-bench adapter plugs into the same experiment/trial model.
 
 Phase 3: trace-aware comparison dashboard. The host now provides summary-level
-run comparison artifacts; dashboard visualization remains the UI layer.
+run comparison artifacts. The dashboard artifact explorer now renders eval run
+summaries and comparison deltas from manifest-discovered artifacts without
+adding eval state to the kernel protocol. It also loads per-run trial artifacts
+from the same manifest, shows instance status/resolution/failure/latency/patch
+size, and exposes each trial's artifact refs. Remaining work is direct trace
+deep links and richer charts.
 
 Phase 4: scheduled CI eval smoke tests and manual full benchmark workflow.
+Implemented as a deterministic fixture smoke in default CI plus a manual
+`Eval Smoke` GitHub Actions workflow. The smoke test exercises the real host CLI
+for prediction export, official-style result ingestion, run comparison, and
+dry-run SWE-bench harness command construction. Full Docker grading remains
+manual/opt-in because official SWE-bench evaluation has large CPU, memory, and
+storage requirements.
 
 Phase 5: model-assisted judge evaluators with saved judge traces.
 

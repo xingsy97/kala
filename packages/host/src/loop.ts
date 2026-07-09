@@ -35,7 +35,7 @@ import {
   createMessageAssemblyArtifact,
   createRouterDecisionArtifact,
   createToolCatalogArtifact,
-} from '@agent-kernel/shared'
+} from '@agent-kernel/shared/enhancement'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
 import { AGENT_TOOL_NAME, interruptSubAgentsForParent, runAgentTool } from './extensions/agent-tool.js'

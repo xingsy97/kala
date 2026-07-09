@@ -39,6 +39,16 @@ Do not reimplement SWE-bench grading. `agent-kernel` should implement inference,
 patch extraction, trace capture, and result ingestion. The official Docker
 harness remains the grading source of truth.
 
+The benchmark adapter must stay above the kernel. SWE-bench does not add reducer
+states, protocol messages, or benchmark-specific effects. The host materializes
+repositories, runs an operator-provided agent command, exports official
+prediction rows, and ingests official result artifacts.
+
+Runtime boundaries are explicit: browser-safe protocol/log types stay on
+`@agent-kernel/shared`; Node-only artifact and eval helpers live on
+`@agent-kernel/shared/enhancement`. This prevents dashboard bundles from
+accidentally importing filesystem or hashing code used by benchmark exporters.
+
 ## Proposed Architecture
 
 Add a benchmark adapter package or host module, tentatively
@@ -160,6 +170,18 @@ agent-kernel-host eval swebench ingest-results \
   --root-dir runs/swebench \
   --run-id smoke-001 \
   --results-dir evaluation_results/smoke-001
+
+agent-kernel-host eval swebench agent-infer \
+  --root-dir runs/swebench \
+  --run-id smoke-001 \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --model agent-kernel-gpt-5.5 \
+  --instances-jsonl fixtures/swebench-lite.jsonl \
+  --agent-command 'agent-kernel-run --prompt-file "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"' \
+  --repo-cache-dir runs/repos \
+  --max-workers 4 \
+  --skip-completed \
+  --timeout-ms 1800000
 ```
 
 `grade` prints the official command by default. Add `--execute` to actually run
@@ -171,6 +193,47 @@ evaluation when the operator only wants to inspect the command.
 maps official resolved/unresolved results into existing `EvalTrial` files,
 updates `summary.json`, and keeps the raw rows in `swebench-results.json`. It
 does not re-grade patches or reinterpret repository tests.
+
+`agent-infer` is the implemented agent-driven materialization adapter. It loads
+local SWE-bench-shaped JSONL instances, clones either `repo_path`, a
+`--repo-cache-dir` match, or the GitHub `repo`, checks out `base_commit`, writes
+a versioned prompt artifact, runs an operator-provided agent command in the
+workspace, captures stdout/stderr artifacts, and extracts `git diff --binary` as
+the official prediction patch. The agent command receives:
+
+- `AGENT_KERNEL_SWEBENCH_INSTANCE_ID`
+- `AGENT_KERNEL_SWEBENCH_REPO`
+- `AGENT_KERNEL_SWEBENCH_PROMPT`
+- `AGENT_KERNEL_SWEBENCH_PROMPT_FILE`
+
+This is intentionally an adapter, not a benchmark-specific kernel mode. The
+official harness remains responsible for grading; the adapter only prepares a
+real workspace and prediction row.
+
+## CI and Release Validation
+
+Implemented CI coverage is split into a cheap deterministic smoke path and an
+explicit manual official-harness path.
+
+The default CI job runs:
+
+```bash
+pnpm run verify:swebench-smoke
+```
+
+That script creates local SWE-bench-shaped fixture instances, generates official
+`predictions.jsonl` through `agent-kernel-host eval swebench infer`, ingests
+official-style `instance_results.jsonl` rows through `ingest-results`, compares
+baseline and candidate summaries, and verifies that `grade` builds the official
+`python -m swebench.harness.run_evaluation` command without executing Docker.
+This catches adapter, artifact, summary, and CLI drift in pull requests without
+requiring Docker image builds or a benchmark-scale runner.
+
+`.github/workflows/eval-smoke.yml` adds a scheduled/manual workflow. The
+scheduled job runs the same fixture smoke. The manual job can either print the
+official harness command or execute it with `execute_swebench_harness=true`.
+This keeps expensive external grading opt-in while still making the production
+command visible in CI logs.
 
 ## Output Layout
 
@@ -214,7 +277,12 @@ network. The kernel should not know that a session is a SWE-bench run.
 
 ## Dashboard Integration
 
-Add an Eval Runs view after the CLI and data model exist:
+The dashboard now has a first eval explorer surface inside the Artifacts modal.
+It consumes the host artifact manifest, finds eval `summary.json` artifacts,
+loads them through the bounded `/artifacts/content` endpoint, and renders run
+level metrics without adding eval state to the kernel or Socket.IO protocol.
+
+The full Eval Runs product view should continue from this foundation:
 
 - Run table: dataset, split, model, pass rate, completed, failed, timed out,
   cost, wall time.
@@ -266,11 +334,12 @@ SWE-bench Lite smoke runs.
 
 ## Implementation Phases
 
-Shared foundation now exists in `@agent-kernel/shared`: SWE-bench prediction
-JSONL helpers, official harness command construction, eval experiment/trial
-metadata types, artifact references, redaction, and trace span export. The next
-implementation should build the CLI runner on top of these helpers rather than
-creating a separate benchmark schema.
+Shared foundation now exists in `@agent-kernel/shared/enhancement`: SWE-bench
+prediction JSONL helpers, official harness command construction, eval
+experiment/trial metadata types, artifact references, redaction, and trace span
+export. The CLI runner builds on these helpers rather than creating a separate
+benchmark schema. The default `@agent-kernel/shared` entry remains browser-safe
+for dashboard and executor protocol imports.
 
 Phase 1: prediction exporter.
 Implemented for local/offline fixtures: load instance JSONL, read patch files,
@@ -284,16 +353,32 @@ official result files and updates per-trial/summary metadata after the harness
 has produced results.
 
 Phase 3: SWE-bench Lite single-instance run.
-Partially implemented through `--instance-ids`, `--limit`, and stable run
-directories. Agent-driven workspace materialization is the next adapter layer;
-the current code intentionally does not fake agent execution.
+Implemented for local JSONL instances and external agent commands through
+`agent-infer`: materialize a git workspace, run the command with prompt/repo env
+vars, capture logs, extract `git diff --binary`, write official predictions,
+and persist trial metadata. The next step is binding this adapter directly to a
+managed `agent-kernel` host/executor session for full dashboard replay.
 
 Phase 4: batch scheduler.
-Add concurrency control, resume, skip-completed behavior, and per-instance
-resource limits.
+Implemented first host-side scheduler controls for `agent-infer`: bounded
+`--max-workers`, stable output ordering, and `--skip-completed` resume behavior
+that reuses existing trial and prediction rows without rerunning completed
+instances. Remaining production work is per-instance resource isolation,
+distributed workers, and richer progress reporting.
 
 Phase 5: dashboard eval explorer.
-Render runs, instance results, final diffs, harness logs, and linked traces.
+Implemented read-only summary, comparison, and instance-level trial views through
+the artifact explorer. The dashboard loads run summaries, trial JSON artifacts,
+and comparison deltas through the bounded artifact content endpoint without
+adding eval state to the kernel protocol. Remaining work: dedicated navigation,
+inline final diff/log preview, official harness log grouping, linked traces, and
+comparison charts.
+
+Phase 6: CI eval smoke and manual official-harness workflow.
+Implemented through `scripts/verify-swebench-smoke.mjs`, default CI, and
+`.github/workflows/eval-smoke.yml`. The default path validates the adapter
+without Docker; the manual path can execute official SWE-bench grading when the
+runner has the required Docker, CPU, memory, and storage resources.
 
 ## Non-Goals
 

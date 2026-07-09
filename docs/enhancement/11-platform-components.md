@@ -70,6 +70,19 @@ GitHub Actions should run:
 
 Status: implemented host-side CLI foundation
 
+CI now validates the benchmark artifact path with `pnpm run verify:swebench-smoke`.
+The smoke is intentionally fixture-only: it proves prediction JSONL generation,
+official-style result ingestion, eval summary comparison, and official harness
+command construction without starting Docker. Expensive official SWE-bench
+grading is available from the manual `Eval Smoke` workflow.
+
+Shared package exports are split by runtime boundary. `@agent-kernel/shared`
+contains browser-safe protocol/log types used by the dashboard and executors.
+`@agent-kernel/shared/enhancement` contains Node-only enhancement helpers such
+as artifact stores, trace exporters, eval summaries, and SWE-bench command
+builders. This keeps platform components reusable without leaking filesystem
+dependencies into frontend bundles.
+
 Production dashboards and eval explorers should not discover data by guessing
 every run-directory layout. The host now provides a manifest builder:
 
