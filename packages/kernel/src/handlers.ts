@@ -72,6 +72,18 @@ export function onLlmResponse(
   const toolCalls = extractToolCalls(message.content)
 
   if (toolCalls.length === 0) {
+    const maxNudges = config.noToolCallNudges ?? 0
+    const used = state.nudgeCount ?? 0
+    if (maxNudges > 0 && used < maxNudges) {
+      const nudgeText =
+        'Your previous message contained no tool call. You MUST respond with exactly one tool call wrapped in <tool_call>{"name":"...","arguments":{...}}</tool_call> tags (or a ```json fenced block). Prose alone will not make progress. Continue the task now with a tool call.'
+      const nudgeMsg: Message = { role: 'user', content: [{ type: 'text', text: nudgeText }] }
+      const nextMessages = [...messages, nudgeMsg]
+      return {
+        next: { ...state, messages: nextMessages, usage: nextUsage, status: 'thinking', nudgeCount: used + 1 },
+        effects: [{ kind: 'call_llm', messages: nextMessages, tools: config.tools }],
+      }
+    }
     return {
       next: { ...state, messages, usage: nextUsage, status: 'done' },
       effects: [{ kind: 'finish' }],
@@ -156,6 +168,7 @@ export function onLlmResponse(
         usage: nextUsage,
         pendingCalls: [],
         status: 'thinking',
+        nudgeCount: 0,
       },
       effects: [
         {
@@ -180,6 +193,7 @@ export function onLlmResponse(
       usage: nextUsage,
       pendingCalls: nextPending,
       status,
+      nudgeCount: 0,
     },
     effects,
   }
