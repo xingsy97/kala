@@ -43,6 +43,38 @@ export function createPushRoutes(ctx: PushHttpContext): PushRouteHandler {
       sendJson(res, 200, body)
       return true
     }
+    if (path === '/push/status' && (req.method === 'GET' || req.method === 'HEAD')) {
+      // Diagnostic: lets the settings UI show whether the host knows about
+      // any subscribers at all. When users report "I don't receive pushes"
+      // the first question is always "does the store even have your
+      // endpoint" — surface it instead of forcing an SSH into the box.
+      const status = ctx.dispatcher.status()
+      const subscribers = status.configured ? status.subscribers : 0
+      sendJson(res, 200, { configured: status.configured, subscribers })
+      return true
+    }
+    if (path === '/push/test' && req.method === 'POST') {
+      // Fires a single notification to every current subscriber (usually
+      // just the caller). Bypasses the per-kind filter so users can verify
+      // the pipeline end-to-end from Settings even before an approval /
+      // waiting event happens. Returns per-endpoint outcomes so a "delivered:0"
+      // is immediately explainable from the client without SSHing into the
+      // host to read logs.
+      const outcomes = await ctx.dispatcher.sendRawDetailed({
+        kind: 'session_error',
+        sessionId: 'test',
+        title: 'Agent RunLab test push',
+        body: 'If you see this, background push is working on this device.',
+        url: '/',
+        tag: 'ak-test-push',
+      })
+      sendJson(res, 200, {
+        ok: true,
+        delivered: outcomes.filter((o) => o.ok).length,
+        outcomes,
+      })
+      return true
+    }
     if (path === '/push/subscribe' && req.method === 'POST') {
       const parsed = await parseSubscribeBody(req)
       if (!parsed) {

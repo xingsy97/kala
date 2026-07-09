@@ -27,12 +27,35 @@ export type VapidKeys = {
   subject: string
 }
 
-const DEFAULT_SUBJECT = 'mailto:user7@example.com'
+// Apple's push service (web.push.apple.com) rejects requests with a VAPID
+// subject that is not a routable https:// URL or a syntactically valid
+// mailto: at a real, resolvable domain. `.local` / `.invalid` /
+// `example.com` and similar placeholder domains all produce
+// HTTP 403 "BadJwtToken" (silently — the browser just never sees the
+// notification). Default to an https:// URL of the project so a fresh
+// install works on Apple devices without manual VAPID_SUBJECT config;
+// operators with a public hostname can override via env.
+const DEFAULT_SUBJECT = 'https://github.com/agent-kernel/agent-kernel'
+
+/**
+ * Some subjects (auto-generated on early versions, or copy-pasted from
+ * examples) will silently break Apple push. Detect and rewrite them so
+ * users don't have to delete push-vapid.json to escape.
+ */
+function normalizeSubject(subject: string | undefined | null): string {
+  const raw = (subject ?? '').trim()
+  if (!raw) return DEFAULT_SUBJECT
+  // mailto:*@*.local / *.invalid / *.example / example.com / agent-kernel.local
+  const badDomain = /^mailto:[^@]+@([^\s]+\.)?(local|invalid|example|test|agent-kernel\.local)(\s|$)/i
+  if (badDomain.test(raw)) return DEFAULT_SUBJECT
+  if (!raw.startsWith('mailto:') && !raw.startsWith('https://')) return DEFAULT_SUBJECT
+  return raw
+}
 
 export function loadOrCreateVapidKeys(sessionsDir: string): VapidKeys | null {
   const envPublic = process.env.AK_PUSH_VAPID_PUBLIC?.trim()
   const envPrivate = process.env.AK_PUSH_VAPID_PRIVATE?.trim()
-  const subject = process.env.AK_PUSH_VAPID_SUBJECT?.trim() || DEFAULT_SUBJECT
+  const subject = normalizeSubject(process.env.AK_PUSH_VAPID_SUBJECT)
 
   if (envPublic && envPrivate) {
     return { publicKey: envPublic, privateKey: envPrivate, subject }
@@ -50,7 +73,7 @@ export function loadOrCreateVapidKeys(sessionsDir: string): VapidKeys | null {
     try {
       const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as Partial<VapidKeys>
       if (parsed.publicKey && parsed.privateKey) {
-        return { publicKey: parsed.publicKey, privateKey: parsed.privateKey, subject: parsed.subject ?? subject }
+        return { publicKey: parsed.publicKey, privateKey: parsed.privateKey, subject: normalizeSubject(parsed.subject ?? subject) }
       }
     } catch {
       // Fall through to regeneration.
