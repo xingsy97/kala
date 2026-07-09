@@ -179,6 +179,7 @@ export function configureDashboardNamespace(
             event: e.event,
             effects: e.effects,
             ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
+            ...(e.model ? { model: e.model } : {}),
           }))
         const payload: ServerHistoryPayload = { sessionId: p.sessionId, entries }
         socket.emit('server:history', payload)
@@ -309,7 +310,20 @@ export function configureDashboardNamespace(
       })
     })
     socket.on('client:set_cwd', async (p: ClientSetCwd) => {
-      const validation = validateSessionCwd(deps, p.sessionId, p.cwd)
+      const record = await loadRecordForDashboard(deps, p.sessionId)
+      if (!record) {
+        deps.broadcastError(p.sessionId, 'host', 'unknown session')
+        return
+      }
+      if (!isRestingStatus(record.state.status)) {
+        deps.broadcastError(
+          p.sessionId,
+          'host',
+          `cannot change cwd while session status is ${record.state.status}`,
+        )
+        return
+      }
+      const validation = validateSessionCwd(deps, record, p.cwd)
       if (!validation.ok) {
         deps.broadcastError(p.sessionId, 'host', validation.reason)
         return
@@ -620,13 +634,16 @@ async function loadRecordForDashboard(
 
 function validateSessionCwd(
   deps: DashboardDeps,
-  sessionId: string,
+  record: SessionRecord,
   cwd: string,
 ): { ok: true; cwd: string } | { ok: false; reason: string } {
   const trimmed = cwd.trim()
   if (trimmed.length === 0) return { ok: false, reason: 'cwd is empty' }
   const resolved = resolvePath(trimmed)
-  const executor = deps.executors.executorForSession(sessionId)
+  const executor = record.workspaceId
+    ? deps.executors.snapshot().find((e) => e.workspaceId === record.workspaceId)
+    : deps.executors.executorForSession(record.sessionId)
+  if (record.workspaceId && !executor) return { ok: false, reason: 'workspace offline' }
   const roots = executor?.sandboxRoots ?? []
   if (roots.length === 0) return { ok: true, cwd: resolved }
   for (const root of roots) {

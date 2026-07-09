@@ -293,4 +293,97 @@ describe('executor end-to-end', () => {
     dashboard.close()
     executor.close()
   })
+
+  it('honors cwd changed through the dashboard before running bash pwd', async () => {
+    await server.close()
+
+    const sessionId = 'e2e-set-cwd-pwd'
+    const workspaceId = ulid()
+    const child = join(sandboxRoot, 'tmp-like-child')
+    mkdirSync(child)
+    config = createConfig({ tools: [BASH_SCHEMA], systemPrompt: 'sys' })
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir,
+      llm: scriptedMessages([
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'pwd-after-set-cwd',
+              name: 'bash',
+              input: { command: 'pwd' },
+            },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+        },
+      ]),
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 3000,
+    })
+    url = `http://localhost:${server.port}`
+
+    await server.store.ensure({
+      sessionId,
+      defaultConfig: config,
+      workspaceId,
+      workspaceName: 'test-ws',
+    })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const executor = startExecutor({
+      host: url,
+      workspaceId,
+      workspaceName: 'test-ws',
+      sandboxRoots: [sandboxRoot],
+    })
+    await executor.ready
+
+    const cwdChanged = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('cwd never changed')), 3000)
+      dashboard.on('state:changed', (p) => {
+        if (p.state.cwd === child) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+    dashboard.emit('client:set_cwd', { sessionId, cwd: child })
+    await cwdChanged
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    dashboard.emit('client:user_message', {
+      sessionId,
+      text: 'what is pwd',
+    })
+    await waitForDone(dashboard)
+
+    const rec = server.store.get(sessionId)!
+    const pwd = toolResultContent(rec.logPath, 'pwd-after-set-cwd')
+    expect(pwd?.split('\n')[0]).toBe(child)
+    expect(pwd).not.toContain(process.cwd())
+
+    dashboard.close()
+    executor.close()
+  })
 })

@@ -53,8 +53,8 @@
    │    ┌──────────────────────────────────────────────────┐        │
    │    │ Tool registry: read / write / edit / bash /      │        │
    │    │                grep / glob / ls / todowrite /    │        │
-   │    │                web_search / bash_output /        │        │
-   │    │                kill_shell                        │        │
+   │    │                memory / web_search /             │        │
+   │    │                bash_output / kill_shell          │        │
    │    └──────────────────────────────────────────────────┘        │
    │    ┌──────────────────────────────────────────────────┐        │
    │    │ Sandbox (working directory whitelist)            │        │
@@ -86,7 +86,7 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 - Serve two Socket.IO namespaces: `/dashboard` and `/executor`, rooms `session:<id>`, and serve the pre-built Dashboard bundle from `packages/dashboard/dist/`
 - Drive context compaction (both auto via `contextPressureLevel === 'hard'` and manual via `client:compact` / the `/compact` slash command). The summarizer is invoked with the LLM adapter; the resulting `compact_replaced` event carries the summarizer `request`, `trigger`, and `responseUsage` for the timeline.
 - Provide the host-side `agent` builtin tool: spawn a child JSONL session in the same workspace, inheriting the parent's `approvalMode`, and return the child's final assistant text.
-- Auto-import LLM providers from `~/.codex/config.toml` and `~/.claude/settings.json`, merge with user-added providers in `~/.agent-kernel/config.json`, and expose them to the dashboard via `server:providers`.
+- Auto-import LLM providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merge user-managed model ids from `~/.config/agent-kernel/models.json`, and expose sanitized snapshots to the dashboard via HTTP `GET /models` and `GET /settings`.
 
 **Non-goals**:
 - Does not implement tools directly (executor does)
