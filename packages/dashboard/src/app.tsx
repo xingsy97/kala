@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Moon, PanelRight, PanelRightClose, Sun } from 'lucide-react'
 
 import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
-import type { Message } from '@agent-kernel/kernel'
 
 import { Button } from './components/ui/button.js'
 import {
@@ -28,10 +27,12 @@ import {
   useControlPlane,
   useSession,
 } from './session.js'
+import { visibleMessages } from './transcript.js'
 
 type Theme = 'dark' | 'light'
 
 const MODEL_STORAGE_KEY = 'ak-model'
+const COMPACT_WATCHDOG_MS = 75_000
 
 /**
  * Fetch the host's advertised models on mount. The host reads them from
@@ -90,6 +91,7 @@ export function App(): JSX.Element {
   >(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
+  const compactStartSeq = useRef<number | null>(null)
   const [theme, toggleTheme] = useTheme()
   const { models, defaultModel } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
@@ -134,6 +136,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     setCompactStatus({ kind: 'idle' })
+    compactStartSeq.current = null
   }, [config.sessionId])
 
   const scheduleCompactIdle = (ms: number): void => {
@@ -147,9 +150,11 @@ export function App(): JSX.Element {
   }
 
   useEffect(() => {
-    if (compactStatus.kind !== 'running') return
+    if (compactStartSeq.current === null) return
     const last = session.timeline[session.timeline.length - 1]
     if (last?.event.kind !== 'compact_replaced') return
+    if (last.seq <= compactStartSeq.current) return
+    compactStartSeq.current = null
     setCompactStatus({ kind: 'done' })
     scheduleCompactIdle(2500)
   }, [compactStatus, session.timeline])
@@ -157,6 +162,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (compactStatus.kind !== 'running') return
     if (!session.lastError) return
+    compactStartSeq.current = null
     setCompactStatus({ kind: 'error', message: session.lastError.message })
     scheduleCompactIdle(6000)
   }, [compactStatus, session.lastError])
@@ -166,9 +172,9 @@ export function App(): JSX.Element {
     const timer = window.setTimeout(() => {
       setCompactStatus({
         kind: 'error',
-        message: 'compact is still waiting; try again after the current request finishes',
+        message: 'compact did not finish after the host timeout window',
       })
-    }, 45_000)
+    }, COMPACT_WATCHDOG_MS)
     return () => window.clearTimeout(timer)
   }, [compactStatus])
 
@@ -262,7 +268,11 @@ export function App(): JSX.Element {
       ? `${firstMsg.slice(0, 40)}…`
       : firstMsg
     : 'new session'
-  const chatMessages = visibleMessages(session.state?.messages ?? [], session.timeline)
+  const chatMessages = visibleMessages(
+    session.state?.messages ?? [],
+    session.timeline,
+    session.streamingText,
+  )
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
@@ -388,6 +398,7 @@ export function App(): JSX.Element {
                     window.clearTimeout(compactResetTimer.current)
                     compactResetTimer.current = null
                   }
+                  compactStartSeq.current = session.timeline.at(-1)?.seq ?? 0
                   setCompactStatus({ kind: 'running' })
                   session.socket?.emit('client:compact', {
                     sessionId: config.sessionId,
@@ -454,43 +465,6 @@ export function App(): JSX.Element {
       />
     </div>
   )
-}
-
-function visibleMessages(
-  stateMessages: readonly Message[],
-  timeline: readonly TimelineEntry[],
-): readonly Message[] {
-  const out: Message[] = []
-  const first = stateMessages[0]
-  if (first?.role === 'system') out.push(first)
-
-  for (const entry of timeline) {
-    const event = entry.event
-    if (event.kind === 'user_message') {
-      out.push({
-        role: 'user',
-        content: event.content
-          ? [...event.content]
-          : [{ type: 'text', text: event.text ?? '' }],
-      })
-    } else if (event.kind === 'llm_response') {
-      out.push(event.message)
-    } else if (event.kind === 'tool_result') {
-      out.push({
-        role: 'tool',
-        content: [
-          {
-            type: 'tool_result',
-            callId: event.callId,
-            ok: event.ok,
-            content: event.content,
-          },
-        ],
-      })
-    }
-  }
-
-  return out.length > 1 ? out : stateMessages
 }
 
 function hasCompactableContent(state: import('@agent-kernel/kernel').AgentState | null): boolean {
