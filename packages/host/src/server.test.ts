@@ -25,6 +25,7 @@ import type {
   ToolCallMessage,
   ToolResultAck,
 } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { SESSION_ERROR_SCOPES } from '@agent-kernel/shared'
 import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
@@ -169,13 +170,43 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId: 's', role: 'executor', clientVersion: '0.0.0' },
+      auth: { sessionId: 's', role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     const err = await new Promise<Error>((resolve) => {
       bad.on('connect_error', (e) => resolve(e))
     })
     expect(err.message).toBe('role_mismatch')
+    bad.close()
+  })
+
+  it('handshake auth rejects mismatched protocol major', async () => {
+    // Simulate an old dashboard build talking to a newer host.
+    const bad: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 's', role: 'dashboard', clientVersion: '0.9.0' },
+      reconnection: false,
+    })
+    const err = await new Promise<Error>((resolve) => {
+      bad.on('connect_error', (e) => resolve(e))
+    })
+    expect(err.message).toBe('version_incompatible')
+    bad.close()
+  })
+
+  it('handshake auth rejects missing clientVersion', async () => {
+    const bad = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 's', role: 'dashboard' } as unknown as Record<string, unknown>,
+      reconnection: false,
+    })
+    const err = await new Promise<Error>((resolve) => {
+      bad.on('connect_error', (e) => resolve(e))
+    })
+    expect(err.message).toBe('version_incompatible')
     bad.close()
   })
 
@@ -188,7 +219,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
 
@@ -251,7 +282,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -266,7 +297,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -326,7 +357,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -338,7 +369,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -413,7 +444,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -425,7 +456,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -502,7 +533,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve, reject) => {
@@ -533,7 +564,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId: sessionA, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId: sessionA, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     const dashB: ClientSocket<
@@ -541,7 +572,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId: sessionB, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId: sessionB, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await Promise.all([
@@ -554,7 +585,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -618,7 +649,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -634,7 +665,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -698,7 +729,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -710,7 +741,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -779,7 +810,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -831,7 +862,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -850,7 +881,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -916,7 +947,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -938,7 +969,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -982,7 +1013,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -994,7 +1025,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -1048,7 +1079,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -1060,7 +1091,7 @@ describe('wire protocol', () => {
       ExecutorClientToServerEvents
     > = clientIO(`${url}/executor`, {
       transports: ['websocket'],
-      auth: { role: 'executor', clientVersion: '0.0.0' },
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
@@ -1135,7 +1166,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId: runningSessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId: runningSessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -1164,7 +1195,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId: offlineSessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId: offlineSessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -1218,7 +1249,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -1283,7 +1314,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -1375,7 +1406,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>
@@ -1465,7 +1496,7 @@ describe('wire protocol', () => {
       DashboardClientToServerEvents
     > = clientIO(`${url}/dashboard`, {
       transports: ['websocket'],
-      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
       reconnection: false,
     })
     await new Promise<SessionReadyEvent>((resolve) =>

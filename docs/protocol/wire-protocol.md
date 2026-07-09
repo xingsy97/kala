@@ -389,6 +389,39 @@ Read the spill file for a tool result whose full output exceeded the inline
 cap. Host resolves the session's `workspaceId`, forwards to
 `fs:read_overflow`, and replies with `server:overflow_contents`.
 
+#### `client:delete_overflow_session`
+
+```ts
+{
+  requestId: string
+  sessionId: string
+}
+```
+
+Delete every spill file belonging to a session. Fired when the dashboard
+deletes a session so the workspace's `.agent-kernel/overflow/<sessionId>/`
+directory does not leak disk space. Host forwards to
+`fs:delete_overflow_session`; the ack carries `{ deleted: boolean, error? }`.
+Idempotent — deleting a session whose overflow dir does not exist returns
+`deleted: true`.
+
+#### `client:copy_overflow_session`
+
+```ts
+{
+  requestId: string
+  sourceSessionId: string
+  targetSessionId: string
+}
+```
+
+Duplicate a session's spill files under a new sessionId. Fired during
+`client:fork` so the forked child inherits the parent's spilled tool
+outputs (kept in step with the inlined-truncated tool_result entries in the
+child's JSONL header). Host forwards to `fs:copy_overflow_session`; the ack
+carries `{ copied: boolean, error? }`. No-op with `copied: true` when the
+source directory does not exist.
+
 #### `client:fork`
 
 ```ts
@@ -506,17 +539,6 @@ front-of-queue steering updates created while a turn was active; `mode: 'queue'`
 items are follow-ups that wait until the active turn is done.
 
 Dashboard resolves via `client:user_approve` or `client:user_reject`.
-
-#### `usage:updated`
-
-Convenience event; a projection of the running `state.usage` after each LLM response.
-
-```ts
-{
-  sessionId: string
-  usage: UsageTotal           // { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens }
-}
-```
 
 #### `server:executors`
 
@@ -1064,20 +1086,6 @@ Alternative to Socket.IO ACK. Useful when a tool completes long after the initia
 }
 ```
 
-#### `executor:progress` (optional, v2)
-
-Streaming progress for long-running tools. Not required in v1.
-
-```ts
-{
-  sessionId: string
-  callId: string
-  chunk: string
-}
-```
-
-Host forwards to Dashboard as `tool:progress`.
-
 #### `executor:bg_task_updated`
 
 Emitted from the executor's `subscribeBackgroundTasks` callback whenever a background task spawns, produces new output (throttled to ~400 ms), or ends. Host rebroadcasts to every dashboard in the executor's workspace room as `server:bg_task_updated` (§4.3).
@@ -1126,6 +1134,8 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Dashboard | `client:list_files` | Host → Executor (`fs:list_files`) |
 | Dashboard | `client:read_file` | Host → Executor (`fs:read_file`) |
 | Dashboard | `client:read_overflow` | Host → Executor (`fs:read_overflow`) |
+| Dashboard | `client:delete_overflow_session` | Host → Executor (`fs:delete_overflow_session`) |
+| Dashboard | `client:copy_overflow_session` | Host → Executor (`fs:copy_overflow_session`) |
 | Dashboard | `bg:list` | Host → Executor (`bg:list`) |
 | Dashboard | `bg:output` | Host → Executor (`bg:output`) |
 | Dashboard | `bg:kill` | Host → Executor (`bg:kill`) |
@@ -1145,7 +1155,6 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Host | `event:appended` | All in room |
 | Host | `session:error` | All in room |
 | Host | `approval:required` | Dashboard only |
-| Host | `usage:updated` | Dashboard only |
 | Host | `server:executors` | Dashboard only (response) |
 | Host | `server:executor_changed` | Dashboard only (broadcast) |
 | Host | `server:sessions` | Dashboard only (response + broadcast) |
@@ -1264,7 +1273,6 @@ Executor replies via ACK:
 Host calls Anthropic again; plain text answer:
   ← event:appended { seq: 4, event: { kind: 'llm_response', message: {…} }, effects: [{ kind: 'finish' }] }
   ← state:changed { cursor: 4, state: {status: 'done'} }
-  ← usage:updated { usage: { inputTokens: 352, outputTokens: 94, cacheCreationTokens: 0, cacheReadTokens: 0 } }
 ```
 
 This session yields 4 lines in the JSONL event log (see [event-log.md](event-log.md) §3).

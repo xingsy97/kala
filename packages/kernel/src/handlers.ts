@@ -30,10 +30,6 @@ import {
   extractToolCalls,
   noop,
 } from './helpers.js'
-import {
-  applyMemoryOp,
-  isSessionMemoryOp,
-} from './tool-lift.js'
 
 export function onUserMessage(
   state: AgentState,
@@ -288,16 +284,7 @@ export function onToolResult(
   const pendingCalls = state.pendingCalls.filter((c) => c.callId !== callId)
   const messages = [...state.messages, toolResultMsg]
 
-  // Session-scoped memory. `memory { operation: 'write', scope: 'session', key, content }`
-  // upserts an entry; `memory { operation: 'delete', scope: 'session', key }` removes one.
-  // Workspace/global scope operations touch disk in the executor and don't
-  // reach the kernel — this branch only fires for scope='session'.
-  const nextMemory =
-    ok && isSessionMemoryOp(target.name, target.input)
-      ? applyMemoryOp(state.memory, target.name, target.input)
-      : state.memory
-
-  return afterPendingSettled(state, messages, pendingCalls, config, nextMemory)
+  return afterPendingSettled(state, messages, pendingCalls, config)
 }
 
 export function onCancel(state: AgentState): StepResult {
@@ -320,7 +307,6 @@ export function onClear(state: AgentState): StepResult {
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     },
-      memory: [],
       error: undefined,
     },
     effects: [],

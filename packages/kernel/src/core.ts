@@ -12,10 +12,9 @@
  * exact code that runs. Absent cells are illegal pairs and fall through to
  * a single no-op path.
  *
- * The handler bodies live in `handlers.ts`; small pure helpers in `helpers.ts`;
- * the session-memory state-lift logic in `tool-lift.ts`. This file exists to
- * keep the dispatch table adjacent to `step()` — the two are meant to be read
- * together.
+ * The handler bodies live in `handlers.ts` and small pure helpers in
+ * `helpers.ts`. This file exists to keep the dispatch table adjacent to
+ * `step()` — the two are meant to be read together.
  *
  * Design invariants:
  *   1. `next` is a new object; the input `state` is never mutated.

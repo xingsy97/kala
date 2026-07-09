@@ -17,6 +17,7 @@ import type {
   ServerBgTaskUpdated,
   SessionErrorScope,
 } from '@agent-kernel/shared'
+import { isCompatibleVersion } from '@agent-kernel/shared'
 import type { AgentConfig } from '@agent-kernel/kernel'
 import type { Namespace } from 'socket.io'
 
@@ -58,6 +59,10 @@ export function configureExecutorNamespace(
       nextFn(new Error('role_mismatch'))
       return
     }
+    if (typeof auth.clientVersion !== 'string' || !isCompatibleVersion(auth.clientVersion)) {
+      nextFn(new Error('version_incompatible'))
+      return
+    }
     if (deps.authToken && auth.token !== deps.authToken) {
       nextFn(new Error('auth_failed'))
       return
@@ -76,14 +81,29 @@ export function configureExecutorNamespace(
       deps.executors.fulfill(payload.sessionId, payload)
     })
     socket.on('executor:bg_task_updated', (payload: ServerBgTaskUpdated) => {
+      const room = `workspace:${payload.workspaceId}`
+      deps.dashboardNs.to(room).emit('server:bg_task_updated', payload)
+      deps.dashboardNs.to(room).emit('server:control_update', {
+        kind: 'bg_task_updated',
+        ...payload,
+      })
+    })
+    socket.on('executor:tool_progress', (payload) => {
+      // Fan out to any dashboard subscribed to this session's room.
       deps.dashboardNs
-        .to(`workspace:${payload.workspaceId}`)
-        .emit('server:bg_task_updated', payload)
+        .to(`session:${payload.sessionId}`)
+        .emit('server:control_update', {
+          kind: 'tool_progress',
+          ...payload,
+        })
     })
     socket.on('executor:bg_task_evicted', (payload: ServerBgTaskEvicted) => {
-      deps.dashboardNs
-        .to(`workspace:${payload.workspaceId}`)
-        .emit('server:bg_task_evicted', payload)
+      const room = `workspace:${payload.workspaceId}`
+      deps.dashboardNs.to(room).emit('server:bg_task_evicted', payload)
+      deps.dashboardNs.to(room).emit('server:control_update', {
+        kind: 'bg_task_evicted',
+        ...payload,
+      })
     })
     socket.on('disconnect', () => {
       deps.executors.detach(socket)
