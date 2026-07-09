@@ -128,6 +128,7 @@ const MIME: Record<string, string> = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.map': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 }
 
 const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
