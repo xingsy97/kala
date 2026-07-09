@@ -23,7 +23,6 @@ import type {
   ServerSessionsPayload,
   ServerSubAgentFinishedEvent,
   ServerSubAgentStartedEvent,
-  SessionForkedEvent,
   SessionReadyEvent,
   ToolResultAck,
   ToolCallMessage,
@@ -214,6 +213,47 @@ describe('wire protocol', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('exposes host restart runtime status over HTTP and settings', async () => {
+    const status = await fetch(`${url}/runtime/restart/status`).then((r) => r.json() as Promise<{ pid: number; current: unknown }>)
+    expect(status.pid).toBe(process.pid)
+    expect(status.current).toBeNull()
+
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      settings: {
+        paths: {
+          claudeSettings: '/tmp/claude.json',
+          codexConfig: '/tmp/codex.toml',
+          manualModels: '/tmp/models.json',
+          hooksConfig: '/tmp/hooks.toml',
+          sessionsDir: dir,
+        },
+      } as ServerSettingsPayload,
+    })
+    url = `http://localhost:${server.port}`
+
+    const settings = await fetch(`${url}/settings`).then((r) => r.json() as Promise<ServerSettingsPayload>)
+    expect(settings.runtime?.pid).toBe(process.pid)
+    expect(settings.runtime?.current).toBeNull()
+    expect(settings.socketConnections).toMatchObject({
+      total: expect.any(Number),
+      dashboard: expect.any(Number),
+      executor: expect.any(Number),
+      other: expect.any(Number),
+      updatedAt: expect.any(String),
+    })
+    expect(settings.socketConnections?.namespaces.some((entry) => entry.namespace === '/dashboard')).toBe(true)
+    expect(settings.socketConnections?.namespaces.some((entry) => entry.namespace === '/executor')).toBe(true)
+  })
+
   it('handshake auth rejects role mismatch', async () => {
     const bad: ClientSocket<
       DashboardServerToClientEvents,
@@ -275,6 +315,45 @@ describe('wire protocol', () => {
       expect(ok.status).toBe(200)
       expect(await ok.text()).toContain('echo local')
       const missing = await fetch(`http://localhost:${localServer.port}/release-assets/missing.sh`)
+      expect(missing.status).toBe(404)
+    } finally {
+      await localServer.close()
+      rmSync(releaseDir, { recursive: true, force: true })
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
+  it('serves embedded release assets when the local release dir is missing a file', async () => {
+    const releaseDir = mkdtempSync(join(tmpdir(), 'agent-kernel-release-assets-empty-'))
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-release-sessions-'))
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      releaseAssetsDir: releaseDir,
+      embeddedReleaseAssets: [
+        { path: 'agent-kernel-executor.cjs', contentBase64: Buffer.from('#!/usr/bin/env node\nconsole.log("embedded executor")\n').toString('base64') },
+        { path: 'SHA256SUMS', contentBase64: Buffer.from('abc  agent-kernel-executor.cjs\n').toString('base64') },
+      ],
+      settings: {
+        providers: [],
+        defaultModel: '',
+        hooks: [],
+        paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+        mcp: { supported: false, note: '' },
+        release: { bootstrapBaseUrl: 'http://localhost:0/release-assets', source: 'local' },
+      },
+    })
+
+    try {
+      const ok = await fetch(`http://localhost:${localServer.port}/release-assets/agent-kernel-executor.cjs`)
+      expect(ok.status).toBe(200)
+      expect(await ok.text()).toContain('embedded executor')
+      const sums = await fetch(`http://localhost:${localServer.port}/release-assets/SHA256SUMS`)
+      expect(sums.status).toBe(200)
+      expect(await sums.text()).toContain('agent-kernel-executor.cjs')
+      const missing = await fetch(`http://localhost:${localServer.port}/release-assets/missing.cjs`)
       expect(missing.status).toBe(404)
     } finally {
       await localServer.close()
@@ -1076,19 +1155,23 @@ describe('wire protocol', () => {
       httpServer: http,
       models: [
         {
+          ref: 'openai:gpt-5.5',
           id: 'gpt-5.5',
           label: 'GPT 5.5',
           provider: 'openai',
+          providerId: 'openai',
           contextWindow: 400_000,
         },
         {
+          ref: 'anthropic:claude-opus-4.7-1m-internal',
           id: 'claude-opus-4.7-1m-internal',
           label: 'Claude Opus 4.7 1M',
           provider: 'anthropic',
+          providerId: 'anthropic',
           contextWindow: 1_000_000,
         },
       ],
-      defaultModel: 'gpt-5.5',
+      defaultModel: 'openai:gpt-5.5',
     })
     url = `http://localhost:${server.port}`
 
@@ -1111,16 +1194,14 @@ describe('wire protocol', () => {
         resolve(payload)
       })
     })
-    dashboard.emit('client:set_model', {
+    dashboard.emit('client:update_preferences', {
       sessionId,
-      model: 'claude-opus-4.7-1m-internal',
+      preferences: { selectedModel: 'anthropic:claude-opus-4.7-1m-internal' },
     })
 
     const payload = await changed
-    expect(payload.contextSnapshot?.contextWindow).toBe(1_000_000)
-    expect(payload.contextSnapshot?.effectiveLimit).toBe(1_000_000)
-    expect(payload.contextSnapshot?.contextWindowSource).toBe('model')
-    expect(payload.contextSnapshot?.contextWindowModel).toBe('claude-opus-4.7-1m-internal')
+    expect(payload.contextSnapshot?.contextWindow).toEqual({ tokens: 1_000_000, source: 'model_registry' })
+    expect(payload.contextSnapshot?.model).toMatchObject({ ref: 'anthropic:claude-opus-4.7-1m-internal', id: 'claude-opus-4.7-1m-internal', provider: 'anthropic' })
 
     dashboard.close()
   })
@@ -1136,7 +1217,7 @@ describe('wire protocol', () => {
       defaultConfig: config,
       httpServer: http,
       models: [
-        { ref: 'anthropic:claude-opus', id: 'claude-opus', label: 'Claude Opus', provider: 'anthropic' },
+        { ref: 'anthropic:claude-opus', id: 'claude-opus', label: 'Claude Opus', provider: 'anthropic', providerId: 'anthropic' },
       ],
     })
     url = `http://localhost:${server.port}`
@@ -1149,8 +1230,12 @@ describe('wire protocol', () => {
       reconnection: false,
     }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
-    const changed = new Promise<void>((resolve) => dashboard.once('session:model_changed', () => resolve()))
-    dashboard.emit('client:set_model', { sessionId, model: 'anthropic:claude-opus' })
+    const changed = new Promise<void>((resolve) => dashboard.on('server:control_update', (payload) => {
+      if (payload.kind === 'session_meta_changed' && payload.sessionId === sessionId && payload.preferences?.selectedModel === 'anthropic:claude-opus') {
+        resolve()
+      }
+    }))
+    dashboard.emit('client:update_preferences', { sessionId, preferences: { selectedModel: 'anthropic:claude-opus' } })
     await changed
     dashboard.close()
 
@@ -1168,7 +1253,7 @@ describe('wire protocol', () => {
       defaultConfig: config,
       httpServer: restartedHttp,
       models: [
-        { ref: 'anthropic:claude-opus', id: 'claude-opus', label: 'Claude Opus', provider: 'anthropic' },
+        { ref: 'anthropic:claude-opus', id: 'claude-opus', label: 'Claude Opus', provider: 'anthropic', providerId: 'anthropic' },
       ],
     })
     url = `http://localhost:${server.port}`
@@ -1180,6 +1265,64 @@ describe('wire protocol', () => {
     const ready = await new Promise<SessionReadyEvent>((resolve) => reconnected.on('session:ready', resolve))
     expect(ready.selectedModel).toBe('anthropic:claude-opus')
     reconnected.close()
+  })
+
+  it('uses persisted session model preferences over the host default model', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const seenModels: Array<string | undefined> = []
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      models: [
+        { ref: 'openai:gpt-default', id: 'gpt-default', label: 'GPT Default', provider: 'openai', providerId: 'openai', contextWindow: 400_000 },
+        { ref: 'anthropic:claude-session', id: 'claude-session', label: 'Claude Session', provider: 'anthropic', providerId: 'anthropic', contextWindow: 1_000_000 },
+      ],
+      defaultModel: 'openai:gpt-default',
+      llm: {
+        async call(p) {
+          seenModels.push(p.model)
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+            usage: { inputTokens: 1, outputTokens: 1 },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    const sessionId = 'wire-model-preference-authority'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    await server.store.updatePreferences(sessionId, { selectedModel: 'anthropic:claude-session' })
+
+    const dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    const ready = await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    expect(ready.selectedModel).toBe('anthropic:claude-session')
+    expect(ready.contextSnapshot.contextWindow).toEqual({ tokens: 1_000_000, source: 'model_registry' })
+
+    const done = new Promise<DashboardServerToClientEvents['state:changed']>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('state:changed never emitted')), 1000)
+      dashboard.on('state:changed', (payload) => {
+        if (payload.state.status === 'done') {
+          clearTimeout(timer)
+          resolve(payload)
+        }
+      })
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'hello' })
+    const payload = await done
+    expect(seenModels).toEqual(['anthropic:claude-session'])
+    expect(payload.contextSnapshot.model.ref).toBe('anthropic:claude-session')
+    expect(payload.contextSnapshot.model.id).toBe('claude-session')
+    expect(payload.contextSnapshot.model.provider).toBe('anthropic')
+    expect(payload.contextSnapshot.contextWindow).toEqual({ tokens: 1_000_000, source: 'model_registry' })
+    dashboard.close()
   })
 
   it('rejects ambiguous bare model ids instead of silently choosing a provider', async () => {
@@ -1207,7 +1350,7 @@ describe('wire protocol', () => {
     }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
     await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
     const error = new Promise<DashboardServerToClientEvents['session:error']>((resolve) => dashboard.once('session:error', resolve))
-    dashboard.emit('client:set_model', { sessionId, model: 'shared' })
+    dashboard.emit('client:update_preferences', { sessionId, preferences: { selectedModel: 'shared' } })
     const payload = await error
     expect(payload.message).toContain('unknown or ambiguous model')
     expect(server.store.get(sessionId)?.preferences.selectedModel).toBeUndefined()
@@ -1878,8 +2021,10 @@ describe('wire protocol', () => {
       dashboard.emit('client:user_message', { sessionId, text: 'go' })
     })
 
-    const forked = new Promise<SessionForkedEvent>((resolve) =>
-      dashboard.on('session:forked', resolve),
+    const forked = new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', (payload) => {
+        if (payload.reason === 'forked') resolve(payload)
+      }),
     )
     dashboard.emit('client:fork', {
       sourceSessionId: sessionId,
@@ -2102,10 +2247,14 @@ describe('wire protocol', () => {
     )
 
     const started = new Promise<ServerSubAgentStartedEvent>((resolve) => {
-      dashboard.once('server:sub_agent_started', resolve)
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'sub_agent_started') resolve(payload)
+      })
     })
     const finished = new Promise<ServerSubAgentFinishedEvent>((resolve) => {
-      dashboard.once('server:sub_agent_finished', resolve)
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'sub_agent_finished') resolve(payload)
+      })
     })
     dashboard.emit('client:user_message', { sessionId, text: 'go' })
 
@@ -2166,7 +2315,7 @@ describe('wire protocol', () => {
   it('surfaces a failed sub-agent to the dashboard and lets the parent recover', async () => {
     // End-to-end coverage for the doc-declared failure path: parent LLM
     // spawns a child agent, the child's LLM throws → the host emits a
-    // `server:sub_agent_finished` with status=failed, writes a failure
+    // `server:control_update` with sub_agent_finished status=failed, writes a failure
     // envelope tool_result into the parent log, and the parent's next LLM
     // call still completes normally.
     await server.close()
@@ -2230,10 +2379,14 @@ describe('wire protocol', () => {
     )
 
     const started = new Promise<ServerSubAgentStartedEvent>((resolve) => {
-      dashboard.once('server:sub_agent_started', resolve)
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'sub_agent_started') resolve(payload)
+      })
     })
     const finished = new Promise<ServerSubAgentFinishedEvent>((resolve) => {
-      dashboard.once('server:sub_agent_finished', resolve)
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'sub_agent_finished') resolve(payload)
+      })
     })
     dashboard.emit('client:user_message', { sessionId, text: 'go' })
 
@@ -2394,7 +2547,7 @@ describe('wire protocol', () => {
     executor.close()
   })
 
-  it('broadcasts server:executor_changed and answers client:list_executors with the current snapshot', async () => {
+  it('broadcasts executor control updates and answers client:list_executors with the current snapshot', async () => {
     // Regression for the Finder-layout Workspaces column: the dashboard
     // needs (a) a one-shot snapshot on load, and (b) live change events so
     // it can update the daemon list without polling. Both routes must
@@ -2416,7 +2569,9 @@ describe('wire protocol', () => {
     )
 
     const changed = new Promise<ServerExecutorChangedPayload>((resolve) => {
-      dashboard.on('server:executor_changed', resolve)
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'executor_changed') resolve(payload)
+      })
     })
 
     const executor: ClientSocket<
@@ -2465,8 +2620,10 @@ describe('wire protocol', () => {
 
     // A detach also fans out.
     const detached = new Promise<ServerExecutorChangedPayload>((resolve) => {
-      dashboard.on('server:executor_changed', (p) => {
-        if (p.change === 'detached') resolve(p)
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'executor_changed' && payload.change === 'detached') {
+          resolve(payload)
+        }
       })
     })
     executor.close()
@@ -2690,8 +2847,14 @@ describe('wire protocol', () => {
     })
 
     const renamed = new Promise<void>((resolve) => {
-      dashboard.on('workspace:renamed', (payload) => {
-        if (payload.workspaceId === 'ws-rename' && payload.workspaceName === 'new-name') resolve()
+      dashboard.on('server:control_update', (payload) => {
+        if (
+          payload.kind === 'workspace_meta_changed' &&
+          payload.workspaceId === 'ws-rename' &&
+          payload.workspaceName === 'new-name'
+        ) {
+          resolve()
+        }
       })
     })
     dashboard.emit('client:rename_workspace', {
@@ -3270,8 +3433,12 @@ describe('wire protocol', () => {
     while (Date.now() < deadline && !queueEvents.some((e) => e.pending === 1 && e.text === 'second')) {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    const modelChanged = new Promise<void>((resolve) => dashboard.once('session:model_changed', () => resolve()))
-    dashboard.emit('client:set_model', { sessionId, model: 'provider:model-b' })
+    const modelChanged = new Promise<void>((resolve) => dashboard.on('server:control_update', (payload) => {
+      if (payload.kind === 'session_meta_changed' && payload.sessionId === sessionId && payload.preferences?.selectedModel === 'provider:model-b') {
+        resolve()
+      }
+    }))
+    dashboard.emit('client:update_preferences', { sessionId, preferences: { selectedModel: 'provider:model-b' } })
     await modelChanged
     releaseFirst()
     await finalDone

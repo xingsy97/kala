@@ -8,6 +8,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 import type { Message } from '@agent-kernel/kernel'
+import { estimateStringTokens } from '@agent-kernel/shared/token-estimation'
 import {
   createArtifactStore,
   createRolloutSidecar,
@@ -507,5 +508,5 @@ function summarizeMessage(message: Message): string {
 }
 
 function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4))
+  return estimateStringTokens(text)
 }

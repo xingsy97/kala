@@ -220,6 +220,7 @@ async function main(): Promise<void> {
 
   const dashboard = await createDashboardServing()
   const embeddedSocketAdminAssets = embeddedSocketAdminAssetsFromGlobal()
+  const embeddedReleaseAssets = embeddedReleaseAssetsFromGlobal()
   const socketAdminStorePath = process.env.AGENT_KERNEL_SOCKET_ADMIN_CONFIG ?? join(homedir(), '.config', 'agent-kernel', 'socket-admin.json')
   const socketAdminStore = createSocketAdminStore(socketAdminStorePath)
   let socketAdminState = loadSocketAdminConfig({ currentModulePath: currentModulePath(), configPath: socketAdminStore.path, record: socketAdminStore.load(), embeddedAssets: embeddedSocketAdminAssets })
@@ -353,6 +354,7 @@ async function main(): Promise<void> {
     ...(dashboard.kind === 'embedded' ? { embeddedStaticAssets: dashboard.assets } : {}),
     ...(socketAdminState.runtime ? { socketAdmin: socketAdminState.runtime } : {}),
     ...(embeddedSocketAdminAssets.length > 0 ? { embeddedSocketAdminAssets } : {}),
+    ...(embeddedReleaseAssets.length > 0 ? { embeddedReleaseAssets } : {}),
     ...(release.source === 'local' ? { releaseAssetsDir: releaseDir() } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
@@ -441,7 +443,6 @@ function createModelRegistry(
     const perModelAdapters = buildProviderAdapters(p)
     for (const [modelId, adapter] of perModelAdapters) {
       models.push(modelInfo(modelId, p.label, {
-        ref: modelRef(p.id, modelId),
         providerId: p.id,
         source: manualModels.some((m) => m.providerId === p.id && m.id === modelId) ? 'manual' : p.source,
         ...(p.contextWindows?.[modelId] ? { contextWindow: p.contextWindows[modelId] } : {}),
@@ -502,7 +503,6 @@ function createModelRegistry(
         router.addRoute(modelRef(provider.id, id), adapter, id)
         router.addRoute(id, adapter)
         models.push(modelInfo(id, provider.label, {
-          ref: modelRef(provider.id, id),
           providerId: provider.id,
           source: 'manual',
           ...(input.label ? { label: input.label } : {}),
@@ -784,6 +784,22 @@ function embeddedSocketAdminAssetsFromGlobal(): readonly EmbeddedSocketAdminAsse
   }).__AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__
   if (!Array.isArray(globalValue)) return []
   const assets: EmbeddedSocketAdminAsset[] = []
+  for (const item of globalValue) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    if (typeof record.path !== 'string') continue
+    if (typeof record.contentBase64 !== 'string') continue
+    assets.push({ path: record.path, contentBase64: record.contentBase64 })
+  }
+  return assets
+}
+
+function embeddedReleaseAssetsFromGlobal(): readonly EmbeddedStaticAsset[] {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__?: unknown
+  }).__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__
+  if (!Array.isArray(globalValue)) return []
+  const assets: EmbeddedStaticAsset[] = []
   for (const item of globalValue) {
     if (!item || typeof item !== 'object') continue
     const record = item as Record<string, unknown>

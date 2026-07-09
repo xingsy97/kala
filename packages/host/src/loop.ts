@@ -27,10 +27,11 @@ import type {
   Effect,
   Message,
 } from '@agent-kernel/kernel'
-import { estimateMessageTokens, step } from '@agent-kernel/kernel'
+import { step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import { redactLlmTrace, type LLMTrace } from '@agent-kernel/shared'
+import { estimateMessageTokens, estimateStringTokens, estimateToolSchemaTokens } from '@agent-kernel/shared/token-estimation'
 import {
   createArtifactStore,
   createMessageAssemblyArtifact,
@@ -46,6 +47,8 @@ import { isSkillManager } from './extensions/skills.js'
 import { dispatchConfiguredTool } from './agent-modules/execution.js'
 import type {
   HostLoopDeps,
+  LoopDrainMode,
+  LoopDrainSessionSnapshot,
   LoopHandle,
   LoopRuntime,
   PostCompactionLoopGuard,
@@ -78,13 +81,30 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   // `cancelStream` aborts it; `performCallLlm` installs a fresh one at the
   // start of every call and clears it on completion.
   const inFlightAborts = new Map<string, AbortController>()
+  const inFlightTools = new Map<string, Set<string>>()
   const sessionTails = new Map<string, Promise<void>>()
   const loopGuard = new Map<string, PostCompactionLoopGuard>()
+  let drainMode: LoopDrainMode = 'none'
+  const checkpointWaiters = new Map<string, Set<(snapshot: LoopDrainSessionSnapshot) => void>>()
+
+  const notifyCheckpoint = (sessionId: string): void => {
+    const waiters = checkpointWaiters.get(sessionId)
+    if (!waiters || waiters.size === 0) return
+    const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+    if (!snapshot.safe) return
+    checkpointWaiters.delete(sessionId)
+    for (const resolve of waiters) resolve(snapshot)
+  }
 
   const handle: LoopHandle = {
     async dispatch(sessionId, event, options) {
+      if (drainMode !== 'none' && event.kind !== 'cancel') {
+        if (event.kind === 'user_message') {
+          throw new Error('host restart is draining; new user messages are paused')
+        }
+      }
       if (event.kind === 'cancel') {
-        await dispatchOne(deps, sessionId, event, inFlightAborts)
+        await dispatchOne(deps, sessionId, event, inFlightAborts, undefined, undefined, undefined, notifyCheckpoint)
         return
       }
       const prior = sessionTails.get(sessionId) ?? Promise.resolve()
@@ -95,11 +115,15 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             handle,
             loopGuard,
             ...(options?.model ? { model: options.model } : {}),
-          })
-          await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
+            drain: () => drainMode,
+            toolStarted: markToolStarted,
+            toolSettled: markToolSettled,
+          }, notifyCheckpoint)
+          if (drainMode === 'none') await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
         })
         .finally(() => {
           if (sessionTails.get(sessionId) === next) sessionTails.delete(sessionId)
+          notifyCheckpoint(sessionId)
         })
       sessionTails.set(sessionId, next)
       await next
@@ -133,11 +157,97 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       await dispatchOne(deps, sessionId, interruptedLlmRecoveryEvent(), inFlightAborts, undefined, undefined, {
         handle,
         loopGuard,
-      })
+        drain: () => drainMode,
+        toolStarted: markToolStarted,
+        toolSettled: markToolSettled,
+      }, notifyCheckpoint)
       return true
     },
+    beginDrain(mode) {
+      drainMode = mode
+      for (const record of deps.store.recordsSnapshot()) notifyCheckpoint(record.sessionId)
+    },
+    endDrain() {
+      drainMode = 'none'
+      for (const [sessionId, waiters] of checkpointWaiters) {
+        const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+        for (const resolve of waiters) resolve(snapshot)
+      }
+      checkpointWaiters.clear()
+    },
+    drainSnapshot(sessionId) {
+      return drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+    },
+    async waitForCheckpoint(sessionId) {
+      const current = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+      if (current.safe) return current
+      return await new Promise<LoopDrainSessionSnapshot>((resolve) => {
+        const waiters = checkpointWaiters.get(sessionId) ?? new Set()
+        waiters.add(resolve)
+        checkpointWaiters.set(sessionId, waiters)
+      })
+    },
+    async resumeSession(sessionId) {
+      if (drainMode !== 'none') return false
+      const record = deps.store.get(sessionId) ?? await deps.store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
+      if (!record) return false
+      if (record.state.status === 'thinking' && record.state.pendingCalls.length === 0) {
+        return await handle.recoverInterruptedLlm(sessionId)
+      }
+      if (record.state.status === 'executing_tools' && record.state.pendingCalls.length > 0) {
+        const effects = record.state.pendingCalls
+          .filter((call) => call.status === 'approved' || call.status === 'dispatched')
+          .map((call) => ({
+            kind: 'call_tool' as const,
+            callId: call.callId,
+            name: call.name,
+            input: call.input,
+            ...(record.state.cwd !== undefined ? { cwd: record.state.cwd } : {}),
+          }))
+        if (effects.length === 0) return false
+        const resultQueue = createSerialQueue()
+        await Promise.all(effects.map((eff) => performCallTool(deps, sessionId, eff, inFlightAborts, { handle, loopGuard, toolStarted: markToolStarted, toolSettled: markToolSettled }, resultQueue)))
+        return true
+      }
+      return false
+    },
+  }
+
+  function markToolStarted(sessionId: string, callId: string): void {
+    const calls = inFlightTools.get(sessionId) ?? new Set<string>()
+    calls.add(callId)
+    inFlightTools.set(sessionId, calls)
+  }
+
+  function markToolSettled(sessionId: string, callId: string): void {
+    const calls = inFlightTools.get(sessionId)
+    if (!calls) return
+    calls.delete(callId)
+    if (calls.size === 0) inFlightTools.delete(sessionId)
+    notifyCheckpoint(sessionId)
   }
   return handle
+}
+
+function drainSnapshotFor(
+  deps: HostLoopDeps,
+  sessionId: string,
+  aborts: Map<string, AbortController>,
+  tools: Map<string, Set<string>>,
+  mode: LoopDrainMode,
+): LoopDrainSessionSnapshot {
+  const record = deps.store.get(sessionId)
+  if (!record) return { sessionId, status: 'missing', safe: true, waiting: 'none', pendingCalls: [] }
+  const state = record.state
+  if (mode === 'idle') {
+    const safe = state.status === 'idle' || state.status === 'done' || state.status === 'error'
+    return { sessionId, status: state.status, safe, waiting: safe ? 'none' : 'idle', pendingCalls: state.pendingCalls, cursor: state.cursor }
+  }
+  if (aborts.has(sessionId)) return { sessionId, status: state.status, safe: false, waiting: 'llm', pendingCalls: state.pendingCalls, cursor: state.cursor }
+  if ((tools.get(sessionId)?.size ?? 0) > 0) {
+    return { sessionId, status: state.status, safe: false, waiting: 'tool', pendingCalls: state.pendingCalls, cursor: state.cursor }
+  }
+  return { sessionId, status: state.status, safe: true, waiting: 'none', pendingCalls: state.pendingCalls, cursor: state.cursor }
 }
 
 function interruptedLlmRecoveryEvent(): AgentEvent {
@@ -158,6 +268,7 @@ export async function dispatchOne(
   llmTrace?: LLMTrace,
   model?: string,
   runtime?: LoopRuntime,
+  onCheckpoint?: (sessionId: string) => void,
 ): Promise<void> {
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
@@ -207,6 +318,11 @@ export async function dispatchOne(
     if (inFlight) inFlight.abort()
   }
 
+  if (shouldStopForDrain(event, effects, runtime)) {
+    onCheckpoint?.(sessionId)
+    return
+  }
+
   if (effects.length > 1 && effects.every(isCallToolEffect)) {
     const resultQueue = createSerialQueue()
     await Promise.all(
@@ -218,6 +334,15 @@ export async function dispatchOne(
   for (const eff of effects) {
     await performEffect(deps, record, eff, aborts, runtime)
   }
+}
+
+function shouldStopForDrain(event: AgentEvent, effects: readonly Effect[], runtime?: LoopRuntime): boolean {
+  const mode = runtime?.drain?.() ?? 'none'
+  if (mode === 'none') return false
+  if (mode === 'idle') return false
+  if (event.kind === 'llm_response' || event.kind === 'llm_error') return true
+  if (effects.some((effect) => effect.kind === 'request_approval')) return true
+  return false
 }
 
 function isCallToolEffect(effect: Effect): effect is CallToolEffect {
@@ -289,7 +414,7 @@ async function performCallLlm(
       }
     : undefined
   try {
-    const res = await callLlmOnce({
+    let res = await callLlmOnce({
       deps,
       tools: effect.tools,
       signal: controller.signal,
@@ -297,6 +422,25 @@ async function performCallLlm(
       model,
       onTextDelta,
     }, messages)
+    await maybeRecordTokenUsageObservation(deps, sessionId, res, messages, effect.tools)
+    if (shouldRecoverFromMaxTokens(res) && runtime && !controller.signal.aborted) {
+      try {
+        await runtime.handle.compact(sessionId, 'preflight')
+        const retryMessages = deps.store.get(sessionId)?.state.messages ?? messages
+        res = await callLlmOnce({
+          deps,
+          tools: effect.tools,
+          signal: controller.signal,
+          config,
+          model,
+          onTextDelta,
+        }, retryMessages)
+        await maybeRecordTokenUsageObservation(deps, sessionId, res, retryMessages, effect.tools, 'max_tokens_retry')
+      } catch {
+        // If recovery compaction or retry fails, persist the original provider
+        // response. The finishReason still records that it was truncated.
+      }
+    }
     await dispatchOne(
       deps,
       sessionId,
@@ -338,6 +482,49 @@ async function performCallLlm(
     await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts, undefined, model, runtime)
   } finally {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
+  }
+}
+
+function shouldRecoverFromMaxTokens(res: Awaited<ReturnType<typeof callLlmOnce>>): boolean {
+  if (res.finishReason !== 'max_tokens' && res.finishReason !== 'length') return false
+  const text = res.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+  const toolCalls = res.message.content.some((c) => c.type === 'tool_call')
+  return !toolCalls && text.length < 512
+}
+
+async function maybeRecordTokenUsageObservation(
+  deps: HostLoopDeps,
+  sessionId: string,
+  res: Awaited<ReturnType<typeof callLlmOnce>>,
+  messages: readonly Message[],
+  tools: CallLlmEffect['tools'],
+  trigger = 'initial',
+): Promise<void> {
+  if (!res.usage) return
+  try {
+    const estimatedInputTokens = estimateMessageTokens(messages) + estimateToolSchemaTokens(tools)
+    const traceBody = res.trace?.request.body
+    const requestBodyEstimatedTokens = traceBody === undefined ? undefined : estimateStringTokens(JSON.stringify(traceBody))
+    const record = deps.store.get(sessionId)
+    if (!record) return
+    const { appendRuntimeMetadataEntry } = await import('./store/log.js')
+    await appendRuntimeMetadataEntry(record.logPath, {
+      sessionId,
+      action: 'token_usage_observed',
+      payload: {
+        trigger,
+        provider: res.trace?.provider ?? deps.llm.name,
+        model: res.trace?.model,
+        estimatedInputTokens,
+        ...(requestBodyEstimatedTokens !== undefined ? { requestBodyEstimatedTokens } : {}),
+        actualInputTokens: res.usage.inputTokens,
+        actualOutputTokens: res.usage.outputTokens,
+        ratio: estimatedInputTokens > 0 ? res.usage.inputTokens / estimatedInputTokens : null,
+        ...(res.finishReason ? { finishReason: res.finishReason } : {}),
+      },
+    })
+  } catch {
+    // Observability only.
   }
 }
 
@@ -489,11 +676,6 @@ function memoryContributionStage(
   }
 }
 
-function estimateToolSchemaTokens(tools: readonly import('@agent-kernel/kernel').ToolSchema[]): number {
-  const chars = tools.reduce((sum, tool) => sum + tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
-  return Math.ceil(chars / 4)
-}
-
 function countMemoryToolPairs(messages: readonly import('@agent-kernel/kernel').Message[]): number {
   const callIds = new Set<string>()
   let results = 0
@@ -508,17 +690,19 @@ function countMemoryToolPairs(messages: readonly import('@agent-kernel/kernel').
 
 function estimateMemoryTokens(messages: readonly import('@agent-kernel/kernel').Message[]): number {
   const callIds = new Set<string>()
-  let chars = 0
+  let tokens = 0
   for (const message of messages) {
     for (const content of message.content) {
       if (content.type === 'tool_call' && content.name === 'memory') {
         callIds.add(content.callId)
-        chars += content.name.length + content.callId.length + JSON.stringify(content.input).length
+        tokens += estimateStringTokens(content.name) + estimateStringTokens(content.callId) + estimateStringTokens(JSON.stringify(content.input)) + 16
       }
-      if (content.type === 'tool_result' && callIds.has(content.callId)) chars += content.content.length + content.callId.length + 16
+      if (content.type === 'tool_result' && callIds.has(content.callId)) {
+        tokens += estimateStringTokens(content.content) + estimateStringTokens(content.callId) + 16
+      }
     }
   }
-  return Math.ceil(chars / 4)
+  return tokens
 }
 
 async function performCallTool(
@@ -529,6 +713,7 @@ async function performCallTool(
   runtime?: LoopRuntime,
   resultQueue?: SerialQueue,
 ): Promise<void> {
+  runtime?.toolStarted?.(sessionId, effect.callId)
   try {
     const blockedByLoop = guardPostCompactionLoop(sessionId, effect, runtime?.loopGuard)
     if (blockedByLoop) {
@@ -596,6 +781,8 @@ async function performCallTool(
       runtime,
       resultQueue,
     )
+  } finally {
+    runtime?.toolSettled?.(sessionId, effect.callId)
   }
 }
 

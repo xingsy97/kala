@@ -32,6 +32,8 @@ import type {
   ServerExecutorInviteRevokedPayload,
   ServerExecutorInvitesPayload,
   ModelInfo,
+  HostRestartStatus,
+  HostRestartAttempt,
   ServerModelsPayload,
   ServerSettingsPayload,
 } from '@agent-kernel/shared'
@@ -104,6 +106,12 @@ import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
 import type { SessionStore } from '../store/session.js'
 import { exportSubAgentGraph } from '../subagent-graph.js'
 import { ContentInputError, resolveContentToPath } from './content-inputs.js'
+import {
+  HttpThemeError,
+  readMarketplaceTheme,
+  readMarketplaceThemeExtension,
+  searchMarketplaceThemes,
+} from '../vscode-themes.js'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -327,6 +335,9 @@ export function attachJsonRoutes(
     sessions?: SessionStore
     routerHealth?: () => unknown
     executorsSnapshot?: () => readonly AttachedExecutor[]
+    restartStatus?: () => HostRestartStatus
+    requestRestart?: (input: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number }) => Promise<HostRestartAttempt>
+    abortRestart?: () => HostRestartAttempt | null
     auth?: AuthConfig
     audit?: AuditLogger
   },
@@ -350,6 +361,34 @@ export function attachJsonRoutes(
         res.end()
         return
       }
+    }
+    if (path === '/themes/marketplace/search' && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      const query = new URL(req.url ?? '/', 'http://localhost').searchParams.get('q') ?? ''
+      void searchMarketplaceThemes(query)
+        .then((body) => sendJson(req, res, body))
+        .catch((err: unknown) => sendError(res, err instanceof HttpThemeError ? err.status : 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    const themeExtensionMatch = path.match(/^\/themes\/marketplace\/extensions\/([^/]+)\/([^/]+)$/u)
+    if (themeExtensionMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      void readMarketplaceThemeExtension(decodeURIComponent(themeExtensionMatch[1] ?? ''), decodeURIComponent(themeExtensionMatch[2] ?? ''))
+        .then((body) => sendJson(req, res, body))
+        .catch((err: unknown) => sendError(res, err instanceof HttpThemeError ? err.status : 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    const themeMatch = path.match(/^\/themes\/marketplace\/extensions\/([^/]+)\/([^/]+)\/themes\/([^/]+)$/u)
+    if (themeMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      void readMarketplaceTheme(
+        decodeURIComponent(themeMatch[1] ?? ''),
+        decodeURIComponent(themeMatch[2] ?? ''),
+        decodeURIComponent(themeMatch[3] ?? ''),
+      )
+        .then((body) => sendJson(req, res, body))
+        .catch((err: unknown) => sendError(res, err instanceof HttpThemeError ? err.status : 500, err instanceof Error ? err.message : String(err)))
+      return
     }
     if (path === '/auth/github/start' && req.method === 'GET' && payloads.auth?.github) {
       claimRoute(req)
@@ -524,6 +563,30 @@ export function attachJsonRoutes(
         sendError(res, 401, auth.reason)
         return
       }
+    }
+    if (path === '/runtime/restart/status' && payloads.restartStatus && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      sendJson(req, res, payloads.restartStatus())
+      return
+    }
+    if (path === '/runtime/restart' && payloads.requestRestart && req.method === 'POST') {
+      claimRoute(req)
+      void readJson(req)
+        .then(async (body) => {
+          const input = parseRestartRequest(body)
+          const result = await payloads.requestRestart!(input)
+          payloads.audit?.log({ action: 'runtime.restart_request', actor: httpActor(req, payloads.auth), outcome: 'ok', metadata: { mode: result.mode, reason: result.reason, attemptId: result.attemptId } })
+          sendJson(req, res, result)
+        })
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/runtime/restart/abort' && payloads.abortRestart && req.method === 'POST') {
+      claimRoute(req)
+      const result = payloads.abortRestart()
+      payloads.audit?.log({ action: 'runtime.restart_abort', actor: httpActor(req, payloads.auth), outcome: result ? 'ok' : 'denied' })
+      sendJson(req, res, result ?? { ok: false })
+      return
     }
     if (path === '/settings/models' && req.method === 'POST' && payloads.addManualModel) {
       claimRoute(req)
@@ -751,6 +814,9 @@ export function attachJsonRoutes(
 function isProtectedJsonRoute(path: string): boolean {
   return path === '/models' ||
     path === '/settings' ||
+    path === '/runtime/restart/status' ||
+    path === '/runtime/restart' ||
+    path === '/runtime/restart/abort' ||
     path === '/settings/models' ||
     path === '/settings/agent-prompt' ||
     path === '/settings/socket-admin/init' ||
@@ -2057,15 +2123,20 @@ export function attachDynamicStaticMountHandler(server: HttpServer, getMount: Dy
   })
 }
 
-export function attachReleaseAssetsHandler(server: HttpServer, releaseDir: string): void {
+export function attachReleaseAssetsHandler(
+  server: HttpServer,
+  releaseDir: string,
+  embeddedAssets: readonly EmbeddedStaticAsset[] = [],
+): void {
   const root = resolvePath(releaseDir)
+  const embedded = embeddedAssetMap(embeddedAssets)
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/'
     if (!url.startsWith('/release-assets/')) return
     if (req.method !== 'GET' && req.method !== 'HEAD') return
     if (routeClaimed(req) || res.headersSent || res.writableEnded) return
     claimRoute(req)
-    void serveReleaseAsset(root, req, res)
+    void serveReleaseAsset(root, embedded, req, res)
   })
 }
 
@@ -2207,8 +2278,29 @@ function normalizeStaticAssetPath(path: string): string {
   return rel.replace(/\\/g, '/')
 }
 
+function parseRestartRequest(body: unknown): { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number } {
+  if (body === null || typeof body !== 'object') return {}
+  const input = body as Record<string, unknown>
+  const out: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number } = {}
+  if (input.mode !== undefined) {
+    if (input.mode !== 'checkpoint' && input.mode !== 'when_idle' && input.mode !== 'force') throw new Error('invalid restart mode')
+    out.mode = input.mode
+  }
+  if (input.reason !== undefined) {
+    if (input.reason !== 'manual' && input.reason !== 'deploy' && input.reason !== 'settings_changed') throw new Error('invalid restart reason')
+    out.reason = input.reason
+  }
+  if (input.timeoutMs !== undefined) {
+    const n = Number(input.timeoutMs)
+    if (!Number.isFinite(n) || n <= 0) throw new Error('invalid restart timeoutMs')
+    out.timeoutMs = Math.floor(n)
+  }
+  return out
+}
+
 async function serveReleaseAsset(
   root: string,
+  embeddedAssets: ReadonlyMap<string, EmbeddedStaticAsset>,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -2226,11 +2318,11 @@ async function serveReleaseAsset(
   try {
     const st = await stat(abs)
     if (!st.isFile()) {
-      res.writeHead(404).end('not found')
+      serveEmbeddedReleaseAsset(embeddedAssets, requested, req, res)
       return
     }
   } catch {
-    res.writeHead(404).end('not found')
+    serveEmbeddedReleaseAsset(embeddedAssets, requested, req, res)
     return
   }
   const mime = MIME[extname(abs).toLowerCase()] ?? 'application/octet-stream'
@@ -2240,6 +2332,31 @@ async function serveReleaseAsset(
     return
   }
   createReadStream(abs).pipe(res)
+}
+
+function serveEmbeddedReleaseAsset(
+  assets: ReadonlyMap<string, EmbeddedStaticAsset>,
+  requested: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): void {
+  const asset = assets.get(normalizeStaticAssetPath(requested))
+  if (!asset) {
+    res.writeHead(404).end('not found')
+    return
+  }
+  const body = Buffer.from(asset.contentBase64, 'base64')
+  const mime = MIME[extname(asset.path).toLowerCase()] ?? 'application/octet-stream'
+  res.writeHead(200, {
+    'content-type': mime,
+    'content-length': String(body.byteLength),
+    'cache-control': 'no-cache, must-revalidate',
+  })
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  res.end(body)
 }
 
 async function pickFile(abs: string, root: string): Promise<string | null> {

@@ -192,6 +192,10 @@ export class SessionStore {
     return this.records.get(sessionId)
   }
 
+  recordsSnapshot(): readonly SessionRecord[] {
+    return [...this.records.values()]
+  }
+
   updateConfig(sessionId: string, update: (config: AgentConfig) => AgentConfig): void {
     const rec = this.records.get(sessionId)
     if (!rec) return
@@ -216,26 +220,27 @@ export class SessionStore {
     return next
   }
 
-  async load(sessionId: string): Promise<SessionRecord> {
+  async load(sessionId: string, options: { recoverDangling?: boolean } = {}): Promise<SessionRecord> {
+    const recoverDangling = options.recoverDangling !== false
     const cached = this.records.get(sessionId)
     if (cached) return cached
-    const inflight = this.inFlight.get(sessionId)
+    const inflight = recoverDangling ? this.inFlight.get(sessionId) : undefined
     if (inflight) return inflight
-    const promise = this.loadInner(sessionId).finally(() => {
+    const promise = this.loadInner(sessionId, { recoverDangling }).finally(() => {
       this.inFlight.delete(sessionId)
     })
-    this.inFlight.set(sessionId, promise)
+    if (recoverDangling) this.inFlight.set(sessionId, promise)
     return promise
   }
 
-  private async loadInner(sessionId: string): Promise<SessionRecord> {
+  private async loadInner(sessionId: string, options: { recoverDangling: boolean }): Promise<SessionRecord> {
     const path = this.pathFor(sessionId)
     if (!existsSync(path)) {
       const found = this.findLogByPrefix(sessionId)
       if (!found) throw new Error(`Unknown session: ${sessionId}`)
-      return this.loadFromFile(sessionId, found)
+      return this.loadFromFile(sessionId, found, options)
     }
-    return this.loadFromFile(sessionId, path)
+    return this.loadFromFile(sessionId, path, options)
   }
 
   async recoverInterruptedLlm(sessionId: string): Promise<{
@@ -306,7 +311,7 @@ export class SessionStore {
     markCreated: () => void,
   ): Promise<SessionRecord> {
     try {
-      const record = await this.loadInner(sessionId)
+      const record = await this.loadInner(sessionId, { recoverDangling: true })
       await this.applyMissingCreateMetadata(record, {
         sessionId,
         defaultConfig,
@@ -535,6 +540,7 @@ export class SessionStore {
   private async loadFromFile(
     sessionId: string,
     path: string,
+    options: { recoverDangling: boolean } = { recoverDangling: true },
   ): Promise<SessionRecord> {
     const parsed = await readSessionLog(path)
     const events = parsed.events.map((e) => e.event)
@@ -548,6 +554,7 @@ export class SessionStore {
     // and append it to the log so replay stays exact.
     let recoveredPending = false
     if (
+      options.recoverDangling &&
       (finalState.status === 'awaiting_approval' ||
         finalState.status === 'executing_tools') &&
       finalState.pendingCalls.length > 0
@@ -610,6 +617,7 @@ export class SessionStore {
     // asking the LLM to react to the failures — that's a legitimate next
     // turn, not a stuck stream.
     if (
+      options.recoverDangling &&
       !recoveredPending &&
       finalState.status === 'thinking' &&
       finalState.pendingCalls.length === 0

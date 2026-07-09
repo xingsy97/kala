@@ -59,6 +59,8 @@ import { snapshotFromConfig, type ContextWindowOverride } from './context/manage
 import { setWireValidationLogger } from './wire-validation.js'
 import type { RuntimeLogger } from './logger.js'
 import type { SocketAdminConfig } from './socket-admin.js'
+import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
+import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
 
 export type HostServerOptions = {
   port: number
@@ -80,6 +82,7 @@ export type HostServerOptions = {
   staticDir?: string
   embeddedStaticAssets?: readonly EmbeddedStaticAsset[]
   embeddedSocketAdminAssets?: readonly EmbeddedStaticAsset[]
+  embeddedReleaseAssets?: readonly EmbeddedStaticAsset[]
   dashboardHandler?: (req: IncomingMessage, res: ServerResponse) => void
   releaseAssetsDir?: string
   socketAdmin?: SocketAdminConfig
@@ -143,6 +146,21 @@ export async function startHostServer(
   const io = new IOServer(http, {
     cors: allowedOrigins === null ? { origin: '*' } : { origin: allowedOrigins, credentials: true },
   })
+  let closed = false
+  const closeServer = async (): Promise<void> => {
+    if (closed) return
+    closed = true
+    await new Promise<void>((resolve, reject) => {
+      io.close((err) => (err ? reject(err) : resolve()))
+    })
+    await new Promise<void>((resolve) => {
+      if (!http.listening) {
+        resolve()
+        return
+      }
+      http.close(() => resolve())
+    })
+  }
   let activeSocketAdmin: SocketAdminConfig | undefined
   const activateSocketAdmin = (config: SocketAdminConfig): void => {
     if (activeSocketAdmin) return
@@ -175,6 +193,7 @@ export async function startHostServer(
     options.detachGraceMs,
   )
 
+  let restart: RestartCoordinator | undefined
   const settingsWithSkills = (settings: ServerSettingsPayload | (() => ServerSettingsPayload)) => (): ServerSettingsPayload => {
     const base = typeof settings === 'function'
       ? settings()
@@ -186,6 +205,8 @@ export async function startHostServer(
         roots: defaultSkillRootsList,
         diagnostics: defaultSkillRegistry.diagnostics,
       },
+      ...(restart ? { runtime: restart.status() } : {}),
+      socketConnections: socketConnectionAuditSnapshot(io),
     }
   }
 
@@ -207,6 +228,17 @@ export async function startHostServer(
     audit,
     sessions: store,
     executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
+    restartStatus: () => restart?.status() ?? {
+      pid: process.pid,
+      startedAt: new Date(0).toISOString(),
+      current: null,
+      last: null,
+    },
+    requestRestart: (input) => {
+      if (!restart) throw new Error('restart coordinator is not ready')
+      return restart.request(input)
+    },
+    abortRestart: () => restart?.abort() ?? null,
   })
 
   const advertisedModels = (): readonly ModelInfo[] => typeof options.models === 'function'
@@ -226,8 +258,13 @@ export async function startHostServer(
     const normalized = normalizeModelRef(selected)
     if (!normalized) return { model: selected }
     const info = advertisedModels().find((m) => (m.ref ?? m.id) === normalized)
-    if (!info?.contextWindow) return { model: selected }
-    return { model: normalized, contextWindow: info.contextWindow }
+    if (!info) return { model: selected }
+    return {
+      model: normalized,
+      modelId: info.id,
+      provider: info.providerId,
+      ...(info.contextWindow ? { contextWindow: info.contextWindow } : {}),
+    }
   }
 
   const socketAdminMount = (): StaticMount | undefined => activeSocketAdmin
@@ -240,22 +277,18 @@ export async function startHostServer(
   attachDynamicStaticMountHandler(http, socketAdminMount)
 
   if (options.dashboardHandler) {
-    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir)
+    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
     attachRequestHandler(http, options.dashboardHandler)
   } else if (options.staticDir) {
-    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir)
+    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
     attachStaticHandler(http, options.staticDir)
   } else if (options.embeddedStaticAssets && options.embeddedStaticAssets.length > 0) {
-    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir)
+    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
     attachEmbeddedStaticHandler(http, options.embeddedStaticAssets)
   } else if (options.releaseAssetsDir) {
-    attachReleaseAssetsHandler(http, options.releaseAssetsDir)
+    attachReleaseAssetsHandler(http, options.releaseAssetsDir, options.embeddedReleaseAssets)
   }
 
-  // Runtime mirror of per-session model preferences. The store is the durable
-  // source of truth; this map only keeps hot paths compatible while records are
-  // being loaded or migrated.
-  const selectedModels = new Map<string, string>()
   const queuedMessages = new Map<string, QueuedUserMessage[]>()
   const drainingQueues = new Set<string>()
 
@@ -385,7 +418,8 @@ export async function startHostServer(
         contextSnapshot: snapshotFromConfig(
           store.get(sessionId)?.config ?? getDefaultConfig(),
           state.messages,
-          contextWindowForModel(selectedModels.get(sessionId)),
+          contextWindowForModel(store.get(sessionId)?.preferences.selectedModel),
+          store.get(sessionId)?.preferences.selectedModel,
         ),
       })
       io.of('/executor').to(room).emit('event:appended', {
@@ -434,7 +468,6 @@ export async function startHostServer(
     },
     onSubAgentStarted(payload) {
       const room = sessionRoom(payload.parentSessionId)
-      io.of('/dashboard').to(room).emit('server:sub_agent_started', payload)
       io.of('/dashboard').to(room).emit('server:control_update', {
         kind: 'sub_agent_started',
         ...payload,
@@ -442,7 +475,6 @@ export async function startHostServer(
     },
     onSubAgentFinished(payload) {
       const room = sessionRoom(payload.parentSessionId)
-      io.of('/dashboard').to(room).emit('server:sub_agent_finished', payload)
       io.of('/dashboard').to(room).emit('server:control_update', {
         kind: 'sub_agent_finished',
         ...payload,
@@ -458,8 +490,8 @@ export async function startHostServer(
     tools: executors,
     broadcast,
     models: {
-      get: (sessionId: string) => store.get(sessionId)?.preferences.selectedModel ?? selectedModels.get(sessionId),
-      contextWindow: (sessionId: string) => contextWindowForModel(store.get(sessionId)?.preferences.selectedModel ?? selectedModels.get(sessionId))?.contextWindow,
+      get: (sessionId: string) => store.get(sessionId)?.preferences.selectedModel,
+      contextWindow: (sessionId: string) => contextWindowForModel(store.get(sessionId)?.preferences.selectedModel)?.contextWindow,
     },
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
     ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
@@ -467,6 +499,18 @@ export async function startHostServer(
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
   }
   loop = runHostLoop(loopDeps)
+  restart = new RestartCoordinator({
+    store,
+    loop,
+    statePath: defaultRestartStatePath(options.sessionsDir),
+    emit: (event) => {
+      dashboardNs.emit('server:control_update', {
+        kind: 'host_restart',
+        ...event,
+      })
+    },
+    closeServer,
+  })
 
   const fireLifecycleHook = async (
     event: 'session_start' | 'session_end',
@@ -503,7 +547,6 @@ export async function startHostServer(
     ...(auth ? { auth } : {}),
     audit,
     broadcastError,
-    selectedModels,
     contextWindowForModel,
     normalizeModelRef,
     dashboardNs,
@@ -535,7 +578,6 @@ export async function startHostServer(
     const effectiveChange = 'executor' in change
       ? { ...change, executor: workspaceAliases.apply(change.executor) }
       : change
-    dashboardNs.emit('server:executor_changed', effectiveChange)
     dashboardNs.emit('server:control_update', {
       kind: 'executor_changed',
       ...effectiveChange,
@@ -577,20 +619,15 @@ export async function startHostServer(
   const port =
     typeof addr === 'object' && addr && 'port' in addr ? addr.port : options.port
 
+  void restart.resumeMarkedSessions()
+
   return {
     io,
     http,
     loop,
     store,
     port,
-    async close() {
-      await new Promise<void>((resolve, reject) => {
-        io.close((err) => (err ? reject(err) : resolve()))
-      })
-      await new Promise<void>((resolve) => {
-        http.close(() => resolve())
-      })
-    },
+    close: closeServer,
   }
 }
 

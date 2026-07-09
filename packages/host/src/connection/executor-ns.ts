@@ -141,7 +141,6 @@ export function configureExecutorNamespace(
       })
       if (!payload) return
       const room = sessionRoom(payload.sessionId)
-      deps.dashboardNs.to(room).emit('server:bg_task_updated', payload)
       deps.dashboardNs.to(room).emit('server:control_update', {
         kind: 'bg_task_updated',
         ...payload,
@@ -167,7 +166,6 @@ export function configureExecutorNamespace(
       })
       if (!payload) return
       const room = sessionRoom(payload.sessionId)
-      deps.dashboardNs.to(room).emit('server:bg_task_evicted', payload)
       deps.dashboardNs.to(room).emit('server:control_update', {
         kind: 'bg_task_evicted',
         ...payload,
