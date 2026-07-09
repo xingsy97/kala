@@ -19,7 +19,7 @@ For `agent-kernel` though, the Dashboard has three properties that push against 
 
 **Vite + React 18 + TypeScript strict, shipped as a static SPA. No Next.js, no server components, no SSR.**
 
-Router: `@tanstack/react-router` (or `wouter` — a per-file decision, both are fine). Styling: Tailwind + shadcn/ui. Wire: `socket.io-client`. Tests: Vitest + `@testing-library/react` for components, Playwright for e2e.
+Router: `@tanstack/react-router` (or `wouter` — a per-file decision, both are fine). Styling: Tailwind + shadcn/ui. Wire: `socket.io-client`. Tests: Vitest + `@testing-library/react` for components, plus Puppeteer verification scripts for production-shape browser checks.
 
 ## Alternatives considered
 

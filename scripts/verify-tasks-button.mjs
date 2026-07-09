@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * REAL end-to-end verify of the todo management feature:
+ * REAL end-to-end verify of the task progress feature:
  *   1. Open dashboard on a fresh sessionId.
  *   2. Send a prompt that forces the LLM to call `todowrite`.
  *   3. Wait for the tool_result event on disk (llm calls todowrite → normal
@@ -27,7 +27,7 @@ const SESSIONS_DIR = process.env.SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions
 const MODEL = process.env.VERIFY_MODEL ?? 'gpt-5.5'
 const stamp = Date.now().toString(36).toUpperCase().padStart(11, '0').slice(-11)
 const SESSION_ID = `01JVTD${stamp}TODO`.padEnd(26, 'X').slice(0, 26)
-const WORKSPACE = process.env.VERIFY_WORKSPACE ?? join(tmpdir(), `verify-todo-${SESSION_ID}`)
+const WORKSPACE = process.env.VERIFY_WORKSPACE ?? join(tmpdir(), `verify-tasks-${SESSION_ID}`)
 const REPO_ROOT = new URL('..', import.meta.url).pathname
 
 mkdirSync(WORKSPACE, { recursive: true })

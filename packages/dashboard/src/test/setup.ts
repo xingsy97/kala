@@ -10,6 +10,14 @@ class ResizeObserverStub implements ResizeObserver {
 
 globalThis.ResizeObserver ??= ResizeObserverStub
 
+const virtuosoScrollToIndexMock = vi.fn()
+const virtuosoScrollToMock = vi.fn()
+const virtuosoScrollByMock = vi.fn()
+
+;(globalThis as typeof globalThis & {
+  __virtuosoScrollToIndexMock?: typeof virtuosoScrollToIndexMock
+}).__virtuosoScrollToIndexMock = virtuosoScrollToIndexMock
+
 // cmdk calls Element.scrollIntoView on the highlighted item; JSDOM does not
 // implement it. A no-op keeps command-palette tests from crashing at layout.
 if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
@@ -20,9 +28,9 @@ vi.mock('react-virtuoso', async () => {
   const React = await import('react')
   const Virtuoso = React.forwardRef<unknown, Record<string, unknown>>((props, ref) => {
     React.useImperativeHandle(ref, () => ({
-      scrollToIndex: vi.fn(),
-      scrollTo: vi.fn(),
-      scrollBy: vi.fn(),
+      scrollToIndex: virtuosoScrollToIndexMock,
+      scrollTo: virtuosoScrollToMock,
+      scrollBy: virtuosoScrollByMock,
     }))
     const totalCount = typeof props.totalCount === 'number' ? props.totalCount : 0
     const itemContent = props.itemContent as ((index: number) => React.ReactNode) | undefined
@@ -48,4 +56,7 @@ vi.mock('react-virtuoso', async () => {
 
 afterEach(() => {
   cleanup()
+  virtuosoScrollToIndexMock.mockClear()
+  virtuosoScrollToMock.mockClear()
+  virtuosoScrollByMock.mockClear()
 })

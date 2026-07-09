@@ -38,8 +38,7 @@ export function isSessionMemoryOp(
 ): boolean {
   if (toolName !== MEMORY_TOOL_NAME) return false
   if ((input as { scope?: unknown }).scope !== 'session') return false
-  const operation = (input as { operation?: unknown }).operation
-  return operation === 'write' || operation === 'delete'
+  return memoryWriteOrDeleteOperation(input) !== null
 }
 
 /**
@@ -55,7 +54,9 @@ export function applyMemoryOp(
 ): readonly MemoryEntry[] {
   const key = (input as { key?: unknown }).key
   if (typeof key !== 'string' || key.length === 0) return current
-  const operation = memoryOperation(toolName, input)
+  const operation = toolName === MEMORY_TOOL_NAME
+    ? memoryWriteOrDeleteOperation(input)
+    : null
   if (operation === 'delete') {
     return current.filter((m) => m.key !== key)
   }
@@ -75,13 +76,9 @@ export function applyMemoryOp(
   return next
 }
 
-function memoryOperation(
-  toolName: string,
+function memoryWriteOrDeleteOperation(
   input: Record<string, unknown>,
 ): 'write' | 'delete' | null {
-  if (toolName === MEMORY_TOOL_NAME) {
-    const operation = (input as { operation?: unknown }).operation
-    return operation === 'write' || operation === 'delete' ? operation : null
-  }
-  return null
+  const operation = (input as { operation?: unknown }).operation
+  return operation === 'write' || operation === 'delete' ? operation : null
 }

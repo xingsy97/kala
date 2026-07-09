@@ -100,7 +100,72 @@ describe('ChatPanel', () => {
     expect(contentWrapper?.className).toContain('mx-auto')
   })
 
+  it('does not imperatively jump when messages append without a scroll token change', () => {
+    const scrollToIndex = (globalThis as typeof globalThis & {
+      __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
+    }).__virtuosoScrollToIndexMock
+    scrollToIndex?.mockClear()
+
+    const { rerender } = render(
+      <ChatPanel
+        messages={[{ role: 'user', content: [{ type: 'text', text: 'one' }] }]}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+        scrollToBottomToken={1}
+      />,
+    )
+
+    expect(scrollToIndex).not.toHaveBeenCalled()
+
+    rerender(
+      <ChatPanel
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'one' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'two' }] },
+        ]}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+        scrollToBottomToken={1}
+      />,
+    )
+
+    expect(scrollToIndex).not.toHaveBeenCalled()
+  })
+
+  it('imperatively jumps only when scrollToBottomToken changes', () => {
+    const scrollToIndex = (globalThis as typeof globalThis & {
+      __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
+    }).__virtuosoScrollToIndexMock
+    scrollToIndex?.mockClear()
+
+    const { rerender } = render(
+      <ChatPanel
+        messages={[{ role: 'user', content: [{ type: 'text', text: 'one' }] }]}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+        scrollToBottomToken={1}
+      />,
+    )
+
+    rerender(
+      <ChatPanel
+        messages={[{ role: 'user', content: [{ type: 'text', text: 'one' }] }]}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+        scrollToBottomToken={2}
+      />,
+    )
+
+    expect(scrollToIndex).toHaveBeenCalledTimes(1)
+    expect(scrollToIndex).toHaveBeenCalledWith({
+      index: 0,
+      align: 'end',
+      behavior: 'auto',
+    })
+  })
+
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { container } = render(
       <ChatPanel
         messages={[
@@ -126,6 +191,12 @@ describe('ChatPanel', () => {
     expect(container.querySelectorAll('code').length).toBeGreaterThanOrEqual(1)
     expect(container.querySelector('[data-testid="code-block-raw"]')).toBeTruthy()
     expect(container.textContent ?? '').toContain('console.log(1)')
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('validateDOMNesting'),
+      expect.stringContaining('<pre> cannot appear as a descendant of <p>'),
+      expect.anything(),
+    )
+    errorSpy.mockRestore()
   })
 
   it('leaves user text as literal (no markdown parsing)', () => {
