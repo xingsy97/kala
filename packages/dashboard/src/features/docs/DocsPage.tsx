@@ -1,14 +1,19 @@
-import { Children, isValidElement, useCallback, useEffect, useMemo, useState, type ReactElement, type RefCallback } from 'react'
+import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
-import type { RowRendererProps } from 'react-arborist'
-import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, RefreshCw, Search } from 'lucide-react'
+import type { RowRendererProps, TreeApi } from 'react-arborist'
+import { BookOpen, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, Folder, RefreshCw, Search } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '../../components/ui/button.js'
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '../../components/ui/resizable.js'
 import { cn } from '../../lib/utils.js'
 import { CodeBlock } from '../chat/CodeBlock.js'
 
@@ -50,6 +55,8 @@ export function DocsPage(): JSX.Element {
   const queryClient = useQueryClient()
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [allExpanded, setAllExpanded] = useState(true)
+  const arboristRef = useRef<TreeApi<DocTreeNode> | null>(null)
   const [treeRef, treeBounds] = useMeasure({ debounce: 30 })
 
   const indexQuery = useQuery({
@@ -106,6 +113,17 @@ export function DocsPage(): JSX.Element {
     if (node.data.kind === 'file') setSelectedPath(node.data.path)
     else node.toggle()
   }
+  const toggleAll = (): void => {
+    const tree = arboristRef.current
+    if (!tree) return
+    if (allExpanded) {
+      tree.closeAll()
+      setAllExpanded(false)
+      return
+    }
+    tree.openAll()
+    setAllExpanded(true)
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-testid="docs-page">
@@ -127,70 +145,96 @@ export function DocsPage(): JSX.Element {
         </div>
         <p className="text-xs text-muted-foreground">{t('docs.page.subtitle')}</p>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(240px,280px)_minmax(0,1fr)]">
-        <aside className="min-h-0 border-r border-border/60 bg-muted/20">
-          <div className="border-b border-border/60 p-2">
-            <label className="flex h-8 items-center gap-2 rounded border border-border/70 bg-background px-2 text-xs text-muted-foreground">
-              <Search className="h-3.5 w-3.5" aria-hidden />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('docs.page.search')}
-                className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-              />
-            </label>
-          </div>
-          <div ref={treeRef} className="h-[calc(100%-49px)] min-h-0 overflow-hidden p-1.5" data-testid="docs-list" data-scroll-owner="react-arborist">
-            {loadingIndex && docs.length === 0 ? (
-              <div className="px-2 py-1 text-xs text-muted-foreground">{t('docs.page.loading')}</div>
-            ) : null}
-            {!loadingIndex && !filteredEmpty ? (
-              <Tree<DocTreeNode>
-                data={filtered as DocTreeNode[]}
-                childrenAccessor={(node) => node.kind === 'folder' ? node.children : null}
-                idAccessor="id"
-                openByDefault
-                disableDrag
-                disableDrop
-                disableEdit
-                disableMultiSelection
-                disableSelect={(node) => node.kind !== 'file'}
-                selection={selectedPath ? `file:${selectedPath}` : undefined}
-                onActivate={activate}
-                renderRow={DocTreeRow}
-                rowHeight={30}
-                indent={14}
-                width={treeWidth}
-                height={treeHeight}
+      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-docs-cols-v1" className="min-h-0 flex-1">
+        <ResizablePanel
+          defaultSize={20}
+          minSize={17}
+          maxSize={30}
+          className="min-w-[240px] bg-muted/20"
+          data-testid="docs-sidebar-panel"
+        >
+          <aside className="h-full min-h-0">
+            <div className="border-b border-border/60 p-2">
+              <label className="flex h-8 items-center gap-2 rounded border border-border/70 bg-background px-2 text-xs text-muted-foreground">
+                <Search className="h-3.5 w-3.5" aria-hidden />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t('docs.page.search')}
+                  className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+                />
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={toggleAll}
+                disabled={filtered.length === 0}
+                className="mt-1.5 h-7 w-full justify-start gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                title={allExpanded ? t('docs.page.collapseAll') : t('docs.page.expandAll')}
+                aria-label={allExpanded ? t('docs.page.collapseAll') : t('docs.page.expandAll')}
+                data-testid="docs-tree-toggle-all"
               >
-                {({ node, style }) => <DocRow node={node} style={style} selectedPath={selectedPath} />}
-              </Tree>
-            ) : null}
-            {filteredEmpty || (!loadingIndex && docs.length === 0) ? (
-              <div className="px-2 py-1 text-xs text-muted-foreground">{t('docs.page.empty')}</div>
-            ) : null}
-          </div>
-        </aside>
-        <main className="min-h-0 overflow-auto" data-testid="docs-content">
-          {error ? (
-            <div className="m-4 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-              {t('docs.page.error', { message: error })}
+                {allExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" aria-hidden /> : <ChevronsUpDown className="h-3.5 w-3.5" aria-hidden />}
+                <span>{allExpanded ? t('docs.page.collapseAll') : t('docs.page.expandAll')}</span>
+              </Button>
             </div>
-          ) : null}
-          {!content && !error ? (
-            <div className="p-4 text-xs text-muted-foreground">{loadingContent ? t('docs.page.loading') : t('docs.page.select')}</div>
-          ) : null}
-          {content ? (
-            <article className="mx-auto max-w-5xl px-6 py-5">
-              <div className="mb-4 border-b border-border/60 pb-3">
-                <div className="font-mono text-[11px] text-muted-foreground">{content.path}</div>
-                <div className="text-[11px] text-muted-foreground">{t('docs.page.updated', { value: new Date(content.updatedAt).toLocaleString() })}</div>
+            <div ref={treeRef} className="h-[calc(100%-84px)] min-h-0 overflow-hidden p-1.5" data-testid="docs-list" data-scroll-owner="react-arborist">
+              {loadingIndex && docs.length === 0 ? (
+                <div className="px-2 py-1 text-xs text-muted-foreground">{t('docs.page.loading')}</div>
+              ) : null}
+              {!loadingIndex && !filteredEmpty ? (
+                <Tree<DocTreeNode>
+                  ref={arboristRef}
+                  data={filtered as DocTreeNode[]}
+                  childrenAccessor={(node) => node.kind === 'folder' ? node.children : null}
+                  idAccessor="id"
+                  openByDefault
+                  disableDrag
+                  disableDrop
+                  disableEdit
+                  disableMultiSelection
+                  disableSelect={(node) => node.kind !== 'file'}
+                  selection={selectedPath ? `file:${selectedPath}` : undefined}
+                  onActivate={activate}
+                  renderRow={DocTreeRow}
+                  rowHeight={30}
+                  indent={14}
+                  width={treeWidth}
+                  height={treeHeight}
+                >
+                  {({ node, style }) => <DocRow node={node} style={style} selectedPath={selectedPath} />}
+                </Tree>
+              ) : null}
+              {filteredEmpty || (!loadingIndex && docs.length === 0) ? (
+                <div className="px-2 py-1 text-xs text-muted-foreground">{t('docs.page.empty')}</div>
+              ) : null}
+            </div>
+          </aside>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={80} minSize={70} data-testid="docs-content-panel">
+          <main className="h-full min-h-0 overflow-auto" data-testid="docs-content">
+            {error ? (
+              <div className="m-4 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+                {t('docs.page.error', { message: error })}
               </div>
-              <DocsMarkdown body={content.body} />
-            </article>
-          ) : null}
-        </main>
-      </div>
+            ) : null}
+            {!content && !error ? (
+              <div className="p-4 text-xs text-muted-foreground">{loadingContent ? t('docs.page.loading') : t('docs.page.select')}</div>
+            ) : null}
+            {content ? (
+              <article className="mx-auto max-w-5xl px-6 py-5">
+                <div className="mb-4 border-b border-border/60 pb-3">
+                  <div className="font-mono text-[11px] text-muted-foreground">{content.path}</div>
+                  <div className="text-[11px] text-muted-foreground">{t('docs.page.updated', { value: new Date(content.updatedAt).toLocaleString() })}</div>
+                </div>
+                <DocsMarkdown body={content.body} />
+              </article>
+            ) : null}
+          </main>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   )
 }

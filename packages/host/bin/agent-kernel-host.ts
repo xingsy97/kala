@@ -40,7 +40,7 @@ import process from 'node:process'
 import type { ManualModelInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 
-import packageJson from '../package.json'
+import packageJson from '../package.json' with { type: 'json' }
 import { anthropicAdapter } from '../src/llm/anthropic.js'
 import { openaiAdapter } from '../src/llm/openai.js'
 import { policyGatewayAdapter } from '../src/llm/policy-gateway.js'

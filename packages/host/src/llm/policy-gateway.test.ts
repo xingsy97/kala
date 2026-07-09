@@ -5,7 +5,49 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { policyGatewayAdapter } from './policy-gateway.js'
+import { liftJsonToolCallsFromContent, policyGatewayAdapter } from './policy-gateway.js'
+
+describe('liftJsonToolCallsFromContent', () => {
+  const tools = new Set(['write', 'bash', 'read'])
+  it('lifts <tool_call> wrapped JSON', () => {
+    const { toolCalls, residualText } = liftJsonToolCallsFromContent(
+      '<tool_call>\n{"name":"write","arguments":{"path":"a"}}\n</tool_call>',
+      tools,
+    )
+    expect(toolCalls).toEqual([{ name: 'write', arguments: { path: 'a' } }])
+    expect(residualText).toBe('')
+  })
+  it('lifts ```json fenced JSON', () => {
+    const { toolCalls } = liftJsonToolCallsFromContent(
+      '```json\n{"name":"bash","arguments":{"cmd":"ls"}}\n```',
+      tools,
+    )
+    expect(toolCalls).toEqual([{ name: 'bash', arguments: { cmd: 'ls' } }])
+  })
+  it('lifts bare JSON tool call', () => {
+    const { toolCalls, residualText } = liftJsonToolCallsFromContent(
+      'I will call write. {"name":"write","arguments":{"path":"x","content":"y"}}',
+      tools,
+    )
+    expect(toolCalls).toEqual([{ name: 'write', arguments: { path: 'x', content: 'y' } }])
+    expect(residualText).toContain('I will call write')
+  })
+  it('ignores JSON that is not a tool call', () => {
+    const { toolCalls, residualText } = liftJsonToolCallsFromContent(
+      '{"foo":"bar"}',
+      tools,
+    )
+    expect(toolCalls).toEqual([])
+    expect(residualText).toBe('{"foo":"bar"}')
+  })
+  it('rejects tool names not in whitelist', () => {
+    const { toolCalls } = liftJsonToolCallsFromContent(
+      '{"name":"eval","arguments":{}}',
+      tools,
+    )
+    expect(toolCalls).toEqual([])
+  })
+})
 
 describe('policyGatewayAdapter', () => {
   let dir: string

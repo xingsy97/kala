@@ -32,7 +32,7 @@ import process from 'node:process'
 
 import lockfile from 'proper-lockfile'
 
-import packageJson from '../package.json'
+import packageJson from '../package.json' with { type: 'json' }
 import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
