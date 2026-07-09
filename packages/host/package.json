@@ -1,0 +1,40 @@
+{
+  "name": "@agent-kernel/host",
+  "version": "0.0.0",
+  "description": "Host runtime for the agent-kernel: LLM adapters, session store, Socket.IO server.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "agent-kernel-host": "./bin/agent-kernel-host.js"
+  },
+  "files": ["dist", "src", "bin", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx bin/agent-kernel-host.ts"
+  },
+  "dependencies": {
+    "@agent-kernel/kernel": "workspace:*",
+    "@agent-kernel/shared": "workspace:*",
+    "socket.io": "^4.8.1",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  },
+  "sideEffects": false,
+  "license": "MIT"
+}
