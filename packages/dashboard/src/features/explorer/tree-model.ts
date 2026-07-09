@@ -43,6 +43,13 @@ export type SessionNode = {
   eventCount: number
   parentSessionId?: string
   lastActivityIso: string
+  /**
+   * Forked children. A session is a child of another when its
+   * `parentSessionId` matches a session in the same workspace. Children
+   * nest directly under the parent — they bypass time-bucketing because a
+   * fork's structural home is its parent, not its own activity bucket.
+   */
+  children: SessionNode[]
 }
 
 export type WorkspaceChild = TimeBucketNode | SessionNode
@@ -80,12 +87,12 @@ export function buildTree(
   options: BuildTreeOptions = {},
 ): WorkspaceNode[] {
   const now = options.now ?? Date.now
-  const buckets = new Map<string, WorkspaceNode>()
+  const workspacesByKey = new Map<string, WorkspaceNode>()
 
   for (const ex of executors) {
     if (!ex.workspaceId) continue
-    if (buckets.has(ex.workspaceId)) continue
-    buckets.set(ex.workspaceId, {
+    if (workspacesByKey.has(ex.workspaceId)) continue
+    workspacesByKey.set(ex.workspaceId, {
       id: `ws:${ex.workspaceId}`,
       kind: 'workspace',
       workspaceId: ex.workspaceId,
@@ -101,11 +108,15 @@ export function buildTree(
   }
 
   const sessionsByWorkspace = new Map<string, SessionNode[]>()
+  const allNodes = new Map<string, SessionNode>()
+  const workspaceKeyBySession = new Map<string, string>()
   for (const s of sessions) {
     const node = sessionNode(s)
+    allNodes.set(s.sessionId, node)
     const key = s.workspaceId ?? UNASSIGNED_KEY
-    if (!buckets.has(key)) {
-      buckets.set(key, {
+    workspaceKeyBySession.set(s.sessionId, key)
+    if (!workspacesByKey.has(key)) {
+      workspacesByKey.set(key, {
         id: key === UNASSIGNED_KEY ? 'ws:unassigned' : `ws:${key}`,
         kind: 'workspace',
         workspaceId: key === UNASSIGNED_KEY ? null : key,
@@ -117,22 +128,49 @@ export function buildTree(
         children: [],
       })
     }
-    const list = sessionsByWorkspace.get(key) ?? []
-    list.push(node)
-    sessionsByWorkspace.set(key, list)
+    const workspaceSessions = sessionsByWorkspace.get(key) ?? []
+    workspaceSessions.push(node)
+    sessionsByWorkspace.set(key, workspaceSessions)
   }
 
-  for (const [key, list] of sessionsByWorkspace) {
-    list.sort((a, b) => b.lastActivityIso.localeCompare(a.lastActivityIso))
-    const bucket = buckets.get(key)
-    if (!bucket) continue
-    bucket.children =
-      list.length >= BUCKET_THRESHOLD
-        ? groupByTime(list, now())
-        : list
+  for (const [key, workspaceSessions] of sessionsByWorkspace) {
+    const roots = nestForkedSessions(workspaceSessions, key, allNodes, workspaceKeyBySession)
+    const workspace = workspacesByKey.get(key)
+    if (!workspace) continue
+    workspace.children =
+      roots.length >= BUCKET_THRESHOLD
+        ? groupByTime(roots, now())
+        : roots
   }
 
-  return [...buckets.values()].sort(compareWorkspaces)
+  return [...workspacesByKey.values()].sort(compareWorkspaces)
+}
+
+function nestForkedSessions(
+  sessions: readonly SessionNode[],
+  workspaceKey: string,
+  allNodes: ReadonlyMap<string, SessionNode>,
+  workspaceKeyBySession: ReadonlyMap<string, string>,
+): SessionNode[] {
+  const roots: SessionNode[] = []
+
+  for (const node of sessions) {
+    const parentId = node.parentSessionId
+    const parent = parentId ? allNodes.get(parentId) : undefined
+    const parentWorkspaceKey = parentId ? workspaceKeyBySession.get(parentId) : undefined
+
+    // Missing parents and cross-workspace parents stay visible as roots.
+    if (parent && parentWorkspaceKey === workspaceKey) parent.children.push(node)
+    else roots.push(node)
+  }
+
+  sortSessionsByActivity(roots)
+  for (const node of sessions) sortSessionsByActivity(node.children)
+  return roots
+}
+
+function sortSessionsByActivity(sessions: SessionNode[]): void {
+  sessions.sort((a, b) => b.lastActivityIso.localeCompare(a.lastActivityIso))
 }
 
 export function groupByTime(
@@ -190,6 +228,7 @@ function sessionNode(s: SessionSummary): SessionNode {
     eventCount: s.eventCount,
     parentSessionId: s.parentSessionId,
     lastActivityIso: s.lastEventAt ?? s.createdAt,
+    children: [],
   }
 }
 

@@ -16,7 +16,7 @@
  * virtualisation each parent turn re-mounts every nested row on every diff.
  */
 
-import { useCallback, useState } from 'react'
+import { Children, isValidElement, useCallback, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -326,18 +326,13 @@ function NestedMarkdown({ text, compact }: { text: string; compact: boolean }): 
         remarkPlugins={[remarkGfm]}
         components={{
           pre({ children }) {
-            return <>{children}</>
+            return <MarkdownPre>{children}</MarkdownPre>
           },
           code({ inline, className, children, ...rest }: {
             inline?: boolean
             className?: string
             children?: React.ReactNode
           }) {
-            const match = /language-(\w+)/.exec(className ?? '')
-            const raw = Array.isArray(children) ? children.join('') : String(children ?? '')
-            const trimmed = raw.replace(/\n$/, '')
-            if (!inline && match) return <CodeBlock code={trimmed} lang={match[1]} />
-            if (!inline) return <CodeBlock code={trimmed} />
             return (
               <code className={className} {...rest}>
                 {children}
@@ -350,4 +345,23 @@ function NestedMarkdown({ text, compact }: { text: string; compact: boolean }): 
       </ReactMarkdown>
     </div>
   )
+}
+
+function MarkdownPre({ children }: { children?: React.ReactNode }): JSX.Element {
+  const code = Children.toArray(children).find((child) => isValidElement(child))
+  if (code && isValidElement<{ className?: string; children?: React.ReactNode }>(code)) {
+    const className = code.props.className
+    const match = /language-(\w+)/.exec(className ?? '')
+    const raw = reactNodeText(code.props.children).replace(/\n$/, '')
+    return <CodeBlock code={raw} lang={match?.[1]} />
+  }
+  return <CodeBlock code={reactNodeText(children).replace(/\n$/, '')} />
+}
+
+function reactNodeText(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(reactNodeText).join('')
+  if (isValidElement<{ children?: React.ReactNode }>(node)) return reactNodeText(node.props.children)
+  return ''
 }

@@ -70,6 +70,11 @@ function VirtualTranscriptInner<Item>(
   ref: React.ForwardedRef<VirtualTranscriptHandle>,
 ): JSX.Element {
   const virtuoso = useRef<VirtuosoHandle | null>(null)
+  const footerRef = useRef<{
+    slot: JSX.Element | null | undefined
+    itemClassName: string | undefined
+  }>({ slot: footerSlot, itemClassName })
+  footerRef.current = { slot: footerSlot, itemClassName }
 
   useImperativeHandle(
     ref,
@@ -143,9 +148,12 @@ function VirtualTranscriptInner<Item>(
       Scroller: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function TranscriptScroller(props, scrollerRef) {
         return <div {...props} ref={scrollerRef} className={cn(props.className, 'virtual-transcript-scroller')} data-virtuoso-scroller="true" />
       }),
-      Footer: footerSlot ? () => <div className={itemClassName}>{footerSlot}</div> : undefined,
+      Footer: function TranscriptFooter() {
+        const { slot, itemClassName: footerClassName } = footerRef.current
+        return slot ? <div className={footerClassName}>{slot}</div> : null
+      },
     }),
-    [footerSlot, itemClassName],
+    [],
   )
 
   return (

@@ -274,7 +274,7 @@ async function performCallLlm(
   runtime?: LoopRuntime,
 ): Promise<void> {
   const model = deps.models?.get(sessionId)
-  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, aborts, runtime)
+  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
   const controller = new AbortController()
   aborts.set(sessionId, controller)
   // Only ask for token deltas when the broadcast wants them. If no consumer
@@ -448,7 +448,6 @@ async function messagesForLlmCall(
   sessionId: string,
   config: AgentConfig,
   messages: readonly import('@agent-kernel/kernel').Message[],
-  aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
 ): Promise<readonly import('@agent-kernel/kernel').Message[]> {
   if (!runtime || !shouldPreflightCompact(config, messages)) return messages

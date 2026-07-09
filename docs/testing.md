@@ -28,7 +28,7 @@ Approximate share:
 - Kernel: 100% unit
 - Host: 70% unit + 30% integration (mocked LLM & socket)
 - Executor: 80% unit + 20% integration (real fs, tmpdir)
-- Dashboard: 60% component test + 40% e2e (Playwright)
+- Dashboard: component tests plus targeted Puppeteer verification scripts for real browser/layout checks
 - Full system: a small handful of e2e tests exercising the golden path
 
 ---
@@ -166,8 +166,8 @@ Not a tool per se, but the workspace whitelist enforcement:
 
 ## 5. Dashboard — component + e2e
 
-**Location**: `packages/dashboard/src/**/*.test.tsx` (component), `packages/dashboard/e2e/*.spec.ts` (playwright)
-**Runner**: `pnpm --filter @agent-kernel/dashboard test` (component), `pnpm --filter @agent-kernel/dashboard e2e` (playwright)
+**Location**: `packages/dashboard/src/**/*.test.tsx` / `*.test.ts` (component and pure view-model tests), `scripts/verify-dashboard-*.mjs` (Puppeteer real-browser checks)
+**Runner**: `pnpm --filter @agent-kernel/dashboard test` for component/unit tests; root `verify:*` scripts for targeted browser checks.
 
 ### 5.1 Component tests
 
@@ -178,14 +178,17 @@ For each React component, test the visible behavior given props:
 
 Use `@testing-library/react`. Snapshot tests are permitted but should assert user-visible content, not DOM structure.
 
-### 5.2 E2e tests (Playwright)
+### 5.2 Browser verification scripts (Puppeteer)
 
-The minimum e2e suite for the dashboard:
-1. **Golden path**: open dashboard, create session, send "hi", verify assistant response appears
-2. **Tool call flow**: send "read /tmp/notes.md" (with a mock LLM returning a tool_call), verify approval UI or tool result renders
-3. **Cancellation**: send a long message, click cancel, verify state → done
+The checked-in browser scripts are intentionally narrow and production-shaped:
 
-Playwright fixtures spin up Host + Executor + Dashboard on random local ports. Use a **mock LLM adapter** (record/replay) so tests don't burn real API tokens.
+- `pnpm run verify:dashboard-debugger`: debugger tabs, trace teaching mode, LLM API detail modal, runtime state/tools, theme contrast screenshots.
+- `pnpm run verify:dashboard-layout-scroll`: responsive layout, drawer sizing, controlled scroll surfaces, modal sizing, screenshot coverage.
+- `pnpm run verify:dashboard-subagent-scroll`: nested sub-agent transcript layout and virtual scroller width.
+- `pnpm run verify:tasks-button`: real `todowrite` tool call round-trip and derived Tasks button state. This script may use a real configured LLM.
+- `pnpm run verify:dashboard-real`: full real-host / real-executor / real-provider smoke. This is the broadest and slowest check.
+
+The default browser automation stack is `puppeteer-core` against a local Chrome/Chromium. Scripts that need real LLM output must say so in their header and should stay out of routine fast CI unless credentials and cost policy are explicit.
 
 ### 5.3 Real-browser cross-check for UI changes
 
@@ -196,7 +199,7 @@ Component tests (React Testing Library + jsdom) verify contract, not visual beha
 3. Load `http://localhost:3000`, toggle each theme the change touches, and read `getComputedStyle(document.body).backgroundColor` (and text color of the primary panels). Fail the check if the computed color falls outside the expected range for that theme — a "white screen in dark mode" bug can pass every jsdom test because jsdom doesn't compute CSS.
 4. Verify the fetched CSS bundle is served with `Cache-Control: no-cache` (or a filename hash) — otherwise old CSS keeps loading even after a rebuild and the check appears to pass on a stale bundle.
 
-The rule is stricter than the general Playwright suite because Playwright fixtures use their own dev server; this check is against the production-shape bundle that ends users see.
+The rule is stricter than jsdom/component coverage because these checks run against the production-shape bundle that end users see.
 
 ---
 
@@ -283,4 +286,4 @@ Some tests are tempting but low-value:
 
 - Kernel tests are pure — if they fail, run one in isolation with `pnpm test -- -t "test name"` and inspect the state / effect diff
 - Host integration tests: use `DEBUG=socket.io*` env var for wire visibility; use `--reporter=verbose` for step-by-step logs
-- E2e: Playwright has `--headed` mode and `--debug` — use them; do not stare at CI-only output
+- Browser verification: rerun the relevant Puppeteer script with `CHROME_PATH` / `DASHBOARD_URL` / `HOST_URL` pointed at the failing environment; do not stare at CI-only output
