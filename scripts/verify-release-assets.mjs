@@ -25,6 +25,28 @@ for (const asset of manifest.assets) {
     }
     accessSync(path, constants.X_OK)
   }
+  if (asset.endsWith('.sh')) {
+    const text = readFileSync(path, 'utf8')
+    if (!text.startsWith('#!/usr/bin/env bash\n')) {
+      fail(`${asset} is missing bash shebang`)
+    }
+    accessSync(path, constants.X_OK)
+    const syntax = spawnSync('bash', ['-n', path], { stdio: 'inherit' })
+    if (syntax.status !== 0) fail(`${asset} failed bash syntax check`)
+  }
+}
+
+const notesPath = join(releaseDir, 'RELEASE_NOTES.md')
+if (!existsSync(notesPath)) fail('missing release/RELEASE_NOTES.md')
+const notes = readFileSync(notesPath, 'utf8')
+if (manifest.assets.includes('run-host.sh') && !notes.includes('run-host.sh | bash')) {
+  fail('release notes missing host bash one-liner')
+}
+if (manifest.assets.includes('run-executor.sh') && !notes.includes('run-executor.sh | HOST_URL=')) {
+  fail('release notes missing executor bash one-liner')
+}
+if (/agent-kernel-(host|executor)\.cjs\s*\|\s*node/.test(notes)) {
+  fail('release notes must not pipe Node.js assets directly to node')
 }
 
 const checksum = spawnSync('shasum', ['-a', '256', '-c', 'SHA256SUMS'], {

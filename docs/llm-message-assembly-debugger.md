@@ -11,6 +11,7 @@ kernel state to provider HTTP payload. A user should be able to answer:
 - How did the provider adapter reshape agent-kernel messages into API-specific
   messages?
 - What exact provider request body was sent?
+- What exact API request was sent, with concrete base URLs redacted in the UI?
 
 ## Problem
 
@@ -36,24 +37,37 @@ The assembly explanation does not require a new structured assembly trace yet,
 but the event log and wire protocol carry optional `model` metadata so the LLM
 call list does not degrade to `unknown` when `llmTrace` is missing.
 
+If `llmTrace` is absent, the UI must still show the exact kernel `call_llm`
+effect and clearly mark HTTP trace as missing. It must not replace the
+whole provider view with a dead-end empty state. Missing trace usually means an
+older log entry, a pending LLM call, or a call path that did not return provider
+trace.
+
 ## UI Shape
 
-When selecting an LLM row in `Trace View -> LLM`, the detail modal renders four
+When selecting an LLM row in `Trace View -> LLM`, the detail modal renders two
 tabs:
 
-1. `Assembly`
+1. `Message Assembler`
    - Human-readable pipeline summary.
    - Shows system prompt handling, kernel message count, tool count, selected
      model/provider, and adapter conversion rules.
-2. `Kernel Messages`
+   - Shows a context composition bar based on serialized size for system,
+     conversation messages, and tool schemas.
    - Compact list of messages from `call_llm.messages`.
-   - Selecting a row shows that message's raw JSON.
-3. `Provider Payload`
-   - Provider URL, inferred request body sections, and raw provider request.
-   - Highlights where `system`, `messages`, and `tools` live in the provider
-     payload.
-4. `Response`
-   - Provider response when captured.
+   - Tool registry view for the `ToolSchema[]` sent with this LLM call.
+   - Selecting a message or tool shows its raw JSON.
+   - Does not duplicate raw API request/response JSON from the API Call tab.
+2. `API Call`
+   - API URL with the concrete base URL redacted, inferred request body
+     sections, and one captured API request JSON block.
+   - Shows captured API request and captured API response side by side.
+   - Does not show `request.body` again as a separate JSON block because it is
+     already part of the captured request.
+   - Does not show the kernel `call_llm` effect when HTTP trace is present; the
+     kernel messages and tools live under `Message Assembler`.
+   - If HTTP trace is missing, shows the kernel `call_llm` effect only as an
+     explicit fallback and labels it as pre-adapter input, not API request body.
    - Parsed kernel response or kernel-level error.
 
 ## Mental Model

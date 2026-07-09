@@ -140,6 +140,49 @@ describe('host loop', () => {
     expect(seenEvents).toContainEqual({ event: 'llm_response', model: 'claude-sonnet-4-6' })
   })
 
+  it('records and broadcasts LLM provider trace from the adapter', async () => {
+    const trace = {
+      provider: 'openai' as const,
+      model: 'gpt-5.5',
+      request: {
+        url: 'https://api.example.test/v1/chat/completions',
+        headers: { authorization: 'Bearer test-redacted-api-key' },
+        body: { model: 'gpt-5.5', messages: [{ role: 'user', content: 'hi' }] },
+      },
+      response: { status: 200, body: { choices: [] } },
+    }
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'trace captured' }],
+        },
+        usage: { inputTokens: 7, outputTokens: 4 },
+        trace,
+      },
+    ])
+    const seen: Array<{ hasTrace: boolean; model?: string }> = []
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: {
+        ...silentBroadcast(),
+        onEvent(_sessionId, _seq, event, _effects, _state, llmTrace, model) {
+          if (event.kind === 'llm_response') seen.push({ hasTrace: Boolean(llmTrace), model })
+        },
+      },
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const response = parsed.events.find((entry) => entry.event.kind === 'llm_response')
+    expect(response?.llmTrace).toEqual(trace)
+    expect(response?.model).toBe('gpt-5.5')
+    expect(seen).toEqual([{ hasTrace: true, model: 'gpt-5.5' }])
+  })
+
   it('drives a tool call round-trip', async () => {
     const llm = scriptedLlm([
       {
