@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import { fold } from '@agent-kernel/kernel'
 import {
   createArtifactStore,
+  createModelJudgeTraceArtifact,
   createSessionProfile,
   summarizeEvalScores,
   type ArtifactRef,
@@ -95,6 +96,64 @@ export type ProfileSessionInput = {
   pricingPath?: string
 }
 
+export type JudgeScoreInput = {
+  rootDir: string
+  promptPath: string
+  responsePath: string
+  judgeModel: string
+  scorer?: string
+  instanceId?: string
+  threshold?: number
+  inputRef?: string
+  workspaceRoot?: string
+}
+
+export async function judgeScore(
+  input: JudgeScoreInput,
+): Promise<{ summary: EvalScoreSummary; scoresPath: string; judgeTrace: ArtifactRef }> {
+  await mkdir(input.rootDir, { recursive: true })
+  const store = createArtifactStore(input.rootDir, {
+    ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
+  })
+  const prompt = await readFile(input.promptPath, 'utf8')
+  const responseRaw = await readFile(input.responsePath, 'utf8')
+  const response = parseJudgeResponse(responseRaw)
+  const score = extractJudgeScore(response)
+  const label = extractJudgeLabel(response)
+  const explanation = extractJudgeExplanation(response)
+  const scorer = input.scorer ?? 'model_judge.score'
+  const trace = createModelJudgeTraceArtifact({
+    scorer,
+    judgeModel: input.judgeModel,
+    ...(input.inputRef ? { inputRef: input.inputRef } : {}),
+    prompt,
+    response,
+    score,
+    threshold: input.threshold,
+    ...(label ? { label } : {}),
+    ...(explanation ? { explanation } : {}),
+    metadata: {
+      promptFile: basename(input.promptPath),
+      responseFile: basename(input.responsePath),
+    },
+  })
+  const judgeTrace = await store.writeJson('eval_judge', `judge/${scorer.replace(/[^a-zA-Z0-9_.-]/g, '_')}.judge-trace.json`, trace)
+  const summary = summarizeEvalScores([
+    {
+      scorer,
+      passed: trace.parsed.passed,
+      ...(!trace.parsed.passed ? { label: failureLabelForJudge(trace.parsed.label) } : {}),
+      score: trace.parsed.score,
+      metrics: { threshold: Number(trace.metadata.threshold), judgeScore: trace.parsed.score },
+      artifactRefs: [judgeTrace],
+      ...(trace.parsed.explanation ? { explanation: trace.parsed.explanation } : {}),
+    },
+  ], input.instanceId)
+  const scoresPath = join(input.rootDir, 'scores.json')
+  await writeFile(scoresPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
+  return { summary, scoresPath, judgeTrace }
+}
+
 export async function profileSession(
   input: ProfileSessionInput,
 ): Promise<{ profile: SessionProfile; profilePath: string }> {
@@ -111,6 +170,45 @@ export async function profileSession(
   const profilePath = join(input.rootDir, 'profile.json')
   await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`, 'utf8')
   return { profile, profilePath }
+}
+
+function parseJudgeResponse(raw: string): unknown {
+  const trimmed = raw.trim()
+  if (!trimmed) throw new Error('judge response is empty')
+  try {
+    return JSON.parse(trimmed) as unknown
+  } catch {
+    return { text: raw }
+  }
+}
+
+function extractJudgeScore(response: unknown): number {
+  if (!response || typeof response !== 'object') throw new Error('judge response must contain a numeric score')
+  const record = response as Record<string, unknown>
+  const candidate = record.score ?? record.rating ?? record.value
+  if (typeof candidate !== 'number' || !Number.isFinite(candidate)) throw new Error('judge response must contain a numeric score')
+  return candidate
+}
+
+function extractJudgeLabel(response: unknown): EvalScoreResult['label'] | undefined {
+  if (!response || typeof response !== 'object') return undefined
+  const label = (response as Record<string, unknown>).label
+  return isEvalFailureLabel(label) ? label : undefined
+}
+
+function extractJudgeExplanation(response: unknown): string | undefined {
+  if (!response || typeof response !== 'object') return undefined
+  const record = response as Record<string, unknown>
+  const explanation = record.explanation ?? record.reason
+  return typeof explanation === 'string' ? explanation : undefined
+}
+
+function isEvalFailureLabel(value: unknown): value is EvalScoreResult['label'] {
+  return value === 'resolved' || value === 'agent_timeout' || value === 'agent_error' || value === 'empty_patch' || value === 'patch_apply_failed' || value === 'test_failed' || value === 'harness_error' || value === 'infrastructure_error'
+}
+
+function failureLabelForJudge(label: EvalScoreResult['label'] | undefined): NonNullable<EvalScoreResult['label']> {
+  return label && label !== 'resolved' ? label : 'agent_error'
 }
 
 export type CompareEvalRunsInput = {

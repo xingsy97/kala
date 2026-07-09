@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from '../store/log.js'
 import { parseSweBenchCli } from './swebench-cli.js'
+import { buildArtifactManifest } from '../artifact-manifest.js'
 import {
   buildSweBenchGradeCommand,
   exportSessionForSweBench,
@@ -106,8 +107,46 @@ describe('SWE-bench eval runner', () => {
 
     expect(result.prediction.instance_id).toBe('sympy__sympy-20590')
     expect(result.traceArtifact.uri).toBe('traces/sympy__sympy-20590.openinference.json')
+    expect(result.trial.sessionId).toBe('s1')
+    expect(result.trial.artifacts.map((artifact) => artifact.uri)).toEqual([
+      'traces/sympy__sympy-20590.openinference.json',
+      'artifacts/sympy__sympy-20590/final.diff',
+    ])
     const trace = JSON.parse(await readFile(join(result.layout.rootDir, result.traceArtifact.uri), 'utf8'))
     expect(trace.spans.map((span: { kind: string }) => span.kind)).toEqual(['AGENT', 'LLM'])
+    const trial = JSON.parse(await readFile(join(result.layout.trialsDir, 'sympy__sympy-20590.json'), 'utf8'))
+    expect(trial.sessionId).toBe('s1')
+    expect(trial.metrics.patchBytes).toBe(Buffer.byteLength('diff --git a/x b/x\n', 'utf8'))
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.trialCount).toBe(1)
+    expect(summary.completed).toBe(1)
+  })
+
+  it('labels empty exported session patches while still linking trace artifacts', async () => {
+    const sessionLog = join(dir, 'empty-session.jsonl')
+    await writeHeader({ path: sessionLog, sessionId: 's-empty', config, initialState })
+    await appendEventEntry({
+      path: sessionLog,
+      seq: 1,
+      event: { kind: 'user_message', text: 'fix it' },
+      effects: [],
+    })
+
+    const result = await exportSessionForSweBench({
+      rootDir: dir,
+      runId: 'run-empty-export',
+      dataset: 'local',
+      model: 'gpt-test',
+      instanceId: 'local__empty-1',
+      sessionLogPath: sessionLog,
+      modelPatch: '',
+    })
+
+    expect(result.trial.status).toBe('failed')
+    expect(result.trial.failureLabel).toBe('empty_patch')
+    expect(result.trial.artifacts.map((artifact) => artifact.kind)).toEqual(['trace', 'diff'])
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.failureCounts.empty_patch).toBe(1)
   })
 
   it('builds official harness command without executing by default', () => {
@@ -362,9 +401,32 @@ describe('SWE-bench eval runner', () => {
     const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
     expect(summary.trialCount).toBe(1)
     expect(summary.failureCounts).toEqual({})
+    const progress = JSON.parse(await readFile(result.layout.progressPath, 'utf8'))
+    expect(progress).toMatchObject({
+      schemaVersion: 1,
+      runId: 'run-agent',
+      status: 'completed',
+      selectedCount: 1,
+      queuedCount: 0,
+      runningCount: 0,
+      skippedCount: 0,
+      completedCount: 1,
+      failedCount: 0,
+      timedOutCount: 0,
+      maxWorkers: 1,
+    })
+    expect(progress.instances[0]).toMatchObject({
+      instanceId: 'local__repo-1',
+      status: 'completed',
+    })
+    expect(progress.instances[0].artifactRefs.map((artifact: { uri: string }) => artifact.uri)).toContain('artifacts/local__repo-1/final.diff')
+    expect(typeof progress.instances[0].durationMs).toBe('number')
     const trial = JSON.parse(await readFile(join(result.layout.trialsDir, 'local__repo-1.json'), 'utf8'))
     expect(trial.artifacts.map((artifact: { uri: string }) => artifact.uri)).toContain('artifacts/local__repo-1/final.diff')
     expect(await readFile(result.layout.predictionsPath, 'utf8')).toContain('local__repo-1')
+
+    const manifest = await buildArtifactManifest({ rootDir: result.layout.rootDir })
+    expect(manifest.manifest.entries.find((entry) => entry.path === 'progress.json')?.kind).toBe('eval_progress')
   })
 
   it('resumes agent inference by skipping completed instances', async () => {
@@ -407,8 +469,62 @@ describe('SWE-bench eval runner', () => {
 
     expect(second.predictions).toEqual(first.predictions)
     expect(second.trials[0]?.failureLabel).toBeUndefined()
+    const progress = JSON.parse(await readFile(second.layout.progressPath, 'utf8'))
+    expect(progress).toMatchObject({
+      selectedCount: 1,
+      skippedCount: 1,
+      completedCount: 0,
+      failedCount: 0,
+      timedOutCount: 0,
+      status: 'completed',
+    })
+    expect(progress.instances[0]).toMatchObject({ instanceId: 'local__resume-1', status: 'skipped' })
     const predictionLines = (await readFile(second.layout.predictionsPath, 'utf8')).trim().split('\n')
     expect(predictionLines).toHaveLength(1)
+  })
+
+  it('records timeout failures in agent inference progress', async () => {
+    const sourceRepo = join(dir, 'source-timeout-repo')
+    mkdirSync(sourceRepo)
+    await writeFile(join(sourceRepo, 'bug.txt'), 'before\n', 'utf8')
+    runGit(sourceRepo, 'init')
+    runGit(sourceRepo, 'config', 'user.email', 'test@example.com')
+    runGit(sourceRepo, 'config', 'user.name', 'Test User')
+    runGit(sourceRepo, 'add', 'bug.txt')
+    runGit(sourceRepo, 'commit', '-m', 'init')
+    const baseCommit = runGit(sourceRepo, 'rev-parse', 'HEAD').trim()
+    const instancesPath = join(dir, 'timeout-instances.jsonl')
+    await writeFile(instancesPath, JSON.stringify({
+      instance_id: 'local__timeout-1',
+      repo_path: sourceRepo,
+      base_commit: baseCommit,
+      problem_statement: 'change bug.txt slowly',
+    }) + '\n', 'utf8')
+
+    const result = await runSweBenchAgentPatchRun({
+      rootDir: dir,
+      runId: 'run-agent-timeout',
+      dataset: 'local',
+      model: 'agent-test',
+      instancesJsonl: instancesPath,
+      agentCommand: 'sleep 2',
+      timeoutMs: 50,
+    })
+
+    expect(result.trials[0]?.status).toBe('timed_out')
+    expect(result.trials[0]?.failureLabel).toBe('agent_timeout')
+    const progress = JSON.parse(await readFile(result.layout.progressPath, 'utf8'))
+    expect(progress).toMatchObject({
+      status: 'failed',
+      timedOutCount: 1,
+      completedCount: 0,
+      failedCount: 0,
+    })
+    expect(progress.instances[0]).toMatchObject({
+      instanceId: 'local__timeout-1',
+      status: 'timed_out',
+      failureLabel: 'agent_timeout',
+    })
   })
 
   it('ingests official-style SWE-bench instance results into trials and summary', async () => {
@@ -438,6 +554,8 @@ describe('SWE-bench eval runner', () => {
         JSON.stringify({ instance_id: 'b__repo-2', resolved: false, error: 'tests failed' }) + '\n',
       'utf8',
     )
+    mkdirSync(join(resultsDir, 'logs', 'b__repo-2'), { recursive: true })
+    await writeFile(join(resultsDir, 'logs', 'b__repo-2', 'test_output.log'), 'pytest failed\n', 'utf8')
 
     const result = await ingestSweBenchResults({ rootDir: dir, runId: 'run9', resultsDir })
 
@@ -450,6 +568,13 @@ describe('SWE-bench eval runner', () => {
     expect(summary.failureCounts.test_failed).toBe(1)
     const failedTrial = JSON.parse(await readFile(join(result.layout.trialsDir, 'b__repo-2.json'), 'utf8'))
     expect(failedTrial.failureLabel).toBe('test_failed')
+    expect(failedTrial.artifacts.map((artifact: { uri: string }) => artifact.uri)).toEqual(expect.arrayContaining([
+      'artifacts/b__repo-2/final.diff',
+      'artifacts/b__repo-2/swebench-result.json',
+      'artifacts/b__repo-2/harness/logs/b__repo-2/test_output.log',
+    ]))
+    expect(await readFile(join(result.layout.rootDir, 'artifacts/b__repo-2/swebench-result.json'), 'utf8')).toContain('tests failed')
+    expect(await readFile(join(result.layout.rootDir, 'artifacts/b__repo-2/harness/logs/b__repo-2/test_output.log'), 'utf8')).toContain('pytest failed')
   })
 
   it('ingests results.json resolved id lists and parses the CLI command', async () => {

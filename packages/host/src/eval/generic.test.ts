@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from '../store/log.js'
 import { parseEnhancementCli } from '../enhancement-cli.js'
-import { compareEvalRuns, profileSession, scoreSession } from './generic.js'
+import { compareEvalRuns, judgeScore, profileSession, scoreSession } from './generic.js'
 
 const config: AgentConfig = { tools: [] }
 const initialState: AgentState = {
@@ -162,6 +162,31 @@ describe('generic eval and profile runners', () => {
     expect(await readFile(result.comparisonPath, 'utf8')).toContain('candidate')
   })
 
+  it('writes model judge traces and score summaries', async () => {
+    const promptPath = join(dir, 'judge-prompt.txt')
+    const responsePath = join(dir, 'judge-response.json')
+    await writeFile(promptPath, 'Judge this answer. OPENAI_API_KEY=test-redacted-api-key', 'utf8')
+    await writeFile(responsePath, JSON.stringify({ score: 0.75, label: 'resolved', explanation: 'Grounded answer.' }), 'utf8')
+
+    const result = await judgeScore({
+      rootDir: join(dir, 'judge'),
+      promptPath,
+      responsePath,
+      judgeModel: 'judge-model-v1',
+      scorer: 'answer.groundedness',
+      instanceId: 'i1',
+      threshold: 0.7,
+    })
+
+    expect(result.summary.resolved).toBe(true)
+    expect(result.summary.score).toBe(1)
+    expect(result.summary.results[0]?.score).toBe(0.75)
+    expect(result.judgeTrace.kind).toBe('eval_judge')
+    const persisted = await readFile(join(dir, 'judge', result.judgeTrace.uri), 'utf8')
+    expect(persisted).toContain('judge-model-v1')
+    expect(persisted).not.toContain('test-redacted-api-key')
+  })
+
   it('parses generic eval and profile CLI commands', () => {
     expect(parseEnhancementCli([
       'enhancement',
@@ -183,6 +208,20 @@ describe('generic eval and profile runners', () => {
       '--pricing',
       'pricing.json',
     ])).toMatchObject({ kind: 'profile-session', pricingPath: 'pricing.json' })
+
+    expect(parseEnhancementCli([
+      'enhancement',
+      'eval',
+      'judge-score',
+      '--prompt',
+      'prompt.txt',
+      '--response',
+      'response.json',
+      '--judge-model',
+      'judge-v1',
+      '--threshold',
+      '0.8',
+    ])).toMatchObject({ kind: 'eval-judge-score', promptPath: 'prompt.txt', responsePath: 'response.json', judgeModel: 'judge-v1', threshold: 0.8 })
 
     expect(parseEnhancementCli([
       'enhancement',

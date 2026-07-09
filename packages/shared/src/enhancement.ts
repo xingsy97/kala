@@ -14,6 +14,7 @@ export type ArtifactKind =
   | 'tool_catalog'
   | 'trace'
   | 'eval_score'
+  | 'eval_judge'
   | 'diff'
   | 'log'
   | 'rl_token_segments'
@@ -362,6 +363,61 @@ export type EvalScoreResult = {
   explanation?: string
 }
 
+export type ModelJudgeTraceArtifact = {
+  schemaVersion: 1
+  scorer: string
+  judgeModel: string
+  inputRef?: string
+  prompt: string
+  response: unknown
+  parsed: {
+    score: number
+    passed: boolean
+    label?: EvalFailureLabel
+    explanation?: string
+  }
+  metadata: Record<string, unknown>
+}
+
+export function createModelJudgeTraceArtifact(input: {
+  scorer: string
+  judgeModel: string
+  inputRef?: string
+  prompt: string
+  response: unknown
+  score: number
+  threshold?: number
+  label?: EvalFailureLabel
+  explanation?: string
+  metadata?: Record<string, unknown>
+}): ModelJudgeTraceArtifact {
+  const threshold = boundedUnitValue(input.threshold ?? 0.5, 'judge threshold')
+  const score = boundedUnitValue(input.score, 'judge score')
+  return {
+    schemaVersion: 1,
+    scorer: input.scorer,
+    judgeModel: input.judgeModel,
+    ...(input.inputRef ? { inputRef: input.inputRef } : {}),
+    prompt: input.prompt,
+    response: input.response,
+    parsed: {
+      score,
+      passed: score >= threshold,
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.explanation ? { explanation: input.explanation } : {}),
+    },
+    metadata: {
+      threshold,
+      ...(input.metadata ?? {}),
+    },
+  }
+}
+
+function boundedUnitValue(value: number, name: string): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${name} must be a number between 0 and 1`)
+  return value
+}
+
 export type EvalScoreSummary = {
   instanceId?: string
   resolved: boolean
@@ -590,7 +646,7 @@ export type MessageAssemblyArtifact = {
   toolCount: number
   estimatedTokens: number
   parts: Array<{
-    name: 'system' | 'user' | 'assistant' | 'tool' | 'tools' | 'images' | 'thinking'
+    name: 'system' | 'user' | 'assistant' | 'tool' | 'tools' | 'images' | 'thinking' | 'memory'
     messages: number
     chars: number
     estimatedTokens: number
@@ -611,6 +667,12 @@ export function createMessageAssemblyArtifact(input: {
     messages: number
     chars: number
   }>()
+  const memoryCallIds = new Set<string>()
+  for (const message of input.messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call' && content.name === 'memory') memoryCallIds.add(content.callId)
+    }
+  }
   for (const message of input.messages) {
     const existing = buckets.get(message.role) ?? { messages: 0, chars: 0 }
     existing.messages += 1
@@ -622,6 +684,13 @@ export function createMessageAssemblyArtifact(input: {
       const bucket = buckets.get(key) ?? { messages: 0, chars: 0 }
       bucket.chars += estimateContentChars(content)
       buckets.set(key, bucket)
+    }
+    const memoryChars = estimateMemoryContributionChars(message, memoryCallIds)
+    if (memoryChars > 0) {
+      const bucket = buckets.get('memory') ?? { messages: 0, chars: 0 }
+      bucket.messages += 1
+      bucket.chars += memoryChars
+      buckets.set('memory', bucket)
     }
   }
   const toolSchemaChars = input.tools.reduce((sum, tool) => sum + tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length, 0)
@@ -646,6 +715,15 @@ export function createMessageAssemblyArtifact(input: {
     parts,
     stages: input.stages ?? [],
   }
+}
+
+function estimateMemoryContributionChars(message: Message, memoryCallIds: ReadonlySet<string>): number {
+  let chars = 0
+  for (const content of message.content) {
+    if (content.type === 'tool_call' && content.name === 'memory') chars += estimateContentChars(content)
+    if (content.type === 'tool_result' && memoryCallIds.has(content.callId)) chars += estimateContentChars(content)
+  }
+  return chars
 }
 
 function estimateMessageChars(messages: readonly Message[]): number {

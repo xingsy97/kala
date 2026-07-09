@@ -184,6 +184,14 @@ agent-kernel-host eval swebench agent-infer \
   --timeout-ms 1800000
 ```
 
+`export-session` writes the same eval-visible run artifacts as the automated
+inference paths: official `predictions.jsonl`, `experiment.json`, per-instance
+`trials/<instance_id>.json`, `summary.json`,
+`traces/<instance_id>.openinference.json`, and
+`artifacts/<instance_id>/final.diff`. The trial includes both trace and diff
+artifact refs, so the dashboard can navigate from a SWE-bench instance to the
+exported OpenInference trace and final patch without guessing paths.
+
 `grade` prints the official command by default. Add `--execute` to actually run
 the Docker harness. This avoids accidentally triggering an expensive SWE-bench
 evaluation when the operator only wants to inspect the command.
@@ -192,7 +200,12 @@ evaluation when the operator only wants to inspect the command.
 `instance_results.jsonl`, `instance_results.json`, or `results.json` shapes. It
 maps official resolved/unresolved results into existing `EvalTrial` files,
 updates `summary.json`, and keeps the raw rows in `swebench-results.json`. It
-does not re-grade patches or reinterpret repository tests.
+also writes each official per-instance result row to
+`artifacts/<instance_id>/swebench-result.json` and copies matching small harness
+text/json/log files under `artifacts/<instance_id>/harness/`. Those refs are
+attached to the trial so the dashboard can open official harness evidence from
+the same artifact store as prompts, diffs, traces, and agent logs. It does not
+re-grade patches or reinterpret repository tests.
 
 `agent-infer` is the implemented agent-driven materialization adapter. It loads
 local SWE-bench-shaped JSONL instances, clones either `repo_path`, a
@@ -209,6 +222,31 @@ the official prediction patch. The agent command receives:
 This is intentionally an adapter, not a benchmark-specific kernel mode. The
 official harness remains responsible for grading; the adapter only prepares a
 real workspace and prediction row.
+
+`agent-infer` also writes a run-level progress artifact:
+
+```text
+runs/swebench/<run_id>/progress.json
+```
+
+This file is the production control-plane view for long benchmark inference. It
+records schema version, run id, dataset, split, model, run status, start/update
+timestamps, selected/queued/running/skipped/completed/failed/timed-out counts,
+`maxWorkers`, and one compact record per instance. Instance records contain the
+instance id, scheduling status, optional failure label, duration, metrics, and
+artifact refs for prompt, logs, final diff, and workspace metadata.
+
+The progress artifact solves three operational problems without changing the
+kernel protocol:
+
+- interrupted runs can be inspected before `summary.json` is final;
+- `--skip-completed` is auditable because skipped instances remain visible;
+- dashboard/eval tooling can show live queue health and failure taxonomy from a
+  single small JSON document instead of walking every trial artifact.
+
+The artifact manifest classifies this file as `eval_progress`, so the dashboard
+can discover it like any other run artifact. It is derived state only; replay
+and official SWE-bench grading do not depend on it.
 
 ## CI and Release Validation
 
@@ -349,8 +387,9 @@ patches without failing the whole run.
 Phase 2: official harness wrapper.
 Implemented command construction and optional execution through
 `python -m swebench.harness.run_evaluation`. Result ingestion is implemented for
-official result files and updates per-trial/summary metadata after the harness
-has produced results.
+official result files, updates per-trial/summary metadata after the harness has
+produced results, and preserves official result/log evidence as trial artifact
+refs.
 
 Phase 3: SWE-bench Lite single-instance run.
 Implemented for local JSONL instances and external agent commands through
