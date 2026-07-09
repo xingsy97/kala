@@ -351,6 +351,22 @@ export class SessionStore {
     return trimmed
   }
 
+  async renameWorkspace(workspaceId: string, workspaceName: string): Promise<number> {
+    const trimmed = workspaceName.trim()
+    if (workspaceId.trim().length === 0) throw new Error('workspaceId is required')
+    if (trimmed.length === 0) throw new Error('workspace name is required')
+    const summaries = await this.listSummaries()
+    let count = 0
+    for (const summary of summaries) {
+      if (summary.workspaceId !== workspaceId) continue
+      const rec = this.records.get(summary.sessionId) ?? (await this.load(summary.sessionId))
+      await appendMetadataEntry(rec.logPath, { workspaceName: trimmed })
+      ;(rec as { workspaceName?: string }).workspaceName = trimmed
+      count += 1
+    }
+    return count
+  }
+
   async delete(sessionId: string): Promise<void> {
     const cached = this.records.get(sessionId)
     const path = cached?.logPath ?? this.findLogByPrefix(sessionId)

@@ -5,8 +5,8 @@ import type { AgentState } from '@agent-kernel/kernel'
 
 import { ContextPressureBanner } from './ContextPressureBanner.js'
 
-function stateWithLevel(level: AgentState['contextPressureLevel']): AgentState {
-  return { contextPressureLevel: level } as AgentState
+function stateWithLevel(level: AgentState['contextPressureLevel'], status: AgentState['status'] = 'idle'): AgentState {
+  return { contextPressureLevel: level, status } as AgentState
 }
 
 describe('ContextPressureBanner', () => {
@@ -74,5 +74,30 @@ describe('ContextPressureBanner', () => {
     expect(banner.getAttribute('data-level')).toBe('hard')
     expect(banner.textContent ?? '').toMatch(/auto-compacting/i)
     expect(screen.queryByTestId('context-pressure-compact-now')).toBeNull()
+  })
+
+  it('does not show context-pressure copy while the current turn is active', () => {
+    const { container } = render(
+      <ContextPressureBanner
+        state={stateWithLevel('hard', 'thinking')}
+        compactRunning={false}
+        onCompactNow={() => {}}
+      />,
+    )
+
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('can be suppressed while the client is awaiting submit acknowledgement', () => {
+    const { container } = render(
+      <ContextPressureBanner
+        state={stateWithLevel('hard')}
+        compactRunning={false}
+        suppressed
+        onCompactNow={() => {}}
+      />,
+    )
+
+    expect(container.firstChild).toBeNull()
   })
 })

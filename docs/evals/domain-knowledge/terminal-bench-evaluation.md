@@ -102,13 +102,37 @@ Default view should show task instruction, resolved/unresolved, timeout/failure 
 
 | Claim | Source |
 |---|---|
-| Terminal-Bench tests AI agents in real terminal environments and evaluates real-world end-to-end terminal tasks. | README lines 21-29: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L21-L29>. |
-| Terminal-Bench has two parts: a task dataset and an execution harness connecting a model to a terminal sandbox. | README lines 27 and 65-73: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L27-L73>. |
-| Each task includes an English instruction, a test script, and an oracle/reference solution. | README lines 55-63: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L55-L63>. |
-| Leaderboard-style execution uses `tb run`, dataset name/version, agent, model, and concurrency. | README lines 75-90: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L75-L90>. |
-| Task schema includes instruction, metadata, parser, timeouts, same-shell tests, and recording control. | `trial_handler.py` lines 29-83: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/handlers/trial_handler.py#L29-L83>. |
-| Task directory convention includes `task.yaml`, solution, `run-tests.sh`, Docker config, and `tests/`. | `trial_handler.py` lines 124-169: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/handlers/trial_handler.py#L124-L169>. |
-| The harness copies `run-tests.sh` and optional tests into the container, then runs `bash run-tests.sh`. | `harness.py` lines 544-585: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/harness.py#L544-L585>. |
-| Parser results are resolved only if every parsed unit status is `PASSED`. | `harness.py` lines 536-542 and 808-824: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/harness.py#L536-L542>, <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/harness.py#L808-L824>. |
-| Results model includes `is_resolved`, `failure_mode`, parser results, recording path, timestamps, accuracy, and pass@k. | `models.py` lines 43-139: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/models.py#L43-L139>. |
-| Supported parser names include pytest, SWE-bench, SWELancer, MLE-bench, and SWEPerf parser classes. | `parser_factory.py` lines 11-37: <https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/parsers/parser_factory.py#L11-L37>. |
+| Terminal-Bench tests AI agents in real terminal environments and evaluates real-world end-to-end terminal tasks. | README lines 21-29: [1]. |
+| Terminal-Bench has two parts: a task dataset and an execution harness connecting a model to a terminal sandbox. | README lines 27 and 65-73: [2]. |
+| Each task includes an English instruction, a test script, and an oracle/reference solution. | README lines 55-63: [3]. |
+| Leaderboard-style execution uses `tb run`, dataset name/version, agent, model, and concurrency. | README lines 75-90: [4]. |
+| Task schema includes instruction, metadata, parser, timeouts, same-shell tests, and recording control. | `trial_handler.py` lines 29-83: [5]. |
+| Task directory convention includes `task.yaml`, solution, `run-tests.sh`, Docker config, and `tests/`. | `trial_handler.py` lines 124-169: [6]. |
+| The harness copies `run-tests.sh` and optional tests into the container, then runs `bash run-tests.sh`. | `harness.py` lines 544-585: [7]. |
+| Parser results are resolved only if every parsed unit status is `PASSED`. | `harness.py` lines 536-542 and 808-824: [8], [9]. |
+| Results model includes `is_resolved`, `failure_mode`, parser results, recording path, timestamps, accuracy, and pass@k. | `models.py` lines 43-139: [10]. |
+| Supported parser names include pytest, SWE-bench, SWELancer, MLE-bench, and SWEPerf parser classes. | `parser_factory.py` lines 11-37: [11]. |
+
+## References
+
+[1] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L21-L29
+
+[2] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L27-L73
+
+[3] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L55-L63
+
+[4] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/README.md#L75-L90
+
+[5] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/handlers/trial_handler.py#L29-L83
+
+[6] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/handlers/trial_handler.py#L124-L169
+
+[7] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/harness.py#L544-L585
+
+[8] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/harness.py#L536-L542
+
+[9] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/harness.py#L808-L824
+
+[10] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/harness/models.py#L43-L139
+
+[11] https://github.com/harbor-framework/terminal-bench/blob/1a6ffa9674b571da0ed040c470cb40c4d85f9b9b/terminal_bench/parsers/parser_factory.py#L11-L37

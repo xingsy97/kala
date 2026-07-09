@@ -8,6 +8,7 @@ import {
   diffStates,
   firstDivergence,
   parseTraceQuery,
+  summarizeStateDiff,
   traceEntryMatchesQuery,
 } from './debugger-model.js'
 
@@ -64,6 +65,31 @@ describe('debugger model helpers', () => {
     expect(diff.map((d) => d.path)).toContain('messages.length')
     expect(diff.map((d) => d.path)).toContain('status')
     expect(diff.map((d) => d.path)).toContain('usage.inputTokens')
+  })
+
+  it('builds semantic state diff summaries for debugger display', () => {
+    const before: AgentState = {
+      ...state,
+      status: 'thinking',
+      cursor: 111,
+      messages: Array.from({ length: 63 }, () => ({ role: 'user' as const, content: [{ type: 'text' as const, text: 'previous' }] })),
+      usage: { inputTokens: 444534, outputTokens: 343304, cacheCreationTokens: 0, cacheReadTokens: 0 },
+    }
+    const after: AgentState = {
+      ...before,
+      status: 'done',
+      cursor: 112,
+      messages: [...before.messages, { role: 'assistant', content: [{ type: 'tool_call', callId: 'c1', name: 'exec', input: {} }, { type: 'text', text: 'ok' }] }],
+      usage: { inputTokens: 502715, outputTokens: 374410, cacheCreationTokens: 0, cacheReadTokens: 0 },
+    }
+
+    const raw = diffStates(before, after, 16)
+    const summary = summarizeStateDiff(before, after, raw)
+
+    expect(summary.find((group) => group.id === 'messages')?.items[0]?.label).toBe('+ assistant message #64')
+    expect(summary.find((group) => group.id === 'messages')?.items[0]?.value).toBe('1 tool call / 1 text block')
+    expect(summary.find((group) => group.id === 'usage')?.items.map((item) => item.value)).toContain('444,534 -> 502,715 (+58,181)')
+    expect(summary.find((group) => group.id === 'state')?.items.map((item) => item.label)).toContain('status')
   })
 
   it('parses and matches scoped trace queries', () => {

@@ -160,7 +160,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               variant="ghost"
               onClick={rejectAll}
               data-testid="approval-reject-all"
-              className="h-6 px-2 text-[11px] text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20"
+              className="h-9 px-2 text-[11px] text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20 sm:h-6"
             >
               {t('chat.approval.rejectAll')}
             </Button>
@@ -169,7 +169,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               variant="ghost"
               onClick={approveAll}
               data-testid="approval-approve-all"
-              className="h-6 px-2 text-[11px] text-emerald-800 hover:bg-emerald-200/60 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
+              className="h-9 px-2 text-[11px] text-emerald-800 hover:bg-emerald-200/60 dark:text-emerald-200 dark:hover:bg-emerald-500/20 sm:h-6"
             >
               {t('chat.approval.approveAll')}
             </Button>

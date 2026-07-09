@@ -224,24 +224,80 @@ The CLI should not print "resolved" in the `run-agent` step.
 
 | Claim | Source |
 |---|---|
-| SWE-bench evaluates language models on real GitHub software issues and asks them to generate patches from a codebase and issue. | Official README, lines 41-44: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L41-L44>. ICLR 2024 paper page: <https://openreview.net/forum?id=VTF8yNQM66>. |
-| Official setup uses Docker for reproducible evaluations. | Official README, lines 53-56: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L53-L56>. Official harness reference: <https://www.swebench.com/SWE-bench/reference/harness/>. |
-| Canonical local evaluation command uses `python -m swebench.harness.run_evaluation`, `--dataset_name`, `--predictions_path`, `--max_workers`, and `--run_id`. | Official README, lines 78-89: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L78-L89>. Evaluation guide, lines 11-19: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/docs/guides/evaluation.md#L11-L19>. |
-| Evaluations generate build/evaluation logs and final results under `evaluation_results`. | Official README, lines 91-93: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L91-L93>. Evaluation guide, lines 131-145: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/docs/guides/evaluation.md#L131-L145>. |
-| Official prediction JSONL rows contain `instance_id`, `model_name_or_path`, and `model_patch`. | Evaluation guide, lines 45-60: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/docs/guides/evaluation.md#L45-L60>. `run_instance` docstring also expects these fields, lines 84-87: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/run_evaluation.py#L84-L87>. |
-| `TestSpec` stores `instance_id`, `repo`, `version`, script lists, architecture, `FAIL_TO_PASS`, `PASS_TO_PASS`, language, and Docker specs. | `test_spec.py`, lines 27-44: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/test_spec.py#L27-L44>. |
-| `make_test_spec` reads task fields including `instance_id`, `repo`, `version`, `base_commit`, `problem_statement`, and `test_patch`; it parses `PASS_TO_PASS` and `FAIL_TO_PASS`. | `test_spec.py`, lines 187-205: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/test_spec.py#L187-L205>. |
-| `make_test_spec` passes `test_patch` into `make_eval_script_list` and returns a `TestSpec` carrying `FAIL_TO_PASS` and `PASS_TO_PASS`. | `test_spec.py`, lines 212-235: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/test_spec.py#L212-L235>. |
-| `run_instance` applies the agent `model_patch` before writing/running `eval.sh`. | `run_evaluation.py`, patch write/copy/apply lines 158-186 and eval script execution lines 198-208: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/run_evaluation.py#L158-L208>. |
-| The official harness attempts multiple patch application commands: `git apply --verbose`, `git apply --verbose --reject`, and `patch --batch --fuzz=5 -p1 -i`. | `run_evaluation.py`, lines 64-68: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/run_evaluation.py#L64-L68>. |
-| `make_eval_script_list` is described as applying the test patch and running tests; it dispatches Python, JavaScript, or common implementations. | `create_scripts.py`, lines 41-53: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/create_scripts.py#L41-L53>. |
-| Python `eval.sh` generation applies `test_patch`, runs the repository/version-specific test command plus directives, and wraps output in start/end markers. | `python.py`, lines 405-462: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/python.py#L405-L462>. |
-| Python test directives are derived from `test_patch`, with Django-specific path transformation. | `python.py`, lines 230-261: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/python.py#L230-L261>. |
-| JavaScript evaluation can adjust common commands with repository-specific test commands such as Jest/npm commands for `Automattic/wp-calypso`. | `javascript.py`, lines 13-67 and 88-105: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/javascript.py#L13-L105>. |
-| The harness parses logs between `START_TEST_OUTPUT` and `END_TEST_OUTPUT` and uses repository-specific parsers. | `grading.py`, lines 39-91: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L39-L91>. |
-| Pass/fail helper semantics treat `PASSED` and `XFAIL` as passed, and absent/failed/error statuses as failed. | `grading.py`, lines 27-35: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L27-L35>. |
-| `FAIL_TO_PASS` is resolution success and `PASS_TO_PASS` is maintenance/regression success. | `grading.py`, lines 94-121: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L94-L121>. |
-| Resolution status is `FULL` only when fail-to-pass ratio and pass-to-pass ratio are both 1; final boolean `resolved` is true only for `FULL`. | `grading.py`, lines 194-232 and 276-290: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L194-L232>, <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L276-L290>. |
-| If the model patch is missing, or logs cannot be parsed/found, the report does not mark the task as resolved. | `grading.py`, lines 255-274: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L255-L274>. |
-| SWE-bench evaluation has substantial local resource requirements. | Official README, lines 95-102: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L95-L102>. |
-| SWE-bench was accepted as an ICLR 2024 oral presentation. | Official README, lines 140-149 for citation metadata: <https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L140-L149>; OpenReview page: <https://openreview.net/forum?id=VTF8yNQM66>. |
+| SWE-bench evaluates language models on real GitHub software issues and asks them to generate patches from a codebase and issue. | Official README, lines 41-44: [1]. ICLR 2024 paper page: [2]. |
+| Official setup uses Docker for reproducible evaluations. | Official README, lines 53-56: [3]. Official harness reference: [4]. |
+| Canonical local evaluation command uses `python -m swebench.harness.run_evaluation`, `--dataset_name`, `--predictions_path`, `--max_workers`, and `--run_id`. | Official README, lines 78-89: [5]. Evaluation guide, lines 11-19: [6]. |
+| Evaluations generate build/evaluation logs and final results under `evaluation_results`. | Official README, lines 91-93: [7]. Evaluation guide, lines 131-145: [8]. |
+| Official prediction JSONL rows contain `instance_id`, `model_name_or_path`, and `model_patch`. | Evaluation guide, lines 45-60: [9]. `run_instance` docstring also expects these fields, lines 84-87: [10]. |
+| `TestSpec` stores `instance_id`, `repo`, `version`, script lists, architecture, `FAIL_TO_PASS`, `PASS_TO_PASS`, language, and Docker specs. | `test_spec.py`, lines 27-44: [11]. |
+| `make_test_spec` reads task fields including `instance_id`, `repo`, `version`, `base_commit`, `problem_statement`, and `test_patch`; it parses `PASS_TO_PASS` and `FAIL_TO_PASS`. | `test_spec.py`, lines 187-205: [12]. |
+| `make_test_spec` passes `test_patch` into `make_eval_script_list` and returns a `TestSpec` carrying `FAIL_TO_PASS` and `PASS_TO_PASS`. | `test_spec.py`, lines 212-235: [13]. |
+| `run_instance` applies the agent `model_patch` before writing/running `eval.sh`. | `run_evaluation.py`, patch write/copy/apply lines 158-186 and eval script execution lines 198-208: [14]. |
+| The official harness attempts multiple patch application commands: `git apply --verbose`, `git apply --verbose --reject`, and `patch --batch --fuzz=5 -p1 -i`. | `run_evaluation.py`, lines 64-68: [15]. |
+| `make_eval_script_list` is described as applying the test patch and running tests; it dispatches Python, JavaScript, or common implementations. | `create_scripts.py`, lines 41-53: [16]. |
+| Python `eval.sh` generation applies `test_patch`, runs the repository/version-specific test command plus directives, and wraps output in start/end markers. | `python.py`, lines 405-462: [17]. |
+| Python test directives are derived from `test_patch`, with Django-specific path transformation. | `python.py`, lines 230-261: [18]. |
+| JavaScript evaluation can adjust common commands with repository-specific test commands such as Jest/npm commands for `Automattic/wp-calypso`. | `javascript.py`, lines 13-67 and 88-105: [19]. |
+| The harness parses logs between `START_TEST_OUTPUT` and `END_TEST_OUTPUT` and uses repository-specific parsers. | `grading.py`, lines 39-91: [20]. |
+| Pass/fail helper semantics treat `PASSED` and `XFAIL` as passed, and absent/failed/error statuses as failed. | `grading.py`, lines 27-35: [21]. |
+| `FAIL_TO_PASS` is resolution success and `PASS_TO_PASS` is maintenance/regression success. | `grading.py`, lines 94-121: [22]. |
+| Resolution status is `FULL` only when fail-to-pass ratio and pass-to-pass ratio are both 1; final boolean `resolved` is true only for `FULL`. | `grading.py`, lines 194-232 and 276-290: [23], [24]. |
+| If the model patch is missing, or logs cannot be parsed/found, the report does not mark the task as resolved. | `grading.py`, lines 255-274: [25]. |
+| SWE-bench evaluation has substantial local resource requirements. | Official README, lines 95-102: [26]. |
+| SWE-bench was accepted as an ICLR 2024 oral presentation. | Official README, lines 140-149 for citation metadata: [27]; OpenReview page: [2]. |
+
+## References
+
+[1] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L41-L44
+
+[2] https://openreview.net/forum?id=VTF8yNQM66
+
+[3] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L53-L56
+
+[4] https://www.swebench.com/SWE-bench/reference/harness/
+
+[5] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L78-L89
+
+[6] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/docs/guides/evaluation.md#L11-L19
+
+[7] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L91-L93
+
+[8] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/docs/guides/evaluation.md#L131-L145
+
+[9] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/docs/guides/evaluation.md#L45-L60
+
+[10] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/run_evaluation.py#L84-L87
+
+[11] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/test_spec.py#L27-L44
+
+[12] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/test_spec.py#L187-L205
+
+[13] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/test_spec.py#L212-L235
+
+[14] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/run_evaluation.py#L158-L208
+
+[15] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/run_evaluation.py#L64-L68
+
+[16] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/create_scripts.py#L41-L53
+
+[17] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/python.py#L405-L462
+
+[18] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/python.py#L230-L261
+
+[19] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/test_spec/javascript.py#L13-L105
+
+[20] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L39-L91
+
+[21] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L27-L35
+
+[22] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L94-L121
+
+[23] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L194-L232
+
+[24] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L276-L290
+
+[25] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/swebench/harness/grading.py#L255-L274
+
+[26] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L95-L102
+
+[27] https://github.com/princeton-nlp/SWE-bench/blob/f7bbbb2ccdf479001d6467c9e34af59e44a840f9/README.md#L140-L149
