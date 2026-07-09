@@ -14,7 +14,7 @@
  */
 
 import { createReadStream } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
 import { extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
@@ -49,6 +49,17 @@ import {
   runSweBenchGrade,
   sweBenchRunLayout,
 } from '../eval/swebench.js'
+import {
+  importTerminalBenchResults,
+  resolveTerminalBenchTasks,
+  runTerminalBenchRun,
+  terminalBenchRunLayout,
+} from '../eval/terminal-bench.js'
+import { mineBadCases } from '../eval/badcase-mining.js'
+import { readSweBenchRunRegistry } from '../eval/run-registry.js'
+import { exportForRL, exportForSFT } from '../eval/badcase-export.js'
+import { exportRollouts } from '../eval/rollout-export.js'
+import { annotateBadCase, readBadCaseAnnotations, BAD_CASE_LABELS, type BadCaseLabel } from '../eval/badcase-annotations.js'
 import {
   InstancesSourceError,
   resolveSweBenchInstances,
@@ -206,6 +217,7 @@ type EnhancementActionRequest = {
   olderThanDays?: number | string
   maxTotalBytes?: number | string
   kinds?: readonly string[] | string
+  kind?: string
   dryRun?: boolean
   endpoint?: string
   headers?: Record<string, string> | string
@@ -247,6 +259,14 @@ type EnhancementActionRequest = {
   pricingContent?: string
   agentCommand?: string
   skipCompleted?: boolean
+  tasksJsonl?: string
+  tasksContent?: string
+  taskIds?: readonly string[] | string
+  label?: string
+  note?: string
+  format?: string
+  target?: string
+  includeStatuses?: readonly string[] | string
 }
 
 export function attachJsonRoutes(
@@ -912,6 +932,234 @@ async function runEnhancementAction(
       if (err instanceof ResultsSourceError) throw new HttpRouteError(err.httpStatus, err.message)
       throw err
     }
+  }
+  if (action === 'terminal-bench-resolve-tasks') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to resolve tasks')
+    const inline = cleanString(body.tasksContent)
+    const path = cleanString(body.tasksJsonl)
+    if (!inline && !path) throw new HttpRouteError(400, 'tasksContent or tasksJsonl is required')
+    const taskIds = listInput(body.taskIds)
+    const limit = positiveInteger(body.limit, 'limit')
+    const tasks = await resolveTerminalBenchTasks({
+      ...(inline ? { inlineContent: inline } : {}),
+      ...(path ? { tasksJsonlPath: path } : {}),
+      ...(taskIds ? { taskIds } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    })
+    const layout = terminalBenchRunLayout(rootDir, runId)
+    await mkdir(layout.rootDir, { recursive: true })
+    await writeFile(layout.tasksJsonl, tasks.map((t) => JSON.stringify(t)).join('\n') + (tasks.length ? '\n' : ''), 'utf8')
+    // Response intentionally omits filesystem paths (see docs/principles.md A1).
+    return { action, runId, taskCount: tasks.length }
+  }
+  if (action === 'terminal-bench-run-agent') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run terminal-bench')
+    const layout = terminalBenchRunLayout(rootDir, runId)
+    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
+    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+    const started = Date.now()
+    const result = await runTerminalBenchRun({
+      rootDir,
+      runId,
+      agentCommand: cleanString(body.agentCommand) ?? 'true',
+      tasksJsonl: cleanString(body.tasksJsonl) ?? layout.tasksJsonl,
+      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
+      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
+      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    })
+    return {
+      action,
+      runId,
+      total: result.summary.total,
+      resolved: result.summary.resolved,
+      unresolved: result.summary.unresolved,
+      errored: result.summary.errored,
+      accuracy: result.summary.accuracy,
+      durationMs: Date.now() - started,
+    }
+  }
+  if (action === 'terminal-bench-read-progress') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const layout = terminalBenchRunLayout(rootDir, runId)
+    let raw: string
+    try {
+      raw = await readFile(layout.progressPath, 'utf8')
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code
+      if (code === 'ENOENT') return { action, runId, status: 'not_started', total: 0, completed: 0 }
+      throw err
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      action,
+      runId,
+      status: typeof parsed.status === 'string' ? parsed.status : 'running',
+      total: typeof parsed.total === 'number' ? parsed.total : 0,
+      completed: typeof parsed.completed === 'number' ? parsed.completed : 0,
+      resolved: typeof parsed.resolved === 'number' ? parsed.resolved : 0,
+      unresolved: typeof parsed.unresolved === 'number' ? parsed.unresolved : 0,
+      errored: typeof parsed.errored === 'number' ? parsed.errored : 0,
+      ...(typeof parsed.currentTask === 'string' ? { currentTask: parsed.currentTask } : {}),
+      lastUpdatedAt: typeof parsed.lastUpdatedAt === 'string' ? parsed.lastUpdatedAt : null,
+    }
+  }
+  if (action === 'terminal-bench-import-results') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const summary = await importTerminalBenchResults({ rootDir, runId })
+    return {
+      action,
+      runId,
+      total: summary.total,
+      resolved: summary.resolved,
+      unresolved: summary.unresolved,
+      errored: summary.errored,
+      accuracy: summary.accuracy,
+    }
+  }
+  if (action === 'badcase-list') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const [{ cases, counts }, annotations] = await Promise.all([
+      mineBadCases({ rootDir, runId }),
+      readBadCaseAnnotations(rootDir, runId),
+    ])
+    // Response intentionally omits filesystem paths (see docs/principles.md A1).
+    return {
+      action,
+      runId,
+      counts,
+      cases: cases.map((c) => ({
+        instanceId: c.instanceId,
+        failureCategory: c.failureCategory,
+        traceHead: c.traceHead,
+        traceTail: c.traceTail,
+        toolCallErrors: c.toolCallErrors,
+        ...(c.verifierReason ? { verifierReason: c.verifierReason } : {}),
+        ...(c.minimalRepro ? { minimalRepro: c.minimalRepro } : {}),
+        ...(annotations.get(c.instanceId) ? {
+          annotation: {
+            label: annotations.get(c.instanceId)!.label,
+            ...(annotations.get(c.instanceId)!.note ? { note: annotations.get(c.instanceId)!.note } : {}),
+            updatedAt: annotations.get(c.instanceId)!.updatedAt,
+          },
+        } : {}),
+      })),
+    }
+  }
+  if (action === 'badcase-annotate') {
+    const runId = requiredString(body.runId, 'runId')
+    const instanceId = requiredString(body.instanceId, 'instanceId')
+    const rawLabel = requiredString(body.label, 'label')
+    if (!BAD_CASE_LABELS.includes(rawLabel as BadCaseLabel)) {
+      throw new HttpRouteError(400, `unknown label: ${rawLabel}`)
+    }
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const annotation = await annotateBadCase({
+      rootDir,
+      runId,
+      instanceId,
+      label: rawLabel as BadCaseLabel,
+      ...(cleanString(body.note) ? { note: cleanString(body.note) } : {}),
+    })
+    return { action, runId, instanceId, label: annotation.label, updatedAt: annotation.updatedAt }
+  }
+  if (action === 'badcase-export') {
+    const runId = requiredString(body.runId, 'runId')
+    const rawFormat = requiredString(body.format, 'format')
+    if (rawFormat !== 'sft' && rawFormat !== 'rl') {
+      throw new HttpRouteError(400, `unsupported format: ${rawFormat}`)
+    }
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const wanted = listInput(body.instanceIds)
+    const { cases } = await mineBadCases({ rootDir, runId })
+    const selected = wanted && wanted.length > 0
+      ? cases.filter((c) => wanted.includes(c.instanceId))
+      : cases
+    const content = rawFormat === 'sft' ? exportForSFT(selected) : exportForRL(selected)
+    // Content string is returned inline; the browser wraps it in a Blob and
+    // downloads. No absolute path leaks into the response envelope.
+    return { action, runId, format: rawFormat, count: selected.length, content }
+  }
+  if (action === 'rollout-export') {
+    const runId = requiredString(body.runId, 'runId')
+    const rawTarget = requiredString(body.target, 'target')
+    if (rawTarget !== 'verl' && rawTarget !== 'slime') {
+      throw new HttpRouteError(400, `unsupported target: ${rawTarget}`)
+    }
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const includeStatuses = listInput(body.includeStatuses)
+    const { content, rolloutCount } = await exportRollouts({
+      rootDir,
+      runId,
+      target: rawTarget,
+      ...(includeStatuses ? { includeStatuses } : {}),
+    })
+    // No paths in the response — the browser wraps `content` in a Blob.
+    return { action, target: rawTarget, rolloutCount, content }
+  }
+  if (action === 'run-registry-list') {
+    const kindFilter = cleanString(body.kind)
+    const registry = await readSweBenchRunRegistry(rootDir)
+    const entries = registry.entries.filter((entry) => {
+      if (!kindFilter) return true
+      const entryKind = entry.kind ?? 'swebench'
+      return entryKind === kindFilter
+    })
+    const runs = await Promise.all(entries.map(async (entry) => {
+      // Best-effort enrich: read summary.json for resolved/total, or progress.json
+      // for status. Paths intentionally NOT surfaced in the response (principle A1).
+      let status: 'running' | 'complete' | 'failed' | 'pending' = 'pending'
+      let totalInstances: number | undefined
+      let resolved: number | undefined
+      try {
+        const summaryText = await readFile(join(entry.runDir, 'summary.json'), 'utf8')
+        const summary = JSON.parse(summaryText) as { total?: number; resolved?: number }
+        if (typeof summary.total === 'number') totalInstances = summary.total
+        if (typeof summary.resolved === 'number') resolved = summary.resolved
+        status = 'complete'
+      } catch {
+        try {
+          const progressText = await readFile(join(entry.runDir, 'progress.json'), 'utf8')
+          const progress = JSON.parse(progressText) as { status?: string; total?: number }
+          if (progress.status === 'error' || progress.status === 'failed') status = 'failed'
+          else if (progress.status === 'complete' || progress.status === 'done') status = 'complete'
+          else status = 'running'
+          if (typeof progress.total === 'number') totalInstances = progress.total
+        } catch {
+          // Neither summary nor progress present — leave as pending.
+        }
+      }
+      const kind = entry.kind ?? 'swebench'
+      return {
+        runId: entry.runId,
+        kind,
+        label: entry.runId,
+        dataset: entry.dataset,
+        ...(entry.split ? { split: entry.split } : {}),
+        model: entry.model,
+        selectedCount: entry.selectedCount,
+        status,
+        createdAt: entry.registeredAt,
+        updatedAt: entry.updatedAt,
+        ...(totalInstances !== undefined ? { totalInstances } : {}),
+        ...(resolved !== undefined ? { resolved } : {}),
+      }
+    }))
+    runs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+    return { action, runs }
   }
   if (action === 'artifacts-manifest') {
     const maxHashBytes = positiveInteger(body.maxHashBytes, 'maxHashBytes')

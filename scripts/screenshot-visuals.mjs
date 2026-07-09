@@ -108,7 +108,7 @@ async function main() {
   // Settings dialog (opens fine without any session; loads /settings endpoint)
   await toggleLight()
   await sleep(200)
-  await page.click('[data-testid="settings-button"]')
+  await page.click('[data-testid="app-shell-nav-settings-icon"]')
   await page.waitForSelector('[data-testid="settings-dialog"]')
   await page.waitForSelector('[data-testid="settings-tab-runtime"]')
   await sleep(300)

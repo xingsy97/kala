@@ -1,12 +1,15 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+export type BenchmarkRunKind = 'swebench' | 'terminal-bench'
+
 export type SweBenchRunRegistryEntry = {
   runId: string
+  kind?: BenchmarkRunKind
   dataset: string
   split?: string
   model: string
-  planPath: string
+  planPath?: string
   runDir: string
   selectedCount: number
   maxWorkers: number
@@ -24,10 +27,11 @@ export type SweBenchRunRegistry = {
 export type RegisterSweBenchRunInput = {
   rootDir: string
   runId: string
+  kind?: BenchmarkRunKind
   dataset: string
   split?: string
   model: string
-  planPath: string
+  planPath?: string
   runDir: string
   selectedCount: number
   maxWorkers: number
@@ -63,10 +67,11 @@ export async function registerSweBenchRun(
   const priorEntry = existing.entries.find((entry) => entry.runId === input.runId)
   const entry: SweBenchRunRegistryEntry = {
     runId: input.runId,
+    ...(input.kind ? { kind: input.kind } : {}),
     dataset: input.dataset,
     ...(input.split ? { split: input.split } : {}),
     model: input.model,
-    planPath: input.planPath,
+    ...(input.planPath ? { planPath: input.planPath } : {}),
     runDir: input.runDir,
     selectedCount: input.selectedCount,
     maxWorkers: input.maxWorkers,
