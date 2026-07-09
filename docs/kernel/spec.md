@@ -141,8 +141,6 @@ type UsageTotal = {
 
 type ApprovalMode = 'auto' | 'ask' | 'deny' | 'allow_all'
 
-type ContextPressureLevel = 'none' | 'soft' | 'hard'
-
 type AgentState = {
   readonly sessionId: string
   readonly messages: readonly Message[]
@@ -151,8 +149,6 @@ type AgentState = {
   readonly usage: UsageTotal
   readonly cursor: number               // event counter; increments by exactly 1 per step()
   readonly approvalMode: ApprovalMode   // per-session gate for tools with requiresApproval
-  readonly contextPressureLevel: ContextPressureLevel  // derived from usage vs config thresholds
-  readonly memory: readonly MemoryEntry[]  // session-scope entries lifted by memory operation=write/delete
   readonly cwd?: string                 // session working directory (absolute); mutated by cwd_changed
   readonly error?: string
 }
@@ -168,7 +164,7 @@ type AgentState = {
 
 Approval mode is reducer-owned state, not host state; it is set by `approval_mode_changed` events and persisted in the JSONL log.
 
-**Context pressure**: `contextPressureLevel` is derived from `usage.inputTokens + usage.outputTokens` versus `config.contextLimit * config.softThreshold` (0.75 default) and `config.contextLimit * config.hardThreshold` (0.92 default). The reducer recomputes it after every `llm_response` with usage. Host consumes it to decide when to prompt the user to compact.
+Context pressure is not reducer state. The host computes `ContextSnapshot` values from model-visible messages, tool schemas, reserve tokens, and context-window settings.
 
 ### 1.5 Events (kernel input)
 
@@ -192,21 +188,12 @@ type UserRejectEvent    = { kind: 'user_reject';    callId: string; reason?: str
 type ToolResultEvent    = { kind: 'tool_result';    callId: string; ok: boolean; content: string }
 type CancelEvent        = { kind: 'cancel' }
 type ClearEvent         = { kind: 'clear' }
-type CompactReplacedEvent = {
-  kind: 'compact_replaced'
-  trigger?: 'manual' | 'auto' | 'preflight'
-  preserveFrom: number
-  request?: {
-    model?: string
-    systemPrompt: string
-    messages: readonly Message[]
-    tools: readonly ToolSchema[]
-  }
-  responseUsage?: UsageDelta
-  summary: string
-  replacedCount: number
-  tokensBefore: number
-  tokensAfter: number
+type MessagesReplacedEvent = {
+  kind: 'messages_replaced'
+  reason: 'compaction' | 'manual_rewrite' | 'recovery'
+  replaceRange: { start: number; end: number }
+  replacementMessages: readonly Message[]
+  artifactRef?: EventArtifactRef
 }
 type ApprovalModeChangedEvent = { kind: 'approval_mode_changed'; mode: ApprovalMode }
 type CwdChangedEvent          = { kind: 'cwd_changed'; cwd: string }
@@ -220,7 +207,7 @@ type AgentEvent =
   | ToolResultEvent
   | CancelEvent
   | ClearEvent
-  | CompactReplacedEvent
+  | MessagesReplacedEvent
   | ApprovalModeChangedEvent
   | CwdChangedEvent
 ```
@@ -350,7 +337,7 @@ Any pair not listed below is a **no-op**.
 | `user_reject` | `awaiting_approval` | Append synthetic `tool_result` (ok=false), remove from pending; if all settled → `thinking` + `call_llm`, else stay |
 | `tool_result` | `executing_tools`, `awaiting_approval` | Append tool_result, remove from pending; if all settled → `thinking` + `call_llm`, else stay. |
 | `cancel` | any except `done`/`error` | → `done`, drop pendingCalls, emit `finish` |
-| `compact_replaced` | `idle`, `thinking`, `done`, `error` | Replace pre-summary `messages` prefix with a single assistant summary block; usage updated from `tokensAfter`; no effects |
+| `messages_replaced` | `idle`, `thinking`, `executing_tools`, `done`, `error` | Replace an explicit message range with supplied replacement messages; no effects |
 | `approval_mode_changed` | any | Set `approvalMode = event.mode`; no effects |
 | `cwd_changed` | `idle`, `done` | Set `cwd = event.cwd`; no effects |
 
@@ -498,18 +485,19 @@ After removing a settled call, examine remaining `pendingCalls`:
 **Effects**
 - `[{ kind: 'finish' }]`
 
-### 4.8 `compact_replaced`
+### 4.8 `messages_replaced`
 
 **Preconditions**
-- `state.status ∈ { 'idle', 'thinking', 'done', 'error' }`. Compaction is a no-op while calls are awaiting approval or executing, because changing message history around unresolved tool calls can orphan pending calls.
-- Host is responsible for choosing a safe moment and a safe `preserveFrom` pivot.
+- `replaceRange.start` and `replaceRange.end` are valid message indexes.
+- `replaceRange.start <= replaceRange.end`.
+- The replacement must not orphan pending tool calls. If the current state has pending calls, the replaced range must not remove the assistant `tool_call` message that introduced those calls while leaving the pending calls active.
 
 **Transition**
-- Preserve the leading system prompt when present.
-- Keep `messages.slice(event.preserveFrom)` verbatim. Host must choose a safe pivot, normally a recent `user` message, so no orphan `tool_result` enters the next provider request. Use `messages.length` when no recent tail should be preserved.
-- Insert one synthetic system message after the leading system prompt: `{ role: 'system', content: [{ type: 'text', text: event.summary }] }`.
-- `usage.inputTokens` is set to `event.tokensAfter`; output and cache token totals are unchanged. The next real `llm_response` refines the count from provider usage.
-- `event.trigger`, `event.request`, and `event.responseUsage` are recorded in the JSONL log for the dashboard's compaction timeline; the reducer ignores them.
+- Invalid replacements are no-ops except for cursor advancement.
+- Valid replacements set:
+  `messages = messages.slice(0, start) + replacementMessages + messages.slice(end)`.
+- `usage`, `pendingCalls`, and `status` are unchanged.
+- `reason` and `artifactRef` are replay-visible facts but do not affect reducer logic.
 
 **Effects**
 - `[]`

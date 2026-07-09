@@ -10,7 +10,7 @@ import type {
   UsageTotal,
 } from '@agent-kernel/kernel'
 
-export type LogEntryKind = 'header' | 'event' | 'snapshot' | 'metadata'
+export type LogEntryKind = 'header' | 'event' | 'snapshot' | 'metadata' | 'runtime_metadata'
 
 export type HeaderEntry = {
   kind: 'header'
@@ -19,6 +19,12 @@ export type HeaderEntry = {
   sessionId: string
   parentSessionId?: string
   parentCursor?: number
+  /** Parent tool_call id when this session was spawned by the `agent` tool. */
+  parentCallId?: string
+  /** Display/type label requested for the sub-agent, when provided. */
+  agentType?: string
+  /** Spawn timestamp for runtime recovery and dashboard replay. */
+  subAgentStartedAt?: string
   /**
    * Workspace this session is bound to — stable ULID minted by the
    * executor on first launch. Written once at create time and never
@@ -35,7 +41,7 @@ export type HeaderEntry = {
    */
   workspaceName?: string
   initialCwd?: string
-  formatVersion: 1
+  formatVersion: 2
   kernelVersion: string
   config: AgentConfig
   initialState: AgentState
@@ -46,9 +52,16 @@ export type EventEntry = {
   seq: number
   ts: string
   event: AgentEvent
+  /**
+   * Lightweight effect summaries for timeline/state inspection. Large reducer
+   * outputs such as full LLM prompt messages are stored out-of-band and loaded
+   * only when an inspector needs the raw payload.
+   */
   effects: readonly Effect[]
   usage?: UsageTotal
+  effectsArtifact?: LogArtifactRef
   llmTrace?: LLMTrace
+  llmTraceArtifact?: LogArtifactRef
   /**
    * Model that answered this event, when the event was produced by an LLM
    * call (`llm_response` / `llm_error`). Recorded independently of `llmTrace`
@@ -56,6 +69,12 @@ export type EventEntry = {
    * was suppressed or an older adapter didn't capture one.
    */
   model?: string
+}
+
+export type LogArtifactRef = {
+  path: string
+  bytes: number
+  sha256: string
 }
 
 export type LLMTrace = {
@@ -68,6 +87,8 @@ export type LLMTrace = {
   }
   response?: {
     status: number
+    /** Provider-native stop reason, e.g. Anthropic `stop_reason` or OpenAI `finish_reason`. */
+    finishReason?: string
     body?: unknown
     streamEventTypes?: readonly string[]
     metrics?: {
@@ -207,8 +228,18 @@ export type MetadataEntry = {
   label?: string
   workspaceId?: string
   workspaceName?: string
+  selectedModel?: string
 }
 
-export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry | MetadataEntry
+export type RuntimeMetadataEntry = {
+  kind: 'runtime_metadata'
+  ts: string
+  sessionId: string
+  action: string
+  payload: Record<string, unknown>
+  artifactRef?: LogArtifactRef
+}
 
-export const LOG_FORMAT_VERSION = 1 as const
+export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry | MetadataEntry | RuntimeMetadataEntry
+
+export const LOG_FORMAT_VERSION = 2 as const

@@ -4,7 +4,8 @@
  * into the artifact store.
  */
 
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
+import { dirname, resolve as resolvePath, sep } from 'node:path'
 
 import {
   createArtifactStore,
@@ -13,6 +14,7 @@ import {
 } from '@agent-kernel/shared/enhancement'
 
 import { readSessionLog } from './store/log.js'
+import type { LLMTrace } from '@agent-kernel/shared'
 
 export type ExportSessionTraceInput = {
   rootDir: string
@@ -50,19 +52,35 @@ export async function exportSessionTraceArtifacts(
   )
   const llmArtifacts: ArtifactRef[] = []
   for (const entry of parsed.events) {
-    if (!entry.llmTrace) continue
+    const trace = await loadEntryTrace(input.sessionLogPath, entry)
+    if (!trace) continue
     llmArtifacts.push(await store.writeJson(
       'llm_request',
       `llm/${sessionId}/${entry.seq}.request.json`,
-      entry.llmTrace.request,
+      trace.request,
     ))
-    if (entry.llmTrace.response) {
+    if (trace.response) {
       llmArtifacts.push(await store.writeJson(
         'llm_response',
         `llm/${sessionId}/${entry.seq}.response.json`,
-        entry.llmTrace.response,
+        trace.response,
       ))
     }
   }
   return { traceArtifact, llmArtifacts, sessionId }
+}
+
+async function loadEntryTrace(
+  logPath: string,
+  entry: Awaited<ReturnType<typeof readSessionLog>>['events'][number],
+): Promise<LLMTrace | undefined> {
+  if (entry.llmTraceArtifact) {
+    const base = dirname(logPath)
+    const resolved = resolvePath(base, entry.llmTraceArtifact.path)
+    if (resolved !== base && !resolved.startsWith(base + sep)) {
+      throw new Error('trace artifact path escapes session directory')
+    }
+    return JSON.parse(await readFile(resolved, 'utf8')) as LLMTrace
+  }
+  return entry.llmTrace
 }

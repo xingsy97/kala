@@ -33,15 +33,15 @@ import type {
   AgentStatus,
   StepResult,
 } from './types.js'
-import { noop, withPressure } from './helpers.js'
+import { noop } from './helpers.js'
 import {
   onApprovalModeChanged,
   onCancel,
   onClear,
-  onCompactReplaced,
   onCwdChanged,
   onLlmError,
   onLlmResponse,
+  onMessagesReplaced,
   onToolResult,
   onUserApprove,
   onUserMessage,
@@ -65,9 +65,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     user_message: (s, e, c) => onUserMessage(s, e, c),
     cancel: (s) => noop(s),
     clear: (s) => onClear(s),
-    compact_replaced: (s, e) => onCompactReplaced(s, e),
-    compact_skipped: (s) => noop(s),
-    compact_rejected: (s) => noop(s),
+    messages_replaced: (s, e) => onMessagesReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
   },
@@ -76,9 +74,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     llm_error: (s, e) => onLlmError(s, e.error),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
-    compact_replaced: (s, e) => onCompactReplaced(s, e),
-    compact_skipped: (s) => noop(s),
-    compact_rejected: (s) => noop(s),
+    messages_replaced: (s, e) => onMessagesReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   awaiting_approval: {
@@ -87,33 +83,26 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
-    compact_skipped: (s) => noop(s),
-    compact_rejected: (s) => noop(s),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   executing_tools: {
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
-    compact_replaced: (s, e) => onCompactReplaced(s, e),
-    compact_skipped: (s) => noop(s),
-    compact_rejected: (s) => noop(s),
+    messages_replaced: (s, e) => onMessagesReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   done: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
     clear: (s) => onClear(s),
-    compact_replaced: (s, e) => onCompactReplaced(s, e),
-    compact_skipped: (s) => noop(s),
-    compact_rejected: (s) => noop(s),
+    messages_replaced: (s, e) => onMessagesReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
   },
   error: {
+    user_message: (s, e, c) => onUserMessage(s, e, c),
     clear: (s) => onClear(s),
-    compact_replaced: (s, e) => onCompactReplaced(s, e),
-    compact_skipped: (s) => noop(s),
-    compact_rejected: (s) => noop(s),
+    messages_replaced: (s, e) => onMessagesReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
 }
@@ -126,9 +115,5 @@ export function step(
   const advanced: AgentState = { ...state, cursor: state.cursor + 1 }
   const row = transitions[advanced.status]
   const handler = row[event.kind] as Handler<typeof event.kind> | undefined
-  const result = handler ? handler(advanced, event, config) : noop(advanced)
-  return {
-    next: withPressure(result.next, config),
-    effects: result.effects,
-  }
+  return handler ? handler(advanced, event, config) : noop(advanced)
 }

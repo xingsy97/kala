@@ -75,6 +75,52 @@ describe('step: user_message', () => {
     expect(effects).toEqual([])
   })
 
+  it('recovers from error with a fresh user message', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'error',
+      error: 'provider failed',
+      pendingCalls: [
+        { callId: 'stale', name: 'read', input: {}, status: 'dispatched' },
+      ],
+    }
+    const { next, effects } = step(s0, { kind: 'user_message', text: 'try again' }, CONFIG)
+    expect(next.status).toBe('thinking')
+    expect(next.error).toBeUndefined()
+    expect(next.pendingCalls).toEqual([])
+    expect(next.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'try again' }],
+    })
+    expect(effects).toEqual([{ kind: 'call_llm', messages: next.messages, tools: CONFIG.tools }])
+  })
+
+  it('repairs orphaned tool calls before a fresh user message', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'error',
+      error: 'previous turn failed after cancel',
+      messages: [
+        ...initial().messages,
+        asst({ type: 'tool_call', callId: 'c-orphan', name: 'bash', input: { command: 'sleep 90' } }),
+      ],
+      pendingCalls: [],
+    }
+
+    const { next, effects } = step(s0, { kind: 'user_message', text: 'continue now' }, CONFIG)
+
+    expect(next.status).toBe('thinking')
+    expect(next.messages.at(-2)).toEqual({
+      role: 'tool',
+      content: [{ type: 'tool_result', callId: 'c-orphan', ok: false, content: 'cancelled by user' }],
+    })
+    expect(next.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'continue now' }],
+    })
+    expect(effects[0]).toMatchObject({ kind: 'call_llm' })
+  })
+
   it('cursor advances by exactly 1', () => {
     const s0 = initial()
     const { next } = step(s0, { kind: 'user_message', text: 'hi' }, CONFIG)
@@ -467,6 +513,10 @@ describe('step: cancel + errors', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'executing_tools',
+      messages: [
+        ...initial().messages,
+        asst({ type: 'tool_call', callId: 'c1', name: 'read', input: {} }),
+      ],
       pendingCalls: [
         { callId: 'c1', name: 'read', input: {}, status: 'dispatched' },
       ],
@@ -474,7 +524,37 @@ describe('step: cancel + errors', () => {
     const { next, effects } = step(s0, { kind: 'cancel' }, CONFIG)
     expect(next.status).toBe('done')
     expect(next.pendingCalls).toEqual([])
+    expect(next.messages.at(-1)).toEqual({
+      role: 'tool',
+      content: [{ type: 'tool_result', callId: 'c1', ok: false, content: 'cancelled by user' }],
+    })
     expect(effects).toEqual([{ kind: 'finish' }])
+  })
+
+  it('cancel records every pending tool call as cancelled so the transcript is provider-valid', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'awaiting_approval',
+      messages: [
+        ...initial().messages,
+        asst(
+          { type: 'tool_call', callId: 'c1', name: 'read', input: {} },
+          { type: 'tool_call', callId: 'c2', name: 'write', input: {} },
+        ),
+      ],
+      pendingCalls: [
+        { callId: 'c1', name: 'read', input: {}, status: 'dispatched' },
+        { callId: 'c2', name: 'write', input: {}, status: 'awaiting_approval' },
+      ],
+    }
+
+    const { next } = step(s0, { kind: 'cancel' }, CONFIG)
+
+    const toolResults = next.messages
+      .flatMap((message) => message.content)
+      .filter((content): content is Extract<Message['content'][number], { type: 'tool_result' }> => content.type === 'tool_result')
+    expect(toolResults.map((result) => result.callId)).toEqual(['c1', 'c2'])
+    expect(toolResults.every((result) => result.ok === false && result.content === 'cancelled by user')).toBe(true)
   })
 
   it('llm_error moves to error status', () => {
@@ -532,153 +612,17 @@ describe('regression: state hygiene on re-entry', () => {
 })
 
 // ============================================================================
-// Compaction + context pressure
+// Message replacement
 // ============================================================================
 
-describe('context pressure', () => {
-  it('stays "none" when config has no contextLimit', () => {
-    const s0: AgentState = {
-      ...initial(),
-      status: 'thinking',
-    }
-    const { next } = step(
-      s0,
-      {
-        kind: 'llm_response',
-        message: asst({ type: 'text', text: 'hi' }),
-        usage: { inputTokens: 10_000_000, outputTokens: 1 },
-      },
-      CONFIG,
-    )
-    expect(next.contextPressureLevel).toBe('none')
-  })
-
-  it('uses current context tokens, not cumulative input usage, for pressure', () => {
-    const c: AgentConfig = createConfig({
-      tools: TOOLS,
-      systemPrompt: 'x',
-      contextLimit: 100,
-      softThreshold: 0.75,
-      hardThreshold: 0.92,
-    })
-    const s0: AgentState = { ...initial(), status: 'thinking' }
-    const next = step(
-      s0,
-      { kind: 'llm_response', message: asst({ type: 'text', text: 'tiny' }), usage: { inputTokens: 10_000, outputTokens: 0 } },
-      c,
-    ).next
-    expect(next.usage.inputTokens).toBe(10_000)
-    expect(next.contextPressureLevel).toBe('none')
-  })
-
-  it('rises to "soft" then "hard" as current context grows past thresholds', () => {
-    const c: AgentConfig = createConfig({
-      tools: TOOLS,
-      systemPrompt: 'x',
-      contextLimit: 100,
-      softThreshold: 0.75,
-      hardThreshold: 0.92,
-    })
-    const s0: AgentState = { ...initial(), status: 'thinking' }
-    const r1 = step(
-      s0,
-      { kind: 'llm_response', message: asst({ type: 'text', text: 'a'.repeat(300) }), usage: { inputTokens: 1, outputTokens: 0 } },
-      c,
-    )
-    expect(r1.next.contextPressureLevel).toBe('soft')
-
-    const r2 = step(
-      { ...r1.next, status: 'thinking' },
-      { kind: 'llm_response', message: asst({ type: 'text', text: 'b'.repeat(120) }), usage: { inputTokens: 1, outputTokens: 0 } },
-      c,
-    )
-    expect(r2.next.contextPressureLevel).toBe('hard')
-  })
-})
-
-describe('step: compact_replaced', () => {
+describe('step: messages_replaced', () => {
   const c: AgentConfig = createConfig({
     tools: TOOLS,
     systemPrompt: 'x',
     contextLimit: 100,
   })
 
-  it('replaces messages, keeps leading system, and updates context tokens', () => {
-    const s0: AgentState = {
-      ...initial(),
-      status: 'done',
-      messages: [
-        { role: 'system', content: [{ type: 'text', text: 'you are' }] },
-        { role: 'user', content: [{ type: 'text', text: 'a' }] },
-        { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
-        { role: 'user', content: [{ type: 'text', text: 'c' }] },
-      ],
-      usage: { inputTokens: 95, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0 },
-    }
-    const { next } = step(
-      s0,
-      {
-        kind: 'compact_replaced',
-        preserveFrom: s0.messages.length,
-        summary: 'we discussed X and Y',
-        replacedCount: 3,
-        tokensBefore: 95,
-        tokensAfter: 10,
-      },
-      c,
-    )
-    expect(next.messages).toHaveLength(2)
-    expect(next.messages[0]?.role).toBe('system')
-    expect(next.messages[0]?.content).toEqual([{ type: 'text', text: 'you are' }])
-    expect(next.messages[1]?.role).toBe('system')
-    expect(next.messages[1]?.content).toEqual([
-      { type: 'text', text: 'we discussed X and Y' },
-    ])
-    expect(next.usage).toEqual({ inputTokens: 95, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0 })
-    expect(next.contextTokens).toBeLessThan(100)
-    expect(next.contextPressureLevel).toBe('none')
-  })
-
-  it('accepts compact request metadata without leaking it into messages', () => {
-    const s0: AgentState = {
-      ...initial(),
-      status: 'done',
-      messages: [
-        { role: 'system', content: [{ type: 'text', text: 'you are' }] },
-        { role: 'user', content: [{ type: 'text', text: 'a' }] },
-      ],
-      usage: { inputTokens: 90, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0 },
-    }
-    const { next } = step(
-      s0,
-      {
-        kind: 'compact_replaced',
-        trigger: 'manual',
-        preserveFrom: s0.messages.length,
-        request: {
-          model: 'm',
-          systemPrompt: 'summarize',
-          messages: s0.messages,
-          tools: [],
-        },
-        responseUsage: { inputTokens: 80, outputTokens: 8 },
-        summary: 'summary only',
-        replacedCount: 2,
-        tokensBefore: 90,
-        tokensAfter: 3,
-      },
-      c,
-    )
-
-    expect(next.messages).toEqual([
-      { role: 'system', content: [{ type: 'text', text: 'you are' }] },
-      { role: 'system', content: [{ type: 'text', text: 'summary only' }] },
-    ])
-    expect(next.usage.inputTokens).toBe(90)
-    expect(next.contextTokens).toBeLessThan(100)
-  })
-
-  it('replaces only the old prefix when preserveFrom is provided', () => {
+  it('replaces an explicit message range deterministically', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'done',
@@ -687,34 +631,48 @@ describe('step: compact_replaced', () => {
         { role: 'user', content: [{ type: 'text', text: 'old request' }] },
         { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
         { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
-        { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
       ],
-      usage: { inputTokens: 90, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
+    const replacement = [{ role: 'system' as const, content: [{ type: 'text' as const, text: 'old context summary' }] }]
     const { next } = step(
       s0,
       {
-        kind: 'compact_replaced',
-        preserveFrom: 3,
-        summary: 'old context summary',
-        replacedCount: 3,
-        tokensBefore: 90,
-        tokensAfter: 20,
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 3 },
+        replacementMessages: replacement,
       },
       c,
     )
 
     expect(next.messages).toEqual([
-      { role: 'system', content: [{ type: 'text', text: 'you are' }] },
-      { role: 'system', content: [{ type: 'text', text: 'old context summary' }] },
-      { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+      s0.messages[0],
+      replacement[0],
+      s0.messages[3],
     ])
-    expect(next.usage.inputTokens).toBe(90)
-    expect(next.contextTokens).toBeLessThan(100)
+    expect(next.usage).toEqual(s0.usage)
   })
 
-  it('is a no-op while awaiting_approval (unsafe to drop pending calls)', () => {
+  it('ignores invalid ranges', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'done',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }],
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 2, end: 1 },
+        replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'summary' }] }],
+      },
+      c,
+    )
+    expect(next.messages).toEqual(s0.messages)
+  })
+
+  it('is a no-op while awaiting_approval', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'awaiting_approval',
@@ -725,17 +683,14 @@ describe('step: compact_replaced', () => {
         { role: 'system', content: [{ type: 'text', text: 'x' }] },
         { role: 'user', content: [{ type: 'text', text: 'big prompt' }] },
       ],
-      usage: { inputTokens: 95, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const { next } = step(
       s0,
       {
-        kind: 'compact_replaced',
-        preserveFrom: s0.messages.length,
-        summary: 'should be ignored',
-        replacedCount: 0,
-        tokensBefore: 95,
-        tokensAfter: 5,
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 2 },
+        replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'ignored' }] }],
       },
       c,
     )
@@ -743,7 +698,7 @@ describe('step: compact_replaced', () => {
     expect(next.pendingCalls).toEqual(s0.pendingCalls)
   })
 
-  it('allows executing_tools compaction when the pending tool-call group is preserved', () => {
+  it('allows executing_tools replacement when the pending tool-call group is preserved', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'executing_tools',
@@ -764,18 +719,14 @@ describe('step: compact_replaced', () => {
         },
         { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'done' }] },
       ],
-      usage: { inputTokens: 95, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const { next } = step(
       s0,
       {
-        kind: 'compact_replaced',
-        trigger: 'tool_result',
-        preserveFrom: 3,
-        summary: 'old context summary',
-        replacedCount: 3,
-        tokensBefore: 95,
-        tokensAfter: 20,
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 3 },
+        replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'old context summary' }] }],
       },
       c,
     )
@@ -786,7 +737,7 @@ describe('step: compact_replaced', () => {
     expect(next.messages[3]).toEqual(s0.messages[4])
   })
 
-  it('rejects executing_tools compaction that would orphan a pending tool result', () => {
+  it('rejects executing_tools replacement that would orphan a pending tool result', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'executing_tools',
@@ -803,50 +754,41 @@ describe('step: compact_replaced', () => {
             { type: 'tool_call', callId: 'c2', name: 'read', input: {} },
           ],
         },
-        { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'done' }] },
       ],
-      usage: { inputTokens: 95, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const { next } = step(
       s0,
       {
-        kind: 'compact_replaced',
-        trigger: 'tool_result',
-        preserveFrom: s0.messages.length,
-        summary: 'unsafe summary',
-        replacedCount: 4,
-        tokensBefore: 95,
-        tokensAfter: 5,
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 3 },
+        replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'unsafe summary' }] }],
       },
       c,
     )
 
     expect(next.messages).toEqual(s0.messages)
     expect(next.pendingCalls).toEqual(s0.pendingCalls)
-    expect(next.usage.inputTokens).toBe(95)
   })
 
-  it('is legal from error state (post-mortem recovery)', () => {
+  it('is legal from error state', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'error',
       error: 'boom',
-      usage: { inputTokens: 100, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }],
     }
     const { next } = step(
       s0,
       {
-        kind: 'compact_replaced',
-        preserveFrom: s0.messages.length,
-        summary: 's',
-        replacedCount: 0,
-        tokensBefore: 100,
-        tokensAfter: 5,
+        kind: 'messages_replaced',
+        reason: 'recovery',
+        replaceRange: { start: 0, end: 1 },
+        replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'recovered' }] }],
       },
       c,
     )
-    expect(next.usage.inputTokens).toBe(100)
-    expect(next.contextTokens).toBeLessThan(100)
+    expect(next.messages).toEqual([{ role: 'system', content: [{ type: 'text', text: 'recovered' }] }])
   })
 })
 

@@ -33,11 +33,11 @@ Files are append-only. No rewriting, no truncation. A corrupted line at the tail
 
 ## 2. Log entry schema
 
-There are three kinds of entries: `event`, `header`, `snapshot`. Every entry has these common fields:
+There are five kinds of entries: `header`, `event`, `snapshot`, `metadata`, and `runtime_metadata`. `header`, `event`, and `snapshot` carry a cursor `seq`; metadata entries do not advance the kernel cursor.
 
 ```ts
 type LogEntry = {
-  kind: 'header' | 'event' | 'snapshot'
+  kind: 'header' | 'event' | 'snapshot' | 'metadata' | 'runtime_metadata'
   seq: number                 // 0 for header, 1..N for event/snapshot
   ts: string                  // ISO 8601 with millisecond precision
 }
@@ -61,7 +61,7 @@ type HeaderEntry = {
   formatVersion: 1                    // bumps on breaking log-format change
   kernelVersion: string               // e.g. "@agent-kernel/kernel@0.1.0"
   config: AgentConfig                 // frozen at session start
-  initialState: AgentState            // AgentState *before* seq 1 is applied. Includes `contextPressureLevel`, `approvalMode`, optional `cwd`, and reducer-owned runtime state only.
+  initialState: AgentState            // AgentState *before* seq 1 is applied. Reducer-owned protocol state only.
 }
 ```
 
@@ -86,15 +86,13 @@ type EventEntry = {
 
 `effects` is included for observability (dashboard timeline, debugging). Replay does **not** need `effects` — the kernel re-derives them from `(state, event, config)`. Effects in the log are a checked-in-transcript artifact; if a replay produces different effects, the kernel implementation drifted from the recorded run.
 
-**Extended event kinds**: `event.kind` may be `compact_replaced`,
+**Extended event kinds**: `event.kind` may be `messages_replaced`,
 `approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union
 in SPEC §1.5. `cwd_changed` is the durable source for `AgentState.cwd`;
-session summaries derive `currentCwd` by folding the log. `compact_replaced`
-stores `summary`, `replacedCount`, `tokensBefore`, `tokensAfter`, `trigger`
-(`manual` | `auto`), required `preserveFrom`, the summarizer `request`
-(`model`, `systemPrompt`, `messages`, `tools`), and optional `responseUsage`.
-Replay applies `preserveFrom` and ignores the request/trigger/responseUsage
-metadata; dashboard history uses them to inspect the compact LLM call.
+session summaries derive `currentCwd` by folding the log. Successful context
+compaction is represented as `messages_replaced` with
+`reason: 'compaction'`. Summarizer request/response/debug metadata belongs in
+artifacts or `runtime_metadata`, not in the kernel event.
 
 **Storage of `usage`**: To keep log lines small, `usage` is written only on lines where it changed (i.e. after an `llm_response` with a delta). Consumers reconstructing running usage can pull it from these lines.
 
@@ -141,6 +139,26 @@ type SnapshotEntry = {
 - On session pause / process shutdown
 
 **Semantics**: A snapshot is a **shortcut**, not authoritative. If a snapshot and a re-fold disagree, the re-fold wins and the snapshot is stale (deletes are safe). Snapshots MAY be stored in a separate file (`sessions/snapshots/<sessionId>_<seq>.json`) instead of inline; either is valid.
+
+### 2.5 Runtime metadata (kind: 'runtime_metadata')
+
+Written by the host for runtime facts that matter for audit/debugging but do
+not change reducer state and must not be folded during replay.
+
+```ts
+type RuntimeMetadataEntry = {
+  kind: 'runtime_metadata'
+  ts: string
+  sessionId: string
+  action: string
+  payload: Record<string, unknown>
+  artifactRef?: LogArtifactRef
+}
+```
+
+Examples include `compaction_skipped`, `compaction_rejected`, and compaction attempt
+reports. These action names are host metadata labels, not `AgentEvent.kind`
+values.
 
 ---
 

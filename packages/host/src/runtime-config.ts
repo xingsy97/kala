@@ -20,11 +20,12 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
-import type { ManualModelInput, ModelInfo, ModelSource } from '@agent-kernel/shared'
+import type { ManualModelInput, ManualProviderInput, ModelInfo, ModelSource, ProviderWire } from '@agent-kernel/shared'
 
+import { normalizeAgentSystemPromptPreset, type AgentSystemPromptPreset } from './builtin-tools.js'
 import type { HookConfig, HookEvent } from './extensions/hooks.js'
 
 export type ProviderSpec = {
@@ -35,19 +36,34 @@ export type ProviderSpec = {
   baseUrl?: string
   apiKey: string
   models: readonly string[]
+  contextWindows?: Readonly<Record<string, number>>
 }
 
 export type RuntimeConfig = {
   providers: readonly ProviderSpec[]
   models: readonly ModelInfo[]
   defaultModel: string
+  manualProviders: readonly ManualProviderInput[]
   manualModels: readonly ManualModelInput[]
+  manualDefaultModel?: string
+}
+
+export type AgentRuntimeSettings = {
+  systemPromptPreset: AgentSystemPromptPreset
 }
 
 export type LoadRuntimeConfigOptions = {
   claudeSettingsPath?: string
   codexConfigPath?: string
+  codexAuthPath?: string
   manualModelsPath?: string
+}
+
+export type AnthropicCliDefaults = {
+  baseUrl?: string
+  baseUrlSource?: 'env' | 'env-file' | 'claude-settings'
+  model?: string
+  smallFastModel?: string
 }
 
 export function loadRuntimeConfig(
@@ -58,38 +74,57 @@ export function loadRuntimeConfig(
     opts.claudeSettingsPath ?? join(home, '.claude', 'settings.json')
   const codexPath =
     opts.codexConfigPath ?? join(home, '.codex', 'config.toml')
+  const codexAuthPath =
+    opts.codexAuthPath ?? join(home, '.codex', 'auth.json')
   const manualPath =
     opts.manualModelsPath ?? join(home, '.config', 'agent-kernel', 'models.json')
 
   const providers: ProviderSpec[] = []
   const claude = loadClaudeSettings(claudePath)
   if (claude) providers.push(claude)
-  const codex = loadCodexProviders(codexPath)
+  const codex = loadCodexProviders(codexPath, codexAuthPath)
   providers.push(...codex.providers)
+  const manualConfig = loadManualConfig(manualPath)
+  const manualProviders = manualConfig.providers.filter((p) => !providers.some((existing) => existing.id === p.id))
+  providers.push(...manualProviders.map(providerSpecFromManual))
   const discoveredModels = new Map(providers.map((p) => [p.id, new Set(p.models)]))
-  const manualModels = loadManualModels(manualPath).filter((m) => {
+  const manualModels = manualConfig.models.filter((m) => {
     const discovered = discoveredModels.get(m.providerId)
     return !discovered?.has(m.id)
   })
   applyManualModels(providers, manualModels)
 
   const models: ModelInfo[] = providers.flatMap((p) =>
-    p.models.map((m) => modelInfo(m, p.label, { providerId: p.id, source: modelSourceFor(p, m, manualModels, discoveredModels) })),
+    p.models.map((m) => {
+      const manual = manualModels.find((candidate) => candidate.providerId === p.id && candidate.id === m)
+      return modelInfo(m, p.label, {
+        ref: modelRef(p.id, m),
+        providerId: p.id,
+        source: modelSourceFor(p, m, manualModels, discoveredModels),
+        ...(manual?.label ? { label: manual.label } : {}),
+        ...(p.contextWindows?.[m] ?? manual?.contextWindow
+          ? { contextWindow: p.contextWindows?.[m] ?? manual?.contextWindow }
+          : {}),
+      })
+    }),
   )
 
-  const defaultModel =
-    codex.defaultModel ?? claude?.models[0] ?? models[0]?.id ?? ''
+  const defaultModel = normalizeDefaultModelRef(
+    manualConfig.defaultModel ?? codex.defaultModel ?? claude?.models[0],
+    models,
+  ) ?? models[0]?.ref ?? models[0]?.id ?? ''
 
-  return { providers, models, defaultModel, manualModels }
+  return { providers, models, defaultModel, manualProviders, manualModels, ...(manualConfig.defaultModel ? { manualDefaultModel: manualConfig.defaultModel } : {}) }
 }
 
 export function modelInfo(
   model: string,
   provider: string,
-  opts: { providerId?: string; source?: ModelSource; label?: string; contextWindow?: number } = {},
+  opts: { ref?: string; providerId?: string; source?: ModelSource; label?: string; contextWindow?: number } = {},
 ): ModelInfo {
   const contextWindow = opts.contextWindow ?? knownContextWindow(model)
   return {
+    ...(opts.ref ? { ref: opts.ref } : {}),
     id: model,
     label: opts.label ?? model,
     provider,
@@ -97,6 +132,16 @@ export function modelInfo(
     ...(opts.source ? { source: opts.source } : {}),
     ...(contextWindow ? { contextWindow } : {}),
   }
+}
+
+export function modelRef(providerId: string | undefined, model: string): string {
+  return providerId ? `${providerId}:${model}` : model
+}
+
+function normalizeDefaultModelRef(defaultModel: string | undefined, models: readonly ModelInfo[]): string | undefined {
+  if (!defaultModel) return undefined
+  const exact = models.find((model) => model.ref === defaultModel || model.id === defaultModel)
+  return exact?.ref ?? exact?.id ?? defaultModel
 }
 
 export function knownContextWindow(model: string): number | undefined {
@@ -121,6 +166,82 @@ type ClaudeSettings = {
   }
 }
 
+export function loadAnthropicCliDefaults(path = join(homedir(), '.claude', 'settings.json')): AnthropicCliDefaults {
+  const raw = tryReadFile(path)
+  let settingsEnv: NonNullable<ClaudeSettings['env']> = {}
+  if (raw !== undefined) {
+    try {
+      settingsEnv = (JSON.parse(raw) as ClaudeSettings).env ?? {}
+    } catch {
+      settingsEnv = {}
+    }
+  }
+
+  const baseUrl = process.env.ANTHROPIC_BASE_URL ?? settingsEnv.ANTHROPIC_BASE_URL
+  const envSource = process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL === 'env-file' ? 'env-file' : 'env'
+  return {
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(baseUrl ? { baseUrlSource: process.env.ANTHROPIC_BASE_URL ? envSource : 'claude-settings' } : {}),
+    ...(process.env.ANTHROPIC_MODEL ?? settingsEnv.ANTHROPIC_MODEL
+      ? { model: process.env.ANTHROPIC_MODEL ?? settingsEnv.ANTHROPIC_MODEL }
+      : {}),
+    ...(process.env.ANTHROPIC_SMALL_FAST_MODEL ?? settingsEnv.ANTHROPIC_SMALL_FAST_MODEL
+      ? { smallFastModel: process.env.ANTHROPIC_SMALL_FAST_MODEL ?? settingsEnv.ANTHROPIC_SMALL_FAST_MODEL }
+      : {}),
+  }
+}
+
+export function requireAnthropicBaseUrl(input: { explicit?: string; defaults?: AnthropicCliDefaults; flagName?: string } = {}): {
+  baseUrl: string
+  source: 'cli' | 'env' | 'env-file' | 'claude-settings'
+} {
+  if (input.explicit) return { baseUrl: input.explicit, source: 'cli' }
+  const defaults = input.defaults ?? loadAnthropicCliDefaults()
+  if (defaults.baseUrl) return { baseUrl: defaults.baseUrl, source: defaults.baseUrlSource ?? 'claude-settings' }
+  throw new Error(`missing Anthropic base URL: pass ${input.flagName ?? '--base-url'}, set ANTHROPIC_BASE_URL, or set env.ANTHROPIC_BASE_URL in ~/.claude/settings.json`)
+}
+
+export function redactedUrlForArtifact(raw: string): string {
+  try {
+    const url = new URL(raw)
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/$/, '')}`
+  } catch {
+    return '<invalid-url>'
+  }
+}
+
+export function defaultBenchmarkEnvPath(cwd = process.cwd()): string {
+  return resolve(cwd, 'experiments/evals/2026-07-agent-benchmark-comparison/.env.local')
+}
+
+export function loadEnvFile(path: string, opts: { override?: boolean; sourceName?: string } = {}): Record<string, string> {
+  const raw = tryReadFile(path)
+  if (raw === undefined) return {}
+  const parsed: Record<string, string> = {}
+  for (const rawLine of raw.split('\n')) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    const key = line.slice(0, eq).trim()
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
+    const value = parseEnvValue(line.slice(eq + 1).trim())
+    parsed[key] = value
+    if (opts.override || process.env[key] === undefined) {
+      process.env[key] = value
+      if (opts.sourceName) process.env[`AGENT_KERNEL_ENV_SOURCE_${key}`] = opts.sourceName
+    }
+  }
+  return parsed
+}
+
+function parseEnvValue(raw: string): string {
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    return raw.slice(1, -1)
+  }
+  return raw
+}
+
 function loadClaudeSettings(path: string): ProviderSpec | undefined {
   const raw = tryReadFile(path)
   if (raw === undefined) return undefined
@@ -137,8 +258,8 @@ function loadClaudeSettings(path: string): ProviderSpec | undefined {
     env.ANTHROPIC_AUTH_TOKEN ??
     (parsed.apiKeyHelper ? runApiKeyHelper(parsed.apiKeyHelper) : undefined)
   if (!apiKey) return undefined
-  const primary = env.ANTHROPIC_MODEL
-  const small = env.ANTHROPIC_SMALL_FAST_MODEL
+  const primary = process.env.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL
+  const small = process.env.ANTHROPIC_SMALL_FAST_MODEL ?? env.ANTHROPIC_SMALL_FAST_MODEL
   const models: string[] = []
   if (primary) models.push(primary)
   if (small && !models.includes(small)) models.push(small)
@@ -148,7 +269,9 @@ function loadClaudeSettings(path: string): ProviderSpec | undefined {
     label: 'Anthropic',
     wire: 'anthropic',
     source: 'claude-settings',
-    ...(env.ANTHROPIC_BASE_URL ? { baseUrl: env.ANTHROPIC_BASE_URL } : {}),
+    ...(process.env.ANTHROPIC_BASE_URL ?? env.ANTHROPIC_BASE_URL
+      ? { baseUrl: process.env.ANTHROPIC_BASE_URL ?? env.ANTHROPIC_BASE_URL }
+      : {}),
     apiKey,
     models,
   }
@@ -177,14 +300,15 @@ type CodexParsed = {
   providers: readonly ProviderSpec[]
 }
 
-function loadCodexProviders(path: string): CodexParsed {
+function loadCodexProviders(path: string, authPath: string): CodexParsed {
   const raw = tryReadFile(path)
   if (raw === undefined) return { providers: [] }
   const parsed = parseCodexToml(raw)
+  const auth = loadCodexAuth(authPath)
   const providers: ProviderSpec[] = []
   const defaultModel = parsed.model
   for (const p of parsed.providers) {
-    const apiKey = p.envKey ? process.env[p.envKey] : undefined
+    const apiKey = resolveCodexApiKey(p.envKey, auth)
     if (!apiKey) continue
     // Codex config declares providers but not per-provider model lists.
     // The user names one default model at the top; attach it to the
@@ -203,6 +327,7 @@ function loadCodexProviders(path: string): CodexParsed {
       ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
       apiKey,
       models,
+      ...(defaultModel && parsed.modelContextWindow ? { contextWindows: { [defaultModel]: parsed.modelContextWindow } } : {}),
     })
   }
   return {
@@ -216,30 +341,98 @@ function loadCodexProviders(path: string): CodexParsed {
 // ============================================================================
 
 export type ManualModelsFile = {
+  defaultModel?: string
+  providers?: readonly ManualProviderInput[]
   models: readonly ManualModelInput[]
 }
 
-export function loadManualModels(path: string): readonly ManualModelInput[] {
+export type ManualConfigFile = {
+  defaultModel?: string
+  providers: readonly ManualProviderInput[]
+  models: readonly ManualModelInput[]
+}
+
+export function loadManualConfig(path: string): ManualConfigFile {
   const raw = tryReadFile(path)
-  if (raw === undefined) return []
+  if (raw === undefined) return { providers: [], models: [] }
   try {
     const parsed = JSON.parse(raw) as Partial<ManualModelsFile>
-    if (!Array.isArray(parsed.models)) return []
-    return parsed.models.filter(isManualModelInput)
+    const providers = Array.isArray(parsed.providers)
+      ? parsed.providers.filter(isManualProviderInput)
+      : []
+    const models = Array.isArray(parsed.models)
+      ? parsed.models.filter(isManualModelInput)
+      : []
+    return {
+      ...(typeof parsed.defaultModel === 'string' && parsed.defaultModel.trim().length > 0 ? { defaultModel: parsed.defaultModel.trim() } : {}),
+      providers,
+      models,
+    }
   } catch {
-    return []
+    return { providers: [], models: [] }
   }
 }
 
+export function loadManualModels(path: string): readonly ManualModelInput[] {
+  return loadManualConfig(path).models
+}
+
 export function writeManualModels(path: string, models: readonly ManualModelInput[]): void {
+  writeManualConfig(path, { providers: loadManualConfig(path).providers, models })
+}
+
+export function writeManualConfig(path: string, config: ManualConfigFile): void {
   mkdirSync(dirname(path), { recursive: true })
-  const normalized = models.map((m) => ({
+  const normalizedProviders = config.providers.map((p) => ({
+    id: p.id,
+    ...(p.label ? { label: p.label } : {}),
+    wire: p.wire,
+    baseUrl: p.baseUrl,
+    apiKey: p.apiKey,
+  }))
+  const normalized = config.models.map((m) => ({
     providerId: m.providerId,
     id: m.id,
     ...(m.label ? { label: m.label } : {}),
     ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
   }))
-  writeFileSync(path, `${JSON.stringify({ models: normalized }, null, 2)}\n`, 'utf8')
+  writeFileSync(path, `${JSON.stringify({
+    ...(config.defaultModel ? { defaultModel: config.defaultModel } : {}),
+    providers: normalizedProviders,
+    models: normalized,
+  }, null, 2)}\n`, 'utf8')
+}
+
+function providerSpecFromManual(input: ManualProviderInput): ProviderSpec {
+  return {
+    id: input.id,
+    label: input.label?.trim() || input.id,
+    wire: input.wire,
+    source: 'manual',
+    baseUrl: input.baseUrl,
+    apiKey: input.apiKey,
+    models: [],
+  }
+}
+
+export function defaultAgentSettingsPath(home = homedir()): string {
+  return join(home, '.config', 'agent-kernel', 'agent.json')
+}
+
+export function loadAgentRuntimeSettings(path = defaultAgentSettingsPath()): AgentRuntimeSettings {
+  const raw = tryReadFile(path)
+  if (raw === undefined) return { systemPromptPreset: 'codex' }
+  try {
+    const parsed = JSON.parse(raw) as { systemPromptPreset?: unknown }
+    return { systemPromptPreset: normalizeAgentSystemPromptPreset(parsed.systemPromptPreset) }
+  } catch {
+    return { systemPromptPreset: 'codex' }
+  }
+}
+
+export function writeAgentRuntimeSettings(path: string, settings: AgentRuntimeSettings): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `${JSON.stringify({ systemPromptPreset: normalizeAgentSystemPromptPreset(settings.systemPromptPreset) }, null, 2)}\n`, 'utf8')
 }
 
 function applyManualModels(
@@ -276,6 +469,21 @@ function isManualModelInput(value: unknown): value is ManualModelInput {
   return true
 }
 
+function isManualProviderInput(value: unknown): value is ManualProviderInput {
+  if (!value || typeof value !== 'object') return false
+  const rec = value as Record<string, unknown>
+  if (typeof rec.id !== 'string' || rec.id.trim().length === 0) return false
+  if (rec.label !== undefined && typeof rec.label !== 'string') return false
+  if (!isProviderWire(rec.wire)) return false
+  if (typeof rec.baseUrl !== 'string' || rec.baseUrl.trim().length === 0) return false
+  if (typeof rec.apiKey !== 'string' || rec.apiKey.length === 0) return false
+  return true
+}
+
+function isProviderWire(value: unknown): value is ProviderWire {
+  return value === 'anthropic' || value === 'openai'
+}
+
 type CodexProviderBlock = {
   id: string
   name?: string
@@ -287,6 +495,7 @@ type CodexProviderBlock = {
 type CodexTomlSubset = {
   model?: string
   defaultProviderId?: string
+  modelContextWindow?: number
   providers: CodexProviderBlock[]
 }
 
@@ -338,9 +547,11 @@ export function parseCodexToml(text: string): CodexTomlSubset {
 
   const model = top.model
   const defaultProviderId = top.model_provider
+  const modelContextWindow = parsePositiveInt(top.model_context_window)
   return {
     ...(model ? { model } : {}),
     ...(defaultProviderId ? { defaultProviderId } : {}),
+    ...(modelContextWindow ? { modelContextWindow } : {}),
     providers,
   }
 }
@@ -363,7 +574,40 @@ function parseTomlValue(raw: string): string | undefined {
   if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
     return s.slice(1, -1).replace(/\\"/g, '"')
   }
+  if (/^\d+$/.test(s)) return s
   return undefined
+}
+
+function parsePositiveInt(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined
+  const n = Number(raw)
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined
+}
+
+function loadCodexAuth(path: string): Record<string, string> {
+  const raw = tryReadFile(path)
+  if (raw === undefined) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.length > 0 && value !== 'env') out[key] = value
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function resolveCodexApiKey(envKey: string | undefined, auth: Readonly<Record<string, string>>): string | undefined {
+  if (envKey) {
+    const fromEnv = process.env[envKey]
+    if (fromEnv) return fromEnv
+    const fromAuth = auth[envKey]
+    if (fromAuth) return fromAuth
+  }
+  return auth.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY
 }
 
 function tryReadFile(path: string): string | undefined {

@@ -1,6 +1,5 @@
-import type { AgentConfig, AgentState, Message, ToolSchema } from './types.js'
+import type { AgentConfig, AgentModuleMetadata, AgentState, Message, ToolSchema } from './types.js'
 import { DEFAULT_APPROVAL_MODE } from './types.js'
-import { estimateMessageTokens } from './helpers.js'
 
 export function createInitialState(params: {
   sessionId: string
@@ -20,9 +19,7 @@ export function createInitialState(params: {
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     },
-    contextTokens: estimateMessageTokens(messages),
     cursor: 0,
-    contextPressureLevel: 'none',
     approvalMode: DEFAULT_APPROVAL_MODE,
   }
 }
@@ -30,6 +27,7 @@ export function createInitialState(params: {
 export function createConfig(params: {
   tools: readonly ToolSchema[]
   systemPrompt?: string
+  agentModule?: AgentModuleMetadata
   contextLimit?: number
   softThreshold?: number
   hardThreshold?: number
@@ -39,6 +37,9 @@ export function createConfig(params: {
   return {
     tools: params.tools,
     systemPrompt: params.systemPrompt,
+    ...(params.agentModule !== undefined
+      ? { agentModule: params.agentModule }
+      : {}),
     ...(params.contextLimit !== undefined
       ? { contextLimit: params.contextLimit }
       : {}),

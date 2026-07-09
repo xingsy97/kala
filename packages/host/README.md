@@ -14,6 +14,31 @@ Host is the only process with a public IP. It owns:
 4. **Connection layer** (`src/connection/`) — Socket.IO server with two namespaces (`/dashboard`, `/executor`), per-session rooms, workspace-based `tool:call` routing.
 5. **Dashboard bundle server** — serves `packages/dashboard/dist/` from `/` so a single Host process is enough for a running product.
 6. **Provider/model auto-import** (`src/runtime-config.ts`) — reads `~/.claude/settings.json` and `~/.codex/config.toml`, then merges manual model ids from `~/.config/agent-kernel/models.json`.
+7. **Agent module assembly** (`src/agent-modules/`) — renders the default `SystemPromptPlugin` plus built-in `ToolsetPlugin[]` into the kernel config, settings metadata, and session artifacts.
+
+## Agent modules
+
+The host keeps the kernel config plain, but the authored agent surface is
+plugin-shaped:
+
+```typescript
+AgentModule = SystemPromptPlugin + ToolsetPlugin[] + RuntimePolicyPlugin?
+```
+
+Each `ToolsetPlugin` represents a coherent toolset, not a single tool. It owns
+tool prompt text, risk metadata, and execution routing (`host` handler or
+remote executor). `resolveBuiltinAgentModule()` renders those plugins into the
+`systemPrompt`, `tools`, and `agentModule` metadata stored in every session
+header. The same metadata drives host tool dispatch, so adding a host-side tool
+does not require hard-coding the tool name in the loop.
+
+For inspection or release checks:
+
+```bash
+agent-kernel-host --print-agent-module
+agent-kernel-host --print-system-prompt
+agent-kernel-host --print-tool-registry
+```
 
 ## What it does NOT do
 

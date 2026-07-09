@@ -43,12 +43,13 @@ export function onUserMessage(
     role: 'user',
     content,
   }
+  const repairedMessages = appendCancelledResultsForOrphanedToolCalls(state.messages)
   // Defensive reset: entering a fresh turn wipes any residual pendingCalls or
   // error text so invariant I5 (status ↔ pendingCalls) can't be left broken
   // by a prior malformed transition.
   const next: AgentState = {
     ...state,
-    messages: [...state.messages, userMsg],
+    messages: [...repairedMessages, userMsg],
     pendingCalls: [],
     status: 'thinking',
     error: undefined,
@@ -57,6 +58,27 @@ export function onUserMessage(
     next,
     effects: [{ kind: 'call_llm', messages: next.messages, tools: config.tools }],
   }
+}
+
+function appendCancelledResultsForOrphanedToolCalls(messages: readonly Message[]): readonly Message[] {
+  const unresolved = new Map<string, ToolCallContent>()
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (content.type === 'tool_call') unresolved.set(content.callId, content)
+      if (content.type === 'tool_result') unresolved.delete(content.callId)
+    }
+  }
+  if (unresolved.size === 0) return messages
+  const repairs = [...unresolved.keys()].map<Message>((callId) => ({
+    role: 'tool',
+    content: [{
+      type: 'tool_result',
+      callId,
+      ok: false,
+      content: 'cancelled by user',
+    }],
+  }))
+  return [...messages, ...repairs]
 }
 
 export function onLlmResponse(
@@ -72,18 +94,6 @@ export function onLlmResponse(
   const toolCalls = extractToolCalls(message.content)
 
   if (toolCalls.length === 0) {
-    const maxNudges = config.noToolCallNudges ?? 0
-    const used = state.nudgeCount ?? 0
-    if (maxNudges > 0 && used < maxNudges) {
-      const nudgeText =
-        'Your previous message contained no tool call. You MUST respond with exactly one tool call wrapped in <tool_call>{"name":"...","arguments":{...}}</tool_call> tags (or a ```json fenced block). Prose alone will not make progress. Continue the task now with a tool call.'
-      const nudgeMsg: Message = { role: 'user', content: [{ type: 'text', text: nudgeText }] }
-      const nextMessages = [...messages, nudgeMsg]
-      return {
-        next: { ...state, messages: nextMessages, usage: nextUsage, status: 'thinking', nudgeCount: used + 1 },
-        effects: [{ kind: 'call_llm', messages: nextMessages, tools: config.tools }],
-      }
-    }
     return {
       next: { ...state, messages, usage: nextUsage, status: 'done' },
       effects: [{ kind: 'finish' }],
@@ -168,7 +178,6 @@ export function onLlmResponse(
         usage: nextUsage,
         pendingCalls: [],
         status: 'thinking',
-        nudgeCount: 0,
       },
       effects: [
         {
@@ -193,7 +202,6 @@ export function onLlmResponse(
       usage: nextUsage,
       pendingCalls: nextPending,
       status,
-      nudgeCount: 0,
     },
     effects,
   }
@@ -302,8 +310,24 @@ export function onToolResult(
 }
 
 export function onCancel(state: AgentState): StepResult {
+  const cancelledResults = state.pendingCalls.map<Message>((call) => ({
+    role: 'tool',
+    content: [{
+      type: 'tool_result',
+      callId: call.callId,
+      ok: false,
+      content: 'cancelled by user',
+    }],
+  }))
   return {
-    next: { ...state, status: 'done', pendingCalls: [] },
+    next: {
+      ...state,
+      messages: cancelledResults.length > 0
+        ? [...state.messages, ...cancelledResults]
+        : state.messages,
+      status: 'done',
+      pendingCalls: [],
+    },
     effects: [{ kind: 'finish' }],
   }
 }
@@ -327,31 +351,24 @@ export function onClear(state: AgentState): StepResult {
   }
 }
 
-export function onCompactReplaced(
+export function onMessagesReplaced(
   state: AgentState,
-  event: Extract<AgentEvent, { kind: 'compact_replaced' }>,
+  event: Extract<AgentEvent, { kind: 'messages_replaced' }>,
 ): StepResult {
-  const preserved: Message[] = []
-  if (state.messages.length > 0 && state.messages[0]!.role === 'system') {
-    preserved.push(state.messages[0]!)
-  }
-  const preserveFrom = Math.min(
-    Math.max(event.preserveFrom, preserved.length),
-    state.messages.length,
-  )
-  if (state.pendingCalls.length > 0 && !preservesPendingToolCallGroup(state, preserveFrom)) {
+  const { start, end } = event.replaceRange
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return noop(state)
+  if (start < 0 || end < start || end > state.messages.length) return noop(state)
+  if (state.pendingCalls.length > 0 && !preservesPendingToolCallGroup(state, end)) {
     return noop(state)
-  }
-  const tail = state.messages.slice(preserveFrom)
-  const summaryMsg: Message = {
-    role: 'system',
-    content: [{ type: 'text', text: event.summary }],
   }
   return {
     next: {
       ...state,
-      messages: [...preserved, summaryMsg, ...tail],
-      contextTokens: event.tokensAfter,
+      messages: [
+        ...state.messages.slice(0, start),
+        ...event.replacementMessages,
+        ...state.messages.slice(end),
+      ],
     },
     effects: [],
   }

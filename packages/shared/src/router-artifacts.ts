@@ -73,6 +73,8 @@ export type ExecutorCapabilitySnapshotArtifact = {
     tools: readonly string[]
     toolCount: number
     sandboxRoots?: readonly string[]
+    defaultCwd?: string
+    /** @deprecated Use `defaultCwd`. */
     workingDir?: string
   }[]
   summary: {

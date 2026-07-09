@@ -11,13 +11,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { loadRuntimeConfig, parseCodexToml, parseHookConfigToml, loadHookConfigs } from './runtime-config.js'
+import { loadAnthropicCliDefaults, loadEnvFile, loadRuntimeConfig, parseCodexToml, parseHookConfigToml, loadHookConfigs, requireAnthropicBaseUrl } from './runtime-config.js'
 
 describe('parseCodexToml', () => {
   it('extracts top-level model + provider block fields', () => {
     const input = [
       'model = "gpt-5.5"',
       'model_provider = "newapi"',
+      'model_context_window = 353346',
       'unrelated = 42',
       '',
       '[model_providers.newapi]',
@@ -37,6 +38,7 @@ describe('parseCodexToml', () => {
     const out = parseCodexToml(input)
     expect(out.model).toBe('gpt-5.5')
     expect(out.defaultProviderId).toBe('newapi')
+    expect(out.modelContextWindow).toBe(353346)
     expect(out.providers).toHaveLength(2)
     const [newapi, direct] = out.providers
     expect(newapi!.id).toBe('newapi')
@@ -78,6 +80,7 @@ describe('loadRuntimeConfig', () => {
       [
         'model = "gpt-5.5"',
         'model_provider = "newapi"',
+        'model_context_window = 353346',
         '[model_providers.newapi]',
         'name = "newapi"',
         'base_url = "https://api.example.test/v1"',
@@ -90,16 +93,17 @@ describe('loadRuntimeConfig', () => {
         claudeSettingsPath: claudePath,
         codexConfigPath: codexPath,
       })
-      expect(cfg.defaultModel).toBe('gpt-5.5')
+      expect(cfg.defaultModel).toBe('newapi:gpt-5.5')
       expect(cfg.models.map((m) => m.id)).toEqual([
         'claude-opus-4.7-1m-internal',
         'claude-haiku-4-5',
         'gpt-5.5',
       ])
+      expect(cfg.models.at(-1)?.ref).toBe('newapi:gpt-5.5')
       expect(cfg.models.map((m) => m.contextWindow)).toEqual([
         1_000_000,
         undefined,
-        400_000,
+        353_346,
       ])
       expect(cfg.models.map((m) => m.source)).toEqual([
         'claude-settings',
@@ -123,6 +127,60 @@ describe('loadRuntimeConfig', () => {
     } finally {
       delete process.env.AK_TEST_TK_KEY
     }
+  })
+
+  it('loads benchmark env files without overwriting existing env values', () => {
+    const envPath = join(dir, '.env.local')
+    writeFileSync(envPath, [
+      'ANTHROPIC_BASE_URL=https://api.example.test/anthropic',
+      'ANTHROPIC_API_KEY=test-key-from-file',
+      'ANTHROPIC_MODEL=claude-sonnet-4-6',
+      '',
+    ].join('\n'))
+    process.env.ANTHROPIC_API_KEY = 'test-key-from-env'
+    try {
+      const loaded = loadEnvFile(envPath, { sourceName: 'env-file' })
+      expect(loaded.ANTHROPIC_BASE_URL).toBe('https://api.example.test/anthropic')
+      expect(process.env.ANTHROPIC_BASE_URL).toBe('https://api.example.test/anthropic')
+      expect(process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL).toBe('env-file')
+      expect(process.env.ANTHROPIC_API_KEY).toBe('test-key-from-env')
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY
+      delete process.env.ANTHROPIC_BASE_URL
+      delete process.env.ANTHROPIC_MODEL
+      delete process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL
+    }
+  })
+
+  it('resolves Anthropic CLI defaults from env first, then Claude settings', () => {
+    const claudePath = join(dir, 'claude.json')
+    writeFileSync(claudePath, JSON.stringify({
+      env: {
+        ANTHROPIC_BASE_URL: 'https://settings.example.test/anthropic',
+        ANTHROPIC_MODEL: 'claude-opus-4.7-1m-internal',
+      },
+    }))
+
+    expect(loadAnthropicCliDefaults(claudePath)).toMatchObject({
+      baseUrl: 'https://settings.example.test/anthropic',
+      baseUrlSource: 'claude-settings',
+      model: 'claude-opus-4.7-1m-internal',
+    })
+
+    process.env.ANTHROPIC_BASE_URL = 'https://env.example.test/anthropic'
+    try {
+      expect(requireAnthropicBaseUrl({ defaults: loadAnthropicCliDefaults(claudePath) })).toEqual({
+        baseUrl: 'https://env.example.test/anthropic',
+        source: 'env',
+      })
+    } finally {
+      delete process.env.ANTHROPIC_BASE_URL
+      delete process.env.AGENT_KERNEL_ENV_SOURCE_ANTHROPIC_BASE_URL
+    }
+  })
+
+  it('requires an Anthropic base URL instead of falling back to localhost', () => {
+    expect(() => requireAnthropicBaseUrl({ defaults: {} })).toThrow(/missing Anthropic base URL/)
   })
 
   it('does not let manual models override auto-discovered model sources', () => {
@@ -158,6 +216,59 @@ describe('loadRuntimeConfig', () => {
     expect(cfg.manualModels).toEqual([{ providerId: 'anthropic', id: 'claude-haiku-4-6' }])
   })
 
+  it('loads manual providers and binds manual models without exposing keys in ModelInfo', () => {
+    const manualPath = join(dir, 'models.json')
+    writeFileSync(
+      manualPath,
+      JSON.stringify({
+        defaultModel: 'local-openai:gpt-local',
+        providers: [
+          {
+            id: 'local-openai',
+            label: 'Local OpenAI',
+            wire: 'openai',
+            baseUrl: 'http://localhost:8000/v1',
+            apiKey: 'test-redacted-api-key',
+          },
+        ],
+        models: [
+          { providerId: 'local-openai', id: 'gpt-local', label: 'GPT Local', contextWindow: 123456 },
+        ],
+      }),
+    )
+
+    const cfg = loadRuntimeConfig({
+      claudeSettingsPath: join(dir, 'missing-claude.json'),
+      codexConfigPath: join(dir, 'missing-codex.toml'),
+      manualModelsPath: manualPath,
+    })
+
+    expect(cfg.providers).toEqual([
+      expect.objectContaining({
+        id: 'local-openai',
+        label: 'Local OpenAI',
+        wire: 'openai',
+        source: 'manual',
+        baseUrl: 'http://localhost:8000/v1',
+        apiKey: 'test-redacted-api-key',
+      }),
+    ])
+    expect(cfg.models).toEqual([
+      expect.objectContaining({
+        id: 'gpt-local',
+        ref: 'local-openai:gpt-local',
+        label: 'GPT Local',
+        provider: 'Local OpenAI',
+        providerId: 'local-openai',
+        source: 'manual',
+        contextWindow: 123456,
+      }),
+    ])
+    expect(cfg.defaultModel).toBe('local-openai:gpt-local')
+    expect(cfg.manualDefaultModel).toBe('local-openai:gpt-local')
+    expect(JSON.stringify(cfg.models)).not.toContain('test-redacted-api-key')
+  })
+
   it('drops providers whose env key is unset (so nothing loud fails when TK_API_KEY is missing)', () => {
     const codexPath = join(dir, 'codex.toml')
     writeFileSync(
@@ -178,6 +289,32 @@ describe('loadRuntimeConfig', () => {
     })
     expect(cfg.providers).toEqual([])
     expect(cfg.models).toEqual([])
+  })
+
+  it('resolves codex provider keys from auth.json when the env key is not exported', () => {
+    const codexPath = join(dir, 'codex.toml')
+    const authPath = join(dir, 'auth.json')
+    writeFileSync(
+      codexPath,
+      [
+        'model = "gpt-5.5"',
+        'model_provider = "newapi"',
+        '[model_providers.newapi]',
+        'name = "napi"',
+        'base_url = "https://api.example.test/v1"',
+        'env_key = "AK_TEST_AUTH_ONLY_KEY"',
+      ].join('\n'),
+    )
+    writeFileSync(authPath, JSON.stringify({ OPENAI_API_KEY: 'auth-openai-key' }))
+
+    const cfg = loadRuntimeConfig({
+      claudeSettingsPath: join(dir, 'missing.json'),
+      codexConfigPath: codexPath,
+      codexAuthPath: authPath,
+    })
+
+    expect(cfg.models.map((m) => m.id)).toEqual(['gpt-5.5'])
+    expect(cfg.providers[0]?.apiKey).toBe('auth-openai-key')
   })
 
   it('returns empty when both files are missing', () => {

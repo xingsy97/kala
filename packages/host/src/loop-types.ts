@@ -95,6 +95,7 @@ export type ToolDispatcher = {
 
 export type ModelResolver = {
   get(sessionId: string): string | undefined
+  contextWindow?(sessionId: string): number | undefined
 }
 
 export type HostLoopDeps = {
@@ -110,8 +111,10 @@ export type HostLoopDeps = {
 }
 
 export type LoopHandle = {
-  dispatch(sessionId: string, event: AgentEvent): Promise<void>
+  dispatch(sessionId: string, event: AgentEvent, options?: DispatchOptions): Promise<void>
   compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'): Promise<void>
+  hasActiveLlmCall(sessionId: string): boolean
+  recoverInterruptedLlm(sessionId: string): Promise<boolean>
   /**
    * Abort the in-flight LLM call for a session, if any. Any streamed text
    * so far becomes the final assistant message with a `[cancelled]` suffix,
@@ -119,6 +122,10 @@ export type LoopHandle = {
    * dangling call. No-op when nothing is streaming.
    */
   cancelStream(sessionId: string): void
+}
+
+export type DispatchOptions = {
+  model?: string
 }
 
 /**
@@ -129,6 +136,7 @@ export type LoopHandle = {
 export type LoopRuntime = {
   handle: LoopHandle
   loopGuard: Map<string, PostCompactionLoopGuard>
+  model?: string
 }
 
 export type PostCompactionLoopGuard = {

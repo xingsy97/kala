@@ -145,7 +145,16 @@ export function refreshSkillToolInConfig(
   const nextSkillTool = skillToolSchema(skills)
   const hasSkill = config.tools.some((tool) => tool.name === SKILL_TOOL_NAME)
   if (!hasSkill) return config
-  const tools = config.tools.map((tool) => tool.name === SKILL_TOOL_NAME ? nextSkillTool : tool)
+  const tools = config.tools.map((tool) => tool.name === SKILL_TOOL_NAME
+    ? {
+        ...nextSkillTool,
+        toolsetId: tool.toolsetId,
+        toolsetVersion: tool.toolsetVersion,
+        risk: tool.risk,
+        executionKind: tool.executionKind,
+        executionHandler: tool.executionHandler,
+      }
+    : tool)
   return { ...config, tools }
 }
 

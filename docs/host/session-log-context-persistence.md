@@ -722,15 +722,17 @@ type AgentEvent =
   | { kind: 'tool_result'; callId: string; ok: boolean; content: string }
   | { kind: 'cancel' }
   | { kind: 'clear' }
-  | { kind: 'compact_replaced'; summary: string; replacedCount: number; preserveFrom: number; tokensBefore: number; tokensAfter: number; trigger: 'manual' | 'auto' | 'preflight' }
-  | { kind: 'compact_skipped'; reason: string }
-  | { kind: 'compact_rejected'; reason: string }
+  | { kind: 'messages_replaced'; reason: 'compaction' | 'manual_rewrite' | 'recovery'; replaceRange: { start: number; end: number }; replacementMessages: Message[]; artifactRef?: ArtifactRef }
   | { kind: 'approval_mode_changed'; mode: ApprovalMode }
   | { kind: 'cwd_changed'; cwd: string }
 ```
 
 These events are observed facts. They should be enough to fold state. Effects
 are not needed to fold state.
+
+Compaction attempts that do not change reducer state, such as skipped or
+rejected attempts, should be written as `runtime_metadata` entries rather than
+`AgentEvent` values.
 
 Large `tool_result.content` remains a real event fact. If tool output size is a
 problem, solve it with a tool-result content policy, not by hiding it inside

@@ -29,7 +29,6 @@ const initialState: AgentState = {
     cacheReadTokens: 0,
   },
   cursor: 0,
-  contextPressureLevel: 'none',
   approvalMode: 'auto',
 }
 
@@ -126,13 +125,10 @@ describe('enhancement artifact export', () => {
       path: logPath,
       seq: 4,
       event: {
-        kind: 'compact_replaced',
-        trigger: 'auto',
-        preserveFrom: 2,
-        summary: 'kept relevant work',
-        replacedCount: 3,
-        tokensBefore: 2000,
-        tokensAfter: 400,
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 2 },
+        replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'kept relevant work' }] }],
       },
       effects: [],
     })
@@ -181,10 +177,8 @@ describe('enhancement artifact export', () => {
     })
     expect(result.segments.topology.compactions[0]).toMatchObject({
       eventSeq: 4,
-      trigger: 'auto',
-      replacedCount: 3,
-      tokensBefore: 2000,
-      tokensAfter: 400,
+      replaceRange: { start: 1, end: 2 },
+      replacementMessageCount: 1,
     })
     expect(result.segments.topology.subAgents[0]).toMatchObject({
       parentCallId: 'agent-1',
