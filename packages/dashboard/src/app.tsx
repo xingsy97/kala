@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Moon, PanelRight, PanelRightClose, Sun } from 'lucide-react'
+import { FolderOpen, Moon, PanelRight, PanelRightClose, Sun } from 'lucide-react'
 
 import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
 
 import { Button } from './components/ui/button.js'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './components/ui/dialog.js'
+import { Input } from './components/ui/input.js'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -12,6 +22,7 @@ import {
 import { ScrollArea } from './components/ui/scroll-area.js'
 import { ActivityBar, type CompactStatus } from './features/chat/ActivityBar.js'
 import { ApprovalsPanel } from './features/chat/ApprovalsPanel.js'
+import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
 import { TodoDock } from './features/chat/TodoDock.js'
@@ -27,7 +38,8 @@ import {
   useControlPlane,
   useSession,
 } from './session.js'
-import { visibleMessages } from './transcript.js'
+import { backgroundTerminalTasks } from './background-terminal.js'
+import { visibleMessages, visibleTranscript } from './transcript.js'
 
 type Theme = 'dark' | 'light'
 
@@ -102,6 +114,8 @@ export function App(): JSX.Element {
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string } | null
   >(null)
+  const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
+  const [cwdDraft, setCwdDraft] = useState('')
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
@@ -276,6 +290,7 @@ export function App(): JSX.Element {
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
   )
+  const currentCwd = session.state?.cwd ?? currentSession?.currentCwd ?? ''
   const firstMsg = currentSession?.firstUserMessage
   const sessionLabel = firstMsg
     ? firstMsg.length > 40
@@ -287,6 +302,12 @@ export function App(): JSX.Element {
     session.timeline,
     session.streamingText,
   )
+  const chatItems = visibleTranscript(
+    session.state?.messages ?? [],
+    session.timeline,
+    session.streamingText,
+  )
+  const backgroundTasks = backgroundTerminalTasks(session.timeline)
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
@@ -297,6 +318,24 @@ export function App(): JSX.Element {
       (e) => e.workspaceId === currentSession.workspaceId,
     )
   }, [currentSession?.workspaceId, control.executors])
+
+  const openCwdDialog = (): void => {
+    setCwdDraft(currentCwd)
+    setCwdDialogOpen(true)
+  }
+
+  const submitCwd = (): void => {
+    const cwd = cwdDraft.trim()
+    if (!cwd || !session.socket) return
+    session.socket.emit('client:set_cwd', {
+      sessionId: config.sessionId,
+      cwd,
+    })
+    setCwdDialogOpen(false)
+    if (!config.explicit) {
+      setConfig((prev) => ({ ...prev, explicit: true }))
+    }
+  }
 
   return (
     <div className="h-screen w-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
@@ -325,163 +364,143 @@ export function App(): JSX.Element {
           </>
         ) : null}
         <ResizablePanel
-          defaultSize={wideLayout ? (inspectorOpen ? 64 : 86) : 100}
-          minSize={wideLayout ? 52 : 100}
-          data-testid="main-panel"
+          defaultSize={wideLayout ? 86 : 100}
+          minSize={wideLayout ? 82 : 100}
+          data-testid="workbench-panel"
         >
-          <div className="h-full flex flex-col min-w-0 min-h-0">
-            <SessionToolbar
+          <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
+            <WorkbenchToolbar
               sessionLabel={sessionLabel}
+              cwd={currentCwd}
+              onChangeCwd={openCwdDialog}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
               inspectorAvailable={wideLayout}
               theme={theme}
               onToggleTheme={toggleTheme}
             />
-            {session.parentSessionId ? (
-              <LineageBar
-                parentSessionId={session.parentSessionId}
-                parentCursor={session.parentCursor}
-                onGoParent={() =>
-                  setConfig((prev) => ({
-                    ...prev,
-                    sessionId: session.parentSessionId ?? prev.sessionId,
-                  }))
-                }
-              />
-            ) : null}
-            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-              <ScrollArea className="flex-1 min-h-0" data-testid="chat-panel">
-                <ChatPanel
-                  messages={chatMessages}
-                  highlightIndex={highlightIndex}
-                />
-              </ScrollArea>
-              <ApprovalsPanel
-                approvals={session.pendingApprovals}
-                onDecision={(callId, decision) => {
-                  if (!session.socket) return
-                  respondApproval(
-                    session.socket,
-                    config.sessionId,
-                    callId,
-                    decision,
-                  )
-                  session.dismissApproval(callId)
-                }}
-              />
-              <TodoDock todos={session.state?.todos ?? []} />
-              <ActivityBar
-                state={session.state}
-                compactStatus={compactStatus}
-              />
-              {session.lastError ? (
-                <div
-                  className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
-                  data-testid="session-error"
-                >
-                  [{session.lastError.scope}] {session.lastError.message}
+            <ResizablePanelGroup direction="horizontal" autoSaveId="ak-workbench-cols-v1" className="min-h-0 flex-1">
+              <ResizablePanel
+                defaultSize={wideLayout ? (inspectorOpen ? 74 : 100) : 100}
+                minSize={wideLayout ? 70 : 100}
+                data-testid="main-panel"
+              >
+                <div className="h-full flex flex-col min-w-0 min-h-0">
+                  {session.parentSessionId ? (
+                    <LineageBar
+                      parentSessionId={session.parentSessionId}
+                      parentCursor={session.parentCursor}
+                      onGoParent={() =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          sessionId: session.parentSessionId ?? prev.sessionId,
+                        }))
+                      }
+                    />
+                  ) : null}
+                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+                    <ScrollArea className="flex-1 min-h-0" data-testid="chat-panel">
+                      <ChatPanel items={chatItems} highlightIndex={highlightIndex} />
+                    </ScrollArea>
+                    <ApprovalsPanel
+                      approvals={session.pendingApprovals}
+                      onDecision={(callId, decision) => {
+                        if (!session.socket) return
+                        respondApproval(session.socket, config.sessionId, callId, decision)
+                        session.dismissApproval(callId)
+                      }}
+                    />
+                    <TodoDock todos={session.state?.todos ?? []} />
+                    <BackgroundTerminalPanel tasks={backgroundTasks} />
+                    <ActivityBar state={session.state} compactStatus={compactStatus} />
+                    {session.lastError ? (
+                      <div
+                        className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
+                        data-testid="session-error"
+                      >
+                        [{session.lastError.scope}] {session.lastError.message}
+                      </div>
+                    ) : null}
+                    {!sessionWorkspaceOnline ? (
+                      <div
+                        className="px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900"
+                        data-testid="workspace-offline-banner"
+                      >
+                        workspace <span className="font-mono">{currentSession?.workspaceName ?? currentSession?.workspaceId}</span> is offline — start its executor to send messages.
+                      </div>
+                    ) : null}
+                    <Composer
+                      disabled={session.status !== 'ready' || !sessionWorkspaceOnline}
+                      model={session.selectedModel ?? preferredModel}
+                      models={models}
+                      onModelChange={onModelChange}
+                      status={session.status}
+                      state={session.state}
+                      config={session.config}
+                      onCompact={() => {
+                        if (!hasCompactableContent(session.state)) {
+                          setCompactStatus({ kind: 'empty', message: 'send a message before compacting context' })
+                          scheduleCompactIdle(6000)
+                          return
+                        }
+                        if (session.state && !isResting(session.state.status)) {
+                          setCompactStatus({ kind: 'error', message: 'wait for the current turn to finish before compacting' })
+                          scheduleCompactIdle(6000)
+                          return
+                        }
+                        if (compactResetTimer.current !== null) {
+                          window.clearTimeout(compactResetTimer.current)
+                          compactResetTimer.current = null
+                        }
+                        compactStartSeq.current = session.timeline.at(-1)?.seq ?? 0
+                        setCompactStatus({ kind: 'running' })
+                        session.socket?.emit('client:compact', { sessionId: config.sessionId })
+                        if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
+                      }}
+                      onSubmit={(text) => {
+                        session.socket?.emit('client:user_message', { sessionId: config.sessionId, text })
+                        if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
+                      }}
+                    />
+                  </div>
                 </div>
+              </ResizablePanel>
+              {wideLayout && inspectorOpen ? (
+                <>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel defaultSize={26} minSize={22} maxSize={36} data-testid="inspector-panel">
+                    <div className="h-full border-l border-slate-200 dark:border-slate-800 min-h-0 overflow-hidden" data-testid="inspector-drawer">
+                      <InspectorPanel
+                        state={session.state}
+                        timeline={session.timeline}
+                        visibleMessagesCount={chatMessages.length}
+                        onFork={(cursor) => {
+                          session.socket?.emit('client:fork', { sourceSessionId: config.sessionId, cursor })
+                        }}
+                        onJumpToMessage={(index) => {
+                          setHighlightIndex(index)
+                          const el = document.getElementById(`msg-${index}`)
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          window.setTimeout(() => {
+                            setHighlightIndex((cur) => (cur === index ? null : cur))
+                          }, 1400)
+                        }}
+                      />
+                    </div>
+                  </ResizablePanel>
+                </>
               ) : null}
-              {!sessionWorkspaceOnline ? (
-                <div
-                  className="px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900"
-                  data-testid="workspace-offline-banner"
-                >
-                  workspace{' '}
-                  <span className="font-mono">
-                    {currentSession?.workspaceName ?? currentSession?.workspaceId}
-                  </span>{' '}
-                  is offline — start its executor to send messages.
-                </div>
-              ) : null}
-              <Composer
-                disabled={session.status !== 'ready' || !sessionWorkspaceOnline}
-                model={session.selectedModel ?? preferredModel}
-                models={models}
-                onModelChange={onModelChange}
-                status={session.status}
-                compacting={compactStatus.kind === 'running'}
-                onCompact={() => {
-                  if (!hasCompactableContent(session.state)) {
-                    setCompactStatus({
-                      kind: 'empty',
-                      message: 'send a message before compacting context',
-                    })
-                    scheduleCompactIdle(6000)
-                    return
-                  }
-                  if (session.state && !isResting(session.state.status)) {
-                    setCompactStatus({
-                      kind: 'error',
-                      message: 'wait for the current turn to finish before compacting',
-                    })
-                    scheduleCompactIdle(6000)
-                    return
-                  }
-                  if (compactResetTimer.current !== null) {
-                    window.clearTimeout(compactResetTimer.current)
-                    compactResetTimer.current = null
-                  }
-                  compactStartSeq.current = session.timeline.at(-1)?.seq ?? 0
-                  setCompactStatus({ kind: 'running' })
-                  session.socket?.emit('client:compact', {
-                    sessionId: config.sessionId,
-                  })
-                  if (!config.explicit) {
-                    setConfig((prev) => ({ ...prev, explicit: true }))
-                  }
-                }}
-                onSubmit={(text) => {
-                  session.socket?.emit('client:user_message', {
-                    sessionId: config.sessionId,
-                    text,
-                  })
-                  if (!config.explicit) {
-                    setConfig((prev) => ({ ...prev, explicit: true }))
-                  }
-                }}
-              />
-            </div>
+            </ResizablePanelGroup>
           </div>
         </ResizablePanel>
-        {wideLayout && inspectorOpen ? (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              defaultSize={22}
-              minSize={18}
-              maxSize={30}
-              data-testid="inspector-panel"
-            >
-              <div
-                className="h-full border-l border-slate-200 dark:border-slate-800 min-h-0 overflow-hidden"
-                data-testid="inspector-drawer"
-              >
-                <InspectorPanel
-                  state={session.state}
-                  timeline={session.timeline}
-                  visibleMessagesCount={chatMessages.length}
-                  onFork={(cursor) => {
-                    session.socket?.emit('client:fork', {
-                      sourceSessionId: config.sessionId,
-                      cursor,
-                    })
-                  }}
-                  onJumpToMessage={(index) => {
-                    setHighlightIndex(index)
-                    const el = document.getElementById(`msg-${index}`)
-                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                    window.setTimeout(() => {
-                      setHighlightIndex((cur) => (cur === index ? null : cur))
-                    }, 1400)
-                  }}
-                />
-              </div>
-            </ResizablePanel>
-          </>
-        ) : null}
       </ResizablePanelGroup>
+      <CwdDialog
+        open={cwdDialogOpen}
+        value={cwdDraft}
+        onValueChange={setCwdDraft}
+        onSubmit={submitCwd}
+        onOpenChange={setCwdDialogOpen}
+      />
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
         workspaces={control.executors}
@@ -515,8 +534,10 @@ function readInitialConfig(): Config {
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
-function SessionToolbar({
+function WorkbenchToolbar({
   sessionLabel,
+  cwd,
+  onChangeCwd,
   onToggleInspector,
   inspectorOpen,
   inspectorAvailable,
@@ -524,6 +545,8 @@ function SessionToolbar({
   onToggleTheme,
 }: {
   sessionLabel: string
+  cwd: string
+  onChangeCwd(): void
   onToggleInspector(): void
   inspectorOpen: boolean
   inspectorAvailable: boolean
@@ -532,16 +555,31 @@ function SessionToolbar({
 }): JSX.Element {
   return (
     <div
-      className="px-3 py-2 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2 text-sm min-w-0"
-      data-testid="session-toolbar"
+      className="h-10 flex-none px-3 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950 flex items-center gap-2 text-sm min-w-0"
+      data-testid="workbench-toolbar"
     >
       <span
-        className="truncate font-medium min-w-0 flex-1"
+        className="truncate font-medium min-w-0"
         title={sessionLabel}
         data-testid="session-label"
       >
         {sessionLabel}
       </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onChangeCwd}
+        title={cwd ? `change session cwd: ${cwd}` : 'set session cwd'}
+        data-testid="cwd-button"
+        className="min-w-0 max-w-[45%] justify-start gap-1.5 px-2 text-xs text-slate-600 dark:text-slate-300"
+      >
+        <FolderOpen className="h-3.5 w-3.5 flex-none" />
+        <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
+          {cwd || 'cwd unset'}
+        </span>
+      </Button>
+      <span className="min-w-0 flex-1" />
       <Button
         variant="ghost"
         size="icon"
@@ -573,6 +611,56 @@ function SessionToolbar({
         </Button>
       ) : null}
     </div>
+  )
+}
+
+function CwdDialog({
+  open,
+  value,
+  onValueChange,
+  onSubmit,
+  onOpenChange,
+}: {
+  open: boolean
+  value: string
+  onValueChange(value: string): void
+  onSubmit(): void
+  onOpenChange(open: boolean): void
+}): JSX.Element {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Change session cwd</DialogTitle>
+          <DialogDescription>
+            Tool calls for this session will run from this directory after the host accepts it.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            onSubmit()
+          }}
+        >
+          <Input
+            value={value}
+            onChange={(e) => onValueChange(e.target.value)}
+            placeholder="/tmp/project"
+            data-testid="cwd-input"
+            autoFocus
+          />
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button type="submit" data-testid="cwd-save-button" disabled={value.trim().length === 0}>
+              Save cwd
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 

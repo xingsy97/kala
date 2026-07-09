@@ -33,7 +33,7 @@ import { openaiAdapter } from '../src/llm/openai.js'
 import { routerAdapter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
 import { builtinTools } from '../src/builtin-tools.js'
-import { loadRuntimeConfig, type ProviderSpec } from '../src/runtime-config.js'
+import { knownContextWindow, loadRuntimeConfig, modelInfo, type ProviderSpec } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
 
 async function main(): Promise<void> {
@@ -54,6 +54,9 @@ async function main(): Promise<void> {
     defaultConfig: {
       tools: [...builtinTools],
       systemPrompt: 'You are a coding agent running via agent-kernel.',
+      ...(knownContextWindow(defaultModel)
+        ? { contextLimit: knownContextWindow(defaultModel) }
+        : {}),
     },
     models,
     defaultModel,
@@ -98,7 +101,7 @@ function buildAdapters(
   for (const p of providers) {
     const perModelAdapters = buildProviderAdapters(p)
     for (const [modelId, adapter] of perModelAdapters) {
-      models.push({ id: modelId, label: modelId, provider: p.label })
+      models.push(modelInfo(modelId, p.label))
       byPrefix.push({ prefix: modelId, adapter })
       if (!primary) primary = adapter
     }
@@ -168,7 +171,7 @@ function legacyEnvAdapter(models: ModelInfo[]): LLMAdapter {
   const openaiKey = process.env.OPENAI_API_KEY
   if (provider === 'openai' && openaiKey) {
     const model = process.env.HOST_MODEL ?? 'gpt-4'
-    models.push({ id: model, label: model, provider: 'openai (env)' })
+    models.push(modelInfo(model, 'openai (env)'))
     return openaiAdapter({
       apiKey: openaiKey,
       model,
@@ -179,7 +182,7 @@ function legacyEnvAdapter(models: ModelInfo[]): LLMAdapter {
   }
   if (anthropicKey) {
     const model = process.env.HOST_MODEL ?? 'claude-opus-4-7'
-    models.push({ id: model, label: model, provider: 'anthropic (env)' })
+    models.push(modelInfo(model, 'anthropic (env)'))
     return anthropicAdapter({
       apiKey: anthropicKey,
       model,

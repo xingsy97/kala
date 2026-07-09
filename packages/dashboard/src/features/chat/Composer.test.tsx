@@ -13,6 +13,8 @@ function renderComposer(props?: {
       models={[]}
       onModelChange={() => {}}
       status="ready"
+      state={null}
+      config={null}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
     />,
@@ -27,6 +29,8 @@ describe('Composer', () => {
         models={[]}
         onModelChange={() => {}}
         status="ready"
+        state={null}
+        config={null}
         onSubmit={() => {}}
         onCompact={() => {}}
       />,
@@ -66,30 +70,9 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
   })
 
-  it('exposes a compact button for manual context compaction', () => {
-    const onCompact = vi.fn()
-    renderComposer({ onCompact })
+  it('does not render a separate compact button', () => {
+    renderComposer()
 
-    fireEvent.click(screen.getByTestId('composer-compact'))
-
-    expect(onCompact).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows compact progress on the compact button', () => {
-    render(
-      <Composer
-        model=""
-        models={[]}
-        onModelChange={() => {}}
-        status="ready"
-        compacting
-        onSubmit={() => {}}
-        onCompact={() => {}}
-      />,
-    )
-
-    const compact = screen.getByTestId('composer-compact')
-    expect(compact.getAttribute('aria-label')).toBe('compacting context')
-    expect(compact).toHaveProperty('disabled', true)
+    expect(screen.queryByTestId('composer-compact')).toBeNull()
   })
 })

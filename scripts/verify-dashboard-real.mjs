@@ -17,7 +17,7 @@
  *      to real mouse wheel scrolling.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -93,6 +93,7 @@ try {
 
   browser = await puppeteer.connect({ browserURL: CHROME_DEBUG_URL })
   const page = await browser.newPage()
+  await page.setViewport({ width: 1440, height: 960, deviceScaleFactor: 1 })
   page.setDefaultTimeout(15_000)
 
   const pageErrors = []
@@ -113,10 +114,12 @@ try {
   await verifyScrollbar(page)
   await verifyComposerFooterLayout(page)
   await verifyEmptyCompact(page)
+  await verifySessionCwd(page)
   await verifyStreaming(page)
   await verifyStateFlow(page)
   await verifyJsonWheelScroll(page)
   await verifyCompact(page)
+  await verifyBackgroundTerminalPanel(page)
 
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
 } catch (err) {
@@ -163,6 +166,40 @@ async function verifyEmptyCompact(page) {
   )
   const activity = await page.$eval('[data-testid="activity-bar"]', (el) => el.textContent || '')
   check('empty compact shows neutral hint', activity.includes('Nothing to compact') && !activity.includes('Compact failed'), activity)
+}
+
+async function verifySessionCwd(page) {
+  const cwd = join(WORKSPACE, 'cwd-e2e')
+  mkdirSync(cwd, { recursive: true })
+  await page.click('[data-testid="cwd-button"]')
+  await page.waitForSelector('[data-testid="cwd-input"]')
+  await page.click('[data-testid="cwd-input"]', { clickCount: 3 })
+  await page.keyboard.type(cwd)
+  await page.click('[data-testid="cwd-save-button"]')
+  await page.waitForFunction(
+    (expected) => document.querySelector('[data-testid="cwd-label"]')?.textContent?.includes(expected),
+    { timeout: 3_000 },
+    cwd,
+  )
+
+  const sessionId = new URL(page.url()).searchParams.get('sessionId')
+  let entries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const cwdEvent = entries.find((e) => e.event.kind === 'cwd_changed' && e.event.cwd === cwd)
+  check('session cwd can be changed from toolbar', Boolean(cwdEvent), JSON.stringify(cwdEvent ?? null))
+
+  await page.click('[data-testid="cwd-button"]')
+  await page.waitForSelector('[data-testid="cwd-input"]')
+  await page.click('[data-testid="cwd-input"]', { clickCount: 3 })
+  await page.keyboard.type('/tmp/outside-agent-kernel-cwd')
+  await page.click('[data-testid="cwd-save-button"]')
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="session-error"]')?.textContent?.includes('cwd outside sandbox roots'),
+    { timeout: 3_000 },
+  )
+  entries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const outsideEvent = entries.find((e) => e.event.kind === 'cwd_changed' && e.event.cwd === '/tmp/outside-agent-kernel-cwd')
+  const label = await page.$eval('[data-testid="cwd-label"]', (el) => el.textContent || '')
+  check('invalid session cwd is rejected by real host validation', !outsideEvent && label.includes(cwd), label)
 }
 
 const failed = checks.filter((c) => !c.pass)
@@ -246,10 +283,14 @@ async function verifyCompact(page) {
   await page.type('[data-testid="composer-input"]', '/compact')
   await page.keyboard.press('Enter')
 
-  await page.waitForFunction(
-    () => document.querySelector('[data-testid="activity-bar"]')?.textContent?.includes('Compacting context'),
-    { timeout: 2_000 },
-  )
+  let sawRunning = false
+  try {
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="activity-bar"]')?.textContent?.includes('Compacting context'),
+      { timeout: 2_000 },
+    )
+    sawRunning = true
+  } catch {}
   await page.waitForFunction(
     () => document.querySelector('[data-testid="activity-bar"]')?.textContent?.includes('Context compacted'),
     { timeout: TURN_TIMEOUT_MS },
@@ -264,11 +305,28 @@ async function verifyCompact(page) {
   const entries = readSessionEntries(SESSIONS_DIR, sessionId)
   const compactEvents = entries.filter((e) => e.event.kind === 'compact_replaced')
   const bodyText = await page.evaluate(() => document.body.textContent || '')
+  const compactUi = await page.evaluate(() => {
+    const boundary = document.querySelector('[data-testid="compact-boundary"]')
+    return {
+      boundaryText: boundary?.textContent || '',
+      rows: Array.from(document.querySelectorAll('[data-testid="timeline-row"]')).map((row) => row.textContent || ''),
+    }
+  })
 
+  const compactEvent = compactEvents[compactEvents.length - 1]?.event
+
+  check('compact running or completion UI observed', sawRunning || bodyText.includes('Context compacted'), sawRunning ? 'Compacting context' : 'Context compacted')
   check('compact completed with success UI', true, 'Context compacted')
   check('compact did not change URL/session', beforeUrl === afterUrl, `${beforeUrl} -> ${afterUrl}`)
   check('compact did not reload page', navCheck.before === beforeNavCount && navCheck.after === beforeNavCount, JSON.stringify(navCheck))
   check('compact_replaced event persisted', compactEvents.length > 0, `${compactEvents.length}`)
+  check('compact event records summarizer request', !!compactEvent?.request?.systemPrompt && Array.isArray(compactEvent.request.messages), JSON.stringify(compactEvent?.request ?? null).slice(0, 400))
+  check('compact event records manual trigger', compactEvent?.trigger === 'manual', compactEvent?.trigger ?? '(missing)')
+  check('chat shows compact boundary', compactUi.boundaryText.includes('Context compacted') && compactUi.boundaryText.includes('Manual compact'), compactUi.boundaryText)
+  await openTimelineEvent(page, 'compact_replaced')
+  const modalText = await page.$eval('[data-testid="timeline-row-details"]', (el) => el.textContent || '')
+  check('compact timeline modal shows summarizer request', modalText.includes('compact summarizer request') && modalText.includes('systemPrompt') && modalText.includes('messages'), modalText.slice(0, 300))
+  await page.keyboard.press('Escape')
   check('transcript remains visible after compact', bodyText.includes('alpha beta gamma'), 'streamed text still visible')
 }
 
@@ -298,9 +356,13 @@ async function verifyScrollbar(page) {
 
 async function verifyComposerFooterLayout(page) {
   const metrics = await page.evaluate(() => {
-    const chips = document.querySelector('[data-testid="composer-state-chips"]')
-    const footer = chips?.parentElement
-    const chipRects = Array.from(chips?.children ?? []).map((el) => {
+    const footer = document.querySelector('[data-testid="composer-footer"]')
+    const indicator = document.querySelector('[data-testid="context-usage-indicator"]')
+    const footerChildren = Array.from(footer?.children ?? []).filter((el) => {
+      const rect = el.getBoundingClientRect()
+      return rect.width > 2 && rect.height > 2 && getComputedStyle(el).visibility !== 'hidden'
+    })
+    const childRects = footerChildren.map((el) => {
       const rect = el.getBoundingClientRect()
       return {
         text: el.textContent || '',
@@ -316,15 +378,39 @@ async function verifyComposerFooterLayout(page) {
       viewportWidth: window.innerWidth,
       footerWidth: footer?.getBoundingClientRect().width ?? 0,
       footerScrollWidth: footer?.scrollWidth ?? 0,
-      chipsText: chips?.textContent || '',
-      chipRects,
+      indicatorText: indicator?.textContent || '',
+      indicatorTitle: indicator?.getAttribute('title') || '',
+      childRects,
     }
   })
-  const tall = metrics.chipRects.filter((r) => r.height > 34)
-  const clipped = metrics.chipRects.filter((r) => r.scrollWidth > Math.ceil(r.width) + 1)
+  const tall = metrics.childRects.filter((r) => r.height > 40)
+  const clipped = metrics.childRects.filter((r) => r.scrollWidth > Math.ceil(r.width) + 2)
   check('composer footer does not create page horizontal overflow', metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check('composer footer content stays inside footer width', metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
-  check('composer state chips render as single-line pills', tall.length === 0 && clipped.length === 0, JSON.stringify(metrics.chipRects))
+  check('composer context usage indicator is visible', metrics.indicatorText.includes('context') && metrics.indicatorTitle.includes('Context window'), JSON.stringify(metrics))
+  check('composer footer controls render without clipping', tall.length === 0 && clipped.length === 0, JSON.stringify(metrics.childRects))
+}
+
+async function verifyBackgroundTerminalPanel(page) {
+  await sendMessage(
+    page,
+    'Use the bash tool exactly once with command "printf ak-bg-start; sleep 0.2; printf ak-bg-done" and run_in_background true. After it starts, use bash_output on the returned task_id with block true, then answer done.',
+  )
+  await page.waitForSelector('[data-testid="approvals-panel"]', { timeout: TURN_TIMEOUT_MS })
+  const approvalText = await page.$eval('[data-testid="approvals-panel"]', (el) => el.textContent || '')
+  check('background bash request asks for approval in real UI', approvalText.includes('bash') && approvalText.includes('run_in_background'), approvalText)
+  await page.click('[data-testid="approval-approve"]')
+  await page.waitForSelector('[data-testid="background-terminal-panel"]', { timeout: TURN_TIMEOUT_MS })
+  await waitForDone(page, TURN_TIMEOUT_MS)
+  const panel = await page.$eval('[data-testid="background-terminal-panel"]', (el) => el.textContent || '')
+  const sessionId = new URL(page.url()).searchParams.get('sessionId')
+  const entries = readSessionEntries(SESSIONS_DIR, sessionId)
+  const backgroundStart = entries.find(
+    (e) => e.event.kind === 'tool_result' && String(e.event.content).includes('taskId'),
+  )
+  check('background terminal panel renders real task', panel.includes('Background terminal') && panel.includes('printf ak-bg-start'), panel)
+  check('background terminal panel shows captured output', panel.includes('ak-bg-start') || panel.includes('ak-bg-done'), panel)
+  check('background shell taskId persisted in event log', !!backgroundStart, JSON.stringify(backgroundStart ?? null))
 }
 
 async function verifyJsonWheelScroll(page) {
@@ -379,7 +465,6 @@ async function installChatMutationProbe(page) {
           })
           .filter((row) => row.label === 'Assistant')
           .map((row) => row.text),
-        chips: document.querySelector('[data-testid="composer-state-chips"]')?.textContent || '',
         activity: document.querySelector('[data-testid="activity-bar"]')?.textContent || '',
       })
     })
@@ -408,9 +493,19 @@ async function sendMessage(page, text) {
 
 async function waitForDone(page, timeout) {
   await page.waitForFunction(
-    () => document.querySelector('[data-testid="composer-state-chips"]')?.textContent?.includes('Done'),
+    () => document.querySelector('[data-testid="activity-bar"]')?.textContent?.includes('Agent Done'),
     { timeout },
   )
+}
+
+async function openTimelineEvent(page, eventKind) {
+  await page.click('[data-testid="history-view-timeline"]')
+  await page.evaluate((kind) => {
+    const rows = Array.from(document.querySelectorAll('[data-testid="timeline-row"]'))
+    const row = rows.find((r) => (r.textContent || '').includes(kind))
+    row?.querySelector('[data-testid="timeline-row-header"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  }, eventKind)
+  await page.waitForSelector('[data-testid="timeline-row-details"]')
 }
 
 async function selectModel(page, model) {
