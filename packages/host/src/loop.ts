@@ -514,7 +514,10 @@ async function runAgentTool(
     ...(parent.workspaceId !== undefined ? { workspaceId: parent.workspaceId } : {}),
     ...(parent.workspaceName !== undefined ? { workspaceName: parent.workspaceName } : {}),
     ...(parent.state.cwd !== undefined ? { initialCwd: parent.state.cwd } : {}),
-    initialApprovalMode: parent.state.approvalMode,
+    // Sub-agents run headless: no dashboard is attached to the child session,
+    // so any RequestApprovalEffect would deadlock. Force allow_all regardless
+    // of the parent's mode. See docs/adr/0014-subagent-approval-mode.md.
+    initialApprovalMode: 'allow_all',
   })
   const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
   const priorModel = model ? deps.models?.get(child.sessionId) : undefined

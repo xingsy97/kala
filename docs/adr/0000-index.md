@@ -41,6 +41,7 @@ What follows from this decision — good and bad.
 | [0010](0010-fsm-dispatch-table.md) | FSM as a hand-rolled dispatch table, not XState | accepted |
 | [0011](0011-rename-host-and-core.md) | Rename `packages/core` → `packages/host`, `reducer.ts` → `core.ts` | accepted |
 | [0013](0013-dashboard-finder-layout.md) | Dashboard Finder-style layout + control-plane events | accepted |
+| [0014](0014-subagent-approval-mode.md) | Sub-agent sessions force `allow_all` approval mode | accepted |
 
 ## When to add an ADR
 

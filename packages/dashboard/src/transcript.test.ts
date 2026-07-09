@@ -51,15 +51,15 @@ describe('visibleMessages', () => {
       '',
     )
 
-    expect(visible.map((m) => m.role)).toEqual(['system', 'user', 'assistant'])
-    expect(visible[1]?.content[0]).toEqual({ type: 'text', text: 'hello' })
-    expect(visible[2]?.content[0]).toEqual({ type: 'text', text: 'hi' })
+    expect(visible.map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(visible[0]?.content[0]).toEqual({ type: 'text', text: 'hello' })
+    expect(visible[1]?.content[0]).toEqual({ type: 'text', text: 'hi' })
     const transcript = visibleTranscript(
       [system, { role: 'system', content: [{ type: 'text', text: 'hello -> hi' }] }],
       timeline,
       '',
     )
-    expect(transcript[3]).toMatchObject({
+    expect(transcript[2]).toMatchObject({
       kind: 'compact_boundary',
       seq: 3,
       trigger: 'unknown',
@@ -82,8 +82,8 @@ describe('visibleMessages', () => {
       'partial answer',
     )
 
-    expect(visible.map((m) => m.role)).toEqual(['system', 'user', 'assistant'])
-    expect(visible[2]?.content[0]).toEqual({ type: 'text', text: 'partial answer' })
+    expect(visible.map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(visible[1]?.content[0]).toEqual({ type: 'text', text: 'partial answer' })
   })
 
   it('uses timeline messages even before the first assistant response lands', () => {
@@ -100,7 +100,20 @@ describe('visibleMessages', () => {
       '',
     )
 
-    expect(visible.map((m) => m.role)).toEqual(['system', 'user'])
-    expect(visible[1]?.content[0]).toEqual({ type: 'text', text: 'first turn' })
+    expect(visible.map((m) => m.role)).toEqual(['user'])
+    expect(visible[0]?.content[0]).toEqual({ type: 'text', text: 'first turn' })
+  })
+
+  it('emits nothing when the only state message is the system prompt (no timeline, no stream)', () => {
+    const visible = visibleMessages([system], [], '')
+    expect(visible).toEqual([])
+    const transcript = visibleTranscript([system], [], '')
+    expect(transcript).toEqual([])
+  })
+
+  it('drops system messages from the tail-fallback dump', () => {
+    const user: Message = { role: 'user', content: [{ type: 'text', text: 'hi' }] }
+    const visible = visibleMessages([system, user], [], '')
+    expect(visible.map((m) => m.role)).toEqual(['user'])
   })
 })

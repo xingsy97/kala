@@ -22,8 +22,6 @@ export function visibleTranscript(
   streamingText: string,
 ): readonly TranscriptItem[] {
   const out: TranscriptItem[] = []
-  const first = stateMessages[0]
-  if (first?.role === 'system') out.push({ kind: 'message', message: first })
 
   for (const entry of timeline) {
     const event = entry.event
@@ -79,9 +77,10 @@ export function visibleTranscript(
     })
   }
 
-  return timeline.length > 0 || streamingText.length > 0
-    ? out
-    : stateMessages.map((message) => ({ kind: 'message', message }))
+  if (timeline.length > 0 || streamingText.length > 0) return out
+  return stateMessages
+    .filter((m) => m.role !== 'system')
+    .map((message) => ({ kind: 'message', message }))
 }
 
 export function visibleMessages(

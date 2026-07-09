@@ -56,7 +56,7 @@ Kernel / Host / Executor:
 - JSONL event log with header + snapshots + fork lineage; deterministic `fold` replay; crash-recovery synthetic events on load
 - Anthropic Messages API + OpenAI-compat (incl. Codex endpoints) adapters, both streaming SSE
 - Provider auto-import from `~/.codex/config.toml` and `~/.claude/settings.json`, merged with `~/.agent-kernel/config.json`
-- Approval modes `auto` / `ask` / `deny` / `allow_all` (with `AK_ALLOW_ALL_OK=1` host env-gate for `allow_all`); sub-agents inherit parent approval mode
+- Approval modes `auto` / `ask` / `deny` / `allow_all` (with `AK_ALLOW_ALL_OK=1` host env-gate for `allow_all`); sub-agents run headless with forced `allow_all` (see [ADR 0014](docs/adr/0014-subagent-approval-mode.md))
 - Context pressure levels (`ok` / `soft` / `hard`) with manual `/compact` slash command and auto-compact on hard pressure
 - Host-side `agent` builtin: child JSONL session under the same workspace, `maxAgentDepth` recursion guard
 - Executor tool set: `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash` (with `run_in_background` → `bash_output` / `kill_shell`), `todowrite`, `web_search` (built-in DuckDuckGo HTML endpoint — no paid API key)

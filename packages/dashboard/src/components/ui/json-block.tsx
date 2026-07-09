@@ -49,11 +49,11 @@ export function JsonBlock({
   return (
     <div
       className={cn(
-        'rounded border overflow-hidden bg-muted/40',
+        'rounded border border-border/50 overflow-hidden bg-muted/40',
         className,
       )}
     >
-      <div className="flex items-center gap-2 px-2 py-1 border-b text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-2 px-2 py-1 border-b border-border/50 text-[11px] text-muted-foreground">
         <span className="flex-1 truncate">{label ?? 'json'}</span>
         <button
           type="button"
