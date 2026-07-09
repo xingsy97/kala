@@ -121,6 +121,34 @@ export const builtinTools: readonly ToolSchema[] = [
       properties: {
         command: { type: 'string' },
         timeout_ms: { type: 'integer', minimum: 1 },
+        run_in_background: { type: 'boolean' },
+      },
+    },
+    requiresApproval: true,
+  },
+  {
+    name: 'bash_output',
+    description: 'Read output from a background bash task by task_id.',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id'],
+      properties: {
+        task_id: { type: 'string' },
+        offset: { type: 'integer', minimum: 0 },
+        block: { type: 'boolean' },
+        timeout_ms: { type: 'integer', minimum: 1 },
+      },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'kill_shell',
+    description: 'Stop a background bash task by task_id.',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id'],
+      properties: {
+        task_id: { type: 'string' },
       },
     },
     requiresApproval: true,
@@ -156,6 +184,20 @@ export const builtinTools: readonly ToolSchema[] = [
           },
         },
       },
+    },
+    requiresApproval: false,
+  },
+  {
+    name: 'agent',
+    description: 'Spawn a sub-agent to handle a focused sub-task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string' },
+        model: { type: 'string' },
+        tools: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['prompt'],
     },
     requiresApproval: false,
   },

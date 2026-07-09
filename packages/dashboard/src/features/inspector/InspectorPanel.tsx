@@ -44,7 +44,6 @@ export function InspectorPanel({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <StateHeader state={state} />
       <div className="flex-1 min-h-0">
         <ResizablePanelGroup
           direction="vertical"
@@ -99,42 +98,6 @@ export function InspectorPanel({
   )
 }
 
-function StateHeader({ state }: { state: AgentState | null }): JSX.Element {
-  if (!state) {
-    return (
-      <div className="p-3 border-b border-slate-200 dark:border-slate-800 text-sm text-slate-500 flex-none">
-        connecting…
-      </div>
-    )
-  }
-  return (
-    <div className="p-3 border-b border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-2 text-xs flex-none">
-      <Metric label="status" value={state.status} />
-      <Metric label="cursor" value={String(state.cursor)} />
-      <Metric label="pending" value={String(state.pendingCalls.length)} />
-      <Metric
-        label="tokens"
-        value={`${state.usage.inputTokens} in / ${state.usage.outputTokens} out`}
-      />
-    </div>
-  )
-}
-
-function Metric({
-  label,
-  value,
-}: {
-  label: string
-  value: string
-}): JSX.Element {
-  return (
-    <div>
-      <div className="text-slate-500 uppercase tracking-wide">{label}</div>
-      <div className="text-slate-800 dark:text-slate-100 font-mono">{value}</div>
-    </div>
-  )
-}
-
 function inboundOf(event: AgentEvent): { source: string; tone: string } {
   switch (event.kind) {
     case 'user_message':
@@ -156,6 +119,12 @@ function inboundOf(event: AgentEvent): { source: string; tone: string } {
       }
     case 'cancel':
       return { source: 'user', tone: 'text-amber-600 dark:text-amber-300' }
+    case 'compact_replaced':
+      return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
+    case 'approval_mode_changed':
+      return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
+    case 'cwd_changed':
+      return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
   }
 }
 

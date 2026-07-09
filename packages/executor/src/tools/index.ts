@@ -5,7 +5,10 @@ export { grepTool } from './grep.js'
 export { writeTool } from './write.js'
 export { editTool } from './edit.js'
 export { bashTool } from './bash.js'
+export { bashOutputTool } from './bash-output.js'
+export { killShellTool } from './kill-shell.js'
 export { todowriteTool } from './todowrite.js'
+export { agentToolSchema } from './agent.js'
 export { createToolRegistry, ToolError } from './registry.js'
 export type { Tool, ToolContext, ToolRunner } from './registry.js'
 
@@ -17,6 +20,8 @@ import { grepTool } from './grep.js'
 import { writeTool } from './write.js'
 import { editTool } from './edit.js'
 import { bashTool } from './bash.js'
+import { bashOutputTool } from './bash-output.js'
+import { killShellTool } from './kill-shell.js'
 import { todowriteTool } from './todowrite.js'
 
 export const allTools: readonly Tool[] = [
@@ -27,5 +32,7 @@ export const allTools: readonly Tool[] = [
   writeTool,
   editTool,
   bashTool,
+  bashOutputTool,
+  killShellTool,
   todowriteTool,
 ]

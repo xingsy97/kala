@@ -4,10 +4,12 @@ import { SandboxError } from '../sandbox.js'
 import type { Tool } from './registry.js'
 import { ToolError } from './registry.js'
 import {
+  optionalBoolean,
   optionalPositiveInt,
   optionalString,
   requireString,
 } from './schema.js'
+import { startBackgroundShell } from './background-shell.js'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_OUTPUT = 1_000_000
@@ -20,6 +22,7 @@ export const bashTool: Tool = {
       throw new ToolError('EINVAL', 'command is empty')
     }
     const cwdInput = optionalString(input, 'cwd')
+    const runInBackground = optionalBoolean(input, 'run_in_background') ?? false
     const timeoutMs =
       optionalPositiveInt(input, 'timeoutMs', 100) ?? DEFAULT_TIMEOUT_MS
 
@@ -38,6 +41,11 @@ export const bashTool: Tool = {
     // a subprocess whose only outcome would be an immediate SIGKILL.
     if (ctx.signal.aborted) {
       return `--- exit code: -1, duration: 0ms\n--- aborted before spawn`
+    }
+
+    if (runInBackground) {
+      const task = await startBackgroundShell({ command, cwd: resolvedCwd })
+      return JSON.stringify({ taskId: task.taskId, note: 'started' })
     }
 
     return await new Promise<string>((resolve) => {

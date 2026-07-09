@@ -31,7 +31,34 @@ export type ToolResultContent = {
   content: string
 }
 
-export type MessageContent = TextContent | ToolCallContent | ToolResultContent
+/**
+ * Image attached to a message. Two shapes are permitted so the JSONL log
+ * can stay readable when large images flow through: `file_ref` records a
+ * path (resolved at send time by the host), `base64` inlines the bytes
+ * (used when there is no filesystem context, e.g. pasted screenshots).
+ */
+export type ImageSource =
+  | {
+      kind: 'base64'
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+      data: string
+    }
+  | {
+      kind: 'file_ref'
+      path: string
+      mediaType?: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+    }
+
+export type ImageContent = {
+  type: 'image'
+  source: ImageSource
+}
+
+export type MessageContent =
+  | TextContent
+  | ToolCallContent
+  | ToolResultContent
+  | ImageContent
 
 export type Message = {
   role: Role
@@ -56,7 +83,22 @@ export type ToolSchema = {
 export type AgentConfig = {
   readonly tools: readonly ToolSchema[]
   readonly systemPrompt?: string
+  /**
+   * Model's total context window in tokens. When set, the reducer derives
+   * `state.contextPressureLevel` from `usage.inputTokens / contextLimit`.
+   * Undefined = pressure never trips.
+   */
+  readonly contextLimit?: number
+  /** Soft threshold ratio (default 0.75). UI banner appears at/above this. */
+  readonly softThreshold?: number
+  /** Hard threshold ratio (default 0.92). Host auto-fires compact at/above. */
+  readonly hardThreshold?: number
+  /** Maximum nested `agent` tool depth. Host default is 3. */
+  readonly maxAgentDepth?: number
 }
+
+export const DEFAULT_SOFT_THRESHOLD = 0.75
+export const DEFAULT_HARD_THRESHOLD = 0.92
 
 // ============================================================================
 // State
@@ -94,6 +136,25 @@ export type TodoItem = {
 
 export const TODOWRITE_TOOL_NAME = 'todowrite'
 
+export type ContextPressureLevel = 'none' | 'soft' | 'hard'
+
+/**
+ * Session-wide approval policy. Mid-turn changes take effect on the NEXT
+ * tool call the LLM emits — pending calls that already went through the
+ * approval branch keep their prior status until the user resolves them.
+ *
+ *   - 'auto' (default): honour `tool.requiresApproval`; safe tools dispatch,
+ *     unsafe tools ask.
+ *   - 'ask': every call needs approval, even `requiresApproval:false`.
+ *   - 'deny': every approval-requiring call is auto-rejected; safe tools
+ *     still dispatch. Useful for headless replays / demos.
+ *   - 'allow_all': bypass approval for every call, even `requiresApproval:
+ *     true`. Guard-railed at the host: config path only, never network.
+ */
+export type ApprovalMode = 'auto' | 'ask' | 'deny' | 'allow_all'
+
+export const DEFAULT_APPROVAL_MODE: ApprovalMode = 'auto'
+
 export type AgentState = {
   readonly sessionId: string
   readonly messages: readonly Message[]
@@ -102,6 +163,18 @@ export type AgentState = {
   readonly usage: UsageTotal
   readonly cursor: number // monotonic event counter, for replay positioning
   readonly todos: readonly TodoItem[]
+  readonly cwd?: string
+  /**
+   * Derived on every step from `usage.inputTokens / config.contextLimit`.
+   * `'none'` when contextLimit is unset or well below soft threshold. The
+   * host uses `'hard'` as the trigger for auto-compact.
+   */
+  readonly contextPressureLevel: ContextPressureLevel
+  /**
+   * Current approval policy. Defaults to `'auto'`; updated in place by
+   * the `approval_mode_changed` event.
+   */
+  readonly approvalMode: ApprovalMode
   readonly error?: string
 }
 
@@ -111,7 +184,8 @@ export type AgentState = {
 
 export type UserMessageEvent = {
   kind: 'user_message'
-  text: string
+  text?: string
+  content?: readonly MessageContent[]
 }
 
 export type UsageDelta = {
@@ -153,6 +227,36 @@ export type CancelEvent = {
   kind: 'cancel'
 }
 
+/**
+ * Replace state.messages with a single summary. Emitted either by the user
+ * (manual `/compact`) or by the host when `contextPressureLevel === 'hard'`.
+ * The reducer keeps the initial system prompt (index 0 if role === 'system')
+ * and replaces the rest with one `system` message carrying the summary.
+ * `usage.inputTokens` is reset to `tokensAfter`; `outputTokens`/`costUsd` are
+ * unchanged so cumulative spend stays accurate.
+ */
+export type CompactReplacedEvent = {
+  kind: 'compact_replaced'
+  summary: string
+  replacedCount: number
+  tokensBefore: number
+  tokensAfter: number
+}
+
+/**
+ * Mid-session approval policy change. State-only; produces no effects.
+ * Applies to any tool call emitted after this event.
+ */
+export type ApprovalModeChangedEvent = {
+  kind: 'approval_mode_changed'
+  mode: ApprovalMode
+}
+
+export type CwdChangedEvent = {
+  kind: 'cwd_changed'
+  cwd: string
+}
+
 export type AgentEvent =
   | UserMessageEvent
   | LlmResponseEvent
@@ -161,6 +265,9 @@ export type AgentEvent =
   | UserRejectEvent
   | ToolResultEvent
   | CancelEvent
+  | CompactReplacedEvent
+  | ApprovalModeChangedEvent
+  | CwdChangedEvent
 
 // ============================================================================
 // Effects (outputs from the reducer; host performs the actual IO)
@@ -177,6 +284,7 @@ export type CallToolEffect = {
   callId: string
   name: string
   input: Record<string, unknown>
+  cwd?: string
 }
 
 export type RequestApprovalEffect = {

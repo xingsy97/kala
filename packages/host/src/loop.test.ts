@@ -48,6 +48,13 @@ const READ = {
   requiresApproval: false,
 } as const
 
+const AGENT = {
+  name: 'agent',
+  description: 'spawn agent',
+  inputSchema: { type: 'object' },
+  requiresApproval: false,
+} as const
+
 describe('host loop', () => {
   let dir: string
   let store: SessionStore
@@ -291,6 +298,298 @@ describe('host loop', () => {
     // cancel from idle → transitions[idle].cancel = noop, so state stays
     // idle with cursor advanced by one.
     expect(rec.state.status).toBe('idle')
+  })
+
+  it('manual compact() summarizes and replaces messages', async () => {
+    // Pre-seed a session that has already run one turn so state.messages is
+    // non-trivial. Then a manual `/compact` should send those messages to
+    // the LLM with the summarizer system prompt, receive a text reply, and
+    // emit a compact_replaced event that shrinks the message list.
+    const llmCalls: Array<{ sys?: string; msgs: number }> = []
+    const llm: LLMAdapter = {
+      name: 'compact-mock',
+      async call(p) {
+        llmCalls.push({ sys: p.systemPrompt, msgs: p.messages.length })
+        // First call = turn's user_message → assistant text reply.
+        // Second call = summarizer → summary text.
+        if (llmCalls.length === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'ok' }],
+            },
+            usage: { inputTokens: 10, outputTokens: 2 },
+          }
+        }
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'SUMMARY-OF-CONVO' }],
+          },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    const beforeCount = store.get(sessionId)!.state.messages.length
+    expect(beforeCount).toBeGreaterThan(1)
+
+    await loop.compact(sessionId)
+
+    const rec = store.get(sessionId)!
+    // system prompt (1) + summary (1) = 2 messages.
+    expect(rec.state.messages).toHaveLength(2)
+    expect(rec.state.messages[0]!.role).toBe('system')
+    const last = rec.state.messages[1]!
+    expect(last.role).toBe('system')
+    expect(last.content[0]).toEqual({ type: 'text', text: 'SUMMARY-OF-CONVO' })
+    // Summarizer call carried the fixed prompt.
+    expect(llmCalls[1]!.sys).toMatch(/summarizer/i)
+    // usage.inputTokens is reset to the compacted-message estimate.
+    expect(rec.state.usage.inputTokens).toBeLessThan(10)
+  })
+
+  it('auto-fires compact when context pressure hits hard tier', async () => {
+    // Build a session whose contextLimit is tiny so a single assistant reply
+    // pushes inputTokens/contextLimit past the hard threshold. The loop's
+    // post-dispatch hook must observe the hard pressure and self-fire compact.
+    const tightConfig = createConfig({
+      tools: [],
+      systemPrompt: 'sys',
+      contextLimit: 100,
+      softThreshold: 0.5,
+      hardThreshold: 0.9,
+    })
+    const rec = await store.create({ config: tightConfig, sessionId: 'sess-hp' })
+    const sid = rec.sessionId
+
+    const llmCalls: Array<{ sys?: string }> = []
+    const llm: LLMAdapter = {
+      name: 'pressure-mock',
+      async call(p) {
+        llmCalls.push({ sys: p.systemPrompt })
+        // Turn 1: assistant text reply. Reports 95 input tokens = 95% of
+        // the 100-token limit → hard tier.
+        if (llmCalls.length === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'done' }],
+            },
+            usage: { inputTokens: 95, outputTokens: 5 },
+          }
+        }
+        // Turn 2 = the auto-compact's summarizer call.
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'auto-summary' }],
+          },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sid, { kind: 'user_message', text: 'x' })
+
+    // Two LLM calls: the turn itself, then the auto-compact summarizer.
+    expect(llmCalls).toHaveLength(2)
+    expect(llmCalls[1]!.sys).toMatch(/summarizer/i)
+    const after = store.get(sid)!
+    // After compact: system prompt + summary = 2 messages.
+    expect(after.state.messages).toHaveLength(2)
+    expect(after.state.messages[1]!.content[0]).toEqual({
+      type: 'text',
+      text: 'auto-summary',
+    })
+    // Pressure recomputed on the reduced input tokens → back to 'none'.
+    expect(after.state.contextPressureLevel).toBe('none')
+  })
+
+  it('pipes streaming text deltas through the broadcast', async () => {
+    // Adapter fake that yields three text chunks synchronously, then returns
+    // the assembled assistant message. Mirrors what the real anthropic /
+    // openai adapters do when `onTextDelta` is present.
+    const chunks = ['hel', 'lo ', 'world']
+    const llm: LLMAdapter = {
+      name: 'streaming-fake',
+      async call({ onTextDelta }) {
+        if (onTextDelta) for (const c of chunks) onTextDelta(c)
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: chunks.join('') }],
+          },
+          usage: { inputTokens: 1, outputTokens: 3 },
+        }
+      },
+    }
+    const deltas: string[] = []
+    const appendedKinds: string[] = []
+    const broadcast: LoopBroadcast = {
+      onEvent: (_sid, _seq, event) => {
+        appendedKinds.push(event.kind)
+      },
+      onApprovalRequired: () => {},
+      onError: () => {},
+      onUsageChanged: () => {},
+      onTokenDelta: (_sid, t) => {
+        deltas.push(t)
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+
+    expect(deltas).toEqual(chunks)
+    // Exactly one llm_response landed in the log — deltas are UI-only.
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const llmResponses = parsed.events.filter(
+      (e) => e.event.kind === 'llm_response',
+    )
+    expect(llmResponses).toHaveLength(1)
+    if (llmResponses[0]!.event.kind === 'llm_response') {
+      expect(llmResponses[0]!.event.message.content[0]).toEqual({
+        type: 'text',
+        text: 'hello world',
+      })
+    }
+    // Sanity: an event:appended fires for the user + the final response, but
+    // NOT one per delta.
+    expect(appendedKinds).toEqual(['user_message', 'llm_response'])
+    // ...state should have used deltas without extra usage records:
+    void state
+  })
+
+  it('cancelStream aborts an in-flight streaming LLM call', async () => {
+    // The adapter observes the AbortSignal and rejects with an AbortError,
+    // matching how fetch(signal) rejects. The loop must convert that into a
+    // finalised `llm_response` with a `[cancelled]` suffix so the FSM
+    // doesn't hang in `thinking`.
+    let seenSignal: AbortSignal | undefined
+    let listenerReady: (() => void) | undefined
+    const listenerReadyPromise = new Promise<void>((r) => {
+      listenerReady = r
+    })
+    const llm: LLMAdapter = {
+      name: 'abortable',
+      async call({ onTextDelta, signal }) {
+        seenSignal = signal
+        onTextDelta?.('partial ')
+        return await new Promise<LLMResponse>((_resolve, reject) => {
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              const err = new Error('aborted')
+              err.name = 'AbortError'
+              reject(err)
+            })
+          }
+          listenerReady!()
+        })
+      },
+    }
+    const broadcast: LoopBroadcast = {
+      onEvent: () => {},
+      onApprovalRequired: () => {},
+      onError: () => {},
+      onUsageChanged: () => {},
+      onTokenDelta: () => {},
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast })
+    const done = loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    await listenerReadyPromise
+    loop.cancelStream(sessionId)
+    await done
+
+    expect(seenSignal).toBeDefined()
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const last = parsed.events[parsed.events.length - 1]!
+    expect(last.event.kind).toBe('llm_response')
+    if (last.event.kind === 'llm_response') {
+      const text = last.event.message.content
+        .filter((c) => c.type === 'text')
+        .map((c) => (c as { type: 'text'; text: string }).text)
+        .join('')
+      expect(text).toMatch(/\[cancelled\]$/)
+      expect(text).toMatch(/^partial /)
+    }
+  })
+
+  it('handles agent tool calls inside the host and records a child session', async () => {
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-parent',
+      workspaceId: 'ws-agent',
+    })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'agent-1',
+              name: 'agent',
+              input: { prompt: 'answer the question' },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '42' }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'parent done' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          throw new Error('agent should not dispatch to executor')
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    const parentLog = await readSessionLog(parent.logPath)
+    const toolResult = parentLog.events.find(
+      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-1',
+    )
+    expect(toolResult?.event).toMatchObject({
+      kind: 'tool_result',
+      ok: true,
+      content: '42',
+    })
+
+    const children = store
+      .list()
+      .filter((r) => r.parentSessionId === parent.sessionId)
+    expect(children).toHaveLength(1)
+    expect(children[0]!.workspaceId).toBe('ws-agent')
+    const childLog = await readSessionLog(children[0]!.logPath)
+    expect(childLog.header.parentSessionId).toBe(parent.sessionId)
+    expect(children[0]!.state.status).toBe('done')
   })
 })
 

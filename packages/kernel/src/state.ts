@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentState, Message, ToolSchema } from './types.js'
+import { DEFAULT_APPROVAL_MODE } from './types.js'
 
 export function createInitialState(params: {
   sessionId: string
@@ -15,16 +16,34 @@ export function createInitialState(params: {
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
     cursor: 0,
     todos: [],
+    contextPressureLevel: 'none',
+    approvalMode: DEFAULT_APPROVAL_MODE,
   }
 }
 
 export function createConfig(params: {
   tools: readonly ToolSchema[]
   systemPrompt?: string
+  contextLimit?: number
+  softThreshold?: number
+  hardThreshold?: number
+  maxAgentDepth?: number
 }): AgentConfig {
   return {
     tools: params.tools,
     systemPrompt: params.systemPrompt,
+    ...(params.contextLimit !== undefined
+      ? { contextLimit: params.contextLimit }
+      : {}),
+    ...(params.softThreshold !== undefined
+      ? { softThreshold: params.softThreshold }
+      : {}),
+    ...(params.hardThreshold !== undefined
+      ? { hardThreshold: params.hardThreshold }
+      : {}),
+    ...(params.maxAgentDepth !== undefined
+      ? { maxAgentDepth: params.maxAgentDepth }
+      : {}),
   }
 }
 

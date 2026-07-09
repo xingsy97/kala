@@ -9,7 +9,14 @@
  *     explicit at the boundary
  */
 
-import type { Message, MessageContent, ToolSchema } from '@agent-kernel/kernel'
+import { readFile } from 'node:fs/promises'
+
+import type {
+  ImageContent,
+  Message,
+  MessageContent,
+  ToolSchema,
+} from '@agent-kernel/kernel'
 
 import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
 
@@ -26,6 +33,14 @@ const DEFAULT_MAX_TOKENS = 4096
 const DEFAULT_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 
+type AnthropicImageSource =
+  | {
+      type: 'base64'
+      media_type: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+      data: string
+    }
+  | { type: 'url'; url: string }
+
 type AnthropicBlock =
   | { type: 'text'; text: string }
   | {
@@ -40,6 +55,7 @@ type AnthropicBlock =
       content: string
       is_error?: boolean
     }
+  | { type: 'image'; source: AnthropicImageSource }
 
 type AnthropicMessage = {
   role: 'user' | 'assistant'
@@ -67,7 +83,18 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
     name: `anthropic:${model}`,
     async call(params: LLMCallParams): Promise<LLMResponse> {
       const effectiveModel = params.model ?? model
-      const body = buildRequestBody(params, effectiveModel, maxTokens)
+      const body = await buildRequestBody(params, effectiveModel, maxTokens)
+      if (params.onTextDelta) {
+        body.stream = true
+        return await callStreaming(
+          apiUrl,
+          opts.apiKey,
+          body,
+          fetchImpl,
+          params.signal,
+          params.onTextDelta,
+        )
+      }
       const res = await fetchImpl(apiUrl, {
         method: 'POST',
         headers: {
@@ -88,6 +115,152 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
   }
 }
 
+/**
+ * Anthropic Messages Streaming spec: SSE where each `event:` line names an
+ * event type and the following `data:` line is JSON. The events we care about:
+ *   - `content_block_start` with block.type === 'text' → starts a text block
+ *   - `content_block_delta` with delta.type === 'text_delta' → text token
+ *   - `content_block_stop` → end of a block
+ *   - `message_delta` → carries stop_reason and final usage
+ *   - `message_stop` → end of stream
+ * Non-text blocks (`tool_use`, thinking) accumulate their JSON via
+ * `input_json_delta` events; we assemble them into a final tool_call.
+ */
+async function callStreaming(
+  apiUrl: string,
+  apiKey: string,
+  body: Record<string, unknown>,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal | undefined,
+  onTextDelta: (delta: string) => void,
+): Promise<LLMResponse> {
+  const res = await fetchImpl(apiUrl, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      accept: 'text/event-stream',
+    },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    const detail = await safeText(res)
+    throw new AnthropicHTTPError(res.status, detail)
+  }
+
+  const blocks: AnthropicBlock[] = []
+  const toolInputBuf: string[] = []
+  let inputTokens = 0
+  let outputTokens = 0
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const payload = line.slice(6)
+      if (!payload) continue
+      let evt: Record<string, unknown>
+      try {
+        evt = JSON.parse(payload) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      handleStreamEvent(
+        evt,
+        blocks,
+        toolInputBuf,
+        (text) => onTextDelta(text),
+        (u) => {
+          inputTokens += u.input
+          outputTokens += u.output
+        },
+      )
+    }
+  }
+
+  const content = blocks
+    .map(fromAnthropicBlock)
+    .filter((c): c is MessageContent => c !== null)
+  const message: Message = { role: 'assistant', content }
+  const usage =
+    inputTokens > 0 || outputTokens > 0
+      ? { inputTokens, outputTokens }
+      : undefined
+  return { message, usage }
+}
+
+function handleStreamEvent(
+  evt: Record<string, unknown>,
+  blocks: AnthropicBlock[],
+  toolBuf: string[],
+  onText: (t: string) => void,
+  onUsage: (u: { input: number; output: number }) => void,
+): void {
+  const kind = evt.type as string | undefined
+  if (kind === 'content_block_start') {
+    const idx = (evt.index as number) ?? blocks.length
+    const block = (evt.content_block as AnthropicBlock) ?? { type: 'text', text: '' }
+    blocks[idx] = block
+    toolBuf[idx] = ''
+    return
+  }
+  if (kind === 'content_block_delta') {
+    const idx = evt.index as number
+    const delta = (evt.delta as Record<string, unknown>) ?? {}
+    const dtype = delta.type as string | undefined
+    const target = blocks[idx]
+    if (!target) return
+    if (dtype === 'text_delta' && target.type === 'text') {
+      const t = (delta.text as string) ?? ''
+      target.text += t
+      if (t) onText(t)
+    } else if (dtype === 'input_json_delta' && target.type === 'tool_use') {
+      toolBuf[idx] = (toolBuf[idx] ?? '') + ((delta.partial_json as string) ?? '')
+    }
+    return
+  }
+  if (kind === 'content_block_stop') {
+    const idx = evt.index as number
+    const target = blocks[idx]
+    if (target?.type === 'tool_use') {
+      try {
+        target.input = JSON.parse(toolBuf[idx] ?? '{}') as Record<string, unknown>
+      } catch {
+        target.input = {}
+      }
+    }
+    return
+  }
+  if (kind === 'message_start') {
+    const msg = (evt.message as { usage?: { input_tokens: number; output_tokens: number } }) ?? {}
+    if (msg.usage) {
+      onUsage({ input: msg.usage.input_tokens ?? 0, output: msg.usage.output_tokens ?? 0 })
+    }
+    return
+  }
+  if (kind === 'message_delta') {
+    const usage = (evt.usage as { output_tokens?: number }) ?? {}
+    if (typeof usage.output_tokens === 'number') {
+      // message_delta usage.output_tokens is the running total, not a delta.
+      // Anthropic reports cumulative output_tokens here; we already captured
+      // input on message_start, and content_block_delta events don't include
+      // usage. Overwrite by treating this as final output.
+      onUsage({ input: 0, output: usage.output_tokens })
+    }
+  }
+}
+
 export class AnthropicHTTPError extends Error {
   constructor(
     readonly status: number,
@@ -98,16 +271,16 @@ export class AnthropicHTTPError extends Error {
   }
 }
 
-function buildRequestBody(
+async function buildRequestBody(
   params: LLMCallParams,
   model: string,
   maxTokens: number,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const { messages, tools, systemPrompt } = params
   const resolvedSystem = systemPrompt ?? extractSystem(messages)
-  const anthropicMessages = messages
-    .filter((m) => m.role !== 'system')
-    .map(toAnthropic)
+  const anthropicMessages = await Promise.all(
+    messages.filter((m) => m.role !== 'system').map(toAnthropic),
+  )
   const body: Record<string, unknown> = {
     model,
     max_tokens: maxTokens,
@@ -126,23 +299,23 @@ function extractSystem(messages: readonly Message[]): string | undefined {
     .join('')
 }
 
-function toAnthropic(msg: Message): AnthropicMessage {
+async function toAnthropic(msg: Message): Promise<AnthropicMessage> {
   if (msg.role === 'tool') {
     return {
       role: 'user',
-      content: msg.content.map(toAnthropicBlock),
+      content: await Promise.all(msg.content.map(toAnthropicBlock)),
     }
   }
   if (msg.role === 'assistant' || msg.role === 'user') {
     return {
       role: msg.role,
-      content: msg.content.map(toAnthropicBlock),
+      content: await Promise.all(msg.content.map(toAnthropicBlock)),
     }
   }
   throw new Error(`Unexpected message role: ${msg.role}`)
 }
 
-function toAnthropicBlock(content: MessageContent): AnthropicBlock {
+async function toAnthropicBlock(content: MessageContent): Promise<AnthropicBlock> {
   switch (content.type) {
     case 'text':
       return { type: 'text', text: content.text }
@@ -160,7 +333,37 @@ function toAnthropicBlock(content: MessageContent): AnthropicBlock {
         content: content.content,
         is_error: !content.ok,
       }
+    case 'image':
+      return { type: 'image', source: await toAnthropicImageSource(content) }
   }
+}
+
+async function toAnthropicImageSource(
+  content: ImageContent,
+): Promise<AnthropicImageSource> {
+  if (content.source.kind === 'base64') {
+    return {
+      type: 'base64',
+      media_type: content.source.mediaType,
+      data: content.source.data,
+    }
+  }
+  const buf = await readFile(content.source.path)
+  return {
+    type: 'base64',
+    media_type: content.source.mediaType ?? guessMediaType(content.source.path),
+    data: buf.toString('base64'),
+  }
+}
+
+function guessMediaType(
+  path: string,
+): 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif' {
+  const lower = path.toLowerCase()
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  return 'image/png'
 }
 
 function toAnthropicTool(tool: ToolSchema): Record<string, unknown> {
