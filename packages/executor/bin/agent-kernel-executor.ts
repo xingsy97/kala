@@ -311,17 +311,15 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown)
 
   // Wait for a permanent error signal from the wire layer. This resolves
-  // only if we've decided reconnection is hopeless — bad version, wrong
-  // auth, host claimed our workspaceId, or socket.io ran out of retry
-  // budget. Distinct exit codes let systemd / launchd distinguish "please
-  // restart me" from "don't restart, fix the config".
+  // only when the host explicitly rejects this executor's identity, auth, or
+  // protocol version. Transport failures are daemon-normal: socket.io keeps
+  // reconnecting with exponential backoff until the process is stopped.
   const failure = await handle.permanentError
   const exitCodeByReason: Record<string, number> = {
     workspace_id_conflict: 2,
     workspace_identity_mismatch: 2,
     version_incompatible: 3,
     auth_failed: 4,
-    reconnect_exhausted: 5,
   }
   const code = exitCodeByReason[failure.code] ?? 1
   logger.error(

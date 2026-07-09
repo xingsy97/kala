@@ -149,7 +149,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   })
   if (executor.status !== 1) fail('executor usage smoke test should exit 1')
   const output = `${executor.stdout}\n${executor.stderr}`
-  if (!output.includes('missing --host (or HOST_URL env var)')) {
+  if (!output.includes('missing host url') || !output.includes('"flag":"--host"') || !output.includes('"env":"HOST_URL"')) {
     fail('executor usage smoke test did not print usage')
   }
 }
@@ -186,7 +186,7 @@ if (nativeExecutor) {
   })
   if (executor.status !== 1) fail('native executor usage smoke test should exit 1')
   const output = `${executor.stdout}\n${executor.stderr}`
-  if (!output.includes('missing --host (or HOST_URL env var)')) {
+  if (!output.includes('missing host url') || !output.includes('"flag":"--host"') || !output.includes('"env":"HOST_URL"')) {
     fail('native executor usage smoke test did not print usage')
   }
 }

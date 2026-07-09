@@ -86,7 +86,7 @@ export type ExecutorOptions = {
 }
 
 export type PermanentError = {
-  code: 'workspace_id_conflict' | 'workspace_identity_mismatch' | 'version_incompatible' | 'auth_failed' | 'reconnect_exhausted'
+  code: 'workspace_id_conflict' | 'workspace_identity_mismatch' | 'version_incompatible' | 'auth_failed'
   message: string
 }
 
@@ -102,9 +102,9 @@ export type ExecutorHandle = {
   /**
    * Resolves when the executor decides to give up reconnecting — either the
    * host emitted `executor:host_reject`, a `connect_error` reported an
-   * unrecoverable message, or socket.io exhausted its retry budget. The
-   * CLI wrapper awaits this so it can exit with a distinct code per
-   * failure class; embedders (tests) awaits it to detect fatal state.
+   * unrecoverable message. Transient transport failures never resolve this;
+   * the executor is a daemon and keeps reconnecting until it is explicitly
+   * stopped or the host rejects its identity/auth/version.
    * Never resolves during normal operation.
    */
   readonly permanentError: Promise<PermanentError>
@@ -135,9 +135,9 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     },
     reconnection: true,
     reconnectionDelay: 500,
-    reconnectionDelayMax: 30_000,   // socket.io does exponential backoff up to this
-    reconnectionAttempts: 30,       // stop trying after ~15min of the max delay
-    randomizationFactor: 0.5,       // ±50% jitter, avoid thundering-herd reconnect
+    reconnectionDelayMax: 600_000,  // keep trying forever, backing off to 10 minutes
+    reconnectionAttempts: Infinity,
+    randomizationFactor: 0.5,       // +/-50% jitter, avoid thundering-herd reconnect
   }) as Socket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>
 
   const inFlight = new Map<string, AbortController>()
@@ -208,7 +208,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     logger.info({ attempt: n }, 'socket reconnect attempt')
   })
   socket.io.on('reconnect_failed', () => {
-    logger.warn('socket reconnect attempts exhausted')
+    logger.warn('socket reconnect attempt budget exhausted unexpectedly; executor will remain alive')
   })
 
   logger.info({ host: options.host, namespace: '/executor' }, 'dialing host executor namespace')
@@ -259,16 +259,6 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     }
     // Other connect_errors (network transient, DNS, host down) are
     // recoverable — let socket.io keep retrying.
-  })
-
-  // Socket.io exhausted its `reconnectionAttempts` budget without ever
-  // reconnecting. The user's network is genuinely unreachable; wait for
-  // them.
-  socket.io.on('reconnect_failed', () => {
-    givePermanentError({
-      code: 'reconnect_exhausted',
-      message: 'exhausted reconnection attempts',
-    })
   })
 
   socket.on('tool:call', async (payload: ToolCallMessage, ack) => {

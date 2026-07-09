@@ -209,4 +209,55 @@ describe('executor idempotency', () => {
     })
     expect(socket.connected).toBe(false)
   })
+
+  it('keeps the executor alive when socket.io reports reconnect_failed', async () => {
+    const socket = makeMockSocket()
+    const handle = startExecutor({
+      host: 'http://x',
+      workspaceId: 'ws-retry',
+      workspaceName: 'ws-retry',
+      executorId: 'ex-retry',
+      tools: [],
+      ioFactory: (() => socket) as never,
+    })
+
+    const resolved = await Promise.race([
+      handle.permanentError.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 20)),
+    ])
+    socket.io.emit('reconnect_failed')
+    const resolvedAfterFailure = await Promise.race([
+      handle.permanentError.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 20)),
+    ])
+
+    expect(resolved).toBe(false)
+    expect(resolvedAfterFailure).toBe(false)
+    expect(socket.connected).toBe(true)
+    handle.close()
+  })
+
+  it('configures socket.io to retry forever with a 10 minute backoff ceiling', () => {
+    const socket = makeMockSocket()
+    const ioFactory = vi.fn(() => socket)
+
+    startExecutor({
+      host: 'http://x',
+      workspaceId: 'ws-retry-config',
+      workspaceName: 'ws-retry-config',
+      executorId: 'ex-retry-config',
+      tools: [],
+      ioFactory: ioFactory as never,
+    })
+
+    expect(ioFactory).toHaveBeenCalledWith(
+      'http://x/executor',
+      expect.objectContaining({
+        reconnection: true,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 600_000,
+        reconnectionAttempts: Infinity,
+      }),
+    )
+  })
 })
