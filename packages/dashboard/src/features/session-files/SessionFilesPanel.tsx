@@ -25,6 +25,7 @@ import type {
 
 import { Button } from '../../components/ui/button.js'
 import { DEFAULT_FILE_VIEW_FONT_SIZE, PREF_FILE_VIEW_FONT_SIZE, useNumberPref } from '../../lib/prefs.js'
+import { workspaceReadBinary } from '../../lib/workspace-exec.js'
 import { notify } from '../../notify.js'
 import type { WorkspaceFileTarget } from '../chat/ChatPanel.js'
 import {
@@ -718,21 +719,62 @@ async function requestDir(socket: DashboardSocket, workspaceId: string, sessionI
 }
 
 async function requestFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, options: { maxBytes?: number; download?: boolean; timeoutMs?: number } = {}): Promise<FileContentsResult> {
-  return await new Promise((resolve) => {
-    const requestId = crypto.randomUUID()
-    const timer = window.setTimeout(() => {
-      socket.off('server:file_contents', handler)
-      resolve({ requestId, workspaceId, path, kind: 'error', error: 'timed out' })
-    }, options.timeoutMs ?? 8000)
-    const handler = (result: FileContentsResult): void => {
-      if (result.requestId !== requestId) return
-      window.clearTimeout(timer)
-      socket.off('server:file_contents', handler)
-      resolve(result)
-    }
-    socket.on('server:file_contents', handler)
-    socket.emit('client:read_file', { requestId, workspaceId, ...(sessionId ? { sessionId } : {}), path, maxBytes: options.maxBytes ?? FILE_PREVIEW_MAX_BYTES, ...(options.download ? { download: true } : {}) })
+  // Uses the generic workspace:read_binary channel introduced by the
+  // workspace-exec refactor (docs/planning/roadmap-notes/workspace-exec-
+  // refactor.md). We keep returning FileContentsResult so the surrounding
+  // viewer / download logic stays unchanged; MIME → kind mapping happens
+  // in classifyFileContent() below.
+  const requestId = crypto.randomUUID()
+  void sessionId
+  const res = await workspaceReadBinary(socket, workspaceId, path, {
+    maxBytes: options.maxBytes ?? FILE_PREVIEW_MAX_BYTES,
+    ackTimeoutMs: options.timeoutMs ?? 8000,
   })
+  return classifyReadBinaryResult(requestId, workspaceId, path, res)
+}
+
+function classifyReadBinaryResult(
+  requestId: string,
+  workspaceId: string,
+  path: string,
+  res: Awaited<ReturnType<typeof workspaceReadBinary>>,
+): FileContentsResult {
+  if (res.error) {
+    const code = res.error.code
+    const kind: FileContentsResult['kind'] =
+      code === 'ENOENT' ? 'not_found'
+      : code === 'EACCES' ? 'error'
+      : code === 'EINVAL' ? 'error'
+      : 'error'
+    return { requestId, workspaceId, path, kind, error: res.error.message }
+  }
+  const mime = res.mime
+  const isImage = mime.startsWith('image/')
+  const isPdf = mime === 'application/pdf'
+  const isText = mime.startsWith('text/') || mime === 'application/json' || mime === 'image/svg+xml'
+  const truncated = res.truncated !== undefined
+  if (isImage) {
+    return { requestId, workspaceId, path, kind: 'image', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
+  }
+  if (isPdf) {
+    return { requestId, workspaceId, path, kind: 'pdf', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
+  }
+  if (isText) {
+    // For text-shaped MIME, decode UTF-8 for the viewer. Callers who need
+    // the raw base64 (downloads) also receive `content` at the base64 path
+    // via encoding='base64' — for text, we hand back UTF-8.
+    const bytes = base64ToBytes(res.base64)
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+    return { requestId, workspaceId, path, kind: 'text', content: text, encoding: 'utf8', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
+  }
+  return { requestId, workspaceId, path, kind: 'binary', content: res.base64, encoding: 'base64', mediaType: mime, size: res.size, ...(truncated ? { truncated: true } : {}) }
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+  return out
 }
 
 async function createTerminal(socket: DashboardSocket, payload: { workspaceId: string; sessionId: string; cwd?: string; cols: number; rows: number }): Promise<TerminalCreateResult> {

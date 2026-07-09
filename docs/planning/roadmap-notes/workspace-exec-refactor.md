@@ -147,12 +147,29 @@ Four commits, each independently deployable. Old channels stay live until the da
 - Deploy dashboard. Manual verification: git panel, file tree, binary preview all still work.
 
 **Commit 4 — Removal**
-- Delete `git-handlers.ts`, `bg-handlers.ts`, and the domain-specific parts of `fs-handlers.ts`.
-- Delete `__git_status`, `__git_diff`, `__fs_list_dirs`, `__fs_list_files`, `__fs_read_file`, `__bg_list`, `__bg_output`, `__bg_kill` from `tools/internal.ts`.
-- Delete `git:*` / `fs:*` (except overflow) / `bg:*` sockets from `dashboard-ns.ts`.
+- Delete `git-handlers.ts` entirely.
+- Delete the `readWorkspaceFile` codepath from `fs-handlers.ts` (list/search stay — see note below).
+- Delete `__git_status`, `__git_diff`, `__fs_read_file` from `tools/internal.ts`.
+- Delete `git:*` and `client:read_file` sockets from `dashboard-ns.ts`.
 - Delete corresponding methods on `executors` in `executor.ts`.
-- Delete per-feature zod schemas and TypeScript types from `shared`.
+- Delete per-feature zod schemas and TypeScript types for the removed endpoints from `shared`.
 - Deploy host + executor. Any stale dashboard still on old sockets breaks visibly at this point — that is the intended forcing function.
+
+**bg-handlers.ts is intentionally kept.** The bg feature holds a stateful
+per-executor process registry (see `tools/background-shell.ts`); replacing
+it with dashboard-initiated `workspace:exec` would require moving that
+registry to the dashboard, which is not feasible for a browser client.
+BgTerminalPanel continues to use the existing `bg:list` / `bg:output` /
+`bg:kill` sockets against `__bg_list` / `__bg_output` / `__bg_kill`.
+
+**`__fs_list_dirs` and `__fs_list_files` are also kept.** The directory
+picker walks a single level (cheap) and the workspace file search does a
+recursive walk with a skip-list of build directories — both would be
+expensive to shell out for from the dashboard (each open, spawn a `find`
+or repeated `ls`) and the executor-side implementation is already only a
+few dozen lines. Only `__fs_read_file` migrates to
+`workspace:read_binary` — reading a file is exactly what the new binary
+channel exists for.
 
 ## Size estimate
 
@@ -174,8 +191,10 @@ Files touched: ~15. No new abstractions introduced (no "provider registry" or si
 
 ## Acceptance
 
-- `rg -n '__git_|__fs_|__bg_' packages/executor/src` returns only the overflow handlers.
-- `rg -n "socket.on\('git:\|socket.on\('bg:\|socket.on\('fs:" packages/host/src` returns empty (except overflow variants).
+- `rg -n '__git_' packages/executor/src` returns empty.
+- `rg -n 'readWorkspaceFile' packages/executor/src` returns empty.
+- `rg -n "socket.on\('git:\|socket.on\('client:read_file" packages/host/src` returns empty.
+- `__bg_*` / `bg:*` and `__fs_list_dirs` / `__fs_list_files` / `client:list_dirs` / `client:list_files` are intentionally retained; see the note under commit 4.
 - SourceControlPanel, FileExplorer, FileViewer, binary preview all pass their existing e2e coverage using the new channels.
 - Redeploying dashboard without redeploying executor works: no `unknown tool` at runtime.
 - Audit log shows one entry per dashboard-initiated workspace command with `action: 'workspace.exec'`.

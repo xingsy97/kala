@@ -109,7 +109,7 @@ describe('SessionFilesPanel', () => {
     expect(screen.getByTestId('monaco-editor').getAttribute('data-readonly')).toBe('true')
     expect(screen.getByTestId('monaco-editor').getAttribute('data-font-size')).toBe('14')
     expect(socket.emitMock).toHaveBeenCalledWith('client:list_dirs', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo' }))
-    expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo/notes.txt', maxBytes: 1024 * 1024 }))
+    expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/notes.txt', maxBytes: 1024 * 1024 }), expect.any(Function))
   })
 
   it('uses the configured file view font size', async () => {
@@ -158,7 +158,7 @@ describe('SessionFilesPanel', () => {
     expect(image.getAttribute('src')).toBe('data:image/png;base64,aW1hZ2U=')
     expect(screen.getByText('image/png')).toBeTruthy()
     expect(socket.emitMock).toHaveBeenCalledWith('client:list_dirs', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo' }))
-    expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo/image.png' }))
+    expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/image.png' }), expect.any(Function))
 
     fireEvent.click(screen.getByRole('button', { name: /copy path/i }))
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repo/image.png')
@@ -167,8 +167,8 @@ describe('SessionFilesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /download file/i }))
     expect(createObjectURLMock).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /refresh file/i }))
-    await waitFor(() => expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ path: '/repo/image.png' })))
-    expect(socket.emitMock.mock.calls.filter(([event]) => event === 'client:read_file')).toHaveLength(2)
+    await waitFor(() => expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ path: '/repo/image.png' }), expect.any(Function)))
+    expect(socket.emitMock.mock.calls.filter(([event]) => event === 'workspace:read_binary')).toHaveLength(2)
   })
 
   it('downloads files from the tree and requests binary download content', async () => {
@@ -182,7 +182,7 @@ describe('SessionFilesPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: /download archive\.bin/i }))
 
     await waitFor(() => expect(createObjectURLMock).toHaveBeenCalled())
-    expect(socket.emitMock).toHaveBeenCalledWith('client:read_file', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', path: '/repo/archive.bin', download: true, maxBytes: 100 * 1024 * 1024 }))
+    expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ workspaceId: 'ws-1', path: '/repo/archive.bin', maxBytes: 100 * 1024 * 1024 }), expect.any(Function))
   })
 
   it('renders GIF files through the image viewer', async () => {
@@ -314,8 +314,12 @@ function makeSessionFilesSocket(input: {
     if (event === 'client:list_dirs') {
       queueMicrotask(() => serverEmit('server:dir_list', dirList(String(payload.requestId), input.entries)))
     }
-    if (event === 'client:read_file') {
-      queueMicrotask(() => serverEmit('server:file_contents', fileContents(String(payload.requestId), String(payload.path), input.file)))
+    if (event === 'workspace:read_binary') {
+      // File reads flow through workspace:read_binary since the workspace-
+      // exec refactor. Translate the test's FileContentsResult stub back
+      // to the ReadBinary envelope so classifyReadBinaryResult() lands on
+      // the same kind.
+      queueMicrotask(() => ack?.(readBinaryFromFixture(String(payload.requestId), input.file)))
     }
     if (event === 'terminal:create') {
       queueMicrotask(() => ack?.({ requestId: payload.requestId, workspaceId: 'ws-1', sessionId: 'sess-1', terminalId: 'term-1', cwd: '/repo' } satisfies TerminalCreateResult))
@@ -345,6 +349,27 @@ function makeSessionFilesSocket(input: {
       } as never
     },
   }
+}
+
+function readBinaryFromFixture(requestId: string, file: Pick<FileContentsResult, 'kind' | 'content' | 'size' | 'truncated' | 'error' | 'encoding' | 'mediaType'>) {
+  if (file.kind === 'not_found') {
+    return { requestId, base64: '', mime: 'application/octet-stream', size: file.size ?? 0, error: { code: 'ENOENT', message: file.error ?? 'not found' } }
+  }
+  // 'too_large' or 'binary' with an inline error is still a successful read
+  // in the workspace:read_binary contract — the ReadBinary channel truncates
+  // rather than failing, and the viewer surfaces "capped" from res.truncated.
+  const isTruncatedTextFixture = file.kind === 'too_large' && file.content !== undefined
+  const isBinaryFixture = file.kind === 'binary'
+  if (file.error && !isTruncatedTextFixture && !isBinaryFixture) {
+    return { requestId, base64: '', mime: 'application/octet-stream', size: file.size ?? 0, error: { code: 'EACCES', message: file.error } }
+  }
+  const mime = file.mediaType
+    ?? (file.kind === 'image' ? 'image/png' : file.kind === 'pdf' ? 'application/pdf' : file.kind === 'binary' ? 'application/octet-stream' : 'text/plain')
+  const base64 = file.encoding === 'base64'
+    ? (file.content ?? '')
+    : btoa(unescape(encodeURIComponent(file.content ?? '')))
+  const truncated = file.truncated || isTruncatedTextFixture ? { truncated: { maxBytes: file.size ?? 0 } } : {}
+  return { requestId, base64, mime, size: file.size ?? base64.length, ...truncated }
 }
 
 function dirList(requestId: string, overrideEntries?: DirListEntry[]): DirListResult {

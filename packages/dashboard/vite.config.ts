@@ -65,6 +65,8 @@ export default defineConfig({
       '@agent-kernel/shared/enhancement': resolve(__dirname, '../shared/src/enhancement.ts'),
       '@agent-kernel/shared/context-policy': resolve(__dirname, '../shared/src/context-policy/index.ts'),
       '@agent-kernel/shared/context-usage': resolve(__dirname, '../shared/src/context-usage/index.ts'),
+      '@agent-kernel/shared/push': resolve(__dirname, '../shared/src/push.ts'),
+      '@agent-kernel/shared/workspace-exec': resolve(__dirname, '../shared/src/workspace-exec.ts'),
       '@agent-kernel/shared': resolve(__dirname, '../shared/src/index.ts'),
     },
   },

@@ -38,6 +38,10 @@
       "types": "./dist/push.d.ts",
       "import": "./dist/push.js"
     },
+    "./workspace-exec": {
+      "types": "./dist/workspace-exec.d.ts",
+      "import": "./dist/workspace-exec.js"
+    },
     "./runtime-logger": {
       "types": "./dist/runtime-logger.d.ts",
       "import": "./dist/runtime-logger.js"

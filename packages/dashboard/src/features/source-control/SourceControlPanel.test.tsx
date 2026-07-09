@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { GitDiffResult, GitStatusResult } from '@agent-kernel/shared'
+import type { WorkspaceExecResponse } from '@agent-kernel/shared/workspace-exec'
 
 import { SourceControlPanel } from './SourceControlPanel.js'
 
@@ -11,25 +11,33 @@ vi.mock('@monaco-editor/react', () => ({
   ),
 }))
 
+/**
+ * Reference porcelain output for the mocked repo. Files are separated by
+ * NUL to match `git status --porcelain=v1 -z --branch`.
+ */
+const PORCELAIN = '## main\0 M src/z.ts\0 M src/app.ts\0?? new.txt\0'
+const REPO_ROOT = '/repo'
+
 describe('SourceControlPanel', () => {
   it('renders grouped git changes and opens a read-only diff dialog', async () => {
-    const socket = makeGitSocket({
-      status: {
-        requestId: 'status',
-        workspaceId: 'ws-1',
-        repo: { root: '/repo', branch: 'main' },
-        files: [
-          { path: 'src/z.ts', status: 'modified', staged: false, unstaged: true },
-          { path: 'src/app.ts', status: 'modified', staged: false, unstaged: true },
-          { path: 'new.txt', status: 'untracked', staged: false, unstaged: true },
-        ],
+    const socket = makeWorkspaceExecSocket({
+      onExec: (argv) => {
+        if (argv[0] === 'git' && argv[1] === 'rev-parse') {
+          return { stdout: REPO_ROOT, stderr: '', exitCode: 0, durationMs: 1 }
+        }
+        if (argv[0] === 'git' && argv[1] === 'status') {
+          return { stdout: PORCELAIN, stderr: '', exitCode: 0, durationMs: 1 }
+        }
+        if (argv[0] === 'git' && argv[1] === 'show' && argv[2] === ':src/app.ts') {
+          return { stdout: 'old', stderr: '', exitCode: 0, durationMs: 1 }
+        }
+        return { stdout: '', stderr: '', exitCode: 0, durationMs: 1 }
       },
-      diff: {
-        requestId: 'diff',
-        workspaceId: 'ws-1',
-        oldText: 'old',
-        newText: 'new',
-        language: 'typescript',
+      onReadBinary: (path) => {
+        if (path === `${REPO_ROOT}/src/app.ts`) {
+          return { base64: btoa('new'), mime: 'text/plain', size: 3 }
+        }
+        return { base64: '', mime: 'application/octet-stream', size: 0, error: { code: 'ENOENT' as const, message: 'not found' } }
       },
     })
 
@@ -47,15 +55,44 @@ describe('SourceControlPanel', () => {
     expect(screen.getByTestId('mock-diff-editor').getAttribute('data-side-by-side')).toBe('true')
     fireEvent.click(screen.getByTestId('source-control-diff-inline'))
     expect(screen.getByTestId('mock-diff-editor').getAttribute('data-side-by-side')).toBe('false')
-    expect(socket.emitMock).toHaveBeenCalledWith('git:status', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 's-1', cwd: '/repo/packages/app' }), expect.any(Function))
-    expect(socket.emitMock).toHaveBeenCalledWith('git:diff', expect.objectContaining({ workspaceId: 'ws-1', sessionId: 's-1', cwd: '/repo/packages/app', path: 'src/app.ts' }), expect.any(Function))
+    // Both git status and git show reach the executor through workspace:exec.
+    const execCalls = socket.emitMock.mock.calls.filter(([event]) => event === 'workspace:exec')
+    expect(execCalls.length).toBeGreaterThanOrEqual(3)
+    expect(execCalls.some(([, payload]) => JSON.stringify((payload as { argv: string[] }).argv).includes('status'))).toBe(true)
+    expect(execCalls.some(([, payload]) => JSON.stringify((payload as { argv: string[] }).argv).includes('show'))).toBe(true)
   })
 })
 
-function makeGitSocket(input: { status: GitStatusResult; diff: GitDiffResult }) {
+type ExecStub = Partial<Omit<WorkspaceExecResponse, 'requestId'>>
+
+function makeWorkspaceExecSocket(input: {
+  onExec: (argv: readonly string[]) => ExecStub
+  onReadBinary?: (path: string) => { base64: string; mime: string; size: number; error?: { code: 'ENOENT' | 'EACCES' | 'EINVAL' | 'EIO'; message: string } }
+}) {
   const emitMock = vi.fn((event: string, payload: Record<string, unknown>, ack?: (payload: unknown) => void) => {
-    if (event === 'git:status') queueMicrotask(() => ack?.({ ...input.status, requestId: payload.requestId }))
-    if (event === 'git:diff') queueMicrotask(() => ack?.({ ...input.diff, requestId: payload.requestId }))
+    if (event === 'workspace:exec') {
+      const argv = (payload as { argv: readonly string[] }).argv
+      const stub = input.onExec(argv)
+      queueMicrotask(() => ack?.({
+        requestId: (payload as { requestId: string }).requestId,
+        stdout: stub.stdout ?? '',
+        stderr: stub.stderr ?? '',
+        exitCode: stub.exitCode ?? 0,
+        durationMs: stub.durationMs ?? 0,
+        ...(stub.error ? { error: stub.error } : {}),
+      }))
+    }
+    if (event === 'workspace:read_binary') {
+      const path = (payload as { path: string }).path
+      const stub = input.onReadBinary?.(path) ?? { base64: '', mime: 'application/octet-stream', size: 0 }
+      queueMicrotask(() => ack?.({
+        requestId: (payload as { requestId: string }).requestId,
+        base64: stub.base64,
+        mime: stub.mime,
+        size: stub.size,
+        ...(stub.error ? { error: stub.error } : {}),
+      }))
+    }
     return undefined
   })
   return {

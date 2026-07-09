@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
+import { gitDiff, gitStatus } from '../../lib/git-client.js'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 
@@ -267,25 +268,13 @@ function DiffError({ message }: { message: string }): JSX.Element {
 }
 
 async function requestGitStatus(socket: DashboardSocket, payload: { workspaceId: string; sessionId?: string; cwd?: string }): Promise<GitStatusResult> {
-  return await new Promise((resolve) => {
-    const requestId = crypto.randomUUID()
-    const timer = window.setTimeout(() => resolve({ requestId, workspaceId: payload.workspaceId, files: [], error: { code: 'timeout', message: 'timed out' } }), 8000)
-    socket.emit('git:status', { requestId, ...payload }, (result) => {
-      window.clearTimeout(timer)
-      resolve(result)
-    })
-  })
+  const requestId = crypto.randomUUID()
+  return await gitStatus(socket, { requestId, ...payload })
 }
 
 async function requestGitDiff(socket: DashboardSocket, payload: { workspaceId: string; sessionId?: string; cwd?: string; path: string; staged: boolean }): Promise<GitDiffResult> {
-  return await new Promise((resolve) => {
-    const requestId = crypto.randomUUID()
-    const timer = window.setTimeout(() => resolve({ requestId, workspaceId: payload.workspaceId, error: { code: 'timeout', message: 'timed out' } }), 10_000)
-    socket.emit('git:diff', { requestId, ...payload }, (result) => {
-      window.clearTimeout(timer)
-      resolve(result)
-    })
-  })
+  const requestId = crypto.randomUUID()
+  return await gitDiff(socket, { requestId, ...payload })
 }
 
 function formatBytes(bytes: number): string {
