@@ -134,6 +134,11 @@ agent-kernel-host enhancement rollout export-session \
 agent-kernel-host enhancement rollout export-segments \
   --root-dir runs/rollouts \
   --session-log ~/.agent-kernel/sessions/<session>.jsonl
+
+agent-kernel-host enhancement rollout export-adapter \
+  --root-dir runs/rollouts \
+  --sidecar runs/rollouts/rollouts/<rollout_id>.json \
+  --framework slime
 ```
 
 The command first exports the OpenInference-shaped trace and redacted LLM
@@ -164,6 +169,20 @@ segments with `lossMask=0`, preserves event sequence links, and sets
 provide a stable handoff point for a future gateway that captures real token ids
 at generation time.
 
+The framework adapter exporter is implemented as a handoff-artifact generator,
+not as a trainer. For `slime`, it writes a ready custom rollout manifest under
+`rl-adapters/slime/<rollout_id>.json` linking the event log, trace, token
+segment artifact, reward artifact, model, and weight version. This is the
+correct integration boundary for custom data-generation/rollout code.
+
+For `verl`, the exporter only emits an AgentLoopOutput-shaped artifact when the
+referenced token artifact explicitly contains generation-time `prompt_ids`,
+`response_ids`, `response_mask`, and `tokenIdsCaptured=true`. If the available
+artifact is the conservative segment index produced by `export-segments`, the
+exporter writes a `status: blocked` artifact explaining that real token ids and
+response masks are required. This prevents fake RL data from entering training
+pipelines.
+
 Phase 1: export completed session logs and verifier rewards with stable rollout
 ids. Implemented as sidecar export.
 
@@ -175,8 +194,14 @@ retokenize or synthesize token ids; it records estimated tokens, event seq links
 source roles, and loss-mask policy for debugging and adapter preparation.
 
 Phase 4: slime adapter with verifier reward.
+Implemented as `enhancement rollout export-adapter --framework slime`. It emits
+a custom rollout manifest that links the replay ledger, trace, token segment
+index, and reward reference without fabricating tensors.
 
 Phase 5: verl Agent Loop adapter returning prompt ids, response ids, and masks.
+Implemented as a guarded adapter export. It returns the verl AgentLoopOutput
+shape only when an external token capture artifact provides real ids and masks;
+otherwise it emits a blocked adapter artifact with the missing requirements.
 
 Phase 6: support compaction, forks, subagents, sibling rollouts, and weight
 version metadata.
@@ -188,7 +213,8 @@ version metadata.
 - Integration test with a small local model/gateway mock returning token ids.
 - Verifier test that rewards run in a clean workspace, not the mutated agent
   workspace.
-- Adapter contract tests for slime and verl output shapes.
+- Implemented adapter contract tests for slime ready manifests, verl blocked
+  exports without token ids, and verl ready exports with captured ids/masks.
 
 ## Non-Goals
 

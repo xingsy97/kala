@@ -64,10 +64,19 @@ frontmatter such as `name`, `description`, `type`, `source`, `confidence`,
 memory to kernel state and does not inject memory into prompts. It is a derived
 artifact for dashboard provenance, eval reproducibility, and cleanup tooling.
 
+Implemented message assembly observability also accounts for memory. When a
+session already contains a structured `memory` tool call and its matching tool
+result, the live `message-assembly` artifact includes a `memory` contribution
+bucket and a `memory.contribution` pipeline stage. This is provenance and budget
+metadata only; it does not create a hidden memory channel or mutate the kernel
+state machine.
+
 ## Testing Plan
 
 - Unit tests for scope filtering.
 - Implemented unit tests for workspace memory index export.
+- Implemented unit tests for memory contribution metadata in message assembly
+  artifacts.
 - Tests that benchmark mode disables cross-task memory by default.
 - Retrieval ranking tests with stale conflicting facts.
 - Browser tests for memory provenance and delete/tombstone behavior.

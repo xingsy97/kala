@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from './store/log.js'
 import { buildArtifactManifest } from './artifact-manifest.js'
-import { exportRolloutSegments, exportRolloutSidecar, exportSessionTraceArtifacts } from './enhancement-export.js'
+import { exportRolloutFrameworkAdapter, exportRolloutSegments, exportRolloutSidecar, exportSessionTraceArtifacts } from './enhancement-export.js'
 import { parseEnhancementCli } from './enhancement-cli.js'
 
 const config: AgentConfig = { tools: [] }
@@ -126,6 +126,78 @@ describe('enhancement artifact export', () => {
     expect(result.segments.segments.some((segment) => segment.source === 'effect' && segment.lossMask === 0)).toBe(true)
   })
 
+  it('exports slime rollout adapter manifests without pretending to have tensors', async () => {
+    const logPath = join(dir, 'session.jsonl')
+    await writeHeader({ path: logPath, sessionId: 's1', config, initialState })
+    const sidecarResult = await exportRolloutSidecar({
+      rootDir: dir,
+      sessionLogPath: logPath,
+      taskId: 'swebench:local__repo-1',
+      frameworkTarget: 'slime',
+      model: 'policy-a',
+    })
+
+    const result = await exportRolloutFrameworkAdapter({ rootDir: dir, sidecarPath: sidecarResult.sidecarPath })
+
+    expect(result.adapterPath).toContain('rl-adapters/slime/')
+    expect(result.adapter).toMatchObject({
+      status: 'ready',
+      frameworkTarget: 'slime',
+      entrypoint: 'custom_rollout_manifest',
+      eventLogRef: logPath,
+    })
+    expect(JSON.stringify(result.adapter)).toContain('does not synthesize token ids')
+  })
+
+  it('blocks verl adapter export when token ids were not captured', async () => {
+    const logPath = join(dir, 'session.jsonl')
+    await writeHeader({ path: logPath, sessionId: 's1', config, initialState })
+    const sidecarResult = await exportRolloutSidecar({
+      rootDir: dir,
+      sessionLogPath: logPath,
+      taskId: 'task1',
+      frameworkTarget: 'verl',
+    })
+
+    const result = await exportRolloutFrameworkAdapter({ rootDir: dir, sidecarPath: sidecarResult.sidecarPath })
+
+    expect(result.adapter).toMatchObject({
+      status: 'blocked',
+      frameworkTarget: 'verl',
+      reason: 'verl AgentLoopOutput requires generation-time token ids and response masks',
+    })
+  })
+
+  it('exports verl AgentLoopOutput shape only from captured token artifacts', async () => {
+    const logPath = join(dir, 'session.jsonl')
+    const tokenPath = join(dir, 'captured-tokens.json')
+    await writeHeader({ path: logPath, sessionId: 's1', config, initialState })
+    await writeFile(tokenPath, JSON.stringify({
+      tokenIdsCaptured: true,
+      prompt_ids: [1, 2, 3],
+      response_ids: [4, 5],
+      response_mask: [1, 1],
+    }), 'utf8')
+    const sidecarResult = await exportRolloutSidecar({
+      rootDir: dir,
+      sessionLogPath: logPath,
+      taskId: 'task1',
+      frameworkTarget: 'verl',
+      tokenSegmentsPath: tokenPath,
+      rewardPath: 'rewards/s1.json',
+    })
+
+    const result = await exportRolloutFrameworkAdapter({ rootDir: dir, sidecarPath: sidecarResult.sidecarPath })
+
+    expect(result.adapter).toMatchObject({
+      status: 'ready',
+      frameworkTarget: 'verl',
+      prompt_ids: [1, 2, 3],
+      response_ids: [4, 5],
+      response_mask: [1, 1],
+    })
+  })
+
   it('parses enhancement trace and rollout export commands', () => {
     expect(parseEnhancementCli([
       'enhancement',
@@ -158,6 +230,16 @@ describe('enhancement artifact export', () => {
       '--root-dir',
       'runs/rollouts',
     ])).toMatchObject({ kind: 'rollout-export-segments', sessionLogPath: 's.jsonl' })
+
+    expect(parseEnhancementCli([
+      'enhancement',
+      'rollout',
+      'export-adapter',
+      '--sidecar',
+      'rollouts/r1.json',
+      '--framework',
+      'slime',
+    ])).toMatchObject({ kind: 'rollout-export-adapter', sidecarPath: 'rollouts/r1.json', frameworkTarget: 'slime' })
 
     expect(parseEnhancementCli([
       'enhancement',

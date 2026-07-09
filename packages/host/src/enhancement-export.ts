@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 import type { Message } from '@agent-kernel/kernel'
@@ -45,6 +45,48 @@ export type RolloutSegmentsArtifact = {
   segments: readonly RolloutSegment[]
   warnings: readonly string[]
 }
+
+export type ExportRolloutAdapterInput = {
+  rootDir: string
+  sidecarPath: string
+  frameworkTarget?: RolloutSidecar['framework_target']
+}
+
+export type RolloutAdapterExport =
+  | {
+      schemaVersion: 1
+      status: 'ready'
+      frameworkTarget: 'slime'
+      rolloutId: string
+      taskId: string
+      eventLogRef: string
+      traceRef?: string
+      tokenSegmentsRef?: string
+      rewardRef?: string
+      model?: string
+      weightVersion?: string
+      entrypoint: 'custom_rollout_manifest'
+      notes: readonly string[]
+    }
+  | {
+      schemaVersion: 1
+      status: 'ready'
+      frameworkTarget: 'verl'
+      rolloutId: string
+      prompt_ids: readonly number[]
+      response_ids: readonly number[]
+      response_mask: readonly number[]
+      metadata: Record<string, unknown>
+    }
+  | {
+      schemaVersion: 1
+      status: 'blocked'
+      frameworkTarget: RolloutSidecar['framework_target']
+      rolloutId: string
+      reason: string
+      requiredArtifacts: readonly string[]
+      availableArtifacts: Record<string, unknown>
+    }
 
 export async function exportSessionTraceArtifacts(
   input: ExportSessionTraceInput,
@@ -143,6 +185,108 @@ input: ExportRolloutSidecarInput,
   await mkdir(join(input.rootDir, 'rollouts'), { recursive: true })
   await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, 'utf8')
   return { sidecar, sidecarPath, traceArtifact: trace.traceArtifact }
+}
+
+export async function exportRolloutFrameworkAdapter(input: ExportRolloutAdapterInput): Promise<{
+  adapter: RolloutAdapterExport
+  adapterPath: string
+}> {
+  const sidecar = JSON.parse(await readFile(input.sidecarPath, 'utf8')) as RolloutSidecar
+  const frameworkTarget = input.frameworkTarget ?? sidecar.framework_target
+  const adapter = await createRolloutAdapterExport(input.rootDir, sidecar, frameworkTarget)
+  const adapterPath = join(input.rootDir, 'rl-adapters', frameworkTarget, `${sidecar.rollout_id}.json`)
+  await mkdir(join(input.rootDir, 'rl-adapters', frameworkTarget), { recursive: true })
+  await writeFile(adapterPath, `${JSON.stringify(adapter, null, 2)}\n`, 'utf8')
+  return { adapter, adapterPath }
+}
+
+async function createRolloutAdapterExport(
+  rootDir: string,
+  sidecar: RolloutSidecar,
+  frameworkTarget: RolloutSidecar['framework_target'],
+): Promise<RolloutAdapterExport> {
+  if (frameworkTarget === 'slime') {
+    return {
+      schemaVersion: 1,
+      status: 'ready',
+      frameworkTarget,
+      rolloutId: sidecar.rollout_id,
+      taskId: sidecar.task_id,
+      eventLogRef: sidecar.event_log_ref,
+      ...(sidecar.trace_ref ? { traceRef: sidecar.trace_ref } : {}),
+      ...(sidecar.token_segments_ref ? { tokenSegmentsRef: sidecar.token_segments_ref } : {}),
+      ...(sidecar.reward_ref ? { rewardRef: sidecar.reward_ref } : {}),
+      ...(sidecar.model ? { model: sidecar.model } : {}),
+      ...(sidecar.weight_version ? { weightVersion: sidecar.weight_version } : {}),
+      entrypoint: 'custom_rollout_manifest',
+      notes: [
+        'Use this as slime custom data-generation input; it indexes replay, trace, token segments, and reward artifacts.',
+        'It is not a tensor dataset and does not synthesize token ids.',
+      ],
+    }
+  }
+  if (frameworkTarget === 'verl') {
+    const tokenArtifact = sidecar.token_segments_ref ? await readTokenArtifact(rootDir, sidecar.token_segments_ref) : undefined
+    const promptIds = numberArray(tokenArtifact, 'prompt_ids') ?? numberArray(tokenArtifact, 'promptIds')
+    const responseIds = numberArray(tokenArtifact, 'response_ids') ?? numberArray(tokenArtifact, 'responseIds')
+    const responseMask = numberArray(tokenArtifact, 'response_mask') ?? numberArray(tokenArtifact, 'responseMask')
+    if (tokenArtifact && tokenArtifact.tokenIdsCaptured === true && promptIds && responseIds && responseMask) {
+      return {
+        schemaVersion: 1,
+        status: 'ready',
+        frameworkTarget,
+        rolloutId: sidecar.rollout_id,
+        prompt_ids: promptIds,
+        response_ids: responseIds,
+        response_mask: responseMask,
+        metadata: {
+          taskId: sidecar.task_id,
+          sessionId: sidecar.session_id,
+          eventLogRef: sidecar.event_log_ref,
+          traceRef: sidecar.trace_ref ?? null,
+          rewardRef: sidecar.reward_ref ?? null,
+          model: sidecar.model ?? null,
+          weightVersion: sidecar.weight_version ?? null,
+        },
+      }
+    }
+    return blockedAdapter(sidecar, frameworkTarget, 'verl AgentLoopOutput requires generation-time token ids and response masks', tokenArtifact)
+  }
+  return blockedAdapter(sidecar, frameworkTarget, `adapter target ${frameworkTarget} is not implemented`, undefined)
+}
+
+async function readTokenArtifact(rootDir: string, ref: string): Promise<Record<string, unknown> | undefined> {
+  const path = ref.startsWith('/') ? ref : join(rootDir, ref)
+  return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+}
+
+function numberArray(record: Record<string, unknown> | undefined, key: string): readonly number[] | undefined {
+  const value = record?.[key]
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'number' && Number.isInteger(item))) return undefined
+  return value
+}
+
+function blockedAdapter(
+  sidecar: RolloutSidecar,
+  frameworkTarget: RolloutSidecar['framework_target'],
+  reason: string,
+  tokenArtifact: Record<string, unknown> | undefined,
+): RolloutAdapterExport {
+  return {
+    schemaVersion: 1,
+    status: 'blocked',
+    frameworkTarget,
+    rolloutId: sidecar.rollout_id,
+    reason,
+    requiredArtifacts: ['generation-time token ids', 'response mask', 'reward metadata'],
+    availableArtifacts: {
+      eventLogRef: sidecar.event_log_ref,
+      traceRef: sidecar.trace_ref ?? null,
+      tokenSegmentsRef: sidecar.token_segments_ref ?? null,
+      tokenIdsCaptured: tokenArtifact?.tokenIdsCaptured ?? sidecar.metadata.tokenIdsCaptured ?? null,
+      rewardRef: sidecar.reward_ref ?? null,
+    },
+  }
 }
 
 function createRolloutSegmentsArtifact(

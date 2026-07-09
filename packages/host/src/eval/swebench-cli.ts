@@ -153,6 +153,7 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
       runId: result.layout.runId,
       predictionsPath: result.layout.predictionsPath,
       experimentPath: result.layout.experimentPath,
+      progressPath: result.layout.progressPath,
       summaryPath: result.layout.summaryPath,
       trialCount: result.trials.length,
     }, null, 2))

@@ -33,6 +33,14 @@ const manifest: ArtifactManifest = {
       sha256: '123456abcdef',
     },
     {
+      path: 'runs/swebench/run1/progress.json',
+      kind: 'eval_progress',
+      mediaType: 'application/json',
+      bytes: 260,
+      mtime: '2026-07-09T00:00:00.000Z',
+      sha256: 'progressabcdef',
+    },
+    {
       path: 'runs/swebench/run1/trials/local__repo-1.json',
       kind: 'eval_trial',
       mediaType: 'application/json',
@@ -48,13 +56,21 @@ const manifest: ArtifactManifest = {
       mtime: '2026-07-09T00:00:00.000Z',
       sha256: 'fedcba654321',
     },
+    {
+      path: 'runs/profile/session/profile.json',
+      kind: 'profile',
+      mediaType: 'application/json',
+      bytes: 420,
+      mtime: '2026-07-09T00:00:00.000Z',
+      sha256: 'profileabcdef',
+    },
   ],
   summary: {
-    entryCount: 5,
-    totalBytes: 5292,
-    hashedCount: 4,
+    entryCount: 7,
+    totalBytes: 5972,
+    hashedCount: 6,
     hashSkippedCount: 1,
-    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_trial: 1, eval_comparison: 1 },
+    kinds: { llm_request: 1, log: 1, eval_summary: 1, eval_progress: 1, eval_trial: 1, eval_comparison: 1, profile: 1 },
   },
 }
 
@@ -80,7 +96,7 @@ describe('ArtifactExplorerDialog', () => {
     })
     await screen.findByText('llm/s1/1.request.json')
     expect(screen.getByText('large.log')).toBeTruthy()
-    expect(screen.getByText('4/5')).toBeTruthy()
+    expect(screen.getByText('6/7')).toBeTruthy()
     expect(screen.getByText('hash skipped')).toBeTruthy()
   })
 
@@ -112,6 +128,26 @@ describe('ArtifactExplorerDialog', () => {
         },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/progress.json',
+        mediaType: 'application/json',
+        body: {
+          schemaVersion: 1,
+          runId: 'run1',
+          dataset: 'local',
+          model: 'agent-test',
+          status: 'completed',
+          selectedCount: 2,
+          queuedCount: 0,
+          runningCount: 0,
+          skippedCount: 1,
+          completedCount: 1,
+          failedCount: 0,
+          timedOutCount: 0,
+          maxWorkers: 4,
+          instances: [{ instanceId: 'local__repo-1', status: 'completed' }],
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         path: 'runs/swebench/run1/trials/local__repo-1.json',
         mediaType: 'application/json',
         body: {
@@ -126,6 +162,11 @@ describe('ArtifactExplorerDialog', () => {
           metrics: { durationMs: 1250, patchBytes: 42 },
         },
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/artifacts/local__repo-1/final.diff',
+        mediaType: 'text/x-diff',
+        body: 'diff --git a/file b/file\n',
+      }), { status: 200 }))
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -136,6 +177,9 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getByText('local')).toBeTruthy()
     expect(screen.getByText('agent-test')).toBeTruthy()
     expect(screen.getByText('50%')).toBeTruthy()
+    expect(screen.getByText('Progress')).toBeTruthy()
+    expect(screen.getAllByText('completed').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Workers')).toBeTruthy()
     expect(await screen.findByText('base')).toBeTruthy()
     expect(screen.getByText('candidate')).toBeTruthy()
     expect(screen.getByText('+50%')).toBeTruthy()
@@ -151,7 +195,96 @@ describe('ArtifactExplorerDialog', () => {
       { cache: 'no-store' },
     )
     expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fprogress.json',
+      { cache: 'no-store' },
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fswebench%2Frun1%2Ftrials%2Flocal__repo-1.json',
+      { cache: 'no-store' },
+    )
+
+    fireEvent.click(screen.getByText('artifacts/local__repo-1/final.diff'))
+
+    await screen.findByText('diff --git a/file b/file')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fartifacts%2Flocal__repo-1%2Ffinal.diff',
+      { cache: 'no-store' },
+    )
+  })
+
+  it('shows progress-only eval runs before summaries are written', async () => {
+    const progressOnlyManifest: ArtifactManifest = {
+      ...manifest,
+      entries: manifest.entries.filter((entry) => entry.path !== 'runs/swebench/run1/summary.json' && entry.path !== 'runs/swebench/run1/trials/local__repo-1.json'),
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(progressOnlyManifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/compare/eval-comparison.json',
+        mediaType: 'application/json',
+        body: {},
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/progress.json',
+        mediaType: 'application/json',
+        body: {
+          runId: 'run1',
+          dataset: 'local',
+          model: 'agent-test',
+          status: 'running',
+          selectedCount: 3,
+          queuedCount: 1,
+          runningCount: 1,
+          skippedCount: 0,
+          completedCount: 1,
+          failedCount: 0,
+          timedOutCount: 0,
+          maxWorkers: 2,
+        },
+      }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
+    await screen.findByText('llm/s1/1.request.json')
+
+    fireEvent.click(screen.getByRole('button', { name: /eval runs/i }))
+
+    await screen.findByText('run1')
+    expect(screen.getByText('running')).toBeTruthy()
+    expect(screen.getByText('Workers')).toBeTruthy()
+    expect(screen.getByText('No trial artifacts found for this run.')).toBeTruthy()
+  })
+
+  it('loads session profile artifacts in the Profiles tab', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/profile/session/profile.json',
+        mediaType: 'application/json',
+        body: {
+          sessionId: 's1',
+          llmCalls: 2,
+          toolCalls: 3,
+          llmTraceMissingCalls: 1,
+          totalInputTokens: 1234,
+          totalOutputTokens: 567,
+          costStatus: 'estimated',
+          estimatedCostUsd: 0.0123,
+          models: ['gpt-test'],
+        },
+      }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
+    await screen.findByText('llm/s1/1.request.json')
+
+    fireEvent.click(screen.getByRole('button', { name: /profiles/i }))
+
+    await screen.findByText('s1')
+    expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('1,234')).toBeTruthy()
+    expect(screen.getAllByText('$0.0123').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('gpt-test')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/artifacts/content?path=runs%2Fprofile%2Fsession%2Fprofile.json',
       { cache: 'no-store' },
     )
   })

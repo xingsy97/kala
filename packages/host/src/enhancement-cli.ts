@@ -1,16 +1,20 @@
 import {
+  exportRolloutFrameworkAdapter,
   exportRolloutSidecar,
   exportRolloutSegments,
   exportSessionTraceArtifacts,
+  type ExportRolloutAdapterInput,
   type ExportRolloutSidecarInput,
   type ExportSessionTraceInput,
 } from './enhancement-export.js'
 import { buildArtifactManifest, type BuildArtifactManifestInput } from './artifact-manifest.js'
 import {
   compareEvalRuns,
+  judgeScore,
   profileSession,
   scoreSession,
   type CompareEvalRunsInput,
+  type JudgeScoreInput,
   type ProfileSessionInput,
   type ScoreSessionInput,
 } from './eval/generic.js'
@@ -21,6 +25,7 @@ import { exportSubAgentGraph, type ExportSubAgentGraphInput } from './subagent-g
 export type EnhancementCliCommand =
   | { kind: 'none' }
   | ({ kind: 'eval-score-session' } & ScoreSessionInput)
+  | ({ kind: 'eval-judge-score' } & JudgeScoreInput)
   | ({ kind: 'eval-compare-runs' } & CompareEvalRunsInput)
   | ({ kind: 'profile-session' } & ProfileSessionInput)
   | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
@@ -30,6 +35,7 @@ export type EnhancementCliCommand =
   | ({ kind: 'trace-export-session' } & ExportSessionTraceInput)
   | ({ kind: 'rollout-export-session' } & ExportRolloutSidecarInput)
   | ({ kind: 'rollout-export-segments' } & ExportSessionTraceInput)
+  | ({ kind: 'rollout-export-adapter' } & ExportRolloutAdapterInput)
 
 export function parseEnhancementCli(argv: readonly string[]): EnhancementCliCommand {
   if (argv[0] !== 'enhancement') return { kind: 'none' }
@@ -63,6 +69,21 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       rootDir: value(rest, '--root-dir') ?? 'runs/eval/compare',
       baselineSummaryPath: required(rest, '--baseline-summary'),
       candidateSummaryPath: required(rest, '--candidate-summary'),
+    }
+  }
+  if (argv[1] === 'eval' && argv[2] === 'judge-score') {
+    const rest = argv.slice(3)
+    return {
+      kind: 'eval-judge-score',
+      rootDir: value(rest, '--root-dir') ?? 'runs/eval/judge-score',
+      promptPath: required(rest, '--prompt'),
+      responsePath: required(rest, '--response'),
+      judgeModel: required(rest, '--judge-model'),
+      scorer: value(rest, '--scorer'),
+      instanceId: value(rest, '--instance-id'),
+      threshold: numberValue(rest, '--threshold'),
+      inputRef: value(rest, '--input-ref'),
+      workspaceRoot: value(rest, '--workspace-root'),
     }
   }
   if (argv[1] === 'profile' && argv[2] === 'session') {
@@ -127,6 +148,16 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       workspaceRoot: value(rest, '--workspace-root'),
     }
   }
+  if (argv[1] === 'rollout' && argv[2] === 'export-adapter') {
+    const rest = argv.slice(3)
+    const framework = value(rest, '--framework')
+    return {
+      kind: 'rollout-export-adapter',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rollouts',
+      sidecarPath: required(rest, '--sidecar'),
+      ...(framework ? { frameworkTarget: frameworkTarget(framework) } : {}),
+    }
+  }
   if (argv[1] === 'artifacts' && argv[2] === 'manifest') {
     const rest = argv.slice(3)
     const maxHashBytes = numberValue(rest, '--max-hash-bytes')
@@ -157,6 +188,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
     console.log(JSON.stringify({ comparisonPath: result.comparisonPath, comparison: result.comparison }, null, 2))
     return true
   }
+  if (command.kind === 'eval-judge-score') {
+    const result = await judgeScore(command)
+    console.log(JSON.stringify({ scoresPath: result.scoresPath, judgeTrace: result.judgeTrace, summary: result.summary }, null, 2))
+    return true
+  }
   if (command.kind === 'profile-session') {
     const result = await profileSession(command)
     console.log(JSON.stringify({ profilePath: result.profilePath, profile: result.profile }, null, 2))
@@ -185,6 +221,11 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
   if (command.kind === 'rollout-export-segments') {
     const result = await exportRolloutSegments(command)
     console.log(JSON.stringify({ artifact: result.artifact, segmentCount: result.segments.segments.length }, null, 2))
+    return true
+  }
+  if (command.kind === 'rollout-export-adapter') {
+    const result = await exportRolloutFrameworkAdapter(command)
+    console.log(JSON.stringify({ adapterPath: result.adapterPath, status: result.adapter.status, frameworkTarget: result.adapter.frameworkTarget }, null, 2))
     return true
   }
   const result = await exportRolloutSidecar(command)
