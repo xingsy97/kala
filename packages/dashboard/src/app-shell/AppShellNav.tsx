@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
-import { BarChart3, Bot, Boxes, PanelRight, PanelRightClose, Settings as SettingsIcon, Sparkles, Workflow } from 'lucide-react'
+import { BarChart3, BookOpen, Bot, Boxes, Settings as SettingsIcon, Sparkles, Workflow } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 import { Button } from '../components/ui/button.js'
 import { cn } from '../lib/utils.js'
@@ -19,22 +20,19 @@ const NAV_ITEMS: readonly NavItem[] = [
   { id: 'operations', labelKey: 'appShell.nav.operations', Icon: Workflow, testid: 'app-shell-nav-operations' },
   { id: 'artifacts', labelKey: 'appShell.nav.artifacts', Icon: Boxes, testid: 'app-shell-nav-artifacts' },
   { id: 'pipeline', labelKey: 'appShell.nav.pipeline', Icon: Sparkles, testid: 'app-shell-nav-pipeline' },
+  { id: 'docs', labelKey: 'appShell.nav.docs', Icon: BookOpen, testid: 'app-shell-nav-docs' },
 ]
 
 export function AppShellNav({
   section,
   onSelect,
   onOpenSettings,
-  onToggleInspector,
-  inspectorOpen,
-  inspectorAvailable,
+  connectionStatus,
 }: {
   section: AppSection
   onSelect(section: AppSection): void
   onOpenSettings(): void
-  onToggleInspector(): void
-  inspectorOpen: boolean
-  inspectorAvailable: boolean
+  connectionStatus?: ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
 
@@ -72,24 +70,6 @@ export function AppShellNav({
       })}
       <span className="ml-auto flex items-center gap-1">
         <LanguageSwitcher />
-        {inspectorAvailable ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            data-testid="app-shell-nav-inspector-icon"
-            onClick={onToggleInspector}
-            title={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
-            aria-label={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
-            aria-pressed={inspectorOpen}
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          >
-            {inspectorOpen ? (
-              <PanelRightClose className="h-4 w-4" aria-hidden />
-            ) : (
-              <PanelRight className="h-4 w-4" aria-hidden />
-            )}
-          </Button>
-        ) : null}
         <Button
           variant="ghost"
           size="icon"
@@ -101,6 +81,7 @@ export function AppShellNav({
         >
           <SettingsIcon className="h-4 w-4" aria-hidden />
         </Button>
+        {connectionStatus}
       </span>
     </nav>
   )

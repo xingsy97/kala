@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Cable,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Folder,
@@ -64,6 +65,7 @@ type Props = {
   onRename(sessionId: string, label: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
+  onCollapse?(): void
 }
 
 const SESSION_ROW_HEIGHT = 60
@@ -81,6 +83,7 @@ export function Explorer({
   onRename,
   onOpenSessionInfo,
   onWorkspaceInfo,
+  onCollapse,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
@@ -104,7 +107,7 @@ export function Explorer({
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/30">
-      <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} />
+      <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} />
       <div
         ref={ref}
         className="flex-1 min-h-0"
@@ -225,10 +228,12 @@ function Header({
   query,
   onQueryChange,
   onConnectWorkspace,
+  onCollapse,
 }: {
   query: string
   onQueryChange(query: string): void
   onConnectWorkspace: () => void
+  onCollapse?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   return (
@@ -237,17 +242,32 @@ function Header({
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {t('explorer.title')}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onConnectWorkspace}
-          data-testid="new-session-button"
-          title={t('explorer.connectWorkspace')}
-          className="h-7 gap-1 rounded-full px-2.5 text-xs"
-        >
-          <Cable className="h-3 w-3" />
-          {t('explorer.workspace')}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onConnectWorkspace}
+            data-testid="new-session-button"
+            title={t('explorer.connectWorkspace')}
+            className="h-7 gap-1 rounded-full px-2.5 text-xs"
+          >
+            <Cable className="h-3 w-3" />
+            {t('explorer.workspace')}
+          </Button>
+          {onCollapse ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onCollapse}
+              data-testid="explorer-collapse-button"
+              title={t('explorer.collapsePanel')}
+              aria-label={t('explorer.collapsePanel')}
+              className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
       </div>
       <label className="flex h-7 min-w-0 items-center gap-1.5 rounded bg-background/70 px-2 text-xs ring-1 ring-border/50 focus-within:ring-primary/40">
         <Search className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />

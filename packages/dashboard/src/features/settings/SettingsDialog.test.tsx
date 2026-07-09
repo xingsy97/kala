@@ -206,6 +206,24 @@ describe('SettingsDialog', () => {
     expect(localStorage.getItem('ak-desktop-notification-session-error')).toBe('0')
   })
 
+  it('offers follow system as a theme preference', async () => {
+    localStorage.setItem('ak-theme', 'dark')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await screen.findByText('<home>/.claude/settings.json')
+
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    expect(screen.getByTestId('settings-theme-system')).toBeTruthy()
+    expect(screen.getByTestId('settings-theme-dark').getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(screen.getByTestId('settings-theme-system'))
+    expect(screen.getByTestId('settings-theme-system').getAttribute('aria-checked')).toBe('true')
+    expect(localStorage.getItem('ak-theme')).toBe('system')
+
+    fireEvent.click(screen.getByTestId('settings-theme-light'))
+    expect(localStorage.getItem('ak-theme')).toBe('light')
+  })
+
   it('keeps desktop notifications disabled when browser permission is denied', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     const NotificationMock = vi.fn()

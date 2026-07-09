@@ -56,7 +56,7 @@ export type RolloutTopology = {
 
 export type RolloutCompactionSummary = {
   eventSeq: number
-  trigger?: 'manual' | 'auto' | 'preflight'
+  trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'
   preserveFrom: number
   replacedCount: number
   tokensBefore: number

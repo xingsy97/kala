@@ -165,7 +165,7 @@ export function RunTerminalBenchWizard({
       <DialogContent className="max-w-2xl" data-testid="terminalbench-wizard">
         <DialogHeader>
           <DialogTitle>{t('benchmarks.terminalWizard.title')}</DialogTitle>
-          <DialogDescription>Terminal-Bench pipeline: choose → run → import.</DialogDescription>
+          <DialogDescription>{t('benchmarks.terminalWizard.description')}</DialogDescription>
         </DialogHeader>
 
         <ol className="flex items-center gap-2 text-xs" data-testid="terminalbench-wizard-steps">
@@ -310,7 +310,7 @@ export function RunTerminalBenchWizard({
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                {t('benchmarks.terminalWizard.importButton')} — Terminal-Bench parser produces the official summary.
+                {t('benchmarks.terminalWizard.importHint')}
               </p>
             )}
             <div className="flex justify-between gap-2">

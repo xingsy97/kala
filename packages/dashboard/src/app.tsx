@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, BarChart3, Boxes, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
+import { Archive, BarChart3, Boxes, ChevronLeft, ChevronRight, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 
@@ -45,10 +45,12 @@ import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
-import { ArtifactExplorerDialog } from './features/artifacts/ArtifactExplorerDialog.js'
 import { AppShellNav } from './app-shell/AppShellNav.js'
 import { useAppSection, type AppSection } from './app-shell/section.js'
 import { BenchmarksPage } from './features/benchmarks/BenchmarksPage.js'
+import { OperationsPage } from './features/operations/OperationsPage.js'
+import { ArtifactsPage } from './features/artifacts-browser/ArtifactsPage.js'
+import { DocsPage } from './features/docs/DocsPage.js'
 import {
   cancelSession,
   clearSession,
@@ -128,6 +130,7 @@ export function App(): JSX.Element {
   const { t } = useTranslation()
   const [config, setConfig] = useState(() => readInitialConfig())
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
+  const [explorerOpen, setExplorerOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string; workspaceId?: string } | null
@@ -139,15 +142,13 @@ export function App(): JSX.Element {
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pipelineGuideOpen, setPipelineGuideOpen] = useState(false)
-  const [artifactsOpen, setArtifactsOpen] = useState(false)
-  const [artifactInitialMode, setArtifactInitialMode] = useState<'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops'>('artifacts')
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
-  const [theme, toggleTheme] = useTheme()
+  const [themePreference, toggleTheme, , effectiveTheme] = useTheme()
   const wideLayout = useMinWidth(1180)
   const { models, defaultModel, reload: reloadModels } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
@@ -542,17 +543,12 @@ export function App(): JSX.Element {
     setCwdDialogOpen(true)
   }
 
-  const openArtifacts = (mode: 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops' = 'artifacts'): void => {
-    setArtifactInitialMode(mode)
-    setArtifactsOpen(true)
-  }
-
   const [section, setSection] = useAppSection()
   const handleSectionSelect = (next: AppSection): void => {
     setSection(next)
-    // Benchmarks is now a real page — rendered inline below, not a modal.
-    if (next === 'operations') openArtifacts('ops')
-    else if (next === 'artifacts') openArtifacts('artifacts')
+    // Benchmarks, Operations & Artifacts are now real pages — rendered inline below, not a modal.
+    if (next === 'operations') { /* rendered inline */ }
+    else if (next === 'artifacts') { /* rendered inline */ }
     else if (next === 'pipeline') setPipelineGuideOpen(true)
   }
 
@@ -672,7 +668,10 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.openEvalHint'),
         icon: BarChart3,
         keywords: ['swebench', 'benchmark', 'comparison', 'score'],
-        run: () => openArtifacts('eval'),
+        run: () => {
+          setSection('benchmarks')
+          if (typeof window !== 'undefined') window.location.hash = '#/benchmarks'
+        },
       },
       {
         id: 'view.artifacts',
@@ -680,8 +679,11 @@ export function App(): JSX.Element {
         label: t('commandPalette.commands.openArtifacts'),
         hint: t('commandPalette.commands.openArtifactsHint'),
         icon: Boxes,
-        keywords: ['manifest', 'trace', 'eval'],
-        run: () => openArtifacts('artifacts'),
+        keywords: ['manifest', 'trace', 'eval', 'memory'],
+        run: () => {
+          setSection('artifacts')
+          if (typeof window !== 'undefined') window.location.hash = '#/artifacts'
+        },
       },
       {
         id: 'view.ops-artifacts',
@@ -690,14 +692,17 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.openOpsHint'),
         icon: Workflow,
         keywords: ['reliability', 'rollout', 'trace', 'router', 'subagent'],
-        run: () => openArtifacts('ops'),
+        run: () => {
+          setSection('operations')
+          if (typeof window !== 'undefined') window.location.hash = '#/operations'
+        },
       },
       {
         id: 'view.toggle-theme',
         group: t('commandPalette.groups.view'),
-        label: theme === 'dark' ? t('commandPalette.commands.switchLight') : t('commandPalette.commands.switchDark'),
+        label: effectiveTheme === 'dark' ? t('commandPalette.commands.switchLight') : t('commandPalette.commands.switchDark'),
         hint: t('commandPalette.commands.toggleThemeHint'),
-        icon: theme === 'dark' ? Sun : Moon,
+        icon: effectiveTheme === 'dark' ? Sun : Moon,
         keywords: ['dark', 'light', 'appearance'],
         run: () => toggleTheme(),
       },
@@ -767,7 +772,8 @@ export function App(): JSX.Element {
     session.state,
     sessionWorkspaceOnline,
     t,
-    theme,
+    effectiveTheme,
+    themePreference,
     toggleTheme,
     wideLayout,
   ])
@@ -884,44 +890,63 @@ export function App(): JSX.Element {
         section={section}
         onSelect={handleSectionSelect}
         onOpenSettings={() => setSettingsOpen(true)}
-        onToggleInspector={() => setInspectorOpen((v) => !v)}
-        inspectorOpen={wideLayout && inspectorOpen}
-        inspectorAvailable={wideLayout && hasSelectedSession}
+        connectionStatus={hasSelectedSession ? <ConnectionStatus status={session.status} /> : null}
       />
       <div className="flex-1 min-h-0">
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'benchmarks' ? (
-        <BenchmarksPage onLaunchSwebench={() => openArtifacts('eval')} />
+        <BenchmarksPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+      ) : section === 'operations' ? (
+        <OperationsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+      ) : section === 'artifacts' ? (
+        <ArtifactsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
+      ) : section === 'docs' ? (
+        <DocsPage />
       ) : (
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
           <>
-            <ResizablePanel
-              defaultSize={20}
-              minSize={17}
-              maxSize={22}
-              className="min-w-[240px] bg-sidebar text-sidebar-foreground"
-              data-testid="explorer-panel"
-            >
-              <div className="h-full">
-                <Explorer
-                  executors={control.executors}
-                  sessions={control.sessions}
-                  selectedSessionId={config.sessionId}
-                  onSelect={selectSession}
-                  onNewSession={newSession}
-                  onConnectWorkspace={() => setConnectWorkspaceOpen(true)}
-                  onDelete={deleteSessionAt}
-                  onRename={renameSessionAt}
-                  onOpenSessionInfo={(sid) => {
-                    if (sid !== config.sessionId) selectSession(sid)
-                    setMetadataOpen(true)
-                  }}
-                  onWorkspaceInfo={setWorkspaceInfoId}
-                />
-              </div>
-            </ResizablePanel>
-            <ResizableHandle withHandle />
+            {explorerOpen ? (
+              <>
+                <ResizablePanel
+                  defaultSize={20}
+                  minSize={17}
+                  maxSize={22}
+                  className="min-w-[240px] bg-sidebar text-sidebar-foreground"
+                  data-testid="explorer-panel"
+                >
+                  <div className="h-full">
+                    <Explorer
+                      executors={control.executors}
+                      sessions={control.sessions}
+                      selectedSessionId={config.sessionId}
+                      onSelect={selectSession}
+                      onNewSession={newSession}
+                      onConnectWorkspace={() => setConnectWorkspaceOpen(true)}
+                      onDelete={deleteSessionAt}
+                      onRename={renameSessionAt}
+                      onOpenSessionInfo={(sid) => {
+                        if (sid !== config.sessionId) selectSession(sid)
+                        setMetadataOpen(true)
+                      }}
+                      onWorkspaceInfo={setWorkspaceInfoId}
+                      onCollapse={() => setExplorerOpen(false)}
+                    />
+                  </div>
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+              </>
+            ) : (
+              <ResizablePanel
+                defaultSize={2}
+                minSize={2}
+                maxSize={2}
+                className="max-w-9 min-w-9 bg-sidebar text-sidebar-foreground"
+                data-testid="explorer-rail"
+              >
+                <ExplorerRail onExpand={() => setExplorerOpen(true)} />
+              </ResizablePanel>
+            )}
           </>
         ) : null}
         <ResizablePanel
@@ -934,7 +959,6 @@ export function App(): JSX.Element {
             <WorkbenchToolbar
               sessionLabel={sessionLabel}
               cwd={currentCwd}
-              status={session.status}
               onOpenExplorer={() => setExplorerDrawerOpen(true)}
               explorerAvailable={!wideLayout}
               onChangeCwd={openCwdDialog}
@@ -1185,8 +1209,16 @@ export function App(): JSX.Element {
                             setHighlightIndex((cur) => (cur === index ? null : cur))
                           }, 1400)
                         }}
+                        onCollapse={() => setInspectorOpen(false)}
                       />
                     </div>
+                  </ResizablePanel>
+                </>
+              ) : wideLayout && hasSelectedSession ? (
+                <>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel defaultSize={2} minSize={2} maxSize={2} className="max-w-9 min-w-9 bg-card text-card-foreground" data-testid="inspector-rail">
+                    <InspectorRail onExpand={() => setInspectorOpen(true)} />
                   </ResizablePanel>
                 </>
               ) : null}
@@ -1245,15 +1277,6 @@ export function App(): JSX.Element {
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
       <PipelineGuideDialog open={pipelineGuideOpen} onOpenChange={setPipelineGuideOpen} />
-      <ArtifactExplorerDialog
-        open={artifactsOpen}
-        initialMode={artifactInitialMode}
-        onOpenChange={setArtifactsOpen}
-        onOpenSession={(sessionId) => {
-          selectSession(sessionId)
-          setArtifactsOpen(false)
-        }}
-      />
       <SessionMetadataDialog
         open={metadataOpen}
         onOpenChange={setMetadataOpen}
@@ -1300,7 +1323,7 @@ export function App(): JSX.Element {
         onOpenChange={setCommandPaletteOpen}
         commands={commandPaletteCommands}
       />
-      <Toaster position="bottom-right" richColors closeButton theme={theme} />
+      <Toaster position="bottom-right" richColors closeButton theme={effectiveTheme} />
       </div>
     </div>
   )
@@ -1514,10 +1537,53 @@ function PipelinePrinciple({ title, body }: { title: string; body: string }): JS
   )
 }
 
+function ExplorerRail({ onExpand }: { onExpand(): void }): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="flex h-full w-9 flex-col items-center border-r border-border/60 bg-sidebar px-1 py-2 text-sidebar-foreground" data-testid="explorer-rail-content">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onExpand}
+        title={t('explorer.expandPanel')}
+        aria-label={t('explorer.expandPanel')}
+        data-testid="explorer-expand-button"
+        className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+      >
+        <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+      </Button>
+      <div className="mt-2 flex flex-1 items-center justify-center text-[9px] font-semibold uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
+        {t('explorer.title')}
+      </div>
+    </div>
+  )
+}
+
+function InspectorRail({ onExpand }: { onExpand(): void }): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="flex h-full w-9 flex-col items-center border-l border-border/60 bg-card px-1 py-2 text-card-foreground" data-testid="inspector-rail-content">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onExpand}
+        title={t('inspector.expandPanel')}
+        aria-label={t('inspector.expandPanel')}
+        data-testid="inspector-expand-button"
+        className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+      </Button>
+      <div className="mt-2 flex flex-1 items-center justify-center text-[9px] font-semibold uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
+        {t('app.debugger')}
+      </div>
+    </div>
+  )
+}
+
 function WorkbenchToolbar({
   sessionLabel,
   cwd,
-  status,
   onOpenExplorer,
   explorerAvailable,
   onChangeCwd,
@@ -1525,7 +1591,6 @@ function WorkbenchToolbar({
 }: {
   sessionLabel: string
   cwd: string
-  status: string
   onOpenExplorer(): void
   explorerAvailable: boolean
   onChangeCwd(): void
@@ -1534,7 +1599,7 @@ function WorkbenchToolbar({
   const { t } = useTranslation()
   return (
     <div
-      className="flex min-h-12 flex-none items-center gap-1.5 bg-card px-2 py-2 text-sm text-card-foreground backdrop-blur-md sm:gap-2 sm:px-3"
+      className="flex min-h-9 flex-none items-center gap-1.5 bg-card px-2 py-1 text-sm text-card-foreground backdrop-blur-md sm:gap-2 sm:px-3"
       data-testid="workbench-toolbar"
     >
       {explorerAvailable ? (
@@ -1545,7 +1610,7 @@ function WorkbenchToolbar({
           title={t('app.openExplorer')}
           aria-label={t('app.openExplorer')}
           data-testid="explorer-toggle"
-          className="flex-none"
+          className="h-8 w-8 flex-none"
         >
           <Menu className="h-4 w-4" />
         </Button>
@@ -1565,7 +1630,7 @@ function WorkbenchToolbar({
         onClick={onChangeCwd}
         title={cwd ? t('app.changeSessionCwd', { cwd }) : t('app.setSessionCwd')}
         data-testid="cwd-button"
-        className="hidden min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
+        className="hidden h-8 min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
       >
         <FolderOpen className="h-3.5 w-3.5 flex-none" />
         <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
@@ -1574,7 +1639,6 @@ function WorkbenchToolbar({
       </Button>
       ) : null}
       <span className="min-w-0 flex-1" />
-      {sessionSelected ? <ConnectionStatus status={status} /> : null}
     </div>
   )
 }
