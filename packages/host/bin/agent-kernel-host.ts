@@ -38,6 +38,7 @@ import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
 import type { ManualModelInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 
 import packageJson from '../package.json'
 import { anthropicAdapter } from '../src/llm/anthropic.js'
@@ -192,6 +193,10 @@ async function main(): Promise<void> {
     })),
     defaultModel,
     hooks: hookSummaries,
+    versions: {
+      host: VERSION,
+      protocol: PROTOCOL_VERSION,
+    },
     auth: authSettings(effectiveAuth),
     paths: {
       claudeSettings: join(homedir(), '.claude', 'settings.json'),

@@ -545,6 +545,12 @@ export const ServerSettingsPayloadSchema = z.object({
   providers: z.array(SettingsProviderSummarySchema),
   defaultModel: z.string(),
   hooks: z.array(SettingsHookSummarySchema),
+  versions: z
+    .object({
+      host: z.string(),
+      protocol: z.string(),
+    })
+    .optional(),
   auth: z
     .object({
       dashboardAuthRequired: z.boolean(),

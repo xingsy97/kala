@@ -77,6 +77,7 @@ const SESSION_ROW_HEIGHT = 60
 const WORKSPACE_ROW_HEIGHT = 48
 const SESSION_ORDER_STORAGE_KEY = 'agent-kernel:explorer:session-order:v1'
 const WORKSPACE_OPEN_STORAGE_KEY = 'agent-kernel:explorer:workspace-open:v1'
+const SESSION_CHILDREN_OPEN_STORAGE_KEY = 'agent-kernel:explorer:session-children-open:v1'
 const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
 const EXPLORER_RAIL_CELL = 'flex h-5 w-4 flex-none items-center justify-center'
 
@@ -104,6 +105,7 @@ export function Explorer({
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [workspaceOpenState, setWorkspaceOpenState] = useState<Record<string, boolean>>(() => readStoredWorkspaceOpenState())
+  const [sessionChildrenOpenState, setSessionChildrenOpenState] = useState<Record<string, boolean>>(() => readStoredSessionChildrenOpenState())
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
   const [manualSessionOrder, setManualSessionOrder] = useState<readonly string[]>(() =>
@@ -124,6 +126,10 @@ export function Explorer({
     [executors, orderedSessions],
   )
   const visibleData = useMemo(() => filterTree(data, query), [data, query])
+  const initialOpenState = useMemo(
+    () => buildInitialOpenState(visibleData, workspaceOpenState, sessionChildrenOpenState),
+    [visibleData, workspaceOpenState, sessionChildrenOpenState],
+  )
 
   const empty = executors.length === 0 && sessions.length === 0
   const filteredEmpty = !empty && query.trim().length > 0 && visibleData.length === 0
@@ -184,14 +190,23 @@ export function Explorer({
             }}
             idAccessor="id"
             openByDefault
-            initialOpenState={workspaceOpenState}
+            initialOpenState={initialOpenState}
             onToggle={(id) => {
-              if (!id.startsWith('ws:')) return
-              setWorkspaceOpenState((prev) => {
-                const next = { ...prev, [id]: !(prev[id] ?? true) }
-                writeStoredWorkspaceOpenState(next)
-                return next
-              })
+              if (id.startsWith('ws:')) {
+                setWorkspaceOpenState((prev) => {
+                  const next = { ...prev, [id]: !(prev[id] ?? true) }
+                  writeStoredWorkspaceOpenState(next)
+                  return next
+                })
+                return
+              }
+              if (id.startsWith('sess:')) {
+                setSessionChildrenOpenState((prev) => {
+                  const next = { ...prev, [id]: !(prev[id] ?? false) }
+                  writeStoredSessionChildrenOpenState(next)
+                  return next
+                })
+              }
             }}
             disableDrag={(d) => d.kind !== 'session'}
             disableDrop={({ parentNode, dragNodes }) => {
@@ -659,7 +674,27 @@ function SessionRow({
         />
       ) : null}
       <div className={EXPLORER_RAIL_CELL}>
-        {!s.parentSessionId ? (
+        {s.children.length > 0 ? (
+          <button
+            type="button"
+            className="flex h-5 w-4 flex-none items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={node.isOpen ? t('explorer.collapseSubAgents') : t('explorer.expandSubAgents')}
+            aria-label={node.isOpen ? t('explorer.collapseSubAgents') : t('explorer.expandSubAgents')}
+            data-testid="session-children-toggle"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              node.toggle()
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            {node.isOpen ? (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </button>
+        ) : !s.parentSessionId ? (
           <div
             ref={dragHandle}
             className="flex h-5 w-4 flex-none cursor-grab items-center justify-center text-muted-foreground/50 opacity-70 active:cursor-grabbing group-hover:text-muted-foreground"
@@ -991,6 +1026,51 @@ function writeStoredWorkspaceOpenState(state: Record<string, boolean>): void {
   } catch {
     // Storage can be unavailable in private mode or quota-exceeded states.
   }
+}
+
+function readStoredSessionChildrenOpenState(): Record<string, boolean> {
+  try {
+    const raw = window.localStorage.getItem(SESSION_CHILDREN_OPEN_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, boolean> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (key.startsWith('sess:') && typeof value === 'boolean') out[key] = value
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function writeStoredSessionChildrenOpenState(state: Record<string, boolean>): void {
+  try {
+    window.localStorage.setItem(SESSION_CHILDREN_OPEN_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Storage can be unavailable in private mode or quota-exceeded states.
+  }
+}
+
+function buildInitialOpenState(
+  workspaces: readonly WorkspaceNode[],
+  workspaceOpenState: Record<string, boolean>,
+  sessionChildrenOpenState: Record<string, boolean>,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = { ...workspaceOpenState }
+  const visitSession = (session: SessionNode): void => {
+    if (session.children.length > 0) {
+      out[session.id] = sessionChildrenOpenState[session.id] ?? false
+      session.children.forEach(visitSession)
+    }
+  }
+  for (const workspace of workspaces) {
+    out[workspace.id] = workspaceOpenState[workspace.id] ?? true
+    workspace.children.forEach((child) => {
+      if (child.kind === 'session') visitSession(child)
+    })
+  }
+  return out
 }
 
 function readStoredSessionOrder(): readonly string[] {

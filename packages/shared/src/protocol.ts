@@ -390,6 +390,8 @@ export type ExecutorOs = 'linux' | 'darwin' | 'win32' | 'other'
 
 export type ExecutorAnnounce = {
   executorId: string
+  /** agent-kernel executor package version. */
+  executorVersion?: string
   /**
    * Stable machine identity. A ULID minted on the executor's first launch
    * and persisted (see packages/executor/src/workspace-id.ts). Sessions
@@ -954,6 +956,10 @@ export type ServerSettingsPayload = {
   providers: readonly SettingsProviderSummary[]
   defaultModel: string
   hooks: readonly SettingsHookSummary[]
+  versions?: {
+    host: string
+    protocol: string
+  }
   auth?: {
     dashboardAuthRequired: boolean
     githubOAuth: {
