@@ -7,7 +7,7 @@ import { createConfig, createInitialState } from '@agent-kernel/kernel'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from './store/log.js'
-import { parseEnhancementCli } from './enhancement-cli.js'
+import { parseEnhancementCli } from './ops-cli.js'
 import { auditSessionReliability, replayReliabilityChaos } from './reliability.js'
 
 const READ = {

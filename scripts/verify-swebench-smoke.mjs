@@ -104,12 +104,22 @@ try {
     .map((line) => JSON.parse(line))
   const candidateSummary = JSON.parse(readFileSync(join(dir, 'runs', 'candidate', 'summary.json'), 'utf8'))
   const comparison = JSON.parse(readFileSync(join(dir, 'compare', 'eval-comparison.json'), 'utf8'))
+  const gradePayload = parseMaybeJson(grade.stdout)
 
   check('prediction JSONL has two official rows', predictions.length === 2, `${predictions.length} row(s)`)
   check('prediction rows use official keys', predictions.every((row) => row.instance_id && row.model_name_or_path && typeof row.model_patch === 'string'))
   check('official-style result ingestion updates resolved count', candidateSummary.resolved === 1, `resolved=${candidateSummary.resolved}`)
   check('comparison captures pass-rate delta', comparison.deltas.passRate === 0.5, `delta=${comparison.deltas.passRate}`)
-  check('grade command is dry-run by default', grade.stdout.includes('python -m swebench.harness.run_evaluation'), grade.stdout.trim())
+  check(
+    'grade command is dry-run by default and names the official Docker harness',
+    gradePayload
+      ? gradePayload.gradingAuthority === 'official-swebench-harness' &&
+        gradePayload.gradingMode === 'dry-run' &&
+        gradePayload.requiresDocker === true &&
+        String(gradePayload.shellCommand).includes('python -m swebench.harness.run_evaluation')
+      : grade.stdout.includes('python -m swebench.harness.run_evaluation'),
+    grade.stdout.trim(),
+  )
 } finally {
   if (keep) console.log(`kept smoke directory: ${dir}`)
   else rmSync(dir, { recursive: true, force: true })
@@ -129,4 +139,12 @@ function runCli(args) {
     ].filter(Boolean).join('\n'))
   }
   return { stdout: result.stdout, stderr: result.stderr }
+}
+
+function parseMaybeJson(raw) {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
 }

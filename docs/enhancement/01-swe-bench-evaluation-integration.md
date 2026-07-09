@@ -1,7 +1,8 @@
 # SWE-bench Evaluation Integration
 
-Status: proposed high-priority enhancement  
+Status: implemented as an artifact-driven SWE-bench adapter; official grading remains external/opt-in
 Priority: 1
+Last reviewed against implementation: 2026-07-10
 
 ## Why This Matters
 
@@ -33,11 +34,28 @@ Important resource facts from the official repo: SWE-bench evaluation uses
 Docker, recommends x86_64, about 120GB free storage, 16GB RAM, and 8 CPU cores,
 and stores results under `evaluation_results` with logs under `logs/`.
 
+The official harness is patch-centric. It applies `model_patch` to the original
+checkout inside Docker, runs the generated `/eval.sh`, parses test logs, and
+marks an instance resolved only when the issue-specific `FAIL_TO_PASS` tests
+pass and the `PASS_TO_PASS` tests keep passing. An agent completing its own run
+or leaving a non-empty diff is not a SWE-bench score.
+
 ## Design Principle
 
 Do not reimplement SWE-bench grading. `agent-kernel` should implement inference,
 patch extraction, trace capture, and result ingestion. The official Docker
 harness remains the grading source of truth.
+
+Use precise product vocabulary:
+
+- **Prediction**: an official JSONL row with `instance_id`,
+  `model_name_or_path`, and `model_patch`.
+- **Agent completion**: the agent command exited and a patch artifact was
+  captured. This can still be an empty patch, bad patch, or test failure.
+- **Official grading**: `python -m swebench.harness.run_evaluation` ran in a
+  Docker-capable environment.
+- **Resolved**: the official harness result was ingested and says the instance
+  resolved. Do not show `resolved` before ingestion.
 
 The benchmark adapter must stay above the kernel. SWE-bench does not add reducer
 states, protocol messages, or benchmark-specific effects. The host materializes
@@ -192,7 +210,9 @@ inference paths: official `predictions.jsonl`, `experiment.json`, per-instance
 artifact refs, so the dashboard can navigate from a SWE-bench instance to the
 exported OpenInference trace and final patch without guessing paths.
 
-`grade` prints the official command by default. Add `--execute` to actually run
+`grade` emits structured JSON by default with `gradingAuthority` set to
+`official-swebench-harness`, `gradingMode` set to `dry-run`, `requiresDocker:
+true`, the argv array, and the shell command. Add `--execute` to actually run
 the Docker harness. This avoids accidentally triggering an expensive SWE-bench
 evaluation when the operator only wants to inspect the command.
 
@@ -207,6 +227,12 @@ attached to the trial so the dashboard can open official harness evidence from
 the same artifact store as prompts, diffs, traces, and agent logs. It does not
 re-grade patches or reinterpret repository tests.
 
+All host and dashboard actions now preserve this distinction in their responses
+and labels. Prediction-producing actions return `gradingStatus: not_graded`.
+Result ingestion returns `gradingStatus: ingested`. Dashboard text uses
+"predictions completed" for agent execution and reserves "resolved" for
+ingested official harness output.
+
 `agent-infer` is the implemented agent-driven materialization adapter. It loads
 local SWE-bench-shaped JSONL instances, clones either `repo_path`, a
 `--repo-cache-dir` match, or the GitHub `repo`, checks out `base_commit`, writes
@@ -218,6 +244,19 @@ the official prediction patch. The agent command receives:
 - `AGENT_KERNEL_SWEBENCH_REPO`
 - `AGENT_KERNEL_SWEBENCH_PROMPT`
 - `AGENT_KERNEL_SWEBENCH_PROMPT_FILE`
+- `AGENT_KERNEL_SWEBENCH_SESSION_LOG`
+
+When the agent command writes an `agent-kernel` JSONL session log to
+`$AGENT_KERNEL_SWEBENCH_SESSION_LOG`, the runner reads it, records the child
+session id on the trial, exports an OpenInference trace to
+`traces/<instance_id>.openinference.json`, and attaches the trace as a trial
+artifact ref. This is the "managed session" mode: the runner owns the session
+log path and trace destination, so any well-behaved agent command produces the
+same replayable dashboard evidence as `export-session` without operator wiring.
+When no session log is written, the trial still succeeds with prompt, stdout,
+stderr, diff, and workspace-metadata artifacts. The default session log
+directory is `<runDir>/sessions/` and can be overridden with
+`--session-logs-dir`.
 
 This is intentionally an adapter, not a benchmark-specific kernel mode. The
 official harness remains responsible for grading; the adapter only prepares a
@@ -345,7 +384,7 @@ manifest inspection.
 The Eval view consumes the host artifact manifest, finds eval `summary.json`,
 `progress.json`, comparison, and trial artifacts, then loads details through the
 bounded `/artifacts/content` endpoint. It renders run-level metrics, live
-progress-only runs, trial evidence, and comparison deltas without adding eval
+progress-only runs, prediction artifacts, official harness results, and comparison deltas without adding eval
 state to the kernel or Socket.IO protocol.
 
 Implemented dashboard surfaces:
@@ -465,3 +504,106 @@ runner has the required Docker, CPU, memory, and storage resources.
 - Do not hide official harness logs behind simplified summaries.
 - Do not treat benchmark pass rate as the only useful metric; failed traces are
   the main debugging and RL data source.
+
+## Current Implementation Alignment
+
+### Implemented In Code
+
+The repository currently has a real SWE-bench adapter layer in the host, not a
+toy benchmark schema. The implemented pieces are:
+
+- CLI commands under `agent-kernel-host eval swebench ...` for `plan`, `infer`,
+  `run`, `agent-infer`, `export-session`, `grade`, and `ingest-results`.
+- Official prediction JSONL generation with rows shaped as
+  `{ instance_id, model_name_or_path, model_patch }`.
+- Offline patch inference from local SWE-bench-shaped `instances.jsonl` plus a
+  patch directory.
+- Existing-session export into SWE-bench prediction/trial artifacts.
+- Official harness command construction through
+  `python -m swebench.harness.run_evaluation`, with Docker execution only when
+  explicitly requested.
+- Official-style result ingestion from `instance_results.jsonl`,
+  `instance_results.json`, or `results.json` shaped outputs.
+- Agent-command based materialization through `agent-infer`: clone/materialize a
+  repo, write a prompt artifact, run an operator-provided command, capture logs,
+  extract `git diff --binary`, and emit prediction/trial/progress artifacts.
+- Worker planning through `worker-plan.json`, with selected instance count,
+  deterministic shards, worker count, timeout, and resource hints. Each plan
+  is also registered in a `runs/registry/run-index.json` artifact keyed by
+  `runId`, so dashboards and follow-up tooling can discover recent SWE-bench
+  plans without re-parsing every run directory.
+- CI smoke coverage through `pnpm run verify:swebench-smoke` and the manual
+  `.github/workflows/eval-smoke.yml` workflow.
+- Dashboard Eval mode that renders summaries, progress, trials, comparisons,
+  worker plans, final diffs, trace refs, harness evidence, and linked sessions.
+- Dashboard action forms for cheap artifact actions: create worker plan, infer
+  offline patches, export session, ingest results, and generate the official
+  grade command.
+- Dashboard `Run Benchmark` wizard that composes those actions into a Plan →
+  Predictions → Grade → Ingest → Review flow with a numbered progress rail,
+  propagated run id/dataset/predictions/results state between steps, an inline
+  Grading Handoff panel showing the official
+  `python -m swebench.harness.run_evaluation` command, and a Reset control.
+- Real browser coverage through `pnpm run verify:dashboard-enhancement-actions`
+  for the dashboard-visible SWE-bench actions and artifact rendering.
+
+### Current Website Workflow
+
+The dashboard now offers two entry points for a SWE-bench run:
+
+1. Guided path: open `Eval` from the toolbar or command palette, expand
+   `Run Benchmark (guided)`, then step through Plan → Predictions → Grade
+   → Ingest → Review. Each step composes one existing artifact action and
+   propagates the run id, dataset, predictions path, and results directory
+   between steps without introducing a new backend endpoint. The Grade step
+   surfaces the official `python -m swebench.harness.run_evaluation` command
+   inline as a Grading Handoff panel; the operator runs it locally or in CI
+   and returns to the Ingest step, whose Results Dir input is pre-filled
+   from the grade response.
+2. Direct-action path (unchanged): the `Create SWE-bench Worker Plan` panel
+   and the Eval Artifact Actions form remain available for one-off actions
+   or for users who prefer explicit control over each API call.
+
+Long-running agent batches and Docker-based official grading still happen
+outside the browser (CLI/CI). The wizard makes that handoff explicit rather
+than hiding it behind an in-browser scheduler.
+
+### Important Gaps
+
+- Guided wizard is implemented but browser-triggered long-running agent
+  shard execution is not. That is acceptable for now, but the UI must keep
+  the CLI/CI handoff explicit rather than pretending to schedule shards.
+- `worker-plan.json` is not yet consumed by a managed distributed worker
+  runtime. It is a planning artifact for CLI/manual orchestration.
+- `agent-infer` now runs external commands with a managed session-log slot
+  (`AGENT_KERNEL_SWEBENCH_SESSION_LOG`) so any well-behaved runner produces
+  sessionId + OpenInference trace on the trial. It is not yet bound to an
+  in-process host loop for one shard, but the artifact contract for
+  dashboard replay is fully in place.
+- Full official Docker SWE-bench grading is manual/opt-in and not part of the
+  default e2e or CI path because of resource requirements.
+- Dataset loading is local JSONL first. Hugging Face dataset integration remains
+  a planned Python/platform component.
+
+### Production Quality Criteria
+
+This feature reaches production level when:
+
+- A user can run a small benchmark from the dashboard without understanding
+  internal action names.
+- Long-running execution has resumable run status, per-worker logs, and clear
+  failure labels.
+- Official grading remains delegated to SWE-bench but can be launched or handed
+  off through a first-class CI/manual workflow from the UI.
+- Every trial links prediction, final patch, session log, trace, harness result,
+  and failure taxonomy.
+- E2e coverage includes missing artifact directories, failed planning inputs,
+  successful planning, prediction export, result ingestion, and report rendering.
+
+### Next Implementation Steps
+
+1. Extend the managed session-log slot into a first-class in-process host loop
+   integration when a real workload demands it (currently the artifact contract
+   already gives dashboard replay from any well-behaved agent command).
+2. Add a real-world e2e that exercises the full browser wizard through dry-run
+   grading and result ingestion.

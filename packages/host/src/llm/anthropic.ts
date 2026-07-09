@@ -28,6 +28,12 @@ export type AnthropicOptions = {
   apiUrl?: string
   fetchImpl?: typeof fetch
   /**
+   * Optional model weight version to stamp on every trace. Hosted providers
+   * rarely expose one; setting it here lets local/proxy gateways or A/B
+   * evaluation configs record which policy checkpoint answered a call.
+   */
+  weightVersion?: string
+  /**
    * Toggle Anthropic prompt caching (attaches `cache_control: ephemeral`
    * markers on the system prompt, last tool, and last non-assistant message).
    * Defaults to true. Set false against gateways that reject the field.
@@ -92,6 +98,7 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
   const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS
   const apiUrl = opts.apiUrl ?? DEFAULT_URL
   const cache = opts.cache ?? true
+  const weightVersion = opts.weightVersion
 
   return {
     name: `anthropic:${model}`,
@@ -108,6 +115,7 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
           fetchImpl,
           params.signal,
           params.onTextDelta,
+          weightVersion,
         )
       }
       const res = await fetchImpl(apiUrl, {
@@ -131,6 +139,9 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
         trace: makeAnthropicTrace(apiUrl, effectiveModel, body, {
           status: res.status,
           body: json,
+        }, {
+          gatewayRequestId: extractAnthropicRequestId(res.headers, json),
+          ...(weightVersion ? { weightVersion } : {}),
         }),
       }
     },
@@ -156,6 +167,7 @@ async function callStreaming(
   fetchImpl: typeof fetch,
   signal: AbortSignal | undefined,
   onTextDelta: (delta: string) => void,
+  weightVersion: string | undefined,
 ): Promise<LLMResponse> {
   const startedAt = performance.now()
   const res = await fetchImpl(apiUrl, {
@@ -180,6 +192,7 @@ async function callStreaming(
   let outputTokens = 0
   let cacheCreationTokens = 0
   let cacheReadTokens = 0
+  let streamMessageId: string | undefined
   const streamEventTypes: string[] = []
 
   const reader = res.body.getReader()
@@ -205,6 +218,10 @@ async function callStreaming(
         continue
       }
       if (typeof evt.type === 'string') streamEventTypes.push(evt.type)
+      if (evt.type === 'message_start' && !streamMessageId) {
+        const msg = evt.message as { id?: string } | undefined
+        if (msg && typeof msg.id === 'string') streamMessageId = msg.id
+      }
       handleStreamEvent(
         evt,
         blocks,
@@ -254,6 +271,9 @@ async function callStreaming(
           cache_read_input_tokens: cacheReadTokens,
         },
       },
+    }, {
+      gatewayRequestId: extractAnthropicRequestId(res.headers, streamMessageId),
+      ...(weightVersion ? { weightVersion } : {}),
     }),
   }
 }
@@ -271,6 +291,7 @@ function makeAnthropicTrace(
   model: string,
   body: Record<string, unknown>,
   response: NonNullable<LLMTrace['response']>,
+  meta?: { gatewayRequestId?: string; weightVersion?: string },
 ): LLMTrace {
   return {
     provider: 'anthropic',
@@ -285,7 +306,26 @@ function makeAnthropicTrace(
       body,
     },
     response,
+    ...(meta?.gatewayRequestId ? { gatewayRequestId: meta.gatewayRequestId } : {}),
+    ...(meta?.weightVersion ? { weightVersion: meta.weightVersion } : {}),
   }
+}
+
+/**
+ * Prefer the HTTP `request-id` header (Anthropic returns one on both
+ * streaming and non-streaming responses). Fall back to the message body's
+ * `id` for non-streaming responses, or to a captured `message_start.id` for
+ * streaming responses. Undefined when nothing was returned (e.g. offline
+ * fixtures).
+ */
+function extractAnthropicRequestId(
+  headers: Headers,
+  bodyOrStreamId: AnthropicResponseBody | string | undefined,
+): string | undefined {
+  const header = headers.get('request-id') ?? headers.get('x-request-id')
+  if (header) return header
+  if (typeof bodyOrStreamId === 'string') return bodyOrStreamId || undefined
+  return bodyOrStreamId?.id
 }
 
 function handleStreamEvent(

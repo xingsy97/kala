@@ -1,7 +1,8 @@
 # Agent Evaluation Platform
 
-Status: proposed enhancement  
+Status: partially implemented; artifact platform exists, scheduler incomplete
 Priority: 3
+Last reviewed against implementation: 2026-07-09
 
 ## Why This Matters
 
@@ -92,7 +93,7 @@ score, and explanation as artifacts.
 
 ## Metrics
 
-Use metrics that connect quality, cost, and reliability:
+Use metrics that connect quality, latency, token pressure, and reliability:
 
 - Pass/resolution rate.
 - Timeout rate.
@@ -101,7 +102,7 @@ Use metrics that connect quality, cost, and reliability:
 - Patch apply failure rate.
 - Median and p95 wall time.
 - Median and p95 input/output tokens.
-- Cost per resolved task.
+- Tokens and wall time per resolved task.
 - LLM calls per task.
 - Tool calls per task.
 - Compaction frequency.
@@ -110,7 +111,7 @@ Use metrics that connect quality, cost, and reliability:
 
 Add an Eval section:
 
-- Experiment list with pass rate, cost, duration, model, commit.
+- Experiment list with pass rate, token usage, duration, model, commit.
 - Dataset/task filters.
 - Regression compare between two experiments.
 - Trial detail linking session replay, trace waterfall, final output, artifacts,
@@ -164,6 +165,27 @@ agent-kernel-host enhancement eval compare-runs \
 It writes `eval-comparison.json` with resolved/failed/timeout/pass-rate deltas
 and per-failure-label deltas. The command reads summaries only and does not
 mutate either run directory.
+
+Implemented regression gate command:
+
+```bash
+agent-kernel-host enhancement eval regression-gate \
+  --root-dir runs/eval/regression-gate \
+  --baseline-summary runs/swebench/base/summary.json \
+  --candidate-summary runs/swebench/candidate/summary.json \
+  --min-pass-rate 0.8 \
+  --max-pass-rate-drop 0.05 \
+  --max-failed-increase 1 \
+  --max-timeout-increase 0 \
+  --max-resolved-drop 2 \
+  --failure-cap agent_error=0
+```
+
+Writes `regression-gate.json` with `verdict.pass`, per-threshold reason codes,
+observed values, and applied thresholds. When the verdict is a fail, the
+process exits with code 2 so CI runners can block promotion without any extra
+scripting. The gate reads summaries only and does not mutate either run
+directory.
 
 Phase 1: local eval run directory and deterministic scorers over synthetic
 fixtures. Implemented for session logs and patch files.
@@ -248,3 +270,85 @@ benchmark scoring, such as SWE-bench, delegated to the official harness.
 - Do not build a full LangSmith/Phoenix clone.
 - Do not store eval scores inside kernel state.
 - Do not let model-assisted eval replace deterministic benchmark grading.
+
+## Current Implementation Alignment
+
+### Implemented In Code
+
+The project now has a real local eval artifact layer:
+
+- Generic deterministic session scoring through
+  `agent-kernel-host enhancement eval score-session`.
+- Model-judge trace parsing through
+  `agent-kernel-host enhancement eval judge-score`; this parses saved judge
+  responses and writes judge trace artifacts, but does not call an external
+  judge model itself.
+- Summary comparison through
+  `agent-kernel-host enhancement eval compare-runs`.
+- SWE-bench adapter artifacts: experiments, trials, summaries, predictions,
+  worker plans, progress, final diffs, traces, and official harness evidence.
+- Dashboard Eval view that discovers artifacts through `/artifacts/manifest` and
+  loads detail through `/artifacts/content`.
+- Dashboard action forms for session score, judge score, compare runs,
+  SWE-bench infer/export/ingest/grade-command, and worker-plan creation.
+- Browser e2e that drives the Eval UI for form-backed actions and verifies real
+  artifact files on disk.
+
+### Current Product Boundary
+
+The dashboard is currently an eval artifact workbench. It can create cheap
+derived artifacts and inspect results, but it is not a full experiment
+scheduler. Long-running benchmark execution, Docker grading, and external judge
+model calls remain CLI/CI or operator-controlled jobs.
+
+This boundary is deliberate for the current implementation because those jobs
+need environment prerequisites, process supervision, resumability, and explicit
+resource controls. The UI, CLI, and HTTP action responses now name this boundary
+explicitly: prediction-producing steps are `not_graded`, the generated grade
+command is a dry-run handoff to the official SWE-bench Docker harness, and
+`resolved` appears only after official harness results are ingested.
+
+### Important Gaps
+
+- No dataset registry with versioned dataset definitions and task metadata.
+- No first-class experiment registry beyond run directories and summaries.
+- No dashboard-owned long-running scheduler for full benchmark execution. The
+  dashboard wizard prepares artifacts, runs local/host prediction steps, creates
+  the official harness command, and ingests official results, but Docker grading
+  remains operator/CI controlled.
+- No scheduled regression gate that compares candidate against baseline and
+  fails on quality/latency/token/reliability thresholds.
+- No model-assisted evaluator service that owns prompt templates, calls judge
+  models, and stores responses. Current `judge-score` only parses a saved
+  response artifact.
+- No eval-level latency/token distribution view across trials, only session
+  profile artifacts and summary-level comparisons.
+- No clustering view for failures beyond low-cardinality labels and comparison
+  deltas.
+
+### Production Quality Criteria
+
+This platform is production-level when:
+
+- A run has immutable metadata: dataset version, model/provider, tool registry
+  hash, prompt version, commit, environment summary, timeout policy, compaction
+  policy, and artifact root.
+- The dashboard can show experiment status and failed-trial artifacts without
+  requiring users to know run-directory conventions.
+- CLI/CI can run a deterministic smoke by default and an official benchmark
+  gate manually or on a scheduled runner.
+- Comparisons include quality, latency, token, tool-error, timeout, and
+  compaction deltas.
+- Model-assisted evals preserve judge prompt, model, response, parsed score,
+  and redaction status.
+
+### Next Implementation Steps
+
+1. Add an `experiment.json` creation path shared by generic eval and SWE-bench,
+   with strict metadata fields.
+2. Add a dashboard `Eval Run` wizard that wraps current actions into an ordered
+   lifecycle.
+3. Add a judge runner adapter that can call a configured judge provider while
+   preserving the existing `judge-score` parser as the persistence layer.
+4. Add e2e coverage for the guided eval flow, including failed input, dry-run
+   grading handoff, result ingestion, and comparison report.

@@ -19,6 +19,7 @@ import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node
 import { extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
 import type {
+  AttachedExecutor,
   ClientAddManualModel,
   ClientDeleteManualModel,
   ModelInfo,
@@ -26,25 +27,51 @@ import type {
   ServerSettingsPayload,
 } from '@agent-kernel/shared'
 
-import { buildArtifactManifest } from '../artifact-manifest.js'
+import { buildArtifactManifest, pruneArtifacts } from '../artifact-manifest.js'
 import {
   exportRolloutFrameworkAdapter,
   exportRolloutSegments,
   exportRolloutSidecar,
-  exportSessionTraceArtifacts,
-} from '../enhancement-export.js'
+} from '../rl-export.js'
+import { verifyReward } from '../rl-reward.js'
+import { exportSessionTraceArtifacts } from '../session-export.js'
+import { exportTraceOtlp, loadHeadersFile } from '../trace-otlp-export.js'
 import { compareEvalRuns, judgeScore, profileSession, scoreSession } from '../eval/generic.js'
+import { evaluateRegressionGate, type RegressionThresholdPolicy } from '../eval/regression-gate.js'
+import { aggregateProfiles } from '../eval/cost-aggregate.js'
+import { evaluateProfileBudget, type ProfileBudgetPolicy } from '../eval/profile-budget.js'
 import {
   exportSessionForSweBench,
   inferSweBenchPatchRun,
   ingestSweBenchResults,
   planSweBenchWorkerRun,
+  runSweBenchAgentPatchRun,
   runSweBenchGrade,
+  sweBenchRunLayout,
 } from '../eval/swebench.js'
+import {
+  InstancesSourceError,
+  resolveSweBenchInstances,
+  type InstancesSource,
+} from '../eval/swebench-instances-source.js'
+import {
+  PatchesSourceError,
+  resolveSweBenchPatches,
+} from '../eval/swebench-patches-source.js'
+import {
+  ResultsSourceError,
+  resolveSweBenchResults,
+} from '../eval/swebench-results-source.js'
 import { buildMemoryIndex } from '../memory-index.js'
+import { retrieveMemory } from '../memory-retrieval.js'
 import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
+import { evaluateReliabilityGate, type ReliabilityGatePolicy } from '../reliability-gate.js'
+import { classifyReliability } from '../reliability-classify.js'
+import { diffToolCatalogs } from '../tool-catalog-diff.js'
+import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
 import type { SessionStore } from '../store/session.js'
 import { exportSubAgentGraph } from '../subagent-graph.js'
+import { ContentInputError, resolveContentToPath } from './content-inputs.js'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -64,6 +91,17 @@ const MIME: Record<string, string> = {
 }
 
 const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
+
+function defaultSweBenchAgentCommand(): string {
+  // Smoke-test recipe: produces an empty patch inside the workspace so the
+  // whole Plan → Infer → Grade → Ingest wizard can complete end-to-end
+  // without a real agent. Real users must supply their own agentCommand
+  // (e.g. Claude Code CLI, aider, or a custom shell script) via the wizard's
+  // "Custom shell command" recipe. This intentionally does NOT invoke
+  // agent-kernel-executor — that binary is a socket.io daemon, not a
+  // standalone agent runner.
+  return 'true'
+}
 const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
 
 type CreateSweBenchPlanRequest = {
@@ -111,6 +149,8 @@ type EnhancementActionRequest = {
   rewardPath?: string
   tokenSegmentsPath?: string
   sidecarPath?: string
+  trialPath?: string
+  scorePath?: string
   dataset?: string
   split?: string
   instancesJsonl?: string
@@ -123,6 +163,90 @@ type EnhancementActionRequest = {
   maxWorkers?: number | string
   modal?: boolean
   cwd?: string
+  minPassRate?: number | string
+  maxPassRateDrop?: number | string
+  maxFailedIncrease?: number | string
+  maxTimeoutIncrease?: number | string
+  maxResolvedDrop?: number | string
+  failureLabelCaps?: Record<string, number | string>
+  outputFilename?: string
+  summaryPath?: string
+  profilePath?: string
+  maxEstimatedCostUsd?: number | string
+  maxInputTokens?: number | string
+  maxOutputTokens?: number | string
+  maxTotalTokens?: number | string
+  maxLlmCalls?: number | string
+  maxToolCalls?: number | string
+  maxToolErrors?: number | string
+  maxWallTimeMs?: number | string
+  maxAverageLlmDurationMs?: number | string
+  maxP95LlmDurationMs?: number | string
+  maxAverageTimeToFirstChunkMs?: number | string
+  maxP95TimeToFirstChunkMs?: number | string
+  maxMissingUsageCalls?: number | string
+  maxLlmTraceMissingCalls?: number | string
+  requireCostEstimated?: boolean | string
+  chaosReportPath?: string
+  maxDanglingCount?: number | string
+  minRecoverableRatio?: number | string
+  maxRecoveryEventCount?: number | string
+  maxDanglingByKind?: Record<string, number | string>
+  requireStatusIn?: readonly string[] | string
+  maxIntegrityIssueCount?: number | string
+  heartbeatPath?: string
+  wedgedThresholdMs?: number | string
+  baselineCatalogPath?: string
+  candidateCatalogPath?: string
+  query?: string
+  maxTokens?: number | string
+  maxHits?: number | string
+  outputPath?: string
+  maxHashBytes?: number | string
+  olderThanDays?: number | string
+  maxTotalBytes?: number | string
+  kinds?: readonly string[] | string
+  dryRun?: boolean
+  endpoint?: string
+  headers?: Record<string, string> | string
+  headersFilePath?: string
+  retries?: number | string
+  retryDelayMs?: number | string
+  timeoutMs?: number | string
+  serviceName?: string
+  hostVersion?: string
+  source?: string
+  inlineContent?: string
+  datasetRef?: string
+  configName?: string
+  datasetSplit?: string
+  datasetLimit?: number | string
+  hfToken?: string
+  hfDatasetsServerBaseUrl?: string
+  patches?: Record<string, string>
+  resultsFiles?: Record<string, string>
+  sessionLogContent?: string
+  patchContent?: string
+  promptContent?: string
+  responseContent?: string
+  baselineSummaryContent?: string
+  candidateSummaryContent?: string
+  chaosReportContent?: string
+  heartbeatContent?: string
+  baselineCatalogContent?: string
+  candidateCatalogContent?: string
+  rewardContent?: string
+  tokenSegmentsContent?: string
+  sidecarContent?: string
+  trialContent?: string
+  scoreContent?: string
+  headersFileContent?: string
+  modelPatchContent?: string
+  profileContent?: string
+  summaryContent?: string
+  pricingContent?: string
+  agentCommand?: string
+  skipCompleted?: boolean
 }
 
 export function attachJsonRoutes(
@@ -135,6 +259,8 @@ export function attachJsonRoutes(
     deleteManualModel?: (input: ClientDeleteManualModel) => ServerSettingsPayload
     artifactRootDir?: string | false
     sessions?: SessionStore
+    routerHealth?: () => unknown
+    executorsSnapshot?: () => readonly AttachedExecutor[]
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -220,63 +346,187 @@ export function attachJsonRoutes(
       sendJson(req, res, valueOf(payloads.settings))
       return
     }
+    if (path === '/router/health' && payloads.routerHealth) {
+      claimRoute(req)
+      sendJson(req, res, payloads.routerHealth())
+      return
+    }
   })
 }
 
 async function runEnhancementAction(
   body: EnhancementActionRequest,
-  payloads: { artifactRootDir?: string | false; sessions?: SessionStore },
+  payloads: {
+    artifactRootDir?: string | false
+    sessions?: SessionStore
+    executorsSnapshot?: () => readonly AttachedExecutor[]
+  },
 ): Promise<unknown> {
   const action = requiredString(body.action, 'action')
   if (action === 'swebench-grade-command') {
     const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
     const instanceIds = listInput(body.instanceIds)
+    const runId = requiredString(body.runId, 'runId')
+    let predictionsPath = cleanString(body.predictionsPath)
+    if (!predictionsPath) {
+      const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+      if (!rootDir) throw new HttpRouteError(400, 'predictionsPath is required (or configure artifact capture so it can be derived from runId)')
+      predictionsPath = sweBenchRunLayout(rootDir, runId).predictionsPath
+    }
     const result = await runSweBenchGrade({
       datasetName: requiredString(body.dataset, 'dataset'),
-      predictionsPath: requiredString(body.predictionsPath, 'predictionsPath'),
-      runId: requiredString(body.runId, 'runId'),
+      predictionsPath,
+      runId,
       ...(maxWorkers !== undefined ? { maxWorkers } : {}),
       ...(instanceIds ? { instanceIds } : {}),
       ...(body.modal === true ? { modal: true } : {}),
       ...(cleanString(body.cwd) ? { cwd: cleanString(body.cwd) } : {}),
       execute: false,
     })
-    return { action, command: result.command, shellCommand: result.command.map(shellQuote).join(' ') }
+    // Hide absolute paths from clients: replace predictionsPath in the emitted
+    // command with the plain filename so users don't see any server-side
+    // filesystem layout. The command is meant to be run inside the run's
+    // artifact directory (or with predictions.jsonl available in $PWD).
+    const predictionsFilename = 'predictions.jsonl'
+    const sanitizedCommand = result.command.map((token) => (token === predictionsPath ? predictionsFilename : token))
+    return {
+      action,
+      gradingAuthority: 'official-swebench-harness',
+      gradingMode: 'dry-run',
+      requiresDocker: true,
+      command: sanitizedCommand,
+      shellCommand: sanitizedCommand.map(shellQuote).join(' '),
+    }
   }
   const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
   if (!rootDir) throw new HttpRouteError(400, 'rootDir is required when artifact capture is not configured')
   if (action === 'profile-session') {
-    const result = await profileSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.pricingPath) ? { pricingPath: cleanString(body.pricingPath) } : {}) })
+    const pricingPath = await resolveInputPath(body, 'pricingPath', 'pricingContent', 'pricing', '.json', rootDir, action)
+    const result = await profileSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action), ...(pricingPath ? { pricingPath } : {}) })
     return { action, profilePath: result.profilePath, profile: result.profile }
   }
   if (action === 'reliability-audit-session') {
-    const result = await auditSessionReliability({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions) })
+    const result = await auditSessionReliability({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action) })
     return { action, auditPath: result.auditPath, audit: result.audit }
   }
   if (action === 'reliability-chaos-replay') {
     const result = await replayReliabilityChaos({ rootDir, sessionLogPaths: sessionLogPaths(body) })
     return { action, reportPath: result.reportPath, report: result.report }
   }
+  if (action === 'reliability-gate') {
+    const policy: ReliabilityGatePolicy = {}
+    const maxDanglingCount = positiveNumber(body.maxDanglingCount, 'maxDanglingCount')
+    const minRecoverableRatio = positiveNumber(body.minRecoverableRatio, 'minRecoverableRatio')
+    const maxRecoveryEventCount = positiveNumber(body.maxRecoveryEventCount, 'maxRecoveryEventCount')
+    const maxIntegrityIssueCount = positiveNumber(body.maxIntegrityIssueCount, 'maxIntegrityIssueCount')
+    if (maxDanglingCount !== undefined) policy.maxDanglingCount = maxDanglingCount
+    if (minRecoverableRatio !== undefined) policy.minRecoverableRatio = minRecoverableRatio
+    if (maxRecoveryEventCount !== undefined) policy.maxRecoveryEventCount = maxRecoveryEventCount
+    if (maxIntegrityIssueCount !== undefined) policy.maxIntegrityIssueCount = maxIntegrityIssueCount
+    const rawKindCaps = body.maxDanglingByKind
+    if (rawKindCaps && typeof rawKindCaps === 'object' && !Array.isArray(rawKindCaps)) {
+      const parsed: Record<string, number> = {}
+      for (const [kind, raw] of Object.entries(rawKindCaps as Record<string, unknown>)) {
+        const cap = positiveNumber(raw, `maxDanglingByKind.${kind}`)
+        if (cap !== undefined) parsed[kind] = cap
+      }
+      if (Object.keys(parsed).length > 0) policy.maxDanglingByKind = parsed
+    }
+    const requireStatus = listInput(body.requireStatusIn)
+    if (requireStatus && requireStatus.length > 0) policy.requireStatusIn = requireStatus
+    const chaosReport = await resolveInputPath(body, 'chaosReportPath', 'chaosReportContent', 'chaosReport', '.json', rootDir, action)
+    const logPaths = listInput(body.sessionLogPaths)
+    if (!chaosReport && (!logPaths || logPaths.length === 0)) {
+      throw new HttpRouteError(400, 'reliability-gate requires chaosReportPath or sessionLogPaths')
+    }
+    const output = cleanString(body.outputFilename)
+    const result = await evaluateReliabilityGate({
+      rootDir,
+      ...(chaosReport ? { chaosReportPath: chaosReport } : {}),
+      ...(logPaths && logPaths.length > 0 ? { sessionLogPaths: logPaths } : {}),
+      policy,
+      ...(output ? { outputFilename: output } : {}),
+    })
+    return { action, verdictPath: result.verdictPath, verdict: result.verdict }
+  }
+  if (action === 'reliability-classify') {
+    const wedgedThresholdMs = positiveNumber(body.wedgedThresholdMs, 'wedgedThresholdMs')
+    const heartbeatPath = await resolveInputPath(body, 'heartbeatPath', 'heartbeatContent', 'heartbeat', '.jsonl', rootDir, action, { required: true })
+    const result = await classifyReliability({
+      rootDir,
+      sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action),
+      heartbeatPath: heartbeatPath!,
+      ...(wedgedThresholdMs !== undefined ? { wedgedThresholdMs } : {}),
+      ...(cleanString(body.outputFilename) ? { outputFilename: cleanString(body.outputFilename)! } : {}),
+    })
+    return { action, reportPath: result.reportPath, report: result.report }
+  }
+  if (action === 'tool-catalog-diff') {
+    const baselinePath = await resolveInputPath(body, 'baselineCatalogPath', 'baselineCatalogContent', 'baselineCatalog', '.json', rootDir, action, { required: true })
+    const candidatePath = await resolveInputPath(body, 'candidateCatalogPath', 'candidateCatalogContent', 'candidateCatalog', '.json', rootDir, action, { required: true })
+    const result = await diffToolCatalogs({
+      rootDir,
+      baselinePath: baselinePath!,
+      candidatePath: candidatePath!,
+      ...(cleanString(body.outputFilename) ? { outputFilename: cleanString(body.outputFilename)! } : {}),
+    })
+    return { action, diffPath: result.diffPath, diff: result.diff }
+  }
+  if (action === 'executor-capabilities-snapshot') {
+    if (!payloads.executorsSnapshot) {
+      throw new HttpRouteError(500, 'executor snapshot is not available in this host build')
+    }
+    const executors = payloads.executorsSnapshot()
+    const result = await writeExecutorCapabilitySnapshot({
+      rootDir,
+      executors,
+      ...(cleanString(body.outputFilename) ? { outputFilename: cleanString(body.outputFilename)! } : {}),
+    })
+    return { action, snapshotPath: result.snapshotPath, snapshot: result.snapshot }
+  }
   if (action === 'memory-index') {
     const result = await buildMemoryIndex({ rootDir, ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}), ...(body.includeGlobal === true ? { includeGlobal: true } : {}) })
     return { action, indexPath: result.indexPath, entries: result.index.entries.length, warnings: result.index.warnings }
+  }
+  if (action === 'memory-retrieve') {
+    const maxTokens = positiveInteger(body.maxTokens, 'maxTokens')
+    const maxHits = positiveInteger(body.maxHits, 'maxHits')
+    const result = await retrieveMemory({
+      rootDir,
+      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot)! } : {}),
+      ...(body.includeGlobal === true ? { includeGlobal: true } : {}),
+      query: requiredString(body.query, 'query'),
+      ...(maxTokens === undefined ? {} : { maxTokens }),
+      ...(maxHits === undefined ? {} : { maxHits }),
+      ...(cleanString(body.outputFilename) ? { outputFilename: cleanString(body.outputFilename)! } : {}),
+    })
+    return {
+      action,
+      artifactPath: result.artifactPath,
+      hitCount: result.artifact.hitCount,
+      budget: result.artifact.budget,
+      reasonCodes: result.artifact.reasonCodes,
+      hits: result.artifact.hits,
+    }
   }
   if (action === 'subagents-graph') {
     const result = await exportSubAgentGraph({ rootDir, sessionsDir: cleanString(body.sessionsDir) ?? payloads.sessions?.dir ?? requiredString(body.sessionsDir, 'sessionsDir') })
     return { action, graphPath: result.graphPath, nodes: result.graph.nodes.length, edges: result.graph.edges.length, warnings: result.graph.warnings }
   }
   if (action === 'trace-export-session') {
-    const result = await exportSessionTraceArtifacts({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}), ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
+    const result = await exportSessionTraceArtifacts({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action), ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}), ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
     return { action, sessionId: result.sessionId, traceArtifact: result.traceArtifact, llmArtifacts: result.llmArtifacts }
   }
   if (action === 'rollout-export-segments') {
-    const result = await exportRolloutSegments({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}), ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
+    const result = await exportRolloutSegments({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action), ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}), ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
     return { action, sessionId: result.sessionId, artifact: result.artifact, segmentCount: result.segments.segments.length }
   }
   if (action === 'rollout-export-session') {
+    const rewardPath = await resolveInputPath(body, 'rewardPath', 'rewardContent', 'reward', '.json', rootDir, action)
+    const tokenSegmentsPath = await resolveInputPath(body, 'tokenSegmentsPath', 'tokenSegmentsContent', 'tokenSegments', '.json', rootDir, action)
     const result = await exportRolloutSidecar({
       rootDir,
-      sessionLogPath: await sessionLogPath(body, payloads.sessions),
+      sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action),
       taskId: requiredString(body.taskId, 'taskId'),
       frameworkTarget: frameworkTarget(requiredString(body.frameworkTarget ?? body.framework, 'frameworkTarget')),
       ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}),
@@ -284,26 +534,52 @@ async function runEnhancementAction(
       ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
       ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
       ...(cleanString(body.weightVersion) ? { weightVersion: cleanString(body.weightVersion) } : {}),
-      ...(cleanString(body.rewardPath) ? { rewardPath: cleanString(body.rewardPath) } : {}),
-      ...(cleanString(body.tokenSegmentsPath) ? { tokenSegmentsPath: cleanString(body.tokenSegmentsPath) } : {}),
+      ...(rewardPath ? { rewardPath } : {}),
+      ...(tokenSegmentsPath ? { tokenSegmentsPath } : {}),
     })
     return { action, rolloutId: result.sidecar.rollout_id, sidecarPath: result.sidecarPath, traceArtifact: result.traceArtifact }
   }
   if (action === 'rollout-export-adapter') {
     const framework = cleanString(body.frameworkTarget ?? body.framework)
-    const result = await exportRolloutFrameworkAdapter({ rootDir, sidecarPath: requiredString(body.sidecarPath, 'sidecarPath'), ...(framework ? { frameworkTarget: frameworkTarget(framework) } : {}) })
+    const sidecarPath = await resolveInputPath(body, 'sidecarPath', 'sidecarContent', 'sidecar', '.json', rootDir, action, { required: true })
+    const result = await exportRolloutFrameworkAdapter({ rootDir, sidecarPath: sidecarPath!, ...(framework ? { frameworkTarget: frameworkTarget(framework) } : {}) })
     return { action, adapterPath: result.adapterPath, status: result.adapter.status, frameworkTarget: result.adapter.frameworkTarget }
   }
+  if (action === 'rollout-verify-reward') {
+    const trialPath = await resolveInputPath(body, 'trialPath', 'trialContent', 'trial', '.json', rootDir, action)
+    const scorePath = await resolveInputPath(body, 'scorePath', 'scoreContent', 'score', '.json', rootDir, action)
+    if (!trialPath && !scorePath) throw new HttpRouteError(400, 'missing required trialPath or scorePath')
+    const result = await verifyReward({
+      rootDir,
+      ...(trialPath ? { trialPath } : {}),
+      ...(scorePath ? { scorePath } : {}),
+      ...(cleanString(body.taskId) ? { taskId: cleanString(body.taskId)! } : {}),
+      ...(cleanString(body.sessionId) ? { sessionId: cleanString(body.sessionId)! } : {}),
+      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot)! } : {}),
+    })
+    return {
+      action,
+      artifact: result.artifact,
+      taskId: result.reward.taskId,
+      reward: result.reward.reward,
+      resolved: result.reward.resolved,
+      shapedLabels: result.reward.shapedLabels,
+      reasonCodes: result.reward.reasonCodes,
+    }
+  }
   if (action === 'eval-score-session') {
-    const result = await scoreSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions), ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}), ...(cleanString(body.patchPath) ? { patchPath: cleanString(body.patchPath) } : {}), ...(body.requireDone === true ? { requireDone: true } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
+    const patchPath = await resolveInputPath(body, 'patchPath', 'patchContent', 'patch', '.diff', rootDir, action)
+    const result = await scoreSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action), ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}), ...(patchPath ? { patchPath } : {}), ...(body.requireDone === true ? { requireDone: true } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
     return { action, scoresPath: result.scoresPath, summary: result.summary }
   }
   if (action === 'eval-judge-score') {
     const threshold = positiveNumber(body.threshold, 'threshold')
+    const promptPath = await resolveInputPath(body, 'promptPath', 'promptContent', 'prompt', '.txt', rootDir, action, { required: true })
+    const responsePath = await resolveInputPath(body, 'responsePath', 'responseContent', 'response', '.txt', rootDir, action, { required: true })
     const result = await judgeScore({
       rootDir,
-      promptPath: requiredString(body.promptPath, 'promptPath'),
-      responsePath: requiredString(body.responsePath, 'responsePath'),
+      promptPath: promptPath!,
+      responsePath: responsePath!,
       judgeModel: requiredString(body.judgeModel, 'judgeModel'),
       ...(cleanString(body.scorer) ? { scorer: cleanString(body.scorer) } : {}),
       ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}),
@@ -314,28 +590,213 @@ async function runEnhancementAction(
     return { action, scoresPath: result.scoresPath, judgeTrace: result.judgeTrace, summary: result.summary }
   }
   if (action === 'eval-compare-runs') {
-    const result = await compareEvalRuns({ rootDir, baselineSummaryPath: requiredString(body.baselineSummaryPath, 'baselineSummaryPath'), candidateSummaryPath: requiredString(body.candidateSummaryPath, 'candidateSummaryPath') })
+    const baselineSummaryPath = await resolveInputPath(body, 'baselineSummaryPath', 'baselineSummaryContent', 'baselineSummary', '.json', rootDir, action, { required: true })
+    const candidateSummaryPath = await resolveInputPath(body, 'candidateSummaryPath', 'candidateSummaryContent', 'candidateSummary', '.json', rootDir, action, { required: true })
+    const result = await compareEvalRuns({ rootDir, baselineSummaryPath: baselineSummaryPath!, candidateSummaryPath: candidateSummaryPath! })
     return { action, comparisonPath: result.comparisonPath, comparison: result.comparison }
+  }
+  if (action === 'eval-regression-gate') {
+    const policy: RegressionThresholdPolicy = {}
+    const minPassRate = positiveNumber(body.minPassRate, 'minPassRate')
+    const maxPassRateDrop = positiveNumber(body.maxPassRateDrop, 'maxPassRateDrop')
+    const maxFailedIncrease = positiveNumber(body.maxFailedIncrease, 'maxFailedIncrease')
+    const maxTimeoutIncrease = positiveNumber(body.maxTimeoutIncrease, 'maxTimeoutIncrease')
+    const maxResolvedDrop = positiveNumber(body.maxResolvedDrop, 'maxResolvedDrop')
+    if (minPassRate !== undefined) policy.minPassRate = minPassRate
+    if (maxPassRateDrop !== undefined) policy.maxPassRateDrop = maxPassRateDrop
+    if (maxFailedIncrease !== undefined) policy.maxFailedIncrease = maxFailedIncrease
+    if (maxTimeoutIncrease !== undefined) policy.maxTimeoutIncrease = maxTimeoutIncrease
+    if (maxResolvedDrop !== undefined) policy.maxResolvedDrop = maxResolvedDrop
+    const rawCaps = body.failureLabelCaps
+    if (rawCaps && typeof rawCaps === 'object' && !Array.isArray(rawCaps)) {
+      const parsed: Record<string, number> = {}
+      for (const [label, raw] of Object.entries(rawCaps as Record<string, unknown>)) {
+        const cap = positiveNumber(raw, `failureLabelCaps.${label}`)
+        if (cap !== undefined) parsed[label] = cap
+      }
+      if (Object.keys(parsed).length > 0) policy.failureLabelCaps = parsed
+    }
+    const baselineSummaryPath = await resolveInputPath(body, 'baselineSummaryPath', 'baselineSummaryContent', 'baselineSummary', '.json', rootDir, action, { required: true })
+    const candidateSummaryPath = await resolveInputPath(body, 'candidateSummaryPath', 'candidateSummaryContent', 'candidateSummary', '.json', rootDir, action, { required: true })
+    const result = await evaluateRegressionGate({
+      rootDir,
+      baselineSummaryPath: baselineSummaryPath!,
+      candidateSummaryPath: candidateSummaryPath!,
+      ...(cleanString(body.outputFilename) ? { outputFilename: cleanString(body.outputFilename)! } : {}),
+      policy,
+    })
+    return { action, verdictPath: result.verdictPath, verdict: result.verdict }
+  }
+  if (action === 'profile-aggregate') {
+    const summaryPath = await resolveInputPath(body, 'summaryPath', 'summaryContent', 'summary', '.json', rootDir, action)
+    const output = cleanString(body.outputFilename)
+    const result = await aggregateProfiles({
+      rootDir,
+      ...(summaryPath ? { summaryPath } : {}),
+      ...(output ? { outputFilename: output } : {}),
+    })
+    return { action, reportPath: result.reportPath, report: result.report }
+  }
+  if (action === 'profile-budget') {
+    const policy: ProfileBudgetPolicy = {}
+    for (const key of [
+      'maxEstimatedCostUsd',
+      'maxInputTokens',
+      'maxOutputTokens',
+      'maxTotalTokens',
+      'maxLlmCalls',
+      'maxToolCalls',
+      'maxToolErrors',
+      'maxWallTimeMs',
+      'maxAverageLlmDurationMs',
+      'maxP95LlmDurationMs',
+      'maxAverageTimeToFirstChunkMs',
+      'maxP95TimeToFirstChunkMs',
+      'maxMissingUsageCalls',
+      'maxLlmTraceMissingCalls',
+    ] as const) {
+      const value = positiveNumber(body[key], key)
+      if (value !== undefined) policy[key] = value
+    }
+    if (body.requireCostEstimated === true || body.requireCostEstimated === 'true') {
+      policy.requireCostEstimated = true
+    }
+    const output = cleanString(body.outputFilename)
+    const profilePath = await resolveInputPath(body, 'profilePath', 'profileContent', 'profile', '.json', rootDir, action, { required: true })
+    const result = await evaluateProfileBudget({
+      rootDir,
+      profilePath: profilePath!,
+      policy,
+      ...(output ? { outputFilename: output } : {}),
+    })
+    return { action, verdictPath: result.verdictPath, verdict: result.verdict }
   }
   if (action === 'swebench-infer-patches') {
     const instanceIds = listInput(body.instanceIds)
     const limit = positiveInteger(body.limit, 'limit')
+    const runId = requiredString(body.runId, 'runId')
+    const layout = sweBenchRunLayout(rootDir, runId)
+    const instancesJsonl = cleanString(body.instancesJsonl) ?? layout.instancesPath
+    const patchesDir = cleanString(body.patchesDir) ?? layout.patchesDir
     const result = await inferSweBenchPatchRun({
       rootDir,
-      runId: requiredString(body.runId, 'runId'),
+      runId,
       dataset: requiredString(body.dataset, 'dataset'),
       ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
       model: requiredString(body.model, 'model'),
-      instancesJsonl: requiredString(body.instancesJsonl, 'instancesJsonl'),
-      patchesDir: requiredString(body.patchesDir, 'patchesDir'),
+      instancesJsonl,
+      patchesDir,
       ...(instanceIds ? { instanceIds } : {}),
       ...(limit !== undefined ? { limit } : {}),
       ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
     })
-    return { action, runId: result.layout.runId, predictionsPath: result.layout.predictionsPath, experimentPath: result.layout.experimentPath, summaryPath: result.layout.summaryPath, trialCount: result.trials.length }
+    return {
+      action,
+      runId: result.layout.runId,
+      predictionsPath: result.layout.predictionsPath,
+      experimentPath: result.layout.experimentPath,
+      summaryPath: result.layout.summaryPath,
+      trialCount: result.trials.length,
+      gradingAuthority: 'official-swebench-harness',
+      gradingStatus: 'not_graded',
+    }
+  }
+  if (action === 'swebench-run-agent-infer') {
+    const runId = requiredString(body.runId, 'runId')
+    const layout = sweBenchRunLayout(rootDir, runId)
+    const instanceIds = listInput(body.instanceIds)
+    const limit = positiveInteger(body.limit, 'limit')
+    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
+    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+    const skipCompletedFlag = body.skipCompleted
+    const skipCompleted = typeof skipCompletedFlag === 'boolean' ? skipCompletedFlag : true
+    const started = Date.now()
+    const result = await runSweBenchAgentPatchRun({
+      rootDir,
+      runId,
+      dataset: requiredString(body.dataset, 'dataset'),
+      ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
+      model: requiredString(body.model, 'model'),
+      instancesJsonl: cleanString(body.instancesJsonl) ?? layout.instancesPath,
+      agentCommand: cleanString(body.agentCommand) ?? defaultSweBenchAgentCommand(),
+      ...(instanceIds ? { instanceIds } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      skipCompleted,
+    })
+    const trials = result.trials
+    let passed = 0
+    let failed = 0
+    let errored = 0
+    for (const trial of trials) {
+      if (trial.status === 'completed') passed += 1
+      else if (trial.status === 'failed') failed += 1
+      else errored += 1
+    }
+    return {
+      action,
+      runId: result.layout.runId,
+      totalInstances: trials.length,
+      completed: trials.length,
+      passed,
+      failed,
+      errored,
+      durationMs: Date.now() - started,
+      predictionsPath: result.layout.predictionsPath,
+      progressPath: result.layout.progressPath,
+      summaryPath: result.layout.summaryPath,
+      gradingAuthority: 'official-swebench-harness',
+      gradingStatus: 'not_graded',
+    }
+  }
+  if (action === 'swebench-read-progress') {
+    const runId = requiredString(body.runId, 'runId')
+    const layout = sweBenchRunLayout(rootDir, runId)
+    let raw: string
+    try {
+      raw = await readFile(layout.progressPath, 'utf8')
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code
+      if (code === 'ENOENT') return { action, runId, status: 'not_started', total: 0, completed: 0, running: 0, failed: 0 }
+      throw err
+    }
+    let parsed: Record<string, unknown> = {}
+    try { parsed = JSON.parse(raw) as Record<string, unknown> } catch { parsed = {} }
+    const status = typeof parsed.status === 'string' ? parsed.status : 'running'
+    const total = typeof parsed.selectedCount === 'number' ? parsed.selectedCount : 0
+    const completedCount = typeof parsed.completedCount === 'number' ? parsed.completedCount : 0
+    const failedCount = typeof parsed.failedCount === 'number' ? parsed.failedCount : 0
+    const runningCount = typeof parsed.runningCount === 'number' ? parsed.runningCount : 0
+    const skippedCount = typeof parsed.skippedCount === 'number' ? parsed.skippedCount : 0
+    const timedOutCount = typeof parsed.timedOutCount === 'number' ? parsed.timedOutCount : 0
+    const instances = Array.isArray(parsed.instances) ? parsed.instances as Array<Record<string, unknown>> : []
+    const currentInstance = instances.find((entry) => entry?.status === 'running')?.instanceId
+    return {
+      action,
+      runId,
+      status,
+      total,
+      completed: completedCount,
+      failed: failedCount + timedOutCount,
+      running: runningCount,
+      skipped: skippedCount,
+      ...(typeof currentInstance === 'string' ? { currentInstance } : {}),
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : null,
+    }
   }
   if (action === 'swebench-export-session') {
-    const modelPatch = await readFile(requiredString(body.modelPatchPath ?? body.patchPath, 'modelPatchPath'), 'utf8')
+    let modelPatch: string
+    const explicitModelPatchPath = cleanString(body.modelPatchPath ?? body.patchPath)
+    if (explicitModelPatchPath) {
+      modelPatch = await readFile(explicitModelPatchPath, 'utf8')
+    } else if (typeof body.modelPatchContent === 'string' && body.modelPatchContent.length > 0) {
+      modelPatch = body.modelPatchContent
+    } else if (typeof body.patchContent === 'string' && body.patchContent.length > 0) {
+      modelPatch = body.patchContent
+    } else {
+      throw new HttpRouteError(400, 'modelPatchPath is required (or provide modelPatchContent)')
+    }
     const result = await exportSessionForSweBench({
       rootDir,
       runId: requiredString(body.runId, 'runId'),
@@ -343,27 +804,248 @@ async function runEnhancementAction(
       ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
       model: requiredString(body.model, 'model'),
       instanceId: requiredString(body.instanceId, 'instanceId'),
-      sessionLogPath: await sessionLogPath(body, payloads.sessions),
+      sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action),
       modelPatch,
       ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
     })
     return { action, runId: result.layout.runId, predictionsPath: result.layout.predictionsPath, experimentPath: result.layout.experimentPath, traceArtifact: result.traceArtifact }
   }
   if (action === 'swebench-ingest-results') {
-    const result = await ingestSweBenchResults({ rootDir, runId: requiredString(body.runId, 'runId'), resultsDir: requiredString(body.resultsDir, 'resultsDir') })
-    return { action, runId: result.layout.runId, resultsPath: result.resultsPath, summaryPath: result.summaryPath, trialCount: result.trials.length, resolved: result.trials.filter((trial) => trial.resolved).length }
+    const runId = requiredString(body.runId, 'runId')
+    const layout = sweBenchRunLayout(rootDir, runId)
+    const resultsDir = cleanString(body.resultsDir) ?? layout.gradeResultsDir
+    const result = await ingestSweBenchResults({ rootDir, runId, resultsDir })
+    return {
+      action,
+      runId: result.layout.runId,
+      resultsPath: result.resultsPath,
+      summaryPath: result.summaryPath,
+      trialCount: result.trials.length,
+      resolved: result.trials.filter((trial) => trial.resolved).length,
+      gradingAuthority: 'official-swebench-harness',
+      gradingStatus: 'ingested',
+    }
+  }
+  if (action === 'swebench-resolve-instances') {
+    const source = requiredString(body.source, 'source')
+    const runId = requiredString(body.runId, 'runId')
+    let instancesSource: InstancesSource
+    if (source === 'inline') {
+      const content = requiredString(body.inlineContent, 'inlineContent')
+      instancesSource = { kind: 'inline', content }
+    } else if (source === 'huggingface') {
+      const datasetLimit = positiveInteger(body.datasetLimit, 'datasetLimit')
+      instancesSource = {
+        kind: 'huggingface',
+        datasetRef: requiredString(body.datasetRef, 'datasetRef'),
+        ...(cleanString(body.configName) ? { config: cleanString(body.configName) } : {}),
+        ...(cleanString(body.datasetSplit) ? { split: cleanString(body.datasetSplit) } : {}),
+        ...(datasetLimit !== undefined ? { limit: datasetLimit } : {}),
+        ...(cleanString(body.hfToken) ? { hfToken: cleanString(body.hfToken) } : {}),
+      }
+    } else {
+      throw new HttpRouteError(400, `unsupported instances source: ${source}`)
+    }
+    try {
+      const result = await resolveSweBenchInstances({
+        rootDir,
+        runId,
+        source: instancesSource,
+        ...(cleanString(body.hfDatasetsServerBaseUrl)
+          ? { huggingFaceOverrides: { baseUrl: cleanString(body.hfDatasetsServerBaseUrl)! } }
+          : {}),
+      })
+      return {
+        action,
+        instancesJsonlPath: result.instancesJsonlPath,
+        rowCount: result.rowCount,
+        bytes: result.bytes,
+        source: result.source,
+      }
+    } catch (err) {
+      if (err instanceof InstancesSourceError) throw new HttpRouteError(err.httpStatus, err.message)
+      throw err
+    }
+  }
+  if (action === 'swebench-upload-patches') {
+    const runId = requiredString(body.runId, 'runId')
+    const patches = body.patches
+    if (!patches || typeof patches !== 'object' || Array.isArray(patches)) {
+      throw new HttpRouteError(400, 'patches is required (object of instanceId → diff content)')
+    }
+    try {
+      const result = await resolveSweBenchPatches({
+        rootDir,
+        runId,
+        source: { kind: 'inline', patches: patches as Record<string, string> },
+      })
+      return {
+        action,
+        patchesDir: result.patchesDir,
+        instanceCount: result.instanceCount,
+        bytes: result.bytes,
+      }
+    } catch (err) {
+      if (err instanceof PatchesSourceError) throw new HttpRouteError(err.httpStatus, err.message)
+      throw err
+    }
+  }
+  if (action === 'swebench-upload-results') {
+    const runId = requiredString(body.runId, 'runId')
+    const files = body.resultsFiles
+    if (!files || typeof files !== 'object' || Array.isArray(files)) {
+      throw new HttpRouteError(400, 'resultsFiles is required (object of fileName → content)')
+    }
+    try {
+      const result = await resolveSweBenchResults({
+        rootDir,
+        runId,
+        source: { kind: 'inline', files: files as Record<string, string> },
+      })
+      return {
+        action,
+        resultsDir: result.resultsDir,
+        fileCount: result.fileCount,
+        bytes: result.bytes,
+      }
+    } catch (err) {
+      if (err instanceof ResultsSourceError) throw new HttpRouteError(err.httpStatus, err.message)
+      throw err
+    }
+  }
+  if (action === 'artifacts-manifest') {
+    const maxHashBytes = positiveInteger(body.maxHashBytes, 'maxHashBytes')
+    const result = await buildArtifactManifest({
+      rootDir,
+      ...(cleanString(body.outputPath) ? { outputPath: cleanString(body.outputPath) } : {}),
+      ...(maxHashBytes !== undefined ? { maxHashBytes } : {}),
+    })
+    return { action, manifestPath: result.manifestPath, summary: result.manifest.summary }
+  }
+  if (action === 'artifacts-prune') {
+    const olderThanDays = positiveNumber(body.olderThanDays, 'olderThanDays')
+    const maxTotalBytes = positiveNumber(body.maxTotalBytes, 'maxTotalBytes')
+    const kinds = listInput(body.kinds)
+    const result = await pruneArtifacts({
+      rootDir,
+      ...(olderThanDays !== undefined ? { olderThanDays } : {}),
+      ...(maxTotalBytes !== undefined ? { maxTotalBytes } : {}),
+      ...(kinds && kinds.length > 0 ? { kinds } : {}),
+      dryRun: body.dryRun === true,
+      ...(cleanString(body.outputPath) ? { outputPath: cleanString(body.outputPath) } : {}),
+    })
+    return {
+      action,
+      reportPath: result.reportPath,
+      dryRun: result.report.dryRun,
+      before: result.report.before,
+      after: result.report.after,
+      removedCount: result.report.removed.length,
+      protectedCount: result.report.protected.length,
+    }
+  }
+  if (action === 'trace-export-otlp') {
+    const retries = positiveInteger(body.retries, 'retries')
+    const retryDelayMs = positiveInteger(body.retryDelayMs, 'retryDelayMs')
+    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+    let headers: Record<string, string> | undefined
+    if (body.headers && typeof body.headers === 'object' && !Array.isArray(body.headers)) {
+      const parsed: Record<string, string> = {}
+      for (const [name, raw] of Object.entries(body.headers as Record<string, unknown>)) {
+        if (typeof raw !== 'string' || !name.trim()) continue
+        parsed[name.trim()] = raw
+      }
+      if (Object.keys(parsed).length > 0) headers = parsed
+    } else if (typeof body.headers === 'string' && body.headers.trim().length > 0) {
+      const parsed: Record<string, string> = {}
+      for (const line of body.headers.split(/[\n,]/)) {
+        const [name, ...rest] = line.split('=')
+        const trimmedName = name?.trim()
+        const value = rest.join('=').trim()
+        if (trimmedName && value) parsed[trimmedName] = value
+      }
+      if (Object.keys(parsed).length > 0) headers = parsed
+    }
+    const headersFilePath = await resolveInputPath(body, 'headersFilePath', 'headersFileContent', 'headers', '.json', rootDir, action)
+    const fileHeaders = await loadHeadersFile(headersFilePath)
+    const mergedHeaders = fileHeaders || headers
+      ? { ...(fileHeaders ?? {}), ...(headers ?? {}) }
+      : undefined
+    const result = await exportTraceOtlp({
+      rootDir,
+      sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action),
+      ...(cleanString(body.runId) ? { runId: cleanString(body.runId) } : {}),
+      ...(cleanString(body.evalInstanceId) ? { evalInstanceId: cleanString(body.evalInstanceId) } : {}),
+      ...(cleanString(body.endpoint) ? { endpoint: cleanString(body.endpoint) } : {}),
+      ...(mergedHeaders ? { headers: mergedHeaders } : {}),
+      ...(retries !== undefined ? { retries } : {}),
+      ...(retryDelayMs !== undefined ? { retryDelayMs } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(cleanString(body.outputFilename) ? { outputFilename: cleanString(body.outputFilename) } : {}),
+      ...(cleanString(body.serviceName) ? { serviceName: cleanString(body.serviceName) } : {}),
+      ...(cleanString(body.hostVersion) ? { hostVersion: cleanString(body.hostVersion) } : {}),
+    })
+    return {
+      action,
+      sessionId: result.sessionId,
+      spanCount: result.spanCount,
+      bundlePath: result.bundlePath,
+      export: result.export,
+    }
   }
   throw new HttpRouteError(400, `unsupported enhancement action: ${action}`)
 }
 
-async function sessionLogPath(body: EnhancementActionRequest, sessions: SessionStore | undefined): Promise<string> {
+async function sessionLogPath(body: EnhancementActionRequest, sessions: SessionStore | undefined, rootDir: string, action: string): Promise<string> {
   const explicit = cleanString(body.sessionLogPath)
   if (explicit) return explicit
+  const content = cleanString(body.sessionLogContent)
+  if (content) {
+    try {
+      return await resolveContentToPath(
+        { content: body.sessionLogContent },
+        { action, field: 'sessionLog', extension: '.jsonl', rootDir },
+      )
+    } catch (err) {
+      if (err instanceof ContentInputError) throw new HttpRouteError(err.httpStatus, err.message)
+      throw err
+    }
+  }
   const sessionId = requiredString(body.sessionId, 'sessionId')
   if (!sessions) throw new HttpRouteError(400, 'sessionId lookup is unavailable')
   const cached = sessions.get(sessionId)
   if (cached) return cached.logPath
   return (await sessions.load(sessionId)).logPath
+}
+
+async function resolveInputPath(
+  body: EnhancementActionRequest,
+  pathField: keyof EnhancementActionRequest,
+  contentField: keyof EnhancementActionRequest,
+  logicalField: string,
+  extension: string,
+  rootDir: string,
+  action: string,
+  options: { required?: boolean } = {},
+): Promise<string | undefined> {
+  const path = cleanString(body[pathField])
+  if (path) return path
+  const rawContent = body[contentField]
+  if (rawContent !== undefined && rawContent !== null && rawContent !== '') {
+    try {
+      return await resolveContentToPath(
+        { content: rawContent as string },
+        { action, field: logicalField, extension, rootDir },
+      )
+    } catch (err) {
+      if (err instanceof ContentInputError) throw new HttpRouteError(err.httpStatus, err.message)
+      throw err
+    }
+  }
+  if (options.required) {
+    throw new HttpRouteError(400, `${String(pathField)} is required (or provide ${String(contentField)})`)
+  }
+  return undefined
 }
 
 function sessionLogPaths(body: EnhancementActionRequest): readonly string[] {
@@ -401,6 +1083,7 @@ async function createSweBenchPlan(body: CreateSweBenchPlanRequest, artifactRootD
   })
   return {
     planPath: result.planPath,
+    registryPath: result.registryPath,
     runId: result.layout.runId,
     selectedCount: result.plan.selectedCount,
     maxWorkers: result.plan.maxWorkers,
