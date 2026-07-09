@@ -803,7 +803,7 @@ Acceptance:
 - A trainer step completes or fails with a framework/runtime error unrelated
   to missing rollout data. Missing token ids, masks, logprobs, or reward is
   a failure of this phase.
-- A completed report exists under `docs/rl/experiments/`.
+- A completed report exists under `experiments/rl/`.
 
 ### Phase 6 (deferred): verl Live Training Integration
 

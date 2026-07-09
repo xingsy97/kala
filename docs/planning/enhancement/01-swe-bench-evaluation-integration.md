@@ -492,7 +492,7 @@ bars. The grouping is UI-only: it uses `kind`, `mediaType`, and path conventions
 from preserved artifacts rather than adding a benchmark-specific protocol field.
 
 Phase 6: CI eval smoke and manual official-harness workflow.
-Implemented through `scripts/verify-swebench-smoke.mjs`, default CI, and
+Implemented through `scripts/eval/benchmarks/swebench/verify-swebench-smoke.mjs`, default CI, and
 `.github/workflows/eval-smoke.yml`. The default path validates the adapter
 without Docker; the manual path can execute official SWE-bench grading when the
 runner has the required Docker, CPU, memory, and storage resources.

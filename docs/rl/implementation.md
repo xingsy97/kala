@@ -513,7 +513,7 @@ pnpm --filter @agent-kernel/dashboard exec vitest run
 python3 -m pytest \
   tests/python/test_slime_agent_kernel_adapter.py \
   tests/python/test_slime_trainer_preflight.py -q
-node scripts/verify-agentic-rl-dashboard.mjs
+node scripts/eval/verify-agentic-rl-dashboard.mjs
 gpu-provider-cli show instances --raw
 ```
 
@@ -680,7 +680,7 @@ A claimed complete E2E training run must produce evidence for every stage:
 - At least one slime train step completed or the run reached the trainer with a
   non-data-plane runtime failure. Missing token ids, masks, logprobs, or reward
   means the E2E run did not reach the required standard.
-- A report was written under `docs/rl/experiments/` with exact commands,
+- A report was written under `experiments/rl/` with exact commands,
   versions, artifacts, and conclusions.
 
 ## 17. Testing and Acceptance Criteria
@@ -736,7 +736,7 @@ produce a human-readable E2E report with direct evidence that a real slime
 rollout/training path executed. The report path is:
 
 ```text
-docs/rl/experiments/<date>-run-<n>/final-report.md
+experiments/rl/<date>-run-<n>/final-report.md
 ```
 
 The report must include:
@@ -784,7 +784,7 @@ Source-side implementation:
   `integrations/slime_agent_kernel/preflight.py`.
 - Dashboard RL readiness panel under
   `packages/dashboard/src/features/benchmarks/RlReadinessPanel.tsx`.
-- Headless browser dashboard check in `scripts/verify-agentic-rl-dashboard.mjs`.
+- Headless browser dashboard check in `scripts/eval/verify-agentic-rl-dashboard.mjs`.
 
 Test coverage per module:
 
@@ -799,7 +799,7 @@ Test coverage per module:
   and synthetic slime `Sample` construction.
 - `tests/python/test_slime_trainer_preflight.py` — preflight schema and
   strict-mode exit codes.
-- `scripts/verify-agentic-rl-dashboard.mjs` — real Chromium E2E covering
+- `scripts/eval/verify-agentic-rl-dashboard.mjs` — real Chromium E2E covering
   missing artifact root, ready rollout rendering, token/reward/sample
   evidence, and detail expansion.
 
