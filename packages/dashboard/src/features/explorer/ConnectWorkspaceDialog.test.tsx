@@ -15,8 +15,9 @@ describe('ConnectWorkspaceDialog', () => {
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
 
     const text = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
-    expect(text).toContain('run-executor.sh')
+    expect(text).toContain('run.sh')
     expect(text).toContain('HOST_URL=')
+    expect(text).toContain('COMPONENT=executor')
     expect(text).toContain('SANDBOX_ROOTS="$PWD"')
     expect(text).toContain('releases/latest/download')
     expect(text).toContain('Mac/Linux')
@@ -33,7 +34,8 @@ describe('ConnectWorkspaceDialog', () => {
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     expect(writeText.mock.calls[0]?.[0]).toContain('wget -qO-')
-    expect(writeText.mock.calls[0]?.[0]).toContain('run-executor.sh')
+    expect(writeText.mock.calls[0]?.[0]).toContain('run.sh')
+    expect(writeText.mock.calls[0]?.[0]).toContain('COMPONENT=executor')
     expect(writeText.mock.calls[0]?.[0]).not.toContain('WORKSPACE_NAME')
   })
 
@@ -41,9 +43,19 @@ describe('ConnectWorkspaceDialog', () => {
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-windows'))
-    expect(screen.getByTestId('connect-workspace-dialog').textContent ?? '').toContain('powershell')
+    const windowsText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
+    expect(windowsText).toContain('wget -qO-')
+    expect(windowsText).toContain('run.sh')
+    expect(windowsText).not.toContain('powershell')
+    expect(windowsText).not.toContain('iwr')
+    expect(windowsText).not.toContain('curl')
+    expect(windowsText).not.toContain('run-executor.sh')
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-unix'))
-    expect(screen.getByTestId('connect-workspace-dialog').textContent ?? '').toContain('wget -qO-')
+    const unixText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
+    expect(unixText).toContain('wget -qO-')
+    expect(unixText).toContain('run.sh')
+    expect(unixText).not.toContain('curl')
+    expect(unixText).not.toContain('run-executor.sh')
   })
 })

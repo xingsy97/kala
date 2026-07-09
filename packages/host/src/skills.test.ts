@@ -151,4 +151,26 @@ describe('skills', () => {
       content: 'unknown skill: missing-skill',
     })
   })
+
+  it('refuses oversized skill files instead of injecting them into context', async () => {
+    const root = join(dir, 'skills')
+    writeSkill(
+      root,
+      'huge-skill',
+      [
+        '---',
+        'name: huge-skill',
+        'description: Use for testing size limits.',
+        '---',
+        '',
+        'x'.repeat(260 * 1024),
+      ].join('\n'),
+    )
+    const registry = await discoverSkills([root])
+
+    const result = await runSkillTool(registry, { name: 'huge-skill' })
+
+    expect(result.ok).toBe(false)
+    expect(result.content).toMatch(/skill huge-skill is too large:/)
+  })
 })

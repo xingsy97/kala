@@ -104,8 +104,10 @@ The host handles `skill` like the existing host-side `agent` builtin:
 1. Validate `input.name`.
 2. Look up the discovered skill by name.
 3. Read the full `SKILL.md` from disk.
-4. Return the markdown content as the tool result.
-5. Let the ordinary kernel flow call the LLM again with that tool result in
+4. Reject oversized files above 256 KiB instead of injecting an unbounded body
+   into the next LLM request.
+5. Return the markdown content as the tool result.
+6. Let the ordinary kernel flow call the LLM again with that tool result in
    context.
 
 This means skill usage is visible in the same places as any other tool call:

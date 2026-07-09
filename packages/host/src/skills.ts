@@ -7,6 +7,7 @@ import type { ToolSchema } from '@agent-kernel/kernel'
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const MAX_DESCRIPTION_LENGTH = 1024
+const MAX_SKILL_BYTES = 256 * 1024
 
 export const SKILL_TOOL_NAME = 'skill'
 
@@ -92,6 +93,13 @@ export async function runSkillTool(
   if (!skill) return { ok: false, content: `unknown skill: ${name}` }
   try {
     const content = await readFile(skill.path, 'utf8')
+    const bytes = Buffer.byteLength(content, 'utf8')
+    if (bytes > MAX_SKILL_BYTES) {
+      return {
+        ok: false,
+        content: `skill ${name} is too large: ${bytes} bytes (limit ${MAX_SKILL_BYTES})`,
+      }
+    }
     return {
       ok: true,
       content: [

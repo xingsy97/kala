@@ -84,7 +84,7 @@ export type HostLoopDeps = {
 
 export type LoopHandle = {
   dispatch(sessionId: string, event: AgentEvent): Promise<void>
-  compact(sessionId: string, trigger?: 'manual' | 'auto'): Promise<void>
+  compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight'): Promise<void>
   /**
    * Abort the in-flight LLM call for a session, if any. Any streamed text
    * so far becomes the final assistant message with a `[cancelled]` suffix,
@@ -106,6 +106,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   // start of every call and clears it on completion.
   const inFlightAborts = new Map<string, AbortController>()
   const sessionTails = new Map<string, Promise<void>>()
+  const loopGuard = new Map<string, PostCompactionLoopGuard>()
 
   const handle: LoopHandle = {
     async dispatch(sessionId, event) {
@@ -117,7 +118,10 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       const next = prior
         .catch(() => {})
         .then(async () => {
-          await dispatchOne(deps, sessionId, event, inFlightAborts)
+          await dispatchOne(deps, sessionId, event, inFlightAborts, undefined, undefined, {
+            handle,
+            loopGuard,
+          })
           await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
         })
         .finally(() => {
@@ -128,6 +132,10 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
     },
     async compact(sessionId, trigger = 'manual') {
       await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts)
+      loopGuard.set(sessionId, {
+        remainingCalls: POST_COMPACTION_GUARD_CALLS,
+        seen: new Map(),
+      })
     },
     cancelStream(sessionId) {
       const ctrl = inFlightAborts.get(sessionId)
@@ -144,6 +152,7 @@ export async function dispatchOne(
   aborts: Map<string, AbortController>,
   llmTrace?: LLMTrace,
   model?: string,
+  runtime?: LoopRuntime,
 ): Promise<void> {
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
@@ -191,7 +200,7 @@ export async function dispatchOne(
   }
 
   for (const eff of effects) {
-    await performEffect(deps, record, eff, aborts)
+    await performEffect(deps, record, eff, aborts, runtime)
   }
 }
 
@@ -200,12 +209,13 @@ async function performEffect(
   record: SessionRecord,
   effect: Effect,
   aborts: Map<string, AbortController>,
+  runtime?: LoopRuntime,
 ): Promise<void> {
   switch (effect.kind) {
     case 'call_llm':
-      return performCallLlm(deps, record.sessionId, record.config, effect, aborts)
+      return performCallLlm(deps, record.sessionId, record.config, effect, aborts, runtime)
     case 'call_tool':
-      return performCallTool(deps, record.sessionId, effect, aborts)
+      return performCallTool(deps, record.sessionId, effect, aborts, runtime)
     case 'request_approval':
       safeBroadcast(() => deps.broadcast.onApprovalRequired(record.sessionId, effect))
       return
@@ -224,8 +234,10 @@ async function performCallLlm(
   config: AgentConfig,
   effect: CallLlmEffect,
   aborts: Map<string, AbortController>,
+  runtime?: LoopRuntime,
 ): Promise<void> {
   const model = deps.models?.get(sessionId)
+  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, aborts, runtime)
   const controller = new AbortController()
   aborts.set(sessionId, controller)
   // Only ask for token deltas when the broadcast wants them. If no consumer
@@ -241,7 +253,7 @@ async function performCallLlm(
     : undefined
   try {
     const res = await deps.llm.call({
-      messages: effect.messages,
+      messages,
       tools: effect.tools,
       signal: controller.signal,
       ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
@@ -262,6 +274,7 @@ async function performCallLlm(
       aborts,
       res.trace,
       res.trace?.model ?? model,
+      runtime,
     )
   } catch (err) {
     // AbortError from the fetch call means the user cancelled mid-stream.
@@ -282,11 +295,12 @@ async function performCallLlm(
         aborts,
         undefined,
         model,
+        runtime,
       )
       return
     }
     const message = err instanceof Error ? err.message : String(err)
-    await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts, undefined, model)
+    await dispatchOne(deps, sessionId, { kind: 'llm_error', error: message }, aborts, undefined, model, runtime)
   } finally {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
   }
@@ -297,8 +311,27 @@ async function performCallTool(
   sessionId: string,
   effect: CallToolEffect,
   aborts: Map<string, AbortController>,
+  runtime?: LoopRuntime,
 ): Promise<void> {
   try {
+    const blockedByLoop = guardPostCompactionLoop(sessionId, effect, runtime?.loopGuard)
+    if (blockedByLoop) {
+      await dispatchOne(
+        deps,
+        sessionId,
+        {
+          kind: 'tool_result',
+          callId: effect.callId,
+          ok: false,
+          content: blockedByLoop,
+        },
+        aborts,
+        undefined,
+        undefined,
+        runtime,
+      )
+      return
+    }
     const blocked = await runPreToolHooks(deps, sessionId, effect)
     if (blocked) {
       await dispatchOne(
@@ -311,6 +344,9 @@ async function performCallTool(
           content: blocked,
         },
         aborts,
+        undefined,
+        undefined,
+        runtime,
       )
       return
     }
@@ -332,6 +368,9 @@ async function performCallTool(
         content: res.content,
       },
       aborts,
+      undefined,
+      undefined,
+      runtime,
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -345,8 +384,101 @@ async function performCallTool(
         content: message,
       },
       aborts,
+      undefined,
+      undefined,
+      runtime,
     )
   }
+}
+
+type LoopRuntime = {
+  handle: LoopHandle
+  loopGuard: Map<string, PostCompactionLoopGuard>
+}
+
+type PostCompactionLoopGuard = {
+  remainingCalls: number
+  seen: Map<string, number>
+}
+
+const PREFLIGHT_RESERVE_FLOOR_TOKENS = 8_000
+const PREFLIGHT_RESERVE_RATIO = 0.12
+const POST_COMPACTION_GUARD_CALLS = 6
+const POST_COMPACTION_REPEAT_LIMIT = 2
+
+async function messagesForLlmCall(
+  deps: HostLoopDeps,
+  sessionId: string,
+  config: AgentConfig,
+  messages: readonly import('@agent-kernel/kernel').Message[],
+  aborts: Map<string, AbortController>,
+  runtime?: LoopRuntime,
+): Promise<readonly import('@agent-kernel/kernel').Message[]> {
+  if (!runtime || !shouldPreflightCompact(config, messages)) return messages
+  await runtime.handle.compact(sessionId, 'preflight')
+  return deps.store.get(sessionId)?.state.messages ?? messages
+}
+
+function shouldPreflightCompact(
+  config: AgentConfig,
+  messages: readonly import('@agent-kernel/kernel').Message[],
+): boolean {
+  if (!config.contextLimit || config.contextLimit <= 0) return false
+  if (!messages.some((m) => m.role !== 'system')) return false
+  const reserve = Math.min(
+    Math.max(
+      PREFLIGHT_RESERVE_FLOOR_TOKENS,
+      Math.round(config.contextLimit * PREFLIGHT_RESERVE_RATIO),
+    ),
+    Math.floor(config.contextLimit * 0.25),
+  )
+  const limit = Math.max(0, config.contextLimit - reserve)
+  return estimateMessageTokens(messages) >= limit
+}
+
+function estimateMessageTokens(messages: readonly import('@agent-kernel/kernel').Message[]): number {
+  let chars = 0
+  for (const message of messages) {
+    chars += message.role.length + 8
+    for (const content of message.content) {
+      if (content.type === 'text' || content.type === 'thinking') chars += content.text.length
+      else if (content.type === 'tool_call') chars += content.name.length + content.callId.length + JSON.stringify(content.input).length
+      else if (content.type === 'tool_result') chars += content.callId.length + content.content.length + 16
+      else chars += content.source.kind === 'file_ref'
+        ? content.source.path.length + 64
+        : Math.round(content.source.data.length / 4)
+    }
+  }
+  return Math.ceil(chars / 4)
+}
+
+function guardPostCompactionLoop(
+  sessionId: string,
+  effect: CallToolEffect,
+  guards: Map<string, PostCompactionLoopGuard> | undefined,
+): string | undefined {
+  const guard = guards?.get(sessionId)
+  if (!guard) return undefined
+  guard.remainingCalls -= 1
+  if (guard.remainingCalls < 0) {
+    guards?.delete(sessionId)
+    return undefined
+  }
+  const key = `${effect.name}:${stableStringify(effect.input)}`
+  const count = (guard.seen.get(key) ?? 0) + 1
+  guard.seen.set(key, count)
+  if (count <= POST_COMPACTION_REPEAT_LIMIT) return undefined
+  guards?.delete(sessionId)
+  return `blocked: repeated identical tool call after context compaction (${effect.name}). Re-read compacted context and choose a different next step.`
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`)
+  return `{${entries.join(',')}}`
 }
 
 function isAbortError(err: unknown): boolean {

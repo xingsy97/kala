@@ -6,8 +6,8 @@
  * `executor:tool_result` emit. If the tool produced more than `inlineBytes`
  * of output, the full text is written to
  * `<overflowDir>/<sessionId>/<callId>.txt` and the on-wire content is
- * replaced with `previewLines` of head + a truncation marker naming the
- * spill file. See docs/tool-output-overflow.md for the design.
+ * replaced with a head+tail preview plus a truncation marker naming the spill
+ * file. See docs/tool-output-overflow.md for the design.
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path'
 export type OverflowConfig = {
   /** Byte threshold above which output is spilled to disk. */
   inlineBytes: number
-  /** Preview head size for spilled outputs (line count). */
+  /** Preview head+tail size for spilled outputs (line count). */
   previewLines: number
   /**
    * Base overflow directory. Files land at
@@ -64,14 +64,22 @@ function byteLength(s: string): number {
 }
 
 /**
- * Truncate to at most `lines` head lines. If the first line already exceeds
- * `inlineBytes`, fall back to a byte-level slice so we still emit something
- * shorter than the original.
+ * Truncate to at most `lines` preview lines, preserving both the beginning and
+ * the end. Command output usually explains setup at the top and the decisive
+ * error or summary at the bottom.
  */
-function head(full: string, lines: number, inlineBytes: number): string {
+function preview(full: string, lines: number, inlineBytes: number): string {
   const parts = full.split('\n')
   if (parts.length <= lines) return full
-  const preview = parts.slice(0, lines).join('\n')
+
+  const headLines = Math.max(1, Math.ceil(lines / 2))
+  const tailLines = Math.max(1, lines - headLines)
+  const omitted = Math.max(0, parts.length - headLines - tailLines)
+  const preview = [
+    ...parts.slice(0, headLines),
+    `[... ${omitted} lines omitted ...]`,
+    ...parts.slice(-tailLines),
+  ].join('\n')
   // Edge: a single "line" (e.g. one huge JSON blob) is longer than inlineBytes.
   // Cut it by bytes so the preview stays smaller than the original.
   if (byteLength(preview) > inlineBytes && lines > 0) {
@@ -112,10 +120,10 @@ export async function maybeOverflow(
   await mkdir(dirname(filePath), { recursive: true })
   await writeFile(filePath, full, 'utf8')
 
-  const preview = head(full, previewLines, inlineBytes)
+  const previewText = preview(full, previewLines, inlineBytes)
   const totalLines = full.split('\n').length
-  const previewLineCount = preview === full ? totalLines : preview.split('\n').length
-  const previewByteCount = byteLength(preview)
+  const previewLineCount = previewText === full ? totalLines : previewText.split('\n').length
+  const previewByteCount = byteLength(previewText)
   const marker = overflowMarker(
     filePath,
     ctx.callId,
@@ -125,7 +133,7 @@ export async function maybeOverflow(
     fullBytes,
   )
   return {
-    content: `${preview}\n\n${marker}`,
+    content: `${previewText}\n\n${marker}`,
     overflowed: true,
     fullBytes,
     filePath,

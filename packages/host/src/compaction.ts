@@ -50,6 +50,7 @@ Rules:
 - Keep the whole response under 1600 tokens.`
 const COMPACT_TIMEOUT_MS = 60_000
 const TARGET_RECENT_TAIL_TOKENS = 12_000
+const MAX_COMPACT_TOOL_RESULT_CHARS = 8_000
 
 export async function maybeAutoCompact(
   deps: HostLoopDeps,
@@ -72,7 +73,7 @@ export async function maybeAutoCompact(
 export async function runCompact(
   deps: HostLoopDeps,
   sessionId: string,
-  trigger: 'manual' | 'auto',
+  trigger: 'manual' | 'auto' | 'preflight',
   inFlight: Set<string>,
   aborts: Map<string, AbortController>,
 ): Promise<void> {
@@ -80,7 +81,7 @@ export async function runCompact(
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
   const s = record.state.status
-  if (s !== 'idle' && s !== 'done' && s !== 'error') {
+  if (s !== 'idle' && s !== 'done' && s !== 'error' && !isPreflightCompactable(trigger, record.state)) {
     throw new Error('cannot compact while the session is busy')
   }
   if (!hasCompactableContent(record.state.messages)) {
@@ -92,7 +93,7 @@ export async function runCompact(
     const tokensBefore = record.state.usage.inputTokens
     const replacedCount = record.state.messages.length
     const preserveFrom = choosePreserveFrom(record.state.messages)
-    const compactedPrefix = record.state.messages.slice(0, preserveFrom)
+    const compactedPrefix = prepareCompactionInput(record.state.messages.slice(0, preserveFrom))
     const preservedTail = record.state.messages.slice(preserveFrom)
     const compact = await summarize(deps, sessionId, compactedPrefix)
     // No provider gives a reliable prompt-token count for the summary alone
@@ -166,6 +167,39 @@ async function summarize(
 
 function hasCompactableContent(messages: readonly Message[]): boolean {
   return messages.some((m) => m.role !== 'system')
+}
+
+function isPreflightCompactable(
+  trigger: 'manual' | 'auto' | 'preflight',
+  state: { status: string; pendingCalls: readonly unknown[] },
+): boolean {
+  return trigger === 'preflight' && state.status === 'thinking' && state.pendingCalls.length === 0
+}
+
+function prepareCompactionInput(messages: readonly Message[]): Message[] {
+  return messages.map((message) => ({
+    ...message,
+    content: message.content.map((content) => {
+      if (content.type !== 'tool_result') return content
+      if (content.content.length <= MAX_COMPACT_TOOL_RESULT_CHARS) return content
+      return {
+        ...content,
+        content: compactToolResult(content.content, MAX_COMPACT_TOOL_RESULT_CHARS),
+      }
+    }),
+  }))
+}
+
+function compactToolResult(content: string, maxChars: number): string {
+  const headChars = Math.floor(maxChars * 0.6)
+  const tailChars = Math.max(0, maxChars - headChars)
+  const omitted = content.length - headChars - tailChars
+  if (omitted <= 0) return content
+  return [
+    content.slice(0, headChars).trimEnd(),
+    `[... ${omitted} chars omitted from old tool result before compaction ...]`,
+    content.slice(-tailChars).trimStart(),
+  ].join('\n')
 }
 
 function choosePreserveFrom(messages: readonly Message[]): number {
