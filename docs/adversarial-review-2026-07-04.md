@@ -142,3 +142,40 @@ The round-2 reviewer noted (without blocking on it) that `packages/shared/src/pr
 | **Total** | **120** | **121** | **+1** | |
 
 Files changed round 3: `packages/shared/src/protocol.ts` (reify enum as const), `docs/protocol/wire-protocol.md` (fix `'core'` → `'host'`, expand per-value docs), `packages/host/src/server.test.ts` (doc-drift regression).
+
+---
+
+## Round 4 — running-system verification
+
+Rounds 1–3 established the code is correct in the small (typecheck + 121 unit tests + build). Round 4 verifies it in the large: an actual browser talking to a running host + executor over Socket.IO, all the way through an approval-gated tool call round-trip. This is the check that unit tests with mocked sockets cannot make (see the "verify frontend with real browser" convention).
+
+**Setup**: `host` on `:3055` with `LLM_PROVIDER=openai` pointed at a real OpenAI-compatible gateway, `executor` bound to `/tmp/agent-kernel-e2e-workspace` announcing to session `demo`, `dashboard` dev server on `:5173`. Real browser: `google-chrome --headless=new --remote-debugging-port=9333` at `http://127.0.0.1:5173/?host=http://127.0.0.1:3055&sessionId=demo`. Every observation below is read out of the live DOM via CDP `Runtime.evaluate`, not out of vitest fixtures.
+
+**Turn 1 — pre-existing (from a prior session left running on hot-reloaded code):**
+
+- User message: `translated historical texttranslated historical texttranslated historical textpwdtranslated historical texttranslated historical texttranslated historical text`
+- Kernel path: `user_message` → `call_llm` → `llm_response` (bash tool call auto-approved via config) → `call_tool` → `tool_result` → `call_llm` → `llm_response` → `finish`
+- Final DOM state: `STATUS: done, CURSOR: 5, PENDING: 0, TOKENS: 1335 in / 1064 out`, executor cwd `/tmp/agent-kernel-e2e-workspace` echoed back
+- Meaning: full happy path (LLM + executor + kernel + broadcast) works against a real LLM and real filesystem.
+
+**Turn 2 — approval-gated round-trip (this round):**
+
+- User message (typed into the composer via CDP, then Enter): `translated historical text echo translated historical texttranslated historical text kernel-verify-ok translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text`
+- Observed status progression: `thinking` (~4s LLM latency) → `awaiting_approval` (approval card visible in the DOM with the full `{command: "echo kernel-verify-ok"}` payload)
+- User action: CDP-clicked the `approve` button in ApprovalsPanel
+- Observed status progression: `thinking` → `done` within 1s (bash `echo` completed in `duration: 0ms`)
+- Final DOM state: `STATUS: done, CURSOR: 10, PENDING: 0, TOKENS: 2981 in / 1989 out`. Bash stdout `kernel-verify-ok` present in the DOM twice (once in the tool_result card, once in the assistant's follow-up message).
+- Timeline cursor 6→10 shows every kernel transition inline: `user_message/call_llm` · `llm_response/request_approval` · `user_approve/call_tool` · `tool_result/call_llm` · `llm_response/finish`.
+- Meaning: the approval branch (B1's neighbour — `awaiting_approval` → `user_approve` → `executing_tools` → `tool_result` → `thinking` → `done`) works end-to-end in a real browser. Token totals accumulate correctly across turns.
+
+**One remaining UI blemish (not a kernel/host regression)**: after `user_approve`, the ApprovalsPanel still shows the approved card ("APPROVAL REQUIRED bash …") alongside the arrived tool_result. The kernel's `pendingCalls` is correctly `[]` (STATUS: done, PENDING: 0 in the state tree) — the dashboard's local approvals state is out of sync with server state after a successful approval. This is a dashboard-layer bug, not a kernel/host bug, and falls into the same class of "the dashboard is thin" observations that motivated [ADR 0012](adr/0012-dashboard-ui-redesign.md). Not fixed here; deferred to the redesign.
+
+**Nothing found requiring revise.** No kernel state leaks, no unhandled effect kinds, no protocol drift, no crash paths, no console errors in the browser during the two-turn run. Rounds 1–3 held up under a live test.
+
+| Verification layer | Status |
+|---|---|
+| `pnpm -r typecheck` | ✅ clean |
+| `pnpm -r test` (121 tests) | ✅ 121 passing |
+| `pnpm -r build` (all packages including dashboard `dist/`) | ✅ clean; dashboard bundle 194 KB / 62 KB gzipped |
+| Real-browser session (Turn 1: auto-approved tool call) | ✅ done at cursor 5 |
+| Real-browser session (Turn 2: approval-gated tool call) | ✅ done at cursor 10, approve click observed by kernel |
