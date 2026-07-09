@@ -23,10 +23,10 @@ import {
   listDirs,
   listFiles,
   readOverflowFile,
-  readWorkspaceFile,
 } from '../fs-handlers.js'
 import { handleBgKill, handleBgList, handleBgOutput } from '../bg-handlers.js'
-import { gitDiff, gitStatus } from '../git-handlers.js'
+import { workspaceExec } from '../workspace-exec.js'
+import { workspaceReadBinary } from '../workspace-read-binary.js'
 
 import type { Tool } from './registry.js'
 import { ToolError } from './registry.js'
@@ -71,12 +71,6 @@ export const fsListFilesTool: Tool = makeTool(
   '__fs_list_files',
   async (input, { sandbox }) =>
     listFiles(input as Parameters<typeof listFiles>[0], sandbox),
-)
-
-export const fsReadFileTool: Tool = makeTool(
-  '__fs_read_file',
-  async (input, { sandbox }) =>
-    readWorkspaceFile(input as Parameters<typeof readWorkspaceFile>[0], sandbox),
 )
 
 export const fsReadOverflowTool: Tool = makeTool(
@@ -126,31 +120,31 @@ export const bgKillTool: Tool = {
 }
 
 // ============================================================================
-// Git read-only inspection
+// Generic dashboard-initiated workspace observation
+// (see docs/planning/roadmap-notes/workspace-exec-refactor.md)
 // ============================================================================
 
-export const gitStatusTool: Tool = makeTool(
-  '__git_status',
+export const workspaceExecTool: Tool = makeTool(
+  '__workspace_exec',
   async (input, { sandbox }) =>
-    gitStatus(input as Parameters<typeof gitStatus>[0], sandbox),
+    workspaceExec(input as Parameters<typeof workspaceExec>[0], sandbox),
 )
 
-export const gitDiffTool: Tool = makeTool(
-  '__git_diff',
+export const workspaceReadBinaryTool: Tool = makeTool(
+  '__workspace_read_binary',
   async (input, { sandbox }) =>
-    gitDiff(input as Parameters<typeof gitDiff>[0], sandbox),
+    workspaceReadBinary(input as Parameters<typeof workspaceReadBinary>[0], sandbox),
 )
 
 export const internalDirectTools: readonly Tool[] = [
   fsListDirsTool,
   fsListFilesTool,
-  fsReadFileTool,
   fsReadOverflowTool,
   fsDeleteOverflowSessionTool,
   fsCopyOverflowSessionTool,
   bgListTool,
   bgOutputTool,
   bgKillTool,
-  gitStatusTool,
-  gitDiffTool,
+  workspaceExecTool,
+  workspaceReadBinaryTool,
 ]

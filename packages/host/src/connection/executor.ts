@@ -21,6 +21,12 @@ import type {
   CallToolEffect,
 } from '@agent-kernel/kernel'
 import type {
+  WorkspaceExecRequest,
+  WorkspaceExecResponse,
+  WorkspaceReadBinaryRequest,
+  WorkspaceReadBinaryResponse,
+} from '@agent-kernel/shared/workspace-exec'
+import type {
   AttachedExecutor,
   BgKillResult,
   BgListResult,
@@ -29,10 +35,7 @@ import type {
   ClientListBgTasks,
   ClientListDirs,
   ClientListFiles,
-  ClientGitDiff,
-  ClientGitStatus,
   ClientReadBgOutput,
-  ClientReadFile,
   ClientReadOverflow,
   ClientTerminalCreate,
   ClientTerminalInput,
@@ -46,10 +49,7 @@ import type {
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
   ExecutorServerToClientEvents,
-  FileContentsResult,
   FileListResult,
-  GitDiffResult,
-  GitStatusResult,
   OverflowContentsResult,
   ServerExecutorChangedPayload,
   TerminalCreateResult,
@@ -96,9 +96,6 @@ export type ExecutorLookup = {
   executorForSession(sessionId: string): AttachedExecutor | undefined
   listDirs(workspaceId: string, path: string | undefined, requestId: string): Promise<DirListResult>
   listFiles(payload: ClientListFiles): Promise<FileListResult>
-  readFile(payload: ClientReadFile): Promise<FileContentsResult>
-  gitStatus(payload: ClientGitStatus): Promise<GitStatusResult>
-  gitDiff(payload: ClientGitDiff): Promise<GitDiffResult>
   readOverflow(payload: ClientReadOverflow, workspaceId: string): Promise<OverflowContentsResult>
   copyOverflowSession(workspaceId: string, sourceSessionId: string, targetSessionId: string): Promise<CopyOverflowSessionResult>
   deleteOverflowSession(workspaceId: string, sessionId: string): Promise<DeleteOverflowSessionResult>
@@ -109,6 +106,8 @@ export type ExecutorLookup = {
   inputTerminal(payload: ClientTerminalInput): void
   resizeTerminal(payload: ClientTerminalResize): void
   killTerminal(payload: ClientTerminalKill): Promise<TerminalKillResult>
+  workspaceExec(payload: WorkspaceExecRequest): Promise<WorkspaceExecResponse>
+  workspaceReadBinary(payload: WorkspaceReadBinaryRequest): Promise<WorkspaceReadBinaryResponse>
 }
 
 export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
@@ -589,73 +588,6 @@ export function createExecutorRegistry(
         }),
       )
     },
-    async readFile(payload) {
-      const bind = findBindByWorkspace(payload.workspaceId)
-      if (!bind) {
-        return {
-          requestId: payload.requestId,
-          workspaceId: payload.workspaceId,
-          path: payload.path,
-          error: 'workspace offline',
-        }
-      }
-      return await callInternalTool<FileContentsResult>(
-        bind,
-        payload.workspaceId,
-        '__fs_read_file',
-        payload as unknown as Record<string, unknown>,
-        (msg) => ({
-          requestId: payload.requestId,
-          workspaceId: payload.workspaceId,
-          path: payload.path,
-          error: msg,
-        }),
-      )
-    },
-    async gitStatus(payload) {
-      const bind = findBindByWorkspace(payload.workspaceId)
-      if (!bind) {
-        return {
-          requestId: payload.requestId,
-          workspaceId: payload.workspaceId,
-          files: [],
-          error: { code: 'executor_unavailable', message: 'workspace offline' },
-        }
-      }
-      return await callInternalTool<GitStatusResult>(
-        bind,
-        payload.workspaceId,
-        '__git_status',
-        payload as unknown as Record<string, unknown>,
-        (msg) => ({
-          requestId: payload.requestId,
-          workspaceId: payload.workspaceId,
-          files: [],
-          error: { code: 'internal_error', message: msg },
-        }),
-      )
-    },
-    async gitDiff(payload) {
-      const bind = findBindByWorkspace(payload.workspaceId)
-      if (!bind) {
-        return {
-          requestId: payload.requestId,
-          workspaceId: payload.workspaceId,
-          error: { code: 'executor_unavailable', message: 'workspace offline' },
-        }
-      }
-      return await callInternalTool<GitDiffResult>(
-        bind,
-        payload.workspaceId,
-        '__git_diff',
-        payload as unknown as Record<string, unknown>,
-        (msg) => ({
-          requestId: payload.requestId,
-          workspaceId: payload.workspaceId,
-          error: { code: 'internal_error', message: msg },
-        }),
-      )
-    },
     async readOverflow(payload, workspaceId) {
       const bind = findBindByWorkspace(workspaceId)
       if (!bind) {
@@ -834,6 +766,58 @@ export function createExecutorRegistry(
       return await new Promise<TerminalKillResult>((resolve) => {
         bind.socket.emit('terminal:kill', payload, (result) => resolve(result))
       })
+    },
+    async workspaceExec(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          stdout: '',
+          stderr: '',
+          exitCode: null,
+          durationMs: 0,
+          error: { code: 'EACCES', message: 'workspace offline' },
+        }
+      }
+      return await callInternalTool<WorkspaceExecResponse>(
+        bind,
+        payload.workspaceId,
+        '__workspace_exec',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          stdout: '',
+          stderr: '',
+          exitCode: null,
+          durationMs: 0,
+          error: { code: 'EIO', message: msg },
+        }),
+      )
+    },
+    async workspaceReadBinary(payload) {
+      const bind = findBindByWorkspace(payload.workspaceId)
+      if (!bind) {
+        return {
+          requestId: payload.requestId,
+          base64: '',
+          mime: 'application/octet-stream',
+          size: 0,
+          error: { code: 'EACCES', message: 'workspace offline' },
+        }
+      }
+      return await callInternalTool<WorkspaceReadBinaryResponse>(
+        bind,
+        payload.workspaceId,
+        '__workspace_read_binary',
+        payload as unknown as Record<string, unknown>,
+        (msg) => ({
+          requestId: payload.requestId,
+          base64: '',
+          mime: 'application/octet-stream',
+          size: 0,
+          error: { code: 'EIO', message: msg },
+        }),
+      )
     },
     onChange(listener) {
       listeners.add(listener)

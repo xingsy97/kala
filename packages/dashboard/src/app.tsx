@@ -94,6 +94,7 @@ import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
 import { cn } from './lib/utils.js'
 import { withViewTransition } from './lib/viewTransition.js'
+import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
 import type { DashboardSocket, TimelineEntry } from './session.js'
@@ -916,6 +917,7 @@ export function App(): JSX.Element {
     workspaceOnline: hasSelectedSession && control.executorsLoaded ? sessionWorkspaceOnline : null,
     workspaceLabel: currentSession?.workspaceName ?? currentSession?.workspaceId,
     suppressWaitingForUser,
+    approvalMode: session.state?.approvalMode,
     ready: sessionHydrated,
   })
 
@@ -929,6 +931,7 @@ export function App(): JSX.Element {
     connectionStatus: session.status,
     pendingApprovals: session.pendingApprovals,
     lastError: session.lastError,
+    approvalMode: session.state?.approvalMode,
   })
   useInactiveSessionSummaryToasts({
     sessions: control.sessions,
@@ -1235,26 +1238,18 @@ export function App(): JSX.Element {
       const socket = session.socket
       const workspaceId = currentSession?.workspaceId
       if (!socket || !workspaceId) return { error: 'no active workspace' }
-      return await new Promise((resolve) => {
-        const requestId = crypto.randomUUID()
-        const timer = setTimeout(() => {
-          socket.off('server:file_contents', handler)
-          resolve({ error: 'timed out' })
-        }, 5000)
-        const handler = (result: FileContentsResult): void => {
-          if (result.requestId !== requestId) return
-          clearTimeout(timer)
-          socket.off('server:file_contents', handler)
-          if (result.error) resolve({ error: result.error })
-          else resolve({ content: result.content ?? '' })
-        }
-        socket.on('server:file_contents', handler)
-        socket.emit('client:read_file', {
-          requestId,
-          workspaceId,
-          path,
-        })
-      })
+      // Uses the generic workspace:read_binary channel; decode the base64 as
+      // UTF-8 for the caller (Composer @-mention preview / etc.).
+      const res = await workspaceReadBinary(socket, workspaceId, path, { ackTimeoutMs: 5000 })
+      if (res.error) return { error: res.error.message }
+      try {
+        const binary = atob(res.base64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        return { content: new TextDecoder('utf-8', { fatal: false }).decode(bytes) }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
     },
     [session.socket, currentSession?.workspaceId],
   )
@@ -1683,7 +1678,21 @@ export function App(): JSX.Element {
                                 ] satisfies readonly MessageContent[]
                               : undefined
                             const createdAt = new Date().toISOString()
-                            if (mode === 'queue') {
+                            // When the operator picked "queue" but the agent
+                            // is currently idle, the server will drain the
+                            // queue immediately — routing the message through
+                            // the queued-messages dock would just animate it
+                            // in and back out within a round-trip. Treat it
+                            // as a normal pending message in that case; the
+                            // wire `mode` stays `queue` because the server
+                            // path is equivalent.
+                            const agentStatus = session.state?.status
+                            const agentBusy =
+                              agentStatus === 'thinking' ||
+                              agentStatus === 'executing_tools' ||
+                              agentStatus === 'awaiting_approval'
+                            const effectiveOptimisticMode: typeof mode = mode === 'queue' && !agentBusy ? 'steer' : mode
+                            if (effectiveOptimisticMode === 'queue') {
                               setOptimisticQueuedMessages((prev) => [
                                 ...prev,
                                 { id: `optimistic-${newPendingMessageId()}`, text, mode, createdAt },
@@ -1694,7 +1703,7 @@ export function App(): JSX.Element {
                                 {
                                   id: newPendingMessageId(),
                                   text,
-                                  mode,
+                                  mode: effectiveOptimisticMode,
                                   ...(content ? { content } : {}),
                                   createdAt,
                                   afterSeq: session.timeline.at(-1)?.seq ?? 0,
@@ -1707,8 +1716,8 @@ export function App(): JSX.Element {
                               mode,
                               ...(content ? { content } : {}),
                             })
-                            if (mode === 'steer') suppressNextWaitingNotification.current = true
-                            if (mode === 'steer' && shouldCompactContext(session.contextSnapshot, {}, { triggerRatio: session.config?.hardThreshold ?? 0.92 }).shouldCompact) {
+                            if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
+                            if (effectiveOptimisticMode === 'steer' && shouldCompactContext(session.contextSnapshot, {}, { triggerRatio: session.config?.hardThreshold ?? 0.92 }).shouldCompact) {
                               if (compactResetTimer.current !== null) {
                                 window.clearTimeout(compactResetTimer.current)
                                 compactResetTimer.current = null

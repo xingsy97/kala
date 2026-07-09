@@ -1367,7 +1367,6 @@ export type DashboardClientToServerEvents = {
   'client:create_session': (payload: ClientCreateSession) => void
   'client:list_dirs': (payload: ClientListDirs) => void
   'client:list_files': (payload: ClientListFiles) => void
-  'client:read_file': (payload: ClientReadFile) => void
   'client:read_overflow': (payload: ClientReadOverflow) => void
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
@@ -1404,13 +1403,13 @@ export type DashboardClientToServerEvents = {
     payload: ClientTerminalKill,
     ack: (result: TerminalKillResult) => void,
   ) => void
-  'git:status': (
-    payload: ClientGitStatus,
-    ack: (result: GitStatusResult) => void,
+  'workspace:exec': (
+    payload: import('./workspace-exec.js').WorkspaceExecRequest,
+    ack: (result: import('./workspace-exec.js').WorkspaceExecResponse) => void,
   ) => void
-  'git:diff': (
-    payload: ClientGitDiff,
-    ack: (result: GitDiffResult) => void,
+  'workspace:read_binary': (
+    payload: import('./workspace-exec.js').WorkspaceReadBinaryRequest,
+    ack: (result: import('./workspace-exec.js').WorkspaceReadBinaryResponse) => void,
   ) => void
   'sub_agent:list': (
     payload: ClientListSubAgents,
@@ -1435,7 +1434,6 @@ export type DashboardServerToClientEvents = {
   'server:sessions': (payload: ServerSessionsPayload) => void
   'server:dir_list': (payload: DirListResult) => void
   'server:file_list': (payload: FileListResult) => void
-  'server:file_contents': (payload: FileContentsResult) => void
   'server:overflow_contents': (payload: OverflowContentsResult) => void
   'server:memory_consolidated': (payload: ConsolidateMemoryResult) => void
   'server:history': (payload: ServerHistoryPayload) => void

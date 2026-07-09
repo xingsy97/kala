@@ -367,7 +367,7 @@ function executorCapabilities(tools: ReadonlyMap<string, Tool>, sandboxRoots: re
     schemaVersion: 1,
     features: {
       backgroundShell: tools.has('bash_output') && tools.has('kill_shell'),
-      filePicker: tools.has('__fs_list_dirs') && tools.has('__fs_list_files') && tools.has('__fs_read_file'),
+      filePicker: tools.has('__fs_list_dirs') && tools.has('__fs_list_files') && tools.has('__workspace_read_binary'),
       overflowFiles: tools.has('__fs_read_overflow'),
       workspaceSandbox: sandboxRoots.length > 0,
     },

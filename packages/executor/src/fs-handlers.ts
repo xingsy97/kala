@@ -28,14 +28,12 @@ import type {
   DeleteOverflowSession,
   DeleteOverflowSessionResult,
   DirListResult,
-  FileContentsResult,
   FileListEntry,
   FileListResult,
   OverflowContentsResult,
 } from '@agent-kernel/shared'
 
 import type { Sandbox } from './sandbox.js'
-import { buildWorkspaceFileContents } from './file-download-service.js'
 
 // ============================================================================
 // listDirs — directory picker one-level-at-a-time
@@ -176,46 +174,6 @@ export async function listFiles(
     workspaceId: payload.workspaceId,
     files: matches,
     truncated,
-  }
-}
-
-// ============================================================================
-// readWorkspaceFile — single-file view
-// ============================================================================
-
-type ReadFilePayload = {
-  requestId: string
-  workspaceId: string
-  path: string
-  maxBytes?: number
-  download?: boolean
-}
-
-export async function readWorkspaceFile(
-  payload: ReadFilePayload,
-  sandbox: Sandbox,
-): Promise<FileContentsResult> {
-  const requested = payload.path?.trim() ?? ''
-  const base = {
-    requestId: payload.requestId,
-    workspaceId: payload.workspaceId,
-    path: requested,
-  }
-  if (requested.length === 0) {
-    return { ...base, error: 'EINVAL: empty path' }
-  }
-  try {
-    const resolved = await sandbox.resolve(requested)
-    return await buildWorkspaceFileContents({
-      requestId: payload.requestId,
-      workspaceId: payload.workspaceId,
-      requestedPath: requested,
-      resolvedPath: resolved,
-      maxBytes: payload.maxBytes,
-      download: payload.download,
-    })
-  } catch (err) {
-    return { ...base, kind: 'error', error: err instanceof Error ? err.message : String(err) }
   }
 }
 

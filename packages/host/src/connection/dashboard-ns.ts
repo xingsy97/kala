@@ -20,8 +20,6 @@ import type {
   ClientCreateSession,
   ClientDeleteSession,
   ClientFork,
-  ClientGitDiff,
-  ClientGitStatus,
   ClientInterruptSubAgent,
   ClientKillBgTask,
   ClientListAgentTypes,
@@ -34,7 +32,6 @@ import type {
   ClientLoadHistory,
   ClientLoadLogArtifact,
   ClientReadBgOutput,
-  ClientReadFile,
   ClientReadOverflow,
   ClientDeleteQueuedMessage,
   ClientReorderQueuedMessage,
@@ -63,6 +60,10 @@ import type {
   SubAgentSummary,
 } from '@agent-kernel/shared'
 import { isCompatibleVersion, schema } from '@agent-kernel/shared'
+import type {
+  WorkspaceExecRequest,
+  WorkspaceReadBinaryRequest,
+} from '@agent-kernel/shared/workspace-exec'
 import type {
   AgentConfig,
   AgentEvent,
@@ -592,48 +593,43 @@ export function configureDashboardNamespace(
       const result = await deps.executors.listFiles(p)
       socket.emit('server:file_list', result)
     })
-    socket.on('client:read_file', async (raw: ClientReadFile) => {
-      const p = vparse(schema.ClientReadFileSchema, raw, 'client:read_file') as ClientReadFile | undefined
-      if (!p) return
-      if (p.sessionId) {
-        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-        if (error) {
-          auditScopedAccessDenied('internal_tool.read_file', p.sessionId, p.workspaceId, error)
-          socket.emit('server:file_contents', { requestId: p.requestId, workspaceId: p.workspaceId, path: p.path, kind: 'error', error })
-          return
-        }
+    // Generic dashboard-initiated workspace exec + binary read. See
+    // docs/planning/roadmap-notes/workspace-exec-refactor.md for the
+    // trust story: same sandbox rules as the agent-facing `bash`; the
+    // difference is the actor (human at a dashboard button, not the LLM).
+    // Audit records argv.slice(0, 3) so post-hoc review has a searchable
+    // shape without unbounded metadata size.
+    socket.on('workspace:exec', async (raw: WorkspaceExecRequest, ack) => {
+      // No zod schema in shared yet; validate minimally by hand.
+      if (!raw || typeof raw !== 'object' || typeof raw.requestId !== 'string' || typeof raw.workspaceId !== 'string' || !Array.isArray(raw.argv) || raw.argv.length === 0) {
+        deps.audit?.log({ action: 'workspace.exec', actor: auditActor(socket), target: { workspaceId: raw?.workspaceId ?? 'unknown' }, outcome: 'denied', error: 'invalid payload' })
+        return ack?.({ requestId: raw?.requestId ?? '', stdout: '', stderr: '', exitCode: null, durationMs: 0, error: { code: 'EINVAL', message: 'invalid payload' } })
       }
-      deps.audit?.log({ action: 'internal_tool.read_file', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
-      const result = await deps.executors.readFile(p)
-      socket.emit('server:file_contents', result)
+      const argvHead = raw.argv.slice(0, 3).map((arg) => typeof arg === 'string' ? arg : String(arg))
+      deps.audit?.log({
+        action: 'workspace.exec',
+        actor: auditActor(socket),
+        target: { workspaceId: raw.workspaceId },
+        outcome: 'ok',
+        metadata: { argv: argvHead, cwd: raw.cwd ?? null },
+      })
+      const result = await deps.executors.workspaceExec(raw as WorkspaceExecRequest)
+      ack?.(result)
     })
-    socket.on('git:status', async (raw: ClientGitStatus, ack) => {
-      const p = vparse(schema.ClientGitStatusSchema, raw, 'git:status', (raw as ClientGitStatus | undefined)?.sessionId)
-      if (!p) return
-      if (p.sessionId) {
-        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-        if (error) {
-          auditScopedAccessDenied('internal_tool.git_status', p.sessionId, p.workspaceId, error)
-          return ack({ requestId: p.requestId, workspaceId: p.workspaceId, files: [], error: { code: 'internal_error', message: error } })
-        }
+    socket.on('workspace:read_binary', async (raw: WorkspaceReadBinaryRequest, ack) => {
+      if (!raw || typeof raw !== 'object' || typeof raw.requestId !== 'string' || typeof raw.workspaceId !== 'string' || typeof raw.path !== 'string') {
+        deps.audit?.log({ action: 'workspace.read_binary', actor: auditActor(socket), target: { workspaceId: raw?.workspaceId ?? 'unknown' }, outcome: 'denied', error: 'invalid payload' })
+        return ack?.({ requestId: raw?.requestId ?? '', base64: '', mime: 'application/octet-stream', size: 0, error: { code: 'EINVAL', message: 'invalid payload' } })
       }
-      deps.audit?.log({ action: 'internal_tool.git_status', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok' })
-      const result = await deps.executors.gitStatus(p)
-      ack(result)
-    })
-    socket.on('git:diff', async (raw: ClientGitDiff, ack) => {
-      const p = vparse(schema.ClientGitDiffSchema, raw, 'git:diff', (raw as ClientGitDiff | undefined)?.sessionId)
-      if (!p) return
-      if (p.sessionId) {
-        const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
-        if (error) {
-          auditScopedAccessDenied('internal_tool.git_diff', p.sessionId, p.workspaceId, error)
-          return ack({ requestId: p.requestId, workspaceId: p.workspaceId, error: { code: 'internal_error', message: error } })
-        }
-      }
-      deps.audit?.log({ action: 'internal_tool.git_diff', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path, staged: p.staged === true } })
-      const result = await deps.executors.gitDiff(p)
-      ack(result)
+      deps.audit?.log({
+        action: 'workspace.read_binary',
+        actor: auditActor(socket),
+        target: { workspaceId: raw.workspaceId },
+        outcome: 'ok',
+        metadata: { path: raw.path },
+      })
+      const result = await deps.executors.workspaceReadBinary(raw as WorkspaceReadBinaryRequest)
+      ack?.(result)
     })
     socket.on('client:read_overflow', async (raw: ClientReadOverflow) => {
       const p = vparse(schema.ClientReadOverflowSchema, raw, 'client:read_overflow', (raw as ClientReadOverflow | undefined)?.sessionId)

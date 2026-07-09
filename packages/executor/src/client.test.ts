@@ -13,7 +13,6 @@ import type { LLMAdapter } from '@agent-kernel/host'
 import type {
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
-  FileContentsResult,
   ServerTerminalOutput,
   SessionReadyEvent,
   TerminalCreateResult,
@@ -432,17 +431,16 @@ describe('executor end-to-end', () => {
     const executor = startExecutor({ host: url, workspaceId, workspaceName: 'test-ws', sandboxRoots: [sandboxRoot] })
     await executor.ready
 
-    const file = await new Promise<FileContentsResult>((resolve, reject) => {
-      const requestId = 'read-file-view'
+    const file = await new Promise<{ base64: string; mime: string; size: number; error?: { code: string; message: string } }>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('file view timed out')), 3000)
-      dashboard.on('server:file_contents', (payload) => {
-        if (payload.requestId !== requestId) return
+      dashboard.emit('workspace:read_binary', { requestId: 'read-file-view', workspaceId, path: filePath }, (payload: { base64: string; mime: string; size: number; error?: { code: string; message: string } }) => {
         clearTimeout(timer)
         resolve(payload)
       })
-      dashboard.emit('client:read_file', { requestId, workspaceId, path: filePath })
     })
-    expect(file).toMatchObject({ content: 'view-ok', kind: 'text' })
+    expect(file.error).toBeUndefined()
+    expect(Buffer.from(file.base64, 'base64').toString()).toBe('view-ok')
+    expect(file.mime).toBe('text/plain')
 
     const created = await new Promise<TerminalCreateResult>((resolve) => {
       dashboard.emit('terminal:create', { requestId: 'term-create', workspaceId, sessionId, cwd: sandboxRoot, cols: 80, rows: 8 }, resolve)

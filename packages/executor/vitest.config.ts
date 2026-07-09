@@ -14,6 +14,8 @@ export default defineConfig({
       '@agent-kernel/shared/context-usage': resolve(__dirname, '../shared/src/context-usage/index.ts'),
       '@agent-kernel/shared/runtime-logger': resolve(__dirname, '../shared/src/runtime-logger.ts'),
       '@agent-kernel/shared/token-estimation': resolve(__dirname, '../shared/src/token-estimation.ts'),
+      '@agent-kernel/shared/push': resolve(__dirname, '../shared/src/push.ts'),
+      '@agent-kernel/shared/workspace-exec': resolve(__dirname, '../shared/src/workspace-exec.ts'),
       '@agent-kernel/shared': resolve(__dirname, '../shared/src/index.ts'),
     },
   },
