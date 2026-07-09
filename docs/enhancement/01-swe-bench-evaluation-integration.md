@@ -248,6 +248,27 @@ The artifact manifest classifies this file as `eval_progress`, so the dashboard
 can discover it like any other run artifact. It is derived state only; replay
 and official SWE-bench grading do not depend on it.
 
+`plan` is the implemented resource planning command:
+
+```bash
+agent-kernel-host eval swebench plan \
+  --root-dir runs/swebench \
+  --run-id lite-plan \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --model agent-kernel \
+  --instances-jsonl data/swebench-lite.jsonl \
+  --max-workers 8 \
+  --timeout-ms 900000 \
+  --repo-cache-dir runs/repo-cache
+```
+
+It writes `runs/swebench/<run_id>/worker-plan.json` with selected instance
+count, deterministic round-robin worker shards, Docker and per-instance git
+workspace isolation hints, timeout, optional repo cache location, and warnings
+such as empty selection or over-provisioned workers. The plan is an artifact for
+CI/manual orchestration and future distributed workers; it does not add
+SWE-bench scheduling state to the kernel protocol.
+
 ## CI and Release Validation
 
 Implemented CI coverage is split into a cheap deterministic smoke path and an
@@ -315,19 +336,31 @@ network. The kernel should not know that a session is a SWE-bench run.
 
 ## Dashboard Integration
 
-The dashboard now has a first eval explorer surface inside the Artifacts modal.
-It consumes the host artifact manifest, finds eval `summary.json` artifacts,
-loads them through the bounded `/artifacts/content` endpoint, and renders run
-level metrics without adding eval state to the kernel or Socket.IO protocol.
+The dashboard has a dedicated Eval entry point in the workbench toolbar and
+command palette. It opens the artifact explorer directly in Eval mode, so eval
+remains a read-only artifact projection instead of becoming a second runtime
+state model. The same dialog can still open in generic Artifacts mode for raw
+manifest inspection.
 
-The full Eval Runs product view should continue from this foundation:
+The Eval view consumes the host artifact manifest, finds eval `summary.json`,
+`progress.json`, comparison, and trial artifacts, then loads details through the
+bounded `/artifacts/content` endpoint. It renders run-level metrics, live
+progress-only runs, trial evidence, and comparison deltas without adding eval
+state to the kernel or Socket.IO protocol.
+
+Implemented dashboard surfaces:
 
 - Run table: dataset, split, model, pass rate, completed, failed, timed out,
-  cost, wall time.
-- Instance table: `instance_id`, status, resolved, duration, token count,
-  tool count, final diff size, failure type.
-- Instance detail: chat/session replay, LLM API calls, tool calls, final diff,
-  official harness logs, and trace spans.
+  worker count, and run status when progress artifacts exist.
+- Instance table: `instance_id`, status, resolved label, duration, failure type,
+  and artifact count.
+- Instance detail: final diff, OpenInference trace, official SWE-bench evidence,
+  harness logs, agent logs, prompt, workspace metadata, and raw trial JSON.
+- Linked session action: trials that include `sessionId` can jump back to the
+  corresponding dashboard session with no new backend endpoint.
+- Comparison view: baseline/candidate summaries, numeric deltas, failure delta
+  chips, and a compact delta bar chart for resolved, failed, timed out, and pass
+  rate changes.
 
 The dashboard should show official SWE-bench result labels separately from
 agent execution labels. For example, `agent_done` does not imply `resolved`.
@@ -402,20 +435,22 @@ Phase 4: batch scheduler.
 Implemented first host-side scheduler controls for `agent-infer`: bounded
 `--max-workers`, stable output ordering, and `--skip-completed` resume behavior
 that reuses existing trial and prediction rows without rerunning completed
-instances. Remaining production work is per-instance resource isolation,
-distributed workers, and richer progress reporting.
+instances. The adapter also emits `progress.json` for live queue visibility and
+`worker-plan.json` for resource-aware sharding. Actual distributed execution can
+consume that plan outside the kernel.
 
 Phase 5: dashboard eval explorer.
 Implemented read-only summary, comparison, and instance-level trial views through
-the artifact explorer. The dashboard loads run summaries, trial JSON artifacts,
-and comparison deltas through the bounded artifact content endpoint without
-adding eval state to the kernel protocol. Trial details now derive grouped
-artifact sections from existing refs, with prominent entries for final patches,
+the artifact explorer, with dedicated Eval toolbar and command palette entries.
+The dashboard loads run summaries, progress files, trial JSON artifacts, and
+comparison deltas through the bounded artifact content endpoint without adding
+eval state to the kernel protocol. Trial details now derive grouped artifact
+sections from existing refs, with prominent entries for final patches,
 OpenInference traces, official SWE-bench result evidence, harness logs, agent
-logs, prompts, and metadata. The grouping is UI-only: it uses `kind`,
-`mediaType`, and path conventions from preserved artifacts rather than adding a
-benchmark-specific protocol field. Remaining work: dedicated navigation, direct
-trace-to-session linking, and richer comparison charts.
+logs, prompts, and metadata. Trials with `sessionId` expose a direct linked
+session action, and comparison rows include both numeric deltas and compact delta
+bars. The grouping is UI-only: it uses `kind`, `mediaType`, and path conventions
+from preserved artifacts rather than adding a benchmark-specific protocol field.
 
 Phase 6: CI eval smoke and manual official-harness workflow.
 Implemented through `scripts/verify-swebench-smoke.mjs`, default CI, and

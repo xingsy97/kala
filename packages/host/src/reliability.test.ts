@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from './store/log.js'
 import { parseEnhancementCli } from './enhancement-cli.js'
-import { auditSessionReliability } from './reliability.js'
+import { auditSessionReliability, replayReliabilityChaos } from './reliability.js'
 
 const READ = {
   name: 'read',
@@ -56,6 +56,7 @@ describe('session reliability audit', () => {
     const before = await auditSessionReliability({ rootDir: join(dir, 'audit-before'), sessionLogPath: logPath })
     expect(before.audit.danglingKind).toBe('tool_call')
     expect(before.audit.pendingCalls[0]).toMatchObject({ callId: 'c1', name: 'read' })
+    expect(before.audit.integrity.toolCallsWithoutResult).toEqual(['c1'])
 
     await appendEventEntry({
       path: logPath,
@@ -65,6 +66,79 @@ describe('session reliability audit', () => {
     })
     const after = await auditSessionReliability({ rootDir: join(dir, 'audit-after'), sessionLogPath: logPath })
     expect(after.audit.recoveryEvents).toBe(1)
+    expect(after.audit.recoveryEventDetails[0]).toMatchObject({ seq: 3, kind: 'tool_result_recovered', callId: 'c1' })
+    expect(after.audit.integrity.toolCallsWithoutResult).toEqual([])
+  })
+
+  it('reports tool-call integrity issues without mutating the log', async () => {
+    const sessionId = 's-integrity'
+    const logPath = join(dir, 'integrity.jsonl')
+    const cfg = createConfig({ tools: [READ], systemPrompt: 'sys' })
+    await writeHeader({ path: logPath, sessionId, config: cfg, initialState: createInitialState({ sessionId, systemPrompt: 'sys' }) })
+    await appendEventEntry({ path: logPath, seq: 1, event: { kind: 'user_message', text: 'read' }, effects: [] })
+    await appendEventEntry({
+      path: logPath,
+      seq: 2,
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'dup', name: 'read', input: {} }] } },
+      effects: [],
+    })
+    await appendEventEntry({
+      path: logPath,
+      seq: 3,
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'dup', name: 'read', input: {} }] } },
+      effects: [],
+    })
+    await appendEventEntry({ path: logPath, seq: 4, event: { kind: 'tool_result', callId: 'dup', ok: true, content: 'ok' }, effects: [] })
+    await appendEventEntry({ path: logPath, seq: 5, event: { kind: 'tool_result', callId: 'dup', ok: true, content: 'ok again' }, effects: [] })
+    await appendEventEntry({ path: logPath, seq: 6, event: { kind: 'tool_result', callId: 'unknown', ok: false, content: 'late result' }, effects: [] })
+
+    const result = await auditSessionReliability({ rootDir: join(dir, 'audit-integrity'), sessionLogPath: logPath })
+
+    expect(result.audit.integrity).toMatchObject({
+      duplicateToolCallIds: ['dup'],
+      duplicateToolResultIds: ['dup'],
+      toolResultsWithoutCall: ['unknown'],
+      toolCallsWithoutResult: [],
+    })
+  })
+
+  it('replays chaos scenarios across session logs into a compact report', async () => {
+    const cfg = createConfig({ tools: [READ], systemPrompt: 'sys' })
+    const danglingPath = join(dir, 'dangling.jsonl')
+    await writeHeader({ path: danglingPath, sessionId: 's-dangling', config: cfg, initialState: createInitialState({ sessionId: 's-dangling', systemPrompt: 'sys' }) })
+    await appendEventEntry({ path: danglingPath, seq: 1, event: { kind: 'user_message', text: 'read' }, effects: [] })
+    await appendEventEntry({
+      path: danglingPath,
+      seq: 2,
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'c1', name: 'read', input: {} }] } },
+      effects: [],
+    })
+
+    const recoveredPath = join(dir, 'recovered.jsonl')
+    await writeHeader({ path: recoveredPath, sessionId: 's-recovered', config: cfg, initialState: createInitialState({ sessionId: 's-recovered', systemPrompt: 'sys' }) })
+    await appendEventEntry({ path: recoveredPath, seq: 1, event: { kind: 'user_message', text: 'read' }, effects: [] })
+    await appendEventEntry({
+      path: recoveredPath,
+      seq: 2,
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'c2', name: 'read', input: {} }] } },
+      effects: [],
+    })
+    await appendEventEntry({
+      path: recoveredPath,
+      seq: 3,
+      event: { kind: 'tool_result', callId: 'c2', ok: false, content: 'host restarted while call was pending' },
+      effects: [],
+    })
+
+    const result = await replayReliabilityChaos({ rootDir: join(dir, 'chaos'), sessionLogPaths: [danglingPath, recoveredPath] })
+
+    expect(result.report.sessionCount).toBe(2)
+    expect(result.report.danglingCount).toBe(2)
+    expect(result.report.recoverableCount).toBe(1)
+    expect(result.report.recoveryEventCount).toBe(1)
+    expect(result.report.danglingByKind.tool_call).toBe(1)
+    expect(result.report.danglingByKind.llm_call).toBe(1)
+    expect(await readFile(result.reportPath, 'utf8')).toContain('s-dangling')
   })
 
   it('parses reliability audit CLI commands', () => {
@@ -77,5 +151,13 @@ describe('session reliability audit', () => {
       '--root-dir',
       'runs/r',
     ])).toMatchObject({ kind: 'reliability-audit-session', rootDir: 'runs/r' })
+
+    expect(parseEnhancementCli([
+      'enhancement',
+      'reliability',
+      'chaos-replay',
+      '--session-logs',
+      'a.jsonl,b.jsonl',
+    ])).toMatchObject({ kind: 'reliability-chaos-replay', sessionLogPaths: ['a.jsonl', 'b.jsonl'] })
   })
 })

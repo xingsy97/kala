@@ -226,6 +226,90 @@ export type RunSweBenchAgentPatchInput = {
   skipCompleted?: boolean
 }
 
+export type SweBenchWorkerPlanInput = {
+  rootDir: string
+  runId: string
+  dataset: string
+  split?: string
+  model: string
+  instancesJsonl: string
+  instanceIds?: readonly string[]
+  limit?: number
+  maxWorkers?: number
+  timeoutMs?: number
+  repoCacheDir?: string
+}
+
+export type SweBenchWorkerPlan = {
+  schemaVersion: 1
+  generatedAt: string
+  runId: string
+  dataset: string
+  split?: string
+  model: string
+  selectedCount: number
+  maxWorkers: number
+  shards: Array<{
+    workerId: number
+    instanceCount: number
+    instanceIds: readonly string[]
+  }>
+  resourceHints: {
+    dockerRequired: true
+    workspaceIsolation: 'per-instance-git-clone'
+    maxConcurrentWorkspaces: number
+    repoCacheDir?: string
+    timeoutMs?: number
+  }
+  warnings: readonly string[]
+}
+
+export async function planSweBenchWorkerRun(
+  input: SweBenchWorkerPlanInput,
+): Promise<{ layout: SweBenchRunLayout; plan: SweBenchWorkerPlan; planPath: string }> {
+  const allInstances = await readSweBenchInstances(input.instancesJsonl)
+  const selected = selectInstances(allInstances, input.instanceIds, input.limit)
+  const layout = sweBenchRunLayout(input.rootDir, input.runId)
+  await mkdir(layout.rootDir, { recursive: true })
+  const maxWorkers = Math.max(1, Math.floor(input.maxWorkers ?? 1))
+  const shards = Array.from({ length: Math.min(maxWorkers, Math.max(1, selected.length)) }, (_, index) => ({
+    workerId: index + 1,
+    instanceIds: [] as string[],
+  }))
+  selected.forEach((instance, index) => {
+    shards[index % shards.length]!.instanceIds.push(instance.instance_id)
+  })
+  const warnings: string[] = []
+  if (selected.length === 0) warnings.push('no instances selected')
+  if ((input.maxWorkers ?? 1) > selected.length && selected.length > 0) warnings.push('maxWorkers exceeds selected instance count')
+  const plan: SweBenchWorkerPlan = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    runId: input.runId,
+    dataset: input.dataset,
+    ...(input.split ? { split: input.split } : {}),
+    model: input.model,
+    selectedCount: selected.length,
+    maxWorkers,
+    shards: shards.map((shard) => ({
+      workerId: shard.workerId,
+      instanceCount: shard.instanceIds.length,
+      instanceIds: shard.instanceIds,
+    })),
+    resourceHints: {
+      dockerRequired: true,
+      workspaceIsolation: 'per-instance-git-clone',
+      maxConcurrentWorkspaces: Math.min(maxWorkers, Math.max(1, selected.length)),
+      ...(input.repoCacheDir ? { repoCacheDir: input.repoCacheDir } : {}),
+      ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
+    },
+    warnings,
+  }
+  const planPath = join(layout.rootDir, 'worker-plan.json')
+  await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8')
+  return { layout, plan, planPath }
+}
+
 export async function runSweBenchAgentPatchRun(
   input: RunSweBenchAgentPatchInput,
 ): Promise<{
