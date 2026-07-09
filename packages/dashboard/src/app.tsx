@@ -42,7 +42,6 @@ import { ChatPanel, type WorkspaceFileTarget } from './features/chat/ChatPanel.j
 import { APPROVAL_MODES, Composer } from './features/chat/Composer.js'
 import { ComposerFlipContainer } from './features/chat/ComposerFlipContainer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
-import { HumanAttentionLowBanner } from './features/chat/HumanAttentionIndicator.js'
 import { BannerStack, BannerSlot } from './features/chat/BannerStack.js'
 import { OfflineBanner, PwaLifecycleHost, PwaUpdateGlobalBanner } from './features/chat/PwaBanners.js'
 import { CommandPalette, type CommandPaletteItem } from './features/command/CommandPalette.js'
@@ -1654,7 +1653,6 @@ export function App(): JSX.Element {
                           suppressed={awaitingAck || compactStatus.kind === 'running'}
                           onCompactNow={runCompactNow}
                         />
-                        <HumanAttentionLowBanner timeline={session.humanAttention} />
                         <OfflineBanner />
                       </BannerStack>
                       <ComposerFlipContainer
@@ -1673,6 +1671,13 @@ export function App(): JSX.Element {
                           humanAttention={session.humanAttention}
                           queuedMessages={visibleQueuedMessages}
                           timeline={session.timeline}
+                          displayPrefs={{
+                            fontSize: chatFontSize,
+                            contentWidth: chatContentWidth,
+                            sideSpace: chatSideSpace,
+                            lineHeight: chatLineHeight,
+                            mathScale: chatMathScale,
+                          }}
                           onQueuedReorder={(id, beforeId) => {
                             if (session.socket && activeSessionId !== null) reorderQueuedMessage(session.socket, activeSessionId, id, beforeId)
                           }}

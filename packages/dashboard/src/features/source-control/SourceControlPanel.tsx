@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { AlertCircle, Columns2, FileCode2, GitBranch, ListTree, Loader2, RefreshCw, Rows3 } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronRight, Columns2, FileCode2, Folder, GitBranch, List, ListTree, Loader2, RefreshCw, Rows3 } from 'lucide-react'
 import type { Socket } from 'socket.io-client'
 
 import type {
@@ -38,6 +38,18 @@ type GitGroup = {
   files: GitFileChange[]
 }
 
+type GitTreeNode =
+  | { kind: 'dir'; name: string; path: string; children: GitTreeNode[] }
+  | { kind: 'file'; name: string; file: GitFileChange }
+
+type GitTreeDraftNode =
+  | { kind: 'dir'; name: string; path: string; children: Map<string, GitTreeDraftNode> }
+  | { kind: 'file'; name: string; file: GitFileChange }
+
+type GitViewMode = 'tree' | 'list'
+
+const SOURCE_CONTROL_VIEW_MODE_PREFIX = 'ak-source-control-view-mode:'
+
 const GIT_STATUS_LABEL: Record<GitFileChange['status'], string> = {
   modified: 'M',
   added: 'A',
@@ -53,25 +65,45 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<{ file: GitFileChange; staged: boolean } | null>(null)
-  const [orderByPath, setOrderByPath] = useState(false)
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(() => new Set())
+  const [viewMode, setViewMode] = useState<GitViewMode>(() => readGitViewMode(sourceControlViewModeKey(sessionId, workspaceId)))
   const online = Boolean(socket && workspaceId)
+  const viewModeKey = sourceControlViewModeKey(sessionId, workspaceId)
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!socket || !workspaceId) return
     setLoading(true)
     const result = await requestGitStatus(socket, { workspaceId, sessionId: sessionId ?? undefined, cwd })
     setStatus(result)
+    setCollapsedDirs(new Set())
     setLoading(false)
   }, [cwd, sessionId, socket, workspaceId])
 
   useEffect(() => {
     setStatus(null)
     setSelected(null)
+    setCollapsedDirs(new Set())
+    setViewMode(readGitViewMode(viewModeKey))
     if (online) void refresh()
-  }, [online, refresh])
+  }, [online, refresh, viewModeKey])
 
-  const groups = useMemo(() => groupGitFiles(status?.files ?? [], orderByPath), [orderByPath, status])
+  const groups = useMemo(() => groupGitFiles(status?.files ?? []), [status])
   const fileCount = status?.files.length ?? 0
+  const toggleDir = useCallback((path: string) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+  const toggleViewMode = useCallback(() => {
+    setViewMode((current) => {
+      const next = current === 'tree' ? 'list' : 'tree'
+      writeGitViewMode(viewModeKey, next)
+      return next
+    })
+  }, [viewModeKey])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground" data-testid="source-control-panel">
@@ -84,15 +116,16 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
         <Button
           variant="ghost"
           size="icon"
-          className={cn('h-6 w-6 flex-none text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground', orderByPath ? 'bg-sidebar-accent text-sidebar-foreground' : '')}
+          className={cn('h-6 w-6 flex-none text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground', fileCount > 0 && 'bg-sidebar-accent/60')}
           disabled={fileCount === 0}
-          onClick={() => setOrderByPath((next) => !next)}
-          title={orderByPath ? 'Use git status order' : 'Order by path'}
-          aria-label={orderByPath ? 'Use git status order' : 'Order by path'}
-          aria-pressed={orderByPath}
-          data-testid="source-control-order-by-path"
+          onClick={toggleViewMode}
+          title={viewMode === 'tree' ? 'Show as list' : 'Show as tree'}
+          aria-label={viewMode === 'tree' ? 'Show as list' : 'Show as tree'}
+          aria-pressed={viewMode === 'tree'}
+          data-testid="source-control-view-mode-toggle"
+          data-view-mode={viewMode}
         >
-          <ListTree className="h-3.5 w-3.5" />
+          {viewMode === 'tree' ? <List className="h-3.5 w-3.5" /> : <ListTree className="h-3.5 w-3.5" />}
         </Button>
         <Button variant="ghost" size="icon" className="h-6 w-6 flex-none text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground" disabled={!online || loading} onClick={() => void refresh()} title="Refresh source control" aria-label="Refresh source control">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -114,9 +147,26 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
               <div key={group.id}>
                 <div className="px-1.5 py-1 text-[11px] font-medium uppercase tracking-normal text-sidebar-foreground/55">{group.label}</div>
                 <div className="space-y-0.5">
-                  {group.files.map((file) => (
-                    <GitFileRow key={`${group.id}:${file.path}:${file.oldPath ?? ''}`} file={file} onOpen={() => setSelected({ file, staged: group.id === 'staged' })} />
-                  ))}
+                  {viewMode === 'tree' ? (
+                    <GitFileTree
+                      nodes={buildGitTree(group.files)}
+                      collapsedDirs={collapsedDirs}
+                      groupId={group.id}
+                      depth={0}
+                      onToggleDir={toggleDir}
+                      onOpen={(file) => setSelected({ file, staged: group.id === 'staged' })}
+                    />
+                  ) : (
+                    group.files.map((file) => (
+                      <GitFileRow
+                        key={`${group.id}:list:${file.path}:${file.oldPath ?? ''}`}
+                        file={file}
+                        depth={0}
+                        label="path"
+                        onOpen={() => setSelected({ file, staged: group.id === 'staged' })}
+                      />
+                    ))
+                  )}
                 </div>
               </div>
             ))}
@@ -138,12 +188,79 @@ function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizeP
 
 export const SourceControlPanel = memo(SourceControlPanelImpl)
 
-function GitFileRow({ file, onOpen }: { file: GitFileChange; onOpen: () => void }): JSX.Element {
+function GitFileTree({
+  nodes,
+  collapsedDirs,
+  groupId,
+  depth,
+  onToggleDir,
+  onOpen,
+}: {
+  nodes: readonly GitTreeNode[]
+  collapsedDirs: ReadonlySet<string>
+  groupId: string
+  depth: number
+  onToggleDir: (path: string) => void
+  onOpen: (file: GitFileChange) => void
+}): JSX.Element {
   return (
-    <button type="button" className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left hover:bg-sidebar-accent" onClick={onOpen} data-testid="source-control-file">
+    <>
+      {nodes.map((node) => {
+        if (node.kind === 'dir') {
+          const collapsed = collapsedDirs.has(node.path)
+          return (
+            <div key={`${groupId}:dir:${node.path}`}>
+              <GitDirRow node={node} depth={depth} collapsed={collapsed} onToggle={() => onToggleDir(node.path)} />
+              {!collapsed ? (
+                <GitFileTree
+                  nodes={node.children}
+                  collapsedDirs={collapsedDirs}
+                  groupId={groupId}
+                  depth={depth + 1}
+                  onToggleDir={onToggleDir}
+                  onOpen={onOpen}
+                />
+              ) : null}
+            </div>
+          )
+        }
+        return <GitFileRow key={`${groupId}:file:${node.file.path}:${node.file.oldPath ?? ''}`} file={node.file} depth={depth} label="basename" onOpen={() => onOpen(node.file)} />
+      })}
+    </>
+  )
+}
+
+function GitDirRow({ node, depth, collapsed, onToggle }: { node: Extract<GitTreeNode, { kind: 'dir' }>; depth: number; collapsed: boolean; onToggle: () => void }): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-sidebar-foreground/80 hover:bg-sidebar-accent"
+      style={{ paddingLeft: `${0.375 + depth * 0.875}rem` }}
+      onClick={onToggle}
+      title={node.path}
+      aria-expanded={!collapsed}
+      data-testid="source-control-dir"
+    >
+      {collapsed ? <ChevronRight className="h-3.5 w-3.5 flex-none text-sidebar-foreground/50" /> : <ChevronDown className="h-3.5 w-3.5 flex-none text-sidebar-foreground/50" />}
+      <Folder className="h-3.5 w-3.5 flex-none text-sidebar-foreground/55" />
+      <span className="min-w-0 flex-1 truncate font-mono text-[0.95em]">{node.name}</span>
+    </button>
+  )
+}
+
+function GitFileRow({ file, depth, label, onOpen }: { file: GitFileChange; depth: number; label: 'basename' | 'path'; onOpen: () => void }): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left hover:bg-sidebar-accent"
+      style={{ paddingLeft: `${0.375 + depth * 0.875}rem` }}
+      onClick={onOpen}
+      title={file.oldPath ? `${file.oldPath} -> ${file.path}` : file.path}
+      data-testid="source-control-file"
+    >
       <span className={cn('flex h-4 w-4 flex-none items-center justify-center rounded text-[10px] font-semibold', statusBadgeClass(file.status))}>{GIT_STATUS_LABEL[file.status]}</span>
       <FileCode2 className="h-3.5 w-3.5 flex-none text-sidebar-foreground/55" />
-      <span className="min-w-0 flex-1 truncate font-mono text-[0.95em]">{file.path}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[0.95em]">{label === 'basename' ? basename(file.path) : file.path}</span>
     </button>
   )
 }
@@ -232,20 +349,80 @@ function GitDiffDialog({ open, onOpenChange, socket, workspaceId, sessionId, cwd
   )
 }
 
-function groupGitFiles(files: readonly GitFileChange[], orderByPath: boolean): GitGroup[] {
-  const order = (items: GitFileChange[]): GitFileChange[] => orderByPath
-    ? [...items].sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }))
-    : items
-  const conflicts = order(files.filter((file) => file.status === 'conflicted'))
-  const staged = order(files.filter((file) => file.staged && file.status !== 'conflicted'))
-  const untracked = order(files.filter((file) => file.status === 'untracked'))
-  const changes = order(files.filter((file) => file.unstaged && file.status !== 'untracked' && file.status !== 'conflicted'))
+function groupGitFiles(files: readonly GitFileChange[]): GitGroup[] {
+  const conflicts = files.filter((file) => file.status === 'conflicted')
+  const staged = files.filter((file) => file.staged && file.status !== 'conflicted')
+  const untracked = files.filter((file) => file.status === 'untracked')
+  const changes = files.filter((file) => file.unstaged && file.status !== 'untracked' && file.status !== 'conflicted')
   return [
     { id: 'staged', label: 'Staged Changes', files: staged },
     { id: 'changes', label: 'Changes', files: changes },
     { id: 'untracked', label: 'Untracked', files: untracked },
     { id: 'conflicts', label: 'Conflicts', files: conflicts },
   ].filter((group) => group.files.length > 0)
+}
+
+function buildGitTree(files: readonly GitFileChange[]): GitTreeNode[] {
+  const root = new Map<string, GitTreeDraftNode>()
+  for (const file of [...files].sort(compareGitPath)) {
+    const parts = file.path.split('/').filter(Boolean)
+    const fileName = parts.pop() ?? file.path
+    let current = root
+    let currentPath = ''
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part
+      let node = current.get(part)
+      if (!node || node.kind !== 'dir') {
+        node = { kind: 'dir', name: part, path: currentPath, children: new Map() }
+        current.set(part, node)
+      }
+      current = node.children
+    }
+    current.set(fileName, { kind: 'file', name: fileName, file })
+  }
+  return finalizeTreeNodes([...root.values()])
+}
+
+function finalizeTreeNodes(nodes: GitTreeDraftNode[]): GitTreeNode[] {
+  return nodes
+    .map((node): GitTreeNode => node.kind === 'dir'
+      ? { kind: 'dir', name: node.name, path: node.path, children: finalizeTreeNodes([...node.children.values()]) }
+      : node)
+    .sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    })
+}
+
+function compareGitPath(a: GitFileChange, b: GitFileChange): number {
+  return a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+function basename(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? path
+}
+
+function sourceControlViewModeKey(sessionId: string | null | undefined, workspaceId: string | undefined): string {
+  if (sessionId) return `${SOURCE_CONTROL_VIEW_MODE_PREFIX}session:${sessionId}`
+  if (workspaceId) return `${SOURCE_CONTROL_VIEW_MODE_PREFIX}workspace:${workspaceId}`
+  return `${SOURCE_CONTROL_VIEW_MODE_PREFIX}global`
+}
+
+function readGitViewMode(key: string): GitViewMode {
+  try {
+    const stored = localStorage.getItem(key)
+    return stored === 'list' ? 'list' : 'tree'
+  } catch {
+    return 'tree'
+  }
+}
+
+function writeGitViewMode(key: string, mode: GitViewMode): void {
+  try {
+    localStorage.setItem(key, mode)
+  } catch {
+    // Ignore storage failures; the view toggle still works for this render.
+  }
 }
 
 function statusBadgeClass(status: GitFileChange['status']): string {

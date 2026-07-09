@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Activity, ChevronDown, ChevronUp } from 'lucide-react'
 import type { HumanAttentionLevel, HumanAttentionTimeline } from '@agent-kernel/shared'
 
 import { cn } from '../../lib/utils.js'
-import { BannerSlot } from './BannerStack.js'
 
 type Props = {
   timeline: HumanAttentionTimeline
@@ -152,61 +151,9 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
   )
 }
 
-export function HumanAttentionLowBanner({ timeline }: { timeline: HumanAttentionTimeline }): JSX.Element | null {
+export function shouldShowLowAttentionHint(timeline: HumanAttentionTimeline): boolean {
   const latest = timeline.latest
-  const shouldShow = latest?.level === 'absent' && shouldShowLowAttentionBanner(timeline)
-  // Signature must be stable while the underlying situation is unchanged, so
-  // dismissing the banner while the agent keeps producing messages doesn't
-  // re-open it on the next cursor tick. We only re-emerge when the *reason
-  // set* meaningfully changes: a new reason kind appears, or riskExposure
-  // crosses into a coarser bucket. Message cursor is intentionally excluded.
-  const signature = useMemo(() => {
-    if (!latest) return ''
-    const bucket =
-      latest.dimensions.riskExposure >= 80
-        ? 'severe'
-        : latest.dimensions.riskExposure >= 60
-          ? 'high'
-          : latest.dimensions.riskExposure >= 35
-            ? 'mid'
-            : 'low'
-    const reasonKinds = Array.from(new Set(latest.reasons.map((r) => r.kind))).sort().join(',')
-    return `${bucket}:${reasonKinds}`
-  }, [latest])
-  const [dismissedSignature, setDismissedSignature] = useState<string | null>(null)
-  useEffect(() => {
-    if (!shouldShow) setDismissedSignature(null)
-  }, [shouldShow])
-  if (!shouldShow) return null
-  if (dismissedSignature === signature) return null
-  return (
-    <BannerSlot>
-      <div
-        className="flex min-w-0 items-center gap-2 border-t border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
-        data-testid="human-attention-low-banner"
-        role="status"
-      >
-        <AlertTriangle className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-        <span className="flex-none font-medium">Attention is low.</span>
-        <span className="min-w-0 flex-1 truncate text-rose-700/80 dark:text-rose-200/75">Review recent changes before broad instructions.</span>
-        <button
-          type="button"
-          onClick={() => setDismissedSignature(signature)}
-          aria-label="Dismiss attention warning"
-          title="Dismiss"
-          data-testid="human-attention-low-banner-dismiss"
-          className="ml-auto flex-none rounded p-0.5 text-rose-600/80 transition-colors hover:bg-rose-100 hover:text-rose-800 dark:text-rose-300/80 dark:hover:bg-rose-900/60 dark:hover:text-rose-100"
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </div>
-    </BannerSlot>
-  )
-}
-
-function shouldShowLowAttentionBanner(timeline: HumanAttentionTimeline): boolean {
-  const latest = timeline.latest
-  if (!latest) return false
+  if (latest?.level !== 'absent') return false
   if (latest.dimensions.riskExposure >= 35) return true
   if (latest.reasons.some((reason) => reason.kind === 'high_agent_activity' || reason.kind === 'high_risk_action' || reason.kind === 'stale_review')) return true
   const recentPoints = timeline.points.slice(-6)
