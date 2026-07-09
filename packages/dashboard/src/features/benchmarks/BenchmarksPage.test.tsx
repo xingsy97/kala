@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import '../../i18n/index.js'
+import { i18n } from '../../i18n/index.js'
 import { BenchmarksPage } from './BenchmarksPage.js'
 
 const runsResponse = {
@@ -57,6 +58,7 @@ describe('BenchmarksPage', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    void i18n.changeLanguage('en')
   })
 
   it('loads runs and renders three columns', async () => {
@@ -110,5 +112,20 @@ describe('BenchmarksPage', () => {
     expect(html).not.toMatch(/\/home\//)
     expect(html).not.toMatch(/\/tmp\//)
     expect(html).not.toMatch(/\.jsonl/)
+  })
+
+  it('renders benchmark-facing UI in Chinese when selected', async () => {
+    await i18n.changeLanguage('zh')
+    render(<BenchmarksPage />)
+    await waitFor(() => expect(screen.getByTestId('benchmarks-page-title').textContent).toContain('评测'))
+    expect(screen.getByTestId('benchmarks-launcher').textContent).toContain('启动新的 benchmark')
+
+    fireEvent.click(screen.getByTestId('benchmarks-launcher-swebench'))
+    await waitFor(() => expect(screen.getByTestId('run-benchmark-wizard-modal')).toBeTruthy())
+    expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行 benchmark 向导')
+    expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行 Benchmark（引导式）')
+
+    await waitFor(() => expect(screen.getByTestId('eval-inline-panel')).toBeTruthy())
+    expect(screen.getByTestId('eval-inline-panel').textContent).toContain('评测产物操作')
   })
 })

@@ -280,10 +280,21 @@ export type ClientFork = {
  */
 export type ClientCreateSession = {
   sessionId: string
-  workspaceId: string
+  /**
+   * Bind the session to a workspace. Optional — when omitted, the session
+   * is unbound and any online executor may run its tools (legacy fallback).
+   * Simple-chat sessions (no fs/shell tools, temp cwd) omit this.
+   */
+  workspaceId?: string
   workspaceName?: string
-  /** Initial tool cwd for the session. Validated against the workspace sandbox. */
+  /** Initial tool cwd for the session. When workspaceId is set, validated against the workspace sandbox. */
   cwd?: string
+  /**
+   * Optional allowlist of tool names. When set, the host derives the
+   * session's tool set by filtering `defaultConfig.tools` to only these
+   * names. Undefined = use `defaultConfig.tools` unchanged.
+   */
+  tools?: readonly string[]
 }
 
 export type ClientListDirs = {
@@ -407,13 +418,6 @@ export type ExecutorAnnounce = {
   startedAt?: string
 }
 
-export type ExecutorToolResult = {
-  sessionId: string
-  callId: string
-  ok: boolean
-  content: string
-}
-
 export type DirListEntry = {
   name: string
   path: string
@@ -529,14 +533,15 @@ export type CopyOverflowSessionResult = {
  * dashboard operator directly observes and controls them without going
  * through the LLM. See docs/host/background-shell-design.md.
  *
- * Routed by `workspaceId`, not `sessionId`: a background task lives in the
- * executor, and multiple sessions on the same workspace can watch the same
- * task.
+ * Routed by `workspaceId` and owned by `sessionId`: a background task lives
+ * in the executor, but only the session that spawned it can list, read, or
+ * kill it by default.
  */
 export type BackgroundTaskStatus = 'running' | 'exited' | 'killed' | 'signaled'
 
 export type BackgroundTaskSummary = {
   taskId: string
+  sessionId: string
   command: string
   cwd: string
   /** Child process id while known. Optional for old executors / replayed data. */
@@ -558,11 +563,13 @@ export type BackgroundTaskSummary = {
 export type ClientListBgTasks = {
   requestId: string
   workspaceId: string
+  sessionId: string
 }
 
 export type BgListResult = {
   requestId: string
   workspaceId: string
+  sessionId: string
   tasks: readonly BackgroundTaskSummary[]
   error?: string
 }
@@ -570,6 +577,7 @@ export type BgListResult = {
 export type ClientReadBgOutput = {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   /** Byte offset into `bytesLogged`. Missing → return the whole current buffer. */
   offset?: number
@@ -580,6 +588,7 @@ export type ClientReadBgOutput = {
 export type BgOutputResult = {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   content: string
   /** Offset the client should pass next time to continue tailing. */
@@ -594,12 +603,14 @@ export type BgOutputResult = {
 export type ClientKillBgTask = {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
 }
 
 export type BgKillResult = {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   /** False iff the task was already exited/killed at the time of the request. */
   killed: boolean
@@ -614,6 +625,7 @@ export type BgKillResult = {
  */
 export type ServerBgTaskUpdated = {
   workspaceId: string
+  sessionId: string
   task: BackgroundTaskSummary
   delta?: {
     /** Offset within `task.bytesLogged` where this delta begins. */
@@ -624,6 +636,7 @@ export type ServerBgTaskUpdated = {
 
 export type ServerBgTaskEvicted = {
   workspaceId: string
+  sessionId: string
   taskId: string
 }
 
@@ -925,6 +938,18 @@ export type SettingsHookSummary = {
   match?: string
 }
 
+export type SettingsSkillDiagnostic = {
+  level: 'warning'
+  path: string
+  message: string
+}
+
+export type SettingsSkillSummary = {
+  count: number
+  roots: readonly string[]
+  diagnostics: readonly SettingsSkillDiagnostic[]
+}
+
 export type ServerSettingsPayload = {
   providers: readonly SettingsProviderSummary[]
   defaultModel: string
@@ -952,6 +977,11 @@ export type ServerSettingsPayload = {
   mcp: {
     supported: false
     note: string
+  }
+  skills?: SettingsSkillSummary
+  release?: {
+    bootstrapBaseUrl: string
+    source: 'local' | 'github'
   }
 }
 
@@ -1079,7 +1109,6 @@ export type QueuedMessagePreview = {
 
 export type ExecutorClientToServerEvents = {
   'executor:announce': (payload: ExecutorAnnounce) => void
-  'executor:tool_result': (payload: ExecutorToolResult) => void
   'executor:tool_progress': (payload: ToolProgressPayload) => void
   'executor:bg_task_updated': (payload: ServerBgTaskUpdated) => void
   'executor:bg_task_evicted': (payload: ServerBgTaskEvicted) => void

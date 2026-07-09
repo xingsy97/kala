@@ -25,6 +25,9 @@ for (const asset of manifest.assets) {
     }
     accessSync(path, constants.X_OK)
   }
+  if (isNativeAsset(asset)) {
+    accessSync(path, constants.X_OK)
+  }
   if (asset.endsWith('.sh')) {
     const text = readFileSync(path, 'utf8')
     if (!text.startsWith('#!/usr/bin/env bash\n')) {
@@ -33,6 +36,12 @@ for (const asset of manifest.assets) {
     accessSync(path, constants.X_OK)
     if (asset !== 'run.sh') fail(`unexpected shell bootstrap ${asset}; use run.sh only`)
     if (text.includes('curl')) fail(`${asset} must be wget-only and must not mention curl`)
+    if (!text.includes('AGENT_KERNEL_RUNTIME:-auto')) {
+      fail(`${asset} must support AGENT_KERNEL_RUNTIME=auto|cjs|native`)
+    }
+    if (!text.includes('[ "$runtime" = "auto" ] && has_node22')) {
+      fail(`${asset} must prefer compact .cjs assets when Node.js 22+ is available`)
+    }
     const syntax = spawnSync('bash', ['-n', path], { stdio: 'inherit' })
     if (syntax.status !== 0) fail(`${asset} failed bash syntax check`)
   }
@@ -78,7 +87,30 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   }
 }
 
+const nativeExecutor = manifest.assets.find((asset) => asset === nativeAssetName('agent-kernel-executor'))
+if (nativeExecutor) {
+  const executor = spawnSync(`./${nativeExecutor}`, [], {
+    cwd: releaseDir,
+    encoding: 'utf8',
+  })
+  if (executor.status !== 1) fail('native executor usage smoke test should exit 1')
+  const output = `${executor.stdout}\n${executor.stderr}`
+  if (!output.includes('agent-kernel-executor --host')) {
+    fail('native executor usage smoke test did not print usage')
+  }
+}
+
 console.log('release assets verified')
+
+function isNativeAsset(asset) {
+  return /^agent-kernel-(host|executor)-(linux|darwin|win32)-(x64|arm64)(\.exe)?$/.test(asset)
+}
+
+function nativeAssetName(base) {
+  const os = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : process.platform === 'linux' ? 'linux' : process.platform
+  const arch = process.arch === 'x64' ? 'x64' : process.arch === 'arm64' ? 'arm64' : process.arch
+  return `${base}-${os}-${arch}${os === 'win32' ? '.exe' : ''}`
+}
 
 function fail(message) {
   console.error(`FAIL ${message}`)

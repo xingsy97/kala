@@ -412,6 +412,7 @@ const _BackgroundTaskSummaryFromExec = ServerBgTaskUpdatedSchema.shape.task
 export const BgListResultSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string(),
   tasks: z.array(_BackgroundTaskSummaryFromExec),
   error: z.string().optional(),
 }) satisfies z.ZodType<BgListResult>
@@ -419,6 +420,7 @@ export const BgListResultSchema = z.object({
 export const BgOutputResultSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string(),
   taskId: z.string(),
   content: z.string(),
   nextOffset: z.number().int().nonnegative(),
@@ -431,6 +433,7 @@ export const BgOutputResultSchema = z.object({
 export const BgKillResultSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string(),
   taskId: z.string(),
   killed: z.boolean(),
   error: z.string().optional(),
@@ -522,6 +525,18 @@ export const SettingsHookSummarySchema = z.object({
   match: z.string().optional(),
 }) satisfies z.ZodType<SettingsHookSummary>
 
+const SettingsSkillDiagnosticSchema = z.object({
+  level: z.literal('warning'),
+  path: z.string(),
+  message: z.string(),
+})
+
+const SettingsSkillSummarySchema = z.object({
+  count: z.number().int().nonnegative(),
+  roots: z.array(z.string()),
+  diagnostics: z.array(SettingsSkillDiagnosticSchema),
+})
+
 export const ServerSettingsPayloadSchema = z.object({
   providers: z.array(SettingsProviderSummarySchema),
   defaultModel: z.string(),
@@ -552,6 +567,13 @@ export const ServerSettingsPayloadSchema = z.object({
     supported: z.literal(false),
     note: z.string(),
   }),
+  skills: SettingsSkillSummarySchema.optional(),
+  release: z
+    .object({
+      bootstrapBaseUrl: z.string(),
+      source: z.enum(['local', 'github']),
+    })
+    .optional(),
 }) satisfies z.ZodType<ServerSettingsPayload>
 
 // ============================================================================

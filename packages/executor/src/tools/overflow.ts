@@ -2,8 +2,8 @@
  * Tool-output overflow: cap in-history bytes, spill full content to disk.
  *
  * The kernel/executor loop wraps every tool run in `runOne`. That wrapper
- * calls `maybeOverflow` between the tool's completion and the
- * `executor:tool_result` emit. If the tool produced more than `inlineBytes`
+ * calls `maybeOverflow` between the tool's completion and the tool-result
+ * ack. If the tool produced more than `inlineBytes`
  * of output, the full text is written to
  * `<overflowDir>/<sessionId>/<callId>.txt` and the on-wire content is
  * replaced with a head+tail preview plus a truncation marker naming the spill

@@ -14,7 +14,7 @@ export type CompactBoundary = {
 }
 
 export type TranscriptItem =
-  | { kind: 'message'; message: Message; seq?: number }
+  | { kind: 'message'; message: Message; seq?: number; ts?: string }
   | {
       kind: 'pending_user_message'
       id: string
@@ -117,6 +117,7 @@ export function visibleTranscript(
       out.push({
         kind: 'message',
         seq: entry.seq,
+        ts: entry.ts,
         message: {
           role: 'user',
           content: event.content
@@ -125,11 +126,12 @@ export function visibleTranscript(
         },
       })
     } else if (event.kind === 'llm_response') {
-      out.push({ kind: 'message', seq: entry.seq, message: event.message })
+      out.push({ kind: 'message', seq: entry.seq, ts: entry.ts, message: event.message })
     } else if (event.kind === 'tool_result') {
       out.push({
         kind: 'message',
         seq: entry.seq,
+        ts: entry.ts,
         message: {
           role: 'tool',
           content: [

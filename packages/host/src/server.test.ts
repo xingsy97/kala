@@ -184,6 +184,9 @@ describe('wire protocol', () => {
       defaultConfig: config,
       httpServer: http,
       toolTimeoutMs: 2000,
+      // Keep instant-detach semantics for tests; the grace window is
+      // covered by targeted tests in connection/executor.test.ts.
+      detachGraceMs: 0,
     })
     url = `http://localhost:${server.port}`
   })
@@ -207,6 +210,59 @@ describe('wire protocol', () => {
     })
     expect(err.message).toBe('role_mismatch')
     bad.close()
+  })
+
+  it('reports a clear error when the requested port is already in use', async () => {
+    const occupied = createServer()
+    await new Promise<void>((resolve) => occupied.listen(0, resolve))
+    const port = (occupied.address() as AddressInfo).port
+    const sessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-port-'))
+
+    try {
+      await expect(startHostServer({
+        port,
+        sessionsDir,
+        llm: scriptedLlm(),
+        defaultConfig: config,
+        toolTimeoutMs: 2000,
+      })).rejects.toThrow(`Port ${port} is already in use`)
+    } finally {
+      await new Promise<void>((resolve) => occupied.close(() => resolve()))
+      rmSync(sessionsDir, { recursive: true, force: true })
+    }
+  })
+
+  it('serves local release assets without SPA fallback', async () => {
+    const releaseDir = mkdtempSync(join(tmpdir(), 'agent-kernel-release-assets-'))
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-release-sessions-'))
+    await writeFile(join(releaseDir, 'run.sh'), '#!/usr/bin/env bash\necho local\n', 'utf8')
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      releaseAssetsDir: releaseDir,
+      settings: {
+        providers: [],
+        defaultModel: '',
+        hooks: [],
+        paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+        mcp: { supported: false, note: '' },
+        release: { bootstrapBaseUrl: 'http://localhost:0/release-assets', source: 'local' },
+      },
+    })
+
+    try {
+      const ok = await fetch(`http://localhost:${localServer.port}/release-assets/run.sh`)
+      expect(ok.status).toBe(200)
+      expect(await ok.text()).toContain('echo local')
+      const missing = await fetch(`http://localhost:${localServer.port}/release-assets/missing.sh`)
+      expect(missing.status).toBe(404)
+    } finally {
+      await localServer.close()
+      rmSync(releaseDir, { recursive: true, force: true })
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
   })
 
   it('handshake auth rejects mismatched protocol major', async () => {
@@ -1998,6 +2054,45 @@ describe('wire protocol', () => {
 
     dashboard.close()
     executor.close()
+  })
+
+  it('client:create_session with tools allowlist filters defaultConfig.tools and skips workspace cwd validation when workspaceId is omitted', async () => {
+    const sessionId = 'wire-simple-chat'
+    const cwd = resolve(dir, 'simple-chat-tmp')
+    await mkdir(cwd, { recursive: true })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const ready = new Promise<SessionReadyEvent>((resolve) => {
+      dashboard.off('session:ready')
+      dashboard.on('session:ready', resolve)
+    })
+    // Emit with no workspaceId and an allowlist that excludes 'write'
+    // (the only tool the default config exposes in this test setup).
+    dashboard.emit('client:create_session', {
+      sessionId,
+      cwd,
+      tools: ['agent'],
+    })
+    await ready
+
+    const rec = server.store.get(sessionId)
+    expect(rec).toBeDefined()
+    expect(rec?.workspaceId).toBeUndefined()
+    expect(rec?.state.cwd).toBe(cwd)
+    expect(rec?.config.tools.map((t) => t.name)).toEqual([])
+
+    dashboard.close()
   })
 
   it('client:create_session backfills workspace and cwd on an existing unbound session', async () => {

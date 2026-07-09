@@ -80,6 +80,7 @@ import type { AuthConfig } from '../auth-control.js'
 import { authenticateDashboardHandshake } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
 import { parseWire, type WireValidationContext } from '../wire-validation.js'
+import { isSkillManager } from '../extensions/skills.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -179,6 +180,13 @@ export function configureDashboardNamespace(
       }
       return parseWire(s, raw, ctx)
     }
+    const validateBgSessionAccess = async (targetSessionId: string, workspaceId: string): Promise<string | undefined> => {
+      if (targetSessionId !== sessionId) return 'background tasks are scoped to the connected session'
+      const record = deps.store.get(targetSessionId) ?? (await deps.store.load(targetSessionId).catch(() => undefined))
+      if (!record) return 'unknown session'
+      if (record.workspaceId !== workspaceId) return 'session does not belong to workspace'
+      return undefined
+    }
 
     // Register first-paint request handlers before any awaited session load.
     // The dashboard emits these immediately after the websocket connects or
@@ -255,6 +263,7 @@ export function configureDashboardNamespace(
         record = undefined
       }
     }
+    if (record) await refreshSessionSkillsIfNeeded(deps, record)
     await socket.join(`session:${sessionId}`)
     const ready: SessionReadyEvent = record
       ? readyEventFor(record, deps.selectedModels.get(sessionId))
@@ -278,6 +287,7 @@ export function configureDashboardNamespace(
           target = undefined
         }
       }
+      if (target) await refreshSessionSkillsIfNeeded(deps, target)
       await socket.join(`session:${sessionId}`)
       const payload: SessionReadyEvent = target
         ? readyEventFor(target, deps.selectedModels.get(sessionId))
@@ -538,21 +548,26 @@ export function configureDashboardNamespace(
       socket.emit('server:overflow_contents', result)
     })
     socket.on('bg:list', async (raw: ClientListBgTasks, ack) => {
-      const p = vparse(schema.ClientListBgTasksSchema, raw, 'bg:list')
+      const p = vparse(schema.ClientListBgTasksSchema, raw, 'bg:list', (raw as ClientListBgTasks | undefined)?.sessionId)
       if (!p) return
-      await socket.join(`workspace:${p.workspaceId}`)
+      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, tasks: [], error })
       const result = await deps.executors.listBg(p)
       ack(result)
     })
     socket.on('bg:output', async (raw: ClientReadBgOutput, ack) => {
-      const p = vparse(schema.ClientReadBgOutputSchema, raw, 'bg:output')
+      const p = vparse(schema.ClientReadBgOutputSchema, raw, 'bg:output', (raw as ClientReadBgOutput | undefined)?.sessionId)
       if (!p) return
+      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, taskId: p.taskId, content: '', nextOffset: 0, done: true, status: 'exited', bytesTruncated: 0, error })
       const result = await deps.executors.readBg(p)
       ack(result)
     })
     socket.on('bg:kill', async (raw: ClientKillBgTask, ack) => {
-      const p = vparse(schema.ClientKillBgTaskSchema, raw, 'bg:kill')
+      const p = vparse(schema.ClientKillBgTaskSchema, raw, 'bg:kill', (raw as ClientKillBgTask | undefined)?.sessionId)
       if (!p) return
+      const error = await validateBgSessionAccess(p.sessionId, p.workspaceId)
+      if (error) return ack({ requestId: p.requestId, workspaceId: p.workspaceId, sessionId: p.sessionId, taskId: p.taskId, killed: false, error })
       const result = await deps.executors.killBg(p)
       ack(result)
     })
@@ -617,7 +632,7 @@ export function configureDashboardNamespace(
       let p: ClientCreateSession = parsed
       try {
         const cwd = p.cwd?.trim()
-        if (cwd && cwd.length > 0) {
+        if (cwd && cwd.length > 0 && p.workspaceId) {
           const validation = await validateWorkspaceCwd(deps, p.workspaceId, cwd)
           if (!validation.ok) {
             deps.audit?.log({ action: 'dashboard.session_create', actor: auditActor(socket), target: { sessionId: p.sessionId, workspaceId: p.workspaceId }, outcome: 'denied', metadata: { cwd }, error: validation.reason })
@@ -632,13 +647,14 @@ export function configureDashboardNamespace(
         }
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
-          defaultConfig: deps.defaultConfig,
-          workspaceId: p.workspaceId,
+          defaultConfig: deriveSessionConfig(deps.defaultConfig, p.tools),
+          ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }
             : {}),
           ...(p.cwd !== undefined ? { initialCwd: p.cwd } : {}),
         })
+        await refreshSessionSkillsIfNeeded(deps, record)
         await socket.join(`session:${record.sessionId}`)
         socket.emit(
           'session:ready',
@@ -696,6 +712,7 @@ export function configureDashboardNamespace(
             ? { workspaceName: source.workspaceName }
             : {}),
         })
+        await refreshSessionSkillsIfNeeded(deps, record)
         const parentModel = deps.selectedModels.get(p.sourceSessionId)
         if (parentModel) deps.selectedModels.set(record.sessionId, parentModel)
         if (source.workspaceId) {
@@ -785,6 +802,23 @@ export function configureDashboardNamespace(
 
 function executorSnapshotFor(deps: DashboardDeps): readonly AttachedExecutor[] {
   return deps.executorSnapshot ? deps.executorSnapshot() : deps.executors.snapshot()
+}
+
+function deriveSessionConfig(
+  base: AgentConfig,
+  toolAllowlist: readonly string[] | undefined,
+): AgentConfig {
+  if (!toolAllowlist) return base
+  const allowed = new Set(toolAllowlist)
+  return { ...base, tools: base.tools.filter((t) => allowed.has(t.name)) }
+}
+
+async function refreshSessionSkillsIfNeeded(
+  deps: DashboardDeps,
+  record: SessionRecord,
+): Promise<void> {
+  if (!isSkillManager(deps.loopDeps.skills)) return
+  await deps.loopDeps.skills.refreshConfig(record)
 }
 
 function auditActor(socket: { data: Record<string, unknown> }): AuditActor {

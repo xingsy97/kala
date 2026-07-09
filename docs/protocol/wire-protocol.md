@@ -763,8 +763,21 @@ ids under existing providers.
   }
   hooks: Array<{ event: string; command: string; match?: string }>
   mcp: { supported: false; note: string }
+  release?: {
+    bootstrapBaseUrl: string
+    source: 'local' | 'github'
+  }
 }
 ```
+
+`release.bootstrapBaseUrl` is the asset base used by the dashboard's Connect
+Workspace command. When `source` is `github`, the value is already an absolute
+GitHub Release download URL and clients should use it as-is. When `source` is
+`local`, the host serves direct release filenames under `/release-assets/*` from
+its local `release/` directory; browser clients should resolve that path against
+the current dashboard origin so a dashboard opened through a LAN IP or DNS name
+does not generate commands that point remote executors at their own
+`localhost`.
 
 #### HTTP `POST /settings/models`
 
@@ -834,7 +847,7 @@ fresh invite.
 
 Runs alongside the three built-in tools (`bash{run_in_background}`, `bash_output`, `kill_shell`). The tools remain the way the *agent* starts, reads, and kills background tasks; the RPCs here are how the *dashboard operator* observes and controls the same tasks without prompting the agent. See `docs/host/background-shell-design.md`.
 
-Routed by `workspaceId`, not `sessionId`. A background task lives in the executor's registry; several sessions on the same workspace can watch the same task.
+Routed by `workspaceId` and owned by `sessionId`. A background task lives in the executor's registry, but only the session that spawned it can list, read, or kill it by default. Sibling sessions in the same workspace do not receive task pushes and cannot access the task through `bg:*` RPCs.
 
 Shared type:
 
@@ -843,6 +856,7 @@ type BackgroundTaskStatus = 'running' | 'exited' | 'killed' | 'signaled'
 
 type BackgroundTaskSummary = {
   taskId: string
+  sessionId: string
   command: string
   cwd: string
   startedAt: string            // ISO
@@ -859,17 +873,18 @@ type BackgroundTaskSummary = {
 
 ```ts
 // Request
-{ requestId: string; workspaceId: string }
+{ requestId: string; workspaceId: string; sessionId: string }
 // Ack
 {
   requestId: string
   workspaceId: string
+  sessionId: string
   tasks: BackgroundTaskSummary[]
   error?: string             // e.g. 'no executor attached'
 }
 ```
 
-Returns every task in the executor's registry (including tasks that already exited but haven't been evicted yet — see `docs/host/background-shell-design.md` §4.1 for the 15-minute grace window).
+Returns every task owned by `sessionId` in the executor's registry (including tasks that already exited but haven't been evicted yet — see `docs/host/background-shell-design.md` §4.1 for the 15-minute grace window).
 
 #### `bg:output` (Dashboard → Host → Executor, ack)
 
@@ -878,6 +893,7 @@ Returns every task in the executor's registry (including tasks that already exit
 {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   offset?: number            // byte offset into bytesLogged; missing → whole current buffer
   maxBytes?: number          // cap on returned slice (default 64 KiB, hard cap 1 MiB)
@@ -886,6 +902,7 @@ Returns every task in the executor's registry (including tasks that already exit
 {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   content: string
   nextOffset: number         // pass back on the next poll to continue tailing
@@ -898,15 +915,18 @@ Returns every task in the executor's registry (including tasks that already exit
 
 Reads a slice of the log without blocking. If `offset` is behind the ring-buffer window (task produced more than 4 MiB since that offset), executor returns the current buffer contents and the caller detects the gap via `bytesTruncated`. Dashboard polls this at ~1.5 s for the *selected* task; push events short-circuit the poll for other visible tasks.
 
+The executor rejects `taskId` values not owned by `sessionId` with `error: 'unknown task'` so task existence is not leaked across sessions.
+
 #### `bg:kill` (Dashboard → Host → Executor, ack)
 
 ```ts
 // Request
-{ requestId: string; workspaceId: string; taskId: string }
+{ requestId: string; workspaceId: string; sessionId: string; taskId: string }
 // Ack
 {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   killed: boolean            // false iff the task was already exited/killed
   error?: string
@@ -917,11 +937,12 @@ Sends SIGTERM to the child. The subsequent `close` triggers a `bg:task_updated` 
 
 #### `server:bg_task_updated` (Host → Dashboard, push)
 
-Fan-out from the executor's registry event stream. Emitted on spawn, on task end, and every ~400 ms during a burst of output (throttled at the executor). Room-scoped: only dashboards subscribed to the task's workspace receive it.
+Fan-out from the executor's registry event stream. Emitted on spawn, on task end, and every ~400 ms during a burst of output (throttled at the executor). Room-scoped: only dashboards subscribed to the task's owning session receive it.
 
 ```ts
 {
   workspaceId: string
+  sessionId: string
   task: BackgroundTaskSummary
   delta?: {                  // present when new output caused this update
     fromOffset: number       // offset within task.bytesLogged where the delta begins
@@ -935,7 +956,7 @@ The dashboard's live-tail reducer appends `delta.content` at `delta.fromOffset` 
 #### `server:bg_task_evicted` (Host → Dashboard, push)
 
 ```ts
-{ workspaceId: string; taskId: string }
+{ workspaceId: string; sessionId: string; taskId: string }
 ```
 
 Sent 15 min after a task's `endedAt`. Dashboard drops the task from its map. Late `bg:output` reads for an evicted taskId return `error: 'unknown task'`.
@@ -1190,24 +1211,25 @@ Alternative to Socket.IO ACK. Useful when a tool completes long after the initia
 
 #### `executor:bg_task_updated`
 
-Emitted from the executor's `subscribeBackgroundTasks` callback whenever a background task spawns, produces new output (throttled to ~400 ms), or ends. Host rebroadcasts to every dashboard in the executor's workspace room as `server:bg_task_updated` (§4.3).
+Emitted from the executor's `subscribeBackgroundTasks` callback whenever a background task spawns, produces new output (throttled to ~400 ms), or ends. Host rebroadcasts to the owning session room as `server:bg_task_updated` (§4.3).
 
 ```ts
 {
   workspaceId: string
+  sessionId: string
   task: BackgroundTaskSummary
   delta?: { fromOffset: number; content: string }
 }
 ```
 
-Payload is identical to `server:bg_task_updated` — Host relays it verbatim after filling in `workspaceId` from the executor's registration if the executor did not.
+Payload is identical to `server:bg_task_updated` — Host relays it verbatim after validating the task's `workspaceId` matches the executor registration.
 
 #### `executor:bg_task_evicted`
 
 Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_task_evicted` (§4.3).
 
 ```ts
-{ workspaceId: string; taskId: string }
+{ workspaceId: string; sessionId: string; taskId: string }
 ```
 
 ---
@@ -1250,8 +1272,8 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Executor | `executor:announce` | Host (routing) |
 | Executor | ACK to `tool:call` | Host (kernel) |
 | Executor | `executor:tool_result` | Host (kernel) |
-| Executor | `executor:bg_task_updated` | Host → Dashboard (workspace room) |
-| Executor | `executor:bg_task_evicted` | Host → Dashboard (workspace room) |
+| Executor | `executor:bg_task_updated` | Host → Dashboard (session room) |
+| Executor | `executor:bg_task_evicted` | Host → Dashboard (session room) |
 | Host | `session:ready` | Dashboard OR Executor |
 | Host | `session:token_delta` | Dashboard only |
 | Host | `session:model_changed` | Dashboard only |
@@ -1269,8 +1291,8 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Host | `server:file_list` | Dashboard only (response) |
 | Host | `server:file_contents` | Dashboard only (response) |
 | Host | `server:overflow_contents` | Dashboard only (response) |
-| Host | `server:bg_task_updated` | Dashboard only (workspace room broadcast) |
-| Host | `server:bg_task_evicted` | Dashboard only (workspace room broadcast) |
+| Host | `server:bg_task_updated` | Dashboard only (session room broadcast) |
+| Host | `server:bg_task_evicted` | Dashboard only (session room broadcast) |
 | Host | `server:sub_agent_started` | Dashboard only (parent session room) |
 | Host | `server:sub_agent_finished` | Dashboard only (parent session room) |
 | Host | `tool:call` | Executor only |

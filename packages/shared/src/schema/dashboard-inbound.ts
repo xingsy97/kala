@@ -124,9 +124,10 @@ export const ClientForkSchema = z.object({
 
 export const ClientCreateSessionSchema = z.object({
   sessionId: z.string(),
-  workspaceId: z.string(),
+  workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
   cwd: z.string().optional(),
+  tools: z.array(z.string()).readonly().optional(),
 }) satisfies z.ZodType<ClientCreateSession>
 
 export const ClientSubscribeSchema = z.object({
@@ -256,11 +257,13 @@ export const CopyOverflowSessionSchema = z.object({
 export const ClientListBgTasksSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string(),
 }) satisfies z.ZodType<ClientListBgTasks>
 
 export const ClientReadBgOutputSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string(),
   taskId: z.string(),
   offset: z.number().int().nonnegative().optional(),
   maxBytes: z.number().int().positive().optional(),
@@ -269,6 +272,7 @@ export const ClientReadBgOutputSchema = z.object({
 export const ClientKillBgTaskSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string(),
   taskId: z.string(),
 }) satisfies z.ZodType<ClientKillBgTask>
 

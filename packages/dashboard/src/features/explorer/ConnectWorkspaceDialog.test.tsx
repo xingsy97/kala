@@ -5,13 +5,33 @@ import { ConnectWorkspaceDialog } from './ConnectWorkspaceDialog.js'
 
 describe('ConnectWorkspaceDialog', () => {
   beforeEach(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { protocol: 'http:', hostname: 'localhost', port: '3000' },
+    })
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
     })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ inviteToken: 'ak_invite_test', expiresAt: '2026-07-11T00:10:00.000Z' }),
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/settings') {
+        return {
+          ok: true,
+          json: async () => ({
+            providers: [],
+            defaultModel: '',
+            hooks: [],
+            paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+            mcp: { supported: false, note: '' },
+            release: { bootstrapBaseUrl: 'http://localhost:3000/release-assets', source: 'local' },
+          }),
+        } as Response
+      }
+      return {
+        ok: true,
+        json: async () => ({ inviteToken: 'ak_invite_test', expiresAt: '2026-07-11T00:10:00.000Z' }),
+      } as Response
     }))
   })
 
@@ -24,13 +44,30 @@ describe('ConnectWorkspaceDialog', () => {
     expect(text).toContain('run.sh')
     expect(text).toContain('HOST_URL=')
     expect(text).toContain('COMPONENT=executor')
+    expect(text).toContain('AGENT_KERNEL_RELEASE_BASE_URL=')
     expect(text).toContain('SANDBOX_ROOTS="$PWD"')
     expect(text).toContain('EXECUTOR_INVITE=')
     expect(text).toContain('ak_invite_test')
-    expect(text).toContain('releases/latest/download')
+    expect(text).toContain('http://localhost:3000/release-assets')
+    expect(text).not.toContain('github.com/OWNER/REPO')
     expect(text).toContain('Mac/Linux')
     expect(text).not.toContain('WORKSPACE_NAME')
     expect(text).not.toContain('agent-kernel-executor')
+  })
+
+  it('uses the dashboard origin for local release assets', async () => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { protocol: 'http:', hostname: '192.0.2.11', port: '3000' },
+    })
+
+    render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
+
+    await screen.findByText(/Invite expires at/i)
+
+    const text = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
+    expect(text).toContain('http://192.0.2.11:3000/release-assets/run.sh')
+    expect(text).not.toContain('http://localhost:3000/release-assets/run.sh')
   })
 
   it('copies the selected wget command', async () => {
@@ -42,9 +79,10 @@ describe('ConnectWorkspaceDialog', () => {
     fireEvent.click(screen.getByTestId('copy-executor-command'))
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
-    expect(writeText.mock.calls[0]?.[0]).toContain('wget -qO-')
+    expect(writeText.mock.calls[0]?.[0]).toContain('wget -O-')
     expect(writeText.mock.calls[0]?.[0]).toContain('run.sh')
     expect(writeText.mock.calls[0]?.[0]).toContain('COMPONENT=executor')
+    expect(writeText.mock.calls[0]?.[0]).toContain('AGENT_KERNEL_RELEASE_BASE_URL=')
     expect(writeText.mock.calls[0]?.[0]).toContain('EXECUTOR_INVITE=')
     expect(writeText.mock.calls[0]?.[0]).not.toContain('WORKSPACE_NAME')
   })
@@ -58,6 +96,7 @@ describe('ConnectWorkspaceDialog', () => {
     const windowsText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
     expect(windowsText).toContain('iwr')
     expect(windowsText).toContain('agent-kernel-executor.cjs')
+    expect(windowsText).toContain('http://localhost:3000/release-assets')
     expect(windowsText).toContain('Get-FileHash')
     expect(windowsText).toContain('$env:HOST_URL=')
     expect(windowsText).toContain('$env:EXECUTOR_INVITE=')
@@ -67,7 +106,7 @@ describe('ConnectWorkspaceDialog', () => {
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-unix'))
     const unixText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
-    expect(unixText).toContain('wget -qO-')
+    expect(unixText).toContain('wget -O-')
     expect(unixText).toContain('run.sh')
     expect(unixText).not.toContain('iwr')
     expect(unixText).not.toContain('curl')

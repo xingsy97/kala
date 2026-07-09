@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { bashTool } from './bash.js'
 import { bashOutputTool } from './bash-output.js'
+import { killShellTool } from './kill-shell.js'
 import { makeCtx, makeCtxWithCwd, makeTempWorkspace, normalizePath } from './_test-helpers.js'
 import { createSandbox } from '../sandbox.js'
 
@@ -175,5 +176,25 @@ describe('bash', () => {
     ) as { content: string; done: boolean }
     expect(second.content).toContain('done')
     expect(second.done).toBe(true)
+  })
+
+  it('scopes background task reads and kills to the owning session', async () => {
+    const owner = { ...makeCtx(root), sessionId: 'session-a' }
+    const sibling = { ...makeCtx(root), sessionId: 'session-b' }
+    const started = await bashTool.run(
+      { command: 'sleep 1; echo hidden', run_in_background: true },
+      owner,
+    )
+    const parsed = JSON.parse(started) as { taskId: string }
+
+    await expect(
+      bashOutputTool.run({ task_id: parsed.taskId, block: false }, sibling),
+    ).rejects.toThrow(/unknown background task/)
+    await expect(
+      killShellTool.run({ task_id: parsed.taskId }, sibling),
+    ).rejects.toThrow(/unknown background task/)
+
+    const killed = JSON.parse(await killShellTool.run({ task_id: parsed.taskId }, owner)) as { killed: boolean }
+    expect(killed.killed).toBe(true)
   })
 })

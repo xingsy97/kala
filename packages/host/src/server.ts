@@ -30,7 +30,7 @@ import type { LoopBroadcast, LoopHandle } from './loop.js'
 import { runHostLoop } from './loop.js'
 import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
 import { selectHooks } from './extensions/hooks.js'
-import type { SkillRegistry } from './extensions/skills.js'
+import { createSkillManager, defaultSkillRoots, discoverSkills, type SkillManager, type SkillRegistry } from './extensions/skills.js'
 import { SessionStore, type SessionRecord } from './store/session.js'
 import { WorkspaceAliasStore } from './store/workspace-alias.js'
 import {
@@ -48,7 +48,7 @@ import {
   configureExecutorNamespace,
   type ExecutorNs,
 } from './connection/executor-ns.js'
-import { attachJsonRoutes, attachRequestHandler, attachStaticHandler } from './http/routes.js'
+import { attachJsonRoutes, attachReleaseAssetsHandler, attachRequestHandler, attachStaticHandler } from './http/routes.js'
 import type { AuthConfig } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
 import { noopAuditLogger } from './audit-log.js'
@@ -59,12 +59,20 @@ export type HostServerOptions = {
   llm: LLMAdapter
   defaultConfig: AgentConfig
   toolTimeoutMs?: number
+  /**
+   * Grace window after an executor disconnects before its "detached" event
+   * fans out to dashboards and pending tool calls are failed. Covers routine
+   * process restarts. Set to 0 in tests to keep the old instant-detach
+   * behavior. Defaults to DETACH_GRACE_MS.
+   */
+  detachGraceMs?: number
   authToken?: string
   auth?: AuthConfig
   audit?: AuditLogger
   httpServer?: HttpServer
   staticDir?: string
   dashboardHandler?: (req: IncomingMessage, res: ServerResponse) => void
+  releaseAssetsDir?: string
   /**
    * Advertised via `GET /models`. When absent the endpoint returns an empty
    * list and the dashboard falls back to whatever the current session says.
@@ -80,7 +88,7 @@ export type HostServerOptions = {
    */
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
-  skills?: SkillRegistry
+  skills?: SkillRegistry | SkillManager
   artifactRootDir?: string | false
   /**
    * Advertised via `GET /settings`. Read-only settings snapshot for the
@@ -114,6 +122,8 @@ export async function startHostServer(
   })
 
   const store = new SessionStore(options.sessionsDir)
+  const defaultSkillRootsList = defaultSkillRoots()
+  const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
   await workspaceAliases.load()
 
@@ -122,12 +132,27 @@ export async function startHostServer(
     { workspaceIdFor: (sid) => store.get(sid)?.workspaceId },
     options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
     audit,
+    options.detachGraceMs,
   )
+
+  const settingsWithSkills = (settings: ServerSettingsPayload | (() => ServerSettingsPayload)) => (): ServerSettingsPayload => {
+    const base = typeof settings === 'function'
+      ? settings()
+      : settings
+    return {
+      ...base,
+      skills: {
+        count: defaultSkillRegistry.skills.length,
+        roots: defaultSkillRootsList,
+        diagnostics: defaultSkillRegistry.diagnostics,
+      },
+    }
+  }
 
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
-    ...(options.settings ? { settings: options.settings } : {}),
+    ...(options.settings ? { settings: settingsWithSkills(options.settings) } : {}),
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
@@ -139,9 +164,13 @@ export async function startHostServer(
   })
 
   if (options.dashboardHandler) {
+    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir)
     attachRequestHandler(http, options.dashboardHandler)
   } else if (options.staticDir) {
+    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir)
     attachStaticHandler(http, options.staticDir)
+  } else if (options.releaseAssetsDir) {
+    attachReleaseAssetsHandler(http, options.releaseAssetsDir)
   }
 
   // Per-session model override, keyed by sessionId. Ephemeral: not persisted
@@ -327,6 +356,8 @@ export async function startHostServer(
     },
   }
 
+  const skills = options.skills ?? createSkillManager(store, options.defaultConfig)
+
   const loopDeps = {
     store,
     llm: options.llm,
@@ -337,7 +368,7 @@ export async function startHostServer(
     },
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
     ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
-    ...(options.skills !== undefined ? { skills: options.skills } : {}),
+    skills,
     ...(options.artifactRootDir ? { artifactRootDir: options.artifactRootDir } : {}),
   }
   loop = runHostLoop(loopDeps)
@@ -424,12 +455,26 @@ export async function startHostServer(
     // Executor no longer subscribes to session:error — it's UI-only.
   }
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     if (http.listening) {
       resolve()
       return
     }
-    http.listen(options.port, () => resolve())
+    const onError = (err: NodeJS.ErrnoException): void => {
+      http.off('listening', onListening)
+      const message = err.code === 'EADDRINUSE'
+        ? `Port ${options.port} is already in use. Stop the process using it or start the host with HOST_PORT=<free-port> or --port <free-port>.`
+        : `Failed to start host on port ${options.port}: ${err.message}`
+      const wrapped = new Error(message)
+      wrapped.cause = err
+      reject(wrapped)
+    }
+    const onListening = (): void => {
+      http.off('error', onError)
+      resolve()
+    }
+    http.once('error', onError)
+    http.listen(options.port, onListening)
   })
   const addr = http.address()
   const port =
