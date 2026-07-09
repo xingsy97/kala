@@ -150,6 +150,18 @@ export function attachStaticHandler(server: HttpServer, staticDir: string): void
   })
 }
 
+export function attachRequestHandler(
+  server: HttpServer,
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+): void {
+  server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const url = req.url ?? '/'
+    if (url.startsWith('/socket.io/')) return
+    if (res.headersSent || res.writableEnded) return
+    handler(req, res)
+  })
+}
+
 async function serveStatic(
   root: string,
   req: IncomingMessage,

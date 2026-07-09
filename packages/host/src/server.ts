@@ -9,7 +9,7 @@
  * a single `close()` for shutdown.
  */
 
-import { createServer, type Server as HttpServer } from 'node:http'
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 
 import type {
   ExecutorClientToServerEvents,
@@ -52,7 +52,7 @@ import {
   configureExecutorNamespace,
   type ExecutorNs,
 } from './connection/executor-ns.js'
-import { attachJsonRoutes, attachStaticHandler } from './http/routes.js'
+import { attachJsonRoutes, attachRequestHandler, attachStaticHandler } from './http/routes.js'
 
 export type HostServerOptions = {
   port: number
@@ -63,6 +63,7 @@ export type HostServerOptions = {
   authToken?: string
   httpServer?: HttpServer
   staticDir?: string
+  dashboardHandler?: (req: IncomingMessage, res: ServerResponse) => void
   /**
    * Advertised via `GET /models`. When absent the endpoint returns an empty
    * list and the dashboard falls back to whatever the current session says.
@@ -115,7 +116,9 @@ export async function startHostServer(
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
   })
 
-  if (options.staticDir) {
+  if (options.dashboardHandler) {
+    attachRequestHandler(http, options.dashboardHandler)
+  } else if (options.staticDir) {
     attachStaticHandler(http, options.staticDir)
   }
 
@@ -232,7 +235,7 @@ export async function startHostServer(
   }
 
   const broadcast: LoopBroadcast = {
-    onEvent(sessionId, seq, event, effects, state, llmTrace) {
+    onEvent(sessionId, seq, event, effects, state, llmTrace, model) {
       const room = `session:${sessionId}`
       io.of('/dashboard').to(room).emit('event:appended', {
         sessionId,
@@ -241,6 +244,7 @@ export async function startHostServer(
         event,
         effects,
         ...(llmTrace ? { llmTrace } : {}),
+        ...(model ? { model } : {}),
       })
       io.of('/dashboard').to(room).emit('state:changed', {
         sessionId,
@@ -254,6 +258,7 @@ export async function startHostServer(
         event,
         effects,
         ...(llmTrace ? { llmTrace } : {}),
+        ...(model ? { model } : {}),
       })
       io.of('/executor').to(room).emit('state:changed', {
         sessionId,

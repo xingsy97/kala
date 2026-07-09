@@ -20,8 +20,7 @@ Only one path: user types `/consolidate-memory` in the dashboard composer. Nothi
 
 Skips (silent no-op returning a short toast):
 
-- Sessions shorter than **8 messages** (matches Claude Code's `MIN_MESSAGES_TO_CONSOLIDATE`). Short Q&A rarely has durable signal.
-- Sessions whose config has `memoryConsolidation: false`.
+- Sessions shorter than **8 messages** (the shipped minimum and Claude Code's `MIN_MESSAGES_TO_CONSOLIDATE`). Short Q&A rarely has durable signal.
 - Sub-agent sessions — the parent is where signal accumulates; running consolidation on a helper turn double-counts.
 
 ### 2.2 What it does
@@ -107,7 +106,7 @@ Kernel: no changes. The consolidator is host-side and writes to disk directly th
 
 ## 4. Configuration
 
-Optional `~/.agent-kernel/config.json` block. Defaults if absent:
+Current implementation uses the host-side `DEFAULT_CONSOLIDATION_CONFIG` in `packages/host/src/memory-consolidation.ts`:
 
 ```json
 {
@@ -115,12 +114,15 @@ Optional `~/.agent-kernel/config.json` block. Defaults if absent:
     "enabled": true,
     "minMessages": 8,
     "maxPerRun": 3,
-    "defaultConfidence": 0.8
+    "defaultConfidence": 0.8,
+    "windowSize": 40,
+    "perMessageCharCap": 600,
+    "timeoutMs": 60000
   }
 }
 ```
 
-Off-switch is `enabled: false`. No per-session opt-out — if it's on, the slash command works; if it's off, the command reports "consolidation disabled in config" and does nothing.
+There is no user-facing config file yet. The code path accepts an injected `ConsolidationConfig` for tests and future wiring; if `enabled` is false, the slash command reports "consolidation disabled in config" and does nothing.
 
 ## 5. Slash command wiring
 

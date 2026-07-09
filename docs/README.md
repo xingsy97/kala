@@ -11,7 +11,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [SPEC.md](SPEC.md) | The kernel contract — types, state machine, invariants |
 | [protocol/wire-protocol.md](protocol/wire-protocol.md) | Every Socket.IO event between Dashboard, Host, and Executor |
 | [protocol/event-log.md](protocol/event-log.md) | JSONL event log format for persistence, replay, fork |
-| [tools.md](tools.md) | The 7 v1 tools Executor ships: schemas, outputs, errors |
+| [tools.md](tools.md) | The Executor tool surface: schemas, outputs, errors |
 
 ## Design and rationale
 
@@ -22,6 +22,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [mcp.md](mcp.md) | MCP runtime integration design (planned, not yet implemented) |
 | [agentic-rl-integration.md](agentic-rl-integration.md) | Agentic RL rollout integration research note - adapter-first, not custom trajectory-first |
 | [skills.md](skills.md) | Skills design - OpenCode-style `skill({ name })` tool loading |
+| [llm-message-assembly-debugger.md](llm-message-assembly-debugger.md) | Dashboard design for explaining how LLM API messages are assembled |
 | [adr/](adr/) | Architecture Decision Records — one file per big call, with alternatives and consequences |
 
 ## Process

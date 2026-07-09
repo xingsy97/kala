@@ -179,6 +179,34 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('serves custom dashboard middleware after JSON routes', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const handled: string[] = []
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      dashboardHandler(req, res) {
+        handled.push(req.url ?? '/')
+        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('dashboard middleware')
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const models = await fetch(`${url}/models`).then((r) => r.json())
+    expect(models).toEqual({ models: [], defaultModel: '' })
+
+    const dashboard = await fetch(`${url}/custom-route`).then((r) => r.text())
+    expect(dashboard).toBe('dashboard middleware')
+    expect(handled).toEqual(['/custom-route'])
+  })
+
   it('drives a full round-trip with dashboard + executor', async () => {
     const sessionId = 'wire-1'
     // Pre-materialize the session: dashboard handshakes are now lazy (they
@@ -1017,6 +1045,70 @@ describe('wire protocol', () => {
 
     dashboard.close()
     executor.close()
+  })
+
+  it('client:set_cwd rejects running or offline workspace sessions', async () => {
+    const runningSessionId = 'wire-set-cwd-running'
+    await server.store.ensure({
+      sessionId: runningSessionId,
+      defaultConfig: config,
+      workspaceId: 'ws-running',
+      workspaceName: 'running-box',
+    })
+    server.store.get(runningSessionId)!.state.status = 'thinking'
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: runningSessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const runningErr = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.once('session:error', resolve)
+    })
+    dashboard.emit('client:set_cwd', { sessionId: runningSessionId, cwd: '/tmp' })
+    await expect(runningErr).resolves.toMatchObject({
+      scope: 'host',
+      message: 'cannot change cwd while session status is thinking',
+    })
+    expect(server.store.get(runningSessionId)?.state.cwd).toBeUndefined()
+
+    const offlineSessionId = 'wire-set-cwd-offline'
+    await server.store.ensure({
+      sessionId: offlineSessionId,
+      defaultConfig: config,
+      workspaceId: 'ws-offline',
+      workspaceName: 'offline-box',
+    })
+    const offlineDashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: offlineSessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      offlineDashboard.on('session:ready', resolve),
+    )
+    const offlineErr = new Promise<{ scope: string; message: string }>((resolve) => {
+      offlineDashboard.once('session:error', resolve)
+    })
+    offlineDashboard.emit('client:set_cwd', { sessionId: offlineSessionId, cwd: '/tmp' })
+    await expect(offlineErr).resolves.toMatchObject({
+      scope: 'host',
+      message: 'workspace offline',
+    })
+    expect(server.store.get(offlineSessionId)?.state.cwd).toBeUndefined()
+
+    dashboard.close()
+    offlineDashboard.close()
   })
 
   it('client:compact rejects an empty session without calling the summarizer', async () => {

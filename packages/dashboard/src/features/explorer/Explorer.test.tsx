@@ -189,6 +189,35 @@ describe('Explorer', () => {
     )
   })
 
+  it('shows explicit row actions for rename and session info', () => {
+    const onRename = vi.fn()
+    const onOpenSessionInfo = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={sessionSummary.sessionId}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onDelete={() => {}}
+        onRename={onRename}
+        onOpenSessionInfo={onOpenSessionInfo}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('session-info-button'))
+    expect(onOpenSessionInfo).toHaveBeenCalledWith(sessionSummary.sessionId)
+
+    fireEvent.click(screen.getByTestId('session-rename-button'))
+    const input = screen.getByTestId('session-rename-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'renamed from button' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onRename).toHaveBeenCalledWith(
+      sessionSummary.sessionId,
+      'renamed from button',
+    )
+  })
+
   it('marks the selected session with the highlight class', () => {
     render(
       <Explorer

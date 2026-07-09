@@ -23,6 +23,7 @@
 
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
   const port = Number(process.env.HOST_PORT ?? 3000)
   const sessionsDir =
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
-  const staticDir = resolveDashboardDir()
+  const dashboard = await createDashboardServing()
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
   const skills = await discoverSkills()
@@ -120,7 +121,8 @@ async function main(): Promise<void> {
     ...(process.env.HOST_AUTH_TOKEN
       ? { authToken: process.env.HOST_AUTH_TOKEN }
       : {}),
-    ...(staticDir ? { staticDir } : {}),
+    ...(dashboard.kind === 'vite' ? { dashboardHandler: dashboard.handler } : {}),
+    ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
     skills,
@@ -133,7 +135,8 @@ async function main(): Promise<void> {
       llm: llm.name,
       models: registry.models.map((m) => m.id),
       defaultModel,
-      ...(staticDir ? { staticDir } : {}),
+      dashboard: dashboard.kind,
+      ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
       hooks: hooks.length,
       skills: skills.skills.length,
     },
@@ -321,11 +324,74 @@ function fail(msg: string): never {
   process.exit(1)
 }
 
-function resolveDashboardDir(): string | undefined {
+type DashboardServing =
+  | { kind: 'vite'; handler: (req: IncomingMessage, res: ServerResponse) => void }
+  | { kind: 'static'; staticDir: string }
+  | { kind: 'none' }
+
+async function createDashboardServing(): Promise<DashboardServing> {
   const override = process.env.DASHBOARD_DIR
   if (override) {
-    return existsSync(join(override, 'index.html')) ? override : undefined
+    return existsSync(join(override, 'index.html'))
+      ? { kind: 'static', staticDir: override }
+      : { kind: 'none' }
   }
+
+  if (isSourceDevRun()) {
+    const handler = await createViteDashboardHandler().catch((err: unknown) => {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'failed to start vite dashboard middleware; falling back to built dashboard',
+      )
+      return null
+    })
+    if (handler) return { kind: 'vite', handler }
+  }
+
+  const staticDir = resolveDashboardDir()
+  return staticDir ? { kind: 'static', staticDir } : { kind: 'none' }
+}
+
+async function createViteDashboardHandler(): Promise<
+  (req: IncomingMessage, res: ServerResponse) => void
+> {
+  type ViteDevServer = {
+    middlewares(req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void): void
+  }
+  type ViteModule = {
+    createServer(options: unknown): Promise<ViteDevServer>
+  }
+  const runtimeImport = Function('specifier', 'return import(specifier)') as (
+    specifier: string,
+  ) => Promise<unknown>
+  const vite = (await runtimeImport('vite')) as ViteModule
+  const dashboardRoot = resolve(dirname(currentModulePath()), '..', '..', 'dashboard')
+  const viteServer = await vite.createServer({
+    root: dashboardRoot,
+    server: {
+      middlewareMode: true,
+      hmr: { server: false },
+    },
+    appType: 'spa',
+  })
+  return (req, res) => {
+    viteServer.middlewares(req, res, (err?: unknown) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end(message)
+      }
+    })
+  }
+}
+
+function isSourceDevRun(): boolean {
+  if (process.env.AGENT_KERNEL_DASHBOARD_DEV === '0') return false
+  if (process.env.AGENT_KERNEL_DASHBOARD_DEV === '1') return true
+  return currentModulePath().endsWith('.ts')
+}
+
+function resolveDashboardDir(): string | undefined {
   const here = dirname(currentModulePath())
   const candidates = [
     // Monorepo layout: packages/host/bin/ → packages/dashboard/dist/
