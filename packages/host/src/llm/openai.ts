@@ -73,6 +73,7 @@ type OpenAIResponseBody = {
     prompt_tokens: number
     completion_tokens: number
     total_tokens?: number
+    prompt_tokens_details?: { cached_tokens?: number }
   }
 }
 
@@ -167,6 +168,7 @@ async function callStreaming(
   const toolCalls = new Map<number, StreamedToolCall>()
   let promptTokens = 0
   let completionTokens = 0
+  let cachedTokens = 0
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -193,7 +195,11 @@ async function callStreaming(
             }>
           }
         }>
-        usage?: { prompt_tokens?: number; completion_tokens?: number }
+        usage?: {
+          prompt_tokens?: number
+          completion_tokens?: number
+          prompt_tokens_details?: { cached_tokens?: number }
+        }
       }
       try {
         evt = JSON.parse(payload)
@@ -226,6 +232,8 @@ async function callStreaming(
         if (typeof evt.usage.completion_tokens === 'number') {
           completionTokens = evt.usage.completion_tokens
         }
+        const cached = evt.usage.prompt_tokens_details?.cached_tokens
+        if (typeof cached === 'number') cachedTokens = cached
       }
     }
   }
@@ -245,7 +253,11 @@ async function callStreaming(
   const message: Message = { role: 'assistant', content }
   const usage =
     promptTokens > 0 || completionTokens > 0
-      ? { inputTokens: promptTokens, outputTokens: completionTokens }
+      ? {
+          inputTokens: promptTokens,
+          outputTokens: completionTokens,
+          cacheReadTokens: cachedTokens,
+        }
       : undefined
   return { message, usage }
 }
@@ -413,6 +425,10 @@ function parseResponse(body: OpenAIResponseBody): LLMResponse {
     ? {
         inputTokens: numOr(body.usage.prompt_tokens, 0),
         outputTokens: numOr(body.usage.completion_tokens, 0),
+        cacheReadTokens: numOr(
+          body.usage.prompt_tokens_details?.cached_tokens,
+          0,
+        ),
       }
     : undefined
   return { message, usage }
