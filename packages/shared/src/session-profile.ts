@@ -80,7 +80,7 @@ export function createSessionProfile(input: {
     llmCalls += 1
     if (entry.model) models.add(entry.model)
     else if (entry.llmTrace?.model) models.add(entry.llmTrace.model)
-    if (!entry.llmTrace) llmTraceMissingCalls += 1
+    if (!entry.llmTrace && !entry.llmTraceArtifact) llmTraceMissingCalls += 1
     const metrics = entry.llmTrace?.response?.metrics
     if (typeof metrics?.durationMs === 'number' && Number.isFinite(metrics.durationMs)) {
       llmDurations.push(metrics.durationMs)

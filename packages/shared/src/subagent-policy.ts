@@ -56,7 +56,7 @@ export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRol
   research: {
     role: 'research',
     purpose: 'Read files and return a concise report with references.',
-    defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'websearch', 'todowrite'],
+    defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'websearch', 'webfetch', 'todowrite'],
     defaultMaxTurns: 20,
     defaultTimeoutMs: 5 * 60_000,
     defaultExpectedOutput: 'Structured summary with file:line references.',

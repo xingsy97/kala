@@ -19,6 +19,7 @@ import type {
   ServerExecutorChangedPayload,
   ServerExecutorsPayload,
   ServerHistoryPayload,
+  ServerSettingsPayload,
   ServerSessionsPayload,
   ServerSubAgentFinishedEvent,
   ServerSubAgentStartedEvent,
@@ -52,6 +53,8 @@ const AGENT = {
     required: ['prompt'],
   },
   requiresApproval: false,
+  executionKind: 'host',
+  executionHandler: 'agent',
 } as const
 
 function scriptedLlm(): LLMAdapter {
@@ -152,6 +155,21 @@ async function waitForWorkspace(
     await new Promise((r) => setTimeout(r, 10))
   }
   throw new Error(`workspace wait timeout: ${workspaceId}`)
+}
+
+async function waitForSocketData(
+  namespace: ReturnType<HostServer['io']['of']>,
+  timeoutMs = 1000,
+  predicate: (data: Record<string, unknown>) => boolean = () => true,
+): Promise<Record<string, unknown>> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const socket = Array.from(namespace.sockets.values())[0]
+    const data = socket?.data as Record<string, unknown> | undefined
+    if (data && predicate(data)) return data
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error('socket data wait timeout')
 }
 
 async function postEnhancementAction(url: string, body: Record<string, unknown>): Promise<unknown> {
@@ -265,6 +283,260 @@ describe('wire protocol', () => {
     }
   })
 
+  it('updates agent prompt settings through HTTP', async () => {
+    let selectedPreset: 'codex' | 'claude-code' = 'codex'
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-'))
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      settings: () => ({
+        providers: [],
+        defaultModel: '',
+        hooks: [],
+        agentPrompt: {
+          selectedPreset,
+          presets: [
+            { id: 'codex', label: 'Codex', description: 'Codex prompt' },
+            { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
+          ],
+          configPath: '/tmp/agent.json',
+        },
+        paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+        mcp: { supported: false, note: '' },
+      }),
+      updateAgentPrompt: (input) => {
+        selectedPreset = input.preset
+        return {
+          providers: [],
+          defaultModel: '',
+          hooks: [],
+          agentPrompt: {
+            selectedPreset,
+            presets: [
+              { id: 'codex', label: 'Codex', description: 'Codex prompt' },
+              { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
+            ],
+            configPath: '/tmp/agent.json',
+          },
+          paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+          mcp: { supported: false, note: '' },
+        }
+      },
+    })
+
+    try {
+      const response = await fetch(`http://localhost:${localServer.port}/settings/agent-prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ preset: 'claude-code' }),
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json() as { agentPrompt?: { selectedPreset?: string } }
+      expect(body.agentPrompt?.selectedPreset).toBe('claude-code')
+      expect(selectedPreset).toBe('claude-code')
+    } finally {
+      await localServer.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
+  it('enables Socket.IO Admin UI immediately after the password is initialized', async () => {
+    let initialized = false
+    let runtimeMode: 'production' | 'development' = 'production'
+    let configuredMode: 'production' | 'development' = 'production'
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-socket-admin-'))
+    const adminPath = '/admin/socket.io'
+    const settings = (): ServerSettingsPayload => ({
+      providers: [],
+      defaultModel: '',
+      hooks: [],
+      socketAdmin: {
+        active: initialized,
+        initialized,
+        path: adminPath,
+        username: 'admin',
+        runtimeMode,
+        configuredMode,
+        configPath: join(localSessionsDir, 'socket-admin.json'),
+        ...(initialized ? { distSource: 'embedded' as const } : {}),
+        ...(initialized && configuredMode !== runtimeMode ? { restartRequired: true } : {}),
+      },
+      paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: localSessionsDir },
+      mcp: { supported: false, note: '' },
+    })
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      settings,
+      embeddedSocketAdminAssets: [
+        { path: 'index.html', contentBase64: Buffer.from('<!doctype html><title>socket admin</title><script src="js/app.js"></script>').toString('base64') },
+        { path: 'js/app.js', contentBase64: Buffer.from('globalThis.socketAdminLoaded = true').toString('base64') },
+      ],
+      initializeSocketAdmin: (input) => {
+        if (initialized) {
+          const err = new Error('already initialized') as Error & { status?: number }
+          err.status = 409
+          throw err
+        }
+        expect(input.password).toBe('password-123')
+        expect(input.mode).toBe('development')
+        initialized = true
+        runtimeMode = input.mode ?? configuredMode
+        configuredMode = runtimeMode
+        input.activate({
+          enabled: true,
+          path: adminPath,
+          username: 'admin',
+          passwordHash: '$2b$10$012345678901234567890u7Z/08sx9Loa7TXHL62ojTkhUMYeOHpu',
+          mode: runtimeMode,
+          distSource: 'embedded',
+        })
+        return settings()
+      },
+      updateSocketAdminMode: (input) => {
+        configuredMode = input.mode
+        return settings()
+      },
+    })
+
+    try {
+      const init = await fetch(`http://localhost:${localServer.port}/settings/socket-admin/init`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'password-123', mode: 'development' }),
+      })
+      expect(init.status).toBe(200)
+      const body = await init.json() as ServerSettingsPayload
+      expect(body.socketAdmin?.initialized).toBe(true)
+      expect(body.socketAdmin?.active).toBe(true)
+      expect(body.socketAdmin?.runtimeMode).toBe('development')
+      expect(body.socketAdmin?.configuredMode).toBe('development')
+      expect(body.socketAdmin?.restartRequired).toBeUndefined()
+
+      const updateMode = await fetch(`http://localhost:${localServer.port}/settings/socket-admin/mode`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'production' }),
+      })
+      expect(updateMode.status).toBe(200)
+      const modeBody = await updateMode.json() as ServerSettingsPayload
+      expect(modeBody.socketAdmin?.runtimeMode).toBe('development')
+      expect(modeBody.socketAdmin?.configuredMode).toBe('production')
+      expect(modeBody.socketAdmin?.restartRequired).toBe(true)
+
+      const noSlash = await fetch(`http://localhost:${localServer.port}${adminPath}`, { redirect: 'manual' })
+      expect(noSlash.status).toBe(308)
+      expect(noSlash.headers.get('location')).toBe(`${adminPath}/`)
+
+      const adminUi = await fetch(`http://localhost:${localServer.port}${adminPath}/`)
+      expect(adminUi.status).toBe(200)
+      expect(await adminUi.text()).toContain('socket admin')
+
+      const adminJs = await fetch(`http://localhost:${localServer.port}${adminPath}/js/app.js`)
+      expect(adminJs.status).toBe(200)
+      expect(adminJs.headers.get('content-type')).toContain('application/javascript')
+      expect(await adminJs.text()).toContain('socketAdminLoaded')
+
+      const second = await fetch(`http://localhost:${localServer.port}/settings/socket-admin/init`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'password-123' }),
+      })
+      expect(second.status).toBe(409)
+      await second.text()
+    } finally {
+      await localServer.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
+  it('updates manual providers through HTTP without returning API keys', async () => {
+    let providers: ServerSettingsPayload['providers'] = []
+    let defaultModel = ''
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-manual-provider-'))
+    const settings = (): ServerSettingsPayload => ({
+      providers,
+      defaultModel,
+      hooks: [],
+      paths: { claudeSettings: '', codexConfig: '', manualModels: '/tmp/models.json', hooksConfig: '', sessionsDir: '' },
+      mcp: { supported: false, note: '' },
+    })
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      settings,
+      addManualProvider: (input) => {
+        providers = [{
+          id: input.id,
+          label: input.label ?? input.id,
+          wire: input.wire,
+          source: 'manual',
+          baseUrl: input.baseUrl,
+          models: [],
+        }]
+        return settings()
+      },
+      deleteManualProvider: (input) => {
+        providers = providers.filter((p) => p.id !== input.providerId)
+        return settings()
+      },
+      setDefaultModel: (input) => {
+        defaultModel = input.model
+        return settings()
+      },
+    })
+
+    try {
+      const add = await fetch(`http://localhost:${localServer.port}/settings/providers`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: 'local-openai',
+          label: 'Local OpenAI',
+          wire: 'openai',
+          baseUrl: 'http://localhost:8000/v1',
+          apiKey: 'test-redacted-api-key',
+        }),
+      })
+      expect(add.status).toBe(200)
+      const added = await add.json() as ServerSettingsPayload
+      expect(added.providers).toEqual([
+        expect.objectContaining({
+          id: 'local-openai',
+          label: 'Local OpenAI',
+          wire: 'openai',
+          source: 'manual',
+          baseUrl: 'http://localhost:8000/v1',
+        }),
+      ])
+      expect(JSON.stringify(added)).not.toContain('test-redacted-api-key')
+
+      const setDefault = await fetch(`http://localhost:${localServer.port}/settings/default-model`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'local-openai:gpt-local' }),
+      })
+      expect(setDefault.status).toBe(200)
+      const defaulted = await setDefault.json() as ServerSettingsPayload
+      expect(defaulted.defaultModel).toBe('local-openai:gpt-local')
+      expect(JSON.stringify(defaulted)).not.toContain('test-redacted-api-key')
+
+      const del = await fetch(`http://localhost:${localServer.port}/settings/providers?providerId=local-openai`, { method: 'DELETE' })
+      expect(del.status).toBe(200)
+      const deleted = await del.json() as ServerSettingsPayload
+      expect(deleted.providers).toEqual([])
+    } finally {
+      await localServer.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
   it('handshake auth rejects mismatched protocol major', async () => {
     // Simulate an old dashboard build talking to a newer host.
     const bad: ClientSocket<
@@ -293,6 +565,118 @@ describe('wire protocol', () => {
     })
     expect(err.message).toBe('version_incompatible')
     bad.close()
+  })
+
+  it('exposes compact dashboard socket metadata without duplicating session membership', async () => {
+    const sessionId = 'wire-dashboard-metadata'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => dashboard.once('connect', resolve))
+
+    const data = await waitForSocketData(server.io.of('/dashboard'))
+    expect(data.dashboardActor).toEqual({ kind: 'anonymous' })
+    expect(data.connectionMeta).toEqual({
+      kind: 'dashboard',
+      label: 'dashboard',
+      clientVersion: PROTOCOL_VERSION,
+      connectedAt: expect.any(String),
+    })
+    expect(Object.keys(data.connectionMeta as Record<string, unknown>).sort()).toEqual([
+      'clientVersion',
+      'connectedAt',
+      'kind',
+      'label',
+    ])
+    expect(JSON.stringify(data)).not.toContain(sessionId)
+
+    dashboard.close()
+  })
+
+  it('exposes compact executor socket metadata without private credentials', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: {
+        executorTokens: [{ token: 'exec-secret-token', workspaceId: 'ws-meta', label: 'runner token' }],
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: 'exec-secret-token' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+
+    const pending = await waitForSocketData(server.io.of('/executor'))
+    expect(pending.executorIdentity).toEqual({
+      accepted: true,
+      workspaceId: 'ws-meta',
+      label: 'runner token',
+    })
+    expect(pending.connectionMeta).toEqual({
+      kind: 'executor',
+      label: 'executor pending',
+      clientVersion: PROTOCOL_VERSION,
+      connectedAt: expect.any(String),
+    })
+
+    executor.emit('executor:announce', {
+      executorId: 'exec-meta',
+      workspaceId: 'ws-meta',
+      workspaceName: 'metadata workspace',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+
+    const announced = await waitForSocketData(server.io.of('/executor'), 1000, (data) => {
+      const meta = data.connectionMeta as { executorId?: string } | undefined
+      return meta?.executorId === 'exec-meta'
+    })
+    expect(announced.connectionMeta).toEqual({
+      kind: 'executor',
+      label: 'executor metadata workspace',
+      clientVersion: PROTOCOL_VERSION,
+      connectedAt: expect.any(String),
+      executorId: 'exec-meta',
+      workspaceId: 'ws-meta',
+      workspaceName: 'metadata workspace',
+    })
+    expect(Object.keys(announced.connectionMeta as Record<string, unknown>).sort()).toEqual([
+      'clientVersion',
+      'connectedAt',
+      'executorId',
+      'kind',
+      'label',
+      'workspaceId',
+      'workspaceName',
+    ])
+    expect(JSON.stringify(announced)).not.toContain('exec-secret-token')
+    expect(announced.executorIdentity).not.toHaveProperty('inviteToken')
+    expect(announced.executorIdentity).not.toHaveProperty('token')
+    expect(announced.connectionMeta).not.toHaveProperty('inviteToken')
+    expect(announced.connectionMeta).not.toHaveProperty('token')
+    expect(JSON.stringify(announced)).not.toContain('tools')
+    expect(JSON.stringify(announced)).not.toContain('runtimeVersion')
+
+    executor.close()
   })
 
   it('rejects executor announce when token scope does not match workspaceId', async () => {
@@ -417,6 +801,21 @@ describe('wire protocol', () => {
     const payload = await welcome
     expect(payload.workspaceId).toBe('ws-invite')
     expect(payload.token).toMatch(/^ak_exec_/)
+    const data = await waitForSocketData(server.io.of('/executor'), 1000, (candidate) => {
+      const meta = candidate.connectionMeta as { workspaceId?: string } | undefined
+      return meta?.workspaceId === 'ws-invite'
+    })
+    expect(data.executorIdentity).toEqual({
+      accepted: true,
+      workspaceId: 'ws-invite',
+      label: 'invited',
+    })
+    expect(data.executorIdentity).not.toHaveProperty('inviteToken')
+    expect(data.executorIdentity).not.toHaveProperty('token')
+    expect(data.connectionMeta).not.toHaveProperty('inviteToken')
+    expect(data.connectionMeta).not.toHaveProperty('token')
+    expect(JSON.stringify(data)).not.toContain(invite.inviteToken)
+    expect(JSON.stringify(data)).not.toContain(payload.token)
     expect(readFileSync(identityPath, 'utf8')).toContain('ws-invite')
     expect(readFileSync(identityPath, 'utf8')).not.toContain(payload.token)
 
@@ -657,6 +1056,162 @@ describe('wire protocol', () => {
     const dashboard = await fetch(`${url}/custom-route`).then((r) => r.text())
     expect(dashboard).toBe('dashboard middleware')
     expect(handled).toEqual(['/custom-route'])
+  })
+
+  it('recomputes context snapshot from the selected advertised model', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const modelConfig = createConfig({
+      tools: [WRITE],
+      systemPrompt: 'sys',
+      contextLimit: 400_000,
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: modelConfig,
+      httpServer: http,
+      models: [
+        {
+          id: 'gpt-5.5',
+          label: 'GPT 5.5',
+          provider: 'openai',
+          contextWindow: 400_000,
+        },
+        {
+          id: 'claude-opus-4.7-1m-internal',
+          label: 'Claude Opus 4.7 1M',
+          provider: 'anthropic',
+          contextWindow: 1_000_000,
+        },
+      ],
+      defaultModel: 'gpt-5.5',
+    })
+    url = `http://localhost:${server.port}`
+
+    const sessionId = 'wire-context-model'
+    await server.store.ensure({ sessionId, defaultConfig: modelConfig })
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const changed = new Promise<DashboardServerToClientEvents['state:changed']>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('state:changed never emitted')), 1000)
+      dashboard.on('state:changed', (payload) => {
+        clearTimeout(timer)
+        resolve(payload)
+      })
+    })
+    dashboard.emit('client:set_model', {
+      sessionId,
+      model: 'claude-opus-4.7-1m-internal',
+    })
+
+    const payload = await changed
+    expect(payload.contextSnapshot?.contextWindow).toBe(1_000_000)
+    expect(payload.contextSnapshot?.effectiveLimit).toBe(1_000_000)
+    expect(payload.contextSnapshot?.contextWindowSource).toBe('model')
+    expect(payload.contextSnapshot?.contextWindowModel).toBe('claude-opus-4.7-1m-internal')
+
+    dashboard.close()
+  })
+
+  it('persists selected model preferences and restores them on a new host instance', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      models: [
+        { ref: 'anthropic:claude-opus', id: 'claude-opus', label: 'Claude Opus', provider: 'anthropic' },
+      ],
+    })
+    url = `http://localhost:${server.port}`
+
+    const sessionId = 'wire-model-persist'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const changed = new Promise<void>((resolve) => dashboard.once('session:model_changed', () => resolve()))
+    dashboard.emit('client:set_model', { sessionId, model: 'anthropic:claude-opus' })
+    await changed
+    dashboard.close()
+
+    const firstRecord = server.store.get(sessionId)!
+    expect(firstRecord.preferences.selectedModel).toBe('anthropic:claude-opus')
+    expect((await readSessionLog(firstRecord.logPath)).metadata.at(-1)?.selectedModel).toBe('anthropic:claude-opus')
+
+    await server.close()
+    const restartedHttp = createServer()
+    await new Promise<void>((resolve) => restartedHttp.listen(0, resolve))
+    server = await startHostServer({
+      port: (restartedHttp.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: restartedHttp,
+      models: [
+        { ref: 'anthropic:claude-opus', id: 'claude-opus', label: 'Claude Opus', provider: 'anthropic' },
+      ],
+    })
+    url = `http://localhost:${server.port}`
+    const reconnected = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    const ready = await new Promise<SessionReadyEvent>((resolve) => reconnected.on('session:ready', resolve))
+    expect(ready.selectedModel).toBe('anthropic:claude-opus')
+    reconnected.close()
+  })
+
+  it('rejects ambiguous bare model ids instead of silently choosing a provider', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      models: [
+        { ref: 'openai:shared', id: 'shared', label: 'Shared OpenAI', provider: 'openai' },
+        { ref: 'anthropic:shared', id: 'shared', label: 'Shared Anthropic', provider: 'anthropic' },
+      ],
+    })
+    url = `http://localhost:${server.port}`
+    const sessionId = 'wire-model-ambiguous'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const error = new Promise<DashboardServerToClientEvents['session:error']>((resolve) => dashboard.once('session:error', resolve))
+    dashboard.emit('client:set_model', { sessionId, model: 'shared' })
+    const payload = await error
+    expect(payload.message).toContain('unknown or ambiguous model')
+    expect(server.store.get(sessionId)?.preferences.selectedModel).toBeUndefined()
+    dashboard.close()
   })
 
   it('exposes router health payload when the option is provided', async () => {
@@ -1286,6 +1841,7 @@ describe('wire protocol', () => {
     await new Promise<SessionReadyEvent>((resolve) =>
       dashboard.on('session:ready', resolve),
     )
+    await server.store.updatePreferences(sessionId, { selectedModel: 'fork-model' })
 
     const executor: ClientSocket<
       ExecutorServerToClientEvents,
@@ -1335,11 +1891,13 @@ describe('wire protocol', () => {
     expect(ev.parentSessionId).toBe(sessionId)
     expect(ev.parentCursor).toBe(2)
     expect(ev.state.cursor).toBe(2)
+    expect(ev.selectedModel).toBe('fork-model')
     // Original session has cursor 4; fork stops at 2 (user + llm tool_call).
     const forkedRec = server.store.get('wire-fork-child')
     expect(forkedRec?.state.sessionId).toBe('wire-fork-child')
     expect(forkedRec?.parentSessionId).toBe(sessionId)
     expect(forkedRec?.parentCursor).toBe(2)
+    expect(forkedRec?.preferences.selectedModel).toBe('fork-model')
     expect(forkedRec?.state.cursor).toBe(2)
     expect(forkedRec).toBeTruthy()
     const forkedLog = await readSessionLog(forkedRec!.logPath)
@@ -1353,6 +1911,33 @@ describe('wire protocol', () => {
 
     dashboard.close()
     executor.close()
+  })
+
+  it('cascades session deletion through descendant sessions when requested', async () => {
+    await server.store.create({ sessionId: 'delete-parent', config })
+    await server.store.create({ sessionId: 'delete-child', config, parentSessionId: 'delete-parent' })
+    await server.store.create({ sessionId: 'delete-grandchild', config, parentSessionId: 'delete-child' })
+    await server.store.create({ sessionId: 'delete-sibling', config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'delete-parent', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    dashboard.emit('client:delete_session', { sessionId: 'delete-parent', cascade: true })
+    let summaries = await server.store.listSummaries()
+    for (let i = 0; i < 50 && summaries.length !== 1; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      summaries = await server.store.listSummaries()
+    }
+    expect(summaries.map((s) => s.sessionId).sort()).toEqual(['delete-sibling'])
+    dashboard.close()
   })
 
   it('forwards client:cancel to the executor as tool:cancel for pending calls', async () => {
@@ -1474,7 +2059,7 @@ describe('wire protocol', () => {
             },
           }
         }
-        if (call === 2) {
+        if (params.messages.length === 1 && JSON.stringify(params.messages).includes('long child task')) {
           await new Promise<void>((_resolve, reject) => {
             const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
             if (params.signal?.aborted) abort()
@@ -2029,6 +2614,37 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('broadcasts session summaries when an inactive session advances', async () => {
+    await server.store.ensure({ sessionId: 'active-session', defaultConfig: config })
+    await server.store.ensure({ sessionId: 'inactive-session', defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'active-session', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    const doneSummary = new Promise<ServerSessionsPayload>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('inactive session summary was not broadcast')), 4000)
+      dashboard.on('server:sessions', (payload) => {
+        const inactive = payload.sessions.find((s) => s.sessionId === 'inactive-session')
+        if (inactive?.status !== 'done') return
+        clearTimeout(timer)
+        resolve(payload)
+      })
+    })
+
+    await server.loop.dispatch('inactive-session', { kind: 'user_message', text: 'run in background' })
+    const payload = await doneSummary
+
+    expect(payload.sessions.find((s) => s.sessionId === 'inactive-session')?.status).toBe('done')
+    dashboard.close()
+  })
+
   it('client:rename_workspace updates executor snapshots and session summaries', async () => {
     const sessionId = 'wire-rename-workspace'
     const dashboard: ClientSocket<
@@ -2568,6 +3184,7 @@ describe('wire protocol', () => {
     await new Promise<void>((resolve) => http.listen(0, resolve))
     const port = (http.address() as AddressInfo).port
     const seenPrompts: string[] = []
+    const seenModels: Array<string | undefined> = []
     let releaseFirst!: () => void
     const firstRelease = new Promise<void>((resolve) => {
       releaseFirst = resolve
@@ -2578,6 +3195,10 @@ describe('wire protocol', () => {
       defaultConfig: config,
       httpServer: http,
       toolTimeoutMs: 2000,
+      models: [
+        { ref: 'provider:model-a', id: 'model-a', label: 'Model A', provider: 'provider' },
+        { ref: 'provider:model-b', id: 'model-b', label: 'Model B', provider: 'provider' },
+      ],
       llm: {
         name: 'queue-test',
         async call(p) {
@@ -2586,6 +3207,7 @@ describe('wire protocol', () => {
             .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
             .join('|')
           seenPrompts.push(userText)
+          seenModels.push(p.model)
           if (seenPrompts.length === 1) await firstRelease
           return {
             message: {
@@ -2599,6 +3221,7 @@ describe('wire protocol', () => {
     })
     url = `http://localhost:${server.port}`
     await server.store.ensure({ sessionId, defaultConfig: config })
+    await server.store.updatePreferences(sessionId, { selectedModel: 'provider:model-a' })
 
     const dashboard: ClientSocket<
       DashboardServerToClientEvents,
@@ -2643,6 +3266,13 @@ describe('wire protocol', () => {
       }, 10)
     })
     dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline && !queueEvents.some((e) => e.pending === 1 && e.text === 'second')) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const modelChanged = new Promise<void>((resolve) => dashboard.once('session:model_changed', () => resolve()))
+    dashboard.emit('client:set_model', { sessionId, model: 'provider:model-b' })
+    await modelChanged
     releaseFirst()
     await finalDone
 
@@ -2650,6 +3280,8 @@ describe('wire protocol', () => {
     expect(queueEvents.map((e) => e.pending)).toContain(0)
     expect(queueEvents.some((e) => e.pending === 1 && e.text === 'second' && e.mode === 'queue' && typeof e.id === 'string')).toBe(true)
     expect(seenPrompts).toEqual(['first', 'first|second'])
+    expect(seenModels).toEqual(['provider:model-a', 'provider:model-a'])
+    expect(server.store.get(sessionId)?.preferences.selectedModel).toBe('provider:model-b')
 
     dashboard.close()
   })

@@ -5,8 +5,12 @@
  * one JSON object per line. See `docs/protocol/event-log.md` for the spec.
  */
 
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { createReadStream } from 'node:fs'
+import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { createInterface } from 'node:readline/promises'
+import { basename, dirname, join, relative } from 'node:path'
 
 import type {
   AgentConfig,
@@ -19,8 +23,10 @@ import type {
   EventEntry,
   HeaderEntry,
   LLMTrace,
+  LogArtifactRef,
   LogEntry,
   MetadataEntry,
+  RuntimeMetadataEntry,
   SnapshotEntry,
 } from '@agent-kernel/shared'
 import { LOG_FORMAT_VERSION, redactLlmTrace } from '@agent-kernel/shared'
@@ -34,6 +40,9 @@ export type WriteHeaderParams = {
   initialState: AgentState
   parentSessionId?: string
   parentCursor?: number
+  parentCallId?: string
+  agentType?: string
+  subAgentStartedAt?: string
   workspaceId?: string
   workspaceName?: string
   initialCwd?: string
@@ -56,6 +65,15 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
     ...(params.parentCursor !== undefined
       ? { parentCursor: params.parentCursor }
       : {}),
+    ...(params.parentCallId !== undefined
+      ? { parentCallId: params.parentCallId }
+      : {}),
+    ...(params.agentType !== undefined
+      ? { agentType: params.agentType }
+      : {}),
+    ...(params.subAgentStartedAt !== undefined
+      ? { subAgentStartedAt: params.subAgentStartedAt }
+      : {}),
     ...(params.workspaceId !== undefined
       ? { workspaceId: params.workspaceId }
       : {}),
@@ -65,7 +83,26 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
     ...(params.initialCwd !== undefined ? { initialCwd: params.initialCwd } : {}),
   }
   await writeFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
+  await maybeWriteAgentModuleArtifacts(params.path, entry)
   return entry
+}
+
+async function maybeWriteAgentModuleArtifacts(logPath: string, header: HeaderEntry): Promise<void> {
+  if (!header.config.agentModule) return
+  const root = artifactRootForLog(logPath)
+  const dir = join(root, 'agent-module')
+  await mkdir(dir, { recursive: true })
+  if (header.config.systemPrompt) {
+    await writeFile(join(dir, 'system-prompt.txt'), header.config.systemPrompt, 'utf8')
+  }
+  await writeFile(
+    join(dir, 'tool-registry.json'),
+    JSON.stringify({
+      module: header.config.agentModule,
+      tools: header.config.tools,
+    }, null, 2) + '\n',
+    'utf8',
+  )
 }
 
 export type AppendEventParams = {
@@ -81,18 +118,115 @@ export type AppendEventParams = {
 export async function appendEventEntry(
   params: AppendEventParams,
 ): Promise<EventEntry> {
+  const artifactRoot = artifactRootForLog(params.path)
+  const fullEffects = params.effects
+  const slimEffects = params.effects.map(slimEffect)
+  const effectsArtifact = hasLargeEffectPayload(fullEffects)
+    ? await writeJsonArtifact({
+        logPath: params.path,
+        artifactRoot,
+        kind: 'effects',
+        seq: params.seq,
+        value: fullEffects,
+      })
+    : undefined
+  const safeLlmTrace = params.llmTrace ? redactLlmTrace(params.llmTrace) : undefined
+  const llmTraceArtifact = safeLlmTrace
+    ? await writeJsonArtifact({
+        logPath: params.path,
+        artifactRoot,
+        kind: 'llm-traces',
+        seq: params.seq,
+        value: safeLlmTrace,
+      })
+    : undefined
   const entry: EventEntry = {
     kind: 'event',
     seq: params.seq,
     ts: new Date().toISOString(),
     event: params.event,
-    effects: params.effects,
+    effects: slimEffects,
     ...(params.usage ? { usage: params.usage } : {}),
-    ...(params.llmTrace ? { llmTrace: redactLlmTrace(params.llmTrace) } : {}),
+    ...(effectsArtifact ? { effectsArtifact } : {}),
+    ...(safeLlmTrace ? { llmTrace: summarizeLlmTrace(safeLlmTrace) } : {}),
+    ...(llmTraceArtifact ? { llmTraceArtifact } : {}),
     ...(params.model ? { model: params.model } : {}),
   }
   await appendFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
   return entry
+}
+
+function summarizeLlmTrace(trace: LLMTrace): LLMTrace {
+  return {
+    provider: trace.provider,
+    model: trace.model,
+    request: {
+      url: trace.request.url,
+      headers: trace.request.headers,
+      body: undefined,
+    },
+    ...(trace.response
+      ? {
+          response: {
+            status: trace.response.status,
+            ...(trace.response.streamEventTypes ? { streamEventTypes: trace.response.streamEventTypes } : {}),
+            ...(trace.response.metrics ? { metrics: trace.response.metrics } : {}),
+          },
+        }
+      : {}),
+    ...(trace.gatewayRequestId ? { gatewayRequestId: trace.gatewayRequestId } : {}),
+    ...(trace.weightVersion ? { weightVersion: trace.weightVersion } : {}),
+  }
+}
+
+function artifactRootForLog(logPath: string): string {
+  const sessionSlug = basename(logPath, '.jsonl')
+  return join(dirname(logPath), 'artifacts', sessionSlug)
+}
+
+function hasLargeEffectPayload(effects: readonly Effect[]): boolean {
+  return effects.some((effect) => effect.kind === 'call_llm')
+}
+
+export function slimEffect(effect: Effect): Effect {
+  if (effect.kind === 'call_llm') return { kind: 'call_llm', messages: [], tools: [] }
+  if (effect.kind === 'call_tool') {
+    return {
+      kind: 'call_tool',
+      callId: effect.callId,
+      name: effect.name,
+      input: effect.input,
+      ...(effect.cwd ? { cwd: effect.cwd } : {}),
+    }
+  }
+  if (effect.kind === 'request_approval') {
+    return {
+      kind: 'request_approval',
+      callId: effect.callId,
+      name: effect.name,
+      input: effect.input,
+    }
+  }
+  return effect
+}
+
+async function writeJsonArtifact(params: {
+  logPath: string
+  artifactRoot: string
+  kind: 'effects' | 'llm-traces'
+  seq: number
+  value: unknown
+}): Promise<LogArtifactRef> {
+  const dir = join(params.artifactRoot, params.kind)
+  await mkdir(dir, { recursive: true })
+  const path = join(dir, `${String(params.seq).padStart(8, '0')}.json`)
+  const json = JSON.stringify(params.value)
+  await writeFile(path, json + '\n', 'utf8')
+  return {
+    path: relative(dirname(params.logPath), path),
+    bytes: Buffer.byteLength(json) + 1,
+    sha256: createHash('sha256').update(json).update('\n').digest('hex'),
+  }
 }
 
 export async function appendSnapshotEntry(
@@ -112,7 +246,7 @@ export async function appendSnapshotEntry(
 
 export async function appendMetadataEntry(
   path: string,
-  patch: { label?: string; workspaceId?: string; workspaceName?: string },
+  patch: { label?: string; workspaceId?: string; workspaceName?: string; selectedModel?: string },
 ): Promise<MetadataEntry> {
   const entry: MetadataEntry = {
     kind: 'metadata',
@@ -120,6 +254,28 @@ export async function appendMetadataEntry(
     ...(patch.label !== undefined ? { label: patch.label } : {}),
     ...(patch.workspaceId !== undefined ? { workspaceId: patch.workspaceId } : {}),
     ...(patch.workspaceName !== undefined ? { workspaceName: patch.workspaceName } : {}),
+    ...(patch.selectedModel !== undefined ? { selectedModel: patch.selectedModel } : {}),
+  }
+  await appendFile(path, JSON.stringify(entry) + '\n', 'utf8')
+  return entry
+}
+
+export async function appendRuntimeMetadataEntry(
+  path: string,
+  input: {
+    sessionId: string
+    action: string
+    payload: Record<string, unknown>
+    artifactRef?: LogArtifactRef
+  },
+): Promise<RuntimeMetadataEntry> {
+  const entry: RuntimeMetadataEntry = {
+    kind: 'runtime_metadata',
+    ts: new Date().toISOString(),
+    sessionId: input.sessionId,
+    action: input.action,
+    payload: input.payload,
+    ...(input.artifactRef ? { artifactRef: input.artifactRef } : {}),
   }
   await appendFile(path, JSON.stringify(entry) + '\n', 'utf8')
   return entry
@@ -130,6 +286,7 @@ export type ParsedLog = {
   events: EventEntry[]
   snapshots: SnapshotEntry[]
   metadata: MetadataEntry[]
+  runtimeMetadata: RuntimeMetadataEntry[]
   /**
    * Non-fatal parse warnings. Populated when the last line of the file was
    * truncated (the process crashed mid-`appendFile`). The recovered log is
@@ -139,37 +296,42 @@ export type ParsedLog = {
 }
 
 export async function readSessionLog(path: string): Promise<ParsedLog> {
-  // Read as a whole file so we can tell whether the trailing byte is a
-  // newline (fully-flushed line) or not (potentially truncated tail).
-  const raw = await readFile(path, 'utf8')
-  const endsWithNewline = raw.length === 0 || raw.endsWith('\n')
-  // Splitting on \n gives us an extra empty trailing element when the file
-  // ends with \n; strip it so `lines[lines.length - 1]` is always the last
-  // *content* line (possibly empty for an empty file).
-  const lines = raw.split('\n')
-  if (endsWithNewline) lines.pop()
-
   const entries: LogEntry[] = []
   const warnings: string[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!
-    if (line.trim().length === 0) continue
+  const endsWithNewline = await fileEndsWithNewline(path)
+  const rl = createInterface({
+    input: createReadStream(path, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  })
+  let lineNo = 0
+  let pendingLine: string | undefined
+  let pendingLineNo = 0
+  for await (const line of rl) {
+    lineNo += 1
+    if (pendingLine !== undefined) {
+      parseLogLine(pendingLine, pendingLineNo, entries)
+      pendingLine = undefined
+    }
     try {
-      entries.push(JSON.parse(line) as LogEntry)
+      pendingLine = line
+      pendingLineNo = lineNo
     } catch (err) {
-      const isLast = i === lines.length - 1
-      // A crash mid-write may leave the final line partial. That's the only
-      // case we tolerate — corruption anywhere else is a real integrity bug
-      // and MUST be surfaced.
-      if (isLast && !endsWithNewline) {
-        warnings.push(
-          `Dropped truncated final line ${i + 1} (${line.length} bytes): ${(err as Error).message}`,
-        )
-        continue
-      }
       throw new Error(
-        `Malformed JSON at line ${i + 1}: ${(err as Error).message}`,
+        `Malformed JSON at line ${lineNo}: ${(err as Error).message}`,
       )
+    }
+  }
+  if (pendingLine !== undefined) {
+    try {
+      parseLogLine(pendingLine, pendingLineNo, entries)
+    } catch (err) {
+      if (!endsWithNewline) {
+        warnings.push(
+          `Dropped truncated final line ${pendingLineNo} (${pendingLine.length} bytes): ${(err as Error).message}`,
+        )
+      } else {
+        throw err
+      }
     }
   }
 
@@ -181,10 +343,34 @@ export async function readSessionLog(path: string): Promise<ParsedLog> {
   const events: EventEntry[] = []
   const snapshots: SnapshotEntry[] = []
   const metadata: MetadataEntry[] = []
+  const runtimeMetadata: RuntimeMetadataEntry[] = []
   for (const e of entries.slice(1)) {
     if (e.kind === 'event') events.push(e)
     else if (e.kind === 'snapshot') snapshots.push(e)
     else if (e.kind === 'metadata') metadata.push(e)
+    else if (e.kind === 'runtime_metadata') runtimeMetadata.push(e)
   }
-  return { header, events, snapshots, metadata, warnings }
+  return { header, events, snapshots, metadata, runtimeMetadata, warnings }
+}
+
+function parseLogLine(line: string, lineNo: number, entries: LogEntry[]): void {
+  if (line.trim().length === 0) return
+  try {
+    entries.push(JSON.parse(line) as LogEntry)
+  } catch (err) {
+    throw new Error(`Malformed JSON at line ${lineNo}: ${(err as Error).message}`)
+  }
+}
+
+async function fileEndsWithNewline(path: string): Promise<boolean> {
+  const handle = await open(path, 'r')
+  try {
+    const stat = await handle.stat()
+    if (stat.size === 0) return true
+    const buf = Buffer.alloc(1)
+    await handle.read(buf, 0, 1, stat.size - 1)
+    return buf[0] === 10
+  } finally {
+    await handle.close()
+  }
 }

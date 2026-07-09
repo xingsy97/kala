@@ -25,6 +25,7 @@ import type {
   FinishEffect,
   RequestApprovalEffect,
   Effect,
+  Message,
 } from '@agent-kernel/kernel'
 import { estimateMessageTokens, step } from '@agent-kernel/kernel'
 
@@ -39,9 +40,10 @@ import {
 } from '@agent-kernel/shared/enhancement'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
-import { AGENT_TOOL_NAME, interruptSubAgentsForParent, runAgentTool } from './extensions/agent-tool.js'
+import { interruptSubAgentsForParent, isCancelledSubAgentChild } from './extensions/agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
-import { isSkillManager, runSkillTool, SKILL_TOOL_NAME } from './extensions/skills.js'
+import { isSkillManager } from './extensions/skills.js'
+import { dispatchConfiguredTool } from './agent-modules/execution.js'
 import type {
   HostLoopDeps,
   LoopHandle,
@@ -53,6 +55,7 @@ import type {
 // from `./loop.js` keep resolving. The definitions live in the leaf module
 // `loop-types.ts` (see the note there) to keep extensions off `loop.ts`.
 export type {
+  DispatchOptions,
   HostLoopDeps,
   LoopBroadcast,
   LoopHandle,
@@ -79,7 +82,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   const loopGuard = new Map<string, PostCompactionLoopGuard>()
 
   const handle: LoopHandle = {
-    async dispatch(sessionId, event) {
+    async dispatch(sessionId, event, options) {
       if (event.kind === 'cancel') {
         await dispatchOne(deps, sessionId, event, inFlightAborts)
         return
@@ -91,6 +94,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
           await dispatchOne(deps, sessionId, event, inFlightAborts, undefined, undefined, {
             handle,
             loopGuard,
+            ...(options?.model ? { model: options.model } : {}),
           })
           await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
         })
@@ -117,8 +121,33 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       const ctrl = inFlightAborts.get(sessionId)
       if (ctrl) ctrl.abort()
     },
+    hasActiveLlmCall(sessionId) {
+      return inFlightAborts.has(sessionId)
+    },
+    async recoverInterruptedLlm(sessionId) {
+      if (inFlightAborts.has(sessionId)) return false
+      const record = deps.store.get(sessionId)
+      if (!record || record.state.status !== 'thinking' || record.state.pendingCalls.length > 0) {
+        return false
+      }
+      await dispatchOne(deps, sessionId, interruptedLlmRecoveryEvent(), inFlightAborts, undefined, undefined, {
+        handle,
+        loopGuard,
+      })
+      return true
+    },
   }
   return handle
+}
+
+function interruptedLlmRecoveryEvent(): AgentEvent {
+  return {
+    kind: 'llm_response',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: '[interrupted]' }],
+    },
+  }
 }
 
 export async function dispatchOne(
@@ -178,8 +207,31 @@ export async function dispatchOne(
     if (inFlight) inFlight.abort()
   }
 
+  if (effects.length > 1 && effects.every(isCallToolEffect)) {
+    const resultQueue = createSerialQueue()
+    await Promise.all(
+      effects.map((eff) => performCallTool(deps, record.sessionId, eff, aborts, runtime, resultQueue)),
+    )
+    return
+  }
+
   for (const eff of effects) {
     await performEffect(deps, record, eff, aborts, runtime)
+  }
+}
+
+function isCallToolEffect(effect: Effect): effect is CallToolEffect {
+  return effect.kind === 'call_tool'
+}
+
+type SerialQueue = <T>(task: () => Promise<T>) => Promise<T>
+
+function createSerialQueue(): SerialQueue {
+  let tail = Promise.resolve()
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    const run = tail.catch(() => undefined).then(task)
+    tail = run.then(() => undefined, () => undefined)
+    return run
   }
 }
 
@@ -215,11 +267,16 @@ async function performCallLlm(
   aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
 ): Promise<void> {
-  const model = deps.models?.get(sessionId)
-  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
-  await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, messages, effect)
+  const model = runtime?.model ?? deps.models?.get(sessionId)
   const controller = new AbortController()
   aborts.set(sessionId, controller)
+  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
+  await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, messages, effect)
+  const live = deps.store.get(sessionId)
+  if (!live || live.state.status !== 'thinking' || controller.signal.aborted || isCancelledSubAgentChild(sessionId)) {
+    if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
+    return
+  }
   // Only ask for token deltas when the broadcast wants them. If no consumer
   // is wired up, we skip streaming entirely — the adapter falls through to
   // the plain buffered path and no partial-message accounting is needed.
@@ -232,17 +289,14 @@ async function performCallLlm(
       }
     : undefined
   try {
-    const res = await deps.llm.call({
-      messages,
+    const res = await callLlmOnce({
+      deps,
       tools: effect.tools,
       signal: controller.signal,
-      ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
-      ...(model ? { model } : {}),
-      ...(config.thinkingBudget !== undefined
-        ? { thinkingBudget: config.thinkingBudget }
-        : {}),
-      ...(onTextDelta ? { onTextDelta } : {}),
-    })
+      config,
+      model,
+      onTextDelta,
+    }, messages)
     await dispatchOne(
       deps,
       sessionId,
@@ -250,6 +304,7 @@ async function performCallLlm(
         kind: 'llm_response',
         message: res.message,
         ...(res.usage ? { usage: res.usage } : {}),
+        ...(res.finishReason ? { finishReason: res.finishReason } : {}),
       },
       aborts,
       res.trace,
@@ -286,6 +341,27 @@ async function performCallLlm(
   }
 }
 
+function callLlmOnce(input: {
+  deps: HostLoopDeps
+  tools: CallLlmEffect['tools']
+  signal: AbortSignal
+  config: AgentConfig
+  model?: string
+  onTextDelta?: (delta: string) => void
+}, messages: readonly Message[]) {
+  return input.deps.llm.call({
+    messages,
+    tools: input.tools,
+    signal: input.signal,
+    ...(input.config.systemPrompt ? { systemPrompt: input.config.systemPrompt } : {}),
+    ...(input.model ? { model: input.model } : {}),
+    ...(input.config.thinkingBudget !== undefined
+      ? { thinkingBudget: input.config.thinkingBudget }
+      : {}),
+    ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
+  })
+}
+
 async function maybeWriteMessageAssemblyArtifact(
   deps: HostLoopDeps,
   sessionId: string,
@@ -296,6 +372,7 @@ async function maybeWriteMessageAssemblyArtifact(
   if (!deps.artifactRootDir) return
   try {
     const record = deps.store.get(sessionId)
+    const contextLimit = contextLimitForSession(deps, sessionId, record)
     const store = createArtifactStore(deps.artifactRootDir, {
       ...(record?.state.cwd ? { workspaceRoot: record.state.cwd } : {}),
     })
@@ -306,7 +383,7 @@ async function maybeWriteMessageAssemblyArtifact(
       messages,
       tools: effect.tools,
       stages: messageAssemblyStages(deps.llm.name, effect.messages, messages, effect.tools),
-      ...(record?.config.contextLimit ? { budget: { contextLimit: record.config.contextLimit } } : {}),
+      ...(contextLimit ? { budget: { contextLimit } } : {}),
     })
     await store.writeJson(
       'message_assembly',
@@ -320,7 +397,7 @@ async function maybeWriteMessageAssemblyArtifact(
         requestedModel: model,
         selectedModel: model,
         adapterName: deps.llm.name,
-        maxInputTokens: record?.config.contextLimit,
+        maxInputTokens: contextLimit,
         tools: effect.tools,
         hasImageInput: messagesHaveImage(messages),
         reasoningBudgetRequested: messagesHaveReasoning(messages),
@@ -450,6 +527,7 @@ async function performCallTool(
   effect: CallToolEffect,
   aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
+  resultQueue?: SerialQueue,
 ): Promise<void> {
   try {
     const blockedByLoop = guardPostCompactionLoop(sessionId, effect, runtime?.loopGuard)
@@ -462,6 +540,7 @@ async function performCallTool(
         blockedByLoop,
         aborts,
         runtime,
+        resultQueue,
       )
       return
     }
@@ -475,6 +554,7 @@ async function performCallTool(
         memoryPolicyBlock,
         aborts,
         runtime,
+        resultQueue,
       )
       return
     }
@@ -488,21 +568,11 @@ async function performCallTool(
         blocked,
         aborts,
         runtime,
+        resultQueue,
       )
       return
     }
-    const res = effect.name === AGENT_TOOL_NAME
-      ? await runAgentTool(deps, sessionId, effect, aborts)
-      : effect.name === SKILL_TOOL_NAME
-        ? deps.skills
-          ? await runSkillTool(
-              isSkillManager(deps.skills)
-                ? await deps.skills.refreshSession(deps.store.get(sessionId)!)
-                : deps.skills,
-              effect.input,
-            )
-          : { ok: false, content: 'skills are not configured on this host' }
-        : await deps.tools.callTool(sessionId, effect)
+    const res = await dispatchConfiguredTool(deps, sessionId, effect, aborts)
     await runPostToolHooks(deps, sessionId, effect, res)
     await dispatchToolResult(
       deps,
@@ -512,6 +582,7 @@ async function performCallTool(
       res.content,
       aborts,
       runtime,
+      resultQueue,
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -523,6 +594,7 @@ async function performCallTool(
       message,
       aborts,
       runtime,
+      resultQueue,
     )
   }
 }
@@ -535,24 +607,29 @@ async function dispatchToolResult(
   content: string,
   aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
+  resultQueue?: SerialQueue,
 ): Promise<void> {
-  const record = deps.store.get(sessionId)
-  const capped = capToolResultForContext(content, record?.config.contextLimit)
-  await dispatchOne(
-    deps,
-    sessionId,
-    {
-      kind: 'tool_result',
-      callId,
-      ok,
-      content: capped,
-    },
-    aborts,
-    undefined,
-    undefined,
-    runtime,
-  )
-  await maybeCompactAfterToolResult(deps, sessionId, runtime)
+  const write = async (): Promise<void> => {
+    const record = deps.store.get(sessionId)
+    const capped = capToolResultForContext(content, contextLimitForSession(deps, sessionId, record))
+    await dispatchOne(
+      deps,
+      sessionId,
+      {
+        kind: 'tool_result',
+        callId,
+        ok,
+        content: capped,
+      },
+      aborts,
+      undefined,
+      undefined,
+      runtime,
+    )
+    await maybeCompactAfterToolResult(deps, sessionId, runtime)
+  }
+  if (resultQueue) await resultQueue(write)
+  else await write()
 }
 
 async function maybeCompactAfterToolResult(
@@ -565,7 +642,7 @@ async function maybeCompactAfterToolResult(
   if (!record) return
   if (record.state.status !== 'executing_tools') return
   if (record.state.pendingCalls.length === 0) return
-  if (!shouldPreflightCompact(record.config, record.state.messages)) return
+  if (!shouldPreflightCompact(record.config, record.state.messages, contextLimitForSession(deps, sessionId, record))) return
   await runtime.handle.compact(sessionId, 'tool_result')
 }
 
@@ -584,7 +661,8 @@ async function messagesForLlmCall(
   messages: readonly import('@agent-kernel/kernel').Message[],
   runtime?: LoopRuntime,
 ): Promise<readonly import('@agent-kernel/kernel').Message[]> {
-  if (!runtime || !shouldPreflightCompact(config, messages)) return messages
+  const contextLimit = contextLimitForSession(deps, sessionId)
+  if (!runtime || !shouldPreflightCompact(config, messages, contextLimit)) return messages
   try {
     await runtime.handle.compact(sessionId, 'preflight')
   } catch {
@@ -593,8 +671,8 @@ async function messagesForLlmCall(
     // the failure surfaces to the user as a broken turn. Emergency truncate to
     // the preflight budget by dropping whole assistant-groups from the head.
     const after = deps.store.get(sessionId)?.state.messages ?? messages
-    if (!shouldPreflightCompact(config, after)) return after
-    return emergencyTruncate(after, config)
+    if (!shouldPreflightCompact(config, after, contextLimit)) return after
+    return emergencyTruncate(after, config, contextLimit)
   }
   return deps.store.get(sessionId)?.state.messages ?? messages
 }
@@ -602,6 +680,7 @@ async function messagesForLlmCall(
 function emergencyTruncate(
   messages: readonly import('@agent-kernel/kernel').Message[],
   config: AgentConfig,
+  contextLimitOverride?: number,
 ): readonly import('@agent-kernel/kernel').Message[] {
   const leadingSystem = messages[0]?.role === 'system' ? [messages[0]] : []
   const rest = messages.slice(leadingSystem.length)
@@ -613,7 +692,7 @@ function emergencyTruncate(
   let dropped = 0
   while (groups.length > 1) {
     const candidate = [...leadingSystem, ...groups.flat()]
-    if (!shouldPreflightCompact(config, candidate)) return candidate
+    if (!shouldPreflightCompact(config, candidate, contextLimitOverride)) return candidate
     groups.shift()
     dropped += 1
     if (dropped > 100) break
@@ -624,23 +703,33 @@ function emergencyTruncate(
 function shouldPreflightCompact(
   config: AgentConfig,
   messages: readonly import('@agent-kernel/kernel').Message[],
+  contextLimitOverride?: number,
 ): boolean {
-  if (!config.contextLimit || config.contextLimit <= 0) return false
+  const contextLimit = contextLimitOverride ?? config.contextLimit
+  if (!contextLimit || contextLimit <= 0) return false
   if (!messages.some((m) => m.role !== 'system')) return false
   const baseReserve = Math.min(
     Math.max(
       PREFLIGHT_RESERVE_FLOOR_TOKENS,
-      Math.round(config.contextLimit * PREFLIGHT_RESERVE_RATIO),
+      Math.round(contextLimit * PREFLIGHT_RESERVE_RATIO),
     ),
-    Math.floor(config.contextLimit * 0.25),
+    Math.floor(contextLimit * 0.25),
   )
   // Extended-thinking budget is spent on THIS turn's reasoning tokens, before
   // the summary response the reserve already accounts for. Add it so a big
   // thinking budget doesn't quietly eat the compaction headroom.
   const thinking = config.thinkingBudget && config.thinkingBudget > 0 ? config.thinkingBudget : 0
-  const reserve = Math.min(baseReserve + thinking, Math.floor(config.contextLimit * 0.5))
-  const limit = Math.max(0, config.contextLimit - reserve)
+  const reserve = Math.min(baseReserve + thinking, Math.floor(contextLimit * 0.5))
+  const limit = Math.max(0, contextLimit - reserve)
   return estimateMessageTokens(messages) >= limit
+}
+
+function contextLimitForSession(
+  deps: HostLoopDeps,
+  sessionId: string,
+  record = deps.store.get(sessionId),
+): number | undefined {
+  return deps.models?.contextWindow?.(sessionId) ?? record?.config.contextLimit
 }
 
 function capToolResultForContext(content: string, contextLimit: number | undefined): string {

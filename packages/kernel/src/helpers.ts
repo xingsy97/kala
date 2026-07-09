@@ -6,7 +6,6 @@
  *   - `extractToolCalls`     —— filter tool_call content blocks
  *   - `addUsage`             —— accumulate token counts
  *   - `afterPendingSettled`  —— decide next status after a call finishes
- *   - `withPressure`         —— attach the derived context-pressure level
  *
  * Everything is pure: no IO, no time source. Keeping them together makes the
  * `step()` / handler files scan smaller.
@@ -15,7 +14,6 @@
 import type {
   AgentConfig,
   AgentState,
-  ContextPressureLevel,
   Message,
   MessageContent,
   PendingToolCall,
@@ -24,7 +22,6 @@ import type {
   UsageDelta,
   UsageTotal,
 } from './types.js'
-import { DEFAULT_HARD_THRESHOLD, DEFAULT_SOFT_THRESHOLD } from './types.js'
 
 export function noop(state: AgentState): StepResult {
   return { next: state, effects: [] }
@@ -75,26 +72,6 @@ export function afterPendingSettled(
     next,
     effects: [{ kind: 'call_llm', messages: next.messages, tools: config.tools }],
   }
-}
-
-export function withPressure(state: AgentState, config: AgentConfig): AgentState {
-  const contextTokens = estimateMessageTokens(state.messages)
-  const level = derivePressure(contextTokens, config)
-  if (level === state.contextPressureLevel && contextTokens === state.contextTokens) return state
-  return { ...state, contextTokens, contextPressureLevel: level }
-}
-
-function derivePressure(
-  inputTokens: number,
-  config: AgentConfig,
-): ContextPressureLevel {
-  if (!config.contextLimit || config.contextLimit <= 0) return 'none'
-  const ratio = inputTokens / config.contextLimit
-  const hard = config.hardThreshold ?? DEFAULT_HARD_THRESHOLD
-  const soft = config.softThreshold ?? DEFAULT_SOFT_THRESHOLD
-  if (ratio >= hard) return 'hard'
-  if (ratio >= soft) return 'soft'
-  return 'none'
 }
 
 export function estimateMessageTokens(messages: readonly Message[]): number {

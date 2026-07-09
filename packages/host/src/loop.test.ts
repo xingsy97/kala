@@ -18,6 +18,7 @@ import type {
 } from './loop.js'
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
 import { createSkillManager, discoverSkills } from './extensions/skills.js'
+import { contextSnapshot } from './context/manager.js'
 
 function silentBroadcast(): LoopBroadcast {
   return {
@@ -59,6 +60,17 @@ const AGENT = {
   description: 'spawn agent',
   inputSchema: { type: 'object' },
   requiresApproval: false,
+  executionKind: 'host',
+  executionHandler: 'agent',
+} as const
+
+const SKILL = {
+  name: 'skill',
+  description: 'skill loader',
+  inputSchema: { type: 'object' },
+  requiresApproval: false,
+  executionKind: 'host',
+  executionHandler: 'skill',
 } as const
 
 const MEMORY = {
@@ -118,6 +130,33 @@ describe('host loop', () => {
     expect(parsed.events[0]?.event.kind).toBe('user_message')
     expect(parsed.events[1]?.event.kind).toBe('llm_response')
     void state
+  })
+
+  it('records an empty assistant response without hidden retry messages', async () => {
+    const calls: number[] = []
+    const llm: LLMAdapter = {
+      name: 'empty-once',
+      async call(params) {
+        calls.push(params.messages.length)
+        return { message: { role: 'assistant', content: [] } }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'continue' })
+
+    expect(calls).toEqual([2])
+    const rec = store.get(sessionId)!
+    expect(rec.state.status).toBe('done')
+    const last = rec.state.messages.at(-1)
+    expect(last).toEqual({ role: 'assistant', content: [] })
+    const parsed = await readSessionLog(rec.logPath)
+    expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message', 'llm_response'])
   })
 
   it('writes message assembly artifacts outside the replay log when configured', async () => {
@@ -340,6 +379,35 @@ describe('host loop', () => {
     expect(seenEvents).toContainEqual({ event: 'llm_response', model: 'claude-sonnet-4-6' })
   })
 
+  it('uses dispatch model override for the whole turn instead of the live resolver value', async () => {
+    const calls: Array<string | undefined> = []
+    const llm: LLMAdapter = {
+      name: 'capturing',
+      async call(params) {
+        calls.push(params.model)
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'override captured' }],
+          },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+      models: { get: () => 'live-model' },
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' }, { model: 'snapshot-model' })
+
+    expect(calls).toEqual(['snapshot-model'])
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    expect(parsed.events.find((entry) => entry.event.kind === 'llm_response')?.model).toBe('snapshot-model')
+  })
+
   it('records and broadcasts LLM provider trace from the adapter', async () => {
     const trace = {
       provider: 'openai' as const,
@@ -358,6 +426,7 @@ describe('host loop', () => {
           content: [{ type: 'text', text: 'trace captured' }],
         },
         usage: { inputTokens: 7, outputTokens: 4 },
+        finishReason: 'stop',
         trace,
       },
     ])
@@ -379,11 +448,13 @@ describe('host loop', () => {
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     const response = parsed.events.find((entry) => entry.event.kind === 'llm_response')
     expect(response?.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
-    expect(response?.llmTrace?.request.headers.authorization).toBe('[redacted]')
-    expect(response?.llmTrace?.request.headers['x-api-key']).toBe('[redacted]')
-    expect(JSON.stringify(response?.llmTrace)).not.toContain('api.example.test')
-    expect(JSON.stringify(response?.llmTrace)).not.toContain('test-redacted-api-key')
+    expect(response?.llmTrace?.request.body).toBeUndefined()
+    expect(response?.llmTraceArtifact?.path).toContain('llm-traces')
     expect(response?.model).toBe('gpt-5.5')
+    expect(response?.event.kind).toBe('llm_response')
+    if (response?.event.kind === 'llm_response') {
+      expect(response.event.finishReason).toBe('stop')
+    }
     expect(seen).toHaveLength(1)
     expect(seen[0]?.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
     expect(seen[0]?.llmTrace?.request.headers.authorization).toBe('[redacted]')
@@ -452,12 +523,7 @@ describe('host loop', () => {
     const skillConfig = createConfig({
       tools: [
         READ,
-        {
-          name: 'skill',
-          description: 'skill loader',
-          inputSchema: { type: 'object' },
-          requiresApproval: false,
-        },
+        SKILL,
       ],
       systemPrompt: 'sys',
     })
@@ -522,12 +588,7 @@ describe('host loop', () => {
     mkdirSync(workspace, { recursive: true })
     const skillConfig = createConfig({
       tools: [
-        {
-          name: 'skill',
-          description: '<available_skills />',
-          inputSchema: { type: 'object' },
-          requiresApproval: false,
-        },
+        { ...SKILL, description: '<available_skills />' },
         {
           name: 'write',
           description: 'write',
@@ -598,12 +659,10 @@ describe('host loop', () => {
     expect(toolDescriptions[0]).toContain('<available_skills />')
     expect(toolDescriptions[1]).toContain('<name>fresh-skill</name>')
     const parsed = await readSessionLog(record.logPath)
-    const secondCallLlm = parsed.events
-      .flatMap((entry) => entry.effects)
-      .filter((effect) => effect.kind === 'call_llm')[1]
-    expect(secondCallLlm?.kind === 'call_llm'
-      ? secondCallLlm.tools.find((tool) => tool.name === 'skill')?.description
-      : '').toContain('<name>fresh-skill</name>')
+    const secondCallLlmEntry = parsed.events.filter((entry) => entry.effects.some((effect) => effect.kind === 'call_llm'))[1]
+    const fullEffects = JSON.parse(await readFile(join(dir, secondCallLlmEntry!.effectsArtifact!.path), 'utf8'))
+    const secondCallLlm = fullEffects.find((effect: { kind: string }) => effect.kind === 'call_llm')
+    expect(secondCallLlm.tools.find((tool: { name: string }) => tool.name === 'skill')?.description).toContain('<name>fresh-skill</name>')
   })
 
   it('translates LLM throw into llm_error event', async () => {
@@ -832,7 +891,7 @@ describe('host loop', () => {
     // Pre-seed a session that has already run one turn so state.messages is
     // non-trivial. Then a manual `/compact` should send those messages to
     // the LLM with the summarizer system prompt, receive a text reply, and
-    // emit a compact_replaced event that shrinks the message list.
+    // emit a messages_replaced event that shrinks the message list.
     const llmCalls: Array<{
       sys?: string
       msgs: number
@@ -889,15 +948,13 @@ describe('host loop', () => {
     expect(llmCalls[1]!.model).toBe('compact-model')
     // Cumulative usage is preserved; current-window context is compacted.
     expect(rec.state.usage.inputTokens).toBe(10)
-    expect(rec.state.contextTokens).toBeLessThan(100)
+    expect(contextSnapshot(rec).estimatedMessageTokens).toBeLessThan(beforeCount * 10)
     const parsed = await readSessionLog(rec.logPath)
-    const compact = parsed.events.find((e) => e.event.kind === 'compact_replaced')
-      ?.event as Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> | undefined
-    expect(compact?.trigger).toBe('manual')
-    expect(compact?.request?.model).toBe('compact-model')
-    expect(compact?.request?.systemPrompt).toMatch(/compacting an agent-kernel coding-agent session/i)
-    expect(compact?.request?.messages).toHaveLength(beforeCount)
-    expect(compact?.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
+    const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
+    expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
+    const metadata = parsed.runtimeMetadata.find((e) => e.action === 'compaction_applied')
+    expect(metadata?.payload.trigger).toBe('manual')
+    expect(metadata?.payload.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
   })
 
   it('manual compact() trims old oversized tool results before summarizing', async () => {
@@ -1083,8 +1140,8 @@ describe('host loop', () => {
       type: 'text',
       text: 'auto-summary',
     })
-    // Pressure recomputed on the reduced input tokens → back to 'none'.
-    expect(after.state.contextPressureLevel).toBe('none')
+    // Pressure is now host-owned and recomputed from the compacted messages.
+    expect(contextSnapshot(after).pressureLevel).toBe('none')
   })
 
   it('auto-compact summarizes the old prefix and preserves the latest user turn', async () => {
@@ -1206,8 +1263,9 @@ describe('host loop', () => {
     expect(calls.map((c) => c.kind)).toEqual(['normal', 'compact', 'normal'])
     expect(calls[2]!.messages.some((m) => m.role === 'system' && JSON.stringify(m).includes('preflight summary'))).toBe(true)
     const parsed = await readSessionLog(store.get(sid)!.logPath)
-    const compact = parsed.events.find((e) => e.event.kind === 'compact_replaced')?.event
-    expect(compact).toMatchObject({ kind: 'compact_replaced', trigger: 'preflight' })
+    const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
+    expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
+    expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_applied' && e.payload.trigger === 'preflight')).toBe(true)
   })
 
   it('compacts between sibling tool results when the first result exhausts context headroom', async () => {
@@ -1289,10 +1347,7 @@ describe('host loop', () => {
     expect(JSON.stringify(toolResults[0])).toContain('TAIL-OF-HUGE-RESULT')
 
     const parsed = await readSessionLog(store.get(sid)!.logPath)
-    const compacts = parsed.events
-      .map((e) => e.event)
-      .filter((event): event is Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> => event.kind === 'compact_replaced')
-    expect(compacts.some((compact) => compact.trigger === 'tool_result')).toBe(true)
+    expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_applied' && e.payload.trigger === 'tool_result')).toBe(true)
     expect(store.get(sid)!.state.status).toBe('done')
   })
 
@@ -1521,7 +1576,66 @@ describe('host loop', () => {
     expect(children[0]!.workspaceId).toBe('ws-agent')
     const childLog = await readSessionLog(children[0]!.logPath)
     expect(childLog.header.parentSessionId).toBe(parent.sessionId)
+    expect(childLog.header.parentCallId).toBe('agent-1')
+    expect(childLog.header.subAgentStartedAt).toMatch(/T/)
     expect(children[0]!.state.status).toBe('done')
+  })
+
+  it('starts sibling sub-agent tool calls concurrently', async () => {
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-parallel-parent',
+      workspaceId: 'ws-agent-parallel',
+    })
+    const childWaiters: Array<() => void> = []
+    let llmCalls = 0
+    const llm: LLMAdapter = {
+      name: 'parallel-scripted',
+      async call() {
+        llmCalls += 1
+        if (llmCalls === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'tool_call', callId: 'agent-a', name: 'agent', input: { prompt: 'A' } },
+                { type: 'tool_call', callId: 'agent-b', name: 'agent', input: { prompt: 'B' } },
+              ],
+            },
+          }
+        }
+        if (llmCalls === 2 || llmCalls === 3) {
+          await new Promise<void>((resolve) => childWaiters.push(resolve))
+          return { message: { role: 'assistant', content: [{ type: 'text', text: `child ${llmCalls}` }] } }
+        }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'parent done' }] } }
+      },
+    }
+    const started: SubAgentStartedPayload[] = []
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: {
+        ...silentBroadcast(),
+        onSubAgentStarted(p) {
+          started.push(p)
+        },
+      },
+    })
+
+    const run = loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+    while (started.length < 2) await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(started.map((p) => p.parentCallId).sort()).toEqual(['agent-a', 'agent-b'])
+    while (childWaiters.length < 2) await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(childWaiters).toHaveLength(2)
+    childWaiters.forEach((resolve) => resolve())
+    await run
+
+    const parentLog = await readSessionLog(parent.logPath)
+    const results = parentLog.events.filter((e) => e.event.kind === 'tool_result')
+    expect(results.map((e) => e.event.kind === 'tool_result' ? e.event.callId : '').sort()).toEqual(['agent-a', 'agent-b'])
   })
 
   it('persists a resolved sub-agent policy artifact when a role is requested', async () => {
@@ -2143,7 +2257,7 @@ describe('SessionStore', () => {
     const rec = await store.create({ config: cfg, sessionId: 'abc' })
     const parsed = await readSessionLog(rec.logPath)
     expect(parsed.header.sessionId).toBe('abc')
-    expect(parsed.header.formatVersion).toBe(1)
+    expect(parsed.header.formatVersion).toBe(2)
     expect(parsed.events).toHaveLength(0)
   })
 

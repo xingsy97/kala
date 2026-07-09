@@ -29,6 +29,7 @@ import type {
   ClientListFiles,
   ClientListSessions,
   ClientListSubAgents,
+  ClientLoadLogArtifact,
   ClientLoadHistory,
   ClientReadBgOutput,
   ClientReadFile,
@@ -39,17 +40,26 @@ import type {
   ClientSetApprovalMode,
   ClientSetCwd,
   ClientSetModel,
+  ClientSetDefaultModel,
   ClientSubscribe,
+  ClientTerminalCreate,
+  ClientTerminalInput,
+  ClientTerminalKill,
+  ClientTerminalResize,
   ClientUpdatePreferences,
   ClientUpdateQueuedMessage,
   ClientUserApprove,
   ClientUserMessage,
   ClientUserReject,
   ClientAddManualModel,
+  ClientAddManualProvider,
+  ClientUpdateAgentPromptSettings,
   ClientDeleteManualModel,
+  ClientDeleteManualProvider,
   CopyOverflowSession,
   DeleteOverflowSession,
   ManualModelInput,
+  ManualProviderInput,
   SessionPreferences,
 } from '../protocol.js'
 import { ApprovalModeSchema, MessageContentSchema } from './kernel.js'
@@ -128,6 +138,7 @@ export const ClientCreateSessionSchema = z.object({
   workspaceName: z.string().optional(),
   cwd: z.string().optional(),
   tools: z.array(z.string()).readonly().optional(),
+  selectedModel: z.string().optional(),
 }) satisfies z.ZodType<ClientCreateSession>
 
 export const ClientSubscribeSchema = z.object({
@@ -139,8 +150,14 @@ export const ClientLoadHistorySchema = z.object({
   sinceCursor: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<ClientLoadHistory>
 
+export const ClientLoadLogArtifactSchema = z.object({
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+}) satisfies z.ZodType<ClientLoadLogArtifact>
+
 export const ClientDeleteSessionSchema = z.object({
   sessionId: z.string(),
+  cascade: z.boolean().optional(),
 }) satisfies z.ZodType<ClientDeleteSession>
 
 // The wire form of a `Record<string, never>` payload is `undefined` or `{}` —
@@ -216,12 +233,14 @@ export const ClientRenameWorkspaceSchema = z.object({
 export const ClientListDirsSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string().optional(),
   path: z.string().optional(),
 }) satisfies z.ZodType<ClientListDirs>
 
 export const ClientListFilesSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string().optional(),
   query: z.string().optional(),
   limit: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ClientListFiles>
@@ -229,6 +248,7 @@ export const ClientListFilesSchema = z.object({
 export const ClientReadFileSchema = z.object({
   requestId: z.string(),
   workspaceId: z.string(),
+  sessionId: z.string().optional(),
   path: z.string(),
   maxBytes: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ClientReadFile>
@@ -238,6 +258,37 @@ export const ClientReadOverflowSchema = z.object({
   sessionId: z.string(),
   callId: z.string(),
 }) satisfies z.ZodType<ClientReadOverflow>
+
+export const ClientTerminalCreateSchema = z.object({
+  requestId: z.string(),
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  cwd: z.string().optional(),
+  cols: z.number().int().positive().optional(),
+  rows: z.number().int().positive().optional(),
+}) satisfies z.ZodType<ClientTerminalCreate>
+
+export const ClientTerminalInputSchema = z.object({
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  terminalId: z.string(),
+  data: z.string(),
+}) satisfies z.ZodType<ClientTerminalInput>
+
+export const ClientTerminalResizeSchema = z.object({
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  terminalId: z.string(),
+  cols: z.number().int().positive(),
+  rows: z.number().int().positive(),
+}) satisfies z.ZodType<ClientTerminalResize>
+
+export const ClientTerminalKillSchema = z.object({
+  requestId: z.string(),
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  terminalId: z.string(),
+}) satisfies z.ZodType<ClientTerminalKill>
 
 export const DeleteOverflowSessionSchema = z.object({
   requestId: z.string(),
@@ -309,9 +360,31 @@ export const ManualModelInputSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
 }) satisfies z.ZodType<ManualModelInput>
 
+export const ManualProviderInputSchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  wire: z.enum(['anthropic', 'openai']),
+  baseUrl: z.string(),
+  apiKey: z.string(),
+}) satisfies z.ZodType<ManualProviderInput>
+
+export const ClientAddManualProviderSchema = ManualProviderInputSchema satisfies z.ZodType<ClientAddManualProvider>
+
+export const ClientDeleteManualProviderSchema = z.object({
+  providerId: z.string(),
+}) satisfies z.ZodType<ClientDeleteManualProvider>
+
 export const ClientAddManualModelSchema = ManualModelInputSchema satisfies z.ZodType<ClientAddManualModel>
 
 export const ClientDeleteManualModelSchema = z.object({
   providerId: z.string(),
   id: z.string(),
 }) satisfies z.ZodType<ClientDeleteManualModel>
+
+export const ClientSetDefaultModelSchema = z.object({
+  model: z.string(),
+}) satisfies z.ZodType<ClientSetDefaultModel>
+
+export const ClientUpdateAgentPromptSettingsSchema = z.object({
+  preset: z.enum(['codex', 'claude-code']),
+}) satisfies z.ZodType<ClientUpdateAgentPromptSettings>

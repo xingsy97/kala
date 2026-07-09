@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createConfig } from '@agent-kernel/kernel'
+import { createConfig, step } from '@agent-kernel/kernel'
 
 import { SessionStore } from './session.js'
 import { appendEventEntry, readSessionLog, writeHeader } from './log.js'
@@ -207,6 +207,36 @@ describe('SessionStore.rename', () => {
     const store2 = new SessionStore(dir)
     const rec2 = await store2.load('sess-persist-label')
     expect(rec2.label).toBe('Persisted title')
+  })
+})
+
+describe('SessionStore.updatePreferences', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-prefs-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('persists selectedModel metadata and restores it after reload', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({ sessionId: 'sess-model-pref', defaultConfig: config })
+
+    const applied = await store.updatePreferences(record.sessionId, { selectedModel: 'anthropic:claude-opus' })
+
+    expect(applied.selectedModel).toBe('anthropic:claude-opus')
+    expect(record.preferences.selectedModel).toBe('anthropic:claude-opus')
+    let parsed = await readSessionLog(record.logPath)
+    expect(parsed.metadata.at(-1)?.selectedModel).toBe('anthropic:claude-opus')
+
+    const reloaded = await new SessionStore(dir).load(record.sessionId)
+    expect(reloaded.preferences.selectedModel).toBe('anthropic:claude-opus')
+
+    await store.updatePreferences(record.sessionId, { selectedModel: '   ' })
+    expect(record.preferences.selectedModel).toBeUndefined()
+    parsed = await readSessionLog(record.logPath)
+    expect(parsed.metadata.at(-1)?.selectedModel).toBe('')
+    const cleared = await new SessionStore(dir).load(record.sessionId)
+    expect(cleared.preferences.selectedModel).toBeUndefined()
   })
 })
 
@@ -435,5 +465,26 @@ describe('SessionStore crash recovery', () => {
         .join('')
       expect(text).toBe('[interrupted]')
     }
+  })
+
+  it('repairs a cached mid-stream session without forcing a disk reload', async () => {
+    const sessionId = 'sess-cached-thinking'
+    const cfg = createConfig({ tools: [], systemPrompt: 'sys' })
+    const store = new SessionStore(dir)
+    const rec = await store.create({ sessionId, config: cfg })
+    const event = { kind: 'user_message', text: 'hello' } as const
+    const { next, effects } = step(rec.state, event, rec.config)
+    await store.record(sessionId, event, effects, next)
+
+    const recovered = await store.recoverInterruptedLlm(sessionId)
+
+    expect(recovered).not.toBeNull()
+    expect(recovered?.record).toBe(rec)
+    expect(rec.state.status).toBe('done')
+    expect(rec.state.cursor).toBe(2)
+
+    const parsed = await readSessionLog(rec.logPath)
+    expect(parsed.events).toHaveLength(2)
+    expect(parsed.events[1]!.event.kind).toBe('llm_response')
   })
 })

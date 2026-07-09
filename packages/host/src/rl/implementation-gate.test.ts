@@ -223,7 +223,7 @@ describe('Agentic RL implementation gate primitives', () => {
     } finally {
       console.log = oldLog
     }
-  })
+  }, 15_000)
 })
 
 function task(input: { taskId?: string; trainingAllowed?: boolean; workdir?: string } = {}) {

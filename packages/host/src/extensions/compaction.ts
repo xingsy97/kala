@@ -1,10 +1,10 @@
 /**
  * Context compaction.
  *
- * When `state.contextPressureLevel === 'hard'` (auto) or the user fires
+ * When context pressure reaches the hard tier (auto) or the user fires
  * `/compact` (manual), summarize the old message prefix into one synthetic
  * system message while keeping the most recent user turn verbatim. The reducer
- * applies the replacement in response to a `compact_replaced` event; this
+ * applies the replacement in response to a `messages_replaced` event; this
  * module chooses the pivot, drives the summarizer LLM call with a bounded
  * retry ladder, and dispatches the event through the normal loop path.
  *
@@ -22,19 +22,19 @@
  *   in-batch retries so we don't loop after every subsequent tool result.
  * - **Empty summary rejection**. A summarizer that returns nothing is a
  *   failed attempt, not a successful compaction of the transcript to "".
- * - **Reducer rejection observability**. When the reducer refuses a
- *   `compact_replaced` (would orphan a pending tool_result), the host detects
- *   the noop, dispatches `compact_rejected` for ledger visibility, and counts
- *   the attempt as a failure.
+ * - **Replacement validation**. Host validates the message rewrite before it
+ *   enters the kernel event ledger. Failed attempts are runtime metadata, not
+ *   agent protocol events.
  * - **Unknown-context-limit fallback**. Preflight uses a synthetic 128k
  *   fallback and disables auto rather than silently doing nothing.
  */
 
 import type {
-  AgentEvent,
   AgentState,
   Message,
   MessageContent,
+  ToolSchema,
+  UsageDelta,
 } from '@agent-kernel/kernel'
 import { estimateMessageTokens } from '@agent-kernel/kernel'
 import type { LLMTrace } from '@agent-kernel/shared'
@@ -46,6 +46,8 @@ import {
 
 import type { HostLoopDeps, LoopHandle } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
+import { appendRuntimeMetadataEntry } from '../store/log.js'
+import { contextSnapshot, shouldAutoCompact } from '../context/manager.js'
 
 const SUMMARIZER_PROMPT = `You are compacting an agent-kernel coding-agent session.
 
@@ -142,7 +144,7 @@ export async function maybeAutoCompact(
 ): Promise<void> {
   const record = deps.store.get(sessionId)
   if (!record) return
-  if (record.state.contextPressureLevel !== 'hard') return
+  if (!shouldAutoCompact(record, contextWindowOverrideForSession(deps, sessionId))) return
   const s = record.state.status
   if (s !== 'idle' && s !== 'done' && s !== 'error') return
   if (inFlight.has(sessionId)) return
@@ -197,8 +199,9 @@ export async function runCompact(
 
   inFlight.add(sessionId)
   try {
-    const contextLimit = record.config.contextLimit
-    const tokensBefore = record.state.contextTokens
+    const contextLimit = deps.models?.contextWindow?.(sessionId) ?? record.config.contextLimit
+    const beforeSnapshot = contextSnapshot(record, record.state.messages, contextWindowOverrideForSession(deps, sessionId))
+    const tokensBefore = beforeSnapshot.estimatedTotalInputTokens
     const replacedCount = record.state.messages.length
     const preserveFrom = choosePreserveFrom(record.state, trigger, contextLimit)
     const preservedTail = record.state.messages.slice(preserveFrom)
@@ -230,55 +233,53 @@ export async function runCompact(
       return false
     }
 
-    const leadingSystem = record.state.messages[0]?.role === 'system' ? [record.state.messages[0]!] : []
+    const leadingSystemCount = record.state.messages[0]?.role === 'system' ? 1 : 0
+    const replacementMessages: Message[] = [
+      { role: 'system', content: [{ type: 'text', text: compact.summary }] },
+    ]
     const tokensAfter = estimateMessageTokens([
-      ...leadingSystem,
-      { role: 'system' as const, content: [{ type: 'text' as const, text: compact.summary }] },
+      ...record.state.messages.slice(0, leadingSystemCount),
+      ...replacementMessages,
       ...preservedTail,
     ])
+    const replaceRange = { start: leadingSystemCount, end: preserveFrom }
+    const invalidReason = validateReplacement(record.state, replaceRange)
+    if (invalidReason) {
+      await dispatchRejected(deps, sessionId, trigger, attemptId, invalidReason, {
+        replaceRange,
+        tokensBefore,
+        tokensAfter,
+      })
+      rt.consecutiveFailures += 1
+      if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
+      if (trigger === 'manual') throw new Error(`compact rejected before dispatch: ${invalidReason}`)
+      return false
+    }
 
-    const messagesBefore = deps.store.get(sessionId)?.state.messages.length ?? 0
     await dispatchOne(
       deps,
       sessionId,
       {
-        kind: 'compact_replaced',
-        trigger,
-        attemptId,
-        preserveFrom,
-        request: compact.request,
-        ...(compact.usage ? { responseUsage: compact.usage } : {}),
-        summary: compact.summary,
-        replacedCount,
-        tokensBefore,
-        tokensAfter,
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange,
+        replacementMessages,
       },
       aborts,
       compact.trace,
       compact.model,
     )
-
-    // Reducer-rejection detection: if the reducer refused the pivot (would
-    // orphan a pending tool_result, or preserveFrom was invalid), it silently
-    // no-ops. We detect by observing that message count did not change.
-    // preserveFrom < messagesBefore should always reduce count; equal count
-    // after with a non-empty summary means the reducer noop'd.
-    const messagesAfter = deps.store.get(sessionId)?.state.messages.length ?? 0
-    const expectedNewCount = expectedMessageCountAfter(record.state.messages, preserveFrom)
-    if (messagesAfter === messagesBefore && messagesBefore !== expectedNewCount) {
-      const reason: 'pending_call_orphaned' | 'invalid_preserve_from' =
-        record.state.pendingCalls.length > 0 ? 'pending_call_orphaned' : 'invalid_preserve_from'
-      await dispatchOne(
-        deps,
-        sessionId,
-        { kind: 'compact_rejected', attemptId, reason },
-        aborts,
-      )
-      rt.consecutiveFailures += 1
-      if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
-      if (trigger === 'manual') throw new Error(`compact rejected by reducer: ${reason}`)
-      return false
-    }
+    await appendCompactionMetadata(deps, sessionId, 'compaction_applied', {
+      trigger,
+      attemptId,
+      replaceRange,
+      preserveFrom,
+      replacedCount,
+      tokensBefore,
+      tokensAfter,
+      summaryChars: compact.summary.length,
+      ...(compact.usage ? { responseUsage: compact.usage } : {}),
+    })
 
     // Success: reset counters and back-off.
     rt.consecutiveFailures = 0
@@ -286,6 +287,16 @@ export async function runCompact(
     return true
   } finally {
     inFlight.delete(sessionId)
+  }
+}
+
+function contextWindowOverrideForSession(deps: HostLoopDeps, sessionId: string): { model?: string; contextWindow?: number } | undefined {
+  const model = deps.models?.get(sessionId)
+  const contextWindow = deps.models?.contextWindow?.(sessionId)
+  if (!model && !contextWindow) return undefined
+  return {
+    ...(model ? { model } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
   }
 }
 
@@ -319,18 +330,44 @@ async function dispatchSkip(
   aborts: Map<string, AbortController>,
   errorMessageText?: string,
 ): Promise<void> {
-  await dispatchOne(
-    deps,
+  void aborts
+  await appendCompactionMetadata(deps, sessionId, 'compaction_skipped', {
+    trigger,
+    attemptId,
+    reason,
+    ...(errorMessageText ? { errorMessage: errorMessageText } : {}),
+  })
+}
+
+async function dispatchRejected(
+  deps: HostLoopDeps,
+  sessionId: string,
+  trigger: CompactTrigger,
+  attemptId: string,
+  reason: 'pending_call_orphaned' | 'invalid_replace_range',
+  extra: Record<string, unknown>,
+): Promise<void> {
+  await appendCompactionMetadata(deps, sessionId, 'compaction_rejected', {
+    trigger,
+    attemptId,
+    reason,
+    ...extra,
+  })
+}
+
+async function appendCompactionMetadata(
+  deps: HostLoopDeps,
+  sessionId: string,
+  action: 'compaction_applied' | 'compaction_skipped' | 'compaction_rejected',
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const record = deps.store.get(sessionId)
+  if (!record) return
+  await appendRuntimeMetadataEntry(record.logPath, {
     sessionId,
-    {
-      kind: 'compact_skipped',
-      trigger,
-      attemptId,
-      reason,
-      ...(errorMessageText ? { errorMessage: errorMessageText } : {}),
-    },
-    aborts,
-  )
+    action,
+    payload,
+  })
 }
 
 function markBatchBackOff(rt: CompactSessionRuntime, state: AgentState): void {
@@ -344,12 +381,17 @@ function activeBatchIdentity(state: AgentState): string | undefined {
   return `batch:${idx}`
 }
 
-function expectedMessageCountAfter(before: readonly Message[], preserveFrom: number): number {
-  // Reducer keeps the leading system message (if any), inserts the summary
-  // system message, then appends the preserved tail. So expected new count =
-  // 1 (system, if present) + 1 (summary) + (before.length - preserveFrom).
-  const leadingSystem = before.length > 0 && before[0]!.role === 'system' ? 1 : 0
-  return leadingSystem + 1 + (before.length - preserveFrom)
+function validateReplacement(
+  state: AgentState,
+  range: { start: number; end: number },
+): 'invalid_replace_range' | 'pending_call_orphaned' | undefined {
+  if (!Number.isInteger(range.start) || !Number.isInteger(range.end)) return 'invalid_replace_range'
+  if (range.start < 0 || range.end < range.start || range.end > state.messages.length) return 'invalid_replace_range'
+  if (state.pendingCalls.length === 0) return undefined
+  const activeAssistant = findActiveToolBatchIndex(state)
+  if (activeAssistant === undefined) return 'pending_call_orphaned'
+  if (activeAssistant < range.end) return 'pending_call_orphaned'
+  return undefined
 }
 
 function errorMessage(err: unknown): string {
@@ -399,8 +441,13 @@ async function maybeWriteCompactionSummaryValidation(
 
 type SummarizeOk = {
   summary: string
-  request: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['request']>
-  usage?: NonNullable<Extract<AgentEvent, { kind: 'compact_replaced' }>['responseUsage']>
+  request: {
+    model?: string
+    systemPrompt: string
+    messages: readonly Message[]
+    tools: readonly ToolSchema[]
+  }
+  usage?: UsageDelta
   trace?: LLMTrace
   model?: string
 }

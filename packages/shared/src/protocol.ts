@@ -8,6 +8,7 @@
 
 import type {
   AgentConfig,
+  AgentModuleMetadata,
   AgentEvent,
   AgentState,
   ApprovalMode,
@@ -46,6 +47,7 @@ export type SessionReadyEvent = {
   cursor: number
   state: AgentState
   config: AgentConfig
+  contextSnapshot?: ContextSnapshot
   /**
    * Why this event fired. `'load'` (default) — a dashboard subscribed to an
    * existing or ephemeral session. `'created'` — the session was just
@@ -58,6 +60,12 @@ export type SessionReadyEvent = {
   reason?: 'load' | 'created' | 'forked'
   parentSessionId?: string
   parentCursor?: number
+  /** Parent `agent` tool_call id when this ready event is for a child session. */
+  parentCallId?: string
+  /** Display/type label requested for the sub-agent, when provided. */
+  agentType?: string
+  /** Spawn timestamp for child sessions created by the `agent` tool. */
+  subAgentStartedAt?: string
   /**
    * Routing key: the workspaceId this session is bound to. Undefined for
    * legacy sessions predating the field.
@@ -170,6 +178,23 @@ export type StateChangedEvent = {
   sessionId: string
   cursor: number
   state: AgentState
+  contextSnapshot?: ContextSnapshot
+}
+
+export type ContextPressureLevel = 'none' | 'soft' | 'hard'
+
+export type ContextSnapshot = {
+  estimatedMessageTokens: number
+  estimatedToolSchemaTokens: number
+  estimatedTotalInputTokens: number
+  reserveTokens: number
+  effectiveLimit?: number
+  contextWindow?: number
+  contextTokens?: number
+  contextWindowSource?: 'model' | 'session-config' | 'unknown'
+  contextWindowModel?: string
+  pressureLevel: ContextPressureLevel
+  reasonCodes: readonly string[]
 }
 
 export type EventAppendedEvent = {
@@ -178,8 +203,23 @@ export type EventAppendedEvent = {
   ts: string
   event: AgentEvent
   effects: readonly Effect[]
+  hasEffectsArtifact?: boolean
+  hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
+}
+
+export type ClientLoadLogArtifact = {
+  sessionId: string
+  seq: number
+}
+
+export type ServerLogArtifactPayload = {
+  sessionId: string
+  seq: number
+  effects?: readonly Effect[]
+  llmTrace?: LLMTrace
+  error?: string
 }
 
 export const SESSION_ERROR_SCOPES = ['kernel', 'llm', 'executor', 'host'] as const
@@ -295,11 +335,13 @@ export type ClientCreateSession = {
    * names. Undefined = use `defaultConfig.tools` unchanged.
    */
   tools?: readonly string[]
+  selectedModel?: string
 }
 
 export type ClientListDirs = {
   requestId: string
   workspaceId: string
+  sessionId?: string
   path?: string
 }
 
@@ -388,10 +430,33 @@ export type ExecutorRuntime = 'node' | 'browser-webcontainer' | 'other'
 
 export type ExecutorOs = 'linux' | 'darwin' | 'win32' | 'other'
 
+export type BuildMetadata = {
+  releaseTag: string
+  gitCommit: string
+  builtAt: string
+  artifactKind: 'source' | 'cjs' | 'native'
+  dashboardMode: 'vite' | 'static' | 'embedded' | 'none'
+  embeddedDashboardFiles?: number
+  socketAdminMode?: 'embedded' | 'filesystem' | 'missing'
+  embeddedSocketAdminFiles?: number
+}
+
+export type ExecutorCapabilities = {
+  schemaVersion: 1
+  features: {
+    backgroundShell: boolean
+    filePicker: boolean
+    overflowFiles: boolean
+    workspaceSandbox: boolean
+  }
+}
+
 export type ExecutorAnnounce = {
   executorId: string
   /** agent-kernel executor package version. */
   executorVersion?: string
+  build?: BuildMetadata
+  capabilities?: ExecutorCapabilities
   /**
    * Stable machine identity. A ULID minted on the executor's first launch
    * and persisted (see packages/executor/src/workspace-id.ts). Sessions
@@ -410,6 +475,9 @@ export type ExecutorAnnounce = {
   tools: string[]
   /** Optional filesystem jail. Empty/missing = executor trusts whole machine. */
   sandboxRoots?: string[]
+  /** Executor startup/default cwd used as a filesystem-picker fallback. */
+  defaultCwd?: string
+  /** @deprecated Use `defaultCwd`; accepted for older executor bundles. */
   workingDir?: string
   runtime: ExecutorRuntime
   runtimeVersion: string
@@ -423,6 +491,8 @@ export type ExecutorAnnounce = {
 export type DirListEntry = {
   name: string
   path: string
+  type?: 'directory' | 'file'
+  size?: number
 }
 
 export type DirListResult = {
@@ -442,6 +512,7 @@ export type DirListResult = {
 export type ClientListFiles = {
   requestId: string
   workspaceId: string
+  sessionId?: string
   query?: string
   limit?: number
 }
@@ -467,6 +538,7 @@ export type FileListResult = {
 export type ClientReadFile = {
   requestId: string
   workspaceId: string
+  sessionId?: string
   path: string
   maxBytes?: number
 }
@@ -477,6 +549,10 @@ export type FileContentsResult = {
   path: string
   content?: string
   size?: number
+  kind?: 'text' | 'image' | 'pdf' | 'binary' | 'too_large' | 'not_found' | 'error'
+  encoding?: 'utf8' | 'base64'
+  mediaType?: string
+  truncated?: boolean
   error?: string
 }
 
@@ -600,6 +676,70 @@ export type BgOutputResult = {
   status: BackgroundTaskStatus
   bytesTruncated: number
   error?: string
+}
+
+export type ClientTerminalCreate = {
+  requestId: string
+  workspaceId: string
+  sessionId: string
+  cwd?: string
+  cols?: number
+  rows?: number
+}
+
+export type TerminalCreateResult = {
+  requestId: string
+  workspaceId: string
+  sessionId: string
+  terminalId?: string
+  cwd?: string
+  error?: string
+}
+
+export type ClientTerminalInput = {
+  workspaceId: string
+  sessionId: string
+  terminalId: string
+  data: string
+}
+
+export type ClientTerminalResize = {
+  workspaceId: string
+  sessionId: string
+  terminalId: string
+  cols: number
+  rows: number
+}
+
+export type ClientTerminalKill = {
+  requestId: string
+  workspaceId: string
+  sessionId: string
+  terminalId: string
+}
+
+export type TerminalKillResult = {
+  requestId: string
+  workspaceId: string
+  sessionId: string
+  terminalId: string
+  killed: boolean
+  error?: string
+}
+
+export type ServerTerminalOutput = {
+  workspaceId: string
+  sessionId: string
+  terminalId: string
+  data: string
+}
+
+export type ServerTerminalExit = {
+  workspaceId: string
+  sessionId: string
+  terminalId: string
+  exitCode: number | null
+  signal: string | null
 }
 
 export type ClientKillBgTask = {
@@ -773,7 +913,7 @@ export type ToolCallMessage = {
   name: string
   input: Record<string, unknown>
   cwd?: string
-  timeoutMs?: number
+  ackTimeoutMs?: number
 }
 
 export type ToolCancelMessage = {
@@ -844,7 +984,6 @@ export type SessionSummary = {
    * can render offline workspaces without needing every executor online.
    */
   workspaceName?: string
-  executorId?: string
   status?: AgentState['status']
   currentCwd?: string
   firstUserMessage?: string
@@ -866,6 +1005,8 @@ export type ClientLoadHistory = {
 
 export type ClientDeleteSession = {
   sessionId: string
+  /** Delete all descendant fork/sub-agent sessions whose parent chain starts here. */
+  cascade?: boolean
 }
 
 export type ServerSessionDeletedPayload = {
@@ -882,6 +1023,8 @@ export type ServerHistoryPayload = {
  * this to populate the model picker instead of hardcoding a list.
  */
 export type ModelInfo = {
+  /** Stable selection key. Usually `id`; provider-qualified as `providerId:id` when needed. */
+  ref?: string
   id: string
   label: string
   provider: string
@@ -892,6 +1035,7 @@ export type ModelInfo = {
 }
 
 export type ModelSource = 'claude-settings' | 'codex-config' | 'env' | 'manual'
+export type ProviderWire = 'anthropic' | 'openai'
 
 export type ManualModelInput = {
   providerId: string
@@ -921,10 +1065,24 @@ export type ServerModelsPayload = {
 export type SettingsProviderSummary = {
   id: string
   label: string
-  wire: 'anthropic' | 'openai'
+  wire: ProviderWire
   source?: ModelSource
   baseUrl?: string
   models: readonly ModelInfo[]
+}
+
+export type ManualProviderInput = {
+  id: string
+  label?: string
+  wire: ProviderWire
+  baseUrl: string
+  apiKey: string
+}
+
+export type ClientAddManualProvider = ManualProviderInput
+
+export type ClientDeleteManualProvider = {
+  providerId: string
 }
 
 export type ClientAddManualModel = ManualModelInput
@@ -932,6 +1090,28 @@ export type ClientAddManualModel = ManualModelInput
 export type ClientDeleteManualModel = {
   providerId: string
   id: string
+}
+
+export type ClientSetDefaultModel = {
+  model: string
+}
+
+export type AgentSystemPromptPresetId = 'codex' | 'claude-code'
+
+export type SettingsAgentPromptPreset = {
+  id: AgentSystemPromptPresetId
+  label: string
+  description: string
+}
+
+export type SettingsAgentPrompt = {
+  selectedPreset: AgentSystemPromptPresetId
+  presets: readonly SettingsAgentPromptPreset[]
+  configPath: string
+}
+
+export type ClientUpdateAgentPromptSettings = {
+  preset: AgentSystemPromptPresetId
 }
 
 export type SettingsHookSummary = {
@@ -959,7 +1139,10 @@ export type ServerSettingsPayload = {
   versions?: {
     host: string
     protocol: string
+    build?: BuildMetadata
   }
+  agentModule?: AgentModuleMetadata
+  agentPrompt?: SettingsAgentPrompt
   auth?: {
     dashboardAuthRequired: boolean
     githubOAuth: {
@@ -973,6 +1156,18 @@ export type ServerSettingsPayload = {
       tokenCount: number
       inviteCount?: number
     }
+  }
+  socketAdmin?: {
+    active: boolean
+    initialized: boolean
+    path: string
+    username: string
+    runtimeMode: 'production' | 'development'
+    configuredMode: 'production' | 'development'
+    configPath: string
+    distSource?: 'embedded' | 'filesystem'
+    createdAt?: string
+    restartRequired?: boolean
   }
   paths: {
     claudeSettings: string
@@ -1056,6 +1251,7 @@ export type DashboardClientToServerEvents = {
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
+  'client:load_log_artifact': (payload: ClientLoadLogArtifact) => void
   'client:delete_session': (payload: ClientDeleteSession) => void
   'client:set_model': (payload: ClientSetModel) => void
   'client:update_preferences': (payload: ClientUpdatePreferences) => void
@@ -1077,6 +1273,16 @@ export type DashboardClientToServerEvents = {
   'bg:kill': (
     payload: ClientKillBgTask,
     ack: (result: BgKillResult) => void,
+  ) => void
+  'terminal:create': (
+    payload: ClientTerminalCreate,
+    ack: (result: TerminalCreateResult) => void,
+  ) => void
+  'terminal:input': (payload: ClientTerminalInput) => void
+  'terminal:resize': (payload: ClientTerminalResize) => void
+  'terminal:kill': (
+    payload: ClientTerminalKill,
+    ack: (result: TerminalKillResult) => void,
   ) => void
   'sub_agent:list': (
     payload: ClientListSubAgents,
@@ -1111,9 +1317,12 @@ export type DashboardServerToClientEvents = {
   'server:overflow_contents': (payload: OverflowContentsResult) => void
   'server:memory_consolidated': (payload: ConsolidateMemoryResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
+  'server:log_artifact': (payload: ServerLogArtifactPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
   'server:bg_task_updated': (payload: ServerBgTaskUpdated) => void
   'server:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
+  'server:terminal_output': (payload: ServerTerminalOutput) => void
+  'server:terminal_exit': (payload: ServerTerminalExit) => void
   'server:sub_agent_started': (payload: ServerSubAgentStartedEvent) => void
   'server:sub_agent_finished': (payload: ServerSubAgentFinishedEvent) => void
   /**
@@ -1143,6 +1352,8 @@ export type ExecutorClientToServerEvents = {
   'executor:tool_progress': (payload: ToolProgressPayload) => void
   'executor:bg_task_updated': (payload: ServerBgTaskUpdated) => void
   'executor:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
+  'executor:terminal_output': (payload: ServerTerminalOutput) => void
+  'executor:terminal_exit': (payload: ServerTerminalExit) => void
 }
 
 /**
@@ -1165,6 +1376,16 @@ export type ExecutorServerToClientEvents = {
     ack: (result: ToolResultAck) => void,
   ) => void
   'tool:cancel': (payload: ToolCancelMessage) => void
+  'terminal:create': (
+    payload: ClientTerminalCreate,
+    ack: (result: TerminalCreateResult) => void,
+  ) => void
+  'terminal:input': (payload: ClientTerminalInput) => void
+  'terminal:resize': (payload: ClientTerminalResize) => void
+  'terminal:kill': (
+    payload: ClientTerminalKill,
+    ack: (result: TerminalKillResult) => void,
+  ) => void
   /**
    * Permanent-failure signal. Sent immediately before a server-initiated
    * `socket.disconnect(true)` when the executor must not retry (workspaceId

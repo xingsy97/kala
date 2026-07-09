@@ -20,6 +20,8 @@ import type {
   BgListResult,
   BgOutputResult,
   ConsolidateMemoryResult,
+  ContextPressureLevel,
+  ContextSnapshot,
   ControlUpdate,
   CopyOverflowSessionResult,
   DeleteOverflowSessionResult,
@@ -47,6 +49,7 @@ import type {
   ServerExecutorInvitesPayload,
   ServerExecutorsPayload,
   ServerHistoryPayload,
+  ServerLogArtifactPayload,
   ServerMessageQueueEvent,
   ServerModelsPayload,
   ServerSessionDeletedPayload,
@@ -65,6 +68,7 @@ import type {
   SessionRenamedEvent,
   SessionSummary,
   SettingsHookSummary,
+  SettingsAgentPrompt,
   SettingsProviderSummary,
   StateChangedEvent,
   SubAgentListResult,
@@ -74,9 +78,10 @@ import type {
   WorkspaceRenamedEvent,
 } from '../protocol.js'
 import { SESSION_ERROR_SCOPES } from '../protocol.js'
-import type { EventEntry, HeaderEntry, LLMTrace, LogEntry, MetadataEntry, SnapshotEntry } from '../log.js'
+import type { EventEntry, HeaderEntry, LLMTrace, LogEntry, MetadataEntry, RuntimeMetadataEntry, SnapshotEntry } from '../log.js'
 import {
   AgentConfigSchema,
+  AgentModuleMetadataSchema,
   AgentEventSchema,
   AgentStateSchema,
   AgentStatusSchema,
@@ -84,6 +89,7 @@ import {
   UsageTotalSchema,
 } from './kernel.js'
 import {
+  BuildMetadataSchema,
   ExecutorAnnounceSchema,
   ServerBgTaskEvictedSchema,
   ServerBgTaskUpdatedSchema,
@@ -109,6 +115,7 @@ export const LLMTraceSchema = z.object({
   response: z
     .object({
       status: z.number().int(),
+      finishReason: z.string().optional(),
       body: z.unknown().optional(),
       streamEventTypes: z.array(z.string()).optional(),
       metrics: z
@@ -127,14 +134,38 @@ export const LLMTraceSchema = z.object({
 // Session lifecycle events
 // ============================================================================
 
+export const ContextPressureLevelSchema: z.ZodType<ContextPressureLevel> = z.enum([
+  'none',
+  'soft',
+  'hard',
+])
+
+export const ContextSnapshotSchema = z.object({
+  estimatedMessageTokens: z.number().int().nonnegative(),
+  estimatedToolSchemaTokens: z.number().int().nonnegative(),
+  estimatedTotalInputTokens: z.number().int().nonnegative(),
+  reserveTokens: z.number().int().nonnegative(),
+  effectiveLimit: z.number().int().positive().optional(),
+  contextWindow: z.number().int().positive().optional(),
+  contextTokens: z.number().int().positive().optional(),
+  contextWindowSource: z.enum(['model', 'session-config', 'unknown']).optional(),
+  contextWindowModel: z.string().optional(),
+  pressureLevel: ContextPressureLevelSchema,
+  reasonCodes: z.array(z.string()),
+}) satisfies z.ZodType<ContextSnapshot>
+
 export const SessionReadyEventSchema = z.object({
   sessionId: z.string(),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
   config: AgentConfigSchema,
+  contextSnapshot: ContextSnapshotSchema.optional(),
   reason: z.enum(['load', 'created', 'forked']).optional(),
   parentSessionId: z.string().optional(),
   parentCursor: z.number().int().nonnegative().optional(),
+  parentCallId: z.string().optional(),
+  agentType: z.string().optional(),
+  subAgentStartedAt: z.string().optional(),
   workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
   selectedModel: z.string().optional(),
@@ -146,6 +177,7 @@ export const StateChangedEventSchema = z.object({
   sessionId: z.string(),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
+  contextSnapshot: ContextSnapshotSchema.optional(),
 }) satisfies z.ZodType<StateChangedEvent>
 
 export const EventAppendedEventSchema = z.object({
@@ -154,9 +186,19 @@ export const EventAppendedEventSchema = z.object({
   ts: z.string(),
   event: AgentEventSchema,
   effects: z.array(EffectSchema),
+  hasEffectsArtifact: z.boolean().optional(),
+  hasLlmTraceArtifact: z.boolean().optional(),
   llmTrace: LLMTraceSchema.optional(),
   model: z.string().optional(),
 }) satisfies z.ZodType<EventAppendedEvent>
+
+export const ServerLogArtifactPayloadSchema = z.object({
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+  effects: z.array(EffectSchema).optional(),
+  llmTrace: LLMTraceSchema.optional(),
+  error: z.string().optional(),
+}) satisfies z.ZodType<ServerLogArtifactPayload>
 
 const SessionErrorScopeSchema = z.enum(
   SESSION_ERROR_SCOPES as unknown as [SessionErrorScope, ...SessionErrorScope[]],
@@ -323,7 +365,6 @@ export const SessionSummarySchema = z.object({
   parentSessionId: z.string().optional(),
   workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
-  executorId: z.string().optional(),
   status: AgentStatusSchema.optional(),
   currentCwd: z.string().optional(),
   firstUserMessage: z.string().optional(),
@@ -350,6 +391,8 @@ export const ServerSessionDeletedPayloadSchema = z.object({
 export const DirListEntrySchema = z.object({
   name: z.string(),
   path: z.string(),
+  type: z.enum(['directory', 'file']).optional(),
+  size: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<DirListEntry>
 
 export const DirListResultSchema = z.object({
@@ -380,6 +423,10 @@ export const FileContentsResultSchema = z.object({
   path: z.string(),
   content: z.string().optional(),
   size: z.number().int().nonnegative().optional(),
+  kind: z.enum(['text', 'image', 'pdf', 'binary', 'too_large', 'not_found', 'error']).optional(),
+  encoding: z.enum(['utf8', 'base64']).optional(),
+  mediaType: z.string().optional(),
+  truncated: z.boolean().optional(),
   error: z.string().optional(),
 }) satisfies z.ZodType<FileContentsResult>
 
@@ -501,6 +548,7 @@ const ModelSourceSchema = z.enum([
 ]) satisfies z.ZodType<ModelSource>
 
 export const ModelInfoSchema = z.object({
+  ref: z.string().optional(),
   id: z.string(),
   label: z.string(),
   provider: z.string(),
@@ -541,6 +589,16 @@ const SettingsSkillSummarySchema = z.object({
   diagnostics: z.array(SettingsSkillDiagnosticSchema),
 })
 
+const SettingsAgentPromptSchema = z.object({
+  selectedPreset: z.enum(['codex', 'claude-code']),
+  presets: z.array(z.object({
+    id: z.enum(['codex', 'claude-code']),
+    label: z.string(),
+    description: z.string(),
+  })),
+  configPath: z.string(),
+}) satisfies z.ZodType<SettingsAgentPrompt>
+
 export const ServerSettingsPayloadSchema = z.object({
   providers: z.array(SettingsProviderSummarySchema),
   defaultModel: z.string(),
@@ -549,8 +607,11 @@ export const ServerSettingsPayloadSchema = z.object({
     .object({
       host: z.string(),
       protocol: z.string(),
+      build: BuildMetadataSchema.optional(),
     })
     .optional(),
+  agentModule: AgentModuleMetadataSchema.optional(),
+  agentPrompt: SettingsAgentPromptSchema.optional(),
   auth: z
     .object({
       dashboardAuthRequired: z.boolean(),
@@ -565,6 +626,20 @@ export const ServerSettingsPayloadSchema = z.object({
         tokenCount: z.number().int().nonnegative(),
         inviteCount: z.number().int().nonnegative().optional(),
       }),
+    })
+    .optional(),
+  socketAdmin: z
+    .object({
+      active: z.boolean(),
+      initialized: z.boolean(),
+      path: z.string(),
+      username: z.string(),
+      runtimeMode: z.enum(['production', 'development']),
+      configuredMode: z.enum(['production', 'development']),
+      configPath: z.string(),
+      distSource: z.enum(['embedded', 'filesystem']).optional(),
+      createdAt: z.string().optional(),
+      restartRequired: z.boolean().optional(),
     })
     .optional(),
   paths: z.object({
@@ -655,11 +730,17 @@ export const HeaderEntrySchema = z.object({
   workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
   initialCwd: z.string().optional(),
-  formatVersion: z.literal(1),
+  formatVersion: z.literal(2),
   kernelVersion: z.string(),
   config: AgentConfigSchema,
   initialState: AgentStateSchema,
 }) satisfies z.ZodType<HeaderEntry>
+
+const LogArtifactRefSchema = z.object({
+  path: z.string(),
+  bytes: z.number(),
+  sha256: z.string(),
+})
 
 export const EventEntrySchema = z.object({
   kind: z.literal('event'),
@@ -668,7 +749,9 @@ export const EventEntrySchema = z.object({
   event: AgentEventSchema,
   effects: z.array(EffectSchema),
   usage: UsageTotalSchema.optional(),
+  effectsArtifact: LogArtifactRefSchema.optional(),
   llmTrace: LLMTraceSchema.optional(),
+  llmTraceArtifact: LogArtifactRefSchema.optional(),
   model: z.string().optional(),
 }) satisfies z.ZodType<EventEntry>
 
@@ -685,11 +768,22 @@ export const MetadataEntrySchema = z.object({
   label: z.string().optional(),
   workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
+  selectedModel: z.string().optional(),
 }) satisfies z.ZodType<MetadataEntry>
+
+export const RuntimeMetadataEntrySchema = z.object({
+  kind: z.literal('runtime_metadata'),
+  ts: z.string(),
+  sessionId: z.string(),
+  action: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+  artifactRef: LogArtifactRefSchema.optional(),
+}) satisfies z.ZodType<RuntimeMetadataEntry>
 
 export const LogEntrySchema = z.discriminatedUnion('kind', [
   HeaderEntrySchema,
   EventEntrySchema,
   SnapshotEntrySchema,
   MetadataEntrySchema,
+  RuntimeMetadataEntrySchema,
 ]) satisfies z.ZodType<LogEntry>
