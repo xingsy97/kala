@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, Folder, Loader2 } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ArrowUp, ChevronRight, Folder, Home, Loader2, RefreshCw, Slash } from 'lucide-react'
 import type { DirListResult } from '@agent-kernel/shared'
 
+import { Button } from '../../components/ui/button.js'
 import { Input } from '../../components/ui/input.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
@@ -23,6 +24,8 @@ type Props = {
   inputTestId?: string
 }
 
+const MANUAL_LOAD_DEBOUNCE_MS = 400
+
 export function DirectoryPicker({
   socket,
   workspaceId,
@@ -34,10 +37,14 @@ export function DirectoryPicker({
 }: Props): JSX.Element {
   const [columns, setColumns] = useState<DirColumn[]>([])
   const [loadingPath, setLoadingPath] = useState<string | null>(null)
+  const [rootPath, setRootPath] = useState<string | null>(null)
   const activeRequestIdRef = useRef<string | null>(null)
+  const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const finderScrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     setColumns([])
+    setRootPath(null)
     activeRequestIdRef.current = null
     if (!socket || !workspaceId) return
     const onDirList = (result: DirListResult): void => {
@@ -45,6 +52,7 @@ export function DirectoryPicker({
       if (result.requestId !== activeRequestIdRef.current) return
       setLoadingPath(null)
       onChange(result.path)
+      if (result.roots.length > 0) setRootPath(result.roots[0]!)
       setColumns((prev) => {
         const existing = prev.findIndex((col) => col.path === result.path)
         const nextColumn: DirColumn = {
@@ -65,39 +73,183 @@ export function DirectoryPicker({
     setLoadingPath(initialPath ?? '')
     return () => {
       socket.off('server:dir_list', onDirList)
+      if (manualTimerRef.current) clearTimeout(manualTimerRef.current)
     }
     // onChange is a plain setter from the parent; excluded intentionally to
     // avoid re-subscribing on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, workspaceId, initialPath])
 
-  const openDir = (path: string): void => {
+  // Auto-scroll the finder to the right so freshly-pushed columns are visible
+  // instead of hiding behind the scroller. Runs when the column count grows.
+  useLayoutEffect(() => {
+    const el = finderScrollRef.current
+    if (!el) return
+    el.scrollLeft = el.scrollWidth
+  }, [columns.length])
+
+  const loadPath = (path: string): void => {
     if (!socket || !workspaceId) return
     onChange(path)
     setLoadingPath(path)
     activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
   }
 
+  const scheduleManualLoad = (path: string): void => {
+    if (manualTimerRef.current) clearTimeout(manualTimerRef.current)
+    if (!socket || !workspaceId) return
+    if (!path.startsWith('/')) return
+    manualTimerRef.current = setTimeout(() => {
+      manualTimerRef.current = null
+      setLoadingPath(path)
+      activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
+    }, MANUAL_LOAD_DEBOUNCE_MS)
+  }
+
+  const openDir = (path: string): void => {
+    if (manualTimerRef.current) {
+      clearTimeout(manualTimerRef.current)
+      manualTimerRef.current = null
+    }
+    loadPath(path)
+  }
+
   const updateManualPath = (next: string): void => {
+    // Invalidate any in-flight request so a late response can't stomp the
+    // user's edit. The debounced load below will register a fresh request id
+    // once the user stops typing.
     activeRequestIdRef.current = null
     setLoadingPath(null)
     onChange(next)
+    scheduleManualLoad(next.trim())
   }
+
+  const commitManualPath = (): void => {
+    if (manualTimerRef.current) {
+      clearTimeout(manualTimerRef.current)
+      manualTimerRef.current = null
+    }
+    const trimmed = value.trim()
+    if (trimmed.length === 0 || !trimmed.startsWith('/')) return
+    loadPath(trimmed)
+  }
+
+  const goUp = (): void => {
+    const parent = parentPath(value.trim())
+    if (parent === null) return
+    if (rootPath && !isWithinRoot(parent, rootPath)) return
+    openDir(parent)
+  }
+
+  const goRoot = (): void => {
+    if (!rootPath) return
+    openDir(rootPath)
+  }
+
+  const refresh = (): void => {
+    const target = value.trim()
+    if (target.length === 0) return
+    openDir(target)
+  }
+
+  const atRoot =
+    rootPath !== null && (value.trim() === rootPath || !isWithinRoot(value.trim(), rootPath))
+  const canGoUp = parentPath(value.trim()) !== null && !atRoot
+  const crumbs = buildBreadcrumbs(value.trim(), rootPath)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border/50 p-3">
-        <Input
-          id={inputId}
-          value={value}
-          onChange={(e) => updateManualPath(e.target.value)}
-          placeholder="/tmp/project"
-          data-testid={inputTestId}
-          className="font-mono"
-        />
+      <div className="flex flex-col gap-2 border-b border-border/50 p-3">
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 px-2"
+            onClick={goUp}
+            disabled={!canGoUp}
+            title="Go up one level"
+            data-testid="dir-picker-up"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 px-2"
+            onClick={goRoot}
+            disabled={!rootPath}
+            title={rootPath ? `Jump to workspace root ${rootPath}` : 'Workspace root unknown'}
+            data-testid="dir-picker-root"
+          >
+            <Home className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 px-2"
+            onClick={refresh}
+            disabled={value.trim().length === 0}
+            title="Refresh current directory"
+            data-testid="dir-picker-refresh"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+          <Input
+            id={inputId}
+            value={value}
+            onChange={(e) => updateManualPath(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commitManualPath()
+              }
+            }}
+            onBlur={commitManualPath}
+            placeholder="/tmp/project"
+            data-testid={inputTestId}
+            title={value}
+            className="min-w-0 flex-1 truncate font-mono"
+          />
+        </div>
+        {crumbs.length > 0 ? (
+          <div
+            className="flex min-w-0 items-center gap-0.5 overflow-x-auto"
+            data-testid="dir-picker-breadcrumbs"
+          >
+            {crumbs.map((crumb, i) => (
+              <div key={`${crumb.path}-${i}`} className="flex flex-none items-center gap-0.5">
+                {i > 0 ? (
+                  <Slash className="h-3 w-3 flex-none text-muted-foreground" aria-hidden="true" />
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => openDir(crumb.path)}
+                  disabled={crumb.path === value.trim()}
+                  title={crumb.path}
+                  data-testid={`dir-picker-breadcrumb-${i}`}
+                  className={cn(
+                    'max-w-[14rem] truncate rounded px-1.5 py-0.5 font-mono text-[11px] transition-colors',
+                    crumb.path === value.trim()
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  )}
+                >
+                  {crumb.label}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ScrollArea className="h-full" data-testid="directory-picker-finder">
+        <ScrollArea
+          className="h-full"
+          data-testid="directory-picker-finder"
+          viewportRef={finderScrollRef}
+        >
           <div className="flex min-h-full w-max min-w-full">
             {columns.length === 0 ? (
               <div className="flex h-48 w-full items-center justify-center text-sm text-muted-foreground">
@@ -133,7 +285,10 @@ function DirectoryColumn({
 }): JSX.Element {
   return (
     <div className="w-64 shrink-0 border-r border-border/50" data-testid="finder-column">
-      <div className="truncate border-b border-border/50 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+      <div
+        className="truncate border-b border-border/50 px-3 py-2 font-mono text-[11px] text-muted-foreground"
+        title={column.path}
+      >
         {column.path}
       </div>
       {column.error ? (
@@ -176,4 +331,45 @@ function requestDirs(socket: DashboardSocket, workspaceId: string, path: string 
     ...(path !== undefined && path.length > 0 ? { path } : {}),
   })
   return requestId
+}
+
+function parentPath(path: string): string | null {
+  if (!path.startsWith('/')) return null
+  if (path === '/') return null
+  const segments = path.split('/').filter((s) => s.length > 0)
+  if (segments.length <= 1) return '/'
+  segments.pop()
+  return `/${segments.join('/')}`
+}
+
+function isWithinRoot(path: string, root: string): boolean {
+  if (path === root) return true
+  const normRoot = root.endsWith('/') ? root : `${root}/`
+  return path.startsWith(normRoot)
+}
+
+type Breadcrumb = { label: string; path: string }
+
+function buildBreadcrumbs(path: string, root: string | null): Breadcrumb[] {
+  if (!path.startsWith('/')) return []
+  const segments = path.split('/').filter((s) => s.length > 0)
+  const crumbs: Breadcrumb[] = []
+  if (root && isWithinRoot(path, root)) {
+    // Collapse ancestors above the workspace root into a single "root" chip so
+    // deep paths inside /very/long/parents/workspace-root/... stay readable.
+    const rootSegments = root.split('/').filter((s) => s.length > 0)
+    const rootLabel = rootSegments.at(-1) ?? '/'
+    crumbs.push({ label: rootLabel || '/', path: root })
+    for (let i = rootSegments.length; i < segments.length; i += 1) {
+      const p = `/${segments.slice(0, i + 1).join('/')}`
+      crumbs.push({ label: segments[i]!, path: p })
+    }
+  } else {
+    crumbs.push({ label: '/', path: '/' })
+    for (let i = 0; i < segments.length; i += 1) {
+      const p = `/${segments.slice(0, i + 1).join('/')}`
+      crumbs.push({ label: segments[i]!, path: p })
+    }
+  }
+  return crumbs
 }

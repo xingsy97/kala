@@ -78,7 +78,7 @@ export type SubAgentFinishedPayload = {
   parentSessionId: string
   parentCallId: string
   childSessionId: string
-  status: 'completed' | 'failed'
+  status: 'completed' | 'failed' | 'cancelled'
   turns: number
   durationMs: number
   finishedAt: string

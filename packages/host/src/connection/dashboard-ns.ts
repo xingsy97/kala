@@ -20,6 +20,7 @@ import type {
   ClientCreateSession,
   ClientDeleteSession,
   ClientFork,
+  ClientInterruptSubAgent,
   ClientKillBgTask,
   ClientListAgentTypes,
   ClientListBgTasks,
@@ -67,6 +68,7 @@ import { ulid } from 'ulid'
 
 import type { HostLoopDeps, LoopHandle } from '../loop.js'
 import { consolidateMemory, type ConsolidationOutcome } from '../extensions/memory-consolidation.js'
+import { markSubAgentInterrupted } from '../extensions/agent-tool.js'
 import { readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
@@ -269,6 +271,22 @@ export function configureDashboardNamespace(
     socket.on('client:cancel', async (p: ClientCancel) => {
       const evt: AgentEvent = { kind: 'cancel' }
       await safeDispatch(deps, p.sessionId, evt)
+    })
+    socket.on('client:interrupt_sub_agent', async (p: ClientInterruptSubAgent) => {
+      try {
+        const result = markSubAgentInterrupted(p.parentSessionId, p.parentCallId, p.childSessionId)
+        if (!result.ok) {
+          deps.broadcastError(p.parentSessionId, 'host', result.error ?? 'sub-agent interrupt failed')
+          return
+        }
+        await deps.loop.dispatch(result.childSessionId, { kind: 'cancel' })
+      } catch (err) {
+        deps.broadcastError(
+          p.parentSessionId,
+          'host',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
     })
     socket.on('client:clear', async (p: ClientClear) => {
       deps.loopDeps.tools.cancelPending(p.sessionId)

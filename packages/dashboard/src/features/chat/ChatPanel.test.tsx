@@ -325,7 +325,10 @@ describe('ChatPanel', () => {
     )
     expect(screen.getByTestId('tool-call-pending-c9')).toBeTruthy()
     expect(screen.getByText('Approval needed')).toBeTruthy()
-    expect(screen.getByText(/Approve or reject in the composer area below/i)).toBeTruthy()
+    // Pending-approval cards render collapsed by default — the composer's
+    // ApprovalCard is the primary UX for the decision, so we don't duplicate
+    // the "approve or reject below" hint inline.
+    expect(screen.queryByText(/Approve or reject in the composer area below/i)).toBeNull()
     // The decision buttons are rendered by ApprovalCard inside the composer
     // flip container, not inside the tool card itself.
     expect(screen.queryByTestId('approval-approve')).toBeNull()

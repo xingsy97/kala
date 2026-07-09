@@ -29,3 +29,17 @@ export type { HostLoopDeps, LoopHandle } from './loop.js'
 export { builtinTools, createBuiltinTools } from './builtin-tools.js'
 export { discoverSkills, skillToolSchema, SKILL_TOOL_NAME } from './extensions/skills.js'
 export type { SkillInfo, SkillRegistry } from './extensions/skills.js'
+
+export {
+  buildSweBenchGradeCommand,
+  exportSessionForSweBench,
+  runSweBenchGrade,
+  sweBenchRunLayout,
+  writeSweBenchPredictionRun,
+} from './eval/swebench.js'
+export type {
+  ExportSessionForSweBenchInput,
+  SweBenchGradeInput,
+  SweBenchRunLayout,
+  WriteSweBenchPredictionInput,
+} from './eval/swebench.js'

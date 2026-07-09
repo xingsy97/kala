@@ -32,7 +32,7 @@ import type { LLMAdapter } from './llm/adapter.js'
 import type { LLMTrace } from '@agent-kernel/shared'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
-import { AGENT_TOOL_NAME, runAgentTool } from './extensions/agent-tool.js'
+import { AGENT_TOOL_NAME, interruptSubAgentsForParent, runAgentTool } from './extensions/agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
 import { runSkillTool, SKILL_TOOL_NAME } from './extensions/skills.js'
 import type {
@@ -154,6 +154,7 @@ export async function dispatchOne(
   // even if a stray call_llm/call_tool effect appeared it wouldn't race
   // against a still-live executor.
   if (event.kind === 'cancel') {
+    await interruptSubAgentsForParent(deps, aborts, sessionId)
     deps.tools.cancelPending(sessionId)
     const inFlight = aborts.get(sessionId)
     if (inFlight) inFlight.abort()

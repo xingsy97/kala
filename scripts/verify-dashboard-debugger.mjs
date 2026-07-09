@@ -8,6 +8,7 @@ import puppeteer from 'puppeteer-core'
 
 const requireFromHost = createRequire(new URL('../packages/host/package.json', import.meta.url))
 const { io } = requireFromHost('socket.io-client')
+const { PROTOCOL_VERSION } = await import('../packages/shared/dist/index.js')
 
 const repo = new URL('..', import.meta.url).pathname
 const port = Number(process.env.VERIFY_DEBUGGER_PORT ?? 3197)
@@ -66,7 +67,7 @@ async function stop(proc) {
 async function verifyHostListsFixture() {
   const socket = io(`http://localhost:${port}/dashboard`, {
     transports: ['websocket'],
-    auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+    auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
   })
   try {
     await new Promise((resolve, reject) => {

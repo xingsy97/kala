@@ -304,4 +304,183 @@ describe('NewSessionDialog', () => {
     })
     expect(screen.getByDisplayValue('/tmp/root/manual')).toBeTruthy()
   })
+
+  it('navigates one level up with the parent button', async () => {
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(harness.socket.emit).toHaveBeenCalledWith(
+        'client:list_dirs',
+        expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+      )
+    })
+
+    act(() => {
+      const request = harness.lastDirRequest()
+      harness.emitDirList({
+        requestId: request.requestId,
+        workspaceId: 'ws-a',
+        path: '/tmp/root',
+        roots: ['/tmp/root'],
+        entries: [{ name: 'project', path: '/tmp/root/project' }],
+      })
+    })
+
+    fireEvent.click(screen.getByText('project'))
+    act(() => {
+      const request = harness.lastDirRequest()
+      harness.emitDirList({
+        requestId: request.requestId,
+        workspaceId: 'ws-a',
+        path: '/tmp/root/project',
+        roots: ['/tmp/root'],
+        entries: [{ name: 'src', path: '/tmp/root/project/src' }],
+      })
+    })
+
+    fireEvent.click(screen.getByText('src'))
+    act(() => {
+      const request = harness.lastDirRequest()
+      harness.emitDirList({
+        requestId: request.requestId,
+        workspaceId: 'ws-a',
+        path: '/tmp/root/project/src',
+        roots: ['/tmp/root'],
+        entries: [],
+      })
+    })
+
+    expect(screen.getByDisplayValue('/tmp/root/project/src')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('dir-picker-up'))
+    expect(harness.socket.emit).toHaveBeenLastCalledWith(
+      'client:list_dirs',
+      expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+    )
+    expect(screen.getByDisplayValue('/tmp/root/project')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('dir-picker-up'))
+    expect(harness.socket.emit).toHaveBeenLastCalledWith(
+      'client:list_dirs',
+      expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+    )
+    // At the workspace root the up button should be disabled.
+    expect((screen.getByTestId('dir-picker-up') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('debounces manual path edits and reloads the finder', async () => {
+    vi.useFakeTimers()
+    try {
+      const harness = makeSocket()
+      render(
+        <NewSessionDialog
+          open
+          workspaces={[wsA]}
+          socket={harness.socket as never}
+          onCreate={() => {}}
+          onCancel={() => {}}
+        />,
+      )
+
+      // Initial mount fires one list_dirs. Skip past it.
+      act(() => {
+        vi.advanceTimersByTime(0)
+      })
+      const initialCalls = harness.socket.emit.mock.calls.filter(
+        ([event]: [string]) => event === 'client:list_dirs',
+      ).length
+
+      fireEvent.change(screen.getByTestId('new-session-cwd-input'), {
+        target: { value: '/tmp/root/typed' },
+      })
+      // Before the debounce fires, no new request should have been sent.
+      const midCalls = harness.socket.emit.mock.calls.filter(
+        ([event]: [string]) => event === 'client:list_dirs',
+      ).length
+      expect(midCalls).toBe(initialCalls)
+
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(harness.socket.emit).toHaveBeenLastCalledWith(
+        'client:list_dirs',
+        expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/typed' }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('jumps to a breadcrumb segment when clicked', async () => {
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(harness.socket.emit).toHaveBeenCalledWith(
+        'client:list_dirs',
+        expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+      )
+    })
+
+    act(() => {
+      const request = harness.lastDirRequest()
+      harness.emitDirList({
+        requestId: request.requestId,
+        workspaceId: 'ws-a',
+        path: '/tmp/root',
+        roots: ['/tmp/root'],
+        entries: [{ name: 'project', path: '/tmp/root/project' }],
+      })
+    })
+
+    fireEvent.click(screen.getByText('project'))
+    act(() => {
+      const request = harness.lastDirRequest()
+      harness.emitDirList({
+        requestId: request.requestId,
+        workspaceId: 'ws-a',
+        path: '/tmp/root/project',
+        roots: ['/tmp/root'],
+        entries: [{ name: 'src', path: '/tmp/root/project/src' }],
+      })
+    })
+
+    fireEvent.click(screen.getByText('src'))
+    act(() => {
+      const request = harness.lastDirRequest()
+      harness.emitDirList({
+        requestId: request.requestId,
+        workspaceId: 'ws-a',
+        path: '/tmp/root/project/src',
+        roots: ['/tmp/root'],
+        entries: [],
+      })
+    })
+
+    // Breadcrumbs collapse everything above workspace root into a single
+    // "root" chip: [root, project, src]. Clicking "project" jumps up one.
+    fireEvent.click(screen.getByTestId('dir-picker-breadcrumb-1'))
+    expect(harness.socket.emit).toHaveBeenLastCalledWith(
+      'client:list_dirs',
+      expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+    )
+  })
 })
