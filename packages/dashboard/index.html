@@ -4,8 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>agent-kernel dashboard</title>
+    <script>
+      // Read the persisted theme before React mounts so the initial paint
+      // matches the user's last choice — otherwise the page flashes dark
+      // before hydrating into light mode. Default: dark (matches the
+      // slate-* palette the rest of the app assumes).
+      try {
+        var t = localStorage.getItem('ak-theme') || 'dark'
+        if (t === 'dark') document.documentElement.classList.add('dark')
+      } catch (_) {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
   </head>
-  <body class="bg-slate-950 text-slate-100">
+  <body class="bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

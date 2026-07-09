@@ -8,12 +8,13 @@
  * never let a runner exception cross the wire.
  */
 
-import { hostname, platform } from 'node:os'
+import { hostname, networkInterfaces, platform } from 'node:os'
 import process from 'node:process'
 
 import type {
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
+  ExecutorOs,
   ExecutorServerToClientEvents,
   ToolCallMessage,
   ToolCancelMessage,
@@ -27,12 +28,29 @@ import type { Sandbox } from './sandbox.js'
 import { allTools as defaultTools } from './tools/index.js'
 import type { Tool } from './tools/registry.js'
 import { ToolError, createToolRegistry } from './tools/registry.js'
+import { loadOrCreateWorkspaceId } from './workspace-id.js'
 
 export type ExecutorOptions = {
   /** Host URL (e.g. `wss://host.example.com` or `http://localhost:3000`). */
   host: string
-  sessionId: string
-  workspace: string | readonly string[]
+  /**
+   * Stable workspace identity. If omitted, the executor loads (or on first
+   * launch mints) one from `~/.agent-kernel/workspace-id`. Passing this
+   * explicitly is the escape hatch for tests or multi-tenant deployments.
+   */
+  workspaceId?: string
+  /**
+   * Display label for the workspace (a workspace = a machine). Free to
+   * rename — routing goes by workspaceId, not this. If omitted,
+   * `os.hostname()` is used.
+   */
+  workspaceName?: string
+  /**
+   * Optional filesystem jail. Empty / omitted = executor trusts the whole
+   * machine (defers to OS user permissions). Passing one or more roots
+   * restricts file tools to those subtrees.
+   */
+  sandboxRoots?: readonly string[]
   token?: string
   executorId?: string
   tools?: readonly Tool[]
@@ -42,6 +60,8 @@ export type ExecutorOptions = {
 
 export type ExecutorHandle = {
   readonly executorId: string
+  readonly workspaceId: string
+  readonly workspaceName: string
   readonly socket: Socket<
     ExecutorServerToClientEvents,
     ExecutorClientToServerEvents
@@ -51,18 +71,17 @@ export type ExecutorHandle = {
 }
 
 export function startExecutor(options: ExecutorOptions): ExecutorHandle {
-  const workspaces = Array.isArray(options.workspace)
-    ? options.workspace
-    : [options.workspace as string]
-  const sandbox: Sandbox = createSandbox({ roots: workspaces })
+  const sandboxRoots = options.sandboxRoots ?? []
+  const sandbox: Sandbox = createSandbox({ roots: sandboxRoots })
   const tools = createToolRegistry(options.tools ?? defaultTools)
   const executorId = options.executorId ?? ulid()
+  const workspaceId = options.workspaceId ?? loadOrCreateWorkspaceId()
+  const workspaceName = options.workspaceName ?? hostname()
 
   const factory = options.ioFactory ?? clientIO
   const socket = factory(`${options.host}/executor`, {
     transports: ['websocket'],
     auth: {
-      sessionId: options.sessionId,
       role: 'executor',
       clientVersion: '0.0.0',
       ...(options.token !== undefined ? { token: options.token } : {}),
@@ -75,16 +94,22 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   const inFlight = new Map<string, AbortController>()
 
   const announcement: ExecutorAnnounce = {
-    sessionId: options.sessionId,
     executorId,
+    workspaceId,
+    workspaceName,
     tools: [...tools.keys()],
-    workingDir: workspaces[0]!,
+    ...(sandboxRoots.length > 0 ? { sandboxRoots: [...sandboxRoots] } : {}),
     runtime: 'node',
     runtimeVersion: process.version,
+    hostname: hostname(),
+    os: normalizeOs(platform()),
+    ipAddresses: collectIpAddresses(),
+    pid: process.pid,
+    startedAt: new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString(),
   }
 
   const ready = new Promise<void>((resolve) => {
-    socket.on('session:ready', () => {
+    socket.on('connect', () => {
       socket.emit('executor:announce', announcement)
       resolve()
     })
@@ -111,6 +136,8 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 
   return {
     executorId,
+    workspaceId,
+    workspaceName,
     socket,
     ready,
     close() {
@@ -154,5 +181,21 @@ async function runOne(
   }
 }
 
-void hostname
-void platform
+function normalizeOs(p: NodeJS.Platform): ExecutorOs {
+  if (p === 'linux' || p === 'darwin' || p === 'win32') return p
+  return 'other'
+}
+
+function collectIpAddresses(): string[] {
+  const out: string[] = []
+  const ifaces = networkInterfaces()
+  for (const list of Object.values(ifaces)) {
+    if (!list) continue
+    for (const addr of list) {
+      if (addr.internal) continue
+      if (addr.family === 'IPv6' && addr.address.startsWith('fe80')) continue
+      out.push(addr.address)
+    }
+  }
+  return out
+}

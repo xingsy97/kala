@@ -5,6 +5,7 @@ export { grepTool } from './grep.js'
 export { writeTool } from './write.js'
 export { editTool } from './edit.js'
 export { bashTool } from './bash.js'
+export { todowriteTool } from './todowrite.js'
 export { createToolRegistry, ToolError } from './registry.js'
 export type { Tool, ToolContext, ToolRunner } from './registry.js'
 
@@ -16,6 +17,7 @@ import { grepTool } from './grep.js'
 import { writeTool } from './write.js'
 import { editTool } from './edit.js'
 import { bashTool } from './bash.js'
+import { todowriteTool } from './todowrite.js'
 
 export const allTools: readonly Tool[] = [
   readTool,
@@ -25,4 +27,5 @@ export const allTools: readonly Tool[] = [
   writeTool,
   editTool,
   bashTool,
+  todowriteTool,
 ]

@@ -36,9 +36,11 @@ describe('SessionStore.ensure', () => {
       store.ensure({ sessionId, defaultConfig: config }),
     ])
 
-    expect(a).toBe(b)
-    expect(b).toBe(c)
-    expect(store.get(sessionId)).toBe(a)
+    expect(a.record).toBe(b.record)
+    expect(b.record).toBe(c.record)
+    expect(store.get(sessionId)).toBe(a.record)
+    // Exactly one caller in a concurrent race should observe `created: true`.
+    expect([a.created, b.created, c.created].filter(Boolean)).toHaveLength(1)
 
     // Most important assertion: exactly one log file on disk. Before the
     // fix this was 3.
@@ -57,21 +59,23 @@ describe('SessionStore.ensure', () => {
     const p2 = store.load(sessionId)
 
     const [a, b] = await Promise.all([p1, p2])
-    expect(a).toBe(b)
+    expect(a.record).toBe(b)
   })
 
   it('returns the cached record on subsequent calls without touching disk', async () => {
     const store = new SessionStore(dir)
-    const rec = await store.ensure({
+    const first = await store.ensure({
       sessionId: 'sess-cached',
       defaultConfig: config,
     })
+    expect(first.created).toBe(true)
     const filesBefore = readdirSync(dir).length
     const again = await store.ensure({
       sessionId: 'sess-cached',
       defaultConfig: config,
     })
-    expect(again).toBe(rec)
+    expect(again.record).toBe(first.record)
+    expect(again.created).toBe(false)
     expect(readdirSync(dir).length).toBe(filesBefore)
   })
 
@@ -82,6 +86,7 @@ describe('SessionStore.ensure', () => {
       sessionId: 'sess-persist',
       defaultConfig: config,
     })
+    expect(rec1.created).toBe(true)
     const filesAfterFirst = readdirSync(dir).length
     expect(filesAfterFirst).toBe(1)
 
@@ -90,7 +95,8 @@ describe('SessionStore.ensure', () => {
       sessionId: 'sess-persist',
       defaultConfig: config,
     })
-    expect(rec2.sessionId).toBe(rec1.sessionId)
+    expect(rec2.record.sessionId).toBe(rec1.record.sessionId)
+    expect(rec2.created).toBe(false)
     // No second file was created.
     expect(readdirSync(dir).length).toBe(1)
   })

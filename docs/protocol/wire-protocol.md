@@ -29,21 +29,24 @@ On connect, the client sends an authentication payload via Socket.IO's `auth` fi
 
 ```ts
 type HandshakeAuth = {
-  sessionId: string          // ULID; identifies the session
   role: 'dashboard' | 'executor'
+  sessionId?: string         // required for `dashboard`; MUST be absent for `executor`
   token?: string             // v1: optional. v2: JWT bearer token
   clientVersion: string      // e.g. "@agent-kernel/executor@0.1.0"
 }
 ```
 
 Host validates:
-- `sessionId` matches an existing session OR the connection is allowed to create one (dashboard-only for v1)
+- Dashboard connections MUST carry a `sessionId` (the session they subscribe to). It matches an existing session OR the connection is allowed to lazy-create one on first user message.
+- Executor connections MUST NOT carry a `sessionId` — an executor is a daemon that serves any session whose `workspaceName` matches its own (see §5).
 - `role` matches the namespace (`role: 'executor'` MUST use `/executor`)
 - `token` valid if server is configured to require auth
 
-**On success**: server calls `socket.join(\`session:\${sessionId}\`)` and sends a `session:ready` event (see §3).
+**On success (dashboard)**: server calls `socket.join(\`session:\${sessionId}\`)` and sends a `session:ready` event (see §3).
 
-**On failure**: server disconnects with a reason string (`auth_failed`, `unknown_session`, `role_mismatch`, `version_incompatible`).
+**On success (executor)**: connection is accepted; the executor MUST then emit `executor:announce` (§5.1) to become routable. No `session:ready` is sent — executor rooms are joined lazily when Host receives `tool:call` traffic for a matching session.
+
+**On failure**: server disconnects with a reason string (`auth_failed`, `unknown_session`, `role_mismatch`, `version_incompatible`, `missing_session_id`).
 
 ---
 
@@ -61,6 +64,11 @@ Emitted once per client, right after handshake succeeds.
   cursor: number              // current event cursor of the session
   state: AgentState           // current snapshot (see SPEC §1.4)
   config: AgentConfig         // (see SPEC §1.3)
+  parentSessionId?: string    // for forked sessions
+  parentCursor?: number       // fork point on the parent
+  workspaceId?: string        // routing key — the workspace this session is bound to (§5.1). Undefined for legacy sessions predating the field.
+  workspaceName?: string      // display label for the workspace, snapshotted at session-create time
+  selectedModel?: string      // per-session model override, if one has been set
 }
 ```
 
@@ -173,6 +181,33 @@ Host replays the source event log up to `cursor` into a new session with `newSes
 
 Explicitly join an additional session room after the initial handshake. Response: `session:ready` on success.
 
+#### `client:list_executors`
+
+```ts
+{}
+```
+
+Request the currently-attached executors on this Host. Response: `server:executors` on the same socket.
+
+#### `client:list_sessions`
+
+```ts
+{}
+```
+
+Request the sessions currently on this Host (JSONL logs under the Host's session directory). Response: `server:sessions`.
+
+#### `client:load_history`
+
+```ts
+{
+  sessionId: string
+  sinceCursor?: number        // if omitted, return the full log from cursor 1
+}
+```
+
+Request the historical timeline for a session. Response: `server:history` with the log entries. Dashboard fires this on `session:ready` so the timeline survives page reloads.
+
 ### 4.2 Host → Dashboard only (not executor)
 
 #### `approval:required`
@@ -201,30 +236,110 @@ Convenience event; a projection of the running `state.usage` after each LLM resp
 }
 ```
 
+#### `server:executors`
+
+Response to `client:list_executors`.
+
+```ts
+{
+  executors: Array<ExecutorAnnounce & { attachedAt: string }>
+}
+```
+
+Each entry is the announcement payload the executor sent, plus the ISO-8601 timestamp Host recorded when the executor attached. Older executors omit the `hostname` / `os` / `ipAddresses` / `pid` / `startedAt` fields — the Dashboard falls back to `executorId` in that case.
+
+#### `server:executor_changed`
+
+Broadcast (not response-scoped) whenever an executor attaches, detaches, or re-announces. Executors are daemons — a change affects all sessions whose `workspaceName` matches or previously matched this executor.
+
+```ts
+// attached | updated:
+{
+  change: 'attached' | 'updated'
+  executorId: string
+  executor: ExecutorAnnounce & { attachedAt: string }
+}
+// detached:
+{
+  change: 'detached'
+  executorId: string
+  // no `executor` field — the executor is gone
+}
+```
+
+`updated` fires when the same executor re-announces with different capabilities (e.g., after a reconnect).
+
+#### `server:sessions`
+
+Response to `client:list_sessions`.
+
+```ts
+{
+  sessions: Array<{
+    sessionId: string
+    createdAt: string          // from JSONL header
+    lastEventAt?: string       // ts of the last event line, if any
+    eventCount: number
+    parentSessionId?: string   // set if this session was forked
+    workspaceId?: string       // routing key — matches an executor's announced workspaceId (§5.1). Undefined for legacy sessions.
+    workspaceName?: string     // display label captured at session-create time. Not authoritative; the live executor's `workspaceName` is what the dashboard shows when one is attached.
+    executorId?: string        // reserved for v2 (Host doesn't record which executor produced a tool_result in v1)
+    status?: AgentState['status']  // last snapshot's status, if a snapshot exists
+    firstUserMessage?: string  // first ~120 chars of the first user_message; used as row label
+  }>
+}
+```
+
+Host derives these fields by reading each session's JSONL header + scanning events. The scan is `O(events)` per session; if a Host tracks many sessions this endpoint may want caching, but v1 reads on demand.
+
+#### `server:history`
+
+Response to `client:load_history`.
+
+```ts
+{
+  sessionId: string
+  entries: EventAppendedEvent[]   // same shape as live event:appended
+}
+```
+
+Every entry has the same shape as a live `event:appended` payload — Dashboard can feed them into its timeline state the same way. Entries are ordered by `seq` ascending. Dashboard dedups by `seq` in case a live `event:appended` overlaps the tail of history.
+
 ---
 
 ## 5. Executor-specific events
 
-Executor is a pure RPC responder. It receives commands from Host, executes them, and replies. It never originates state-changing events.
+Executor is a pure RPC responder. It receives commands from Host, executes them, and replies. It never originates state-changing events. **An executor is a daemon**: one process serves N sessions. It has no session binding at connect time; Host routes each `tool:call` to it based on the session's `workspaceName` (see §5.1).
 
 ### 5.1 Executor → Host (on connect)
 
 #### `executor:announce`
 
-Sent by executor after `session:ready`. Declares its capabilities.
+Sent by executor immediately after the handshake succeeds. Declares the workspace this executor represents plus its capabilities and machine metadata (used by the Dashboard's Workspaces column).
 
 ```ts
 {
-  sessionId: string
-  executorId: string          // client-generated stable id
+  executorId: string          // client-generated stable id (usually a ULID)
+  workspaceId: string         // REQUIRED. Stable ULID minted on the executor's first launch and persisted (default `~/.agent-kernel/workspace-id`). Sessions bind to this in their JSONL header (see event-log.md §3); Host routes `tool:call` by matching `session.workspaceId` against a live announce. Never renamed — a lost or regenerated id detaches the machine's existing sessions, which is why the executor refuses to boot with a corrupted id file.
+  workspaceName: string       // REQUIRED. Human-readable display label. Free to change via `--name` — routing goes by workspaceId, not this. Falls back to `os.hostname()` when the operator doesn't pass a name.
   tools: string[]             // tool names this executor implements
-  workingDir?: string         // for logging/display only
+  sandboxRoots?: string[]     // optional filesystem jail(s). Empty / omitted = executor trusts whole machine (defers to OS user permissions).
+  workingDir?: string         // for logging/display only; NOT part of the workspace identity.
   runtime: 'node' | 'browser-webcontainer' | 'other'
   runtimeVersion: string
+  // Machine metadata — all optional. An older executor that doesn't
+  // populate these still works; the Dashboard falls back to executorId.
+  hostname?: string           // os.hostname()
+  os?: 'linux' | 'darwin' | 'win32' | 'other'  // normalized os.platform()
+  ipAddresses?: string[]      // non-loopback, non-link-local IPv4/IPv6
+  pid?: number                // process.pid
+  startedAt?: string          // ISO-8601, executor process boot time
 }
 ```
 
-Host stores the mapping `sessionId → executor(s)`. v1 accepts one executor per session; a second `executor:announce` for the same session replaces the first.
+A workspace is a machine, not a directory (see ADR 0014). Two executor processes with the same `workspaceId` (rare — same user, same machine, same id file) are treated as replicas. `workspaceName` is display-only and free to change; if the same executor re-announces with a new name, the Dashboard picks up the new label but existing sessions stay bound via `workspaceId`.
+
+Host stores the attach in a registry keyed by `executorId`. A second `executor:announce` from the same executorId replaces the first entry and fires `server:executor_changed { change: 'updated' }` (§4.2).
 
 ### 5.2 Host → Executor
 
@@ -305,6 +420,9 @@ Host forwards to Dashboard as `tool:progress`.
 | Dashboard | `client:user_reject` | Host (kernel) |
 | Dashboard | `client:cancel` | Host (kernel) |
 | Dashboard | `client:fork` | Host (kernel + storage) |
+| Dashboard | `client:list_executors` | Host (routing) |
+| Dashboard | `client:list_sessions` | Host (storage) |
+| Dashboard | `client:load_history` | Host (storage) |
 | Dashboard | `subscribe` | Host (routing) |
 | Executor | `executor:announce` | Host (routing) |
 | Executor | ACK to `tool:call` | Host (kernel) |
@@ -315,6 +433,10 @@ Host forwards to Dashboard as `tool:progress`.
 | Host | `session:error` | All in room |
 | Host | `approval:required` | Dashboard only |
 | Host | `usage:updated` | Dashboard only |
+| Host | `server:executors` | Dashboard only (response) |
+| Host | `server:executor_changed` | Dashboard only (broadcast) |
+| Host | `server:sessions` | Dashboard only (response) |
+| Host | `server:history` | Dashboard only (response) |
 | Host | `tool:call` | Executor only |
 | Host | `tool:cancel` | Executor only |
 
@@ -335,15 +457,15 @@ If executor does not reply to `tool:call` within `timeoutMs` (default: **60000ms
 
 ### 7.3 Executor disconnected while calls pending
 
-Host detects via Socket.IO `disconnect`. For every pending `call_tool` targeting the disconnected executor:
+Host detects via Socket.IO `disconnect`. For every pending `call_tool` the disconnected executor was serving:
 - Synthesize `tool_result(ok=false, content='executor disconnected')`
 - Feed to kernel
 
-The session moves forward. When executor reconnects (with same `sessionId`), it re-announces and resumes.
+The session moves forward. When a fresh executor announces with a matching `workspaceId` (typically the same daemon reconnecting after a restart — the persisted id file makes this stable), Host resumes routing to it for that workspace's sessions.
 
 ### 7.4 Dashboard disconnected
 
-No kernel action needed. On reconnect and re-subscribe, Host sends `session:ready` with current state. If the dashboard wants recent events for its timeline, it MAY send `subscribe` with a `sinceCursor` field (v2).
+No kernel action needed. On reconnect and re-subscribe, Host sends `session:ready` with current state. Dashboard fires `client:load_history` after `session:ready` to rebuild the timeline (see §4.1). It MAY pass `sinceCursor` to limit the response to entries the tab hasn't seen.
 
 ### 7.5 LLM error
 
@@ -358,9 +480,9 @@ Socket.IO handles TCP-level reconnection. On reconnect:
 1. Client re-sends handshake auth (Socket.IO does this automatically if `reconnection: true`).
 2. Server calls `socket.join('session:...')` again.
 3. Server emits `session:ready` with current state.
-4. If client has a stale `cursor`, it can compare with `session:ready.cursor` and decide whether to fetch missing events via a `history:query` (v2).
+4. Dashboard fires `client:load_history` with the last seen `cursor` (or none, for a fresh tab). Host responds with `server:history`, and Dashboard merges the entries into its timeline (dedup by `seq`).
 
-**v1 keeps it simple**: after reconnect, clients treat their state as fresh from `session:ready`. Timeline reconstruction on reconnect is a v2 concern.
+Executors don't need timeline replay on reconnect — they only care about `pendingCalls`, which Host redispatches from its in-memory registry.
 
 ---
 

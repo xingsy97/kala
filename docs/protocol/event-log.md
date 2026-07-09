@@ -55,6 +55,8 @@ type HeaderEntry = {
   sessionId: string
   parentSessionId?: string            // present iff this session is a fork
   parentCursor?: number               // fork point in the parent session's log
+  workspaceId?: string                // routing key: the workspace (a machine, see ADR 0014) this session is bound to. Written once at create time; Host uses it to route `tool:call` to the executor announcing the same id. Undefined for legacy logs predating the field — treated as "unassigned".
+  workspaceName?: string              // display label captured at create time. Not authoritative — the live executor's `workspaceName` is what the dashboard shows when an executor is attached.
   formatVersion: 1                    // bumps on breaking log-format change
   kernelVersion: string               // e.g. "@agent-kernel/kernel@0.1.0"
   config: AgentConfig                 // frozen at session start
