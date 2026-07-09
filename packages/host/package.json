@@ -25,7 +25,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx bin/agent-kernel-host.ts",
+    "dev": "tsx watch --exclude \"../dashboard/**\" bin/agent-kernel-host.ts",
+    "dev:restart": "node ../../scripts/restart-every.mjs --interval-ms 180000 -- tsx bin/agent-kernel-host.ts",
     "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
   "dependencies": {
