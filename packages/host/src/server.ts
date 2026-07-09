@@ -27,9 +27,9 @@ import { Server as IOServer } from 'socket.io'
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LoopBroadcast, LoopHandle } from './loop.js'
 import { runHostLoop } from './loop.js'
-import type { HookConfig, HookPayload, HookRunner } from './hooks.js'
-import { selectHooks } from './hooks.js'
-import type { SkillRegistry } from './skills.js'
+import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
+import { selectHooks } from './extensions/hooks.js'
+import type { SkillRegistry } from './extensions/skills.js'
 import { SessionStore, type SessionRecord } from './store/session.js'
 import {
   createExecutorRegistry,
@@ -387,7 +387,7 @@ export async function startHostServer(
   ): void {
     const payload: SessionErrorEvent = { sessionId, scope, message }
     dashboardNs.to(`session:${sessionId}`).emit('session:error', payload)
-    executorNs.to(`session:${sessionId}`).emit('session:error', payload)
+    // Executor no longer subscribes to session:error — it's UI-only.
   }
 
   await new Promise<void>((resolve) => {

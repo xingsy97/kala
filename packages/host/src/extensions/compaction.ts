@@ -11,8 +11,8 @@
 
 import type { AgentEvent, Message } from '@agent-kernel/kernel'
 
-import type { HostLoopDeps, LoopHandle } from './loop.js'
-import { dispatchOne } from './loop.js'
+import type { HostLoopDeps, LoopHandle } from '../loop-types.js'
+import { dispatchOne } from '../loop.js'
 
 /**
  * Fixed instruction fed to the summarizer LLM call. The output replaces the

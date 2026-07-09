@@ -23,22 +23,32 @@ import {
 } from './executor.js'
 
 type EmittedCall = {
-  event: 'tool:call' | 'tool:cancel'
-  payload: ToolCallMessage | { sessionId: string; callId: string }
+  event:
+    | 'tool:call'
+    | 'tool:cancel'
+    | 'session:error'
+    | 'executor:host_reject'
+  payload:
+    | ToolCallMessage
+    | { sessionId: string; callId: string }
+    | Record<string, unknown>
   ack?: (r: ToolResultAck) => void
 }
 
 type FakeSocket = {
   id: string
   emitted: EmittedCall[]
+  connected: boolean
   emit: (event: string, payload: unknown, ack?: (r: ToolResultAck) => void) => void
+  disconnect: (close?: boolean) => void
 }
 
 function makeFakeSocket(id: string): FakeSocket {
   const emitted: EmittedCall[] = []
-  return {
+  const sock: FakeSocket = {
     id,
     emitted,
+    connected: true,
     emit(event, payload, ack) {
       emitted.push({
         event: event as EmittedCall['event'],
@@ -46,7 +56,11 @@ function makeFakeSocket(id: string): FakeSocket {
         ...(ack ? { ack } : {}),
       })
     },
+    disconnect() {
+      sock.connected = false
+    },
   }
+  return sock
 }
 
 function fakeIo(): unknown {
@@ -391,5 +405,65 @@ describe('ExecutorRegistry', () => {
     expect(sock.emitted).toHaveLength(1)
     sock.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'ok' })
     await expect(p).resolves.toEqual({ ok: true, content: 'ok' })
+  })
+
+  it('rejects a second executor claiming the same workspaceId while the first is still connected', () => {
+    const reg = createExecutorRegistry(fakeIo() as never, makeResolver(), 5_000)
+    const first = makeFakeSocket('first')
+    reg.attach(first as never, announceOf('e-first', 'ws-shared'))
+
+    const second = makeFakeSocket('second')
+    reg.attach(second as never, announceOf('e-second', 'ws-shared'))
+
+    // Second attempt must be told off + disconnected. First must remain
+    // the sole claimant.
+    expect(second.connected).toBe(false)
+    const reject = second.emitted.find((e) => e.event === 'executor:host_reject')
+    expect(reject).toBeDefined()
+    expect((reject!.payload as { code: string }).code).toBe('workspace_id_conflict')
+
+    // First should still be able to route tool calls.
+    const p = reg.callTool('sess-x', callEffect('c1'))
+    expect(first.emitted).toHaveLength(1) // tool:call went to the original
+    first.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'ok' })
+    return expect(p).resolves.toEqual({ ok: true, content: 'ok' })
+  })
+
+  it('lets a new executor claim a workspaceId whose previous holder has disconnected', () => {
+    const reg = createExecutorRegistry(fakeIo() as never, makeResolver(), 5_000)
+    const first = makeFakeSocket('first')
+    reg.attach(first as never, announceOf('e-first', 'ws-takeover'))
+
+    // Simulate the first executor's socket having gone down without a
+    // detach event yet (race window). Its connected flag is false but the
+    // bind still lives in the registry.
+    first.connected = false
+
+    const second = makeFakeSocket('second')
+    reg.attach(second as never, announceOf('e-second', 'ws-takeover'))
+
+    // Second executor is the new claimant; must not have been disconnected.
+    expect(second.connected).toBe(true)
+    expect(second.emitted.some((e) => e.event === 'executor:host_reject')).toBe(false)
+
+    // Tool call should route to the new bind. Give the resolver a hint
+    // that sess-y is bound to ws-takeover.
+    const reg2 = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-y': 'ws-takeover' }),
+      5_000,
+    )
+    const a = makeFakeSocket('a')
+    reg2.attach(a as never, announceOf('e-a', 'ws-takeover'))
+    a.connected = false
+    const b = makeFakeSocket('b')
+    reg2.attach(b as never, announceOf('e-b', 'ws-takeover'))
+
+    const p = reg2.callTool('sess-y', callEffect('c1'))
+    // Only the new socket b should have received the tool:call
+    expect(a.emitted).toHaveLength(0)
+    expect(b.emitted).toHaveLength(1)
+    b.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'ok' })
+    return expect(p).resolves.toEqual({ ok: true, content: 'ok' })
   })
 })

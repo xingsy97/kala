@@ -1,17 +1,27 @@
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createSandbox, SandboxError } from './sandbox.js'
 
+// The sandbox returns *canonical* absolute paths (symlinks resolved, and on
+// Windows 8.3 short names like `C:\Users\USER\…` expanded to their long
+// form). `os.tmpdir()` can itself be an 8.3 path, so a raw `mkdtemp` result is
+// not necessarily canonical. Run every temp dir through the same
+// canonicalization the sandbox uses so assertions compare like with like on
+// any TEMP configuration. On Linux/macOS this is a no-op.
+function canonical(p: string): string {
+  return realpathSync.native(p)
+}
+
 describe('sandbox', () => {
   let workspace: string
   let outside: string
 
   beforeEach(() => {
-    workspace = mkdtempSync(join(tmpdir(), 'ak-sandbox-ws-'))
-    outside = mkdtempSync(join(tmpdir(), 'ak-sandbox-out-'))
+    workspace = canonical(mkdtempSync(join(tmpdir(), 'ak-sandbox-ws-')))
+    outside = canonical(mkdtempSync(join(tmpdir(), 'ak-sandbox-out-')))
     writeFileSync(join(workspace, 'a.txt'), 'hi')
     mkdirSync(join(workspace, 'sub'))
     writeFileSync(join(workspace, 'sub', 'b.txt'), 'sub')
@@ -68,7 +78,7 @@ describe('sandbox', () => {
   })
 
   it('supports multiple workspace roots', async () => {
-    const alt = mkdtempSync(join(tmpdir(), 'ak-sandbox-alt-'))
+    const alt = canonical(mkdtempSync(join(tmpdir(), 'ak-sandbox-alt-')))
     writeFileSync(join(alt, 'c.txt'), 'alt')
     try {
       const sb = createSandbox({ roots: [workspace, alt] })

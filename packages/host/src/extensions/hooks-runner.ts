@@ -11,7 +11,7 @@
 import type { CallToolEffect } from '@agent-kernel/kernel'
 
 import { selectHooks } from './hooks.js'
-import type { HostLoopDeps } from './loop.js'
+import type { HostLoopDeps } from '../loop-types.js'
 
 /**
  * Run every configured pre_tool_use hook. Returns null when the tool call

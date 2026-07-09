@@ -731,6 +731,22 @@ export type ToolCallMessage = {
   input: Record<string, unknown>
   cwd?: string
   timeoutMs?: number
+  /**
+   * Delivery mode. `'kernel'` (default when omitted) — the tool call
+   * originates from a kernel `call_tool` effect, its result is fed back
+   * as a `tool_result` event, appended to the session log, and echoed
+   * to dashboards. `'direct'` — a host-initiated internal RPC (fs
+   * inspection, background-task control, overflow spill management, ...);
+   * the executor runs the tool identically but the host never dispatches
+   * the result through kernel `step()` — it just returns `ToolResultAck`
+   * to the original caller. The `sessionId` field is a routing convenience
+   * only in this mode; it does NOT mutate any real session.
+   *
+   * Direct-mode tool names are conventionally prefixed `__` so a reader
+   * scanning the executor's tool registry can tell at a glance which are
+   * LLM-visible.
+   */
+  dispatchMode?: 'kernel' | 'direct'
 }
 
 export type ToolCancelMessage = {
@@ -1024,52 +1040,40 @@ export type ExecutorClientToServerEvents = {
   'executor:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
 }
 
+/**
+ * Executor's inbound wire surface. Kept intentionally small so an executor
+ * deployed in the field only has to speak two message shapes: "run this
+ * tool" and "cancel that one". Everything the host previously exposed as
+ * a bespoke RPC (fs inspection, background-task inspection, overflow
+ * spill management) now travels through `tool:call` with `dispatchMode:
+ * 'direct'` — the tool's own name (conventionally prefixed `__`) tells
+ * the executor which built-in to run.
+ *
+ * The kernel-echo events (`session:ready`, `state:changed`, `event:appended`,
+ * `session:error`) that used to be declared here were never actually
+ * subscribed by any executor; they were pure type noise. Gone.
+ */
 export type ExecutorServerToClientEvents = {
-  'session:ready': (payload: SessionReadyEvent) => void
-  'state:changed': (payload: StateChangedEvent) => void
-  'event:appended': (payload: EventAppendedEvent) => void
-  'session:error': (payload: SessionErrorEvent) => void
   'tool:call': (
     payload: ToolCallMessage,
     ack: (result: ToolResultAck) => void,
   ) => void
   'tool:cancel': (payload: ToolCancelMessage) => void
-  'fs:list_dirs': (
-    payload: ClientListDirs,
-    ack: (result: DirListResult) => void,
-  ) => void
-  'fs:list_files': (
-    payload: ClientListFiles,
-    ack: (result: FileListResult) => void,
-  ) => void
-  'fs:read_file': (
-    payload: ClientReadFile,
-    ack: (result: FileContentsResult) => void,
-  ) => void
-  'fs:read_overflow': (
-    payload: ClientReadOverflow,
-    ack: (result: OverflowContentsResult) => void,
-  ) => void
-  'fs:delete_overflow_session': (
-    payload: DeleteOverflowSession,
-    ack: (result: DeleteOverflowSessionResult) => void,
-  ) => void
-  'fs:copy_overflow_session': (
-    payload: CopyOverflowSession,
-    ack: (result: CopyOverflowSessionResult) => void,
-  ) => void
-  'bg:list': (
-    payload: ClientListBgTasks,
-    ack: (result: BgListResult) => void,
-  ) => void
-  'bg:output': (
-    payload: ClientReadBgOutput,
-    ack: (result: BgOutputResult) => void,
-  ) => void
-  'bg:kill': (
-    payload: ClientKillBgTask,
-    ack: (result: BgKillResult) => void,
-  ) => void
+  /**
+   * Permanent-failure signal. Sent immediately before a server-initiated
+   * `socket.disconnect(true)` when the executor must not retry (workspaceId
+   * conflict, auth failure, protocol-version incompatibility). Executors
+   * should log `payload.message` and exit their process — the socket.io
+   * client will fire `disconnect('io server disconnect')` right after this
+   * event and, per the client's own retry policy, must not reconnect.
+   *
+   * The `code` field is machine-readable so the executor's exit path can
+   * pick a distinct exit code per class of failure.
+   */
+  'executor:host_reject': (payload: {
+    code: 'workspace_id_conflict' | 'version_incompatible' | 'auth_failed'
+    message: string
+  }) => void
 }
 
 // ============================================================================

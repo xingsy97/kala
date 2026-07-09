@@ -14,6 +14,37 @@ import { startBackgroundShell } from './background-shell.js'
 const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_OUTPUT = 1_000_000
 
+/**
+ * Kill a spawned shell *and its descendants*. `child.kill()` signals only the
+ * direct child; on Windows the child (`bash.exe`) spawns the actual command
+ * (`sleep`, a compiler, …) as a grandchild that keeps the stdout pipe open, so
+ * a bare kill leaves it running and `close` never fires until the command
+ * exits on its own — timeoutMs and abort would hang for the full duration.
+ * On win32 we hand the whole tree to `taskkill /T /F`; elsewhere a process
+ * group signal (negative pid) isn't used because we don't detach, so SIGKILL
+ * to the child is enough for the POSIX `sh -c` case.
+ */
+function killTree(child: ReturnType<typeof spawn>): void {
+  if (process.platform === 'win32') {
+    const pid = child.pid
+    if (pid === undefined) {
+      child.kill('SIGKILL')
+      return
+    }
+    // Fire-and-forget; if taskkill itself can't run we still fall back to the
+    // direct kill so the child is at least signalled.
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+      }).on('error', () => child.kill('SIGKILL'))
+    } catch {
+      child.kill('SIGKILL')
+    }
+    return
+  }
+  child.kill('SIGKILL')
+}
+
 export const bashTool: Tool = {
   name: 'bash',
   async run(input, ctx) {
@@ -94,12 +125,12 @@ export const bashTool: Tool = {
 
       const timer = setTimeout(() => {
         killedByTimeout = true
-        child.kill('SIGKILL')
+        killTree(child)
       }, timeoutMs)
 
       const abortListener = (): void => {
         killedByAbort = true
-        child.kill('SIGKILL')
+        killTree(child)
       }
       ctx.signal.addEventListener('abort', abortListener, { once: true })
 
