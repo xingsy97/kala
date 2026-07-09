@@ -43,7 +43,6 @@ let actionPrefix = 'enhancement-action-eval-artifact-actions'
 
 try {
   mkdirSync(SESSIONS_DIR, { recursive: true })
-  mkdirSync(ARTIFACT_ROOT, { recursive: true })
   const fixture = writeFixtures()
 
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], {
@@ -83,6 +82,7 @@ try {
   })
 
   await page.goto(HOST_URL, { waitUntil: 'networkidle2', timeout: 15_000 })
+  await verifyMissingArtifactRootFirstUse()
   await openArtifactMode('eval')
   await verifySweBenchPlanFailure(fixture)
   await verifySweBenchPlanSuccess(fixture)
@@ -120,6 +120,25 @@ async function verifySweBenchPlanFailure(fixture) {
   await page.waitForSelector('[data-testid="swebench-plan-error"]')
   const text = await textContent('[data-testid="swebench-plan-error"]')
   check('SWE-bench plan failure is surfaced in the real dialog', /ENOENT|no such file|missing/i.test(text), text)
+}
+
+async function verifyMissingArtifactRootFirstUse() {
+  check('e2e starts with a missing artifact root', !existsSync(ARTIFACT_ROOT), ARTIFACT_ROOT)
+  for (const mode of ['eval', 'ops', 'profiles']) {
+    await openArtifactMode(mode)
+    await page.waitForFunction(
+      () => !(document.body.textContent ?? '').includes('ENOENT: no such file or directory'),
+      { timeout: 5_000 },
+    )
+    const text = await bodyText()
+    check(`artifact ${mode} view tolerates missing artifact root`, !/ENOENT|scandir/.test(text), text.slice(0, 400))
+  }
+  const manifest = await page.evaluate(async () => {
+    const res = await fetch('/artifacts/manifest', { cache: 'no-store' })
+    return { status: res.status, body: await res.json() }
+  })
+  check('missing artifact root manifest request returns an empty manifest', manifest.status === 200 && manifest.body?.summary?.entryCount === 0, JSON.stringify(manifest))
+  check('missing artifact root is initialized for later writes', existsSync(ARTIFACT_ROOT), ARTIFACT_ROOT)
 }
 
 async function verifySweBenchPlanSuccess(fixture) {
