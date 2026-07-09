@@ -3,9 +3,9 @@
 Status: shared reference runbooks for the four Agentic RL smoke tiers plus the
 rented GPU host paid runbook. Everything in this file applies to *every* run; anything
 that changes between runs (task pool contents, launch flags, success criteria)
-belongs in `experiments/<date>-run-<n>/runbook.md`, not here. This document is
+belongs in `../../experiments/rl/<date>-run-<n>/runbook.md`, not here. This document is
 committed; the operator log with concrete instance ids, timings, and error
-transcripts lives in `experiments/<date>-run-<n>/raw-log.md`, which is
+transcripts lives in `../../experiments/rl/<date>-run-<n>/raw-log.md`, which is
 `.gitignore`d.
 
 For design context see `system-design.md`. For the implementation gate see
@@ -170,7 +170,7 @@ custom generator.
 The commands below are the reference/template form. **The concrete parameters
 for a specific paid run (task pool, `--num-rollout`, `--n-samples-per-prompt`,
 `--max-turns`, coefficients, verifier fixtures) live under
-`experiments/<date>-run-<n>/runbook.md`**. Read the run-specific runbook first
+`../../experiments/rl/<date>-run-<n>/runbook.md`**. Read the run-specific runbook first
 when reproducing or auditing a past run.
 
 Prerequisites:
@@ -226,7 +226,7 @@ Expected result:
 - slime completes at least one train step or a configured rollout-then-train
   debug step.
 - Debug rollout data contains the agent-kernel artifact refs in metadata.
-- The run updates `docs/rl/experiments/<date>-run-<n>/final-report.md`
+- The run updates `../../experiments/rl/<date>-run-<n>/final-report.md`
   with environment, commands, artifacts, sample validation, trainer logs, and
   conclusions.
 

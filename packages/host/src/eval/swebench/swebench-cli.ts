@@ -1,0 +1,272 @@
+import { readFile } from 'node:fs/promises'
+
+import {
+  exportSessionForSweBench,
+  inferSweBenchPatchRun,
+  ingestSweBenchResults,
+  planSweBenchWorkerRun,
+  runSweBenchAgentPatchRun,
+  runSweBenchGrade,
+  type ExportSessionForSweBenchInput,
+  type InferSweBenchPatchRunInput,
+  type SweBenchWorkerPlanInput,
+  type RunSweBenchAgentPatchInput,
+  type SweBenchIngestResultsInput,
+  type SweBenchGradeInput,
+} from '../swebench/swebench.js'
+
+export type SweBenchCliCommand =
+  | { kind: 'none' }
+  | ({ kind: 'grade' } & SweBenchGradeInput)
+  | ({ kind: 'infer' } & InferSweBenchPatchRunInput)
+  | ({ kind: 'agent-infer' } & RunSweBenchAgentPatchInput)
+  | ({ kind: 'plan' } & SweBenchWorkerPlanInput)
+  | ({ kind: 'ingest-results' } & SweBenchIngestResultsInput)
+  | ({ kind: 'run' } & InferSweBenchPatchRunInput & {
+      maxWorkers?: number
+      modal?: boolean
+      execute?: boolean
+      cwd?: string
+    })
+  | ({ kind: 'export-session' } & Omit<ExportSessionForSweBenchInput, 'modelPatch'> & {
+      modelPatchPath: string
+    })
+
+export function parseSweBenchCli(argv: readonly string[]): SweBenchCliCommand {
+  if (argv[0] !== 'eval' || argv[1] !== 'swebench') return { kind: 'none' }
+  const subcommand = argv[2]
+  const rest = argv.slice(3)
+  if (subcommand === 'grade') {
+    return {
+      kind: 'grade',
+      datasetName: required(rest, '--dataset'),
+      predictionsPath: required(rest, '--predictions'),
+      runId: required(rest, '--run-id'),
+      maxWorkers: numberArg(rest, '--max-workers'),
+      instanceIds: listArg(rest, '--instance-ids'),
+      modal: flag(rest, '--modal'),
+      execute: flag(rest, '--execute'),
+      cwd: value(rest, '--cwd'),
+    }
+  }
+  if (subcommand === 'export-session') {
+    return {
+      kind: 'export-session',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      dataset: required(rest, '--dataset'),
+      split: value(rest, '--split'),
+      model: required(rest, '--model'),
+      instanceId: required(rest, '--instance-id'),
+      sessionLogPath: required(rest, '--session-log'),
+      modelPatchPath: required(rest, '--model-patch'),
+      workspaceRoot: value(rest, '--workspace-root'),
+    }
+  }
+  if (subcommand === 'ingest-results') {
+    return {
+      kind: 'ingest-results',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      resultsDir: required(rest, '--results-dir'),
+    }
+  }
+  if (subcommand === 'plan') {
+    return {
+      kind: 'plan',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      dataset: required(rest, '--dataset'),
+      split: value(rest, '--split'),
+      model: required(rest, '--model'),
+      instancesJsonl: required(rest, '--instances-jsonl'),
+      instanceIds: listArg(rest, '--instance-ids'),
+      limit: numberArg(rest, '--limit'),
+      maxWorkers: numberArg(rest, '--max-workers'),
+      timeoutMs: numberArg(rest, '--timeout-ms'),
+      repoCacheDir: value(rest, '--repo-cache-dir'),
+    }
+  }
+  if (subcommand === 'infer' || subcommand === 'run') {
+    const base = {
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      dataset: required(rest, '--dataset'),
+      split: value(rest, '--split'),
+      model: required(rest, '--model'),
+      instancesJsonl: required(rest, '--instances-jsonl'),
+      patchesDir: required(rest, '--patches-dir'),
+      instanceIds: listArg(rest, '--instance-ids'),
+      limit: numberArg(rest, '--limit'),
+      workspaceRoot: value(rest, '--workspace-root'),
+    }
+    if (subcommand === 'infer') return { kind: 'infer', ...base }
+    return {
+      kind: 'run',
+      ...base,
+      maxWorkers: numberArg(rest, '--max-workers'),
+      modal: flag(rest, '--modal'),
+      execute: flag(rest, '--execute'),
+      cwd: value(rest, '--cwd'),
+    }
+  }
+  if (subcommand === 'agent-infer') {
+    return {
+      kind: 'agent-infer',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      dataset: required(rest, '--dataset'),
+      split: value(rest, '--split'),
+      model: required(rest, '--model'),
+      instancesJsonl: required(rest, '--instances-jsonl'),
+      agentCommand: required(rest, '--agent-command'),
+      instanceIds: listArg(rest, '--instance-ids'),
+      limit: numberArg(rest, '--limit'),
+      workspaceRoot: value(rest, '--workspace-root'),
+      repoCacheDir: value(rest, '--repo-cache-dir'),
+      timeoutMs: numberArg(rest, '--timeout-ms'),
+      maxWorkers: numberArg(rest, '--max-workers'),
+      skipCompleted: flag(rest, '--skip-completed'),
+      sessionLogsDir: value(rest, '--session-logs-dir'),
+    }
+  }
+  throw new Error(`unknown swebench subcommand: ${subcommand ?? '<missing>'}`)
+}
+
+export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boolean> {
+  if (command.kind === 'none') return false
+  if (command.kind === 'grade') {
+    const result = await runSweBenchGrade(command)
+    console.log(JSON.stringify({
+      action: 'swebench-grade-command',
+      gradingAuthority: 'official-swebench-harness',
+      gradingMode: command.execute ? 'execute' : 'dry-run',
+      requiresDocker: true,
+      command: result.command,
+      shellCommand: result.command.map(shellQuote).join(' '),
+      ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+    }, null, 2))
+    if (result.exitCode !== undefined) process.exitCode = result.exitCode
+    return true
+  }
+  if (command.kind === 'infer' || command.kind === 'run') {
+    const result = await inferSweBenchPatchRun(command)
+    const payload: Record<string, unknown> = {
+      runId: result.layout.runId,
+      predictionsPath: result.layout.predictionsPath,
+      experimentPath: result.layout.experimentPath,
+      summaryPath: result.layout.summaryPath,
+      trialCount: result.trials.length,
+    }
+    if (command.kind === 'run') {
+      const grade = await runSweBenchGrade({
+        datasetName: command.dataset,
+        predictionsPath: result.layout.predictionsPath,
+        runId: command.runId,
+        maxWorkers: command.maxWorkers,
+        instanceIds: command.instanceIds,
+        modal: command.modal,
+        execute: command.execute,
+        cwd: command.cwd,
+      })
+      payload.gradingAuthority = 'official-swebench-harness'
+      payload.gradingMode = command.execute ? 'execute' : 'dry-run'
+      payload.requiresDocker = true
+      payload.officialHarnessCommand = grade.command
+      payload.officialHarnessShellCommand = grade.command.map(shellQuote).join(' ')
+      if (grade.exitCode !== undefined) process.exitCode = grade.exitCode
+    }
+    console.log(JSON.stringify(payload, null, 2))
+    return true
+  }
+  if (command.kind === 'agent-infer') {
+    const result = await runSweBenchAgentPatchRun(command)
+    console.log(JSON.stringify({
+      runId: result.layout.runId,
+      predictionsPath: result.layout.predictionsPath,
+      experimentPath: result.layout.experimentPath,
+      progressPath: result.layout.progressPath,
+      summaryPath: result.layout.summaryPath,
+      trialCount: result.trials.length,
+      gradingAuthority: 'official-swebench-harness',
+      gradingStatus: 'not_graded',
+      nextStep: 'Run agent-kernel-host eval swebench grade to generate or execute the official Docker harness command, then ingest official results.',
+    }, null, 2))
+    return true
+  }
+  if (command.kind === 'plan') {
+    const result = await planSweBenchWorkerRun(command)
+    console.log(JSON.stringify({
+      runId: result.layout.runId,
+      planPath: result.planPath,
+      registryPath: result.registryPath,
+      selectedCount: result.plan.selectedCount,
+      maxWorkers: result.plan.maxWorkers,
+      shardCount: result.plan.shards.length,
+      warnings: result.plan.warnings,
+    }, null, 2))
+    return true
+  }
+  if (command.kind === 'ingest-results') {
+    const result = await ingestSweBenchResults(command)
+    console.log(JSON.stringify({
+      runId: result.layout.runId,
+      resultsPath: result.resultsPath,
+      summaryPath: result.summaryPath,
+      trialCount: result.trials.length,
+      resolved: result.trials.filter((trial) => trial.resolved).length,
+      gradingAuthority: 'official-swebench-harness',
+      gradingStatus: 'ingested',
+    }, null, 2))
+    return true
+  }
+  const modelPatch = await readFile(command.modelPatchPath, 'utf8')
+  const result = await exportSessionForSweBench({ ...command, modelPatch })
+  console.log(JSON.stringify({
+    runId: result.layout.runId,
+    predictionsPath: result.layout.predictionsPath,
+    experimentPath: result.layout.experimentPath,
+    traceArtifact: result.traceArtifact,
+    gradingAuthority: 'official-swebench-harness',
+    gradingStatus: 'not_graded',
+  }, null, 2))
+  return true
+}
+
+function value(argv: readonly string[], name: string): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (arg === name) return argv[i + 1]
+    if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)
+  }
+  return undefined
+}
+
+function required(argv: readonly string[], name: string): string {
+  const found = value(argv, name)
+  if (!found) throw new Error(`missing required ${name}`)
+  return found
+}
+
+function numberArg(argv: readonly string[], name: string): number | undefined {
+  const found = value(argv, name)
+  if (found === undefined) return undefined
+  const parsed = Number(found)
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`invalid ${name}: ${found}`)
+  return parsed
+}
+
+function listArg(argv: readonly string[], name: string): readonly string[] | undefined {
+  const found = value(argv, name)
+  if (!found) return undefined
+  return found.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+function flag(argv: readonly string[], name: string): boolean {
+  return argv.includes(name)
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}

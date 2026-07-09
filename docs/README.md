@@ -67,8 +67,8 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [rl/system-design.md](rl/system-design.md) | **Source of truth.** Architecture, why historical sessions aren't RL samples, artifact families |
 | [rl/implementation.md](rl/implementation.md) | Local implementation gate and acceptance criteria |
 | [rl/training-design.md](rl/training-design.md) | Training methodology, GPU/budget decisions, stop conditions, risks |
-| [rl/shared-runbooks.md](rl/shared-runbooks.md) | Shared E2E smoke tiers + rented GPU host paid runbook; per-run parameters live in each `experiments/<date>-run-<n>/runbook.md` |
-| [rl/experiments/README.md](rl/experiments/README.md) | Explains why experiment records are `.gitignore`d |
+| [rl/shared-runbooks.md](rl/shared-runbooks.md) | Shared E2E smoke tiers + rented GPU host paid runbook; per-run parameters live in `../experiments/rl/<date>-run-<n>/runbook.md` |
+| [../experiments/rl/README.md](../experiments/rl/README.md) | Explains the RL experiment record layout and ignore boundaries |
 
 ---
 
