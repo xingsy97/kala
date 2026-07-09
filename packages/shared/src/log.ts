@@ -70,6 +70,10 @@ export type LLMTrace = {
     status: number
     body?: unknown
     streamEventTypes?: readonly string[]
+    metrics?: {
+      durationMs?: number
+      timeToFirstChunkMs?: number
+    }
   }
 }
 

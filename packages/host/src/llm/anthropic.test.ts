@@ -19,6 +19,22 @@ function mockFetch(
   }) as unknown as typeof fetch
 }
 
+function mockSseFetch(chunks: readonly string[], opts: { sink?: FetchArgs[] } = {}): typeof fetch {
+  const encoder = new TextEncoder()
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    opts.sink?.push({ url: String(input), init: init ?? {} })
+    return new Response(new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+        controller.close()
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+  }) as unknown as typeof fetch
+}
+
 const READ_TOOL = {
   name: 'read',
   description: 'read a file',
@@ -166,5 +182,31 @@ describe('anthropicAdapter — prompt caching', () => {
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     })
+  })
+
+  it('records streaming duration and time to first chunk in trace metrics', async () => {
+    const deltas: string[] = []
+    const llm = anthropicAdapter({
+      apiKey: 'k',
+      fetchImpl: mockSseFetch([
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":3,"output_tokens":0}}}\n\n',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hel"}}\n\n',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}\n\n',
+        'data: {"type":"message_delta","usage":{"output_tokens":2}}\n\n',
+        'data: {"type":"message_stop"}\n\n',
+      ]),
+    })
+
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [],
+      onTextDelta: (delta) => deltas.push(delta),
+    })
+
+    expect(deltas).toEqual(['hel', 'lo'])
+    expect(res.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(res.trace?.response?.metrics?.durationMs).toEqual(expect.any(Number))
+    expect(res.trace?.response?.metrics?.timeToFirstChunkMs).toEqual(expect.any(Number))
   })
 })

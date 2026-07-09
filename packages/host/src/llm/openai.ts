@@ -159,6 +159,7 @@ async function callStreaming(
   signal: AbortSignal | undefined,
   onTextDelta: (delta: string) => void,
 ): Promise<LLMResponse> {
+  const startedAt = performance.now()
   const res = await fetchImpl(url, {
     method: 'POST',
     headers: {
@@ -180,6 +181,7 @@ async function callStreaming(
   let completionTokens = 0
   let cachedTokens = 0
   const streamEventTypes: string[] = []
+  let firstChunkAt: number | undefined
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -221,10 +223,12 @@ async function callStreaming(
       const choice = evt.choices?.[0]
       const delta = choice?.delta
       if (delta?.content) {
+        firstChunkAt ??= performance.now()
         textBuf += delta.content
         onTextDelta(delta.content)
       }
       if (delta?.tool_calls) {
+        firstChunkAt ??= performance.now()
         for (const tc of delta.tool_calls) {
           const existing = toolCalls.get(tc.index) ?? {
             id: '',
@@ -277,6 +281,7 @@ async function callStreaming(
     trace: makeOpenAITrace(url, model, body, {
       status: res.status,
       streamEventTypes,
+      metrics: streamMetrics(startedAt, firstChunkAt),
       body: {
         role: 'assistant',
         content: textBuf.length > 0 ? textBuf : null,
@@ -290,6 +295,14 @@ async function callStreaming(
         }),
       },
     }),
+  }
+}
+
+function streamMetrics(startedAt: number, firstChunkAt: number | undefined): NonNullable<NonNullable<LLMTrace['response']>['metrics']> {
+  const finishedAt = performance.now()
+  return {
+    durationMs: Math.max(0, Math.round(finishedAt - startedAt)),
+    ...(firstChunkAt !== undefined ? { timeToFirstChunkMs: Math.max(0, Math.round(firstChunkAt - startedAt)) } : {}),
   }
 }
 

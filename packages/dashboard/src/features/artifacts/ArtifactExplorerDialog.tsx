@@ -42,7 +42,7 @@ type Props = {
   onOpenChange(open: boolean): void
 }
 
-type ViewMode = 'artifacts' | 'eval' | 'profiles'
+type ViewMode = 'artifacts' | 'eval' | 'profiles' | 'memory'
 
 type ArtifactContentResponse = {
   path: string
@@ -58,6 +58,7 @@ type EvalRunSummary = {
   resolved?: number
   failed?: number
   timedOut?: number
+  failureCounts?: Record<string, number>
   metrics?: Record<string, unknown>
 }
 
@@ -160,6 +161,11 @@ type SessionProfile = {
   estimatedCostUsd?: number
   models?: readonly string[]
   wallTimeMs?: number
+  llmLatencyCalls?: number
+  averageLlmDurationMs?: number
+  p95LlmDurationMs?: number
+  averageTimeToFirstChunkMs?: number
+  p95TimeToFirstChunkMs?: number
 }
 
 type ProfileRow = {
@@ -167,9 +173,53 @@ type ProfileRow = {
   profile: SessionProfile
 }
 
+type MemoryIndexEntry = {
+  scope?: 'workspace' | 'global'
+  key?: string
+  path?: string
+  bytes?: number
+  status?: 'active' | 'tombstoned'
+  name?: string
+  description?: string
+  type?: string
+  source?: string
+  confidence?: number
+  generatedAt?: string
+  sessionId?: string
+  deletedAt?: string
+  archivedPath?: string
+}
+
+type MemoryIndex = {
+  generatedAt?: string
+  entries?: readonly MemoryIndexEntry[]
+  warnings?: readonly string[]
+}
+
+type MemoryIndexRow = {
+  path: string
+  index: MemoryIndex
+}
+
 type ArtifactDetailRequest = {
   path: string
   label: string
+}
+
+type TrialArtifactItem = {
+  artifact: EvalTrialArtifactRef
+  category: TrialArtifactCategory
+  path: string | null
+  title: string
+  meta: string
+}
+
+type TrialArtifactCategory = 'patch' | 'trace' | 'harness' | 'log' | 'prompt' | 'metadata' | 'other'
+
+type TrialArtifactGroup = {
+  category: TrialArtifactCategory
+  label: string
+  items: readonly TrialArtifactItem[]
 }
 
 export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Element {
@@ -188,6 +238,8 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
   const [evalTrialsError, setEvalTrialsError] = useState<string | null>(null)
   const [profileRows, setProfileRows] = useState<readonly ProfileRow[]>([])
   const [profileError, setProfileError] = useState<string | null>(null)
+  const [memoryRows, setMemoryRows] = useState<readonly MemoryIndexRow[]>([])
+  const [memoryError, setMemoryError] = useState<string | null>(null)
   const [artifactDetail, setArtifactDetail] = useState<ArtifactDetailRequest | null>(null)
 
   useEffect(() => {
@@ -315,6 +367,27 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
     }
   }, [open, mode, manifest])
 
+  useEffect(() => {
+    if (!open || mode !== 'memory' || !manifest) return
+    const memoryIndexes = manifest.entries.filter((entry) => entry.kind === 'memory_index' || entry.path.endsWith('/memory-index.json'))
+    let cancelled = false
+    setMemoryError(null)
+    setMemoryRows([])
+    void Promise.all(memoryIndexes.map(async (entry): Promise<MemoryIndexRow> => {
+      const content = await fetchArtifactContent(entry.path)
+      return { path: entry.path, index: content.body as MemoryIndex }
+    }))
+      .then((rows) => {
+        if (!cancelled) setMemoryRows(rows.sort((a, b) => a.path.localeCompare(b.path)))
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setMemoryError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, mode, manifest])
+
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -328,8 +401,9 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             <div className="flex items-center gap-2">
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
                 <button type="button" className={tabClass(mode === 'artifacts')} onClick={() => setMode('artifacts')}>Artifacts</button>
-                <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')}>Eval Runs</button>
+                <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')}>Eval</button>
                 <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')}>Profiles</button>
+                <button type="button" className={tabClass(mode === 'memory')} onClick={() => setMode('memory')}>Memory</button>
               </div>
               <Button
                 type="button"
@@ -362,11 +436,18 @@ export function ArtifactExplorerDialog({ open, onOpenChange }: Props): JSX.Eleme
             loading={loading}
             onOpenArtifact={setArtifactDetail}
           />
-        ) : (
+        ) : mode === 'profiles' ? (
           <ProfilesView
             manifest={manifest}
             rows={profileRows}
             error={error ?? profileError}
+            loading={loading}
+          />
+        ) : (
+          <MemoryView
+            manifest={manifest}
+            rows={memoryRows}
+            error={error ?? memoryError}
             loading={loading}
           />
         )}
@@ -497,7 +578,7 @@ function EvalRunsView({
           <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
         </div>
       </aside>
-      <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_minmax(220px,1fr)_auto] gap-3 p-3 max-lg:grid-rows-none">
+      <div className="grid min-h-0 grid-rows-[minmax(150px,0.55fr)_auto_auto_minmax(220px,1fr)_auto] gap-3 p-3 max-lg:grid-rows-none">
         {error ? (
           <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
@@ -505,6 +586,7 @@ function EvalRunsView({
         ) : null}
         {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
         {manifest && rows.length === 0 && comparisons.length === 0 && !error ? <div className="text-xs text-muted-foreground">No eval summaries found.</div> : null}
+        <EvalScorecard rows={rows} selectedRun={selectedRun} />
         <div className="min-h-0 overflow-hidden rounded-md border border-border">
           {rows.length > 0 ? (
           <ScrollArea className="h-full">
@@ -547,6 +629,7 @@ function EvalRunsView({
         {selectedRun ? (
           <div className="contents" key={selectedRun.key}>
           <EvalProgressStrip run={selectedRun} />
+          <FailureBreakdown run={selectedRun} />
           <EvalTrialDetail
             run={selectedRun}
             trials={trials}
@@ -560,11 +643,11 @@ function EvalRunsView({
           </div>
         ) : null}
         {comparisons.length > 0 ? (
-          <div className="rounded-md border border-border">
+          <div className="min-h-0 rounded-md border border-border">
             <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">Comparisons</div>
-            <div className="divide-y divide-border text-xs">
+            <div className="max-h-48 divide-y divide-border overflow-auto text-xs">
               {comparisons.map((row) => (
-                <div key={row.path} className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px] gap-3 px-3 py-2 max-lg:grid-cols-[1fr_1fr_80px_80px]">
+                <div key={row.path} className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px_minmax(150px,0.7fr)] gap-3 px-3 py-2 max-lg:grid-cols-[1fr_1fr_80px_80px]">
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px]">{row.comparison.baseline?.experimentId ?? 'baseline'}</div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
@@ -574,12 +657,52 @@ function EvalRunsView({
                   <Delta label="failed" value={row.comparison.deltas?.failed} invert />
                   <Delta label="timeout" value={row.comparison.deltas?.timedOut} invert />
                   <Delta label="pass" value={row.comparison.deltas?.passRate} percent />
+                  <FailureDeltaChips deltas={row.comparison.failureDeltas} />
                 </div>
               ))}
             </div>
           </div>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+function EvalScorecard({ rows, selectedRun }: { rows: readonly EvalRunRow[]; selectedRun: EvalRunRow | undefined }): JSX.Element | null {
+  if (rows.length === 0) return null
+  const totals = rows.reduce((acc, row) => {
+    acc.trials += row.summary?.trialCount ?? row.progress?.selectedCount ?? 0
+    acc.resolved += row.summary?.resolved ?? 0
+    acc.failed += row.summary?.failed ?? row.progress?.failedCount ?? 0
+    acc.timedOut += row.summary?.timedOut ?? row.progress?.timedOutCount ?? 0
+    return acc
+  }, { trials: 0, resolved: 0, failed: 0, timedOut: 0 })
+  const selectedPassRate = selectedRun ? selectedRun.summary?.metrics?.passRate : undefined
+  return (
+    <div className="grid grid-cols-5 gap-2 text-xs max-xl:grid-cols-3 max-md:grid-cols-2">
+      <Stat label="Runs" value={String(rows.length)} />
+      <Stat label="Trials" value={formatInteger(totals.trials)} />
+      <Stat label="Resolved" value={formatInteger(totals.resolved)} />
+      <Stat label="Failed" value={formatInteger(totals.failed + totals.timedOut)} />
+      <Stat label="Selected pass" value={formatPercent(selectedPassRate)} />
+    </div>
+  )
+}
+
+function FailureDeltaChips({ deltas }: { deltas: Record<string, number> | undefined }): JSX.Element {
+  const entries = deltas
+    ? Object.entries(deltas).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value !== 0)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]) || a[0].localeCompare(b[0]))
+      .slice(0, 3)
+    : []
+  if (entries.length === 0) return <div className="truncate text-[11px] text-muted-foreground">no failure deltas</div>
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {entries.map(([label, value]) => (
+        <span key={label} className={cn('max-w-full truncate rounded border px-1.5 py-0.5 font-mono text-[10px]', value < 0 ? 'border-emerald-200 text-emerald-700 dark:border-emerald-900 dark:text-emerald-300' : 'border-rose-200 text-rose-700 dark:border-rose-900 dark:text-rose-300')} title={`${label} ${value > 0 ? '+' : ''}${value}`}>
+          {label} {value > 0 ? '+' : ''}{value}
+        </span>
+      ))}
     </div>
   )
 }
@@ -603,6 +726,12 @@ function EvalTrialDetail({
   error: string | null
   onOpenArtifact(request: ArtifactDetailRequest): void
 }): JSX.Element {
+  const artifactGroups = selectedTrial
+    ? groupTrialArtifacts(run.root, selectedTrial.trial.artifacts ?? [])
+    : []
+  const primaryArtifacts = artifactGroups
+    .flatMap((group) => group.items)
+    .filter((item) => item.category === 'patch' || item.category === 'trace' || item.category === 'harness')
   return (
     <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_280px] overflow-hidden rounded-md border border-border max-xl:grid-cols-1">
       <div className="min-h-0 border-r border-border max-xl:border-b max-xl:border-r-0">
@@ -662,32 +791,55 @@ function EvalTrialDetail({
               <Stat label="Artifacts" value={String(selectedTrial.trial.artifacts?.length ?? 0)} />
               <Stat label="Session" value={selectedTrial.trial.sessionId ? 'linked' : 'none'} />
             </div>
+            {primaryArtifacts.length > 0 ? (
+              <div className="grid grid-cols-2 gap-1.5">
+                {primaryArtifacts.slice(0, 4).map((item) => (
+                  <button
+                    key={`${item.path ?? item.title}-primary`}
+                    type="button"
+                    disabled={!item.path}
+                    onClick={() => item.path && onOpenArtifact({ path: item.path, label: item.title })}
+                    className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-muted/40 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-background"
+                  >
+                    <div className="truncate font-medium">{trialArtifactCategoryLabel(item.category)}</div>
+                    <div className="truncate font-mono text-muted-foreground" title={item.title}>{item.title}</div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="rounded-md border border-border bg-background/70">
               <div className="border-b border-border px-2 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">Artifacts</div>
-              <div className="max-h-48 overflow-auto p-2">
-                {(selectedTrial.trial.artifacts ?? []).length > 0 ? (
-                  <div className="grid gap-1.5">
-                    {(selectedTrial.trial.artifacts ?? []).map((artifact, index) => {
-                      const uri = artifact.uri
-                      const path = uri ? resolveTrialArtifactPath(run.root, uri) : null
-                      return (
-                      <button
-                        key={`${uri ?? 'artifact'}-${index}`}
-                        type="button"
-                        disabled={!path}
-                        onClick={() => path && onOpenArtifact({ path, label: uri ?? path })}
-                        className="min-w-0 rounded border border-border bg-muted/20 px-2 py-1 text-left transition-colors hover:bg-muted/40 disabled:cursor-default disabled:hover:bg-muted/20"
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <FileText className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
-                          <span className="truncate font-mono text-[11px]" title={uri}>{uri ?? '(inline)'}</span>
+              <div className="max-h-64 overflow-auto p-2">
+                {artifactGroups.length > 0 ? (
+                  <div className="grid gap-2">
+                    {artifactGroups.map((group) => (
+                      <div key={group.category} className="grid gap-1">
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                          <span className="font-medium uppercase">{group.label}</span>
+                          <span className="font-mono">{group.items.length}</span>
                         </div>
-                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                          <span>{artifact.kind ?? 'artifact'}</span>
-                          <span>{typeof artifact.bytes === 'number' ? formatBytes(artifact.bytes) : ''}</span>
+                        <div className="grid gap-1.5">
+                          {group.items.map((item, index) => (
+                            <button
+                              key={`${item.path ?? item.title}-${index}`}
+                              type="button"
+                              disabled={!item.path}
+                              onClick={() => item.path && onOpenArtifact({ path: item.path, label: item.title })}
+                              className="min-w-0 rounded border border-border bg-muted/20 px-2 py-1 text-left transition-colors hover:bg-muted/40 disabled:cursor-default disabled:hover:bg-muted/20"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <FileText className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+                                <span className="truncate font-mono text-[11px]" title={item.title}>{item.title}</span>
+                              </div>
+                              <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span className="truncate">{item.meta}</span>
+                                <span>{typeof item.artifact.bytes === 'number' ? formatBytes(item.artifact.bytes) : ''}</span>
+                              </div>
+                            </button>
+                          ))}
                         </div>
-                      </button>
-                    )})}
+                      </div>
+                    ))}
                   </div>
                 ) : <div className="text-[11px] text-muted-foreground">No artifact refs in trial.</div>}
               </div>
@@ -757,6 +909,36 @@ function ProgressBar({
         {segments.map((segment) => segment.value > 0 ? (
           <div key={segment.key} className={segment.className} style={{ width: `${Math.max(4, (segment.value / denominator) * 100)}%` }} />
         ) : null)}
+      </div>
+    </div>
+  )
+}
+
+function FailureBreakdown({ run }: { run: EvalRunRow }): JSX.Element | null {
+  const counts = run.summary?.failureCounts
+  const entries: Array<[string, number]> = counts
+    ? Object.entries(counts)
+      .filter(([, count]) => typeof count === 'number' && Number.isFinite(count) && count > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    : []
+  if (entries.length === 0) return null
+  const total = entries.reduce((sum, [, count]) => sum + count, 0)
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-2 text-xs">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="font-medium">Failure Breakdown</div>
+        <div className="font-mono text-[11px] text-muted-foreground">{total} labeled</div>
+      </div>
+      <div className="grid gap-1.5">
+        {entries.slice(0, 6).map(([label, count]) => (
+          <div key={label} className="grid grid-cols-[140px_minmax(0,1fr)_52px] items-center gap-2">
+            <div className="truncate font-mono text-[11px]" title={label}>{label}</div>
+            <div className="h-1.5 overflow-hidden rounded bg-muted">
+              <div className="h-full bg-rose-500" style={{ width: `${Math.max(5, (count / Math.max(1, total)) * 100)}%` }} />
+            </div>
+            <div className="text-right font-mono text-[11px] text-muted-foreground">{count}</div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -840,8 +1022,9 @@ function ProfilesView({
     acc.outputTokens += row.profile.totalOutputTokens ?? 0
     acc.knownCost += row.profile.costStatus === 'estimated' && typeof row.profile.estimatedCostUsd === 'number' ? row.profile.estimatedCostUsd : 0
     acc.unknownCost += row.profile.costStatus === 'unknown' ? 1 : 0
+    acc.latencyCalls += row.profile.llmLatencyCalls ?? 0
     return acc
-  }, { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, knownCost: 0, unknownCost: 0 })
+  }, { llmCalls: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0, knownCost: 0, unknownCost: 0, latencyCalls: 0 })
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
       <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
@@ -851,6 +1034,7 @@ function ProfilesView({
           <Stat label="Tool calls" value={String(totals.toolCalls)} />
           <Stat label="Known cost" value={formatUsd(totals.knownCost)} />
           <Stat label="Unknown cost" value={String(totals.unknownCost)} />
+          <Stat label="Latency calls" value={String(totals.latencyCalls)} />
           <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
         </div>
       </aside>
@@ -864,30 +1048,34 @@ function ProfilesView({
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No profile artifacts found.</div> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
-            <div className="min-w-[860px] divide-y divide-border text-xs">
-              <div className="grid grid-cols-[1.25fr_95px_95px_110px_110px_105px_105px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
+            <div className="min-w-[1120px] divide-y divide-border text-xs">
+              <div className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                 <div>Profile</div>
                 <div>LLM</div>
                 <div>Tools</div>
-                <div>Input tok</div>
-                <div>Output tok</div>
+                <div>Input</div>
+                <div>Output</div>
+                <div>Avg dur</div>
+                <div>P95 dur</div>
+                <div>Avg TTFT</div>
+                <div>P95 TTFT</div>
                 <div>Cost</div>
-                <div>Missing</div>
-                <div>Models</div>
               </div>
               {rows.map((row) => (
-                <div key={row.path} className="grid grid-cols-[1.25fr_95px_95px_110px_110px_105px_105px_1fr] gap-3 px-3 py-2">
+                <div key={row.path} className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px_1fr] gap-3 px-3 py-2">
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px]">{row.profile.sessionId ?? row.path}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path} · {(row.profile.models ?? []).join(', ') || 'unknown'} · missing {row.profile.llmTraceMissingCalls ?? 0}</div>
                   </div>
                   <div className="font-mono text-[11px]">{row.profile.llmCalls ?? 0}</div>
                   <div className="font-mono text-[11px]">{row.profile.toolCalls ?? 0}</div>
                   <div className="font-mono text-[11px]">{formatInteger(row.profile.totalInputTokens)}</div>
                   <div className="font-mono text-[11px]">{formatInteger(row.profile.totalOutputTokens)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.averageLlmDurationMs)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.p95LlmDurationMs)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.averageTimeToFirstChunkMs)}</div>
+                  <div className="font-mono text-[11px]">{formatDurationMetric(row.profile.p95TimeToFirstChunkMs)}</div>
                   <div className="font-mono text-[11px]">{row.profile.costStatus === 'estimated' ? formatUsd(row.profile.estimatedCostUsd) : row.profile.costStatus ?? 'unknown'}</div>
-                  <div className="font-mono text-[11px] text-muted-foreground">{row.profile.llmTraceMissingCalls ?? 0}</div>
-                  <div className="truncate font-mono text-[11px] text-muted-foreground">{(row.profile.models ?? []).join(', ') || 'unknown'}</div>
                 </div>
               ))}
             </div>
@@ -896,6 +1084,93 @@ function ProfilesView({
       </div>
     </div>
   )
+}
+
+function MemoryView({
+  manifest,
+  rows,
+  error,
+  loading,
+}: {
+  manifest: ArtifactManifest | null
+  rows: readonly MemoryIndexRow[]
+  error: string | null
+  loading: boolean
+}): JSX.Element {
+  const entries = rows.flatMap((row) => (row.index.entries ?? []).map((entry) => ({ row, entry })))
+  const totals = entries.reduce((acc, item) => {
+    if (item.entry.scope === 'global') acc.global += 1
+    else acc.workspace += 1
+    if (item.entry.status === 'tombstoned') acc.tombstoned += 1
+    else acc.active += 1
+    return acc
+  }, { active: 0, tombstoned: 0, workspace: 0, global: 0 })
+  const warningCount = rows.reduce((sum, row) => sum + (row.index.warnings?.length ?? 0), 0)
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
+      <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
+        <div className="grid gap-2 text-xs">
+          <Stat label="Indexes" value={String(rows.length)} />
+          <Stat label="Active" value={String(totals.active)} />
+          <Stat label="Tombstoned" value={String(totals.tombstoned)} />
+          <Stat label="Workspace" value={String(totals.workspace)} />
+          <Stat label="Global" value={String(totals.global)} />
+          <Stat label="Warnings" value={String(warningCount)} />
+          <Stat label="Artifacts" value={String(manifest?.summary.entryCount ?? 0)} />
+        </div>
+      </aside>
+      <div className="min-h-0 p-3">
+        {error ? (
+          <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+            {error}
+          </div>
+        ) : null}
+        {loading && !manifest ? <div className="text-xs text-muted-foreground">Loading artifact manifest...</div> : null}
+        {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">No memory index artifacts found.</div> : null}
+        {entries.length > 0 ? (
+          <ScrollArea className="h-full rounded-md border border-border">
+            <div className="min-w-[980px] divide-y divide-border text-xs">
+              <div className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
+                <div>Scope</div>
+                <div>Status</div>
+                <div>Key</div>
+                <div>Description</div>
+                <div>Confidence</div>
+                <div>Session</div>
+                <div>Provenance</div>
+              </div>
+              {entries.map(({ row, entry }, index) => (
+                <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 px-3 py-2">
+                  <div className="font-mono text-[11px]">{entry.scope ?? 'unknown'}</div>
+                  <MemoryStatus status={entry.status} />
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-[11px]" title={entry.key}>{entry.key ?? 'unknown'}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={row.path}>{row.path}</div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate" title={entry.description ?? entry.name}>{entry.description ?? entry.name ?? '-'}</div>
+                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{entry.type ?? 'memory'}</div>
+                  </div>
+                  <div className="font-mono text-[11px]">{formatConfidence(entry.confidence)}</div>
+                  <div className="truncate font-mono text-[11px] text-muted-foreground" title={entry.sessionId}>{entry.sessionId ?? '-'}</div>
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-[11px]" title={entry.path}>{entry.status === 'tombstoned' ? entry.deletedAt ?? 'deleted' : entry.source ?? 'unknown'}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={entry.archivedPath ?? entry.path}>{entry.archivedPath ?? entry.path ?? '-'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function MemoryStatus({ status }: { status: MemoryIndexEntry['status'] | undefined }): JSX.Element {
+  if (status === 'tombstoned') return <div className="font-mono text-[11px] text-amber-700 dark:text-amber-300">tombstoned</div>
+  if (status === 'active') return <div className="font-mono text-[11px] text-emerald-700 dark:text-emerald-300">active</div>
+  return <div className="font-mono text-[11px] text-muted-foreground">unknown</div>
 }
 
 function ResultPill({ resolved }: { resolved: boolean | undefined }): JSX.Element {
@@ -957,6 +1232,53 @@ function resolveTrialArtifactPath(runRoot: string, uri: string): string {
   return `${runRoot}/${uri}`
 }
 
+function groupTrialArtifacts(runRoot: string, artifacts: readonly EvalTrialArtifactRef[]): TrialArtifactGroup[] {
+  const byCategory = new Map<TrialArtifactCategory, TrialArtifactItem[]>()
+  for (const artifact of artifacts) {
+    const uri = artifact.uri
+    const path = uri ? resolveTrialArtifactPath(runRoot, uri) : null
+    const category = classifyTrialArtifact(artifact)
+    const title = uri ?? '(inline artifact)'
+    const meta = [artifact.kind ?? 'artifact', artifact.mediaType].filter(Boolean).join(' / ')
+    const items = byCategory.get(category) ?? []
+    items.push({ artifact, category, path, title, meta })
+    byCategory.set(category, items)
+  }
+  return trialArtifactCategoryOrder
+    .map((category) => {
+      const items = byCategory.get(category) ?? []
+      return { category, label: trialArtifactCategoryLabel(category), items }
+    })
+    .filter((group) => group.items.length > 0)
+}
+
+const trialArtifactCategoryOrder: readonly TrialArtifactCategory[] = ['patch', 'trace', 'harness', 'log', 'prompt', 'metadata', 'other']
+
+function classifyTrialArtifact(artifact: EvalTrialArtifactRef): TrialArtifactCategory {
+  const kind = (artifact.kind ?? '').toLowerCase()
+  const uri = (artifact.uri ?? '').toLowerCase()
+  const mediaType = (artifact.mediaType ?? '').toLowerCase()
+  if (kind === 'diff' || uri.endsWith('.diff') || uri.endsWith('.patch') || mediaType.includes('diff')) return 'patch'
+  if (kind === 'trace' || uri.includes('trace') || uri.includes('openinference')) return 'trace'
+  if (uri.includes('/harness/') || uri.includes('swebench-result')) return 'harness'
+  if (uri.endsWith('prompt.txt') || uri.includes('/prompt.')) return 'prompt'
+  if (kind === 'log' || uri.endsWith('.log') || uri.includes('stdout') || uri.includes('stderr') || mediaType.startsWith('text/plain')) return 'log'
+  if (kind === 'metadata' || mediaType.includes('json')) return 'metadata'
+  return 'other'
+}
+
+function trialArtifactCategoryLabel(category: TrialArtifactCategory): string {
+  switch (category) {
+    case 'patch': return 'Final Patch'
+    case 'trace': return 'Trace'
+    case 'harness': return 'Harness Evidence'
+    case 'log': return 'Agent Logs'
+    case 'prompt': return 'Prompt'
+    case 'metadata': return 'Metadata'
+    case 'other': return 'Other'
+  }
+}
+
 function mergeEvalRuns(
   summaries: readonly EvalSummaryContentRow[],
   progresses: readonly EvalProgressContentRow[],
@@ -1002,6 +1324,14 @@ function formatInteger(value: unknown): string {
 
 function formatUsd(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `$${value.toFixed(4)}` : 'unknown'
+}
+
+function formatDurationMetric(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}ms` : 'n/a'
+}
+
+function formatConfidence(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : 'n/a'
 }
 
 async function fetchArtifactContent(path: string): Promise<ArtifactContentResponse> {
