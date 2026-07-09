@@ -16,7 +16,6 @@ import type {
   AgentConfig,
   AgentState,
   ContextPressureLevel,
-  MemoryEntry,
   Message,
   MessageContent,
   PendingToolCall,
@@ -53,7 +52,6 @@ export function afterPendingSettled(
   messages: readonly Message[],
   pendingCalls: readonly PendingToolCall[],
   config: AgentConfig,
-  memory: readonly MemoryEntry[] = state.memory,
 ): StepResult {
   if (pendingCalls.length > 0) {
     const stillAwaiting = pendingCalls.some((c) => c.status === 'awaiting_approval')
@@ -62,7 +60,6 @@ export function afterPendingSettled(
         ...state,
         messages,
         pendingCalls,
-        memory,
         status: stillAwaiting ? 'awaiting_approval' : 'executing_tools',
       },
       effects: [],
@@ -72,7 +69,6 @@ export function afterPendingSettled(
     ...state,
     messages,
     pendingCalls: [],
-    memory,
     status: 'thinking',
   }
   return {

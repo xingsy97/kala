@@ -45,6 +45,16 @@ export type SessionReadyEvent = {
   cursor: number
   state: AgentState
   config: AgentConfig
+  /**
+   * Why this event fired. `'load'` (default) — a dashboard subscribed to an
+   * existing or ephemeral session. `'created'` — the session was just
+   * materialised via `client:create_session`. `'forked'` — the session was
+   * just spawned via `client:fork`; `parentSessionId` + `parentCursor` are
+   * guaranteed to be populated in this case. Consumers use `reason` to
+   * decide UI behaviour (e.g. jump to the new session on fork) but the
+   * envelope shape is identical across all three.
+   */
+  reason?: 'load' | 'created' | 'forked'
   parentSessionId?: string
   parentCursor?: number
   /**
@@ -55,6 +65,98 @@ export type SessionReadyEvent = {
   /** Display label captured at session-create time. */
   workspaceName?: string
   selectedModel?: string
+}
+
+/**
+ * Fork uses the same envelope as `SessionReadyEvent`; the discriminator is
+ * `reason: 'forked'`. Kept as an alias so existing type imports don't break,
+ * but new code should read `reason` directly off `SessionReadyEvent`.
+ */
+export type SessionForkedEvent = SessionReadyEvent
+
+/**
+ * Per-session runtime preferences. Not part of `AgentConfig` (which is
+ * immutable at session creation) and not part of `AgentState` (which is
+ * kernel-owned and model-agnostic). Lives in a fourth category: UI-owned,
+ * mutable, per-session settings that the operator adjusts and the host
+ * persists.
+ *
+ * Every field is optional so this envelope is stable when new preferences
+ * arrive — a v(N+1) dashboard can send extra fields to a v(N) host without
+ * a version bump as long as the host ignores unknown fields (it does).
+ *
+ * v1 fields:
+ *   - selectedModel: which LLM to route this session's `call_llm` effects to.
+ *
+ * Future candidates: preferred approval mode default, context pressure
+ * threshold overrides, editor language, UI density, etc.
+ */
+export type SessionPreferences = {
+  selectedModel?: string
+}
+
+export type ClientUpdatePreferences = {
+  sessionId: string
+  preferences: SessionPreferences
+}
+
+export type SessionPreferencesChangedEvent = {
+  sessionId: string
+  preferences: SessionPreferences
+}
+
+// ============================================================================
+// Unified control-plane push channel
+// ============================================================================
+
+/**
+ * A single wire event — `server:control_update` — carries every "something
+ * outside the kernel changed" push. This replaces the ~8 individual
+ * push-event names that previously fanned out for renames, preferences,
+ * executor attaches/detaches, background-task lifecycle, sub-agent
+ * lifecycle, and tool-progress deltas.
+ *
+ * The `kind` field is the discriminator. Dashboard code should `switch`
+ * on it (with an exhaustive default that logs an unknown kind rather
+ * than throws — so a v(N+1) host can push a new kind to a v(N)
+ * dashboard without crashing it).
+ *
+ * The legacy per-name events (`session:renamed`, `server:executor_changed`,
+ * `server:bg_task_updated`, etc.) are still emitted for one release cycle
+ * so mid-flight dashboard bundles keep working during rollout. New code
+ * should subscribe to `server:control_update` and read from the payload.
+ */
+export type ControlUpdate =
+  | ({ kind: 'session_meta_changed' } & SessionMetaChanged)
+  | ({ kind: 'executor_changed' } & ServerExecutorChangedPayload)
+  | ({ kind: 'bg_task_updated' } & ServerBgTaskUpdated)
+  | ({ kind: 'bg_task_evicted' } & ServerBgTaskEvicted)
+  | ({ kind: 'sub_agent_started' } & ServerSubAgentStartedEvent)
+  | ({ kind: 'sub_agent_finished' } & ServerSubAgentFinishedEvent)
+  | ({ kind: 'tool_progress' } & ToolProgressPayload)
+
+/**
+ * "Something about the session's metadata changed." Groups rename +
+ * preferences + any future per-session UI-owned mutation. Any field left
+ * `undefined` means "unchanged since last snapshot"; the dashboard merges
+ * with its current view.
+ */
+export type SessionMetaChanged = {
+  sessionId: string
+  label?: string
+  preferences?: SessionPreferences
+}
+
+/**
+ * Streaming progress for long-running tools. `chunk` is arbitrary text
+ * the executor wants surfaced (e.g. lines from a long-running build).
+ * Ordering per (sessionId, callId) is preserved; interleaving across
+ * callIds is best-effort.
+ */
+export type ToolProgressPayload = {
+  sessionId: string
+  callId: string
+  chunk: string
 }
 
 export type StateChangedEvent = {
@@ -80,17 +182,6 @@ export type SessionErrorEvent = {
   sessionId: string
   scope: SessionErrorScope
   message: string
-}
-
-export type SessionForkedEvent = {
-  sessionId: string
-  parentSessionId: string
-  parentCursor: number
-  cursor: number
-  state: AgentState
-  config: AgentConfig
-  workspaceId?: string
-  workspaceName?: string
 }
 
 // ============================================================================
@@ -150,11 +241,6 @@ export type ServerTokenDeltaEvent = {
 }
 
 export type ClientSetApprovalMode = {
-  sessionId: string
-  mode: ApprovalMode
-}
-
-export type SessionApprovalModeEvent = {
   sessionId: string
   mode: ApprovalMode
 }
@@ -248,11 +334,6 @@ export type ApprovalRequiredEvent = {
   callId: string
   name: string
   input: Record<string, unknown>
-}
-
-export type UsageUpdatedEvent = {
-  sessionId: string
-  usage: UsageTotal
 }
 
 export type SessionModelChangedEvent = {
@@ -857,6 +938,7 @@ export type DashboardClientToServerEvents = {
   'client:load_history': (payload: ClientLoadHistory) => void
   'client:delete_session': (payload: ClientDeleteSession) => void
   'client:set_model': (payload: ClientSetModel) => void
+  'client:update_preferences': (payload: ClientUpdatePreferences) => void
   'client:set_cwd': (payload: ClientSetCwd) => void
   'client:reorder_queued_message': (payload: ClientReorderQueuedMessage) => void
   'client:update_queued_message': (payload: ClientUpdateQueuedMessage) => void
@@ -893,10 +975,9 @@ export type DashboardServerToClientEvents = {
   'event:appended': (payload: EventAppendedEvent) => void
   'session:error': (payload: SessionErrorEvent) => void
   'approval:required': (payload: ApprovalRequiredEvent) => void
-  'usage:updated': (payload: UsageUpdatedEvent) => void
   'session:model_changed': (payload: SessionModelChangedEvent) => void
+  'session:preferences_changed': (payload: SessionPreferencesChangedEvent) => void
   'session:token_delta': (payload: ServerTokenDeltaEvent) => void
-  'session:approval_mode': (payload: SessionApprovalModeEvent) => void
   'session:renamed': (payload: SessionRenamedEvent) => void
   'server:message_queue': (payload: ServerMessageQueueEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
@@ -913,6 +994,13 @@ export type DashboardServerToClientEvents = {
   'server:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
   'server:sub_agent_started': (payload: ServerSubAgentStartedEvent) => void
   'server:sub_agent_finished': (payload: ServerSubAgentFinishedEvent) => void
+  /**
+   * Unified control-plane push. Every "something outside the kernel
+   * changed" push is either duplicated here (during the migration
+   * window) or emitted only here (for new features). See {@link ControlUpdate}
+   * for the discriminated payload.
+   */
+  'server:control_update': (payload: ControlUpdate) => void
 }
 
 export type ServerMessageQueueEvent = {
@@ -931,6 +1019,7 @@ export type QueuedMessagePreview = {
 export type ExecutorClientToServerEvents = {
   'executor:announce': (payload: ExecutorAnnounce) => void
   'executor:tool_result': (payload: ExecutorToolResult) => void
+  'executor:tool_progress': (payload: ToolProgressPayload) => void
   'executor:bg_task_updated': (payload: ServerBgTaskUpdated) => void
   'executor:bg_task_evicted': (payload: ServerBgTaskEvicted) => void
 }
@@ -983,4 +1072,35 @@ export type ExecutorServerToClientEvents = {
   ) => void
 }
 
-export const PROTOCOL_VERSION = '0.1.0' as const
+// ============================================================================
+// Protocol version
+// ============================================================================
+
+/**
+ * Semver-like protocol version. The host compares the major component of an
+ * incoming `HandshakeAuth.clientVersion` against `PROTOCOL_VERSION`; a
+ * mismatch on major → the handshake middleware rejects with
+ * `'version_incompatible'`. Minor / patch differences are always accepted —
+ * they are reserved for additive (backwards-compatible) changes to event
+ * payloads. Producers use the string form directly; consumers use
+ * `parseMajor()` to extract just the compatibility digit.
+ *
+ * Bump the major whenever a wire event changes shape in a
+ * backwards-incompatible way. Bump minor for additive changes (new events,
+ * new optional fields). Bump patch for doc-only corrections.
+ */
+export const PROTOCOL_VERSION = '1.0.0' as const
+
+export function parseMajor(version: string): number | null {
+  const first = version.split('.')[0]
+  if (first === undefined) return null
+  const n = Number.parseInt(first, 10)
+  return Number.isFinite(n) ? n : null
+}
+
+export function isCompatibleVersion(clientVersion: string): boolean {
+  const client = parseMajor(clientVersion)
+  const server = parseMajor(PROTOCOL_VERSION)
+  return client !== null && server !== null && client === server
+}
+
