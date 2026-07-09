@@ -536,7 +536,7 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(760px,86dvh)] w-[min(1040px,94vw)] max-w-none flex-col overflow-hidden p-0 gap-0">
+      <DialogContent className="flex h-[min(760px,86dvh)] w-[min(1040px,94vw)] max-w-none flex-col overflow-hidden p-0 gap-0" data-testid="artifact-dialog">
         <DialogHeader className="border-b border-border px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -545,11 +545,11 @@ export function ArtifactExplorerDialog({ open, initialMode = 'artifacts', onOpen
             </div>
             <div className="flex items-center gap-2">
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs">
-                <button type="button" className={tabClass(mode === 'artifacts')} onClick={() => setMode('artifacts')}>Artifacts</button>
-                <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')}>Eval</button>
-                <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')}>Profiles</button>
-                <button type="button" className={tabClass(mode === 'memory')} onClick={() => setMode('memory')}>Memory</button>
-                <button type="button" className={tabClass(mode === 'ops')} onClick={() => setMode('ops')}>Ops</button>
+                <button type="button" className={tabClass(mode === 'artifacts')} onClick={() => setMode('artifacts')} data-testid="artifact-mode-artifacts">Artifacts</button>
+                <button type="button" className={tabClass(mode === 'eval')} onClick={() => setMode('eval')} data-testid="artifact-mode-eval">Eval</button>
+                <button type="button" className={tabClass(mode === 'profiles')} onClick={() => setMode('profiles')} data-testid="artifact-mode-profiles">Profiles</button>
+                <button type="button" className={tabClass(mode === 'memory')} onClick={() => setMode('memory')} data-testid="artifact-mode-memory">Memory</button>
+                <button type="button" className={tabClass(mode === 'ops')} onClick={() => setMode('ops')} data-testid="artifact-mode-ops">Ops</button>
               </div>
               <Button
                 type="button"
@@ -908,30 +908,30 @@ function SweBenchPlanPanel({ onCreated }: { onCreated(): void }): JSX.Element {
   }
 
   return (
-    <div className="rounded-md border border-border bg-background/70">
-      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30" onClick={() => setOpen((value) => !value)}>
+    <div className="rounded-md border border-border bg-background/70" data-testid="swebench-plan-panel">
+      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30" onClick={() => setOpen((value) => !value)} data-testid="swebench-plan-toggle">
         <span className="font-medium">Create SWE-bench Worker Plan</span>
         <span className="font-mono text-[11px] text-muted-foreground">{open ? 'hide' : 'show'}</span>
       </button>
       {open ? (
         <form onSubmit={(event) => void submit(event)} className="grid gap-3 border-t border-border p-3 text-xs">
           <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
-            <LabeledInput label="Run ID" value={runId} onChange={setRunId} required placeholder="swebench-smoke" />
-            <LabeledInput label="Model" value={model} onChange={setModel} required placeholder="gpt-5.5" />
-            <LabeledInput label="Dataset" value={dataset} onChange={setDataset} required />
-            <LabeledInput label="Split" value={split} onChange={setSplit} />
-            <LabeledInput label="Instances JSONL" value={instancesJsonl} onChange={setInstancesJsonl} required placeholder="/path/to/instances.jsonl" />
-            <LabeledInput label="Root Dir" value={rootDir} onChange={setRootDir} placeholder="uses artifact root when empty" />
-            <LabeledInput label="Instance IDs" value={instanceIds} onChange={setInstanceIds} placeholder="comma separated" />
-            <LabeledInput label="Repo Cache" value={repoCacheDir} onChange={setRepoCacheDir} placeholder="optional" />
-            <LabeledInput label="Limit" value={limit} onChange={setLimit} inputMode="numeric" placeholder="optional" />
-            <LabeledInput label="Max Workers" value={maxWorkers} onChange={setMaxWorkers} inputMode="numeric" />
-            <LabeledInput label="Timeout ms" value={timeoutMs} onChange={setTimeoutMs} inputMode="numeric" placeholder="optional" />
+            <LabeledInput label="Run ID" value={runId} onChange={setRunId} required placeholder="swebench-smoke" data-testid="swebench-plan-run-id" />
+            <LabeledInput label="Model" value={model} onChange={setModel} required placeholder="gpt-5.5" data-testid="swebench-plan-model" />
+            <LabeledInput label="Dataset" value={dataset} onChange={setDataset} required data-testid="swebench-plan-dataset" />
+            <LabeledInput label="Split" value={split} onChange={setSplit} data-testid="swebench-plan-split" />
+            <LabeledInput label="Instances JSONL" value={instancesJsonl} onChange={setInstancesJsonl} required placeholder="/path/to/instances.jsonl" data-testid="swebench-plan-instances-jsonl" />
+            <LabeledInput label="Root Dir" value={rootDir} onChange={setRootDir} placeholder="uses artifact root when empty" data-testid="swebench-plan-root-dir" />
+            <LabeledInput label="Instance IDs" value={instanceIds} onChange={setInstanceIds} placeholder="comma separated" data-testid="swebench-plan-instance-ids" />
+            <LabeledInput label="Repo Cache" value={repoCacheDir} onChange={setRepoCacheDir} placeholder="optional" data-testid="swebench-plan-repo-cache" />
+            <LabeledInput label="Limit" value={limit} onChange={setLimit} inputMode="numeric" placeholder="optional" data-testid="swebench-plan-limit" />
+            <LabeledInput label="Max Workers" value={maxWorkers} onChange={setMaxWorkers} inputMode="numeric" data-testid="swebench-plan-max-workers" />
+            <LabeledInput label="Timeout ms" value={timeoutMs} onChange={setTimeoutMs} inputMode="numeric" placeholder="optional" data-testid="swebench-plan-timeout-ms" />
           </div>
-          {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
-          {result ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">Created {result.planPath ?? result.runId} / {result.selectedCount ?? 0} instances / {result.shardCount ?? 0} shards</div> : null}
+          {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300" data-testid="swebench-plan-error">{error}</div> : null}
+          {result ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300" data-testid="swebench-plan-result">Created {result.planPath ?? result.runId} / {result.selectedCount ?? 0} instances / {result.shardCount ?? 0} shards</div> : null}
           <div className="flex justify-end">
-            <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Creating...' : 'Create Plan'}</Button>
+            <Button type="submit" size="sm" disabled={submitting} data-testid="swebench-plan-submit">{submitting ? 'Creating...' : 'Create Plan'}</Button>
           </div>
         </form>
       ) : null}
@@ -970,6 +970,7 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
   const [rootDir, setRootDir] = useState('')
   const config = actions.find((action) => action.action === selectedAction) ?? actions[0]
   const configAction = config?.action
+  const testIdPrefix = `enhancement-action-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
   useEffect(() => {
     if (!config) return
@@ -1017,20 +1018,20 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
   }
 
   return (
-    <div className="mb-3 rounded-md border border-border bg-background/70">
-      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30" onClick={() => setOpen((value) => !value)}>
+    <div className="mb-3 rounded-md border border-border bg-background/70" data-testid={`enhancement-action-panel-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30" onClick={() => setOpen((value) => !value)} data-testid={`${testIdPrefix}-toggle`}>
         <span className="font-medium">{title}</span>
         <span className="font-mono text-[11px] text-muted-foreground">{open ? 'hide' : 'show'}</span>
       </button>
       {open ? (
-        <form onSubmit={(event) => void submit(event)} className="grid gap-3 border-t border-border p-3 text-xs">
+        <form onSubmit={(event) => void submit(event)} className="grid gap-3 border-t border-border p-3 text-xs" data-testid={`${testIdPrefix}-form`}>
           <label className="grid gap-1">
             <span className="text-[11px] font-medium text-muted-foreground">Action</span>
-            <select className="h-8 rounded border border-input bg-background px-2 text-sm" value={selectedAction} onChange={(event) => setSelectedAction(event.currentTarget.value)}>
+            <select className="h-8 rounded border border-input bg-background px-2 text-sm" value={selectedAction} onChange={(event) => setSelectedAction(event.currentTarget.value)} data-testid={`${testIdPrefix}-select`}>
               {actions.map((action) => <option key={action.action} value={action.action}>{action.label}</option>)}
             </select>
           </label>
-          <LabeledInput label="Root Dir" value={rootDir} onChange={setRootDir} placeholder="uses artifact root when empty" />
+          <LabeledInput label="Root Dir" value={rootDir} onChange={setRootDir} placeholder="uses artifact root when empty" data-testid={`${testIdPrefix}-root-dir`} />
           <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
             {config.fields.map((field) => (
               <LabeledInput
@@ -1041,13 +1042,14 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
                 required={field.required}
                 placeholder={field.placeholder}
                 inputMode={field.numeric ? 'numeric' : undefined}
+                data-testid={`${testIdPrefix}-field-${field.key}`}
               />
             ))}
           </div>
-          {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
-          {result ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">{typeof result.shellCommand === 'string' ? 'Generated' : 'Created'} {enhancementResultLabel(result)}</div> : null}
+          {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300" data-testid={`${testIdPrefix}-error`}>{error}</div> : null}
+          {result ? <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300" data-testid={`${testIdPrefix}-result`}>{typeof result.shellCommand === 'string' ? 'Generated' : 'Created'} {enhancementResultLabel(result)}</div> : null}
           <div className="flex justify-end">
-            <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Running...' : 'Run Action'}</Button>
+            <Button type="submit" size="sm" disabled={submitting} data-testid={`${testIdPrefix}-submit`}>{submitting ? 'Running...' : 'Run Action'}</Button>
           </div>
         </form>
       ) : null}
