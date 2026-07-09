@@ -1,9 +1,10 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 
+import { PREF_DASHBOARD_LANGUAGE } from '../lib/prefs.js'
 import { resources, type DashboardLanguage } from './resources.js'
 
-const STORAGE_KEY = 'ak-dashboard-language'
+const STORAGE_KEY = PREF_DASHBOARD_LANGUAGE
 const DEFAULT_LANGUAGE: DashboardLanguage = 'en'
 
 function readStoredLanguage(): DashboardLanguage {
@@ -40,4 +41,3 @@ persistDashboardLanguage(readStoredLanguage())
 
 export { i18n }
 export type { DashboardLanguage }
-

@@ -4,7 +4,7 @@
  * Reconciles three sources into a single `Map<taskId, LiveBackgroundTask>`:
  *
  *  1. `bg:list` (RPC on mount / workspace change) — reset baseline.
- *  2. `server:bg_task_updated` (push) — appends output deltas, updates status.
+ *  2. `server:control_update` (push) — appends output deltas, updates status.
  *  3. `bg:output` (poll every 1.5s for the *selected* task) — closes any gap
  *     between the tail we already hold and whatever the executor has now.
  *
@@ -19,6 +19,7 @@ import type {
   BackgroundTaskSummary,
   BgKillResult,
   BgOutputResult,
+  ControlUpdate,
   ServerBgTaskEvicted,
   ServerBgTaskUpdated,
 } from '@agent-kernel/shared'
@@ -47,6 +48,7 @@ const DEFAULT_POLL_MS = 1500
 
 export type UseBackgroundTasksResult = {
   tasks: readonly LiveBackgroundTask[]
+  error: string | null
   killTask: (taskId: string) => Promise<BgKillResult | null>
 }
 
@@ -60,6 +62,7 @@ export function useBackgroundTasks({
   const [tasks, setTasks] = useState<ReadonlyMap<string, LiveBackgroundTask>>(
     () => new Map(),
   )
+  const [error, setError] = useState<string | null>(null)
   const tasksRef = useRef(tasks)
   tasksRef.current = tasks
 
@@ -82,17 +85,24 @@ export function useBackgroundTasks({
   useEffect(() => {
     if (!socket || !workspaceId || !sessionId) {
       setTasks(new Map())
+      setError(null)
       return
     }
 
     let cancelled = false
+    setError(null)
 
     // Baseline: fetch the full list once the workspace binding is known.
     socket.emit(
       'bg:list',
       { requestId: requestId(), workspaceId, sessionId },
       (result) => {
-        if (cancelled || result.error || !result.tasks) return
+        if (cancelled) return
+        if (result.error || !result.tasks) {
+          setError(result.error ?? 'Unable to load background shells.')
+          return
+        }
+        setError(null)
         setTasks((prev) => {
           const next = new Map<string, LiveBackgroundTask>()
           for (const summary of result.tasks) {
@@ -151,13 +161,16 @@ export function useBackgroundTasks({
       setTask(payload.taskId, () => null)
     }
 
-    socket.on('server:bg_task_updated', onUpdate)
-    socket.on('server:bg_task_evicted', onEvicted)
+    const onControlUpdate = (payload: ControlUpdate): void => {
+      if (payload.kind === 'bg_task_updated') onUpdate(payload)
+      if (payload.kind === 'bg_task_evicted') onEvicted(payload)
+    }
+
+    socket.on('server:control_update', onControlUpdate)
 
     return () => {
       cancelled = true
-      socket.off('server:bg_task_updated', onUpdate)
-      socket.off('server:bg_task_evicted', onEvicted)
+      socket.off('server:control_update', onControlUpdate)
     }
   }, [socket, workspaceId, sessionId, setTask])
 
@@ -175,7 +188,12 @@ export function useBackgroundTasks({
         'bg:output',
         { requestId: requestId(), workspaceId, sessionId, taskId: selectedTaskId, offset },
         (result: BgOutputResult) => {
-          if (disposed || result.error) return
+          if (disposed) return
+          if (result.error) {
+            setError(result.error)
+            return
+          }
+          setError(null)
           setTask(selectedTaskId, (prev) => {
             if (!prev) return null
             const nextOutput =
@@ -212,6 +230,9 @@ export function useBackgroundTasks({
           (result: BgKillResult) => {
             if (!result.killed) {
               setTask(taskId, (prev) => (prev ? { ...prev, killing: false } : prev ?? null))
+              if (result.error) setError(result.error)
+            } else {
+              setError(null)
             }
             resolve(result)
           },
@@ -232,7 +253,7 @@ export function useBackgroundTasks({
     })
   }, [tasks])
 
-  return { tasks: list, killTask }
+  return { tasks: list, error, killTask }
 }
 
 export function statusLabel(status: BackgroundTaskStatus): string {

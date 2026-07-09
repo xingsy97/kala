@@ -5,7 +5,7 @@ import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
-import type { ContextSnapshot, FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
+import type { ContextUsageSnapshot, FileListEntry, HumanAttentionTimeline, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
   AgentConfig,
   AgentState,
@@ -24,7 +24,9 @@ import {
 } from '../../components/ui/select.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { cn } from '../../lib/utils.js'
+import { PREF_COMPOSER_SEND_MODE_PREFIX } from '../../lib/prefs.js'
 import { RuntimeMetrics } from './RuntimeMetrics.js'
+import { HumanAttentionIndicator } from './HumanAttentionIndicator.js'
 import type { TimelineEntry } from '../../session.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { ComposerModeToggle } from './composer/ComposerModeToggle.js'
@@ -45,7 +47,8 @@ type Props = {
   onApprovalModeChange(mode: ApprovalMode): void
   state: AgentState | null
   config: AgentConfig | null
-  contextSnapshot: ContextSnapshot | null
+  contextSnapshot: ContextUsageSnapshot | null
+  humanAttention: HumanAttentionTimeline
   queuedMessages: readonly QueuedMessagePreview[]
   timeline?: readonly TimelineEntry[]
   onQueuedReorder?(id: string, beforeId?: string | null): void
@@ -63,7 +66,7 @@ type Props = {
 }
 
 export type SendMode = 'steer' | 'queue'
-const SEND_MODE_STORAGE_PREFIX = 'agent-kernel:composer:send-mode:'
+const SEND_MODE_STORAGE_PREFIX = PREF_COMPOSER_SEND_MODE_PREFIX
 const QUEUED_MESSAGES_VISIBLE_LIMIT = 3
 
 type PastedImage = {
@@ -156,6 +159,7 @@ export function Composer({
   state,
   config,
   contextSnapshot,
+  humanAttention,
   queuedMessages,
   timeline,
   onQueuedReorder,
@@ -444,6 +448,7 @@ export function Composer({
               onCompact={onCompact}
               compactDisabled={disabled}
             />
+            <HumanAttentionIndicator timeline={humanAttention} density="simple" />
             <SendButton
               disabled={!canSubmit}
               sendMode={sendMode}
@@ -696,6 +701,7 @@ export function Composer({
                 onCompact={onCompact}
                 compactDisabled={disabled}
               />
+              <HumanAttentionIndicator timeline={humanAttention} />
               <SendButton
                 disabled={!canSubmit}
                 sendMode={sendMode}

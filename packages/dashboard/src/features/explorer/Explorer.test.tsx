@@ -8,7 +8,8 @@ vi.mock('react-use-measure', () => ({
   default: () => [() => {}, { width: 240, height: 400 }, () => {}],
 }))
 
-import { Explorer, canDropWorkspacesAtRootForTest, reorderWorkspaceIdsForTest } from './Explorer.js'
+import { Explorer } from './Explorer.js'
+import { canDropWorkspacesAtRoot, reorderWorkspaceIds } from './tree-model.js'
 import { HIDDEN_WORKSPACES_STORAGE_KEY } from './hidden-workspaces.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 
@@ -272,23 +273,23 @@ describe('Explorer', () => {
   })
 
   it('allows workspace drops on the react-arborist root node', () => {
-    expect(canDropWorkspacesAtRootForTest({
+    expect(canDropWorkspacesAtRoot({
       parentNode: { id: '__REACT_ARBORIST_INTERNAL_ROOT__', isRoot: true },
       dragNodes: [{ data: { kind: 'workspace', workspaceId: 'ws-1' } }],
     })).toBe(true)
-    expect(canDropWorkspacesAtRootForTest({
+    expect(canDropWorkspacesAtRoot({
       parentNode: { id: 'ws:ws-2', isRoot: false },
       dragNodes: [{ data: { kind: 'workspace', workspaceId: 'ws-1' } }],
     })).toBe(false)
-    expect(canDropWorkspacesAtRootForTest({
+    expect(canDropWorkspacesAtRoot({
       parentNode: { id: '__REACT_ARBORIST_INTERNAL_ROOT__', isRoot: true },
       dragNodes: [{ data: { kind: 'workspace', workspaceId: null } }],
     })).toBe(false)
   })
 
   it('reorders workspace ids for root-level workspace drags', () => {
-    expect(reorderWorkspaceIdsForTest(['ws-1', 'ws-2', 'ws-3'], ['ws-1', 'ws-2', 'ws-3'], ['ws-3'], 0)).toEqual(['ws-3', 'ws-1', 'ws-2'])
-    expect(reorderWorkspaceIdsForTest(['ws-1', 'ws-2', 'ws-3'], ['ws-1', 'ws-2', 'ws-3'], ['ws-1'], 3)).toEqual(['ws-2', 'ws-3', 'ws-1'])
+    expect(reorderWorkspaceIds(['ws-1', 'ws-2', 'ws-3'], ['ws-1', 'ws-2', 'ws-3'], ['ws-3'], 0)).toEqual(['ws-3', 'ws-1', 'ws-2'])
+    expect(reorderWorkspaceIds(['ws-1', 'ws-2', 'ws-3'], ['ws-1', 'ws-2', 'ws-3'], ['ws-1'], 3)).toEqual(['ws-2', 'ws-3', 'ws-1'])
   })
 
   it('does not render a workspace drag handle for unassigned sessions', () => {

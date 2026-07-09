@@ -101,16 +101,26 @@ describe('debugger model helpers', () => {
 
   it('builds run health without cost data', () => {
     const health = buildRunHealth(state, { tools: [], contextLimit: 100 }, timeline, {
-      estimatedMessageTokens: 70,
-      estimatedToolSchemaTokens: 0,
-      estimatedTotalInputTokens: 80,
-      reserveTokens: 10,
-      effectiveLimit: 100,
-      pressureLevel: 'soft',
-      reasonCodes: ['pressure_soft'],
+      model: { ref: 'test-model' },
+      contextWindow: { tokens: 100, source: 'manual_config' },
+      usage: { inputTokens: 80, totalTokens: 80 },
+      breakdown: {
+        system: 10,
+        transcript: 70,
+        tools: 0,
+        memory: 0,
+        attachments: 0,
+        pendingUserInput: 0,
+      },
+      estimator: {
+        total: { kind: 'heuristic', confidence: 'rough' },
+        breakdown: { kind: 'heuristic', confidence: 'rough' },
+        version: 'test',
+      },
+      updatedAt: 0,
     })
 
-    expect(health.find((item) => item.id === 'context')?.value).toBe('soft · 80%')
+    expect(health.find((item) => item.id === 'context')?.value).toBe('high · 80%')
     expect(health.find((item) => item.id === 'tool-errors')?.tone).toBe('error')
     expect(health.find((item) => item.id === 'missing-trace')?.tone).toBe('warn')
     expect(health.map((item) => item.label).join(' ')).not.toMatch(/cost|money/i)

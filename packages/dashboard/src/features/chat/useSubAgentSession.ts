@@ -1,7 +1,7 @@
 /**
  * Live view of a single sub-agent child session.
  *
- * The dashboard listens for `server:sub_agent_started` on the parent's room to
+ * The dashboard listens for `server:control_update` on the parent's room to
  * discover children spawned by the current turn; when one arrives with a
  * matching `parentCallId` we subscribe to the child's `session:<id>` room and
  * mirror `state.messages` via `session:ready` + `state:changed` so the nested
@@ -23,6 +23,7 @@ import type { Message } from '@agent-kernel/kernel'
 import type {
   ServerSubAgentFinishedEvent,
   ServerSubAgentStartedEvent,
+  ControlUpdate,
   SessionReadyEvent,
   StateChangedEvent,
   SubAgentListResult,
@@ -200,11 +201,14 @@ export function useSubAgentSession({
         }
       })
     }
-    socket.on('server:sub_agent_started', onStarted)
-    socket.on('server:sub_agent_finished', onFinished)
+    const onControlUpdate = (payload: ControlUpdate): void => {
+      if (payload.kind === 'sub_agent_started') onStarted(payload)
+      if (payload.kind === 'sub_agent_finished') onFinished(payload)
+    }
+
+    socket.on('server:control_update', onControlUpdate)
     return () => {
-      socket.off('server:sub_agent_started', onStarted)
-      socket.off('server:sub_agent_finished', onFinished)
+      socket.off('server:control_update', onControlUpdate)
     }
   }, [socket, parentSessionId, parentCallId])
 

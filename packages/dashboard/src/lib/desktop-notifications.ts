@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 
 import type { ApprovalRequiredEvent, SessionErrorEvent } from '@agent-kernel/shared'
 
-import { useBooleanPref } from './prefs.js'
+import { DASHBOARD_PREFERENCES, useBooleanPref } from './prefs.js'
 
 export type DesktopNotificationKind =
   | 'approval_required'
@@ -11,13 +11,13 @@ export type DesktopNotificationKind =
   | 'connection_lost'
   | 'workspace_offline'
 
-export const PREF_DESKTOP_NOTIFICATIONS_ENABLED = 'ak-desktop-notifications-enabled'
-export const PREF_DESKTOP_NOTIFICATION_APPROVAL = 'ak-desktop-notification-approval-required'
-export const PREF_DESKTOP_NOTIFICATION_WAITING = 'ak-desktop-notification-waiting-for-user'
-export const PREF_DESKTOP_NOTIFICATION_ERROR = 'ak-desktop-notification-session-error'
-export const PREF_DESKTOP_NOTIFICATION_CONNECTION = 'ak-desktop-notification-connection-lost'
-export const PREF_DESKTOP_NOTIFICATION_WORKSPACE = 'ak-desktop-notification-workspace-offline'
-export const PREF_DESKTOP_NOTIFICATION_SOUND = 'ak-desktop-notification-sound'
+export const PREF_DESKTOP_NOTIFICATIONS_ENABLED = DASHBOARD_PREFERENCES.desktopNotificationsEnabled.key
+export const PREF_DESKTOP_NOTIFICATION_APPROVAL = DASHBOARD_PREFERENCES.desktopNotificationApproval.key
+export const PREF_DESKTOP_NOTIFICATION_WAITING = DASHBOARD_PREFERENCES.desktopNotificationWaiting.key
+export const PREF_DESKTOP_NOTIFICATION_ERROR = DASHBOARD_PREFERENCES.desktopNotificationError.key
+export const PREF_DESKTOP_NOTIFICATION_CONNECTION = DASHBOARD_PREFERENCES.desktopNotificationConnection.key
+export const PREF_DESKTOP_NOTIFICATION_WORKSPACE = DASHBOARD_PREFERENCES.desktopNotificationWorkspace.key
+export const PREF_DESKTOP_NOTIFICATION_SOUND = DASHBOARD_PREFERENCES.desktopNotificationSound.key
 
 export const DESKTOP_NOTIFICATION_PREFS: ReadonlyArray<{
   kind: DesktopNotificationKind

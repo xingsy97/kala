@@ -1,4 +1,6 @@
-const STORAGE_KEY = 'agent-kernel:host-endpoint'
+import { PREF_HOST_ENDPOINT } from './lib/prefs.js'
+
+const STORAGE_KEY = PREF_HOST_ENDPOINT
 
 export type HostEndpointSource = 'query' | 'settings' | 'build' | 'default'
 

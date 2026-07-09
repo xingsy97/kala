@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { applyCurrentVSCodeTheme, VSCODE_THEME_CHANGE_EVENT } from '../theme/vscode-theme.js'
+import { PREF_THEME } from './prefs.js'
 
 export type Theme = 'dark' | 'light'
 export type ThemePreference = Theme | 'system'
 
-const THEME_STORAGE_KEY = 'ak-theme'
+const THEME_STORAGE_KEY = PREF_THEME
 const THEME_CHANGE_EVENT = 'ak-theme-change'
 
 /**
@@ -37,13 +39,19 @@ export function useTheme(): [ThemePreference, () => void, (theme: ThemePreferenc
   const effectiveTheme = preference === 'system' ? systemTheme : preference
 
   useEffect(() => {
-    const root = document.documentElement
-    if (effectiveTheme === 'dark') root.classList.add('dark')
-    else root.classList.remove('dark')
+    applyCurrentVSCodeTheme(effectiveTheme)
     try {
-      localStorage.setItem('ak-theme', preference)
+      localStorage.setItem(THEME_STORAGE_KEY, preference)
     } catch {}
   }, [effectiveTheme, preference])
+
+  useEffect(() => {
+    const onVSCodeThemeChange = (): void => {
+      applyCurrentVSCodeTheme(effectiveTheme)
+    }
+    window.addEventListener(VSCODE_THEME_CHANGE_EVENT, onVSCodeThemeChange)
+    return () => window.removeEventListener(VSCODE_THEME_CHANGE_EVENT, onVSCodeThemeChange)
+  }, [effectiveTheme])
 
   const setThemePreference = (next: ThemePreference): void => {
     setPreference(next)
@@ -71,4 +79,10 @@ function readThemePreference(): ThemePreference {
 
 function systemThemeNow(): Theme {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+export function initializeTheme(): void {
+  const preference = readThemePreference()
+  const effective = preference === 'system' ? systemThemeNow() : preference
+  applyCurrentVSCodeTheme(effective)
 }

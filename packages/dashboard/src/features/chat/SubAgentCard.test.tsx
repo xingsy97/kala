@@ -555,10 +555,14 @@ function makeControlledSocket(): {
     socket,
     emit,
     emitStarted(payload) {
-      for (const listener of listeners.get('server:sub_agent_started') ?? []) listener(payload)
+      for (const listener of listeners.get('server:control_update') ?? []) {
+        listener({ kind: 'sub_agent_started', ...payload })
+      }
     },
     emitFinished(payload) {
-      for (const listener of listeners.get('server:sub_agent_finished') ?? []) listener(payload)
+      for (const listener of listeners.get('server:control_update') ?? []) {
+        listener({ kind: 'sub_agent_finished', ...payload })
+      }
     },
   }
 }

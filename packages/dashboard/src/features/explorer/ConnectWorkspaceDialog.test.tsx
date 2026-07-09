@@ -41,6 +41,7 @@ describe('ConnectWorkspaceDialog', () => {
     await screen.findByText(/Invite ready/i)
 
     const text = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
+    expect(text).toContain('downloads and verifies the executor from this host')
     expect(text).toContain('run.sh')
     expect(text).toContain('HOST_URL=')
     expect(text).toContain('COMPONENT=executor')

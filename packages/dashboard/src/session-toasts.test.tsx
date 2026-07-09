@@ -308,8 +308,9 @@ describe('useSubAgentToasts', () => {
     const emitter = new EventEmitter()
     const fakeSocket = emitter as unknown as DashboardSocket
     render(<SubAgentHarness socket={fakeSocket} />)
-    emitter.emit('server:sub_agent_started', { childSessionId: 'c1', agentType: 'general-purpose' })
-    emitter.emit('server:sub_agent_finished', {
+    emitter.emit('server:control_update', { kind: 'sub_agent_started', childSessionId: 'c1', agentType: 'general-purpose' })
+    emitter.emit('server:control_update', {
+      kind: 'sub_agent_finished',
       childSessionId: 'c1',
       status: 'completed',
       durationMs: 12_000,
@@ -323,8 +324,9 @@ describe('useSubAgentToasts', () => {
     const emitter = new EventEmitter()
     const fakeSocket = emitter as unknown as DashboardSocket
     render(<SubAgentHarness socket={fakeSocket} />)
-    emitter.emit('server:sub_agent_started', { childSessionId: 'c1', agentType: 'code-reviewer' })
-    emitter.emit('server:sub_agent_finished', {
+    emitter.emit('server:control_update', { kind: 'sub_agent_started', childSessionId: 'c1', agentType: 'code-reviewer' })
+    emitter.emit('server:control_update', {
+      kind: 'sub_agent_finished',
       childSessionId: 'c1',
       status: 'failed',
       durationMs: 500,
@@ -340,13 +342,15 @@ describe('useSubAgentToasts', () => {
     const emitter = new EventEmitter()
     const fakeSocket = emitter as unknown as DashboardSocket
     render(<SubAgentHarness socket={fakeSocket} />)
-    emitter.emit('server:sub_agent_started', { childSessionId: 'c1', agentType: 'x' })
-    emitter.emit('server:sub_agent_finished', {
+    emitter.emit('server:control_update', { kind: 'sub_agent_started', childSessionId: 'c1', agentType: 'x' })
+    emitter.emit('server:control_update', {
+      kind: 'sub_agent_finished',
       childSessionId: 'c1',
       status: 'completed',
       durationMs: 1000,
     })
-    emitter.emit('server:sub_agent_finished', {
+    emitter.emit('server:control_update', {
+      kind: 'sub_agent_finished',
       childSessionId: 'c1',
       status: 'completed',
       durationMs: 1000,

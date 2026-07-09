@@ -43,6 +43,17 @@ const payload: ServerSettingsPayload = {
       embeddedDashboardFiles: 42,
     },
   },
+  socketConnections: {
+    total: 3,
+    dashboard: 2,
+    executor: 1,
+    other: 0,
+    namespaces: [
+      { namespace: '/dashboard', sockets: 2, dashboard: 2, executor: 0, other: 0 },
+      { namespace: '/executor', sockets: 1, dashboard: 0, executor: 1, other: 0 },
+    ],
+    updatedAt: '2026-07-20T00:00:00.000Z',
+  },
   agentPrompt: {
     selectedPreset: 'codex',
     presets: [
@@ -117,6 +128,20 @@ describe('SettingsDialog', () => {
 
     expect(screen.getByTestId('settings-dialog').className).toContain('h-[calc(100dvh-0.5rem)]')
     expect(screen.getByTestId('settings-tab-connection').className).toContain('w-32')
+  })
+
+  it('shows current Socket.IO connection audit counts in deployment settings', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-deployment'))
+
+    const panel = await screen.findByTestId('settings-socket-connections')
+    expect(panel.textContent).toContain('Socket.IO connections')
+    expect(panel.textContent).toContain('3 active sockets')
+    expect(panel.textContent).toContain('/dashboard: 2 sockets')
+    expect(panel.textContent).toContain('/executor: 1 sockets')
   })
 
   it('switches to Models tab and lists providers + default model', async () => {
@@ -464,6 +489,45 @@ describe('SettingsDialog', () => {
 
     fireEvent.click(screen.getByTestId('settings-theme-light'))
     expect(localStorage.getItem('ak-theme')).toBe('light')
+  })
+
+  it('searches marketplace VS Code themes and stores selected raw theme JSON', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/settings') return new Response(JSON.stringify(payload), { status: 200 })
+      if (url.startsWith('/themes/marketplace/search')) {
+        return new Response(JSON.stringify({ results: [{ namespace: 'example', name: 'theme', displayName: 'Example Theme', description: 'Theme pack', version: '1.0.0', verified: true, downloadCount: 9 }] }), { status: 200 })
+      }
+      if (url === '/themes/marketplace/extensions/example/theme') {
+        return new Response(JSON.stringify({ namespace: 'example', name: 'theme', displayName: 'Example Theme', description: 'Theme pack', version: '1.0.0', verified: true, downloadCount: 9, themes: [{ id: 'Example Dark', label: 'Example Dark', uiTheme: 'vs-dark', path: './themes/dark.json' }] }), { status: 200 })
+      }
+      if (url === '/themes/marketplace/extensions/example/theme/themes/Example%20Dark') {
+        return new Response(JSON.stringify({ extension: {}, theme: { name: 'Example Dark', type: 'dark', colors: { 'editor.background': '#101010', foreground: '#f0f0f0' } } }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ error: 'not found' }), { status: 404 })
+    })
+
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+
+    const marketplace = await screen.findByTestId('settings-vscode-marketplace')
+    expect(marketplace.textContent).toContain('Theme list')
+    const defaultThemeRow = await screen.findByTestId('settings-vscode-theme-agent-kernel-dark')
+    expect(defaultThemeRow.textContent).toContain('Default Dark')
+    expect(defaultThemeRow.textContent).not.toContain('Built in')
+    await screen.findByText('Example Theme')
+    fireEvent.click(screen.getByText('Example Theme'))
+    const themeRow = await screen.findByTestId('settings-vscode-theme-example.theme:Example Dark')
+    fireEvent.click(Array.from(themeRow.querySelectorAll('button')).at(0)!)
+    await waitFor(() => {
+      expect(themeRow.textContent).toContain('Previewing')
+    })
+    fireEvent.click(Array.from(themeRow.querySelectorAll('button')).at(-1)!)
+
+    await waitFor(() => {
+      expect(localStorage.getItem('ak-vscode-theme')).toContain('Example Dark')
+    })
   })
 
   it('stores the live tool activity tail preference', async () => {

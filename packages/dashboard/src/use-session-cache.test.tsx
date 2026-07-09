@@ -1,10 +1,10 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 
-import { useSession, type TimelineEntry } from './session.js'
+import { useControlPlane, useDashboardControlSocket, useSession, type TimelineEntry } from './session.js'
 import { createSessionViewCache } from './session-view-cache.js'
 
 type Handler = (payload: any) => void
@@ -29,6 +29,12 @@ class MockSocket {
     const list = this.handlers.get(event) ?? []
     list.push(handler)
     this.handlers.set(event, list)
+    return this
+  }
+
+  off(event: string, handler: Handler): this {
+    const list = this.handlers.get(event) ?? []
+    this.handlers.set(event, list.filter((candidate) => candidate !== handler))
     return this
   }
 
@@ -60,6 +66,68 @@ afterEach(() => {
 })
 
 describe('useSession session view cache', () => {
+  it('keeps a dashboard control socket independent from the selected session hook', async () => {
+    const { rerender, unmount } = renderHook(
+      ({ sessionId }) => ({
+        control: useDashboardControlSocket('http://host.test'),
+        session: useSession({ host: 'http://host.test', sessionId }),
+      }),
+      { initialProps: { sessionId: 's1' as string | null } },
+    )
+
+    await waitFor(() => expect(sockets).toHaveLength(2))
+    const controlSocket = sockets[0]!
+    const sessionSocket = sockets[1]!
+    expect(controlSocket.emitted).toEqual([])
+    expect(sessionSocket.connected).toBe(true)
+
+    rerender({ sessionId: null })
+
+    expect(sessionSocket.connected).toBe(false)
+    expect(controlSocket.connected).toBe(true)
+
+    unmount()
+    expect(controlSocket.connected).toBe(false)
+  })
+
+  it('keeps control-plane data loaded when the selected session is cleared', async () => {
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => {
+        const controlSocket = useDashboardControlSocket('http://host.test')
+        return {
+          control: useControlPlane(controlSocket),
+          session: useSession({ host: 'http://host.test', sessionId }),
+        }
+      },
+      { initialProps: { sessionId: 's1' as string | null } },
+    )
+
+    await waitFor(() => expect(sockets).toHaveLength(2))
+    const controlSocket = sockets[0]!
+    const sessionSocket = sockets[1]!
+
+    act(() => {
+      controlSocket.serverEmit('server:executors', { executors: [] })
+      controlSocket.serverEmit('server:sessions', {
+        sessions: [{ sessionId: 's1', createdAt: 't0', eventCount: 0 }],
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.control.executorsLoaded).toBe(true)
+      expect(result.current.control.sessionsLoaded).toBe(true)
+      expect(result.current.control.sessions).toHaveLength(1)
+    })
+
+    rerender({ sessionId: null })
+
+    expect(sessionSocket.connected).toBe(false)
+    expect(controlSocket.connected).toBe(true)
+    expect(result.current.control.executorsLoaded).toBe(true)
+    expect(result.current.control.sessionsLoaded).toBe(true)
+    expect(result.current.control.sessions.map((session) => session.sessionId)).toEqual(['s1'])
+  })
+
   it('restores cached timeline immediately and refreshes history from the cached cursor', async () => {
     const cache = createSessionViewCache({ maxBytes: 1024 * 1024 })
     const state = createInitialState({ sessionId: 's1' })
