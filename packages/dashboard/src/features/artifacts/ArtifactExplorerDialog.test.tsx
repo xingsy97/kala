@@ -109,6 +109,7 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('loads eval summaries from artifact content when the Eval Runs tab is selected', async () => {
+    const onOpenSession = vi.fn()
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -163,6 +164,7 @@ describe('ArtifactExplorerDialog', () => {
           trialId: 'run1:local__repo-1',
           experimentId: 'run1',
           instanceId: 'local__repo-1',
+          sessionId: 'session-linked-1',
           status: 'completed',
           resolved: true,
           artifacts: [
@@ -183,7 +185,7 @@ describe('ArtifactExplorerDialog', () => {
         body: 'diff --git a/file b/file\n',
       }), { status: 200 }))
 
-    render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
+    render(<ArtifactExplorerDialog open onOpenChange={() => {}} onOpenSession={onOpenSession} />)
     await screen.findByText('llm/s1/1.request.json')
 
     fireEvent.click(screen.getByRole('button', { name: /^eval$/i }))
@@ -203,10 +205,14 @@ describe('ArtifactExplorerDialog', () => {
     expect(screen.getByText('Workers')).toBeTruthy()
     expect(await screen.findByText('base')).toBeTruthy()
     expect(screen.getByText('candidate')).toBeTruthy()
-    expect(screen.getByText('+50%')).toBeTruthy()
+    expect(screen.getAllByText('+50%').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByLabelText('comparison delta chart')).toBeTruthy()
     expect(screen.getByText('empty_patch -1')).toBeTruthy()
     await waitFor(() => expect(screen.getAllByText('local__repo-1').length).toBeGreaterThanOrEqual(1))
     expect(screen.getAllByText('resolved').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Linked Session')).toBeTruthy()
+    fireEvent.click(screen.getByText('session-linked-1'))
+    expect(onOpenSession).toHaveBeenCalledWith('session-linked-1')
     expect(screen.getAllByText('Final Patch').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Trace').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Harness Evidence').length).toBeGreaterThanOrEqual(1)
@@ -241,6 +247,37 @@ describe('ArtifactExplorerDialog', () => {
       '/artifacts/content?path=runs%2Fswebench%2Frun1%2Fartifacts%2Flocal__repo-1%2Ffinal.diff',
       { cache: 'no-store' },
     )
+  })
+
+  it('can open directly in eval mode', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/summary.json',
+        mediaType: 'application/json',
+        body: { experimentId: 'run1', dataset: 'local', model: 'agent-test', trialCount: 1, resolved: 1, failed: 0, metrics: { passRate: 1 } },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/eval/compare/eval-comparison.json',
+        mediaType: 'application/json',
+        body: {},
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/progress.json',
+        mediaType: 'application/json',
+        body: { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 1 },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        path: 'runs/swebench/run1/trials/local__repo-1.json',
+        mediaType: 'application/json',
+        body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] },
+      }), { status: 200 }))
+
+    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+
+    await screen.findByRole('heading', { name: 'Eval' })
+    await screen.findByText('run1')
+    expect(screen.queryByText('llm/s1/1.request.json')).toBeNull()
   })
 
   it('shows progress-only eval runs before summaries are written', async () => {

@@ -4,10 +4,12 @@ import {
   exportSessionForSweBench,
   inferSweBenchPatchRun,
   ingestSweBenchResults,
+  planSweBenchWorkerRun,
   runSweBenchAgentPatchRun,
   runSweBenchGrade,
   type ExportSessionForSweBenchInput,
   type InferSweBenchPatchRunInput,
+  type SweBenchWorkerPlanInput,
   type RunSweBenchAgentPatchInput,
   type SweBenchIngestResultsInput,
   type SweBenchGradeInput,
@@ -18,6 +20,7 @@ export type SweBenchCliCommand =
   | ({ kind: 'grade' } & SweBenchGradeInput)
   | ({ kind: 'infer' } & InferSweBenchPatchRunInput)
   | ({ kind: 'agent-infer' } & RunSweBenchAgentPatchInput)
+  | ({ kind: 'plan' } & SweBenchWorkerPlanInput)
   | ({ kind: 'ingest-results' } & SweBenchIngestResultsInput)
   | ({ kind: 'run' } & InferSweBenchPatchRunInput & {
       maxWorkers?: number
@@ -66,6 +69,22 @@ export function parseSweBenchCli(argv: readonly string[]): SweBenchCliCommand {
       rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
       runId: required(rest, '--run-id'),
       resultsDir: required(rest, '--results-dir'),
+    }
+  }
+  if (subcommand === 'plan') {
+    return {
+      kind: 'plan',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      dataset: required(rest, '--dataset'),
+      split: value(rest, '--split'),
+      model: required(rest, '--model'),
+      instancesJsonl: required(rest, '--instances-jsonl'),
+      instanceIds: listArg(rest, '--instance-ids'),
+      limit: numberArg(rest, '--limit'),
+      maxWorkers: numberArg(rest, '--max-workers'),
+      timeoutMs: numberArg(rest, '--timeout-ms'),
+      repoCacheDir: value(rest, '--repo-cache-dir'),
     }
   }
   if (subcommand === 'infer' || subcommand === 'run') {
@@ -156,6 +175,18 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
       progressPath: result.layout.progressPath,
       summaryPath: result.layout.summaryPath,
       trialCount: result.trials.length,
+    }, null, 2))
+    return true
+  }
+  if (command.kind === 'plan') {
+    const result = await planSweBenchWorkerRun(command)
+    console.log(JSON.stringify({
+      runId: result.layout.runId,
+      planPath: result.planPath,
+      selectedCount: result.plan.selectedCount,
+      maxWorkers: result.plan.maxWorkers,
+      shardCount: result.plan.shards.length,
+      warnings: result.plan.warnings,
     }, null, 2))
     return true
   }

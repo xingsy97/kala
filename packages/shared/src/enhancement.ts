@@ -757,6 +757,13 @@ export type RouterDecisionArtifact = {
     maxInputTokens?: number
     maxOutputTokens?: number
   }
+  toolPolicy?: {
+    toolCount: number
+    requiresApprovalCount: number
+    skillBackedCount: number
+    subAgentToolAvailable: boolean
+    memoryToolAvailable: boolean
+  }
 }
 
 export type ToolCatalogArtifact = {
@@ -779,18 +786,44 @@ export function createRouterDecisionArtifact(input: {
   fallbacks?: readonly string[]
   maxInputTokens?: number
   maxOutputTokens?: number
+  tools?: readonly ToolSchema[]
 }): RouterDecisionArtifact {
   const selectedProvider = providerFromAdapter(input.adapterName) ?? inferProvider(input.selectedModel ?? input.requestedModel)
+  const toolPolicy = input.tools ? createToolPolicy(input.tools) : undefined
   return {
     ...(selectedProvider ? { selectedProvider } : {}),
     ...(input.selectedModel ?? input.requestedModel ? { selectedModel: input.selectedModel ?? input.requestedModel } : {}),
-    reasonCodes: input.reasonCodes ?? [input.requestedModel ? 'session_model_selected' : 'adapter_default_model'],
+    reasonCodes: input.reasonCodes ?? [
+      input.requestedModel ? 'session_model_selected' : 'adapter_default_model',
+      ...(toolPolicy ? toolReasonCodes(toolPolicy) : []),
+    ],
     fallbacks: input.fallbacks ?? [],
     budget: compactRecord({
       maxInputTokens: input.maxInputTokens,
       maxOutputTokens: input.maxOutputTokens,
     }),
+    ...(toolPolicy ? { toolPolicy } : {}),
   }
+}
+
+function createToolPolicy(tools: readonly ToolSchema[]): NonNullable<RouterDecisionArtifact['toolPolicy']> {
+  return {
+    toolCount: tools.length,
+    requiresApprovalCount: tools.filter((tool) => tool.requiresApproval).length,
+    skillBackedCount: tools.filter((tool) => tool.name === 'skill').length,
+    subAgentToolAvailable: tools.some((tool) => tool.name === 'agent'),
+    memoryToolAvailable: tools.some((tool) => tool.name === 'memory'),
+  }
+}
+
+function toolReasonCodes(policy: NonNullable<RouterDecisionArtifact['toolPolicy']>): readonly string[] {
+  return [
+    policy.toolCount > 0 ? 'tool_calling_enabled' : 'tool_calling_disabled',
+    ...(policy.requiresApprovalCount > 0 ? ['approval_required_tools_visible'] : []),
+    ...(policy.skillBackedCount > 0 ? ['skill_backed_tools_visible'] : []),
+    ...(policy.subAgentToolAvailable ? ['sub_agent_tool_visible'] : []),
+    ...(policy.memoryToolAvailable ? ['memory_tool_visible'] : []),
+  ]
 }
 
 export function createToolCatalogArtifact(tools: readonly ToolSchema[]): ToolCatalogArtifact {

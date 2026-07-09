@@ -169,6 +169,14 @@ segments with `lossMask=0`, preserves event sequence links, and sets
 provide a stable handoff point for a future gateway that captures real token ids
 at generation time.
 
+The segment index also includes rollout topology metadata derived from the same
+JSONL ledger: parent session id/cursor for forks and child agents, event counts,
+tool call/result counts, compaction summaries, and sub-agent request/result
+links parsed from the existing `agent` tool call and `<sub_agent>` result
+envelope. This is deliberately metadata, not protocol state. Trainer adapters
+can use it to split or filter rollout groups without asking the kernel to know
+about RL concepts.
+
 The framework adapter exporter is implemented as a handoff-artifact generator,
 not as a trainer. For `slime`, it writes a ready custom rollout manifest under
 `rl-adapters/slime/<rollout_id>.json` linking the event log, trace, token
@@ -204,12 +212,19 @@ shape only when an external token capture artifact provides real ids and masks;
 otherwise it emits a blocked adapter artifact with the missing requirements.
 
 Phase 6: support compaction, forks, subagents, sibling rollouts, and weight
-version metadata.
+version metadata. Implemented for export-side metadata: generated segment
+artifacts now carry parent/fork lineage, compaction summaries, sub-agent
+request/result linkage, and sidecar metadata for compaction/sub-agent counts.
+Sibling rollout grouping and model weight version are represented in sidecars;
+real training tensors still require generation-time token capture from a model
+gateway.
 
 ## Testing Plan
 
 - Unit test segment masks on synthetic tool-call traces.
 - Golden test that event seq links survive export.
+- Implemented topology test for parent lineage, compaction summaries, and
+  sub-agent request/result linkage.
 - Integration test with a small local model/gateway mock returning token ids.
 - Verifier test that rewards run in a clean workspace, not the mutated agent
   workspace.

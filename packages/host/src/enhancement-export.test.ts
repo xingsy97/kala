@@ -86,11 +86,13 @@ describe('enhancement artifact export', () => {
     expect(sidecar.reward_ref).toBe('rewards/s1.json')
     expect(sidecar.token_segments_ref).toBe('rl-token-segments/s1.json')
     expect(sidecar.metadata.tokenIdsCaptured).toBe(false)
+    expect(sidecar.metadata.compactionCount).toBe(0)
+    expect(sidecar.metadata.subAgentCallCount).toBe(0)
   })
 
   it('exports rollout segment indexes with assistant-only loss masks', async () => {
     const logPath = join(dir, 'session.jsonl')
-    await writeHeader({ path: logPath, sessionId: 's1', config, initialState })
+    await writeHeader({ path: logPath, sessionId: 's1', config, initialState, parentSessionId: 'parent-1', parentCursor: 7 })
     await appendEventEntry({
       path: logPath,
       seq: 1,
@@ -115,6 +117,43 @@ describe('enhancement artifact export', () => {
       event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'file content' },
       effects: [],
     })
+    await appendEventEntry({
+      path: logPath,
+      seq: 4,
+      event: {
+        kind: 'compact_replaced',
+        trigger: 'auto',
+        preserveFrom: 2,
+        summary: 'kept relevant work',
+        replacedCount: 3,
+        tokensBefore: 2000,
+        tokensAfter: 400,
+      },
+      effects: [],
+    })
+    await appendEventEntry({
+      path: logPath,
+      seq: 5,
+      event: {
+        kind: 'llm_response',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_call', callId: 'agent-1', name: 'agent', input: { prompt: 'inspect', agent_type: 'Explore' } }],
+        },
+      },
+      effects: [{ kind: 'call_tool', callId: 'agent-1', name: 'agent', input: { prompt: 'inspect', agent_type: 'Explore' } }],
+    })
+    await appendEventEntry({
+      path: logPath,
+      seq: 6,
+      event: {
+        kind: 'tool_result',
+        callId: 'agent-1',
+        ok: true,
+        content: '<sub_agent\n  session_id="child-1"\n  agent_type="Explore"\n  status="completed"\n  turns="4"\n  duration_ms="1250"\n>\n<result>done</result>\n</sub_agent>',
+      },
+      effects: [],
+    })
 
     const result = await exportRolloutSegments({ rootDir: dir, sessionLogPath: logPath })
 
@@ -124,6 +163,34 @@ describe('enhancement artifact export', () => {
     expect(result.segments.segments.some((segment) => segment.source === 'assistant' && segment.lossMask === 1)).toBe(true)
     expect(result.segments.segments.some((segment) => segment.source === 'tool' && segment.lossMask === 0)).toBe(true)
     expect(result.segments.segments.some((segment) => segment.source === 'effect' && segment.lossMask === 0)).toBe(true)
+    expect(result.segments.topology).toMatchObject({
+      parentSessionId: 'parent-1',
+      parentCursor: 7,
+      eventCount: 6,
+      llmResponseCount: 2,
+      toolCallCount: 2,
+      toolResultCount: 2,
+      compactionCount: 1,
+      subAgentCallCount: 1,
+      subAgentResultCount: 1,
+    })
+    expect(result.segments.topology.compactions[0]).toMatchObject({
+      eventSeq: 4,
+      trigger: 'auto',
+      replacedCount: 3,
+      tokensBefore: 2000,
+      tokensAfter: 400,
+    })
+    expect(result.segments.topology.subAgents[0]).toMatchObject({
+      parentCallId: 'agent-1',
+      eventSeq: 5,
+      requestedAgentType: 'Explore',
+      childSessionId: 'child-1',
+      status: 'completed',
+      turns: 4,
+      durationMs: 1250,
+    })
+    expect(result.segments.warnings.some((warning) => warning.includes('compaction'))).toBe(true)
   })
 
   it('exports slime rollout adapter manifests without pretending to have tensors', async () => {
