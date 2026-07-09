@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, Moon, PanelRight, PanelRightClose, Sun } from 'lucide-react'
+import { FolderOpen, Moon, PanelRight, PanelRightClose, Settings, Sun } from 'lucide-react'
 
 import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
 
@@ -29,6 +29,7 @@ import { TodoDock } from './features/chat/TodoDock.js'
 import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
+import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import {
   createSession,
   deleteSession,
@@ -118,6 +119,7 @@ export function App(): JSX.Element {
   >(null)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [cwdDraft, setCwdDraft] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
@@ -406,6 +408,7 @@ export function App(): JSX.Element {
               cwd={currentCwd}
               status={session.status}
               onChangeCwd={openCwdDialog}
+              onOpenSettings={() => setSettingsOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
               inspectorAvailable={wideLayout}
@@ -555,6 +558,7 @@ export function App(): JSX.Element {
         onSubmit={submitCwd}
         onOpenChange={setCwdDialogOpen}
       />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
         workspaces={control.executors}
@@ -596,6 +600,7 @@ function WorkbenchToolbar({
   cwd,
   status,
   onChangeCwd,
+  onOpenSettings,
   onToggleInspector,
   inspectorOpen,
   inspectorAvailable,
@@ -606,6 +611,7 @@ function WorkbenchToolbar({
   cwd: string
   status: string
   onChangeCwd(): void
+  onOpenSettings(): void
   onToggleInspector(): void
   inspectorOpen: boolean
   inspectorAvailable: boolean
@@ -614,7 +620,7 @@ function WorkbenchToolbar({
 }): JSX.Element {
   return (
     <div
-      className="h-10 flex-none px-3 border-b border-border bg-white dark:border-border dark:bg-background flex items-center gap-2 text-sm min-w-0"
+      className="h-12 flex-none px-3 border-b border-border/60 bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/50 flex items-center gap-2 text-sm min-w-0"
       data-testid="workbench-toolbar"
     >
       <span
@@ -640,6 +646,16 @@ function WorkbenchToolbar({
       </Button>
       <span className="min-w-0 flex-1" />
       <ConnectionStatus status={status} />
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onOpenSettings}
+        title="Settings"
+        aria-label="open settings"
+        data-testid="settings-button"
+      >
+        <Settings className="h-4 w-4" />
+      </Button>
       <Button
         variant="ghost"
         size="icon"
@@ -678,14 +694,13 @@ function ConnectionStatus({ status }: { status: string }): JSX.Element {
   const label = hostStatusLabel(status)
   return (
     <div
-      className="inline-flex h-7 flex-none items-center gap-1.5 rounded-md border border-border bg-muted px-2 text-[11px] text-muted-foreground dark:border-border dark:bg-card/70 dark:text-muted-foreground"
+      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md hover:bg-accent/60 transition-colors"
       data-testid="connection-status"
       data-status={status}
       title={label}
       aria-label={label}
     >
       <span className={cn('h-2 w-2 rounded-full', statusDot(status))} />
-      <span className="hidden sm:inline">{label}</span>
     </div>
   )
 }
