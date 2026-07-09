@@ -12,7 +12,7 @@ import {
   type EvalRunSummary,
   type PricingTable,
   type SessionProfile,
-} from '@agent-kernel/shared'
+} from '@agent-kernel/shared/enhancement'
 
 import { readSessionLog } from '../store/log.js'
 

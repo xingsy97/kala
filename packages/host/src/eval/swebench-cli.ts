@@ -4,9 +4,11 @@ import {
   exportSessionForSweBench,
   inferSweBenchPatchRun,
   ingestSweBenchResults,
+  runSweBenchAgentPatchRun,
   runSweBenchGrade,
   type ExportSessionForSweBenchInput,
   type InferSweBenchPatchRunInput,
+  type RunSweBenchAgentPatchInput,
   type SweBenchIngestResultsInput,
   type SweBenchGradeInput,
 } from './swebench.js'
@@ -15,6 +17,7 @@ export type SweBenchCliCommand =
   | { kind: 'none' }
   | ({ kind: 'grade' } & SweBenchGradeInput)
   | ({ kind: 'infer' } & InferSweBenchPatchRunInput)
+  | ({ kind: 'agent-infer' } & RunSweBenchAgentPatchInput)
   | ({ kind: 'ingest-results' } & SweBenchIngestResultsInput)
   | ({ kind: 'run' } & InferSweBenchPatchRunInput & {
       maxWorkers?: number
@@ -88,6 +91,25 @@ export function parseSweBenchCli(argv: readonly string[]): SweBenchCliCommand {
       cwd: value(rest, '--cwd'),
     }
   }
+  if (subcommand === 'agent-infer') {
+    return {
+      kind: 'agent-infer',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      dataset: required(rest, '--dataset'),
+      split: value(rest, '--split'),
+      model: required(rest, '--model'),
+      instancesJsonl: required(rest, '--instances-jsonl'),
+      agentCommand: required(rest, '--agent-command'),
+      instanceIds: listArg(rest, '--instance-ids'),
+      limit: numberArg(rest, '--limit'),
+      workspaceRoot: value(rest, '--workspace-root'),
+      repoCacheDir: value(rest, '--repo-cache-dir'),
+      timeoutMs: numberArg(rest, '--timeout-ms'),
+      maxWorkers: numberArg(rest, '--max-workers'),
+      skipCompleted: flag(rest, '--skip-completed'),
+    }
+  }
   throw new Error(`unknown swebench subcommand: ${subcommand ?? '<missing>'}`)
 }
 
@@ -123,6 +145,17 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
       if (grade.exitCode !== undefined) process.exitCode = grade.exitCode
     }
     console.log(JSON.stringify(payload, null, 2))
+    return true
+  }
+  if (command.kind === 'agent-infer') {
+    const result = await runSweBenchAgentPatchRun(command)
+    console.log(JSON.stringify({
+      runId: result.layout.runId,
+      predictionsPath: result.layout.predictionsPath,
+      experimentPath: result.layout.experimentPath,
+      summaryPath: result.layout.summaryPath,
+      trialCount: result.trials.length,
+    }, null, 2))
     return true
   }
   if (command.kind === 'ingest-results') {

@@ -320,6 +320,15 @@ describe('wire protocol', () => {
     expect(manifest.summary.entryCount).toBe(1)
     expect(manifest.summary.kinds.llm_request).toBe(1)
     expect(manifest.entries[0]).toMatchObject({ path: 'llm/s1/1.request.json', kind: 'llm_request' })
+
+    const content = await fetch(`${url}/artifacts/content?path=${encodeURIComponent('llm/s1/1.request.json')}`).then((r) => r.json() as Promise<{
+      path: string
+      body: { ok: boolean }
+    }>)
+    expect(content).toMatchObject({ path: 'llm/s1/1.request.json', body: { ok: true } })
+
+    const traversal = await fetch(`${url}/artifacts/content?path=${encodeURIComponent('../secret.json')}`)
+    expect(traversal.status).toBe(403)
   })
 
   it('drives a full round-trip with dashboard + executor', async () => {
