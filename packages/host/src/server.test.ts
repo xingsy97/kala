@@ -396,13 +396,13 @@ describe('wire protocol', () => {
     const index = await fetch(`${url}/docs/index`).then((r) => r.json() as Promise<{
       docs: Array<{ path: string; title: string }>
     }>)
-    expect(index.docs.some((doc) => doc.path === 'context-compaction.md')).toBe(true)
+    expect(index.docs.some((doc) => doc.path === 'host/context-compaction.md')).toBe(true)
 
-    const content = await fetch(`${url}/docs/content?path=${encodeURIComponent('context-compaction.md')}`).then((r) => r.json() as Promise<{
+    const content = await fetch(`${url}/docs/content?path=${encodeURIComponent('host/context-compaction.md')}`).then((r) => r.json() as Promise<{
       path: string
       body: string
     }>)
-    expect(content.path).toBe('context-compaction.md')
+    expect(content.path).toBe('host/context-compaction.md')
     expect(content.body).toContain('# Context Compaction')
 
     const traversal = await fetch(`${url}/docs/content?path=${encodeURIComponent('../package.json')}`)

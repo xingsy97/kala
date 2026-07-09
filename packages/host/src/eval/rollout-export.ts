@@ -19,7 +19,7 @@
 //   slime rows: { schemaVersion, frameworkTarget:'slime', rolloutId, taskId,
 //                 reward, entrypoint:'custom_rollout_manifest', metadata }
 //
-// See docs/enhancement/04-agentic-rl-rollout-export.md and docs/roadmap/rl-e2e.md.
+// See docs/planning/enhancement/04-agentic-rl-rollout-export.md and docs/planning/roadmap-notes/rl-e2e.md.
 
 import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
