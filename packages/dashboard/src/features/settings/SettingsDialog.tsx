@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Check, Copy, ExternalLink } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Check, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import type { ServerSettingsPayload } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -16,6 +16,7 @@ import { cn } from '../../lib/utils.js'
 type Props = {
   open: boolean
   onOpenChange(open: boolean): void
+  onModelsChanged?(): void
 }
 
 type SectionKey = 'runtime' | 'models' | 'approvals' | 'hooks' | 'mcp'
@@ -28,7 +29,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
   { key: 'mcp', label: 'MCP servers', hint: 'Placeholder — not wired yet' },
 ]
 
-export function SettingsDialog({ open, onOpenChange }: Props): JSX.Element {
+export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): JSX.Element {
   const [payload, setPayload] = useState<ServerSettingsPayload | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [section, setSection] = useState<SectionKey>('runtime')
@@ -64,7 +65,7 @@ export function SettingsDialog({ open, onOpenChange }: Props): JSX.Element {
         <DialogHeader className="border-b border-border/50 px-4 py-3">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Read-only view of the host's runtime config. Edit the underlying files and restart the host to change these values.
+            Runtime config, provider sources, hooks, and manually managed model ids.
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 grid-cols-[200px_minmax(0,1fr)]">
@@ -100,7 +101,7 @@ export function SettingsDialog({ open, onOpenChange }: Props): JSX.Element {
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
               ) : section === 'models' ? (
-                <ModelsSection payload={payload} />
+                <ModelsSection payload={payload} onPayloadChange={setPayload} onModelsChanged={onModelsChanged} />
               ) : section === 'approvals' ? (
                 <ApprovalsSection />
               ) : section === 'hooks' ? (
@@ -141,6 +142,7 @@ function RuntimeSection({
   const rows: Array<[string, string]> = [
     ['Anthropic settings', payload.paths.claudeSettings],
     ['OpenAI-compatible providers', payload.paths.codexConfig],
+    ['Manual models', payload.paths.manualModels],
     ['Hooks config', payload.paths.hooksConfig],
     ['Sessions directory', payload.paths.sessionsDir],
   ]
@@ -181,15 +183,117 @@ function RuntimeSection({
 
 function ModelsSection({
   payload,
+  onPayloadChange,
+  onModelsChanged,
 }: {
   payload: ServerSettingsPayload
+  onPayloadChange(payload: ServerSettingsPayload): void
+  onModelsChanged?(): void
 }): JSX.Element {
+  const [providerId, setProviderId] = useState(payload.providers[0]?.id ?? '')
+  const [modelId, setModelId] = useState('')
+  const [label, setLabel] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!payload.providers.some((p) => p.id === providerId)) {
+      setProviderId(payload.providers[0]?.id ?? '')
+    }
+  }, [payload.providers, providerId])
+
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    setError(null)
+    setBusy(true)
+    try {
+      const res = await fetch('/settings/models', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ providerId, id: modelId.trim(), label: label.trim() || undefined }),
+      })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      onPayloadChange(body as ServerSettingsPayload)
+      onModelsChanged?.()
+      setModelId('')
+      setLabel('')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const deleteManual = async (deleteProviderId: string, id: string): Promise<void> => {
+    setError(null)
+    setBusy(true)
+    try {
+      const params = new URLSearchParams({ providerId: deleteProviderId, id })
+      const res = await fetch(`/settings/models?${params.toString()}`, { method: 'DELETE' })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      onPayloadChange(body as ServerSettingsPayload)
+      onModelsChanged?.()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div>
       <SectionHeader
         title="Models"
-        subtitle="Providers currently advertised by the host. API keys stay in-memory on the host and never appear here."
+        subtitle="Models advertised by the host. Auto-discovered entries are read-only; manual entries bind a model id to an existing provider endpoint."
       />
+      <form onSubmit={(event) => { void submit(event) }} className="mb-4 rounded-md border border-border bg-muted/30 p-3">
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <label className="text-xs font-medium text-muted-foreground">
+            Provider
+            <select
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              value={providerId}
+              onChange={(event) => setProviderId(event.target.value)}
+              disabled={payload.providers.length === 0 || busy}
+              data-testid="settings-model-provider-select"
+            >
+              {payload.providers.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs font-medium text-muted-foreground">
+            Model id
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
+              value={modelId}
+              onChange={(event) => setModelId(event.target.value)}
+              placeholder="gpt-5.5-mini"
+              disabled={payload.providers.length === 0 || busy}
+              data-testid="settings-model-id-input"
+            />
+          </label>
+          <label className="text-xs font-medium text-muted-foreground">
+            Label
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="optional"
+              disabled={payload.providers.length === 0 || busy}
+            />
+          </label>
+          <Button type="submit" className="mt-5 h-9" disabled={payload.providers.length === 0 || busy || modelId.trim().length === 0}>
+            <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> Add
+          </Button>
+        </div>
+        {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
+        <div className="mt-2 text-xs text-muted-foreground">
+          Manual models are stored at <code className="font-mono">{payload.paths.manualModels}</code> and never contain API keys.
+        </div>
+      </form>
       {payload.providers.length === 0 ? (
         <EmptyRow>
           No provider is configured. Add one in{' '}
@@ -201,7 +305,7 @@ function ModelsSection({
           {payload.providers.map((p) => (
             <div
               key={p.id}
-              className="rounded-md border border-border p-4"
+              className="rounded-md border border-border bg-card/60 p-4"
               data-testid={`settings-provider-${p.id}`}
             >
               <div className="mb-2 flex items-center justify-between gap-3">
@@ -209,6 +313,8 @@ function ModelsSection({
                   <div className="font-medium">{p.label}</div>
                   <div className="text-xs text-muted-foreground">
                     <span className="font-mono">{p.wire}</span>
+                    {' · '}
+                    <SourceBadge source={p.source ?? 'unknown'} />
                     {p.baseUrl ? (
                       <>
                         {' · '}
@@ -217,7 +323,7 @@ function ModelsSection({
                     ) : null}
                   </div>
                 </div>
-                {p.models.some((m) => m === payload.defaultModel) ? (
+                {p.models.some((m) => m.id === payload.defaultModel) ? (
                   <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground">
                     default provider
                   </span>
@@ -231,15 +337,29 @@ function ModelsSection({
                 <ul className="space-y-1">
                   {p.models.map((m) => (
                     <li
-                      key={m}
-                      className="flex items-center justify-between gap-2 rounded border border-border bg-muted/40 px-2.5 py-1.5 font-mono text-xs"
+                      key={m.id}
+                      className="flex items-center justify-between gap-2 rounded border border-border bg-muted/40 px-2.5 py-1.5 text-xs"
                     >
-                      <span>{m}</span>
-                      {m === payload.defaultModel ? (
-                        <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
-                          default
-                        </span>
-                      ) : null}
+                      <span className="min-w-0 truncate font-mono">{m.id}</span>
+                      <span className="flex flex-none items-center gap-2">
+                        <SourceBadge source={m.source ?? p.source ?? 'unknown'} />
+                        {m.id === payload.defaultModel ? (
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
+                            default
+                          </span>
+                        ) : null}
+                        {m.source === 'manual' ? (
+                          <button
+                            type="button"
+                            onClick={() => { void deleteManual(p.id, m.id) }}
+                            className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            aria-label={`delete model ${m.id}`}
+                            disabled={busy}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -249,6 +369,23 @@ function ModelsSection({
         </div>
       )}
     </div>
+  )
+}
+
+function SourceBadge({ source }: { source: string }): JSX.Element {
+  const label = source === 'claude-settings'
+    ? 'Claude Code'
+    : source === 'codex-config'
+      ? 'Codex'
+      : source === 'env'
+        ? 'Env'
+        : source === 'manual'
+          ? 'Manual'
+          : 'Unknown'
+  return (
+    <span className="rounded border border-border bg-background/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      {label}
+    </span>
   )
 }
 

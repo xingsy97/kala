@@ -153,6 +153,7 @@ type AgentState = {
   readonly approvalMode: ApprovalMode   // per-session gate for tools with requiresApproval
   readonly contextPressureLevel: ContextPressureLevel  // derived from usage vs config thresholds
   readonly todos: readonly TodoItem[]   // set by the todowrite tool
+  readonly memory: readonly MemoryEntry[]  // session-scope entries lifted by memory operation=write/delete
   readonly cwd?: string                 // session working directory (absolute); mutated by cwd_changed
   readonly error?: string
 }
@@ -472,7 +473,8 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
 **Transition**
 - Append tool_result message with `{ callId, ok, content }` from the event.
 - Remove the call from `pendingCalls`.
-- **`todowrite` special case**: if the settled call's `name === 'todowrite'` and `event.ok === true`, promote `pendingCall.input.todos` into `state.todos` (replacing the whole list). This is the only tool the reducer looks inside; every other tool result is opaque.
+- **`todowrite` special case**: if the settled call's `name === 'todowrite'` and `event.ok === true`, promote `pendingCall.input.todos` into `state.todos` (replacing the whole list).
+- **`memory` special case (scope='session' only)**: if the settled call's `name === 'memory'`, `event.ok === true`, `input.scope === 'session'`, and `input.operation === 'write'`, upsert `{ key: input.key, content: input.content, updatedAt: input.updatedAt }` into `state.memory` (replacing any entry with the same key). Symmetric for `input.operation === 'delete'` — remove the matching entry. Workspace / global scope produce ordinary tool_results and never touch `state.memory`. These are the only tools the reducer looks inside; every other tool result is opaque.
 - Apply pending-settled transition (§4.6.1).
 
 #### 4.6.1 Pending-settled transition
@@ -655,7 +657,7 @@ These are all valid concerns for an agent system, but the kernel does not handle
 ## 8. Reference implementation
 
 - Source: `packages/kernel/src/`
-- Tests: `packages/kernel/src/core.test.ts` — 44 tests covering transitions, purity, fold, fork, compaction, approval modes, todos, cwd, and image content preservation.
+- Tests: `packages/kernel/src/core.test.ts` — 50 tests covering transitions, purity, fold, fork, compaction, approval modes, todos, cwd, memory, and image content preservation.
 
 The reference implementation is the tie-breaker only for things this spec is silent about. Where they conflict, spec wins and the ref impl should be patched.
 

@@ -14,6 +14,13 @@ on:
         required: true
       component:
         description: 'Asset group to publish: all, host, executor, or dashboard'
+        type: choice
+        options:
+          - ''
+          - all
+          - host
+          - executor
+          - dashboard
         required: false
         default: ''
 
@@ -74,6 +81,7 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run test
       - run: pnpm run build:release-assets -- --component ${{ steps.release.outputs.component }}
+      - run: pnpm run verify:release-assets
 
       - name: Create or update GitHub Release
         env:

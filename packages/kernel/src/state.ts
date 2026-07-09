@@ -22,6 +22,7 @@ export function createInitialState(params: {
     },
     cursor: 0,
     todos: [],
+    memory: [],
     contextPressureLevel: 'none',
     approvalMode: DEFAULT_APPROVAL_MODE,
   }

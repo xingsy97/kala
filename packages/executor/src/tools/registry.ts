@@ -11,6 +11,16 @@ import type { Sandbox } from '../sandbox.js'
 export type ToolContext = {
   readonly sandbox: Sandbox
   readonly signal: AbortSignal
+  /**
+   * Session-level working directory for this call, as tracked by
+   * `state.cwd` in the kernel and forwarded on `tool:call.cwd`. Tools that
+   * resolve caller-supplied paths MUST pass this through as
+   * `sandbox.resolve(path, { cwd: ctx.cwd })` so relative inputs behave
+   * consistently across tools (e.g. `ls "."` and `bash pwd` see the same
+   * directory). Undefined = the client didn't forward a cwd; fall back to
+   * `sandbox.roots[0]` or `process.cwd()`.
+   */
+  readonly cwd?: string
 }
 
 export type ToolRunner = (

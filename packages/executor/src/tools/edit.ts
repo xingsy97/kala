@@ -36,7 +36,7 @@ export const editTool: Tool = {
 
     let resolved: string
     try {
-      resolved = await ctx.sandbox.resolve(path)
+      resolved = await ctx.sandbox.resolve(path, { cwd: ctx.cwd })
     } catch (err) {
       if (err instanceof SandboxError) throw new ToolError(err.code, err.message)
       throw err

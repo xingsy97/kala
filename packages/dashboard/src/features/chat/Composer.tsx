@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { AtSign, CornerDownRight, ListChecks, Navigation, Send, X } from 'lucide-react'
+import { AtSign, Check, ChevronDown, ChevronUp, CornerDownRight, GripVertical, ListChecks, Navigation, Pencil, Trash2, X } from 'lucide-react'
 
 import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
@@ -27,6 +27,7 @@ type Props = {
   disabled?: boolean
   onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void
   onCompact(): void
+  onConsolidateMemory?(): void
   model: string
   models: readonly ModelInfo[]
   onModelChange(model: string): void
@@ -35,6 +36,9 @@ type Props = {
   state: AgentState | null
   config: AgentConfig | null
   queuedMessages: readonly QueuedMessagePreview[]
+  onQueuedReorder?(id: string, beforeId?: string | null): void
+  onQueuedUpdate?(id: string, text: string): void
+  onQueuedDelete?(id: string): void
   workspaceOnline?: boolean
   onListFiles?(query: string): Promise<readonly FileListEntry[]>
   onReadFile?(path: string): Promise<{ content?: string; error?: string }>
@@ -73,6 +77,7 @@ export function Composer({
   disabled,
   onSubmit,
   onCompact,
+  onConsolidateMemory,
   model,
   models,
   onModelChange,
@@ -81,6 +86,9 @@ export function Composer({
   state,
   config,
   queuedMessages,
+  onQueuedReorder,
+  onQueuedUpdate,
+  onQueuedDelete,
   workspaceOnline,
   onListFiles,
   onReadFile,
@@ -98,14 +106,24 @@ export function Composer({
   const approvalModeLabel = APPROVAL_MODE_BY_VALUE.get(approvalMode)?.label ?? approvalMode
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
   const slashCommands = useMemo(
-    () => [
-      {
-        command: '/compact',
-        label: 'Compact context',
-        run: onCompact,
-      },
-    ],
-    [onCompact],
+    () => {
+      const commands: { command: string; label: string; run: () => void }[] = [
+        {
+          command: '/compact',
+          label: 'Compact context',
+          run: onCompact,
+        },
+      ]
+      if (onConsolidateMemory) {
+        commands.push({
+          command: '/consolidate-memory',
+          label: 'Consolidate memory',
+          run: onConsolidateMemory,
+        })
+      }
+      return commands
+    },
+    [onCompact, onConsolidateMemory],
   )
   const matchingCommands = slashQuery
     ? slashCommands.filter((c) => c.command.startsWith(slashQuery))
@@ -264,7 +282,12 @@ export function Composer({
       data-testid="composer"
     >
       <div className="mx-auto max-w-[68rem]">
-        <QueuedMessagesDock items={queuedMessages} />
+        <QueuedMessagesDock
+          items={queuedMessages}
+          onReorder={onQueuedReorder}
+          onUpdate={onQueuedUpdate}
+          onDelete={onQueuedDelete}
+        />
         <div
           className={cn(
             'relative rounded-2xl border border-border/60 bg-background/60 transition-shadow',
@@ -279,7 +302,7 @@ export function Composer({
               {pastedImages.map((img) => (
                 <div
                   key={img.id}
-                  className="group relative h-16 w-16 overflow-hidden rounded-lg border bg-background"
+                  className="group relative h-16 w-16 overflow-hidden rounded-lg border border-border/50 bg-background"
                   data-testid={`pasted-image-${img.id}`}
                 >
                   <img src={img.dataUrl} alt="pasted" className="h-full w-full object-cover" />
@@ -482,31 +505,12 @@ export function Composer({
               modelInfo={models.find((m) => m.id === model) ?? null}
               queuedMessages={queuedMessages.length}
             />
-            <SendModeControl value={sendMode} onChange={setSendMode} />
-            <Button
-              type="submit"
+            <SendButton
               disabled={!canSubmit}
-              data-testid="composer-send"
-              className={cn(
-                'h-8 flex-none rounded-full px-4 text-xs font-medium',
-                canSubmit ? '' : 'opacity-50',
-              )}
-              aria-label="send message"
-            >
-              <Send className="mr-1 h-3.5 w-3.5" />
-              Send
-            </Button>
+              sendMode={sendMode}
+              onSendModeChange={setSendMode}
+            />
           </div>
-        </div>
-        <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[10px] text-muted-foreground">
-          <span>
-            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send ·
-            <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-[10px]">Shift + Enter</kbd> for newline
-          </span>
-          <span>
-            <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">@</kbd> files ·
-            <kbd className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd> commands
-          </span>
         </div>
         {pendingToast ? (
           <div
@@ -521,56 +525,163 @@ export function Composer({
   )
 }
 
-function SendModeControl({
-  value,
-  onChange,
+function SendButton({
+  disabled,
+  sendMode,
+  onSendModeChange,
 }: {
-  value: SendMode
-  onChange(value: SendMode): void
+  disabled: boolean
+  sendMode: SendMode
+  onSendModeChange(value: SendMode): void
 }): JSX.Element {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (e: MouseEvent): void => {
+      if (!containerRef.current) return
+      if (!containerRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [menuOpen])
+
+  const ModeIcon = sendMode === 'steer' ? Navigation : ListChecks
+  const modeLabel = sendMode === 'steer' ? 'Steer active turn' : 'Queue follow-up'
+  const modeHint =
+    sendMode === 'steer'
+      ? 'Send feedback for the current run; promoted at the next safe boundary if the agent is busy.'
+      : 'Hold this message until the current turn finishes, then send it in FIFO order.'
+
   return (
     <div
-      className="flex flex-none rounded-md border border-border/50 bg-muted/40 p-0.5"
+      className="relative flex flex-none"
+      ref={containerRef}
       data-testid="send-mode-control"
-      aria-label="send mode"
     >
-      {(['steer', 'queue'] as const).map((mode) => {
-        const selected = value === mode
-        const Icon = mode === 'steer' ? Navigation : ListChecks
-        return (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => onChange(mode)}
-            className={cn(
-              'flex h-6 items-center gap-1 rounded-sm px-2 text-[11px] transition-colors',
-              selected
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-            data-testid={`send-mode-${mode}`}
-            aria-pressed={selected}
-            title={
+      <Button
+        type="submit"
+        disabled={disabled}
+        data-testid="composer-send"
+        className={cn(
+          'h-8 rounded-r-none rounded-l-full pl-4 pr-3 text-xs font-medium',
+          disabled ? 'opacity-50' : '',
+        )}
+        aria-label={`send message (${modeLabel})`}
+        title={modeHint}
+      >
+        <ModeIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+        Send
+      </Button>
+      <button
+        type="button"
+        onClick={() => setMenuOpen((v) => !v)}
+        className={cn(
+          'flex h-8 flex-none items-center justify-center rounded-r-full border-l border-primary-foreground/30 bg-primary px-2 text-primary-foreground transition-colors hover:bg-primary/90',
+        )}
+        data-testid="send-mode-toggle"
+        aria-label="send mode"
+        aria-haspopup="listbox"
+        aria-expanded={menuOpen}
+      >
+        {menuOpen ? (
+          <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+      </button>
+      {menuOpen ? (
+        <div
+          className="absolute right-0 bottom-full z-20 mb-2 min-w-[15rem] overflow-hidden rounded-lg border border-border/60 bg-popover text-xs shadow-lg"
+          role="listbox"
+          data-testid="send-mode-menu"
+        >
+          {(['steer', 'queue'] as const).map((mode) => {
+            const Icon = mode === 'steer' ? Navigation : ListChecks
+            const selected = sendMode === mode
+            const label = mode === 'steer' ? 'Steer active turn' : 'Queue follow-up'
+            const hint =
+              mode === 'steer'
+                ? 'Send feedback for the current run.'
+                : 'Hold until the active turn finishes.'
+            const longHint =
               mode === 'steer'
                 ? 'Steer active turn: send feedback for the current run; if the agent is busy, it is promoted at the next safe boundary.'
                 : 'Queue follow-up: hold this message until the current turn finishes, then send it in FIFO order.'
-            }
-          >
-            <Icon className="h-3 w-3" aria-hidden="true" />
-            {mode === 'steer' ? 'Steer active turn' : 'Queue follow-up'}
-          </button>
-        )
-      })}
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                title={longHint}
+                onClick={() => {
+                  onSendModeChange(mode)
+                  setMenuOpen(false)
+                }}
+                className={cn(
+                  'flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground',
+                  selected ? 'bg-accent/60 text-accent-foreground' : 'text-foreground',
+                )}
+                data-testid={`send-mode-${mode}`}
+              >
+                <Icon className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{label}</span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                    {hint}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }
 
 function QueuedMessagesDock({
   items,
+  onReorder,
+  onUpdate,
+  onDelete,
 }: {
   items: readonly QueuedMessagePreview[]
+  onReorder?(id: string, beforeId?: string | null): void
+  onUpdate?(id: string, text: string): void
+  onDelete?(id: string): void
 }): JSX.Element | null {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [draggingId, setDraggingId] = useState<string | null>(null)
   if (items.length === 0) return null
+  const beginEdit = (item: QueuedMessagePreview): void => {
+    setEditingId(item.id)
+    setDraft(item.text)
+  }
+  const commitEdit = (): void => {
+    if (!editingId) return
+    const trimmed = draft.trim()
+    if (trimmed.length > 0) onUpdate?.(editingId, trimmed)
+    setEditingId(null)
+    setDraft('')
+  }
+  const cancelEdit = (): void => {
+    setEditingId(null)
+    setDraft('')
+  }
+  const move = (index: number, direction: -1 | 1): void => {
+    const item = items[index]
+    if (!item) return
+    if (direction < 0) {
+      const before = items[index - 1]
+      if (before) onReorder?.(item.id, before.id)
+    } else {
+      const afterNext = items[index + 2]
+      onReorder?.(item.id, afterNext?.id ?? null)
+    }
+  }
   return (
     <div
       className="mb-2 rounded-2xl border border-border/50 bg-muted/40 px-3 py-2 text-xs"
@@ -592,27 +703,116 @@ function QueuedMessagesDock({
           {items.map((item, index) => (
             <div
               key={item.id}
-              className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-lg border border-border/50 bg-background px-2 py-1.5"
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg border border-border/50 bg-background px-2 py-1.5"
               data-testid="queued-message-row"
               title={item.text}
+              draggable={Boolean(onReorder)}
+              onDragStart={(e) => {
+                setDraggingId(item.id)
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', item.id)
+              }}
+              onDragOver={(e) => {
+                if (!onReorder) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(e) => {
+                if (!onReorder) return
+                e.preventDefault()
+                const id = e.dataTransfer.getData('text/plain') || draggingId
+                if (id && id !== item.id) onReorder(id, item.id)
+                setDraggingId(null)
+              }}
+              onDragEnd={() => setDraggingId(null)}
             >
-              <span className="mt-0.5 flex h-5 min-w-5 items-center justify-center rounded bg-muted font-mono text-[10px] text-muted-foreground">
-                #{index + 1}
+              <span className="mt-0.5 flex h-5 min-w-8 items-center justify-center gap-0.5 rounded bg-muted font-mono text-[10px] text-muted-foreground">
+                {onReorder ? <GripVertical className="h-3 w-3" aria-hidden="true" /> : null}
+                {index + 1}
               </span>
               <span className="min-w-0">
                 <span className="mb-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
                   <CornerDownRight className="h-3 w-3" aria-hidden="true" />
                   {item.mode === 'steer' ? 'Steering update' : 'Queued follow-up'}
                 </span>
-                <span className="block truncate text-foreground">
-                  {item.text.trim().length > 0 ? item.text : '(image attachment)'}
-                </span>
+                {editingId === item.id ? (
+                  <input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitEdit()
+                      if (e.key === 'Escape') cancelEdit()
+                    }}
+                    className="h-6 w-full rounded border border-border/50 bg-background px-2 text-xs outline-none focus:border-ring"
+                    data-testid="queued-message-edit-input"
+                    autoFocus
+                  />
+                ) : (
+                  <span className="block truncate text-foreground">
+                    {item.text.trim().length > 0 ? item.text : '(image attachment)'}
+                  </span>
+                )}
+              </span>
+              <span className="flex items-center gap-0.5">
+                {editingId === item.id ? (
+                  <>
+                    <QueueAction label="save queued message" onClick={commitEdit} testId="queued-message-save">
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="cancel edit" onClick={cancelEdit} testId="queued-message-cancel">
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                  </>
+                ) : (
+                  <>
+                    <QueueAction label="move queued message up" onClick={() => move(index, -1)} disabled={!onReorder || index === 0} testId="queued-message-up">
+                      <ChevronUp className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="move queued message down" onClick={() => move(index, 1)} disabled={!onReorder || index === items.length - 1} testId="queued-message-down">
+                      <ChevronDown className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="edit queued message" onClick={() => beginEdit(item)} disabled={!onUpdate} testId="queued-message-edit">
+                      <Pencil className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                    <QueueAction label="delete queued message" onClick={() => onDelete?.(item.id)} disabled={!onDelete} testId="queued-message-delete">
+                      <Trash2 className="h-3 w-3" aria-hidden="true" />
+                    </QueueAction>
+                  </>
+                )}
               </span>
             </div>
           ))}
         </div>
       </ScrollArea>
     </div>
+  )
+}
+
+function QueueAction({
+  children,
+  label,
+  onClick,
+  disabled,
+  testId,
+}: {
+  children: React.ReactNode
+  label: string
+  onClick(): void
+  disabled?: boolean
+  testId: string
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+    >
+      {children}
+    </button>
   )
 }
 
