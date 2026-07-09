@@ -1,6 +1,6 @@
-# agent-kernel
+# Agent RunLab
 
-> An open-source, model-agnostic coding agent reference implementation.
+> An open-source coding agent runtime and experiment platform.
 > The **kernel** is a pure function. Every tool call, every state transition, every LLM turn
 > is an inspectable event you can **pause, rewind, and fork** from a dashboard.
 
@@ -15,7 +15,7 @@ Existing coding agents fall into two camps, and neither is a clean substrate to 
 - **Closed source** — Claude Code and Codex CLI ship as binaries. Third-party source dumps exist, but there is no supported way to fork, hack, or replay a session.
 - **Open source but not built to be read** — [opencode](https://github.com/sst/opencode) and [pi](https://github.com/earendil-works/pi) are both MIT-licensed and inspectable, but the agent loops are 3k+ LOC files interleaved with UI, provider quirks, planning, memory, and compaction. To learn from them you first have to unpick the ideas from the product.
 
-`agent-kernel` takes the other approach: strip the agent loop down to a pure function readable in one sitting, and push everything else outside the kernel. Three properties, in priority order:
+Agent RunLab takes the other approach: strip the agent loop down to a pure function readable in one sitting, and push everything else outside the kernel. Three properties, in priority order:
 
 1. **Readable.** The core is a pure function in [`packages/kernel/src/core.ts`](packages/kernel/src/core.ts) — around 350 lines — with types in [`types.ts`](packages/kernel/src/types.ts). If you know Redux, you know this.
 2. **Model-agnostic.** The kernel does not know whether it is talking to Anthropic, OpenAI, or DeepSeek. Provider adapters live outside.
@@ -100,7 +100,19 @@ pnpm --filter @agent-kernel/host dev                   # listens on :3000, serve
 # Terminal 2 — executor (dials into host, provides the tools)
 pnpm --filter @agent-kernel/executor exec tsx bin/agent-kernel-executor.ts \
   --host http://localhost:3000 \
-  --workspace $(pwd)/examples/scratch
+  --sandbox-root $(pwd)/examples/scratch
+```
+
+To run a development executor beside a release executor on the same machine, give
+the dev process its own local profile. Profiles isolate the local lock,
+`workspace-id`, and saved executor token; the default profile keeps the existing
+single-workspace behavior.
+
+```bash
+pnpm --filter @agent-kernel/executor exec tsx bin/agent-kernel-executor.ts \
+  --host http://localhost:3000 \
+  --profile dev \
+  --sandbox-root $(pwd)/examples/scratch
 ```
 
 Prefer an OpenAI-compatible endpoint (self-hosted gateway, `newapi`, LiteLLM, ollama's OpenAI-shim, Codex endpoints, etc.)? Just add the provider under Settings, or drop it into `~/.agent-kernel/config.json` (or leave it in `~/.codex/config.toml` — Host auto-imports).
@@ -113,8 +125,9 @@ For a walkthrough of how a single turn flows through the system, see [ARCHITECTU
 
 Every tag under [Releases](https://github.com/OWNER/REPO/releases) publishes:
 
-- `agent-kernel-host-<os>-<arch>[.exe]` — self-contained binary (bundled Node.js runtime)
-- `agent-kernel-host.cjs`, `agent-kernel-executor.cjs` — fallback for Node.js 22+
+- `agent-kernel-host-<os>-<arch>[.exe]` — self-contained Agent RunLab runtime binary (bundled Node.js runtime)
+- `bundle-dashboard-with-runtime.cjs` — Host runtime + embedded dashboard bundle for Node.js 22+
+- `agent-kernel-executor.cjs` — Executor fallback for Node.js 22+
 - `agent-kernel-dashboard-dist.tar.gz` — the frontend bundle
 - `run.sh` — a `wget`-only bootstrap that downloads, verifies (SHA256), and runs a component
 
@@ -122,7 +135,7 @@ Set `COMPONENT` to pick what to run on this machine:
 
 | `COMPONENT` | What runs here |
 |---|---|
-| `host-frontend` (default) | Host process + serves the dashboard bundle. Open a browser at `http://<this-host>:3000/`. |
+| `host-frontend` (default) | Host process + embedded dashboard bundle. Open a browser at `http://<this-host>:3000/`. |
 | `host` | Headless host only. Deploy the frontend somewhere else. |
 | `frontend` | Downloads and extracts the frontend bundle to a directory, prints its path, exits. |
 | `executor` | Executor that dials into a running host. Requires `HOST_URL`. |
@@ -132,16 +145,13 @@ Typical VM deploy:
 ```bash
 export ANTHROPIC_API_KEY=sk-...
 export HOST=0.0.0.0                  # bind on all interfaces
-wget -qO- https://github.com/OWNER/REPO/releases/latest/download/run.sh \
-  | COMPONENT=host-frontend bash
+bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/OWNER/REPO/releases/latest/download/run.sh"; COMPONENT=host-frontend bash "$tmp"'
 ```
 
 Executor on the machine that holds the files:
 
 ```bash
-wget -qO- https://github.com/OWNER/REPO/releases/latest/download/run.sh \
-  | COMPONENT=executor HOST_URL=http://<vm-ip>:3000 bash -s -- \
-  --workspace $(pwd)/my-project
+bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/OWNER/REPO/releases/latest/download/run.sh"; COMPONENT=executor HOST_URL=http://<vm-ip>:3000 bash "$tmp" -- --sandbox-root "$(pwd)/my-project"'
 ```
 
 Environment variables the bootstrap and host understand:
@@ -205,7 +215,7 @@ Per-package details live next to the code:
 ## Non-goals
 
 - **Not a competitor to Claude Code / Codex.** Those are products. This is a reference implementation.
-- **Not an orchestration framework.** LangGraph / AutoGen / crewai do that. `agent-kernel` deliberately keeps orchestration *outside* the kernel.
+- **Not an orchestration framework.** LangGraph / AutoGen / crewai do that. Agent RunLab deliberately keeps orchestration *outside* the kernel.
 - **Not opinionated about planning, memory, or subagents.** Those are extensions, not core. (Sub-agent *dispatch* is a builtin, but *strategy* isn't.)
 
 ## License

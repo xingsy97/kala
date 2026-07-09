@@ -58,7 +58,7 @@ describe('migrate-memory-tools', () => {
     }
     writeFileSync(path, `${JSON.stringify(header)}\n${JSON.stringify(event)}\n`, 'utf8')
 
-    execFileSync(process.execPath, [join(process.cwd(), 'scripts/migrate-memory-tools.mjs'), dir], {
+    execFileSync(process.execPath, [join(process.cwd(), 'scripts/migrations/migrate-memory-tools.mjs'), dir], {
       cwd: process.cwd(),
       stdio: 'pipe',
     })

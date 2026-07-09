@@ -2,9 +2,10 @@ import puppeteer from 'puppeteer-core'
 import { mkdirSync } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const DASHBOARD_URL = 'http://localhost:5288'
-const WORKSPACE = '/tmp/agent-kernel-workspace'
+const WORKSPACE = process.env.AK_TEST_WORKSPACE ?? join(tmpdir(), 'agent-kernel-workspace')
 
 const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9222' })
 const page = await browser.newPage()

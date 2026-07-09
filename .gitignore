@@ -44,9 +44,23 @@ sessions/
 
 # Reference projects (cloned for study, not committed)
 references/
+.presq/
 
 # Agent scratch
 .claude/
+.agent-home/
+.claude-home/
+
+# Experiment-local heavy/raw evidence. Small summaries, reports, diagnostics,
+# and plans live outside artifacts so gitignore stays simple.
+experiments/**/.venv*/
+experiments/**/artifacts/
+
+# Defensive ignores for misplaced runtime output.
+experiments/**/*.tar
+experiments/**/*.tar.gz
+experiments/**/workspace/
+experiments/**/workspaces/
 
 # Per-package scratch directories (local debug/probe scripts, not committed)
 packages/*/scratch/

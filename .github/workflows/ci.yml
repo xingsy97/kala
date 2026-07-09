@@ -17,14 +17,15 @@ jobs:
           - swebench-smoke
           - release-assets
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          package-manager-cache: false
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: Run ${{ matrix.task }}

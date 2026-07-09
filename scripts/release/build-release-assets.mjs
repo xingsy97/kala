@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 import { copyFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { build } from 'esbuild'
 
-const root = fileURLToPath(new URL('..', import.meta.url))
+const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
 const dashboardDist = join(root, 'packages/dashboard/dist')
+const socketAdminDist = join(root, '.presq/socket.io-admin-ui/dist')
 const options = parseOptions(process.argv.slice(2))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const { component, tag, nativeOnly, finalizeOnly, noNative } = options
@@ -27,6 +28,7 @@ mkdirSync(outDir, { recursive: true })
 const allEntries = [
   {
     name: 'agent-kernel-host',
+    cjsName: 'bundle-dashboard-with-runtime',
     component: 'host',
     entry: join(root, 'packages/host/bin/agent-kernel-host.ts'),
   },
@@ -40,7 +42,7 @@ const entries = allEntries.filter((entry) => component === 'all' || entry.compon
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
 const nativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']
 const expectedAssets = [
-  ...allEntries.map((entry) => `${entry.name}.cjs`),
+  ...allEntries.map((entry) => cjsAssetName(entry)),
   ...allEntries.flatMap((entry) => nativeTargets.map((target) => nativeAssetName(entry.name, target))),
   'agent-kernel-dashboard-dist.tar.gz',
   'run.sh',
@@ -48,7 +50,7 @@ const expectedAssets = [
   'manifest.json',
   'SHA256SUMS',
 ]
-const legacyAssets = ['run-host.sh', 'run-executor.sh']
+const legacyAssets = ['run-host.sh', 'run-executor.sh', 'agent-kernel-host.cjs']
 for (const asset of !nativeOnly && !finalizeOnly ? [...expectedAssets, ...legacyAssets] : []) {
   rmSync(join(outDir, asset), { force: true })
 }
@@ -62,14 +64,28 @@ if (wantsNativeBuild && nativeTarget !== currentNativeTarget) {
   throw new Error(`native target ${nativeTarget} does not match this runner (${currentNativeTarget}); Node SEA builds are not cross-compiled`)
 }
 
-if (includeDashboard && !nativeOnly) {
+if (includeDashboard) {
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'])
 }
 
+if (!nativeOnly) {
+  await run('pnpm', ['--filter', '@agent-kernel/kernel', 'build'])
+  await run('pnpm', ['--filter', '@agent-kernel/shared', 'build'])
+  await run('pnpm', ['--filter', '@agent-kernel/executor', 'build'])
+  await run('pnpm', ['--filter', '@agent-kernel/host', 'build'])
+}
+
 for (const item of entries) {
+  const embeddedDashboard = item.component === 'host' && includeDashboard
+    ? embeddedDashboardBanner(dashboardDist)
+    : ''
+  const embeddedSocketAdmin = item.component === 'host'
+    ? embeddedSocketAdminBanner(socketAdminDist)
+    : ''
+  const buildInfo = buildInfoBanner({ artifactKind: nativeOnly ? 'native' : 'cjs', dashboardMode: item.component === 'host' && includeDashboard ? 'embedded' : 'none', socketAdminMode: item.component === 'host' ? 'embedded' : 'missing' })
   const outfile = nativeOnly
     ? join(outDir, '.sea', `${item.name}-${nativeTarget}`, `${item.name}.cjs`)
-    : join(outDir, `${item.name}.cjs`)
+    : join(outDir, cjsAssetName(item))
   mkdirSync(dirname(outfile), { recursive: true })
   await build({
     entryPoints: [item.entry],
@@ -78,7 +94,7 @@ for (const item of entries) {
     platform: 'node',
     target: 'node22',
     format: 'cjs',
-    banner: { js: '#!/usr/bin/env node' },
+    banner: { js: `#!/usr/bin/env node\n${buildInfo}${embeddedDashboard}${embeddedSocketAdmin}` },
     sourcemap: false,
     legalComments: 'none',
     logLevel: 'info',
@@ -124,7 +140,7 @@ function finalizeRelease() {
   }
 
   const builtEntries = entries.map((entry) => {
-    const cjs = `${entry.name}.cjs`
+    const cjs = cjsAssetName(entry)
     const natives = nativeTargets
       .map((target) => nativeAssetName(entry.name, target))
       .filter((asset) => exists(asset))
@@ -150,7 +166,7 @@ function finalizeRelease() {
         ? 'host and executor releases include native binaries plus Node.js .cjs fallback assets'
         : 'host and executor releases include Node.js .cjs fallback assets; native binaries are added by the native release job',
       'run.sh is a wget-only bash bootstrap that uses compact .cjs assets when Node.js 22+ is available and falls back to native binaries otherwise',
-      'host releases include the dashboard dist because agent-kernel-host serves it when DASHBOARD_DIR is set',
+      'bundle-dashboard-with-runtime.cjs embeds the host runtime and dashboard dist; DASHBOARD_DIR remains an explicit override',
     ],
   }
   writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
@@ -198,6 +214,66 @@ function detectNativeTarget() {
 
 function nativeAssetName(name, target) {
   return `${name}-${target}${target.startsWith('win32-') ? '.exe' : ''}`
+}
+
+function cjsAssetName(entry) {
+  return `${entry.cjsName ?? entry.name}.cjs`
+}
+
+function embeddedDashboardBanner(dir) {
+  if (!existsSync(join(dir, 'index.html'))) {
+    throw new Error(`dashboard dist missing index.html at ${dir}; build dashboard first`)
+  }
+  const assets = []
+  for (const file of walkFiles(dir)) {
+    const rel = relative(dir, file).replace(/\\/g, '/')
+    assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
+  }
+  return `globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=${JSON.stringify(assets)};\n`
+}
+
+function embeddedSocketAdminBanner(dir) {
+  if (!existsSync(join(dir, 'index.html'))) {
+    throw new Error(`Socket.IO Admin UI dist missing index.html at ${dir}; run pnpm prepare:socket-admin-ui first`)
+  }
+  const assets = []
+  for (const file of walkFiles(dir)) {
+    const rel = relative(dir, file).replace(/\\/g, '/')
+    assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
+  }
+  return `globalThis.__AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__=${JSON.stringify(assets)};\n`
+}
+
+function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
+  const info = {
+    releaseTag: tag,
+    gitCommit: gitCommit(),
+    builtAt: new Date().toISOString(),
+    artifactKind,
+    dashboardMode,
+    socketAdminMode,
+  }
+  return `globalThis.__AGENT_KERNEL_BUILD_INFO__=${JSON.stringify(info)};\n`
+}
+
+function gitCommit() {
+  try {
+    const result = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: root, encoding: 'utf8' })
+    if (result.status === 0) return result.stdout.trim() || 'unknown'
+  } catch {}
+  return 'unknown'
+}
+
+function* walkFiles(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const abs = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      yield* walkFiles(abs)
+    } else if (entry.isFile()) {
+      const st = statSync(abs)
+      if (st.size > 0) yield abs
+    }
+  }
 }
 
 async function buildNativeSea(name, cjsPath, target) {
@@ -354,7 +430,7 @@ function unifiedBootstrap({ repo, tag, component }) {
     'require_cmd wget',
     '',
     'log() {',
-    '  printf "agent-kernel bootstrap | %s\\n" "$*" >&2',
+    '  printf "Agent RunLab bootstrap | %s\\n" "$*" >&2',
     '}',
     '',
     'debug() {',
@@ -454,6 +530,9 @@ function unifiedBootstrap({ repo, tag, component }) {
     '  native="${base}-${target}"',
     '  case "$target" in win32-*) native="${native}.exe" ;; esac',
     '  cjs="${base}.cjs"',
+    '  if [ "$base" = "agent-kernel-host" ]; then',
+    '    cjs="bundle-dashboard-with-runtime.cjs"',
+    '  fi',
     '  runtime="${AGENT_KERNEL_RUNTIME:-auto}"',
     '  case "$runtime" in auto|cjs|native) ;; *) echo "AGENT_KERNEL_RUNTIME must be auto, cjs, or native" >&2; exit 1 ;; esac',
     '  if [ "$runtime" = "cjs" ] || { [ "$runtime" = "auto" ] && has_node22; }; then',
@@ -515,10 +594,9 @@ function unifiedBootstrap({ repo, tag, component }) {
     '    log "browser example: ?host=http://<host-ip>:3000"',
     '    exit 0',
     '    ;;',
-    '  host-frontend)',
-    '    download_and_extract_frontend',
+  '  host-frontend)',
     '    print_start_banner',
-    '    DASHBOARD_DIR="$FRONTEND_DIR" run_asset agent-kernel-host "$@"',
+    '    run_asset agent-kernel-host "$@"',
     '    ;;',
     '  host)',
     '    print_start_banner',
@@ -541,7 +619,7 @@ function releaseNotes(manifest) {
   }
   const hasNativeAssets = Object.values(manifest.nativeAssets ?? {}).some((assets) => Array.isArray(assets) && assets.length > 0)
   const lines = [
-    `# agent-kernel ${manifest.tag}`,
+    `# Agent RunLab ${manifest.tag}`,
     '',
     hasNativeAssets
       ? 'Release assets include compact Node.js 22 `.cjs` host/executor assets, OS-native fallback binaries, and a wget-only bash bootstrap that downloads and verifies the selected component before running it. By default, `run.sh` uses `.cjs` when Node.js 22+ is available and uses the native binary only when Node is missing or too old.'

@@ -111,18 +111,19 @@ jobs:
       matrix: ${{ fromJSON(needs.resolve.outputs.native_matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          package-manager-cache: false
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: native-${{ matrix.target }}
           path: release/agent-kernel-*-${{ matrix.target }}*
@@ -134,16 +135,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          package-manager-cache: false
+
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
@@ -154,7 +156,7 @@ jobs:
       - name: Install-time smoke on release assets (host + dashboard bundle)
         if: needs.resolve.outputs.component == 'all' || needs.resolve.outputs.component == 'host'
         run: pnpm run verify:release-install
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: cjs-release-assets
           path: release/*
@@ -170,6 +172,7 @@ jobs:
             gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
             gh release delete-asset "$TAG" run-host.sh --yes || true
             gh release delete-asset "$TAG" run-executor.sh --yes || true
+            gh release delete-asset "$TAG" agent-kernel-host.cjs --yes || true
             for asset in \
               agent-kernel-host-linux-x64 agent-kernel-host-linux-arm64 agent-kernel-host-darwin-x64 agent-kernel-host-darwin-arm64 agent-kernel-host-win32-x64.exe agent-kernel-host-win32-arm64.exe \
               agent-kernel-executor-linux-x64 agent-kernel-executor-linux-arm64 agent-kernel-executor-darwin-x64 agent-kernel-executor-darwin-arm64 agent-kernel-executor-win32-x64.exe agent-kernel-executor-win32-arm64.exe; do
@@ -189,23 +192,24 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          package-manager-cache: false
+
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
 
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: cjs-release-assets
           path: release
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: native-*
           path: release

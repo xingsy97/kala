@@ -30,7 +30,7 @@ describe('restart-every', () => {
     const child = spawn(
       process.execPath,
       [
-        'scripts/restart-every.mjs',
+        'scripts/dev/restart-every.mjs',
         '--interval-ms',
         '5000',
         '--',

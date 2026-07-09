@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 import puppeteer from 'puppeteer-core'
 
-const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const PORT = Number(process.env.VERIFY_AGENTIC_RL_DASHBOARD_PORT ?? 3191)
 const HOST_URL = `http://localhost:${PORT}`
 const CHROME = process.env.CHROME_PATH ?? detectBrowser()

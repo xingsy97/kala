@@ -6,11 +6,11 @@ import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import puppeteer from 'puppeteer-core'
 
-const requireFromHost = createRequire(new URL('../packages/host/package.json', import.meta.url))
+const requireFromHost = createRequire(new URL('../../packages/host/package.json', import.meta.url))
 const { io } = requireFromHost('socket.io-client')
 const { PROTOCOL_VERSION } = await import('../packages/shared/dist/index.js')
 
-const repo = new URL('..', import.meta.url).pathname
+const repo = new URL('../..', import.meta.url).pathname
 const port = Number(process.env.VERIFY_DEBUGGER_PORT ?? 3197)
 const sessionId = 'debugger-ui-fixture'
 const sessionsDir = mkdtempSync(join(tmpdir(), 'ak-debugger-sessions-'))

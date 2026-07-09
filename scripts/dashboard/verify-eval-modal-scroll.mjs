@@ -16,7 +16,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import puppeteer from 'puppeteer-core'
 
-const REPO_ROOT = new URL('..', import.meta.url).pathname
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_EVAL_MODAL_SCROLL_PORT ?? 3187)
 const HOST_URL = `http://localhost:${PORT}`
 const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'ak-eval-modal-scroll-sessions-'))
