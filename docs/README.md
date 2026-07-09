@@ -52,14 +52,23 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [protocol/wire-protocol.md](protocol/wire-protocol.md) | **Normative.** Every Socket.IO event between Dashboard, Host, and Executor |
 | [protocol/event-log.md](protocol/event-log.md) | **Current implementation.** JSONL event log format for persistence, replay, fork; see the host session-log document for the breaking v2 target |
 
-### Evals — benchmarks, RL, references
+### Evals — benchmarks, references
 
 | File | Purpose |
 |---|---|
 | [evals/badcase-mining.md](evals/badcase-mining.md) | Bad-case mining: category definitions and pipeline |
-| [evals/agentic-rl-integration.md](evals/agentic-rl-integration.md) | Agentic RL rollout integration — adapter-first, not trajectory-first |
 | [evals/references-comparison.md](evals/references-comparison.md) | Quantitative comparison of Claude Code, Codex, opencode, pi |
 | [evals/domain-knowledge/](evals/domain-knowledge/) | Per-benchmark domain notes (SWE-bench, τ-bench, Terminal-Bench, WebArena) |
+
+### RL — Agentic RL / slime integration
+
+| File | Purpose |
+|---|---|
+| [rl/system-design.md](rl/system-design.md) | **Source of truth.** Architecture, why historical sessions aren't RL samples, artifact families |
+| [rl/implementation.md](rl/implementation.md) | Local implementation gate and acceptance criteria |
+| [rl/training-design.md](rl/training-design.md) | Training methodology, GPU/budget decisions, stop conditions, risks |
+| [rl/shared-runbooks.md](rl/shared-runbooks.md) | Shared E2E smoke tiers + rented GPU host paid runbook; per-run parameters live in each `experiments/<date>-run-<n>/runbook.md` |
+| [rl/experiments/README.md](rl/experiments/README.md) | Explains why experiment records are `.gitignore`d |
 
 ---
 
