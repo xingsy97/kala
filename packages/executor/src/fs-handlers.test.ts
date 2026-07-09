@@ -55,6 +55,19 @@ describe('filesystem inspection handlers', () => {
     expect(result.error).toContain('EBINARY')
   })
 
+  it('returns binary file contents only for download requests', async () => {
+    const path = join(root, 'archive.bin')
+    const bytes = Buffer.from([0, 1, 2, 3, 4, 5])
+    writeFileSync(path, bytes)
+
+    const result = await readWorkspaceFile({ requestId: 'r1', workspaceId: 'w1', path, download: true, maxBytes: 1024 }, createSandbox({ roots: [root] }))
+
+    expect(result.kind).toBe('binary')
+    expect(result.encoding).toBe('base64')
+    expect(result.mediaType).toBe('application/octet-stream')
+    expect(result.content).toBe(bytes.toString('base64'))
+  })
+
   it('returns small image files as base64 views', async () => {
     const path = join(root, 'image.png')
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])

@@ -26,6 +26,7 @@ import {
   readWorkspaceFile,
 } from '../fs-handlers.js'
 import { handleBgKill, handleBgList, handleBgOutput } from '../bg-handlers.js'
+import { gitDiff, gitStatus } from '../git-handlers.js'
 
 import type { Tool } from './registry.js'
 import { ToolError } from './registry.js'
@@ -124,6 +125,22 @@ export const bgKillTool: Tool = {
   },
 }
 
+// ============================================================================
+// Git read-only inspection
+// ============================================================================
+
+export const gitStatusTool: Tool = makeTool(
+  '__git_status',
+  async (input, { sandbox }) =>
+    gitStatus(input as Parameters<typeof gitStatus>[0], sandbox),
+)
+
+export const gitDiffTool: Tool = makeTool(
+  '__git_diff',
+  async (input, { sandbox }) =>
+    gitDiff(input as Parameters<typeof gitDiff>[0], sandbox),
+)
+
 export const internalDirectTools: readonly Tool[] = [
   fsListDirsTool,
   fsListFilesTool,
@@ -134,4 +151,6 @@ export const internalDirectTools: readonly Tool[] = [
   bgListTool,
   bgOutputTool,
   bgKillTool,
+  gitStatusTool,
+  gitDiffTool,
 ]
