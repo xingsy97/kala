@@ -50,11 +50,11 @@ function ApprovalRow({
           <ChevronRight className="h-3.5 w-3.5" />
         )}
       </button>
-      <span className="font-mono text-slate-800 dark:text-slate-100 flex-none">
+      <span className="font-mono text-foreground dark:text-foreground flex-none">
         {approval.name}
       </span>
       <span
-        className="font-mono text-slate-500 dark:text-slate-500 truncate flex-1 min-w-0"
+        className="font-mono text-muted-foreground dark:text-muted-foreground truncate flex-1 min-w-0"
         title={preview}
       >
         {preview}
