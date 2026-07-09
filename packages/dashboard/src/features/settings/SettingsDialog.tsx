@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy, ExternalLink, Monitor, Moon, Plus, RefreshCw, Sun, Trash2 } from 'lucide-react'
 import { Trans, useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { AttachedExecutor, ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload, ServerSettingsPayload } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -16,8 +17,11 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_EXPLORER_OPEN,
+  PREF_INSPECTOR_OPEN,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   PREF_SHOW_TOOL_CALL_TAB,
+  PREF_TOPBAR_OPEN,
   useBooleanPref,
   useNumberPref,
 } from '../../lib/prefs.js'
@@ -30,17 +34,22 @@ import {
   notificationPermission,
   requestNotificationPermission,
 } from '../../lib/desktop-notifications.js'
+import packageJson from '../../../package.json'
+
+const DASHBOARD_VERSION = packageJson.version
 
 type Props = {
   open: boolean
   onOpenChange(open: boolean): void
   onModelsChanged?(): void
+  executors?: readonly AttachedExecutor[]
 }
 
-type SectionKey = 'runtime' | 'connection' | 'models' | 'security' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface'
+type SectionKey = 'runtime' | 'connection' | 'models' | 'security' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'versions'
 
 const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
   { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint' },
+  { key: 'versions', label: 'settings.sections.versions.label', hint: 'settings.sections.versions.hint' },
   { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint' },
   { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint' },
   { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint' },
@@ -51,7 +60,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
   { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint' },
 ]
 
-export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): JSX.Element {
+export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [] }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [section, setSection] = useState<SectionKey>('interface')
@@ -119,6 +128,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
                 <HooksSection payload={payload} />
               ) : section === 'interface' ? (
                 <InterfaceSection />
+              ) : section === 'versions' ? (
+                <VersionsSection payload={payload} executors={executors} />
               ) : (
                 <McpSection payload={payload} />
               )}
@@ -229,6 +240,73 @@ function RuntimeSection({
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+function VersionsSection({
+  payload,
+  executors,
+}: {
+  payload: ServerSettingsPayload
+  executors: readonly AttachedExecutor[]
+}): JSX.Element {
+  const { t } = useTranslation()
+  const rows: Array<[string, string]> = [
+    [t('settings.versions.dashboard'), DASHBOARD_VERSION],
+    [t('settings.versions.host'), payload.versions?.host ?? '—'],
+    [t('settings.versions.protocol'), payload.versions?.protocol ?? PROTOCOL_VERSION],
+  ]
+  return (
+    <div>
+      <SectionHeader title={t('settings.sections.versions.label')} subtitle={t('settings.versions.subtitle')} />
+      <div className="overflow-hidden rounded-md ring-1 ring-border/50">
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map(([label, value], i) => (
+              <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
+                <th className="w-48 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">{label}</th>
+                <td className="px-3 py-2.5 font-mono text-xs">{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-5">
+        <h4 className="text-sm font-semibold text-foreground">{t('settings.versions.connectedExecutors')}</h4>
+        <p className="mt-1 text-xs text-muted-foreground">{t('settings.versions.connectedExecutorsDesc')}</p>
+        {executors.length === 0 ? (
+          <EmptyRow>{t('settings.versions.noExecutors')}</EmptyRow>
+        ) : (
+          <div className="mt-3 overflow-hidden rounded-md ring-1 ring-border/50">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.workspace')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executor')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executorVersion')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executorProtocol')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.runtime')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {executors.map((executor, i) => (
+                  <tr key={executor.executorId} className={cn('border-border/50', i !== executors.length - 1 && 'border-b')}>
+                    <td className="max-w-44 px-3 py-2">
+                      <div className="truncate font-medium" title={executor.workspaceName}>{executor.workspaceName}</div>
+                      <div className="truncate font-mono text-[11px] text-muted-foreground" title={executor.workspaceId}>{executor.workspaceId}</div>
+                    </td>
+                    <td className="max-w-44 truncate px-3 py-2 font-mono text-xs" title={executor.executorId}>{executor.executorId}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{executor.executorVersion ?? '—'}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{executor.clientVersion ?? '—'}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{executor.runtime} {executor.runtimeVersion}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -808,6 +886,9 @@ command = "/usr/local/bin/lint-shell.sh"`}
 function InterfaceSection(): JSX.Element {
   const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
+  const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
+  const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
+  const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
   const [liveToolActivityTail, setLiveToolActivityTail] = useNumberPref(
     PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -898,6 +979,27 @@ function InterfaceSection(): JSX.Element {
             testId="settings-toggle-tool-call-tab"
           />
         </li>
+        <InterfaceToggle
+          label={t('settings.interface.explorerOpen')}
+          description={t('settings.interface.explorerOpenDesc')}
+          checked={explorerOpen}
+          onChange={setExplorerOpen}
+          testId="settings-toggle-explorer-open"
+        />
+        <InterfaceToggle
+          label={t('settings.interface.inspectorOpen')}
+          description={t('settings.interface.inspectorOpenDesc')}
+          checked={inspectorOpen}
+          onChange={setInspectorOpen}
+          testId="settings-toggle-inspector-open"
+        />
+        <InterfaceToggle
+          label={t('settings.interface.topbarOpen')}
+          description={t('settings.interface.topbarOpenDesc')}
+          checked={topbarOpen}
+          onChange={setTopbarOpen}
+          testId="settings-toggle-topbar-open"
+        />
         <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.liveToolActivityTail')}</div>
@@ -920,6 +1022,30 @@ function InterfaceSection(): JSX.Element {
         <DesktopNotificationsSettings />
       </ul>
     </div>
+  )
+}
+
+function InterfaceToggle({
+  label,
+  description,
+  checked,
+  onChange,
+  testId,
+}: {
+  label: string
+  description: string
+  checked: boolean
+  onChange(next: boolean): void
+  testId: string
+}): JSX.Element {
+  return (
+    <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+      <div className="min-w-0">
+        <div className="font-medium">{label}</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Toggle checked={checked} onChange={onChange} ariaLabel={label} testId={testId} />
+    </li>
   )
 }
 

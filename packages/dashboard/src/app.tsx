@@ -86,7 +86,11 @@ import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from
 import type { PendingUserTranscriptMessage } from './transcript.js'
 import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_EXPLORER_OPEN,
+  PREF_INSPECTOR_OPEN,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_TOPBAR_OPEN,
+  useBooleanPref,
   useNumberPref,
 } from './lib/prefs.js'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
@@ -147,9 +151,9 @@ export function App(): JSX.Element {
   const { t } = useTranslation()
   const [config, setConfig] = useState(() => readInitialConfig())
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
-  const [explorerOpen, setExplorerOpen] = useState(true)
-  const [inspectorOpen, setInspectorOpen] = useState(true)
-  const [topbarOpen, setTopbarOpen] = useState(true)
+  const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
+  const [inspectorOpen, setInspectorOpen] = useBooleanPref(PREF_INSPECTOR_OPEN, true)
+  const [topbarOpen, setTopbarOpen] = useBooleanPref(PREF_TOPBAR_OPEN, true)
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string; workspaceId?: string } | null
   >(null)
@@ -884,7 +888,7 @@ export function App(): JSX.Element {
         keywords: ['debug', 'panel'],
         disabled: !wideLayout || !hasSelectedSession,
         disabledReason: !wideLayout ? t('commandPalette.disabled.inspectorWideOnly') : t('commandPalette.disabled.noSessionSelected'),
-        run: () => setInspectorOpen((value) => !value),
+        run: () => setInspectorOpen(!inspectorOpen),
       },
       {
         id: 'view.open-explorer',
@@ -1543,7 +1547,12 @@ export function App(): JSX.Element {
       />
       {settingsOpen ? (
         <Suspense fallback={null}>
-          <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
+          <SettingsDialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            onModelsChanged={reloadModels}
+            executors={control.executors}
+          />
         </Suspense>
       ) : null}
       <SessionMetadataDialog

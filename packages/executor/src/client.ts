@@ -41,6 +41,9 @@ import {
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
 import { subscribeBackgroundTasks } from './tools/background-shell.js'
+import packageJson from '../package.json'
+
+const EXECUTOR_VERSION = packageJson.version
 
 export type ExecutorOptions = {
   /** Host URL (e.g. `wss://host.example.com` or `http://localhost:3000`). */
@@ -144,6 +147,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 
   const announcement: ExecutorAnnounce = {
     executorId,
+    executorVersion: EXECUTOR_VERSION,
     workspaceId,
     workspaceName,
     tools: [...tools.keys()],

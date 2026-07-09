@@ -199,6 +199,26 @@ describe('Composer', () => {
     expect(onQueuedDelete).toHaveBeenCalledWith('queued-simple-1')
   })
 
+  it('lets the queued messages dock grow up to three rows before scrolling', () => {
+    renderComposer({
+      queuedMessages: [
+        { id: 'q1', text: 'one queued message', mode: 'queue', createdAt: '2026-07-06T00:00:00.000Z' },
+      ],
+    })
+    expect(screen.getByTestId('queued-messages-scrollarea').className).not.toContain('h-40')
+
+    renderComposer({
+      queuedMessages: Array.from({ length: 4 }, (_, index) => ({
+        id: `q${index + 1}`,
+        text: `queued message ${index + 1}`,
+        mode: 'queue' as const,
+        createdAt: `2026-07-06T00:00:0${index}.000Z`,
+      })),
+    })
+    const scrollAreas = screen.getAllByTestId('queued-messages-scrollarea')
+    expect(scrollAreas.at(-1)?.className ?? '').toContain('h-40')
+  })
+
   it('explains send modes and shows queue previews', () => {
     render(
       <Composer

@@ -47,6 +47,37 @@ describe('VirtualTranscript', () => {
     expect(screen.getByTestId('footer')).toBeTruthy()
   })
 
+  it('scrolls to the real bottom when footerSlot appears while pinned', () => {
+    const scrollTo = (globalThis as typeof globalThis & {
+      __virtuosoScrollToMock?: ReturnType<typeof vi.fn>
+    }).__virtuosoScrollToMock
+    scrollTo?.mockClear()
+
+    const { rerender } = render(
+      <VirtualTranscript<Item>
+        items={makeItems(2)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+      />,
+    )
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    rerender(
+      <VirtualTranscript<Item>
+        items={makeItems(2)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+        footerSlot={<div data-testid="footer">thinking</div>}
+      />,
+    )
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+  })
+
   it('scrollToBottom on the imperative handle jumps to the last item', () => {
     const ref = createRef<VirtualTranscriptHandle>()
     render(

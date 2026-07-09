@@ -3,7 +3,7 @@ import { Pencil, ShieldCheck, ShieldOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { AttachedExecutor, ExecutorIdentitySummary, ServerExecutorIdentitiesPayload, SessionSummary } from '@agent-kernel/shared'
+import type { AttachedExecutor, ExecutorIdentitySummary, ServerExecutorIdentitiesPayload, ServerSettingsPayload, SessionSummary } from '@agent-kernel/shared'
 
 import {
   Dialog,
@@ -53,6 +53,16 @@ export function WorkspaceMetadataDialog({
   })
   const identity: ExecutorIdentitySummary | null =
     identitiesQuery.data?.identities.find((entry) => entry.workspaceId === workspaceId) ?? null
+  const settingsQuery = useQuery({
+    queryKey: ['settings'],
+    queryFn: async (): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings', { cache: 'no-store' })
+      if (!res.ok) throw new Error(await res.text())
+      return (await res.json()) as ServerSettingsPayload
+    },
+    enabled: open,
+    staleTime: 30_000,
+  })
 
   const revokeMutation = useMutation({
     mutationFn: async (): Promise<void> => {
@@ -81,11 +91,13 @@ export function WorkspaceMetadataDialog({
   }
   const revokeIdentity = (): void => {
     if (workspaceId.length === 0) return
-    console.error('[debug] revokeIdentity called', { hasIdentity: !!identity })
     revokeMutation.mutate()
   }
   const rows: Array<[string, string]> = [
     [t('workspaceMetadata.workspaceId'), workspaceId],
+    [t('workspaceMetadata.hostVersion'), settingsQuery.data?.versions?.host ?? '—'],
+    [t('workspaceMetadata.executorVersion'), executor?.executorVersion ?? '—'],
+    [t('workspaceMetadata.protocolVersion'), executor?.clientVersion ?? settingsQuery.data?.versions?.protocol ?? '—'],
     [t('workspaceMetadata.runtime'), executor ? `${executor.runtime} ${executor.runtimeVersion}` : '—'],
     [t('workspaceMetadata.os'), executor?.os ?? '—'],
     [t('workspaceMetadata.hostname'), executor?.hostname ?? '—'],
