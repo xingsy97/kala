@@ -4,7 +4,7 @@
 // exits 0 AND every parsed unit reports pass. Any other outcome maps to
 // `unresolved` (tests ran but did not all pass) or `errored` (agent or
 // harness failure before tests could complete). See
-// docs/domain-knowledge/terminal-bench-evaluation.md for the source of truth.
+// docs/evals/domain-knowledge/terminal-bench-evaluation.md for the source of truth.
 //
 // Scope for this iteration: run tasks defined by a local JSONL manifest
 // (see resolveTerminalBenchTasks). Integration with the upstream

@@ -1,7 +1,7 @@
 /**
  * RL rollout exports: token-segment indices, rollout sidecars, and per-framework
  * adapter files (slime / verl). All artifacts index the ledger and referenced
- * files rather than fabricating tensors — see docs/enhancement/04.
+ * files rather than fabricating tensors — see docs/planning/enhancement/04.
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'

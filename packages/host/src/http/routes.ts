@@ -966,7 +966,7 @@ async function runEnhancementAction(
     const layout = terminalBenchRunLayout(rootDir, runId)
     await mkdir(layout.rootDir, { recursive: true })
     await writeFile(layout.tasksJsonl, tasks.map((t) => JSON.stringify(t)).join('\n') + (tasks.length ? '\n' : ''), 'utf8')
-    // Response intentionally omits filesystem paths (see docs/principles.md A1).
+    // Response intentionally omits filesystem paths (see docs/meta/principles.md A1).
     return { action, runId, taskCount: tasks.length }
   }
   if (action === 'terminal-bench-run-agent') {
@@ -1048,7 +1048,7 @@ async function runEnhancementAction(
       mineBadCases({ rootDir, runId }),
       readBadCaseAnnotations(rootDir, runId),
     ])
-    // Response intentionally omits filesystem paths (see docs/principles.md A1).
+    // Response intentionally omits filesystem paths (see docs/meta/principles.md A1).
     return {
       action,
       runId,

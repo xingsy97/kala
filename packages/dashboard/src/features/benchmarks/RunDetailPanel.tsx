@@ -20,7 +20,7 @@ export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JS
     )
   }
 
-  // Per docs/principles.md A3: only surface `resolved` after import is done
+  // Per docs/meta/principles.md A3: only surface `resolved` after import is done
   // (i.e., summary contains resolved+total). Before that, we deliberately
   // show status only — no invented metrics.
   const officialTerm = run.kind === 'terminal-bench' ? 'resolved (Terminal-Bench parser)' : 'resolved'

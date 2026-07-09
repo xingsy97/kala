@@ -2,7 +2,7 @@
 //
 // Thin delegation layer over swebench.ts. Does NOT reimplement anything;
 // see swebench.ts for the actual pipeline. Semantics of `resolved` come from
-// the official SWE-bench harness (docs/domain-knowledge/swe-bench-evaluation.md).
+// the official SWE-bench harness (docs/evals/domain-knowledge/swe-bench-evaluation.md).
 
 import { readFile } from 'node:fs/promises'
 

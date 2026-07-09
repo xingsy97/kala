@@ -7,7 +7,7 @@
  * of output, the full text is written to
  * `<overflowDir>/<sessionId>/<callId>.txt` and the on-wire content is
  * replaced with a head+tail preview plus a truncation marker naming the spill
- * file. See docs/tool-output-overflow.md for the design.
+ * file. See docs/host/tool-output-overflow.md for the design.
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
