@@ -51,7 +51,7 @@ type Props = {
   onDelete(sessionId: string): void
 }
 
-const ROW_HEIGHT = 72
+const ROW_HEIGHT = 88
 
 export function Explorer({
   executors,
@@ -77,7 +77,7 @@ export function Explorer({
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/30">
       <Header onNewSession={onNewSession} />
       <div
         ref={ref}
@@ -86,9 +86,9 @@ export function Explorer({
         data-scroll-owner="react-arborist"
       >
         {empty ? (
-          <div className="p-3 text-xs text-slate-500 leading-relaxed">
+          <div className="p-4 text-xs leading-relaxed text-muted-foreground">
             No daemons attached. Start an executor with{' '}
-            <code className="text-slate-700 dark:text-slate-200">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
               pnpm executor:dev
             </code>
             .
@@ -110,7 +110,7 @@ export function Explorer({
             onActivate={activate}
             renderRow={TreeRow}
             rowHeight={ROW_HEIGHT}
-            indent={16}
+            indent={12}
             width={bounds.width}
             height={bounds.height}
           >
@@ -135,7 +135,7 @@ export function Explorer({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete session?</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-mono text-slate-700 dark:text-slate-200">
+              <span className="font-mono text-foreground">
                 {pendingDelete?.label ?? ''}
               </span>
               <br />
@@ -177,8 +177,8 @@ function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>
 
 function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
   return (
-    <div className="px-3 py-2 border-b border-slate-200 bg-white/90 dark:border-slate-800 dark:bg-slate-950 flex items-center justify-between">
-      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+    <div className="flex items-center justify-between border-b bg-background/80 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         Explorer
       </span>
       <Button
@@ -187,9 +187,10 @@ function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
         onClick={onNewSession}
         data-testid="new-session-button"
         title="Start a new session"
-        className="h-6 px-2 text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-slate-50"
+        className="h-7 gap-1 rounded-full px-2.5 text-xs"
       >
-        <Plus className="mr-1 h-3 w-3" /> new
+        <Plus className="h-3 w-3" />
+        New
       </Button>
     </div>
   )
@@ -228,7 +229,7 @@ function WorkspaceRow({
   const w = node.data
   const dotCls = w.online
     ? 'bg-emerald-500 dark:bg-emerald-400'
-    : 'bg-slate-400 dark:bg-slate-600'
+    : 'bg-muted-foreground/40'
   const meta =
     w.workspaceId === null
       ? 'sessions with no workspace'
@@ -242,20 +243,20 @@ function WorkspaceRow({
       data-workspace-id={w.workspaceId ?? 'unassigned'}
       data-online={w.online ? 'true' : 'false'}
       onClick={() => node.toggle()}
-      className="min-w-0 px-2 border-b border-slate-200/70 dark:border-slate-900 hover:bg-slate-100 dark:hover:bg-slate-900 cursor-pointer select-none"
+      className="group/ws min-w-0 cursor-pointer select-none px-3 hover:bg-accent/50"
     >
-      <div className="flex items-center gap-1.5 h-7">
+      <div className="flex h-8 items-center gap-1.5">
         {node.isOpen ? (
-          <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-slate-500" />
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
         )}
-        <span className={`inline-block w-2 h-2 rounded-full ${dotCls}`} />
-        <span className="text-sm text-slate-800 dark:text-slate-100 truncate">
+        <span className={cn('inline-block h-2 w-2 rounded-full', dotCls)} />
+        <span className="truncate text-[13px] font-semibold text-foreground">
           {w.name}
         </span>
       </div>
-      <div className="pl-6 -mt-1 text-[11px] text-slate-500 dark:text-slate-500 truncate">
+      <div className="-mt-1 pl-6 text-[11px] text-muted-foreground truncate">
         {meta}
       </div>
     </div>
@@ -279,42 +280,53 @@ function SessionRow({
       data-testid="session-row"
       data-session-id={s.sessionId}
       className={cn(
-        'group relative min-w-0 overflow-hidden border-b border-slate-200/70 dark:border-slate-900 hover:bg-white dark:hover:bg-slate-900/80 transition-colors',
+        'group relative min-w-0 cursor-pointer overflow-hidden transition-colors',
+        'hover:bg-accent',
         selected &&
-          'bg-white dark:bg-slate-900 border-l-2 border-l-sky-500 dark:border-l-sky-400 shadow-[inset_0_1px_0_rgba(148,163,184,0.18)]',
+          'bg-accent border-l-2 border-l-primary',
       )}
       onClick={() => node.activate()}
     >
-      <div className="min-w-0 px-2 pl-6 py-2 pr-9 cursor-pointer">
+      <div className="min-w-0 cursor-pointer px-3 py-2.5 pl-6 pr-9">
         <div className="flex min-w-0 items-center gap-2">
-          <MessageSquare className="h-3.5 w-3.5 flex-none text-slate-400 dark:text-slate-500" />
-          <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+          <MessageSquare
+            className={cn(
+              'h-3.5 w-3.5 flex-none',
+              selected ? 'text-primary' : 'text-muted-foreground',
+            )}
+          />
+          <div
+            className={cn(
+              'min-w-0 flex-1 truncate text-[13px] font-medium',
+              selected ? 'text-foreground' : 'text-foreground/90',
+            )}
+          >
             {s.label}
           </div>
         </div>
-        <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-[11px] text-slate-500 dark:text-slate-400">
+        <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-[11px] text-muted-foreground">
           <StatusChip status={s.status} />
-          <span className="truncate tabular-nums text-slate-500 dark:text-slate-500">
-            {s.eventCount} evt
-          </span>
-          <span className="ml-auto truncate tabular-nums text-slate-400 dark:text-slate-600">
+          <span className="truncate tabular-nums">{s.eventCount} evt</span>
+          <span className="ml-auto truncate tabular-nums opacity-70">
             {formatWhen(s.lastActivityIso)}
           </span>
         </div>
         {s.currentCwd ? (
           <div
-            className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-slate-500 dark:text-slate-500"
+            className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] leading-4 text-muted-foreground"
             title={s.currentCwd}
             data-testid="session-row-cwd"
           >
-            <Folder className="h-3 w-3 flex-none text-slate-400 dark:text-slate-600" />
+            <Folder className="h-3 w-3 flex-none opacity-70" />
             <span className="min-w-0 truncate font-mono">cwd {s.currentCwd}</span>
           </div>
         ) : null}
         {s.parentSessionId ? (
           <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-amber-600 dark:text-amber-400">
             <GitFork className="h-3 w-3 flex-none" />
-            <span className="min-w-0 truncate font-mono">fork of {s.parentSessionId.slice(0, 8)}...</span>
+            <span className="min-w-0 truncate font-mono">
+              fork of {s.parentSessionId.slice(0, 8)}...
+            </span>
           </div>
         ) : null}
       </div>
@@ -328,7 +340,7 @@ function SessionRow({
         data-testid="session-delete-button"
         title="Delete this session (irreversible)"
         aria-label={`delete session ${s.sessionId}`}
-        className="absolute right-1.5 top-1.5 h-7 w-7 rounded-md text-slate-400 opacity-0 transition-colors hover:bg-rose-500 hover:text-white group-hover:opacity-100 dark:text-slate-500 dark:hover:bg-rose-600 dark:hover:text-white"
+        className="absolute right-1.5 top-1.5 h-7 w-7 rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-destructive hover:text-destructive-foreground group-hover:opacity-100"
       >
         <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
       </Button>
@@ -361,7 +373,7 @@ function statusMeta(status: SessionSummary['status'] | undefined): {
     return {
       label: 'unknown',
       icon: Clock3,
-      className: 'text-slate-500 dark:text-slate-500',
+      className: 'text-muted-foreground',
     }
   }
   if (status === 'done' || status === 'idle') {

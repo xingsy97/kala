@@ -132,10 +132,21 @@ The dashboard's job is to inject user-originated events into the kernel.
 #### `client:user_message`
 
 ```ts
-{ sessionId: string; text: string }
+{
+  sessionId: string
+  text: string
+  mode?: 'steer' | 'queue'
+  content?: MessageContent[]
+}
 ```
 
-Host translates to `{ kind: 'user_message', text }` and feeds to `step`.
+Host translates to `{ kind: 'user_message', text, content? }` and feeds to
+`step` when the session is idle. `mode: 'steer'` is the default: during an
+active turn the host cancels the current stream if needed and promotes the
+message at the front of the next safe delivery boundary. `mode: 'queue'` holds
+the message until the current turn finishes, then promotes queued messages in
+FIFO order. Queue state is surfaced with `server:message_queue`; dashboards
+must render pending message previews instead of showing only a count.
 
 #### `client:user_approve`
 
@@ -222,6 +233,28 @@ Sent when the kernel emits a `request_approval` effect. Dashboard renders a conf
   input: Record<string, unknown>
 }
 ```
+
+#### `server:message_queue`
+
+Sent whenever the host's per-session delivery queue changes, and once after a
+dashboard subscribes so reconnects show the current pending deliveries.
+
+```ts
+{
+  sessionId: string
+  pending: number
+  items: Array<{
+    id: string
+    text: string
+    mode: 'steer' | 'queue'
+    createdAt: string
+  }>
+}
+```
+
+`pending` is a convenience mirror of `items.length`. `mode: 'steer'` items are
+front-of-queue steering updates created while a turn was active; `mode: 'queue'`
+items are follow-ups that wait until the active turn is done.
 
 Dashboard resolves via `client:user_approve` or `client:user_reject`.
 

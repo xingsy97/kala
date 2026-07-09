@@ -1,5 +1,20 @@
 import { useState } from 'react'
-import { Archive, CheckCircle2, ChevronDown, ChevronRight, Pencil, Sparkles, Wrench, X, XCircle } from 'lucide-react'
+import {
+  Archive,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  FileText,
+  Lightbulb,
+  Pencil,
+  Sparkles,
+  Terminal,
+  Wrench,
+  X,
+  XCircle,
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -9,20 +24,62 @@ import type {
   ToolCallContent,
   ToolResultContent,
 } from '@agent-kernel/kernel'
+import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { Textarea } from '../../components/ui/textarea.js'
+import { formatTokens } from '../../lib/format.js'
+import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
+import { DiffPreview } from './DiffPreview.js'
 
 type Props = {
   messages?: readonly Message[]
   items?: readonly TranscriptItem[]
   highlightIndex?: number | null
   onEditAndRerun?: (seq: number, text: string) => void
+  onSuggest?: (text: string) => void
+  pendingApprovals?: readonly ApprovalRequiredEvent[]
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
 }
 
-export function ChatPanel({ messages, items, highlightIndex, onEditAndRerun }: Props): JSX.Element {
+const EMPTY_SUGGESTIONS: ReadonlyArray<{
+  icon: typeof Sparkles
+  title: string
+  prompt: string
+}> = [
+  {
+    icon: Code2,
+    title: 'Explain this repo',
+    prompt: 'Give me a quick tour of this repository — what does it do, and where should I start reading?',
+  },
+  {
+    icon: Terminal,
+    title: 'Run tests and fix failures',
+    prompt: 'Run the tests. If any fail, propose a fix.',
+  },
+  {
+    icon: FileText,
+    title: 'Draft a change plan',
+    prompt: 'I want to add a new feature. Ask me a few clarifying questions, then draft an implementation plan.',
+  },
+  {
+    icon: Lightbulb,
+    title: 'Suggest improvements',
+    prompt: 'Read the main source files and suggest three concrete improvements I could make today.',
+  },
+]
+
+export function ChatPanel({
+  messages,
+  items,
+  highlightIndex,
+  onEditAndRerun,
+  onSuggest,
+  pendingApprovals,
+  onApprovalDecision,
+}: Props): JSX.Element {
   const fallbackItems: TranscriptItem[] = (messages ?? []).map((message) => ({
     kind: 'message',
     message,
@@ -36,12 +93,13 @@ export function ChatPanel({ messages, items, highlightIndex, onEditAndRerun }: P
       if (content.type === 'tool_call') toolNameByCallId.set(content.callId, content.name)
     }
   }
+  const approvalByCallId = new Map<string, ApprovalRequiredEvent>()
+  for (const a of pendingApprovals ?? []) approvalByCallId.set(a.callId, a)
   let messageIndex = -1
+  const isEmpty = transcriptItems.length === 0
   return (
-    <div className="flex min-w-0 flex-col divide-y divide-slate-100 dark:divide-slate-900">
-      {transcriptItems.length === 0 ? (
-        <div className="px-6 py-8 text-slate-500 text-sm">No messages yet.</div>
-      ) : null}
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
+      {isEmpty ? <EmptyState onSuggest={onSuggest} /> : null}
       {transcriptItems.map((item, itemIndex) => {
         if (item.kind === 'compact_boundary') {
           return <CompactBoundaryRow key={`compact-${item.seq}`} boundary={item} />
@@ -55,6 +113,8 @@ export function ChatPanel({ messages, items, highlightIndex, onEditAndRerun }: P
             message={item.message}
             highlighted={highlightIndex === currentMessageIndex}
             toolNameByCallId={toolNameByCallId}
+            approvalByCallId={approvalByCallId}
+            onApprovalDecision={onApprovalDecision}
             seq={item.seq}
             onEditAndRerun={onEditAndRerun}
           />
@@ -64,29 +124,84 @@ export function ChatPanel({ messages, items, highlightIndex, onEditAndRerun }: P
   )
 }
 
-function CompactBoundaryRow({ boundary }: { boundary: Extract<TranscriptItem, { kind: 'compact_boundary' }> }): JSX.Element {
+function EmptyState({
+  onSuggest,
+}: {
+  onSuggest?: (text: string) => void
+}): JSX.Element {
   return (
-    <div
-      className="px-6 py-3 bg-sky-50/70 text-sky-900 dark:bg-sky-950/25 dark:text-sky-100"
-      data-testid="compact-boundary"
-    >
-      <div className="flex min-w-0 items-center gap-3 rounded border border-sky-200 bg-white/70 px-3 py-2 text-xs dark:border-sky-900/70 dark:bg-slate-950/60">
-        <Archive className="h-4 w-4 flex-none text-sky-600 dark:text-sky-300" />
-        <div className="min-w-0 flex-1">
-          <div className="font-medium">Context compacted</div>
-          <div className="mt-0.5 truncate text-[11px] text-sky-700/80 dark:text-sky-200/75">
-            {boundary.trigger === 'auto' ? 'Automatic compact' : 'Manual compact'} · event #{boundary.seq} · {formatTokens(boundary.tokensBefore)} → {formatTokens(boundary.tokensAfter)} tokens · {boundary.replacedCount} messages summarized
-          </div>
+    <div className="flex flex-col items-center gap-8 py-16 text-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border bg-muted/40">
+          <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          What can I help with?
+        </h1>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Ask a question, request code changes, or pick one of the suggestions below to get started.
+        </p>
+      </div>
+      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+        {EMPTY_SUGGESTIONS.map((s) => {
+          const Icon = s.icon
+          const clickable = typeof onSuggest === 'function'
+          return (
+            <button
+              key={s.title}
+              type="button"
+              onClick={() => onSuggest?.(s.prompt)}
+              disabled={!clickable}
+              className={cn(
+                'group flex min-w-0 items-start gap-3 rounded-xl border bg-muted/40 p-4 text-left transition-colors',
+                clickable
+                  ? 'hover:border-ring hover:bg-muted cursor-pointer'
+                  : 'cursor-default opacity-70',
+              )}
+              data-testid={`empty-suggestion-${s.title.toLowerCase().replace(/\s+/g, '-')}`}
+            >
+              <div className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg border bg-background text-muted-foreground group-hover:text-foreground">
+                <Icon className="h-4 w-4" aria-hidden="true" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 text-sm font-medium text-foreground">{s.title}</div>
+                <div className="line-clamp-2 text-xs text-muted-foreground">{s.prompt}</div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <div className="text-xs text-muted-foreground" data-testid="empty-state-hint">
+        No messages yet — type below to begin.
       </div>
     </div>
   )
 }
 
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
-  return String(tokens)
+function CompactBoundaryRow({
+  boundary,
+}: {
+  boundary: Extract<TranscriptItem, { kind: 'compact_boundary' }>
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-3 py-2" data-testid="compact-boundary">
+      <div className="h-px flex-1 bg-border" aria-hidden="true" />
+      <div className="flex min-w-0 items-center gap-2 rounded-full border bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground">
+        <Archive className="h-3 w-3 flex-none" />
+        <span className="font-medium text-foreground">Context compacted</span>
+        <span className="hidden truncate sm:inline">
+          · {boundary.trigger === 'auto' ? 'Automatic compact' : 'Manual compact'} · event #{boundary.seq} ·{' '}
+          {formatTokens(boundary.tokensBefore)} → {formatTokens(boundary.tokensAfter)} tokens ·{' '}
+          {boundary.replacedCount} messages summarized
+        </span>
+        <span className="truncate sm:hidden">
+          {boundary.trigger === 'auto' ? 'Auto' : 'Manual'} · {formatTokens(boundary.tokensBefore)} →{' '}
+          {formatTokens(boundary.tokensAfter)}
+        </span>
+      </div>
+      <div className="h-px flex-1 bg-border" aria-hidden="true" />
+    </div>
+  )
 }
 
 function MessageRow({
@@ -94,6 +209,8 @@ function MessageRow({
   message,
   highlighted,
   toolNameByCallId,
+  approvalByCallId,
+  onApprovalDecision,
   seq,
   onEditAndRerun,
 }: {
@@ -101,16 +218,11 @@ function MessageRow({
   message: Message
   highlighted: boolean
   toolNameByCallId: ReadonlyMap<string, string>
+  approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   seq?: number
   onEditAndRerun?: (seq: number, text: string) => void
 }): JSX.Element {
-  const label = roleLabel(message.role)
-  const labelColor =
-    message.role === 'user'
-      ? 'text-slate-500 dark:text-slate-400'
-      : message.role === 'tool'
-        ? 'text-emerald-700 dark:text-emerald-400'
-      : 'text-amber-700 dark:text-amber-400'
   const editable =
     message.role === 'user' &&
     seq !== undefined &&
@@ -123,83 +235,149 @@ function MessageRow({
     : ''
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(initialText)
+
+  if (editing && editable) {
+    return (
+      <div
+        id={`msg-${index}`}
+        data-message-index={index}
+        className={cn(
+          'group relative flex flex-col gap-2 rounded-2xl border bg-muted/40 p-4 transition-colors',
+          highlighted ? 'bg-amber-50/60 dark:bg-amber-950/20' : '',
+        )}
+      >
+        <Textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="min-h-[80px] resize-none border-0 bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+          data-testid={`edit-message-input-${index}`}
+          autoFocus
+        />
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-7 px-3 text-xs"
+            onClick={() => {
+              setEditing(false)
+              setDraft(initialText)
+            }}
+            data-testid={`edit-message-cancel-${index}`}
+          >
+            <X className="mr-1 h-3.5 w-3.5" />
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            className="h-7 px-3 text-xs"
+            disabled={draft.trim().length === 0}
+            onClick={() => {
+              if (seq === undefined) return
+              onEditAndRerun?.(seq, draft.trim())
+              setEditing(false)
+            }}
+            data-testid={`edit-message-submit-${index}`}
+          >
+            Rerun
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (message.role === 'user') {
+    return (
+      <div
+        id={`msg-${index}`}
+        data-message-index={index}
+        className={cn(
+          'group relative flex justify-end',
+          highlighted ? 'rounded-2xl bg-amber-50/60 p-1 dark:bg-amber-950/20' : '',
+        )}
+      >
+        <div className="relative max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+          <div className="flex min-w-0 flex-col gap-2">
+            {message.content.map((c, i) => (
+              <ContentBlock
+                key={i}
+                content={c}
+                role={message.role}
+                toolNameByCallId={toolNameByCallId}
+                approvalByCallId={approvalByCallId}
+                onApprovalDecision={onApprovalDecision}
+              />
+            ))}
+          </div>
+        </div>
+        {editable ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(initialText)
+              setEditing(true)
+            }}
+            className="absolute -left-8 top-2 rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+            title="Edit and rerun"
+            data-testid={`edit-message-${index}`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+
+  // Assistant + tool messages: no bubble, avatar-labeled row with generous line height.
+  const roleTextColor =
+    message.role === 'tool'
+      ? 'text-emerald-700 dark:text-emerald-400'
+      : 'text-muted-foreground'
+  const label = message.role === 'assistant' ? 'Assistant' : 'Tool result'
+
   return (
     <div
       id={`msg-${index}`}
       data-message-index={index}
-      className={`group relative min-w-0 overflow-hidden px-6 py-4 transition-colors ${
-        highlighted ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
-      }`}
+      className={cn(
+        'group relative flex min-w-0 gap-3',
+        highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
+      )}
     >
-      <div
-        className={`text-[11px] uppercase tracking-wider font-medium mb-2 ${labelColor}`}
-      >
-        {label}
-      </div>
-      {editing && editable ? (
-        <div className="flex flex-col gap-2">
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            className="min-h-[80px] text-sm"
-            data-testid={`edit-message-input-${index}`}
-            autoFocus
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-7 px-3 text-xs"
-              onClick={() => {
-                setEditing(false)
-                setDraft(initialText)
-              }}
-              data-testid={`edit-message-cancel-${index}`}
-            >
-              <X className="mr-1 h-3.5 w-3.5" />
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              className="h-7 px-3 text-xs"
-              disabled={draft.trim().length === 0}
-              onClick={() => {
-                if (seq === undefined) return
-                onEditAndRerun?.(seq, draft.trim())
-                setEditing(false)
-              }}
-              data-testid={`edit-message-submit-${index}`}
-            >
-              Rerun
-            </Button>
-          </div>
+      <div className="flex-none pt-0.5">
+        <div
+          className={cn(
+            'flex h-7 w-7 items-center justify-center rounded-full border text-[10px] font-semibold uppercase tracking-wider',
+            message.role === 'assistant'
+              ? 'border-border bg-background text-foreground'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300',
+          )}
+          aria-label={label}
+        >
+          {message.role === 'assistant' ? 'AK' : <Wrench className="h-3 w-3" aria-hidden="true" />}
         </div>
-      ) : (
-        <div className="flex min-w-0 flex-col gap-2">
+      </div>
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            'mb-1 text-[11px] font-medium uppercase tracking-wider',
+            roleTextColor,
+          )}
+        >
+          {label}
+        </div>
+        <div className="flex min-w-0 flex-col gap-3">
           {message.content.map((c, i) => (
             <ContentBlock
               key={i}
               content={c}
               role={message.role}
               toolNameByCallId={toolNameByCallId}
+              approvalByCallId={approvalByCallId}
+              onApprovalDecision={onApprovalDecision}
             />
           ))}
         </div>
-      )}
-      {editable && !editing ? (
-        <button
-          type="button"
-          onClick={() => {
-            setDraft(initialText)
-            setEditing(true)
-          }}
-          className="absolute right-3 top-3 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-          title="Edit and rerun"
-          data-testid={`edit-message-${index}`}
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
-      ) : null}
+      </div>
     </div>
   )
 }
@@ -208,20 +386,39 @@ function ContentBlock({
   content,
   role,
   toolNameByCallId,
+  approvalByCallId,
+  onApprovalDecision,
 }: {
   content: MessageContent
   role: Message['role']
   toolNameByCallId: ReadonlyMap<string, string>
+  approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
 }): JSX.Element {
   if (content.type === 'text') {
     if (role === 'assistant') return <AssistantMarkdown text={content.text} />
+    if (role === 'user') {
+      return (
+        <div className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
+          {content.text}
+        </div>
+      )
+    }
     return (
-      <div className="min-w-0 whitespace-pre-wrap break-words text-sm text-slate-800 [overflow-wrap:anywhere] dark:text-slate-100">
+      <div className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">
         {content.text}
       </div>
     )
   }
-  if (content.type === 'tool_call') return <ToolCallBlock call={content} />
+  if (content.type === 'tool_call') {
+    return (
+      <ToolCallBlock
+        call={content}
+        approval={approvalByCallId.get(content.callId) ?? null}
+        onApprovalDecision={onApprovalDecision}
+      />
+    )
+  }
   if (content.type === 'tool_result') {
     return (
       <ToolResultBlock
@@ -234,14 +431,11 @@ function ContentBlock({
   return <ImageBlock content={content} />
 }
 
-function roleLabel(role: Message['role']): string {
-  if (role === 'user') return 'You'
-  if (role === 'assistant') return 'Assistant'
-  if (role === 'tool') return 'Tool result'
-  return role
-}
-
-function ImageBlock({ content }: { content: import('@agent-kernel/kernel').ImageContent }): JSX.Element {
+function ImageBlock({
+  content,
+}: {
+  content: import('@agent-kernel/kernel').ImageContent
+}): JSX.Element {
   const src =
     content.source.kind === 'base64'
       ? `data:${content.source.mediaType};base64,${content.source.data}`
@@ -250,7 +444,7 @@ function ImageBlock({ content }: { content: import('@agent-kernel/kernel').Image
     <img
       src={src}
       alt=""
-      className="max-w-xs max-h-64 rounded border border-slate-200 dark:border-slate-800"
+      className="h-auto max-h-64 max-w-full rounded-lg border object-contain sm:max-w-xs"
     />
   )
 }
@@ -262,15 +456,14 @@ function ThinkingBlock({
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded border border-violet-200 bg-violet-50/60 text-xs dark:border-violet-900/60 dark:bg-violet-950/20">
+    <div className="min-w-0 max-w-full">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-violet-800 hover:bg-violet-100/70 dark:text-violet-200 dark:hover:bg-violet-900/30"
+        className="inline-flex min-w-0 items-center gap-2 rounded-full border border-dashed bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground hover:bg-muted"
       >
-        <Sparkles className="h-3.5 w-3.5 flex-none" />
+        <Sparkles className="h-3 w-3 flex-none" />
         <span className="font-medium">Thinking</span>
-        <span className="flex-1" />
         {open ? (
           <ChevronDown className="h-3 w-3 flex-none" />
         ) : (
@@ -278,11 +471,13 @@ function ThinkingBlock({
         )}
       </button>
       {open ? (
-        <ScrollArea className="border-t border-violet-200 dark:border-violet-900/60">
-          <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-violet-900/90 [overflow-wrap:anywhere] dark:text-violet-100/80">
-            {content.text}
-          </pre>
-        </ScrollArea>
+        <div className="mt-2 rounded-lg border border-dashed bg-muted/30">
+          <ScrollArea>
+            <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+              {content.text}
+            </pre>
+          </ScrollArea>
+        </div>
       ) : null}
     </div>
   )
@@ -290,13 +485,27 @@ function ThinkingBlock({
 
 function AssistantMarkdown({ text }: { text: string }): JSX.Element {
   return (
-    <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full break-words text-slate-800 leading-relaxed [overflow-wrap:anywhere] dark:text-slate-100 [&_a]:text-sky-600 dark:[&_a]:text-sky-400 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 dark:[&_blockquote]:border-slate-600 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 dark:[&_blockquote]:text-slate-300 [&_code]:rounded [&_code]:bg-slate-100 dark:[&_code]:bg-slate-900 [&_code]:px-1 [&_code]:text-amber-700 dark:[&_code]:text-amber-200 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:m-0 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0 [&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-2 [&_pre_code]:text-slate-800 dark:[&_pre_code]:text-slate-100 [&_table]:border [&_table]:border-slate-300 dark:[&_table]:border-slate-700 [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-700 [&_th]:px-2 [&_ul]:list-disc [&_ul]:pl-5">
+    <div
+      className={cn(
+        'prose prose-sm dark:prose-invert min-w-0 max-w-full break-words leading-relaxed [overflow-wrap:anywhere]',
+        'prose-p:text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground',
+        '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
+        '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
+        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground [&_code]:before:content-[""] [&_code]:after:content-[""]',
+        '[&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm',
+        '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border sm:[&_img]:max-w-xs',
+        '[&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5',
+        '[&_pre]:m-0 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0',
+        '[&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:text-foreground',
+        '[&_table]:border [&_td]:border [&_td]:px-2 [&_th]:border [&_th]:px-2',
+      )}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           pre({ children }) {
             return (
-              <ScrollArea className="my-2 max-w-full rounded border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+              <ScrollArea className="my-3 max-w-full rounded-lg border bg-muted/40">
                 {children}
               </ScrollArea>
             )
@@ -309,37 +518,109 @@ function AssistantMarkdown({ text }: { text: string }): JSX.Element {
   )
 }
 
-function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
-  const [open, setOpen] = useState(false)
+function ToolCallBlock({
+  call,
+  approval,
+  onApprovalDecision,
+}: {
+  call: ToolCallContent
+  approval: ApprovalRequiredEvent | null
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
+}): JSX.Element {
+  const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
+  const hasDiffPreview = isPendingApproval && (call.name === 'edit' || call.name === 'write')
+  const [open, setOpen] = useState(isPendingApproval)
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded border border-amber-200 bg-amber-50/70 text-xs dark:border-amber-900/60 dark:bg-amber-950/25">
+    <div
+      className={cn(
+        'min-w-0 max-w-full rounded-lg border transition-colors',
+        isPendingApproval
+          ? 'border-amber-400/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20'
+          : 'border-border',
+      )}
+      data-testid={
+        isPendingApproval ? `tool-call-pending-${call.callId}` : undefined
+      }
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-amber-800 hover:bg-amber-100/70 dark:text-amber-200 dark:hover:bg-amber-900/30"
+        className={cn(
+          'group/tool flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors',
+          isPendingApproval
+            ? 'hover:bg-amber-100/40 dark:hover:bg-amber-950/30'
+            : 'bg-muted/40 hover:bg-muted',
+        )}
         data-testid={`tool-call-toggle-${call.callId}`}
       >
-        <Wrench className="h-3.5 w-3.5 flex-none" />
-        <span className="font-medium">Assistant requested tool</span>
-        <span className="min-w-0 max-w-[45%] truncate rounded bg-white/70 px-1.5 py-0.5 font-mono dark:bg-slate-950/60">
+        <Wrench
+          className={cn(
+            'h-3.5 w-3.5 flex-none',
+            isPendingApproval
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-muted-foreground',
+          )}
+        />
+        <span
+          className={cn(
+            'font-medium',
+            isPendingApproval
+              ? 'text-amber-800 dark:text-amber-200'
+              : 'text-muted-foreground',
+          )}
+        >
+          {isPendingApproval ? 'Approval needed' : 'Assistant requested tool'}
+        </span>
+        <span className="min-w-0 max-w-[45%] truncate rounded border bg-background px-1.5 py-0.5 font-mono text-[11px]">
           {call.name}
         </span>
         <span className="flex-1" />
-        <span className="min-w-0 max-w-[35%] truncate font-mono text-[11px] text-amber-700/75 dark:text-amber-200/70">
+        <span className="hidden max-w-[35%] truncate font-mono text-[11px] text-muted-foreground sm:inline">
           {call.callId}
         </span>
         {open ? (
-          <ChevronDown className="h-3 w-3 flex-none" />
+          <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-3 w-3 flex-none" />
+          <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
       </button>
       {open ? (
-        <ScrollArea className="border-t border-amber-200 dark:border-amber-900/60">
-          <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-amber-900/90 [overflow-wrap:anywhere] dark:text-amber-100/80">
-            {JSON.stringify(call.input, null, 2)}
-          </pre>
-        </ScrollArea>
+        <div className="flex min-w-0 flex-col gap-2 border-t border-inherit px-3 py-2">
+          {isPendingApproval && hasDiffPreview ? (
+            <DiffPreview toolName={call.name} input={approval.input} />
+          ) : (
+            <div className="overflow-hidden rounded-md border bg-muted/30">
+              <ScrollArea>
+                <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                  {JSON.stringify(call.input, null, 2)}
+                </pre>
+              </ScrollArea>
+            </div>
+          )}
+          {isPendingApproval ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onApprovalDecision?.(call.callId, 'reject')}
+                data-testid="approval-reject"
+                className="h-7 px-3 flex-none"
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                Reject
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => onApprovalDecision?.(call.callId, 'approve')}
+                data-testid="approval-approve"
+                className="h-7 flex-none bg-emerald-600 px-3 text-white hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600"
+              >
+                <Check className="mr-1 h-3.5 w-3.5" />
+                Approve
+              </Button>
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )
@@ -354,45 +635,53 @@ function ToolResultBlock({
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const Icon = result.ok ? CheckCircle2 : XCircle
-  const tone = result.ok
-    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200'
-    : 'border-rose-200 bg-rose-50/70 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/25 dark:text-rose-200'
-  const hover = result.ok
-    ? 'hover:bg-emerald-100/70 dark:hover:bg-emerald-900/30'
-    : 'hover:bg-rose-100/70 dark:hover:bg-rose-900/30'
-  const border = result.ok ? 'border-emerald-200 dark:border-emerald-900/60' : 'border-rose-200 dark:border-rose-900/60'
+  const statusTone = result.ok
+    ? 'text-emerald-600 dark:text-emerald-400'
+    : 'text-rose-600 dark:text-rose-400'
+  const statusBadge = result.ok
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300'
+    : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300'
   return (
-    <div className={`min-w-0 max-w-full overflow-hidden rounded border text-xs ${tone}`}>
+    <div className="min-w-0 max-w-full">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left ${hover}`}
+        className="group/tool flex w-full min-w-0 items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-muted"
         data-testid={`tool-result-toggle-${result.callId}`}
       >
-        <Icon className="h-3.5 w-3.5 flex-none" />
-        <span className="font-medium">Tool result</span>
+        <Icon className={cn('h-3.5 w-3.5 flex-none', statusTone)} />
+        <span className="font-medium text-muted-foreground">Tool result</span>
         {toolName ? (
-          <span className="min-w-0 max-w-[45%] truncate rounded bg-white/70 px-1.5 py-0.5 font-mono dark:bg-slate-950/60">
+          <span className="min-w-0 max-w-[45%] truncate rounded border bg-background px-1.5 py-0.5 font-mono text-[11px]">
             {toolName}
           </span>
         ) : null}
-        <span className="rounded bg-white/70 px-1.5 py-0.5 dark:bg-slate-950/60">
+        <span
+          className={cn(
+            'flex-none rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider',
+            statusBadge,
+          )}
+        >
           {result.ok ? 'Succeeded' : 'Failed'}
         </span>
         <span className="flex-1" />
-        <span className="min-w-0 max-w-[35%] truncate font-mono text-[11px] opacity-75">{result.callId}</span>
+        <span className="hidden max-w-[35%] truncate font-mono text-[11px] text-muted-foreground sm:inline">
+          {result.callId}
+        </span>
         {open ? (
-          <ChevronDown className="h-3 w-3 flex-none" />
+          <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-3 w-3 flex-none" />
+          <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
       </button>
       {open ? (
-        <ScrollArea className={`border-t ${border}`}>
-          <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-slate-700 [overflow-wrap:anywhere] dark:text-slate-200">
-            {result.content}
-          </pre>
-        </ScrollArea>
+        <div className="mt-2 overflow-hidden rounded-lg border bg-muted/30">
+          <ScrollArea>
+            <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
+              {result.content}
+            </pre>
+          </ScrollArea>
+        </div>
       ) : null}
     </div>
   )
