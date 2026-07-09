@@ -61,6 +61,35 @@ const OK_RESPONSE = {
 }
 
 describe('anthropicAdapter — prompt caching', () => {
+  it('does not cap output tokens by default', async () => {
+    const sink: FetchArgs[] = []
+    const llm = anthropicAdapter({
+      apiKey: 'k',
+      fetchImpl: mockFetch(OK_RESPONSE, { sink }),
+    })
+    await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'generate source' }] }],
+      tools: [],
+    })
+    const body = JSON.parse(String(sink[0].init.body))
+    expect(body.max_tokens).toBeUndefined()
+  })
+
+  it('uses configured max output tokens in the provider request body', async () => {
+    const sink: FetchArgs[] = []
+    const llm = anthropicAdapter({
+      apiKey: 'k',
+      maxTokens: 32000,
+      fetchImpl: mockFetch(OK_RESPONSE, { sink }),
+    })
+    await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'generate source' }] }],
+      tools: [],
+    })
+    const body = JSON.parse(String(sink[0].init.body))
+    expect(body.max_tokens).toBe(32000)
+  })
+
   it('marks system prompt with cache_control by default', async () => {
     const sink: FetchArgs[] = []
     const llm = anthropicAdapter({
@@ -156,6 +185,8 @@ describe('anthropicAdapter — prompt caching', () => {
       messages: [{ role: 'user', content: [{ type: 'text', text: 'q' }] }],
       tools: [],
     })
+    expect(res.finishReason).toBe('end_turn')
+    expect(res.trace?.response?.finishReason).toBe('end_turn')
     expect(res.usage).toEqual({
       inputTokens: 50,
       outputTokens: 12,
@@ -196,7 +227,7 @@ describe('anthropicAdapter — prompt caching', () => {
         'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hel"}}\n\n',
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}\n\n',
-        'data: {"type":"message_delta","usage":{"output_tokens":2}}\n\n',
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
         'data: {"type":"message_stop"}\n\n',
       ]),
     })
@@ -209,6 +240,8 @@ describe('anthropicAdapter — prompt caching', () => {
 
     expect(deltas).toEqual(['hel', 'lo'])
     expect(res.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(res.finishReason).toBe('end_turn')
+    expect(res.trace?.response?.finishReason).toBe('end_turn')
     expect(res.trace?.response?.metrics?.durationMs).toEqual(expect.any(Number))
     expect(res.trace?.response?.metrics?.timeToFirstChunkMs).toEqual(expect.any(Number))
   })
@@ -257,5 +290,92 @@ describe('anthropicAdapter — prompt caching', () => {
       onTextDelta: () => {},
     })
     expect(res.trace?.gatewayRequestId).toBe('msg_stream_1')
+  })
+
+  it('retries one transient non-streaming fetch failure', async () => {
+    let calls = 0
+    const llm = anthropicAdapter({
+      apiKey: 'k',
+      retryDelayMs: 0,
+      fetchImpl: (async () => {
+        calls += 1
+        if (calls === 1) throw new Error('fetch failed')
+        return new Response(JSON.stringify(OK_RESPONSE), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }) as unknown as typeof fetch,
+    })
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      tools: [],
+    })
+    expect(calls).toBe(2)
+    expect(res.message.content).toEqual([{ type: 'text', text: 'ok' }])
+  })
+
+  it('retries one transient non-streaming HTTP failure', async () => {
+    let calls = 0
+    const llm = anthropicAdapter({
+      apiKey: 'k',
+      retryDelayMs: 0,
+      fetchImpl: (async () => {
+        calls += 1
+        if (calls === 1) return new Response('temporary upstream failure', { status: 503 })
+        return new Response(JSON.stringify(OK_RESPONSE), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }) as unknown as typeof fetch,
+    })
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      tools: [],
+    })
+    expect(calls).toBe(2)
+    expect(res.finishReason).toBe('end_turn')
+  })
+
+  it('does not retry aborted requests', async () => {
+    let calls = 0
+    const llm = anthropicAdapter({
+      apiKey: 'k',
+      retryDelayMs: 0,
+      fetchImpl: (async () => {
+        calls += 1
+        const err = new Error('aborted')
+        err.name = 'AbortError'
+        throw err
+      }) as unknown as typeof fetch,
+    })
+    const err = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      tools: [],
+    }).catch((e: unknown) => e)
+    expect(calls).toBe(1)
+    expect((err as Error).name).toBe('AbortError')
+  })
+
+  it('surfaces network failures with provider and endpoint context without leaking credentials', async () => {
+    const cause = new Error('getaddrinfo ENOTFOUND llm.invalid')
+    ;(cause as Error & { code?: string }).code = 'ENOTFOUND'
+    const err = new TypeError('fetch failed', { cause })
+    const llm = anthropicAdapter({
+      apiKey: 'redacted-test-api-key',
+      apiUrl: 'https://llm.invalid/v1/messages?api_key=secret',
+      maxRetries: 0,
+      fetchImpl: (async () => { throw err }) as unknown as typeof fetch,
+    })
+
+    const thrown = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      tools: [],
+    }).catch((e: unknown) => e)
+
+    expect((thrown as Error).message).toContain('Anthropic network error calling https://llm.invalid/v1/messages')
+    expect((thrown as Error).message).toContain('fetch failed')
+    expect((thrown as Error).message).toContain('ENOTFOUND')
+    expect((thrown as Error).message).not.toContain('test-redacted-api-key')
+    expect((thrown as Error).message).not.toContain('api_key=secret')
   })
 })

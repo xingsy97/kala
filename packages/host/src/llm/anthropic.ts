@@ -20,6 +20,8 @@ import type {
 import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
+import { classifyProviderError, isRetryable } from './provider-health.js'
+import { ProviderHTTPError, wrapProviderFetchError } from './provider-error.js'
 
 export type AnthropicOptions = {
   apiKey: string
@@ -39,10 +41,16 @@ export type AnthropicOptions = {
    * Defaults to true. Set false against gateways that reject the field.
    */
   cache?: boolean
+  /**
+   * Retry transient non-streaming request failures. Defaults to one retry.
+   * Streaming calls are not retried because partial UI deltas may already
+   * have been emitted.
+   */
+  maxRetries?: number
+  retryDelayMs?: number
 }
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
-const DEFAULT_MAX_TOKENS = 4096
 const DEFAULT_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -95,10 +103,12 @@ type AnthropicResponseBody = {
 export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
   const fetchImpl = opts.fetchImpl ?? fetch
   const model = opts.model ?? DEFAULT_MODEL
-  const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS
+  const maxTokens = opts.maxTokens
   const apiUrl = opts.apiUrl ?? DEFAULT_URL
   const cache = opts.cache ?? true
   const weightVersion = opts.weightVersion
+  const maxRetries = opts.maxRetries ?? 1
+  const retryDelayMs = opts.retryDelayMs ?? 250
 
   return {
     name: `anthropic:${model}`,
@@ -118,19 +128,18 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
           weightVersion,
         )
       }
-      const res = await fetchImpl(apiUrl, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': opts.apiKey,
-          'anthropic-version': ANTHROPIC_VERSION,
-        },
-        body: JSON.stringify(body),
+      const res = await fetchAnthropicWithRetry({
+        apiUrl,
+        apiKey: opts.apiKey,
+        body,
         signal: params.signal,
+        fetchImpl,
+        maxRetries,
+        retryDelayMs,
       })
       if (!res.ok) {
         const detail = await safeText(res)
-        throw new AnthropicHTTPError(res.status, detail)
+        throw new AnthropicHTTPError(res.status, detail, apiUrl)
       }
       const json = (await res.json()) as AnthropicResponseBody
       const parsed = parseResponse(json)
@@ -138,6 +147,7 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
         ...parsed,
         trace: makeAnthropicTrace(apiUrl, effectiveModel, body, {
           status: res.status,
+          ...(parsed.finishReason ? { finishReason: parsed.finishReason } : {}),
           body: json,
         }, {
           gatewayRequestId: extractAnthropicRequestId(res.headers, json),
@@ -146,6 +156,63 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
       }
     },
   }
+}
+
+async function fetchAnthropicWithRetry(input: {
+  apiUrl: string
+  apiKey: string
+  body: Record<string, unknown>
+  signal?: AbortSignal
+  fetchImpl: typeof fetch
+  maxRetries: number
+  retryDelayMs: number
+}): Promise<Response> {
+  let lastErr: unknown
+  const attempts = Math.max(1, input.maxRetries + 1)
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await input.fetchImpl(input.apiUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': input.apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify(input.body),
+        signal: input.signal,
+      }).catch((err: unknown) => wrapProviderFetchError('Anthropic', input.apiUrl, err))
+      if (res.ok || attempt === attempts - 1 || !isRetryable(classifyProviderError({ status: res.status }))) return res
+      lastErr = new AnthropicHTTPError(res.status, await safeText(res), input.apiUrl)
+    } catch (err) {
+      if (isAbortError(err) || attempt === attempts - 1 || !isRetryable(classifyProviderError(err))) throw err
+      lastErr = err
+    }
+    await delay(input.retryDelayMs * (attempt + 1), input.signal)
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError'
+}
+
+async function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) return
+  if (signal?.aborted) throw abortError()
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(abortError())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function abortError(): Error {
+  const err = new Error('aborted')
+  err.name = 'AbortError'
+  return err
 }
 
 /**
@@ -180,10 +247,10 @@ async function callStreaming(
     },
     body: JSON.stringify(body),
     signal,
-  })
+  }).catch((err: unknown) => wrapProviderFetchError('Anthropic', apiUrl, err))
   if (!res.ok || !res.body) {
     const detail = await safeText(res)
-    throw new AnthropicHTTPError(res.status, detail)
+    throw new AnthropicHTTPError(res.status, detail, apiUrl)
   }
 
   const blocks: AnthropicBlock[] = []
@@ -193,6 +260,7 @@ async function callStreaming(
   let cacheCreationTokens = 0
   let cacheReadTokens = 0
   let streamMessageId: string | undefined
+  let finishReason: string | undefined
   const streamEventTypes: string[] = []
 
   const reader = res.body.getReader()
@@ -239,6 +307,9 @@ async function callStreaming(
           cacheCreationTokens += u.cacheCreation
           cacheReadTokens += u.cacheRead
         },
+        (reason) => {
+          finishReason = reason
+        },
       )
     }
   }
@@ -257,13 +328,16 @@ async function callStreaming(
   return {
     message,
     usage,
+    ...(finishReason ? { finishReason } : {}),
     trace: makeAnthropicTrace(apiUrl, model, body, {
       status: res.status,
+      ...(finishReason ? { finishReason } : {}),
       streamEventTypes,
       metrics: streamMetrics(startedAt, firstChunkAt),
       body: {
         role: 'assistant',
         content: blocks,
+        ...(finishReason ? { stop_reason: finishReason } : {}),
         usage: {
           input_tokens: inputTokens,
           output_tokens: outputTokens,
@@ -340,6 +414,7 @@ function handleStreamEvent(
     cacheCreation: number
     cacheRead: number
   }) => void,
+  onFinishReason: (reason: string) => void,
 ): void {
   const kind = evt.type as string | undefined
   if (kind === 'content_block_start') {
@@ -404,6 +479,14 @@ function handleStreamEvent(
     return
   }
   if (kind === 'message_delta') {
+    const delta = (evt.delta as Record<string, unknown> | undefined) ?? {}
+    const finishReason =
+      typeof delta.stop_reason === 'string'
+        ? delta.stop_reason
+        : typeof evt.stop_reason === 'string'
+          ? evt.stop_reason
+          : undefined
+    if (finishReason) onFinishReason(finishReason)
     const usage = (evt.usage as { output_tokens?: number }) ?? {}
     if (typeof usage.output_tokens === 'number') {
       // message_delta usage.output_tokens is the running total, not a delta.
@@ -420,12 +503,13 @@ function handleStreamEvent(
   }
 }
 
-export class AnthropicHTTPError extends Error {
+export class AnthropicHTTPError extends ProviderHTTPError {
   constructor(
     readonly status: number,
     readonly bodyText: string,
+    readonly endpoint = 'Anthropic endpoint',
   ) {
-    super(`Anthropic HTTP ${status}: ${bodyText.slice(0, 200)}`)
+    super({ provider: 'Anthropic', endpoint, status, bodyText })
     this.name = 'AnthropicHTTPError'
   }
 }
@@ -433,7 +517,7 @@ export class AnthropicHTTPError extends Error {
 async function buildRequestBody(
   params: LLMCallParams,
   model: string,
-  maxTokens: number,
+  maxTokens: number | undefined,
   cache: boolean,
 ): Promise<Record<string, unknown>> {
   const { messages, tools, systemPrompt } = params
@@ -443,9 +527,9 @@ async function buildRequestBody(
   )
   const body: Record<string, unknown> = {
     model,
-    max_tokens: maxTokens,
     messages: anthropicMessages,
   }
+  if (maxTokens !== undefined) body.max_tokens = maxTokens
   if (resolvedSystem) {
     body.system = cache
       ? [{ type: 'text', text: resolvedSystem, cache_control: { type: 'ephemeral' } }]
@@ -600,7 +684,11 @@ function parseResponse(body: AnthropicResponseBody): LLMResponse {
         cacheReadTokens: numOr(body.usage.cache_read_input_tokens, 0),
       }
     : undefined
-  return { message, usage }
+  return {
+    message,
+    usage,
+    ...(body.stop_reason ? { finishReason: body.stop_reason } : {}),
+  }
 }
 
 function numOr(v: unknown, fallback: number): number {

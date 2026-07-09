@@ -23,7 +23,7 @@ import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
 
 export type RouterOptions = {
   readonly defaultAdapter: LLMAdapter
-  readonly byPrefix: ReadonlyArray<{ prefix: string; adapter: LLMAdapter }>
+  readonly byPrefix: ReadonlyArray<RouteEntry>
   readonly healthRegistry?: ProviderHealthRegistry
   readonly providerName?: (adapter: LLMAdapter) => string
   readonly maxFallbacks?: number
@@ -39,9 +39,21 @@ export type RouterDecision = {
 }
 
 export type MutableRouter = LLMAdapter & {
-  addRoute(prefix: string, adapter: LLMAdapter): void
+  addRoute(prefix: string, adapter: LLMAdapter, routedModel?: string): void
   deleteRoute(prefix: string): void
   lastDecision(): RouterDecision | undefined
+}
+
+export type RouteEntry = {
+  prefix: string
+  adapter: LLMAdapter
+  /** Model id to send to the provider after this route matches. */
+  routedModel?: string
+}
+
+type RouteTarget = {
+  adapter: LLMAdapter
+  routedModel?: string
 }
 
 const DEFAULT_MAX_FALLBACKS = 2
@@ -63,12 +75,13 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
       let lastError: unknown
       for (let i = 0; i < limit; i++) {
         const target = candidates[i]!
+        const routedParams = routeParams(params, target.routedModel)
         const started = Date.now()
         try {
-          const response = await target.call(params)
+          const response = await target.adapter.call(routedParams)
           const attempt: ProviderFallbackAttempt = {
-            provider: nameOf(target),
-            adapterName: target.name,
+            provider: nameOf(target.adapter),
+            adapterName: target.adapter.name,
             ...(params.model ? { model: params.model } : {}),
             durationMs: Date.now() - started,
             retryCount: i,
@@ -77,7 +90,7 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
           opts.healthRegistry?.record({
             provider: attempt.provider,
             ...(params.model ? { model: params.model } : {}),
-            adapterName: target.name,
+            adapterName: target.adapter.name,
             ok: true,
             durationMs: attempt.durationMs,
             timestamp: new Date().toISOString(),
@@ -86,7 +99,7 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
             attempts,
             finalOutcome: 'success',
             selectedProvider: attempt.provider,
-            selectedAdapter: target.name,
+            selectedAdapter: target.adapter.name,
             ...(params.model ? { selectedModel: params.model } : {}),
           }
           opts.onDecision?.(lastDecision)
@@ -94,8 +107,8 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
         } catch (err) {
           const label = classifyProviderError(err)
           const attempt: ProviderFallbackAttempt = {
-            provider: nameOf(target),
-            adapterName: target.name,
+            provider: nameOf(target.adapter),
+            adapterName: target.adapter.name,
             ...(params.model ? { model: params.model } : {}),
             label,
             durationMs: Date.now() - started,
@@ -105,7 +118,7 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
           opts.healthRegistry?.record({
             provider: attempt.provider,
             ...(params.model ? { model: params.model } : {}),
-            adapterName: target.name,
+            adapterName: target.adapter.name,
             ok: false,
             label,
             durationMs: attempt.durationMs,
@@ -124,10 +137,11 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
       if (lastError instanceof Error) throw lastError
       throw new Error('router: all candidates failed')
     },
-    addRoute(prefix, adapter) {
+    addRoute(prefix, adapter, routedModel) {
       const existing = byPrefix.findIndex((p) => p.prefix === prefix)
-      if (existing === -1) byPrefix.push({ prefix, adapter })
-      else byPrefix[existing] = { prefix, adapter }
+      const route = { prefix, adapter, ...(routedModel ? { routedModel } : {}) }
+      if (existing === -1) byPrefix.push(route)
+      else byPrefix[existing] = route
     },
     deleteRoute(prefix) {
       const index = byPrefix.findIndex((p) => p.prefix === prefix)
@@ -146,34 +160,39 @@ function shouldTryNext(label: ProviderErrorLabel, currentIndex: number, lastInde
 }
 
 function candidateOrder(
-  opts: { defaultAdapter: LLMAdapter; byPrefix: ReadonlyArray<{ prefix: string; adapter: LLMAdapter }> },
+  opts: { defaultAdapter: LLMAdapter; byPrefix: ReadonlyArray<RouteEntry> },
   model: string | undefined,
   health: ProviderHealthRegistry | undefined,
   nameOf: (adapter: LLMAdapter) => string,
-): readonly LLMAdapter[] {
+): readonly RouteTarget[] {
   const primary = resolvePrimary(opts, model)
   const seen = new Set<string>()
-  const ordered: LLMAdapter[] = []
-  const push = (adapter: LLMAdapter): void => {
-    const key = `${nameOf(adapter)}::${adapter.name}`
+  const ordered: RouteTarget[] = []
+  const push = (target: RouteTarget): void => {
+    const key = `${nameOf(target.adapter)}::${target.adapter.name}::${target.routedModel ?? ''}`
     if (seen.has(key)) return
     seen.add(key)
-    ordered.push(adapter)
+    ordered.push(target)
   }
   push(primary)
-  for (const { adapter } of opts.byPrefix) push(adapter)
-  push(opts.defaultAdapter)
+  for (const route of opts.byPrefix) push({ adapter: route.adapter, ...(route.routedModel ? { routedModel: route.routedModel } : {}) })
+  push({ adapter: opts.defaultAdapter })
   if (!health) return ordered
-  const healthy = ordered.filter((adapter) => health.isProviderHealthy(nameOf(adapter)))
+  const healthy = ordered.filter((target) => health.isProviderHealthy(nameOf(target.adapter)))
   return healthy.length > 0 ? healthy : ordered
 }
 
-function resolvePrimary(opts: { defaultAdapter: LLMAdapter; byPrefix: ReadonlyArray<{ prefix: string; adapter: LLMAdapter }> }, model: string | undefined): LLMAdapter {
-  if (!model) return opts.defaultAdapter
+function resolvePrimary(opts: { defaultAdapter: LLMAdapter; byPrefix: ReadonlyArray<RouteEntry> }, model: string | undefined): RouteTarget {
+  if (!model) return { adapter: opts.defaultAdapter }
   const exact = opts.byPrefix.find((p) => p.prefix === model)
-  if (exact) return exact.adapter
+  if (exact) return { adapter: exact.adapter, ...(exact.routedModel ? { routedModel: exact.routedModel } : {}) }
   const prefix = opts.byPrefix.find((p) => model.startsWith(p.prefix))
-  return prefix?.adapter ?? opts.defaultAdapter
+  return prefix ? { adapter: prefix.adapter, ...(prefix.routedModel ? { routedModel: prefix.routedModel } : {}) } : { adapter: opts.defaultAdapter }
+}
+
+function routeParams(params: LLMCallParams, routedModel: string | undefined): LLMCallParams {
+  if (!routedModel || params.model === routedModel) return params
+  return { ...params, model: routedModel }
 }
 
 function providerNameFromAdapter(adapter: LLMAdapter): string {

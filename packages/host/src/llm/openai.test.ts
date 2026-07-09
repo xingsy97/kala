@@ -76,12 +76,38 @@ describe('openaiAdapter', () => {
 
     expect(res.message.role).toBe('assistant')
     expect(res.message.content).toEqual([{ type: 'text', text: 'hi there' }])
+    expect(res.finishReason).toBe('stop')
+    expect(res.trace?.response?.finishReason).toBe('stop')
     expect(res.usage).toEqual({ inputTokens: 12, outputTokens: 4, cacheReadTokens: 0 })
     expect(sink[0].url).toBe('https://api.openai.com/v1/chat/completions')
     const body = JSON.parse(String(sink[0].init.body))
     expect(body.model).toBe('gpt-4o')
+    expect(body.max_tokens).toBeUndefined()
     expect(body.tools).toBeUndefined()
     expect(body.messages).toEqual([{ role: 'user', content: 'hi' }])
+  })
+
+  it('uses configured max output tokens in the provider request body', async () => {
+    const sink: FetchArgs[] = []
+    const llm = openaiAdapter({
+      apiKey: 'test-redacted-api-key',
+      maxTokens: 32000,
+      fetchImpl: mockFetch(
+        {
+          id: 'x',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' } }],
+        },
+        { sink },
+      ),
+    })
+
+    await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'generate source' }] }],
+      tools: [],
+    })
+
+    const body = JSON.parse(String(sink[0].init.body))
+    expect(body.max_tokens).toBe(32000)
   })
 
   it('honors baseUrl override (openai-compatible gateways)', async () => {
@@ -184,6 +210,8 @@ describe('openaiAdapter', () => {
         input: { path: 'README.md' },
       },
     ])
+    expect(res.finishReason).toBe('tool_calls')
+    expect(res.trace?.response?.finishReason).toBe('tool_calls')
   })
 
   it('round-trips a full assistant→tool→user cycle to OpenAI shape', async () => {
@@ -500,5 +528,27 @@ describe('openaiAdapter', () => {
       onTextDelta: () => {},
     })
     expect(res.trace?.gatewayRequestId).toBe('chatcmpl_stream_1')
+  })
+
+  it('surfaces network failures with provider and endpoint context without leaking credentials', async () => {
+    const cause = new Error('connect ECONNREFUSED 127.0.0.1:9')
+    ;(cause as Error & { code?: string }).code = 'ECONNREFUSED'
+    const err = new TypeError('fetch failed', { cause })
+    const llm = openaiAdapter({
+      apiKey: 'test-redacted-api-key',
+      baseUrl: 'http://user:password@127.0.0.1:9/v1',
+      fetchImpl: (async () => { throw err }) as unknown as typeof fetch,
+    })
+
+    const thrown = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [],
+    }).catch((e: unknown) => e)
+
+    expect((thrown as Error).message).toContain('OpenAI network error calling http://127.0.0.1:9/v1/chat/completions')
+    expect((thrown as Error).message).toContain('fetch failed')
+    expect((thrown as Error).message).toContain('ECONNREFUSED')
+    expect((thrown as Error).message).not.toContain('test-redacted-api-key')
+    expect((thrown as Error).message).not.toContain('password')
   })
 })
