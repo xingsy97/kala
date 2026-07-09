@@ -2,8 +2,6 @@
 
 Wire-protocol types shared by Host, Executor, and Dashboard. **Types only** — no runtime code, no dependencies.
 
-**Status**: skeleton in place; types filled in as Phases 2–4 progress.
-
 ---
 
 ## Why this package exists

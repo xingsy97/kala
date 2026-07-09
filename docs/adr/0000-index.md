@@ -40,7 +40,6 @@ What follows from this decision — good and bad.
 | [0009](0009-provider-adapter-strategy.md) | Provider adapters behind a thin `LLMAdapter` interface | accepted |
 | [0010](0010-fsm-dispatch-table.md) | FSM as a hand-rolled dispatch table, not XState | accepted |
 | [0011](0011-rename-host-and-core.md) | Rename `packages/core` → `packages/host`, `reducer.ts` → `core.ts` | accepted |
-| [0012](0012-dashboard-ui-redesign.md) | Dashboard UI — session/executor management + layout + framework upgrade | superseded by 0013 |
 | [0013](0013-dashboard-finder-layout.md) | Dashboard Finder-style layout + control-plane events | accepted |
 
 ## When to add an ADR

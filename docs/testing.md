@@ -71,7 +71,7 @@ If a kernel test needs any of the above, the kernel has grown IO and violated [A
 
 ### 2.5 Current state
 
-43 tests in `packages/kernel/src/core.test.ts`. See file for concrete examples.
+44 tests in `packages/kernel/src/core.test.ts`. See file for concrete examples.
 
 ---
 
@@ -180,16 +180,27 @@ Use `@testing-library/react`. Snapshot tests are permitted but should assert use
 
 ### 5.2 E2e tests (Playwright)
 
-The minimum e2e suite (post-Phase 4):
+The minimum e2e suite for the dashboard:
 1. **Golden path**: open dashboard, create session, send "hi", verify assistant response appears
 2. **Tool call flow**: send "read /tmp/notes.md" (with a mock LLM returning a tool_call), verify approval UI or tool result renders
 3. **Cancellation**: send a long message, click cancel, verify state → done
 
 Playwright fixtures spin up Host + Executor + Dashboard on random local ports. Use a **mock LLM adapter** (record/replay) so tests don't burn real API tokens.
 
+### 5.3 Real-browser cross-check for UI changes
+
+Component tests (React Testing Library + jsdom) verify contract, not visual behavior. **Any UI change — theme, layout, dashboard bundle — MUST be cross-checked in a real headless Chromium before shipping.** The concrete rule that came out of the OKLCH dark-mode regression:
+
+1. Rebuild the dashboard (`pnpm --filter dashboard build`) and restart Host — the dashboard is served from `packages/dashboard/dist/`, not the vite dev server, so unbuilt `.tsx` edits will not appear at `:3000`.
+2. Attach to Chrome with remote debugging (`--remote-debugging-port=9222`) and connect via `puppeteer-core`.
+3. Load `http://localhost:3000`, toggle each theme the change touches, and read `getComputedStyle(document.body).backgroundColor` (and text color of the primary panels). Fail the check if the computed color falls outside the expected range for that theme — a "white screen in dark mode" bug can pass every jsdom test because jsdom doesn't compute CSS.
+4. Verify the fetched CSS bundle is served with `Cache-Control: no-cache` (or a filename hash) — otherwise old CSS keeps loading even after a rebuild and the check appears to pass on a stale bundle.
+
+The rule is stricter than the general Playwright suite because Playwright fixtures use their own dev server; this check is against the production-shape bundle that ends users see.
+
 ---
 
-## 6. Full-system e2e (post-Phase 5)
+## 6. Full-system e2e (dashboard + host + executor + replay/fork)
 
 A single golden-path test that:
 1. Starts Host + Executor + Dashboard

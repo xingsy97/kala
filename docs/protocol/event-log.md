@@ -2,7 +2,7 @@
 
 **Format**: JSONL (one JSON object per line, UTF-8, LF-terminated)
 **Storage**: `~/.agent-kernel/sessions/<iso-timestamp>_<sessionId>.jsonl`
-**Status**: Normative for v1
+**Status**: Normative.
 
 The event log is the **canonical source of truth** for a session. Everything else — in-memory state, in-flight snapshots, dashboard timelines — can be reconstructed from the log. Nothing else is authoritative.
 
@@ -53,18 +53,19 @@ type HeaderEntry = {
   seq: 0
   ts: string
   sessionId: string
-  parentSessionId?: string            // present iff this session is a fork
+  parentSessionId?: string            // present iff this session is a fork or a child agent session
   parentCursor?: number               // fork point in the parent session's log
-  workspaceId?: string                // routing key: the workspace (a machine, see ADR 0014) this session is bound to. Written once at create time; Host uses it to route `tool:call` to the executor announcing the same id. Undefined for legacy logs predating the field — treated as "unassigned".
+  workspaceId?: string                // routing key: the workspace (a machine) this session is bound to. Written once at create time; Host uses it to route `tool:call` to the executor announcing the same id. Undefined for legacy logs predating the field — treated as "unassigned".
   workspaceName?: string              // display label captured at create time. Not authoritative — the live executor's `workspaceName` is what the dashboard shows when an executor is attached.
+  initialCwd?: string                 // initial working directory for the session. Validated at create time against the workspace sandbox roots and mirrored into `initialState.cwd`.
   formatVersion: 1                    // bumps on breaking log-format change
   kernelVersion: string               // e.g. "@agent-kernel/kernel@0.1.0"
   config: AgentConfig                 // frozen at session start
-  initialState: AgentState            // AgentState *before* seq 1 is applied
+  initialState: AgentState            // AgentState *before* seq 1 is applied. Includes `contextPressureLevel`, `approvalMode`, `todos`, and optional `cwd`.
 }
 ```
 
-The header captures everything needed to reconstruct the session's initial conditions. `config` is written here (not in every event line) because it never changes.
+The header captures everything needed to reconstruct the session's initial conditions. `config` is written here (not in every event line) because it never changes. Child sessions created by the host-side `agent` tool reuse the fork/lineage fields (`parentSessionId`, `parentCursor`) — the agent tool is not a separate log kind.
 
 ### 2.2 Event (kind: 'event')
 
@@ -83,9 +84,37 @@ type EventEntry = {
 
 `effects` is included for observability (dashboard timeline, debugging). Replay does **not** need `effects` — the kernel re-derives them from `(state, event, config)`. Effects in the log are a checked-in-transcript artifact; if a replay produces different effects, the kernel implementation drifted from the recorded run.
 
+**Extended event kinds**: `event.kind` may be `compact_replaced`,
+`approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union
+in SPEC §1.5. `cwd_changed` is the durable source for `AgentState.cwd`;
+session summaries derive `currentCwd` by folding the log. `compact_replaced`
+stores `summary`, `replacedCount`, `tokensBefore`, `tokensAfter`, `trigger`
+(`manual` | `auto`), the summarizer `request` (`model`, `systemPrompt`,
+`messages`, `tools`), and optional `responseUsage`. Replay ignores the
+request/trigger/responseUsage metadata; dashboard history uses them to
+inspect the compact LLM call.
+
 **Storage of `usage`**: To keep log lines small, `usage` is written only on lines where it changed (i.e. after an `llm_response` with a delta). Consumers reconstructing running usage can pull it from these lines.
 
-### 2.3 Snapshot (kind: 'snapshot')
+### 2.3 Metadata (kind: 'metadata')
+
+Written by the host on operator actions that don't change kernel state —
+currently only `client:rename_session`. Multiple metadata entries may exist;
+readers walk them in reverse to find the most recent value per field.
+
+```ts
+type MetadataEntry = {
+  kind: 'metadata'
+  seq: 0                      // metadata entries do not advance the cursor
+  ts: string
+  label?: string              // operator-set display label; empty string clears the override
+}
+```
+
+An empty `label` acts as a clear signal — the session summary falls back to
+`firstUserMessage` when the latest label entry is empty.
+
+### 2.4 Snapshot (kind: 'snapshot')
 
 Optional. Written periodically or on demand to accelerate replay.
 
@@ -185,6 +214,24 @@ After replay, verify:
 
 Both are cheap invariants that catch log corruption and kernel drift early.
 
+### 4.3 Crash recovery
+
+Load also patches sessions that were mid-turn when the host died:
+
+- **Pending tool calls left in the log.** If the folded state ends in
+  `awaiting_approval` or `executing_tools` with non-empty `pendingCalls`,
+  the store appends a synthetic `user_approve` (for calls that were still
+  awaiting) followed by a failed `tool_result` (`ok: false`,
+  `content: 'host restarted while call was pending'`) for each pending
+  call. These entries are appended to the same JSONL so replay stays
+  deterministic.
+- **Interrupted LLM streams.** If the folded state ends in `thinking`
+  with no pending calls, the store appends an `llm_response` with body
+  `[interrupted]`, moving the FSM to `done`.
+
+Both fix-ups run once at load time. The persisted log is the durable
+recovery artifact; there is no separate crash journal.
+
 ---
 
 ## 5. Fork semantics
@@ -272,18 +319,3 @@ This is the load-bearing property. If it breaks, either:
 - The kernel is no longer pure (a bug in kernel)
 - The log was tampered with
 - The kernelVersion changed and introduced a semantic difference (must be a major bump)
-
----
-
-## 11. Implementation Update (2026-07-05)
-
-Current logs may contain these additional deterministic fields and events:
-
-- Header may include `parentSessionId`, `parentCursor`, `workspaceId`, `workspaceName`, and `initialCwd`.
-- Header `initialState` includes `contextPressureLevel`, `approvalMode`, `todos`, and optional `cwd`.
-- Events may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
-- `cwd_changed` is the durable source for `AgentState.cwd`; session summaries derive `currentCwd` by folding the log, and the dashboard displays that cwd in Explorer and the workbench toolbar.
-- `compact_replaced` stores `summary`, `replacedCount`, `tokensBefore`, and `tokensAfter`. Newer logs also store `trigger`, the summarizer `request` (`model`, `systemPrompt`, `messages`, `tools`), and optional `responseUsage`; replay ignores those metadata fields, but dashboard history uses them to inspect the compact LLM request.
-- Crash recovery appends synthetic `user_approve` and/or failed `tool_result` events when a loaded session was stuck with pending tool calls.
-- Child sessions created by the host-side `agent` tool use normal fork/lineage header fields (`parentSessionId`, `parentCursor`) and their own JSONL file.
-- Background shell internals are not stored directly. The parent session only logs the normal `tool_result` content returned by `bash`, `bash_output`, or `kill_shell`.

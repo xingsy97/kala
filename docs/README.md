@@ -18,15 +18,17 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Three-process topology and a full turn end-to-end |
+| [platform.md](platform.md) | SaaS platformization design (multi-user cloud brain + local executors) — planned, not yet implemented |
+| [mcp.md](mcp.md) | MCP runtime integration design (planned, not yet implemented) |
 | [adr/](adr/) | Architecture Decision Records — one file per big call, with alternatives and consequences |
 
 ## Process
 
 | File | Purpose |
 |---|---|
-| [ROADMAP.md](ROADMAP.md) | Six phases, acceptance criteria, current status |
-| [implementation-guide.md](implementation-guide.md) | Step-by-step guide for building Phases 2–6 from the specs |
+| [ROADMAP.md](ROADMAP.md) | Shipped feature ledger, deferred items, non-goals |
 | [testing.md](testing.md) | Test strategy at each layer + CI configuration |
+| [RELEASING.md](RELEASING.md) | npm publish workflow (tag-driven) |
 
 ## Reference material
 
@@ -40,7 +42,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 
 If two docs contradict each other, the more normative one wins:
 
-**SPEC.md > protocol/*.md > tools.md > implementation-guide.md > everything else**
+**SPEC.md > protocol/*.md > tools.md > everything else**
 
 If you find such a contradiction, please open a PR to fix the lower-tier doc — that's the definition of a doc bug.
 

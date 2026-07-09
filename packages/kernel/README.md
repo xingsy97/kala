@@ -1,8 +1,6 @@
 # @agent-kernel/kernel
 
-The pure-function heart of `agent-kernel`. An FSM, some types, and two combinators — nothing else.
-
-**Status**: v0.1 shipped (23 unit tests, zero runtime deps).
+The pure-function heart of `agent-kernel`. An FSM, some types, and two combinators — nothing else. Zero runtime dependencies.
 
 ---
 
@@ -55,7 +53,7 @@ All of that is the host's job. See [ADR 0005](../../docs/adr/0005-kernel-boundar
 ## Running tests
 
 ```bash
-pnpm test        # 23 tests
+pnpm test
 pnpm typecheck
 pnpm build
 ```
@@ -84,5 +82,5 @@ src/
 ├── state.ts     # createInitialState, createConfig
 ├── fold.ts      # fold, foldWithTrace, fork
 ├── index.ts     # barrel
-└── core.test.ts # 23 tests covering every legal transition
+└── core.test.ts # covers every legal transition
 ```

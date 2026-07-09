@@ -33,7 +33,7 @@ const payload: ServerSettingsPayload = {
   },
   mcp: {
     supported: false,
-    note: 'MCP runtime is not implemented yet — declaring servers in session config is a no-op.',
+    note: 'MCP runtime is not implemented yet — see docs/mcp.md for the planned design.',
   },
 }
 
@@ -104,7 +104,7 @@ describe('SettingsDialog', () => {
 
     fireEvent.click(screen.getByTestId('settings-tab-mcp'))
     await screen.findByText('Not implemented yet')
-    expect(screen.getAllByText(/no-op/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/docs\/mcp\.md/i).length).toBeGreaterThan(0)
   })
 
   it('surfaces a fetch failure without crashing', async () => {
