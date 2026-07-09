@@ -1,0 +1,90 @@
+name: GitHub Release Assets
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'host-v*'
+      - 'executor-v*'
+      - 'dashboard-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish assets to, for example v0.1.0 or host-v0.1.0'
+        required: true
+      component:
+        description: 'Asset group to publish: all, host, executor, or dashboard'
+        required: false
+        default: ''
+
+jobs:
+  release-assets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Resolve release target
+        id: release
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            COMPONENT="${{ inputs.component }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            COMPONENT=""
+          fi
+
+          if [ -z "$COMPONENT" ]; then
+            case "$TAG" in
+              host-v*) COMPONENT="host" ;;
+              executor-v*) COMPONENT="executor" ;;
+              dashboard-v*) COMPONENT="dashboard" ;;
+              v*) COMPONENT="all" ;;
+              *)
+                echo "Cannot infer release component from tag $TAG" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          case "$COMPONENT" in
+            all|host|executor|dashboard) ;;
+            *)
+              echo "Unknown component $COMPONENT" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "component=$COMPONENT" >> "$GITHUB_OUTPUT"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm run build:release-assets -- --component ${{ steps.release.outputs.component }}
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          COMPONENT: ${{ steps.release.outputs.component }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* \
+              --title "$TAG" \
+              --notes "agent-kernel $COMPONENT release assets. See manifest.json and SHA256SUMS."
+          fi

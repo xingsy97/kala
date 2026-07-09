@@ -25,7 +25,7 @@ export function ChatPanel({ messages, highlightIndex }: Props): JSX.Element {
     }
   }
   return (
-    <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-900">
+    <div className="flex min-w-0 flex-col divide-y divide-slate-100 dark:divide-slate-900">
       {messages.length === 0 ? (
         <div className="px-6 py-8 text-slate-500 text-sm">No messages yet.</div>
       ) : null}
@@ -64,7 +64,7 @@ function MessageRow({
     <div
       id={`msg-${index}`}
       data-message-index={index}
-      className={`px-6 py-4 transition-colors ${
+      className={`min-w-0 overflow-hidden px-6 py-4 transition-colors ${
         highlighted ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
       }`}
     >
@@ -73,7 +73,7 @@ function MessageRow({
       >
         {label}
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex min-w-0 flex-col gap-2">
         {message.content.map((c, i) => (
           <ContentBlock
             key={i}
@@ -99,7 +99,7 @@ function ContentBlock({
   if (content.type === 'text') {
     if (role === 'assistant') return <AssistantMarkdown text={content.text} />
     return (
-      <div className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">
+      <div className="min-w-0 whitespace-pre-wrap break-words text-sm text-slate-800 [overflow-wrap:anywhere] dark:text-slate-100">
         {content.text}
       </div>
     )
@@ -139,13 +139,13 @@ function ImageBlock({ content }: { content: import('@agent-kernel/kernel').Image
 
 function AssistantMarkdown({ text }: { text: string }): JSX.Element {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none text-slate-800 dark:text-slate-100 leading-relaxed [&_pre]:m-0 [&_pre]:bg-transparent [&_pre]:p-0 [&_pre]:overflow-visible [&_code]:text-amber-700 dark:[&_code]:text-amber-200 [&_code]:bg-slate-100 dark:[&_code]:bg-slate-900 [&_code]:px-1 [&_code]:rounded [&_pre_code]:block [&_pre_code]:bg-transparent [&_pre_code]:text-slate-800 dark:[&_pre_code]:text-slate-100 [&_pre_code]:p-2 [&_pre_code]:min-w-max [&_a]:text-sky-600 dark:[&_a]:text-sky-400 [&_a]:underline [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:border [&_table]:border-slate-300 dark:[&_table]:border-slate-700 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-700 [&_th]:px-2 [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 dark:[&_blockquote]:border-slate-600 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 dark:[&_blockquote]:text-slate-300">
+    <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full break-words text-slate-800 leading-relaxed [overflow-wrap:anywhere] dark:text-slate-100 [&_a]:text-sky-600 dark:[&_a]:text-sky-400 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 dark:[&_blockquote]:border-slate-600 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 dark:[&_blockquote]:text-slate-300 [&_code]:rounded [&_code]:bg-slate-100 dark:[&_code]:bg-slate-900 [&_code]:px-1 [&_code]:text-amber-700 dark:[&_code]:text-amber-200 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:m-0 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0 [&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-2 [&_pre_code]:text-slate-800 dark:[&_pre_code]:text-slate-100 [&_table]:border [&_table]:border-slate-300 dark:[&_table]:border-slate-700 [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:px-2 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-700 [&_th]:px-2 [&_ul]:list-disc [&_ul]:pl-5">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           pre({ children }) {
             return (
-              <ScrollArea className="my-2 rounded border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+              <ScrollArea className="my-2 max-w-full rounded border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
                 {children}
               </ScrollArea>
             )
@@ -161,20 +161,20 @@ function AssistantMarkdown({ text }: { text: string }): JSX.Element {
 function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
   const [open, setOpen] = useState(false)
   return (
-    <div className="rounded border border-amber-200 bg-amber-50/70 text-xs dark:border-amber-900/60 dark:bg-amber-950/25">
+    <div className="min-w-0 max-w-full overflow-hidden rounded border border-amber-200 bg-amber-50/70 text-xs dark:border-amber-900/60 dark:bg-amber-950/25">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-amber-800 hover:bg-amber-100/70 dark:text-amber-200 dark:hover:bg-amber-900/30"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-amber-800 hover:bg-amber-100/70 dark:text-amber-200 dark:hover:bg-amber-900/30"
         data-testid={`tool-call-toggle-${call.callId}`}
       >
         <Wrench className="h-3.5 w-3.5 flex-none" />
         <span className="font-medium">Assistant requested tool</span>
-        <span className="font-mono rounded bg-white/70 px-1.5 py-0.5 dark:bg-slate-950/60">
+        <span className="min-w-0 max-w-[45%] truncate rounded bg-white/70 px-1.5 py-0.5 font-mono dark:bg-slate-950/60">
           {call.name}
         </span>
         <span className="flex-1" />
-        <span className="font-mono text-[11px] text-amber-700/75 dark:text-amber-200/70">
+        <span className="min-w-0 max-w-[35%] truncate font-mono text-[11px] text-amber-700/75 dark:text-amber-200/70">
           {call.callId}
         </span>
         {open ? (
@@ -185,7 +185,7 @@ function ToolCallBlock({ call }: { call: ToolCallContent }): JSX.Element {
       </button>
       {open ? (
         <ScrollArea className="border-t border-amber-200 dark:border-amber-900/60">
-          <pre className="min-w-max px-3 py-2 text-amber-900/90 dark:text-amber-100/80 whitespace-pre-wrap">
+          <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-amber-900/90 [overflow-wrap:anywhere] dark:text-amber-100/80">
             {JSON.stringify(call.input, null, 2)}
           </pre>
         </ScrollArea>
@@ -211,17 +211,17 @@ function ToolResultBlock({
     : 'hover:bg-rose-100/70 dark:hover:bg-rose-900/30'
   const border = result.ok ? 'border-emerald-200 dark:border-emerald-900/60' : 'border-rose-200 dark:border-rose-900/60'
   return (
-    <div className={`rounded border text-xs ${tone}`}>
+    <div className={`min-w-0 max-w-full overflow-hidden rounded border text-xs ${tone}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center gap-2 px-3 py-2 text-left ${hover}`}
+        className={`flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left ${hover}`}
         data-testid={`tool-result-toggle-${result.callId}`}
       >
         <Icon className="h-3.5 w-3.5 flex-none" />
         <span className="font-medium">Tool result</span>
         {toolName ? (
-          <span className="font-mono rounded bg-white/70 px-1.5 py-0.5 dark:bg-slate-950/60">
+          <span className="min-w-0 max-w-[45%] truncate rounded bg-white/70 px-1.5 py-0.5 font-mono dark:bg-slate-950/60">
             {toolName}
           </span>
         ) : null}
@@ -229,7 +229,7 @@ function ToolResultBlock({
           {result.ok ? 'Succeeded' : 'Failed'}
         </span>
         <span className="flex-1" />
-        <span className="font-mono text-[11px] opacity-75">{result.callId}</span>
+        <span className="min-w-0 max-w-[35%] truncate font-mono text-[11px] opacity-75">{result.callId}</span>
         {open ? (
           <ChevronDown className="h-3 w-3 flex-none" />
         ) : (
@@ -238,7 +238,7 @@ function ToolResultBlock({
       </button>
       {open ? (
         <ScrollArea className={`border-t ${border}`}>
-          <pre className="min-w-max px-3 py-2 whitespace-pre-wrap text-slate-700 dark:text-slate-200">
+          <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-slate-700 [overflow-wrap:anywhere] dark:text-slate-200">
             {result.content}
           </pre>
         </ScrollArea>

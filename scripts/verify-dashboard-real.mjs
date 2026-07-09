@@ -13,6 +13,8 @@
  *      transcript messages visible.
  *   3. Scroll containers use Radix ScrollArea in the rendered DOM and dashboard
  *      app code has no raw overflow utility classes left in feature surfaces.
+ *   4. Composer footer status chips stay single-line and JSON viewers respond
+ *      to real mouse wheel scrolling.
  */
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
@@ -109,9 +111,11 @@ try {
 
   await verifyModelPicker(page)
   await verifyScrollbar(page)
+  await verifyComposerFooterLayout(page)
   await verifyEmptyCompact(page)
   await verifyStreaming(page)
   await verifyStateFlow(page)
+  await verifyJsonWheelScroll(page)
   await verifyCompact(page)
 
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
@@ -290,6 +294,75 @@ async function verifyScrollbar(page) {
   check('chat panel uses Radix ScrollArea viewport', dom.chatHasRadixViewport)
   check('rendered DOM has no raw overflow auto/scroll utility classes', dom.rawOverflowClass.length === 0, dom.rawOverflowClass.join(' | '))
   check('dashboard source has no raw overflow auto/scroll utility classes', sourceRaw.length === 0, sourceRaw.join(' | '))
+}
+
+async function verifyComposerFooterLayout(page) {
+  const metrics = await page.evaluate(() => {
+    const chips = document.querySelector('[data-testid="composer-state-chips"]')
+    const footer = chips?.parentElement
+    const chipRects = Array.from(chips?.children ?? []).map((el) => {
+      const rect = el.getBoundingClientRect()
+      return {
+        text: el.textContent || '',
+        width: rect.width,
+        height: rect.height,
+        scrollWidth: el.scrollWidth,
+        scrollHeight: el.scrollHeight,
+        whiteSpace: getComputedStyle(el).whiteSpace,
+      }
+    })
+    return {
+      bodyScrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+      footerWidth: footer?.getBoundingClientRect().width ?? 0,
+      footerScrollWidth: footer?.scrollWidth ?? 0,
+      chipsText: chips?.textContent || '',
+      chipRects,
+    }
+  })
+  const tall = metrics.chipRects.filter((r) => r.height > 34)
+  const clipped = metrics.chipRects.filter((r) => r.scrollWidth > Math.ceil(r.width) + 1)
+  check('composer footer does not create page horizontal overflow', metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
+  check('composer footer content stays inside footer width', metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
+  check('composer state chips render as single-line pills', tall.length === 0 && clipped.length === 0, JSON.stringify(metrics.chipRects))
+}
+
+async function verifyJsonWheelScroll(page) {
+  const before = await page.evaluate(() => {
+    const root = document.querySelector('[data-testid="json-block-scrollarea"]')
+    const viewport = root?.querySelector('[data-radix-scroll-area-viewport]')
+    if (!root || !viewport) return { found: false }
+    const rect = viewport.getBoundingClientRect()
+    return {
+      found: true,
+      scrollTop: viewport.scrollTop,
+      clientHeight: viewport.clientHeight,
+      scrollHeight: viewport.scrollHeight,
+      overflowY: getComputedStyle(viewport).overflowY,
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    }
+  })
+  if (before.found) {
+    await page.mouse.move(before.x, before.y)
+    await page.mouse.wheel({ deltaY: 500 })
+    await sleep(150)
+  }
+  const after = await page.evaluate(() => {
+    const root = document.querySelector('[data-testid="json-block-scrollarea"]')
+    const viewport = root?.querySelector('[data-radix-scroll-area-viewport]')
+    if (!root || !viewport) return { found: false }
+    return {
+      found: true,
+      scrollTop: viewport.scrollTop,
+      clientHeight: viewport.clientHeight,
+      scrollHeight: viewport.scrollHeight,
+      overflowY: getComputedStyle(viewport).overflowY,
+    }
+  })
+  const result = { before, after }
+  check('json viewer has a scrollable Radix viewport', before.found && before.scrollHeight > before.clientHeight, JSON.stringify(result))
+  check('json viewer wheel changes scrollTop', after.found && after.scrollTop > before.scrollTop, JSON.stringify(result))
 }
 
 async function installChatMutationProbe(page) {
