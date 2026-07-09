@@ -662,6 +662,43 @@ describe('step: compact_replaced', () => {
     expect(next.contextPressureLevel).toBe('none')
   })
 
+  it('accepts compact request metadata without leaking it into messages', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'done',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'you are' }] },
+        { role: 'user', content: [{ type: 'text', text: 'a' }] },
+      ],
+      usage: { inputTokens: 90, outputTokens: 1, costUsd: 0 },
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'compact_replaced',
+        trigger: 'manual',
+        request: {
+          model: 'm',
+          systemPrompt: 'summarize',
+          messages: s0.messages,
+          tools: [],
+        },
+        responseUsage: { inputTokens: 80, outputTokens: 8 },
+        summary: 'summary only',
+        replacedCount: 2,
+        tokensBefore: 90,
+        tokensAfter: 3,
+      },
+      c,
+    )
+
+    expect(next.messages).toEqual([
+      { role: 'system', content: [{ type: 'text', text: 'you are' }] },
+      { role: 'system', content: [{ type: 'text', text: 'summary only' }] },
+    ])
+    expect(next.usage.inputTokens).toBe(3)
+  })
+
   it('is a no-op while awaiting_approval (unsafe to drop pending calls)', () => {
     const s0: AgentState = {
       ...initial(),

@@ -305,11 +305,11 @@ describe('host loop', () => {
     // non-trivial. Then a manual `/compact` should send those messages to
     // the LLM with the summarizer system prompt, receive a text reply, and
     // emit a compact_replaced event that shrinks the message list.
-    const llmCalls: Array<{ sys?: string; msgs: number }> = []
+    const llmCalls: Array<{ sys?: string; msgs: number; model?: string }> = []
     const llm: LLMAdapter = {
       name: 'compact-mock',
       async call(p) {
-        llmCalls.push({ sys: p.systemPrompt, msgs: p.messages.length })
+        llmCalls.push({ sys: p.systemPrompt, msgs: p.messages.length, model: p.model })
         // First call = turn's user_message → assistant text reply.
         // Second call = summarizer → summary text.
         if (llmCalls.length === 1) {
@@ -326,6 +326,7 @@ describe('host loop', () => {
             role: 'assistant',
             content: [{ type: 'text', text: 'SUMMARY-OF-CONVO' }],
           },
+          usage: { inputTokens: 8, outputTokens: 3 },
         }
       },
     }
@@ -334,6 +335,7 @@ describe('host loop', () => {
       llm,
       tools: nullTools(),
       broadcast: silentBroadcast(),
+      models: { get: () => 'compact-model' },
     })
 
     await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
@@ -351,8 +353,17 @@ describe('host loop', () => {
     expect(last.content[0]).toEqual({ type: 'text', text: 'SUMMARY-OF-CONVO' })
     // Summarizer call carried the fixed prompt.
     expect(llmCalls[1]!.sys).toMatch(/summarizer/i)
+    expect(llmCalls[1]!.model).toBe('compact-model')
     // usage.inputTokens is reset to the compacted-message estimate.
     expect(rec.state.usage.inputTokens).toBeLessThan(10)
+    const parsed = await readSessionLog(rec.logPath)
+    const compact = parsed.events.find((e) => e.event.kind === 'compact_replaced')
+      ?.event as Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> | undefined
+    expect(compact?.trigger).toBe('manual')
+    expect(compact?.request?.model).toBe('compact-model')
+    expect(compact?.request?.systemPrompt).toMatch(/summarizer/i)
+    expect(compact?.request?.messages).toHaveLength(beforeCount)
+    expect(compact?.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
   })
 
   it('manual compact() rejects empty sessions before calling the summarizer', async () => {

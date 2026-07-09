@@ -61,13 +61,30 @@ export function loadRuntimeConfig(
   providers.push(...codex.providers)
 
   const models: ModelInfo[] = providers.flatMap((p) =>
-    p.models.map((m) => ({ id: m, label: m, provider: p.label })),
+    p.models.map((m) => modelInfo(m, p.label)),
   )
 
   const defaultModel =
     codex.defaultModel ?? claude?.models[0] ?? models[0]?.id ?? ''
 
   return { providers, models, defaultModel }
+}
+
+export function modelInfo(model: string, provider: string): ModelInfo {
+  const contextWindow = knownContextWindow(model)
+  return {
+    id: model,
+    label: model,
+    provider,
+    ...(contextWindow ? { contextWindow } : {}),
+  }
+}
+
+export function knownContextWindow(model: string): number | undefined {
+  const normalized = model.toLowerCase()
+  if (normalized.includes('claude-opus-4.7-1m')) return 1_000_000
+  if (normalized.includes('gpt-5.5')) return 400_000
+  return undefined
 }
 
 // ============================================================================
