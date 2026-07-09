@@ -64,14 +64,16 @@ export type ExecutorOptions = {
    */
   sandboxRoots?: readonly string[]
   token?: string
+  invite?: string
   executorId?: string
+  onToken?(token: string): void
   tools?: readonly Tool[]
   /** Injectable Socket.IO factory — used by tests. */
   ioFactory?: typeof clientIO
 }
 
 export type PermanentError = {
-  code: 'workspace_id_conflict' | 'version_incompatible' | 'auth_failed' | 'reconnect_exhausted'
+  code: 'workspace_id_conflict' | 'workspace_identity_mismatch' | 'version_incompatible' | 'auth_failed' | 'reconnect_exhausted'
   message: string
 }
 
@@ -115,6 +117,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
       role: 'executor',
       clientVersion: PROTOCOL_VERSION,
       ...(options.token !== undefined ? { token: options.token } : {}),
+      ...(options.invite !== undefined ? { invite: options.invite } : {}),
     },
     reconnection: true,
     reconnectionDelay: 500,
@@ -185,6 +188,15 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     givePermanentError({ code: payload.code, message: payload.message })
   })
 
+  socket.on('executor:welcome', (payload) => {
+    options.onToken?.(payload.token)
+    socket.auth = {
+      role: 'executor',
+      clientVersion: PROTOCOL_VERSION,
+      token: payload.token,
+    }
+  })
+
   // Handshake failures (auth, version). These come through connect_error
   // with the error's `.message` being the reason middleware called
   // `next(new Error(reason))` on the host side.
@@ -249,10 +261,9 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     if (ctrl) ctrl.abort()
   })
 
-  // The nine `fs:*` and `bg:*` bespoke RPCs that used to live here are gone.
-  // Host now sends them as ordinary `tool:call` messages with
-  // `dispatchMode: 'direct'`; the tools themselves are declared in
-  // `./tools/internal.ts` and picked up by `defaultTools`.
+  // Host-internal filesystem/background RPCs also arrive as ordinary
+  // `tool:call` messages. The executor executes tools only; the host decides
+  // whether the result enters the agent transcript or returns to a dashboard RPC.
 
   const unsubscribeBg = subscribeBackgroundTasks((change) => {
     if (change.kind === 'evicted') {

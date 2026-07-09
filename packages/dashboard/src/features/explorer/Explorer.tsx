@@ -23,6 +23,7 @@ import {
   Folder,
   GitFork,
   Info,
+  LoaderCircle,
   Pencil,
   Plus,
   Search,
@@ -58,11 +59,13 @@ type Props = {
   executors: readonly AttachedExecutor[]
   sessions: readonly SessionSummary[]
   selectedSessionId: string | null
+  activeSessionStatus?: SessionActivityStatus
   onSelect(sessionId: string): void
   onNewSession(workspaceId?: string): void
   onConnectWorkspace(): void
   onDelete(sessionId: string): void
   onRename(sessionId: string, label: string): void
+  onRenameWorkspace?(workspaceId: string, workspaceName: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
   onCollapse?(): void
@@ -72,15 +75,19 @@ const SESSION_ROW_HEIGHT = 60
 const WORKSPACE_ROW_HEIGHT = 48
 const BUCKET_ROW_HEIGHT = 28
 
+export type SessionActivityStatus = SessionSummary['status'] | 'loading'
+
 export function Explorer({
   executors,
   sessions,
   selectedSessionId,
+  activeSessionStatus,
   onSelect,
   onNewSession,
   onConnectWorkspace,
   onDelete,
   onRename,
+  onRenameWorkspace,
   onOpenSessionInfo,
   onWorkspaceInfo,
   onCollapse,
@@ -88,6 +95,7 @@ export function Explorer({
   const { t } = useTranslation()
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
@@ -160,8 +168,18 @@ export function Explorer({
                 }}
                 onOpenSessionInfo={onOpenSessionInfo}
                 onWorkspaceInfo={onWorkspaceInfo}
+                editingWorkspaceId={editingWorkspaceId}
+                onStartWorkspaceEdit={(workspace) => setEditingWorkspaceId(workspace.workspaceId)}
+                onCancelWorkspaceEdit={() => setEditingWorkspaceId(null)}
+                onSubmitWorkspaceEdit={(workspace, next) => {
+                  setEditingWorkspaceId(null)
+                  if (workspace.workspaceId !== null && next.trim() !== workspace.name.trim()) {
+                    onRenameWorkspace?.(workspace.workspaceId, next)
+                  }
+                }}
                 onNewSession={onNewSession}
                 query={query}
+                activeSessionStatus={activeSessionStatus}
               />
             )}
           </Tree>
@@ -262,7 +280,7 @@ function Header({
               data-testid="explorer-collapse-button"
               title={t('explorer.collapsePanel')}
               aria-label={t('explorer.collapsePanel')}
-              className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+              className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground sm:h-7 sm:w-7"
             >
               <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
@@ -299,8 +317,13 @@ function Row({
   onSubmitEdit,
   onOpenSessionInfo,
   onWorkspaceInfo,
+  editingWorkspaceId,
+  onStartWorkspaceEdit,
+  onCancelWorkspaceEdit,
+  onSubmitWorkspaceEdit,
   onNewSession,
   query,
+  activeSessionStatus,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
@@ -311,8 +334,13 @@ function Row({
   onSubmitEdit(sess: SessionNode, label: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
+  editingWorkspaceId: string | null
+  onStartWorkspaceEdit(workspace: WorkspaceNode): void
+  onCancelWorkspaceEdit(): void
+  onSubmitWorkspaceEdit(workspace: WorkspaceNode, label: string): void
   onNewSession(workspaceId?: string): void
   query: string
+  activeSessionStatus?: SessionActivityStatus
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
@@ -320,6 +348,10 @@ function Row({
         node={node as NodeApi<WorkspaceNode>}
         style={style}
         onWorkspaceInfo={onWorkspaceInfo}
+        editing={node.data.workspaceId !== null && editingWorkspaceId === node.data.workspaceId}
+        onStartEdit={onStartWorkspaceEdit}
+        onCancelEdit={onCancelWorkspaceEdit}
+        onSubmitEdit={onSubmitWorkspaceEdit}
         onNewSession={onNewSession}
         query={query}
       />
@@ -339,6 +371,7 @@ function Row({
       onSubmitEdit={onSubmitEdit}
       onOpenSessionInfo={onOpenSessionInfo}
       query={query}
+      activeStatus={node.isSelected ? activeSessionStatus : undefined}
     />
   )
 }
@@ -347,12 +380,20 @@ function WorkspaceRow({
   node,
   style,
   onWorkspaceInfo,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onSubmitEdit,
   onNewSession,
   query,
 }: {
   node: NodeApi<WorkspaceNode>
   style: React.CSSProperties
   onWorkspaceInfo?(workspaceId: string): void
+  editing: boolean
+  onStartEdit(workspace: WorkspaceNode): void
+  onCancelEdit(): void
+  onSubmitEdit(workspace: WorkspaceNode, label: string): void
   onNewSession(workspaceId?: string): void
   query: string
 }): JSX.Element {
@@ -369,13 +410,16 @@ function WorkspaceRow({
           .join(' · ') || t('explorer.offline')
   const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
   const canCreateSession = w.workspaceId !== null
+  const canRename = w.workspaceId !== null
   return (
     <div
       style={style}
       data-testid="workspace-row"
       data-workspace-id={w.workspaceId ?? 'unassigned'}
       data-online={w.online ? 'true' : 'false'}
-      onClick={() => node.toggle()}
+      onClick={() => {
+        if (!editing) node.toggle()
+      }}
       className="group/ws flex min-w-0 cursor-pointer select-none flex-col justify-center px-3 hover:bg-accent/50"
     >
       <div className="flex items-center gap-1.5">
@@ -385,9 +429,43 @@ function WorkspaceRow({
           <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
         <span className={cn('inline-block h-2 w-2 flex-none rounded-full', dotCls)} />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-          <HighlightText text={w.name} query={query} />
-        </span>
+        {editing ? (
+          <RenameInput
+            initial={w.name}
+            onSubmit={(next) => onSubmitEdit(w, next)}
+            onCancel={onCancelEdit}
+            testId="workspace-rename-input"
+            ariaLabel={t('explorer.renameWorkspace')}
+          />
+        ) : (
+          <span
+            className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground"
+            title={canRename ? t('explorer.doubleClickRename') : undefined}
+            onDoubleClick={(e) => {
+              if (!canRename) return
+              e.preventDefault()
+              e.stopPropagation()
+              onStartEdit(w)
+            }}
+          >
+            <HighlightText text={w.name} query={query} />
+          </span>
+        )}
+        {canRename && !editing ? (
+          <button
+            type="button"
+            data-testid={`workspace-rename-${w.workspaceId}`}
+            title={t('explorer.renameWorkspace')}
+            aria-label={t('explorer.renameWorkspaceAria', { workspaceId: w.workspaceId })}
+            className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/ws:opacity-100"
+            onClick={(e) => {
+              e.stopPropagation()
+              onStartEdit(w)
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         {canCreateSession ? (
           <button
             type="button"
@@ -467,6 +545,7 @@ function SessionRow({
   onSubmitEdit,
   onOpenSessionInfo,
   query,
+  activeStatus,
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
@@ -477,10 +556,12 @@ function SessionRow({
   onSubmitEdit(sess: SessionNode, label: string): void
   onOpenSessionInfo?(sessionId: string): void
   query: string
+  activeStatus?: SessionActivityStatus
 }): JSX.Element {
   const { t } = useTranslation()
   const s = node.data
   const selected = node.isSelected
+  const status = activeStatus ?? s.status
   return (
     <div
       style={style}
@@ -506,7 +587,7 @@ function SessionRow({
     >
       <div className="min-w-0 cursor-pointer px-3 py-2 pl-6 pr-24">
         <div className="flex min-w-0 items-center gap-2">
-          <SessionStatusIndicator status={s.status} selected={selected} />
+          <SessionStatusIndicator status={status} selected={selected} />
           {s.parentSessionId ? (
             <GitFork
               className="h-3 w-3 flex-none text-amber-600 dark:text-amber-400"
@@ -563,7 +644,7 @@ function SessionRow({
             data-testid="session-rename-button"
             title={t('explorer.renameSession')}
             aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
+            className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -579,7 +660,7 @@ function SessionRow({
               data-testid="session-info-button"
               title={t('explorer.sessionInfoTitle')}
               aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
-              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
+              className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
             >
               <Info className="h-3.5 w-3.5" strokeWidth={2.2} />
             </Button>
@@ -595,7 +676,7 @@ function SessionRow({
             data-testid="session-delete-button"
             title={t('explorer.deleteSessionTitle')}
             aria-label={t('explorer.deleteSessionAria', { sessionId: s.sessionId })}
-            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+            className="h-9 w-9 rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground sm:h-7 sm:w-7"
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
           </Button>
@@ -605,16 +686,35 @@ function SessionRow({
   )
 }
 
-function SessionStatusIndicator({
+export function SessionStatusIndicator({
   status,
   selected,
 }: {
-  status: SessionSummary['status'] | undefined
+  status: SessionActivityStatus | undefined
   selected: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const label = statusIndicatorLabel(status, t)
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
+  if (status === 'loading') {
+    return (
+      <span
+        className={base}
+        data-testid="session-status-indicator"
+        data-status={status}
+        aria-label={label}
+        title={label}
+      >
+        <LoaderCircle
+          className={cn(
+            'h-3 w-3 animate-spin',
+            selected ? 'text-sky-600 dark:text-sky-400' : 'text-sky-500 dark:text-sky-400/90',
+          )}
+          strokeWidth={2.4}
+        />
+      </span>
+    )
+  }
   if (status === 'thinking') {
     return (
       <span
@@ -712,8 +812,10 @@ function SessionStatusIndicator({
   )
 }
 
-function statusIndicatorLabel(status: SessionSummary['status'] | undefined, t: ReturnType<typeof useTranslation>['t']): string {
+function statusIndicatorLabel(status: SessionActivityStatus | undefined, t: ReturnType<typeof useTranslation>['t']): string {
   switch (status) {
+    case 'loading':
+      return t('explorer.status.loading')
     case 'thinking':
       return t('explorer.status.thinking')
     case 'executing_tools':
@@ -748,10 +850,14 @@ function RenameInput({
   initial,
   onSubmit,
   onCancel,
+  testId = 'session-rename-input',
+  ariaLabel,
 }: {
   initial: string
   onSubmit(label: string): void
   onCancel(): void
+  testId?: string
+  ariaLabel?: string
 }): JSX.Element {
   const { t } = useTranslation()
   const [value, setValue] = useState(initial)
@@ -777,8 +883,8 @@ function RenameInput({
         }
       }}
       onBlur={() => onSubmit(value)}
-      data-testid="session-rename-input"
-      aria-label={t('explorer.renameSession')}
+      data-testid={testId}
+      aria-label={ariaLabel ?? t('explorer.renameSession')}
       spellCheck={false}
       className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-[13px] font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
     />

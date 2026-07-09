@@ -97,15 +97,45 @@ The UI must explicitly label `Reference trajectory` as diagnostic unless `ACTION
 
 | Claim | Source |
 |---|---|
-| Original Tau-Bench proposes dynamic conversations between simulated users and language agents with domain-specific API tools and policy guidelines. | Original README lines 1-10: <https://github.com/sierra-research/tau-bench/blob/59a200c6d575d595120f1cb70fea53cef0632f6b/README.md#L1-L10>; original paper: <https://arxiv.org/abs/2406.12045>. |
-| The original tau-bench repo warns that its tasks are outdated and points to the newer tau2/tau3 repository. | Original README lines 3-5: <https://github.com/sierra-research/tau-bench/blob/59a200c6d575d595120f1cb70fea53cef0632f6b/README.md#L3-L5>. |
-| Tau3-Bench includes text/voice modes, knowledge domain, task fixes, and an updated leaderboard. | Tau3 README lines 15-35: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L15-L35>. |
-| Tau-Bench is a simulation framework for customer service agents across domains; each domain specifies policy, tools, tasks, and optional user tools. | Tau3 README lines 37-48: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L37-L48>. |
-| Quick start uses `tau2 run` with domain, agent LLM, user LLM, number of trials, and number of tasks; results are saved under `data/simulations`. | Tau3 README lines 83-91: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L83-L91>. |
-| Documentation identifies task schema/evaluation as the source for `evaluation_criteria.actions`, `reward_basis`, and action correctness. | Tau3 README lines 103-111: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L103-L111>. |
-| A task's final reward is the product of components in `evaluation_criteria.reward_basis`; default airline/retail/telecom basis is `[DB, COMMUNICATE]`. | `docs/evaluation.md` lines 8-20 and 34-62: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L8-L62>. |
-| `evaluation_criteria.actions` is one reference trajectory, not necessarily the only correct action sequence. | `docs/evaluation.md` lines 14-29 and 63-87: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L14-L29>, <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L63-L87>. |
-| Reward components include DB, ENV_ASSERTION, COMMUNICATE, NL_ASSERTION, and ACTION; the final reward is multiplicative. | `docs/evaluation.md` lines 40-62: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L40-L62>. |
-| `ACTION` is only used in reward basis for a small subset of banking knowledge tasks; airline, retail, and telecom do not use it. | `docs/evaluation.md` lines 172-186: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L172-L186>. |
-| Evaluator notes state reward is multiplicative, missing criteria are not failures, premature termination gets zero reward, and actions are not per-action requirements unless reward basis says so. | `src/tau2/evaluator/AGENTS.md` lines 36-60: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/src/tau2/evaluator/AGENTS.md#L36-L60>. |
-| Core Tau-Bench and Tau2-Bench papers are cited in the current repo. | Tau3 README lines 179-201: <https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L179-L201>. |
+| Original Tau-Bench proposes dynamic conversations between simulated users and language agents with domain-specific API tools and policy guidelines. | Original README lines 1-10: [1]; original paper: [2]. |
+| The original tau-bench repo warns that its tasks are outdated and points to the newer tau2/tau3 repository. | Original README lines 3-5: [3]. |
+| Tau3-Bench includes text/voice modes, knowledge domain, task fixes, and an updated leaderboard. | Tau3 README lines 15-35: [4]. |
+| Tau-Bench is a simulation framework for customer service agents across domains; each domain specifies policy, tools, tasks, and optional user tools. | Tau3 README lines 37-48: [5]. |
+| Quick start uses `tau2 run` with domain, agent LLM, user LLM, number of trials, and number of tasks; results are saved under `data/simulations`. | Tau3 README lines 83-91: [6]. |
+| Documentation identifies task schema/evaluation as the source for `evaluation_criteria.actions`, `reward_basis`, and action correctness. | Tau3 README lines 103-111: [7]. |
+| A task's final reward is the product of components in `evaluation_criteria.reward_basis`; default airline/retail/telecom basis is `[DB, COMMUNICATE]`. | `docs/evaluation.md` lines 8-20 and 34-62: [8]. |
+| `evaluation_criteria.actions` is one reference trajectory, not necessarily the only correct action sequence. | `docs/evaluation.md` lines 14-29 and 63-87: [9], [10]. |
+| Reward components include DB, ENV_ASSERTION, COMMUNICATE, NL_ASSERTION, and ACTION; the final reward is multiplicative. | `docs/evaluation.md` lines 40-62: [11]. |
+| `ACTION` is only used in reward basis for a small subset of banking knowledge tasks; airline, retail, and telecom do not use it. | `docs/evaluation.md` lines 172-186: [12]. |
+| Evaluator notes state reward is multiplicative, missing criteria are not failures, premature termination gets zero reward, and actions are not per-action requirements unless reward basis says so. | `src/tau2/evaluator/AGENTS.md` lines 36-60: [13]. |
+| Core Tau-Bench and Tau2-Bench papers are cited in the current repo. | Tau3 README lines 179-201: [14]. |
+
+## References
+
+[1] https://github.com/sierra-research/tau-bench/blob/59a200c6d575d595120f1cb70fea53cef0632f6b/README.md#L1-L10
+
+[2] https://arxiv.org/abs/2406.12045
+
+[3] https://github.com/sierra-research/tau-bench/blob/59a200c6d575d595120f1cb70fea53cef0632f6b/README.md#L3-L5
+
+[4] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L15-L35
+
+[5] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L37-L48
+
+[6] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L83-L91
+
+[7] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L103-L111
+
+[8] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L8-L62
+
+[9] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L14-L29
+
+[10] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L63-L87
+
+[11] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L40-L62
+
+[12] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/docs/evaluation.md#L172-L186
+
+[13] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/src/tau2/evaluator/AGENTS.md#L36-L60
+
+[14] https://github.com/sierra-research/tau2-bench/blob/1901a301961cbbe3fd11f3e84a2a376530c759e3/README.md#L179-L201

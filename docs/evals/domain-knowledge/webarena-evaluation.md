@@ -92,15 +92,45 @@ The default page should not show raw URLs and auth file paths as primary content
 
 | Claim | Source |
 |---|---|
-| WebArena is a standalone, self-hostable web environment for autonomous agents. | README lines 1-6: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L1-L6>. |
-| The canonical repo recommends AgentLab/BrowserGym for enhanced infrastructure but remains the canonical implementation for reproducing paper results. | README lines 26-29: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L26-L29>. |
-| WebArena uses a browser environment similar to OpenAI Gym with `env.reset(options={"config_file": ...})` and `env.step(action)`. | README lines 54-76: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L54-L76>. |
-| Correct evaluation requires self-hosted WebArena websites; generated config files represent individual test examples. | README lines 77-102: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L77-L102>. |
-| Official end-to-end evaluation uses `run.py` with instruction prompt, test range, model, and result directory; trajectories are saved as HTML. | README lines 110-120: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L110-L120>. |
-| The run loop creates `ScriptBrowserEnv`, loads `intent` and `task_id`, resets the environment, asks the agent for actions, executes `env.step`, and then calls `evaluator_router`. | `run.py` lines 220-365: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/run.py#L220-L365>. |
-| String evaluator supports exact match, must include, fuzzy match, and unachievable-task matching. | `evaluators.py` lines 71-170: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L71-L170>. |
-| URL evaluator compares final page URL against task reference URL. | `evaluators.py` lines 173-241: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L173-L241>. |
-| HTML content evaluator checks selected page content with exact or must-include rules. | `evaluators.py` lines 244-333: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L244-L333>. |
-| Multiple evaluators are combined multiplicatively and selected by `eval_types`. | `evaluators.py` lines 336-374: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L336-L374>. |
-| Example config files include sites, task ID, login state, start URL, intent, eval config, and reference action sequence. | Example configs: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/config_files/examples/1.json#L1-L31>, <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/config_files/examples/2.json#L1-L30>. |
-| Paper citation identifies WebArena as a realistic web environment for autonomous agents. | README citation lines 153-161: <https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L153-L161>; arXiv: <https://arxiv.org/abs/2307.13854>. |
+| WebArena is a standalone, self-hostable web environment for autonomous agents. | README lines 1-6: [1]. |
+| The canonical repo recommends AgentLab/BrowserGym for enhanced infrastructure but remains the canonical implementation for reproducing paper results. | README lines 26-29: [2]. |
+| WebArena uses a browser environment similar to OpenAI Gym with `env.reset(options={"config_file": ...})` and `env.step(action)`. | README lines 54-76: [3]. |
+| Correct evaluation requires self-hosted WebArena websites; generated config files represent individual test examples. | README lines 77-102: [4]. |
+| Official end-to-end evaluation uses `run.py` with instruction prompt, test range, model, and result directory; trajectories are saved as HTML. | README lines 110-120: [5]. |
+| The run loop creates `ScriptBrowserEnv`, loads `intent` and `task_id`, resets the environment, asks the agent for actions, executes `env.step`, and then calls `evaluator_router`. | `run.py` lines 220-365: [6]. |
+| String evaluator supports exact match, must include, fuzzy match, and unachievable-task matching. | `evaluators.py` lines 71-170: [7]. |
+| URL evaluator compares final page URL against task reference URL. | `evaluators.py` lines 173-241: [8]. |
+| HTML content evaluator checks selected page content with exact or must-include rules. | `evaluators.py` lines 244-333: [9]. |
+| Multiple evaluators are combined multiplicatively and selected by `eval_types`. | `evaluators.py` lines 336-374: [10]. |
+| Example config files include sites, task ID, login state, start URL, intent, eval config, and reference action sequence. | Example configs: [11], [12]. |
+| Paper citation identifies WebArena as a realistic web environment for autonomous agents. | README citation lines 153-161: [13]; arXiv: [14]. |
+
+## References
+
+[1] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L1-L6
+
+[2] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L26-L29
+
+[3] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L54-L76
+
+[4] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L77-L102
+
+[5] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L110-L120
+
+[6] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/run.py#L220-L365
+
+[7] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L71-L170
+
+[8] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L173-L241
+
+[9] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L244-L333
+
+[10] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/evaluation_harness/evaluators.py#L336-L374
+
+[11] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/config_files/examples/1.json#L1-L31
+
+[12] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/config_files/examples/2.json#L1-L30
+
+[13] https://github.com/web-arena-x/webarena/blob/dce04686a56253aefba7b18a4fa0937cf1dc987b/README.md#L153-L161
+
+[14] https://arxiv.org/abs/2307.13854

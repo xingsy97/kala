@@ -313,15 +313,22 @@ function NestedMarkdown({ text, compact }: { text: string; compact: boolean }): 
   return (
     <div
       className={cn(
-        'prose prose-sm dark:prose-invert min-w-0 max-w-full break-words leading-snug [overflow-wrap:anywhere]',
+        'min-w-0 max-w-full break-words leading-snug text-foreground [overflow-wrap:anywhere]',
         compact ? 'text-[11px]' : 'text-[12px]',
-        'prose-p:my-1 prose-p:text-foreground prose-headings:my-1.5 prose-headings:text-foreground prose-strong:text-foreground prose-li:my-0 prose-li:text-foreground',
+        '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
-        '[&_code]:rounded [&_code]:bg-muted/70 [&_code]:px-1 [&_code]:py-0 [&_code]:text-foreground [&_code]:before:content-[""] [&_code]:after:content-[""]',
-        '[&_h1]:text-[12px] [&_h1]:font-semibold [&_h2]:text-[12px] [&_h2]:font-semibold [&_h3]:text-[11px]',
+        '[&_p]:my-1',
+        '[&_h1]:my-1.5 [&_h1]:text-[12px] [&_h1]:font-semibold',
+        '[&_h2]:my-1.5 [&_h2]:text-[12px] [&_h2]:font-semibold',
+        '[&_h3]:my-1.5 [&_h3]:text-[11px] [&_h3]:font-semibold',
+        '[&_h4]:my-1.5 [&_h4]:text-[11px] [&_h4]:font-semibold',
+        '[&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-2 [&_blockquote]:text-muted-foreground',
+        '[&_code]:rounded [&_code]:bg-muted/70 [&_code]:px-1 [&_code]:py-0 [&_code]:text-foreground',
         '[&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4',
+        '[&_li]:my-0.5 [&_li>p]:my-0.5',
         '[&_pre]:my-1 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/60 [&_pre]:p-2 [&_pre]:text-[10px]',
-        '[&_table]:text-[10px] [&_table]:border [&_table]:border-border/50 [&_td]:border [&_td]:border-border/50 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-border/50 [&_th]:px-1.5 [&_th]:py-0.5',
+        '[&_hr]:my-2 [&_hr]:border-border/50',
+        '[&_table]:my-1 [&_table]:text-[10px] [&_table]:border [&_table]:border-border/50 [&_td]:border [&_td]:border-border/50 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-border/50 [&_th]:px-1.5 [&_th]:py-0.5',
       )}
     >
       <ReactMarkdown

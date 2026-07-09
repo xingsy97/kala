@@ -7,7 +7,7 @@
 
 Every coding-agent project defines its own tool schema: input shape, output shape, error convention, discovery mechanism. Historically these were bespoke — Claude Code's tools look nothing like Codex's, which look nothing like opencode's.
 
-In late 2024 Anthropic published the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), a JSON-Schema-based standard for describing tools and a transport-agnostic call convention (`tools/list`, `tools/call`). It's now supported natively by Claude Desktop, Claude Code, and a growing list of clients (Cursor, Zed, some IDE plugins).
+In late 2024 Anthropic published the Model Context Protocol (MCP) [1], a JSON-Schema-based standard for describing tools and a transport-agnostic call convention (`tools/list`, `tools/call`). It's now supported natively by Claude Desktop, Claude Code, and a growing list of clients (Cursor, Zed, some IDE plugins).
 
 For `agent-kernel`, this raised a question: define our own tool schema, or align with MCP?
 
@@ -51,3 +51,7 @@ Consequence: it should be a small amount of adapter code (not a rewrite) to expo
 
 - `docs/executor/tools.md` §Tool schemas is expressed in JSON Schema matching MCP's `Tool` type.
 - If a future PR introduces a tool with a bespoke schema shape that doesn't fit MCP, that PR should either (a) round-trip the shape through MCP conventions or (b) update this ADR with an argued exception.
+
+## References
+
+[1] https://modelcontextprotocol.io/

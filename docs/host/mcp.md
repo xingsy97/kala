@@ -5,7 +5,7 @@
 
 ## 1. What is MCP?
 
-Model Context Protocol ([spec.modelcontextprotocol.io](https://spec.modelcontextprotocol.io/)) translated historical text Anthropic translated historical texttranslated historical texttranslated historical text"translated historical text LLM translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical text。
+Model Context Protocol (spec.modelcontextprotocol.io [1]) translated historical text Anthropic translated historical texttranslated historical texttranslated historical text"translated historical text LLM translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical text。
 
 translated historical texttranslated historical texttranslated historical texttranslated historical text：**MCP client**（translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text）translated historical texttranslated historical text stdio translated historical texttranslated historical texttranslated historical texttranslated historical text **MCP server** translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text JSON-RPC 2.0 translated historical texttranslated historical text；client translated historical text `tools/list` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，`tools/call` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
 
@@ -197,3 +197,7 @@ translated historical texttranslated historical texttranslated historical texttr
   ```
 - translated historical texttranslated historical texttranslated historical texttranslated historical text：kill translated historical texttranslated historical texttranslated historical text MCP server translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical text executor translated historical texttranslated historical texttranslated historical texttranslated historical text announce（tools translated historical texttranslated historical texttranslated historical texttranslated historical text）
 - SIGTERM：SIGTERM executor，translated historical texttranslated historical texttranslated historical texttranslated historical text MCP server translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 6s translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+
+## References
+
+[1] https://spec.modelcontextprotocol.io/

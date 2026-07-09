@@ -11,7 +11,7 @@ The v0.1 implementation expressed this as one big `switch (event.kind)` block wi
 
 Two options for improving this:
 
-1. **Adopt [XState](https://stately.ai/docs/xstate)** — the widely-used JS statechart library. Get visualization, devtools, formal machine semantics, ecosystem recognition.
+1. **Adopt XState [1]** — the widely-used JS statechart library. Get visualization, devtools, formal machine semantics, ecosystem recognition.
 2. **Hand-roll a two-dimensional dispatch table** — `Record<Status, Partial<Record<EventKind, Handler>>>`. Fallthroughs are automatic no-ops. Zero dependencies.
 
 ## Decision
@@ -78,3 +78,7 @@ The `transitions` object **is** SPEC §3's legality table, expressed as code. Il
 - `packages/kernel/src/core.ts` (post-rename from `reducer.ts`) defines a `transitions` object of type `Record<Status, Partial<Record<AgentEvent['kind'], Handler>>>`.
 - `packages/kernel/package.json` `dependencies` is `{}`. `devDependencies` may include only types and test tools.
 - All 23 tests in `core.test.ts` continue to pass unmodified — public signature is preserved.
+
+## References
+
+[1] https://stately.ai/docs/xstate

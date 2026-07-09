@@ -18,6 +18,8 @@ function renderComposer(props?: {
   onClearSession?: () => void
   onListFiles?: (query: string) => Promise<readonly FileListEntry[]>
   onReadFile?: (path: string) => Promise<{ content?: string; error?: string }>
+  queuedMessages?: React.ComponentProps<typeof Composer>['queuedMessages']
+  onQueuedDelete?: (id: string) => void
 }) {
   return render(
     <Composer
@@ -28,7 +30,8 @@ function renderComposer(props?: {
       onApprovalModeChange={() => {}}
       state={null}
       config={null}
-      queuedMessages={[]}
+      queuedMessages={props?.queuedMessages ?? []}
+      {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
       {...(props?.onCancel ? { onCancel: props.onCancel } : {})}
@@ -150,6 +153,50 @@ describe('Composer', () => {
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
 
     expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined, undefined)
+  })
+
+  it('keeps send mode selection available in simple mode', () => {
+    const onSubmit = vi.fn()
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({ onSubmit })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    expect(screen.getByTestId('composer-simple-shell')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('send-mode-toggle'))
+    fireEvent.click(screen.getByTestId('send-mode-queue'))
+
+    const input = screen.getByTestId('composer-input-simple')
+    input.textContent = 'later from simple'
+    fireEvent.input(input)
+    fireEvent.click(screen.getByTestId('composer-send'))
+
+    expect(onSubmit).toHaveBeenCalledWith('later from simple', 'queue', undefined, undefined)
+  })
+
+  it('shows queued message management in simple mode', () => {
+    const onQueuedDelete = vi.fn()
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({
+      onQueuedDelete,
+      queuedMessages: [
+        {
+          id: 'queued-simple-1',
+          text: 'run after current turn',
+          mode: 'queue',
+          createdAt: '2026-07-06T00:00:00.000Z',
+        },
+      ],
+    })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    expect(screen.getByTestId('composer-simple-shell')).toBeTruthy()
+    expect(screen.getByTestId('queued-messages-dock').textContent ?? '').toContain('run after current turn')
+    fireEvent.click(screen.getByTestId('queued-message-delete'))
+    expect(onQueuedDelete).toHaveBeenCalledWith('queued-simple-1')
   })
 
   it('explains send modes and shows pending delivery previews', () => {

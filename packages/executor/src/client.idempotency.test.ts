@@ -29,6 +29,7 @@ function makeMockSocket() {
   const emitted: Array<{ event: string; args: unknown[] }> = []
   const socket = {
     connected: true,
+    auth: undefined as unknown,
     // Socket.IO client exposes `.io` = the underlying Manager, which also
     // implements EventEmitter. Real code subscribes to `reconnect_failed`
     // there. The test doesn't need to emit those, but the attach must not
@@ -173,6 +174,29 @@ describe('executor idempotency', () => {
     // The permanent-error handler should have disconnected the socket to
     // stop socket.io's own reconnection loop.
     expect(socket.connected).toBe(false)
+  })
+
+  it('passes executor:welcome long-term token to the persistence callback', () => {
+    const socket = makeMockSocket()
+    const onToken = vi.fn()
+    startExecutor({
+      host: 'http://x',
+      workspaceId: 'ws-welcome',
+      workspaceName: 'ws-welcome',
+      executorId: 'ex-welcome',
+      tools: [],
+      onToken,
+      ioFactory: (() => socket) as never,
+    })
+
+    socket.__trigger('executor:welcome', { token: 'ak_exec_saved', workspaceId: 'ws-welcome' })
+
+    expect(onToken).toHaveBeenCalledWith('ak_exec_saved')
+    expect(socket.auth).toEqual({
+      role: 'executor',
+      clientVersion: expect.any(String),
+      token: 'ak_exec_saved',
+    })
   })
 
   it('resolves permanentError on version_incompatible connect_error', async () => {

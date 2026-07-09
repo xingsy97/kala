@@ -293,9 +293,16 @@ export type ClearEvent = {
  * that index are kept verbatim so the most recent user turn and tool-call chain
  * survive compaction. Use `messages.length` when no tail should be preserved.
  */
+export type CompactTrigger = 'manual' | 'auto' | 'preflight' | 'tool_result'
+
 export type CompactReplacedEvent = {
   kind: 'compact_replaced'
-  trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'
+  trigger?: CompactTrigger
+  /**
+   * Host-generated correlation id so `compact_skipped` / `compact_rejected`
+   * for the same attempt can be linked back to the request that produced them.
+   */
+  attemptId?: string
   preserveFrom: number
   request?: {
     model?: string
@@ -308,6 +315,38 @@ export type CompactReplacedEvent = {
   replacedCount: number
   tokensBefore: number
   tokensAfter: number
+}
+
+/**
+ * A compaction attempt the host declined to make or that failed at the
+ * summarizer boundary before any `compact_replaced` could be dispatched.
+ * Never mutates messages. See `docs/host/context-compaction.md` for
+ * the reason-code taxonomy.
+ */
+export type CompactSkippedEvent = {
+  kind: 'compact_skipped'
+  trigger: CompactTrigger
+  attemptId: string
+  reason:
+    | 'circuit_breaker_open'
+    | 'back_off_same_batch'
+    | 'summarizer_failed'
+    | 'empty_summary'
+    | 'no_compactable_content'
+    | 'session_busy'
+  errorMessage?: string
+}
+
+/**
+ * Reducer refused to apply a `compact_replaced` because the proposed pivot
+ * violated protocol invariants (would orphan a pending tool_result, or the
+ * preserveFrom is outside the legal range). Emitted by the host after it
+ * observes the reducer noop, so the failure is visible in the ledger.
+ */
+export type CompactRejectedEvent = {
+  kind: 'compact_rejected'
+  attemptId: string
+  reason: 'pending_call_orphaned' | 'invalid_preserve_from'
 }
 
 /**
@@ -334,6 +373,8 @@ export type AgentEvent =
   | CancelEvent
   | ClearEvent
   | CompactReplacedEvent
+  | CompactSkippedEvent
+  | CompactRejectedEvent
   | ApprovalModeChangedEvent
   | CwdChangedEvent
 
