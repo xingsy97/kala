@@ -14,7 +14,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import puppeteer from 'puppeteer-core'
 
-const REPO_ROOT = new URL('..', import.meta.url).pathname
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_DASHBOARD_PORT ?? 3183)
 const HOST_URL = `http://localhost:${PORT}`
 const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'ak-screenshot-sessions-'))

@@ -57,7 +57,7 @@ Current assets:
 | -------------------------------------- | ------------------------------------------------ |
 | `agent-kernel-host-<os>-<arch>`        | OS-native host binary. Current release workflow builds Linux x64, macOS x64, and Windows x64. |
 | `agent-kernel-executor-<os>-<arch>`    | OS-native executor binary. Current release workflow builds Linux x64, macOS x64, and Windows x64. |
-| `agent-kernel-host.cjs`                | Node.js 22 fallback asset for the host CLI.      |
+| `bundle-dashboard-with-runtime.cjs`    | Node.js 22 fallback asset with host runtime and embedded dashboard. |
 | `agent-kernel-executor.cjs`            | Node.js 22 fallback asset for the executor.      |
 | `agent-kernel-dashboard-dist.tar.gz`   | Static dashboard bundle served by the host.      |
 | `run.sh`                               | Wget-only bash bootstrap that downloads checksums, uses compact `.cjs` assets when Node.js 22+ is available, and falls back to native binaries otherwise. |
@@ -90,7 +90,10 @@ assets. This makes the release usable before the slow native matrix has finished
 while still ending in one coherent GitHub Release.
 
 The `.cjs` files remain as fallback assets for unsupported platforms or manual
-debugging; they require Node.js 22 or newer.
+debugging; they require Node.js 22 or newer. Help/version output uses Agent
+RunLab product naming. Internal npm/bin names remain `agent-kernel-host` and
+`agent-kernel-executor`; public Node.js release examples should use
+`bundle-dashboard-with-runtime.cjs` and `agent-kernel-executor.cjs`.
 
 The recommended release entrypoint is the bash bootstrap, not piping an asset
 directly into `node`. The bootstrap downloads `SHA256SUMS`, detects the current
@@ -104,8 +107,8 @@ OS / architecture, and selects a runtime:
 Example one-line commands for a full release tag:
 
 ```bash
-wget -qO- https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh | COMPONENT=host bash
-wget -qO- https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 bash
+bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh"; COMPONENT=host bash "$tmp"'
+bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh"; HOST_URL=http://localhost:3000 COMPONENT=executor bash "$tmp"'
 ```
 
 The host also accepts `--port <port>` directly when launching an unpacked or
@@ -143,7 +146,7 @@ startup and logs a reminder when a newer release is available. Automatic update
 is opt-in:
 
 ```bash
-wget -qO- https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 AGENT_KERNEL_AUTO_UPDATE=1 bash
+bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh"; HOST_URL=http://localhost:3000 COMPONENT=executor AGENT_KERNEL_AUTO_UPDATE=1 bash "$tmp"'
 ```
 
 `--auto-update` is equivalent when launching a downloaded executor asset

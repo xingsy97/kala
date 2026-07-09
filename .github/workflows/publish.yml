@@ -24,7 +24,7 @@ jobs:
       contents: read
       id-token: write  # for npm provenance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Parse tag
         id: tag
@@ -35,15 +35,16 @@ jobs:
           echo "package=$PKG" >> "$GITHUB_OUTPUT"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          package-manager-cache: false
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.3.0 --activate
 
       - run: pnpm install --frozen-lockfile
 

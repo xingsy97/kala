@@ -31,7 +31,7 @@
    │    ┌──────────────────────┐   ┌──────────────────────┐         │
    │    │ agent tool (builtin) │   │ Compaction driver    │         │
    │    │ spawns child JSONL   │   │ (manual + auto,      │         │
-   │    │ session in workspace │   │  writes compact_replaced) │     │
+   │    │ session in workspace │   │  writes messages_replaced) │    │
    │    └──────────────────────┘   └──────────────────────┘         │
    │    ┌──────────────────────────────────────────────────┐        │
    │    │ Connection layer (Socket.IO server)              │        │
@@ -84,7 +84,7 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 - Persist events to a JSONL log (append per `step` result). Recover on restart by folding the log and appending synthetic events for stuck pending tool calls / interrupted streams (see [event-log.md](../protocol/event-log.md) §4.3).
 - Broadcast state and events to subscribed dashboards; dispatch `call_tool` effects to the executor announcing the session's `workspaceId` (i.e. the machine the session is bound to)
 - Serve two Socket.IO namespaces: `/dashboard` and `/executor`, rooms `session:<id>`, and serve the pre-built Dashboard bundle from `packages/dashboard/dist/`
-- Drive context compaction (both auto via `contextPressureLevel === 'hard'` and manual via `client:compact` / the `/compact` slash command). The summarizer is invoked with the LLM adapter; the resulting `compact_replaced` event carries the summarizer `request`, `trigger`, and `responseUsage` for the timeline.
+- Drive context compaction (both auto via host `ContextSnapshot.pressureLevel === 'hard'` and manual via `client:compact` / the `/compact` slash command). The summarizer is invoked with the LLM adapter; successful replacement is recorded as `messages_replaced(reason='compaction')`, while attempt metadata is written as runtime metadata/artifacts.
 - Provide the host-side `agent` builtin tool: spawn a child JSONL session in the same workspace, inheriting the parent's `approvalMode`, and return the child's final assistant text.
 - Auto-import LLM providers/models from `~/.claude/settings.json` and `~/.codex/config.toml`, merge user-managed model ids from `~/.config/agent-kernel/models.json`, and expose sanitized snapshots to the dashboard via HTTP `GET /models` and `GET /settings`.
 
@@ -96,11 +96,11 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 
 Lives close to the files it needs to touch. Dials **out** to Host via Socket.IO. Never accepts inbound connections.
 
-**One executor per workspace, one workspace per machine.** The executor's `workspaceId` (a stable ULID persisted in `~/.agent-kernel/workspace-id`) is the routing key Host uses to dispatch tool calls; the `workspaceName` (defaults to `os.hostname()`) is the display label. Two executor processes with the same `workspaceId` are treated as replicas of the same workspace.
+**One executor per workspace, one workspace per local profile.** The executor's `workspaceId` (a stable ULID persisted in `~/.agent-kernel/workspace-id`) is the routing key Host uses to dispatch tool calls; the `workspaceName` (defaults to `os.hostname()`) is the display label. Two executor processes with the same `workspaceId` are treated as replicas of the same workspace. A development machine can run an additional isolated executor with `--profile dev`, which stores its lock, `workspace-id`, and token under `~/.agent-kernel/profiles/dev/`.
 
 **Two forms**:
 
-1. **Local Node daemon**: user runs `agent-kernel-executor --host wss://host.example.com`. Has access to a whitelisted working directory. Runs `bash`, `read`, `write`, etc. against the real filesystem. Also runs background shell tasks (see below).
+1. **Local Node daemon**: user runs `node agent-kernel-executor.cjs --host wss://host.example.com`. Has access to a whitelisted working directory. Runs `bash`, `read`, `write`, etc. against the real filesystem. Also runs background shell tasks (see below).
 2. **Browser WebContainer**: dashboard hosts an in-page executor via WebContainer API [1]. Same tool implementations, but the filesystem is an in-memory vfs. Enables the "demo with just a URL" experience.
 
 **Responsibilities**:
@@ -126,7 +126,7 @@ React SPA. Built to a static bundle (`packages/dashboard/dist/`) and served by H
 
 **Responsibilities**:
 - Connect to Host via Socket.IO (`/dashboard` namespace) with a `sessionId` and role
-- Show the chat transcript (rendering text + image blocks), the inspector, the event timeline (with a compact boundary marker when `compact_replaced` fired), the replay/fork UI, the Settings pane (providers, models, approval mode default, host)
+- Show the chat transcript (rendering text + image blocks), the inspector, the event timeline (with a compact boundary marker when `messages_replaced(reason='compaction')` fired), the replay/fork UI, the Settings pane (providers, models, approval mode default, host)
 - Send user events (`user_message`, `user_approve`, `user_reject`, `cancel`) and control messages (`client:set_approval_mode`, `client:set_cwd`, `client:set_model`, `client:compact`, `client:rename_session`, `client:delete_session`, `client:create_session`, `client:list_dirs`) to Host
 
 **Non-goals**:
@@ -254,7 +254,7 @@ Examples:
 
 - "The session has a pending approval" is core state; "show a toast", "send a desktop notification", and "play a sound" are dashboard effects.
 - "The reducer emitted `call_tool` with `cwd=/tmp`" is kernel output; "send that request to the matching executor and enforce sandbox roots" is host/executor responsibility.
-- "Context pressure is hard" is derived reducer state; "run a summarizer and append `compact_replaced`" is host orchestration.
+- "Context pressure is hard" is host `ContextSnapshot` state; "run a summarizer and append `messages_replaced`" is host orchestration.
 - "A provider HTTP request/response was captured" is trace metadata next to the event log; it is not an `AgentState` field and not a kernel event.
 
 This principle is a review gate. When a feature adds state, first ask whether it changes the agent protocol itself or whether it is an observer of protocol state. Observers must be implemented outside the core mechanism and tested at the lowest layer that owns the side effect.
@@ -313,7 +313,7 @@ The topology is the same. What changes is **who has the public IP**.
 
 **Cloud + local executor** (the differentiating deployment):
 - Host deployed to Fly.io / Railway, reachable at `wss://host.example.com`
-- Executor runs on your laptop, dials out: `agent-kernel-executor --host wss://host.example.com --session <id>`
+- Executor runs on your laptop, dials out: `node agent-kernel-executor.cjs --host wss://host.example.com --sandbox-root /repo`
 - Dashboard hosted static (Vercel), served at `https://app.example.com`, connects to `wss://host.example.com/dashboard`
 - The laptop needs **no inbound port**. It creates the outbound WS. This is the NAT/firewall workaround baked in.
 
