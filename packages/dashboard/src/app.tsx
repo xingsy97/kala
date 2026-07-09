@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Moon, PanelRight, PanelRightClose, Sun } from 'lucide-react'
 
 import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
+import type { Message } from '@agent-kernel/kernel'
 
 import { Button } from './components/ui/button.js'
 import {
@@ -9,6 +10,8 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from './components/ui/resizable.js'
+import { ScrollArea } from './components/ui/scroll-area.js'
+import { ActivityBar, type CompactStatus } from './features/chat/ActivityBar.js'
 import { ApprovalsPanel } from './features/chat/ApprovalsPanel.js'
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
@@ -21,6 +24,7 @@ import {
   deleteSession,
   respondApproval,
   setSessionModel,
+  type TimelineEntry,
   useControlPlane,
   useSession,
 } from './session.js'
@@ -84,6 +88,8 @@ export function App(): JSX.Element {
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string } | null
   >(null)
+  const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
+  const compactResetTimer = useRef<number | null>(null)
   const [theme, toggleTheme] = useTheme()
   const { models, defaultModel } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
@@ -125,6 +131,46 @@ export function App(): JSX.Element {
       setConfig((prev) => ({ ...prev, sessionId: p.sessionId, explicit: true }))
     },
   })
+
+  useEffect(() => {
+    setCompactStatus({ kind: 'idle' })
+  }, [config.sessionId])
+
+  const scheduleCompactIdle = (ms: number): void => {
+    if (compactResetTimer.current !== null) {
+      window.clearTimeout(compactResetTimer.current)
+    }
+    compactResetTimer.current = window.setTimeout(() => {
+      setCompactStatus({ kind: 'idle' })
+      compactResetTimer.current = null
+    }, ms)
+  }
+
+  useEffect(() => {
+    if (compactStatus.kind !== 'running') return
+    const last = session.timeline[session.timeline.length - 1]
+    if (last?.event.kind !== 'compact_replaced') return
+    setCompactStatus({ kind: 'done' })
+    scheduleCompactIdle(2500)
+  }, [compactStatus, session.timeline])
+
+  useEffect(() => {
+    if (compactStatus.kind !== 'running') return
+    if (!session.lastError) return
+    setCompactStatus({ kind: 'error', message: session.lastError.message })
+    scheduleCompactIdle(6000)
+  }, [compactStatus, session.lastError])
+
+  useEffect(() => {
+    if (compactStatus.kind !== 'running') return
+    const timer = window.setTimeout(() => {
+      setCompactStatus({
+        kind: 'error',
+        message: 'compact is still waiting; try again after the current request finishes',
+      })
+    }, 45_000)
+    return () => window.clearTimeout(timer)
+  }, [compactStatus])
 
   // If the host already has a per-session model on record, that's the truth
   // (persists across reloads because host keeps it in memory). Only push the
@@ -216,6 +262,7 @@ export function App(): JSX.Element {
       ? `${firstMsg.slice(0, 40)}…`
       : firstMsg
     : 'new session'
+  const chatMessages = visibleMessages(session.state?.messages ?? [], session.timeline)
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
@@ -271,15 +318,12 @@ export function App(): JSX.Element {
               />
             ) : null}
             <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-              <div
-                className="flex-1 min-h-0 overflow-y-auto"
-                data-testid="chat-panel"
-              >
+              <ScrollArea className="flex-1 min-h-0" data-testid="chat-panel">
                 <ChatPanel
-                  messages={session.state?.messages ?? []}
+                  messages={chatMessages}
                   highlightIndex={highlightIndex}
                 />
-              </div>
+              </ScrollArea>
               <ApprovalsPanel
                 approvals={session.pendingApprovals}
                 onDecision={(callId, decision) => {
@@ -294,6 +338,10 @@ export function App(): JSX.Element {
                 }}
               />
               <TodoDock todos={session.state?.todos ?? []} />
+              <ActivityBar
+                state={session.state}
+                compactStatus={compactStatus}
+              />
               {session.lastError ? (
                 <div
                   className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
@@ -321,6 +369,33 @@ export function App(): JSX.Element {
                 onModelChange={onModelChange}
                 status={session.status}
                 state={session.state}
+                compacting={compactStatus.kind === 'running'}
+                onCompact={() => {
+                  if (!hasCompactableContent(session.state)) {
+                    setCompactStatus({ kind: 'error', message: 'nothing to compact yet' })
+                    scheduleCompactIdle(6000)
+                    return
+                  }
+                  if (session.state && !isResting(session.state.status)) {
+                    setCompactStatus({
+                      kind: 'error',
+                      message: 'wait for the current turn to finish before compacting',
+                    })
+                    scheduleCompactIdle(6000)
+                    return
+                  }
+                  if (compactResetTimer.current !== null) {
+                    window.clearTimeout(compactResetTimer.current)
+                    compactResetTimer.current = null
+                  }
+                  setCompactStatus({ kind: 'running' })
+                  session.socket?.emit('client:compact', {
+                    sessionId: config.sessionId,
+                  })
+                  if (!config.explicit) {
+                    setConfig((prev) => ({ ...prev, explicit: true }))
+                  }
+                }}
                 onSubmit={(text) => {
                   session.socket?.emit('client:user_message', {
                     sessionId: config.sessionId,
@@ -350,6 +425,7 @@ export function App(): JSX.Element {
                 <InspectorPanel
                   state={session.state}
                   timeline={session.timeline}
+                  visibleMessagesCount={chatMessages.length}
                   onFork={(cursor) => {
                     session.socket?.emit('client:fork', {
                       sourceSessionId: config.sessionId,
@@ -378,6 +454,51 @@ export function App(): JSX.Element {
       />
     </div>
   )
+}
+
+function visibleMessages(
+  stateMessages: readonly Message[],
+  timeline: readonly TimelineEntry[],
+): readonly Message[] {
+  const out: Message[] = []
+  const first = stateMessages[0]
+  if (first?.role === 'system') out.push(first)
+
+  for (const entry of timeline) {
+    const event = entry.event
+    if (event.kind === 'user_message') {
+      out.push({
+        role: 'user',
+        content: event.content
+          ? [...event.content]
+          : [{ type: 'text', text: event.text ?? '' }],
+      })
+    } else if (event.kind === 'llm_response') {
+      out.push(event.message)
+    } else if (event.kind === 'tool_result') {
+      out.push({
+        role: 'tool',
+        content: [
+          {
+            type: 'tool_result',
+            callId: event.callId,
+            ok: event.ok,
+            content: event.content,
+          },
+        ],
+      })
+    }
+  }
+
+  return out.length > 1 ? out : stateMessages
+}
+
+function hasCompactableContent(state: import('@agent-kernel/kernel').AgentState | null): boolean {
+  return state?.messages.some((m) => m.role !== 'system') ?? false
+}
+
+function isResting(status: import('@agent-kernel/kernel').AgentState['status']): boolean {
+  return status === 'idle' || status === 'done' || status === 'error'
 }
 
 type Config = {

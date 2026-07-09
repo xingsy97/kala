@@ -553,6 +553,7 @@ This session yields 4 lines in the JSONL event log (see [event-log.md](event-log
 Current protocol includes these additive events and fields:
 
 - Dashboard → Host: `client:compact`, `client:cancel_stream`, `client:set_approval_mode`, `client:set_cwd`, `client:create_session`, `client:list_executors`, `client:list_sessions`, `client:load_history`, `client:delete_session`, `client:set_model`.
+- Dashboard emits `client:compact` from the Composer compact button and from exact `/compact` input; `/compact` is not appended as a `user_message`.
 - Host → Dashboard: `session:token_delta`, `usage:updated`, `session:model_changed`, `server:executors`, `server:executor_changed`, `server:sessions`, `server:history`, `server:session_deleted`.
 - Kernel events in `event:appended` may include `compact_replaced`, `approval_mode_changed`, and `cwd_changed`.
 - `ToolCallMessage` includes optional `cwd`; executor client merges it into the tool input before running the tool.

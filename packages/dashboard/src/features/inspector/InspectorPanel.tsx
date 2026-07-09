@@ -13,6 +13,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../../components/ui/alert-dialog.js'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog.js'
+import { Button } from '../../components/ui/button.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
 import {
   ResizableHandle,
@@ -25,6 +35,7 @@ import { cn } from '../../lib/utils.js'
 type Props = {
   state: AgentState | null
   timeline: readonly TimelineEntry[]
+  visibleMessagesCount?: number
   onFork?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
 }
@@ -32,10 +43,15 @@ type Props = {
 export function InspectorPanel({
   state,
   timeline,
+  visibleMessagesCount,
   onFork,
   onJumpToMessage,
 }: Props): JSX.Element {
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
+  const [selectedTimeline, setSelectedTimeline] = useState<{
+    entry: TimelineEntry
+    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
+  } | null>(null)
 
   const confirmFork = (): void => {
     if (pendingForkSeq !== null && onFork) onFork(pendingForkSeq)
@@ -52,9 +68,10 @@ export function InspectorPanel({
           <ResizablePanel defaultSize={65} minSize={25}>
             <Timeline
               timeline={timeline}
-              messagesCount={state?.messages.length ?? 0}
+              messagesCount={visibleMessagesCount ?? state?.messages.length ?? 0}
               onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
               onJumpToMessage={onJumpToMessage}
+              onInspect={setSelectedTimeline}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
@@ -94,6 +111,39 @@ export function InspectorPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={selectedTimeline !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTimeline(null)
+        }}
+      >
+        <DialogContent className="max-w-5xl h-[86vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
+          <DialogHeader className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+            <DialogTitle className="text-base">
+              Timeline event #{selectedTimeline?.entry.seq}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedTimeline?.entry.event.kind ?? ''}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="min-h-0">
+            <div className="p-4">
+            {selectedTimeline ? (
+              <EventDetails
+                entry={selectedTimeline.entry}
+                priorCallLlm={selectedTimeline.priorCallLlm}
+              />
+            ) : null}
+            </div>
+          </ScrollArea>
+          <DialogFooter className="border-t border-slate-200 px-4 py-3 dark:border-slate-800">
+            <DialogClose asChild>
+              <Button variant="outline" className="mt-0">Close</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -175,11 +225,16 @@ function Timeline({
   messagesCount,
   onForkRequest,
   onJumpToMessage,
+  onInspect,
 }: {
   timeline: readonly TimelineEntry[]
   messagesCount: number
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
+  onInspect(payload: {
+    entry: TimelineEntry
+    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
+  }): void
 }): JSX.Element {
   return (
     <div className="h-full flex flex-col">
@@ -202,6 +257,7 @@ function Timeline({
                 messageIndex={messageIndexFor(timeline, i, messagesCount)}
                 onForkRequest={onForkRequest}
                 onJumpToMessage={onJumpToMessage}
+                onInspect={onInspect}
               />
             ))}
           </ul>
@@ -232,14 +288,18 @@ function TimelineRow({
   messageIndex,
   onForkRequest,
   onJumpToMessage,
+  onInspect,
 }: {
   entry: TimelineEntry
   priorCallLlm: { seq: number; effect: CallLlmEffect } | null
   messageIndex: number | null
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
+  onInspect(payload: {
+    entry: TimelineEntry
+    priorCallLlm: { seq: number; effect: CallLlmEffect } | null
+  }): void
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(false)
   const inbound = inboundOf(entry.event)
   const jumpable = messageIndex !== null && onJumpToMessage !== undefined
   return (
@@ -247,20 +307,18 @@ function TimelineRow({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => onInspect({ entry, priorCallLlm })}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
-            setExpanded((v) => !v)
+            onInspect({ entry, priorCallLlm })
           }
         }}
-        aria-expanded={expanded}
+        aria-label={`inspect timeline event ${entry.seq}`}
         data-testid="timeline-row-header"
         className={cn(
           'group flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer select-none',
           'hover:bg-slate-100 dark:hover:bg-slate-800/60',
-          expanded &&
-            'bg-slate-100 dark:bg-slate-800/60 border-l-2 border-l-sky-500 dark:border-l-sky-400 pl-1.5',
         )}
       >
         <span className="text-slate-500 w-8 text-right font-mono flex-none">
@@ -332,9 +390,6 @@ function TimelineRow({
           })}
         </ul>
       ) : null}
-      {expanded ? (
-        <EventDetails entry={entry} priorCallLlm={priorCallLlm} />
-      ) : null}
     </li>
   )
 }
@@ -353,7 +408,7 @@ function EventDetails({
   if (entry.event.kind === 'llm_response' && priorCallLlm) {
     return (
       <div
-        className="ml-10 mt-2 mb-3 grid grid-cols-1 lg:grid-cols-2 gap-2"
+        className="grid grid-cols-1 lg:grid-cols-2 gap-2"
         data-testid="timeline-row-details"
       >
         <JsonBlock
@@ -377,7 +432,7 @@ function EventDetails({
   }
   return (
     <div
-      className="ml-10 mt-2 mb-3 space-y-2"
+      className="space-y-2"
       data-testid="timeline-row-details"
     >
       <JsonBlock
@@ -400,10 +455,10 @@ function EventDetails({
 function RawStateSection({ state }: { state: AgentState | null }): JSX.Element {
   return (
     <div className="h-full flex flex-col border-t border-slate-200 dark:border-slate-800">
-      <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500 flex-none">
-        raw state
+      <div className="px-3 py-2 text-xs text-slate-500 flex-none">
+        <span className="font-medium">Agent state</span>
         <span className="ml-2 normal-case tracking-normal text-slate-500 dark:text-slate-600">
-          full AgentState — drag the divider above to resize
+          full runtime state JSON
         </span>
       </div>
       <div className="flex-1 min-h-0 mx-3 mb-3">

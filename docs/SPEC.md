@@ -537,8 +537,8 @@ These are all valid concerns for an agent system, but the kernel does not handle
 ## 8. Reference implementation
 
 - Source: `packages/kernel/src/`
-- Tests: `packages/kernel/src/core.test.ts` — 23 tests covering all transitions, purity, fold, fork
-- Line counts: ~350 lines production code + ~500 lines tests
+- Tests: `packages/kernel/src/core.test.ts` — 43 tests covering transitions, purity, fold, fork, compaction, approval modes, todos, cwd, and image content preservation.
+- Line counts: evolved beyond the original v0.1 snapshot as Batch A landed; use the source tree as the current reference.
 
 The reference implementation is the tie-breaker only for things this spec is silent about. Where they conflict, spec wins and the ref impl should be patched.
 

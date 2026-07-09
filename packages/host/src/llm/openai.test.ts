@@ -226,6 +226,58 @@ describe('openaiAdapter', () => {
     ])
   })
 
+  it('maps user image content to OpenAI image_url blocks', async () => {
+    const sink: FetchArgs[] = []
+    const llm = openaiAdapter({
+      apiKey: 'k',
+      fetchImpl: mockFetch(
+        {
+          id: 'x',
+          choices: [
+            { index: 0, message: { role: 'assistant', content: 'seen' } },
+          ],
+        },
+        { sink },
+      ),
+    })
+
+    await llm.call({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'text only' }] },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'look' },
+            {
+              type: 'image',
+              source: {
+                kind: 'base64',
+                mediaType: 'image/png',
+                data: 'aGVsbG8=',
+              },
+            },
+          ],
+        },
+      ],
+      tools: [],
+    })
+
+    const body = JSON.parse(String(sink[0].init.body))
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'text only' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'look' },
+          {
+            type: 'image_url',
+            image_url: { url: 'data:image/png;base64,aGVsbG8=' },
+          },
+        ],
+      },
+    ])
+  })
+
   it('surfaces HTTP errors with body text', async () => {
     const llm = openaiAdapter({
       apiKey: 'k',
