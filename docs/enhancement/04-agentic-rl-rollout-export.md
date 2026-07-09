@@ -120,8 +120,35 @@ The shared foundation includes `RolloutSidecar`, which intentionally indexes
 event logs, trace artifacts, token segment artifacts, and reward artifacts. It
 is not a trajectory format and must remain an adapter-side index.
 
+Implemented local sidecar export command:
+
+```bash
+agent-kernel-host enhancement rollout export-session \
+  --root-dir runs/rollouts \
+  --session-log ~/.agent-kernel/sessions/<session>.jsonl \
+  --task-id swebench:sympy__sympy-20590 \
+  --framework slime \
+  --model local-policy \
+  --reward rewards/<session>.json
+```
+
+The command first exports the OpenInference-shaped trace and redacted LLM
+request/response artifacts, then writes:
+
+```text
+runs/rollouts/
+  traces/<session_id>.openinference.json
+  llm/<session_id>/<seq>.request.json
+  llm/<session_id>/<seq>.response.json
+  rollouts/<rollout_id>.json
+```
+
+The sidecar links to the event log, trace, optional reward file, optional token
+segment file, target framework, model, and weight version. It deliberately does
+not invent token ids or masks when the serving path did not capture them.
+
 Phase 1: export completed session logs and verifier rewards with stable rollout
-ids.
+ids. Implemented as sidecar export.
 
 Phase 2: add controlled local model gateway token capture for one backend.
 

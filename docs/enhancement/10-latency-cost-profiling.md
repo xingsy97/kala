@@ -49,6 +49,37 @@ Keep a versioned pricing table outside the kernel. The host computes estimated
 cost from provider-reported usage. If provider usage is unavailable, label cost
 as estimated or unknown rather than pretending precision.
 
+Implemented local profile command:
+
+```bash
+agent-kernel-host enhancement profile session \
+  --root-dir runs/profile/session \
+  --session-log ~/.agent-kernel/sessions/<session>.jsonl \
+  --pricing pricing.json
+```
+
+`pricing.json` is optional and has this shape:
+
+```json
+{
+  "version": "local-2026-07",
+  "currency": "USD",
+  "models": {
+    "gpt-test": {
+      "inputPerMillion": 1,
+      "outputPerMillion": 2,
+      "cacheReadPerMillion": 0.1,
+      "cacheCreationPerMillion": 1
+    }
+  }
+}
+```
+
+The output `profile.json` records LLM calls, tool calls, failed tool results,
+token totals, missing usage, missing provider traces, model ids, wall time, and
+estimated cost when every model has a price entry. If usage or pricing is
+missing, `costStatus` is `unknown`; the runner does not invent cost precision.
+
 ## Dashboard
 
 Add compact profiling views:
@@ -62,6 +93,7 @@ Add compact profiling views:
 ## Testing Plan
 
 - Unit tests for pricing table lookup and unknown-cost handling.
+- Implemented for session-log profile export.
 - Integration test that LLM spans include TTFT when streaming.
 - Browser test for cost summary with missing usage fields.
 
@@ -70,4 +102,3 @@ Add compact profiling views:
 - Do not block execution on cost calculation.
 - Do not encode provider pricing in kernel or shared protocol types unless it is
   purely optional metadata.
-

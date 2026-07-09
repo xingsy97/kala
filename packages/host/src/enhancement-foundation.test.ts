@@ -7,11 +7,18 @@ import type { EventEntry, HeaderEntry, LLMTrace } from '@agent-kernel/shared'
 import {
   buildSweBenchEvaluationCommand,
   createArtifactStore,
+  createEvalExperiment,
+  createMessageAssemblyArtifact,
   createRolloutSidecar,
+  createRouterDecisionArtifact,
+  createSessionProfile,
   createSweBenchPrediction,
+  createToolCatalogArtifact,
   exportSessionSpans,
   redactForPersistence,
   serializeJsonl,
+  summarizeEvalRun,
+  summarizeEvalScores,
 } from '@agent-kernel/shared'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -187,5 +194,124 @@ describe('enhancement foundation', () => {
       model: 'local-policy',
       metadata: {},
     })
+  })
+
+  it('summarizes eval trials with low-cardinality failure labels', () => {
+    const experiment = createEvalExperiment({
+      experimentId: 'run1',
+      dataset: 'local',
+      model: 'gpt-test',
+      createdAt: '2026-07-09T00:00:00.000Z',
+    })
+    const summary = summarizeEvalRun(experiment, [
+      {
+        trialId: 't1',
+        experimentId: 'run1',
+        instanceId: 'i1',
+        status: 'completed',
+        resolved: true,
+        failureLabel: 'resolved',
+        artifacts: [],
+        metrics: {},
+      },
+      {
+        trialId: 't2',
+        experimentId: 'run1',
+        instanceId: 'i2',
+        status: 'completed',
+        resolved: false,
+        failureLabel: 'empty_patch',
+        artifacts: [],
+        metrics: {},
+      },
+    ])
+
+    expect(summary.trialCount).toBe(2)
+    expect(summary.resolved).toBe(1)
+    expect(summary.emptyPatch).toBe(1)
+    expect(summary.metrics.passRate).toBe(0.5)
+  })
+
+  it('builds message assembly artifacts from messages and tool schemas', () => {
+    const artifact = createMessageAssemblyArtifact({
+      sessionId: 's1',
+      model: 'gpt-test',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'sys' }] },
+        { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      ],
+      tools: [{ name: 'read', description: 'read files', inputSchema: { type: 'object' }, requiresApproval: false }],
+    })
+
+    expect(artifact.messageCount).toBe(2)
+    expect(artifact.toolCount).toBe(1)
+    expect(artifact.parts.map((part) => part.name)).toContain('system')
+    expect(artifact.parts.map((part) => part.name)).toContain('tools')
+    expect(artifact.estimatedTokens).toBeGreaterThan(0)
+  })
+
+  it('summarizes eval scores and session profiles without kernel state changes', () => {
+    const score = summarizeEvalScores([
+      {
+        scorer: 'patch.non_empty',
+        passed: false,
+        label: 'empty_patch',
+        score: 0,
+        metrics: {},
+        artifactRefs: [],
+      },
+    ], 'i1')
+    expect(score.failureLabel).toBe('empty_patch')
+    expect(score.resolved).toBe(false)
+
+    const profile = createSessionProfile({
+      header,
+      events: [
+        {
+          kind: 'event',
+          seq: 1,
+          ts: '2026-07-09T00:00:01.000Z',
+          event: { kind: 'llm_response', message: { role: 'assistant', content: [] } },
+          effects: [],
+          model: 'gpt-test',
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 500,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 100,
+          },
+        },
+      ],
+      pricing: {
+        version: 'test',
+        currency: 'USD',
+        models: { 'gpt-test': { inputPerMillion: 1, outputPerMillion: 2, cacheReadPerMillion: 0.1 } },
+      },
+    })
+    expect(profile.llmCalls).toBe(1)
+    expect(profile.totalInputTokens).toBe(1000)
+    expect(profile.costStatus).toBe('estimated')
+    expect(profile.estimatedCostUsd).toBe(0.00201)
+  })
+
+  it('creates router decision and tool catalog artifacts for observability', () => {
+    const decision = createRouterDecisionArtifact({
+      requestedModel: 'gpt-test',
+      adapterName: 'router(openai:gpt-test)',
+      maxInputTokens: 128000,
+    })
+    expect(decision.selectedProvider).toBe('openai')
+    expect(decision.selectedModel).toBe('gpt-test')
+    expect(decision.budget?.maxInputTokens).toBe(128000)
+
+    const catalog = createToolCatalogArtifact([
+      { name: 'skill', description: 'Load skill', requiresApproval: false, inputSchema: { type: 'object' } },
+      { name: 'agent', description: 'Sub agent', requiresApproval: false, inputSchema: { type: 'object' } },
+      { name: 'edit', description: 'Edit file', requiresApproval: true, inputSchema: { type: 'object' } },
+    ])
+    expect(catalog.toolCount).toBe(3)
+    expect(catalog.tools[0]).toMatchObject({ name: 'skill', kind: 'skill_loader', skillBacked: true })
+    expect(catalog.tools[1]).toMatchObject({ name: 'agent', kind: 'sub_agent' })
+    expect(catalog.tools[2]).toMatchObject({ name: 'edit', kind: 'executor', requiresApproval: true })
   })
 })

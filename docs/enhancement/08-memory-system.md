@@ -49,9 +49,25 @@ Avoid automatic memory writes for every message. Good candidates:
 
 Memory writes should be visible and reversible in dashboard.
 
+Implemented memory index export:
+
+```bash
+agent-kernel-host enhancement memory index \
+  --root-dir runs/memory \
+  --workspace-root /path/to/workspace \
+  --include-global
+```
+
+The command reads workspace/global `.agent-kernel/memory/*.md` files, extracts
+frontmatter such as `name`, `description`, `type`, `source`, `confidence`,
+`generatedAt`, and `sessionId`, and writes `memory-index.json`. It does not add
+memory to kernel state and does not inject memory into prompts. It is a derived
+artifact for dashboard provenance, eval reproducibility, and cleanup tooling.
+
 ## Testing Plan
 
 - Unit tests for scope filtering.
+- Implemented unit tests for workspace memory index export.
 - Tests that benchmark mode disables cross-task memory by default.
 - Retrieval ranking tests with stale conflicting facts.
 - Browser tests for memory provenance and delete/tombstone behavior.
@@ -61,4 +77,3 @@ Memory writes should be visible and reversible in dashboard.
 - Do not treat memory as hidden system prompt text.
 - Do not let memory bypass context budget accounting.
 - Do not add vector database dependencies to the kernel.
-
