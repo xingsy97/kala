@@ -3,6 +3,15 @@ import process from 'node:process'
 import pino, { type Logger, type LoggerOptions } from 'pino'
 import pinoPretty from 'pino-pretty'
 
+export type RuntimeLogFormat = 'json' | 'pretty'
+
+export type RuntimeLoggerPolicy = {
+  level: string
+  format: RuntimeLogFormat
+  warnUnknownFormat: boolean
+  requestedFormat?: string
+}
+
 const REDACT_PATHS = [
   'apiKey',
   '*.apiKey',
@@ -25,10 +34,10 @@ const REDACT_PATHS = [
 export type RuntimeLogger = Logger
 
 export function createRuntimeLogger(name: string): RuntimeLogger {
-  const format = (process.env.LOG_FORMAT ?? 'pretty').toLowerCase()
+  const policy = resolveRuntimeLoggerPolicy(process.env)
   const options: LoggerOptions = {
     name,
-    level: process.env.LOG_LEVEL ?? 'info',
+    level: policy.level,
     redact: {
       paths: REDACT_PATHS,
       censor: '[redacted]',
@@ -38,7 +47,7 @@ export function createRuntimeLogger(name: string): RuntimeLogger {
     },
   }
 
-  if (format === 'json') {
+  if (policy.format === 'json') {
     return pino(options, pino.destination({ fd: 2, sync: true }))
   }
 
@@ -53,9 +62,21 @@ export function createRuntimeLogger(name: string): RuntimeLogger {
     }),
   )
 
-  if (format !== 'pretty' && format !== 'human') {
-    logger.warn({ format: process.env.LOG_FORMAT }, 'unknown LOG_FORMAT; using pretty logs')
+  if (policy.warnUnknownFormat) {
+    logger.warn({ format: policy.requestedFormat }, 'unknown LOG_FORMAT; using pretty logs')
   }
 
   return logger
+}
+
+export function resolveRuntimeLoggerPolicy(env: { LOG_FORMAT?: string; LOG_LEVEL?: string }): RuntimeLoggerPolicy {
+  const requestedFormat = env.LOG_FORMAT
+  const normalizedFormat = (requestedFormat ?? 'pretty').toLowerCase()
+  const format: RuntimeLogFormat = normalizedFormat === 'json' ? 'json' : 'pretty'
+  return {
+    level: env.LOG_LEVEL ?? 'info',
+    format,
+    warnUnknownFormat: requestedFormat !== undefined && normalizedFormat !== 'pretty' && normalizedFormat !== 'human' && normalizedFormat !== 'json',
+    ...(requestedFormat !== undefined ? { requestedFormat } : {}),
+  }
 }

@@ -31,6 +31,11 @@ import type {
   ExecutorCapabilities,
 } from '../protocol.js'
 
+const NonEmptyStringSchema = z.string().trim().min(1)
+const SessionIdSchema = NonEmptyStringSchema
+const WorkspaceIdSchema = NonEmptyStringSchema
+const WireIdSchema = NonEmptyStringSchema
+
 // ============================================================================
 // Handshake
 // ============================================================================
@@ -39,7 +44,7 @@ export const ClientRoleSchema = z.enum(['dashboard', 'executor']) satisfies z.Zo
 
 export const HandshakeAuthSchema = z.object({
   role: ClientRoleSchema,
-  sessionId: z.string().optional(),
+  sessionId: SessionIdSchema.optional(),
   token: z.string().optional(),
   invite: z.string().optional(),
   clientVersion: z.string(),
@@ -84,11 +89,11 @@ export const ExecutorCapabilitiesSchema = z.object({
 }) satisfies z.ZodType<ExecutorCapabilities>
 
 export const ExecutorAnnounceSchema = z.object({
-  executorId: z.string(),
+  executorId: WireIdSchema,
   executorVersion: z.string().optional(),
   build: BuildMetadataSchema.optional(),
   capabilities: ExecutorCapabilitiesSchema.optional(),
-  workspaceId: z.string(),
+  workspaceId: WorkspaceIdSchema,
   workspaceName: z.string(),
   tools: z.array(z.string()),
   sandboxRoots: z.array(z.string()).optional(),
@@ -104,8 +109,8 @@ export const ExecutorAnnounceSchema = z.object({
 }) satisfies z.ZodType<ExecutorAnnounce>
 
 export const ToolProgressPayloadSchema = z.object({
-  sessionId: z.string(),
-  callId: z.string(),
+  sessionId: SessionIdSchema,
+  callId: WireIdSchema,
   chunk: z.string(),
 }) satisfies z.ZodType<ToolProgressPayload>
 
@@ -117,8 +122,8 @@ const BackgroundTaskStatusSchema = z.enum([
 ]) satisfies z.ZodType<BackgroundTaskStatus>
 
 export const BackgroundTaskSummarySchema = z.object({
-  taskId: z.string(),
-  sessionId: z.string(),
+  taskId: WireIdSchema,
+  sessionId: SessionIdSchema,
   command: z.string(),
   cwd: z.string(),
   pid: z.number().int().optional(),
@@ -132,8 +137,8 @@ export const BackgroundTaskSummarySchema = z.object({
 }) satisfies z.ZodType<BackgroundTaskSummary>
 
 export const ServerBgTaskUpdatedSchema = z.object({
-  workspaceId: z.string(),
-  sessionId: z.string(),
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
   task: BackgroundTaskSummarySchema,
   delta: z
     .object({
@@ -144,22 +149,22 @@ export const ServerBgTaskUpdatedSchema = z.object({
 }) satisfies z.ZodType<ServerBgTaskUpdated>
 
 export const ServerBgTaskEvictedSchema = z.object({
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  taskId: z.string(),
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  taskId: WireIdSchema,
 }) satisfies z.ZodType<ServerBgTaskEvicted>
 
 export const ServerTerminalOutputSchema = z.object({
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  terminalId: z.string(),
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  terminalId: WireIdSchema,
   data: z.string(),
 }) satisfies z.ZodType<ServerTerminalOutput>
 
 export const ServerTerminalExitSchema = z.object({
-  workspaceId: z.string(),
-  sessionId: z.string(),
-  terminalId: z.string(),
+  workspaceId: WorkspaceIdSchema,
+  sessionId: SessionIdSchema,
+  terminalId: WireIdSchema,
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable(),
 }) satisfies z.ZodType<ServerTerminalExit>
@@ -169,8 +174,8 @@ export const ServerTerminalExitSchema = z.object({
 // ============================================================================
 
 export const ToolCallMessageSchema = z.object({
-  sessionId: z.string(),
-  callId: z.string(),
+  sessionId: SessionIdSchema,
+  callId: WireIdSchema,
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
   cwd: z.string().optional(),
@@ -178,12 +183,12 @@ export const ToolCallMessageSchema = z.object({
 }) satisfies z.ZodType<ToolCallMessage>
 
 export const ToolCancelMessageSchema = z.object({
-  sessionId: z.string(),
-  callId: z.string(),
+  sessionId: SessionIdSchema,
+  callId: WireIdSchema,
 }) satisfies z.ZodType<ToolCancelMessage>
 
 export const ToolResultAckSchema = z.object({
-  callId: z.string(),
+  callId: WireIdSchema,
   ok: z.boolean(),
   content: z.string(),
 }) satisfies z.ZodType<ToolResultAck>

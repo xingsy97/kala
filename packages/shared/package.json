@@ -14,6 +14,26 @@
       "types": "./dist/enhancement.d.ts",
       "import": "./dist/enhancement.js"
     },
+    "./token-estimation": {
+      "types": "./dist/token-estimation.d.ts",
+      "import": "./dist/token-estimation.js"
+    },
+    "./session-derived-state": {
+      "types": "./dist/session-derived-state.d.ts",
+      "import": "./dist/session-derived-state.js"
+    },
+    "./context-usage": {
+      "types": "./dist/context-usage/index.d.ts",
+      "import": "./dist/context-usage/index.js"
+    },
+    "./context-policy": {
+      "types": "./dist/context-policy/index.d.ts",
+      "import": "./dist/context-policy/index.js"
+    },
+    "./human-attention": {
+      "types": "./dist/human-attention/index.d.ts",
+      "import": "./dist/human-attention/index.js"
+    },
     "./runtime-logger": {
       "types": "./dist/runtime-logger.d.ts",
       "import": "./dist/runtime-logger.js"
