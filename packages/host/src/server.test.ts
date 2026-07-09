@@ -28,6 +28,7 @@ import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import { startHostServer, type HostServer } from './server.js'
+import { readSessionLog } from './store/log.js'
 
 const WRITE = {
   name: 'write',
@@ -84,6 +85,23 @@ async function waitForAnyExecutor(
     await new Promise((r) => setTimeout(r, 10))
   }
   throw new Error('announce wait timeout')
+}
+
+async function waitForWorkspace(
+  dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>,
+  workspaceId: string,
+  timeoutMs = 1000,
+): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const list = await new Promise<ServerExecutorsPayload>((resolve) => {
+      dashboard.once('server:executors', resolve)
+      dashboard.emit('client:list_executors', {})
+    })
+    if (list.executors.some((e) => e.workspaceId === workspaceId)) return
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error(`workspace wait timeout: ${workspaceId}`)
 }
 
 describe('wire protocol', () => {
@@ -273,9 +291,19 @@ describe('wire protocol', () => {
     expect(ev.state.cursor).toBe(2)
     // Original session has cursor 4; fork stops at 2 (user + llm tool_call).
     const forkedRec = server.store.get('wire-fork-child')
+    expect(forkedRec?.state.sessionId).toBe('wire-fork-child')
     expect(forkedRec?.parentSessionId).toBe(sessionId)
     expect(forkedRec?.parentCursor).toBe(2)
     expect(forkedRec?.state.cursor).toBe(2)
+    expect(forkedRec).toBeTruthy()
+    const forkedLog = await readSessionLog(forkedRec!.logPath)
+    expect(forkedLog.header.sessionId).toBe('wire-fork-child')
+    expect(forkedLog.header.initialState.sessionId).toBe('wire-fork-child')
+
+    const summaries = await server.store.listSummaries()
+    const childSummary = summaries.find((s) => s.sessionId === 'wire-fork-child')
+    expect(childSummary).toBeTruthy()
+    expect(childSummary?.parentSessionId).toBe(sessionId)
 
     dashboard.close()
     executor.close()
@@ -691,6 +719,140 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('client:create_session validates and writes the initial cwd', async () => {
+    const sessionId = 'wire-create-session-cwd'
+    const root = resolve(dir, 'workspace-root')
+    const child = resolve(root, 'child')
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', {
+      executorId: 'ex-create-cwd',
+      workspaceId: 'ws-create-cwd',
+      workspaceName: 'cwd-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+    await waitForWorkspace(dashboard, 'ws-create-cwd')
+
+    const ready = new Promise<SessionReadyEvent>((resolve) => {
+      dashboard.off('session:ready')
+      dashboard.on('session:ready', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-create-cwd',
+      workspaceName: 'cwd-box',
+      cwd: child,
+    })
+    const createdReady = await ready
+    expect(createdReady.state.cwd).toBe(child)
+    expect(server.store.get(sessionId)?.state.cwd).toBe(child)
+
+    const err = new Promise<{ scope: string; message: string }>((resolve) => {
+      dashboard.on('session:error', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId: 'wire-create-session-cwd-bad',
+      workspaceId: 'ws-create-cwd',
+      workspaceName: 'cwd-box',
+      cwd: resolve(dir, 'outside'),
+    })
+    await expect(err).resolves.toMatchObject({
+      scope: 'host',
+      message: 'cwd outside sandbox roots',
+    })
+
+    dashboard.close()
+    executor.close()
+  })
+
+  it('client:list_dirs returns directory entries from the selected executor', async () => {
+    const sessionId = 'wire-list-dirs'
+    const root = resolve(dir, 'dir-root')
+    const child = resolve(root, 'child')
+    await import('node:fs/promises').then((fs) => fs.mkdir(child, { recursive: true }))
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.on('fs:list_dirs', (payload, ack) => {
+      ack({
+        requestId: payload.requestId,
+        workspaceId: payload.workspaceId,
+        path: root,
+        roots: [root],
+        entries: [{ name: 'child', path: child }],
+      })
+    })
+    executor.emit('executor:announce', {
+      executorId: 'ex-list-dirs',
+      workspaceId: 'ws-list-dirs',
+      workspaceName: 'dir-box',
+      tools: ['write'],
+      sandboxRoots: [root],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    await waitForAnyExecutor(server)
+
+    const listed = new Promise<import('@agent-kernel/shared').DirListResult>((resolve) => {
+      dashboard.on('server:dir_list', resolve)
+    })
+    dashboard.emit('client:list_dirs', {
+      requestId: 'dirs-1',
+      workspaceId: 'ws-list-dirs',
+      path: root,
+    })
+    await expect(listed).resolves.toMatchObject({
+      requestId: 'dirs-1',
+      workspaceId: 'ws-list-dirs',
+      path: root,
+      entries: [{ name: 'child', path: child }],
+    })
+
+    dashboard.close()
+    executor.close()
+  })
+
   it('client:set_cwd validates sandbox roots and updates session summaries', async () => {
     const sessionId = 'wire-set-cwd'
     const root = resolve(dir, 'workspace')
@@ -813,6 +975,158 @@ describe('wire protocol', () => {
       message: 'nothing to compact yet',
     })
     expect(llmCalls).toBe(0)
+
+    dashboard.close()
+  })
+
+  it('queues user messages while a turn is running and dispatches them after rest', async () => {
+    const sessionId = 'wire-message-queue'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: `answer ${seenPrompts.length}` }],
+            },
+            usage: { inputTokens: 10, outputTokens: 1 },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const queueCounts: number[] = []
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) queueCounts.push(p.pending)
+    })
+    const finalDone = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('queued turn never finished')), 4000)
+      dashboard.on('state:changed', (p) => {
+        if (p.state.status === 'done' && p.state.messages.length >= 5) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    releaseFirst()
+    await finalDone
+
+    expect(queueCounts).toContain(1)
+    expect(queueCounts).toContain(0)
+    expect(seenPrompts).toEqual(['first', 'first|second'])
+
+    dashboard.close()
+  })
+
+  it('fires session_start and session_end lifecycle hooks around create/delete', async () => {
+    const sessionId = 'wire-lifecycle-hooks'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const calls: Array<{ event: string; sessionId: string }> = []
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: scriptedLlm(),
+      hooks: [
+        { event: 'session_start', command: 'true' },
+        { event: 'session_end', command: 'true' },
+        { event: 'session_start', command: 'true', match: 'nope' },
+      ],
+      hookRunner: {
+        async run(hook, payload) {
+          calls.push({ event: hook.event, sessionId: payload.sessionId })
+          return { ok: true, exitCode: 0, stdout: '', stderr: '' }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: '0.0.0' },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const created = new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.on('server:sessions', resolve)
+    })
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-life',
+      workspaceName: 'life-box',
+    })
+    await created
+    // Wait one tick so the async lifecycle hook has a chance to run.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(calls).toEqual([{ event: 'session_start', sessionId }])
+
+    const deleted = new Promise<{ sessionId: string }>((resolve) => {
+      dashboard.on('server:session_deleted', resolve)
+    })
+    dashboard.emit('client:delete_session', { sessionId })
+    await deleted
+    await new Promise((r) => setTimeout(r, 50))
+    expect(calls).toEqual([
+      { event: 'session_start', sessionId },
+      { event: 'session_end', sessionId },
+    ])
 
     dashboard.close()
   })

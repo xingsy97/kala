@@ -100,6 +100,7 @@ async function verifyViewports(page) {
     await verifyActivityBar(page, viewport.width)
     await verifyVisualIntegrity(page, viewport.width)
     await verifyJsonWheelScroll(page, viewport.width)
+    await verifyToolRegistry(page, viewport.width)
     const path = join(SHOTS_DIR, `dashboard-${viewport.width}.png`)
     await page.screenshot({ path, fullPage: false })
     check(`dashboard screenshot ${viewport.width}px`, true, path)
@@ -132,6 +133,8 @@ async function verifyResponsivePanels(page, viewportWidth) {
       sessionCwdText: sessionCwd?.textContent || '',
       sessionCwd: rectFor(sessionCwd),
       selectedSession: rectFor(selectedSession),
+      selectedSessionScrollWidth: selectedSession?.scrollWidth ?? 0,
+      selectedSessionClientWidth: selectedSession?.clientWidth ?? 0,
     }
   })
   if (viewportWidth < 1024) {
@@ -146,8 +149,10 @@ async function verifyResponsivePanels(page, viewportWidth) {
   check(`wide layout keeps explorer rail at ${viewportWidth}px`, Boolean(metrics.explorer?.width), JSON.stringify(metrics))
   check(`wide layout keeps inspector rail at ${viewportWidth}px`, Boolean(metrics.inspector?.width), JSON.stringify(metrics))
   check(`wide layout keeps explorer at top level at ${viewportWidth}px`, metrics.explorer?.top === 0 && metrics.toolbar && metrics.toolbar.left >= (metrics.explorer?.right ?? 0), JSON.stringify(metrics))
+  check(`wide layout keeps explorer readable at ${viewportWidth}px`, metrics.explorer?.width >= 240, JSON.stringify(metrics))
+  check(`wide layout keeps session rows inside explorer at ${viewportWidth}px`, metrics.explorer && metrics.selectedSession && metrics.selectedSession.left >= metrics.explorer.left - 1 && metrics.selectedSession.right <= metrics.explorer.right + 1 && metrics.selectedSessionScrollWidth <= metrics.selectedSessionClientWidth + 1, JSON.stringify(metrics))
   check(`wide layout shows session cwd metadata at ${viewportWidth}px`, metrics.sessionCwdText.includes('cwd /tmp') && metrics.sessionCwd && metrics.selectedSession && metrics.sessionCwd.bottom <= metrics.selectedSession.bottom + 1, JSON.stringify(metrics))
-  check(`wide layout keeps explorer rail compact at ${viewportWidth}px`, metrics.explorer?.width <= viewportWidth * 0.19, JSON.stringify(metrics))
+  check(`wide layout keeps explorer rail compact at ${viewportWidth}px`, metrics.explorer?.width <= viewportWidth * 0.29, JSON.stringify(metrics))
   check(`wide layout keeps inspector rail compact at ${viewportWidth}px`, metrics.inspector?.width <= viewportWidth * 0.31, JSON.stringify(metrics))
   check(`wide layout keeps main panel usable at ${viewportWidth}px`, metrics.main?.width >= minMainWidth, JSON.stringify(metrics))
   check(`wide layout exposes inspector toggle at ${viewportWidth}px`, metrics.inspectorTogglePresent === true, JSON.stringify(metrics))
@@ -223,7 +228,9 @@ async function verifyFooterLayout(page, viewportWidth) {
   const metrics = await page.evaluate(() => {
     const realControls = [
       '[data-testid="model-picker"]',
-      '[data-testid="connection-status"]',
+      '[data-testid="approval-mode-picker"]',
+      '[data-testid="context-usage-indicator"]',
+      '[data-testid="send-mode-control"]',
       '[data-testid="composer-send"]',
     ]
       .map((selector) => document.querySelector(selector))
@@ -262,7 +269,7 @@ async function verifyFooterLayout(page, viewportWidth) {
   check(`composer footer does not create page horizontal overflow at ${viewportWidth}px`, metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check(`composer footer content stays inside footer width at ${viewportWidth}px`, metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
   check(`composer footer remains a compact single action row at ${viewportWidth}px`, metrics.footerHeight <= 42 && tall.length === 0 && clipped.length === 0, JSON.stringify(visibleControls))
-  check(`runtime counters are not rendered in composer footer at ${viewportWidth}px`, !visibleControls.some((r) => /Cursor|Pending tools|Tokens/.test(r.text)), JSON.stringify(visibleControls))
+  check(`runtime counters are grouped with context indicator at ${viewportWidth}px`, visibleControls.some((r) => r.testId === 'context-usage-indicator' && /Cursor|Pending|Tokens/.test(r.text)), JSON.stringify(visibleControls))
 }
 
 async function verifyVisualIntegrity(page, viewportWidth) {
@@ -362,14 +369,8 @@ async function verifyActivityBar(page, viewportWidth) {
       viewportWidth: window.innerWidth,
     }
   })
-  const shouldShowSummary = viewportWidth >= 1536
   check(`activity bar shows readable agent state at ${viewportWidth}px`, metrics.visibleText.includes('Agent Ready') || metrics.visibleText.includes('Agent Done'), JSON.stringify(metrics))
-  check(`activity bar runtime summary visibility is responsive at ${viewportWidth}px`, metrics.summaryVisible === shouldShowSummary, JSON.stringify(metrics))
-  check(
-    `activity bar shows explicit runtime labels at ${viewportWidth}px`,
-    !shouldShowSummary || (metrics.summaryText.includes('Cursor') && metrics.summaryText.includes('Pending tools') && metrics.summaryText.includes('Tokens in/out')),
-    metrics.summaryText,
-  )
+  check(`activity bar does not duplicate composer runtime metrics at ${viewportWidth}px`, metrics.summaryVisible === false, JSON.stringify(metrics))
   check(`activity bar stays inside viewport at ${viewportWidth}px`, metrics.scrollWidth <= metrics.width + 1 && metrics.height <= 42, JSON.stringify(metrics))
 }
 
@@ -425,8 +426,58 @@ async function verifyJsonWheelScroll(page, viewportWidth) {
   check(`json viewer wheel changes scrollTop at ${viewportWidth}px`, after.found && after.scrollTop > before.scrollTop, JSON.stringify(result))
 }
 
+async function verifyToolRegistry(page, viewportWidth) {
+  if (viewportWidth < 1024) {
+    const found = await page.evaluate(() => Boolean(document.querySelector('[data-testid="runtime-view-tools"]')))
+    check(`narrow layout does not render inspector tool registry at ${viewportWidth}px`, found === false, String(found))
+    return
+  }
+  await page.click('[data-testid="runtime-view-tools"]')
+  await page.waitForSelector('[data-testid="tool-registry"]', { timeout: 3_000 })
+  const metrics = await page.evaluate(() => {
+    const registry = document.querySelector('[data-testid="tool-registry"]')
+    const item = document.querySelector('[data-testid="tool-registry-item"]')
+    const jsonScroll = item?.querySelector('[data-testid="json-block-scrollarea"]')
+    const viewport = jsonScroll?.querySelector('[data-radix-scroll-area-viewport]')
+    return {
+      text: registry?.textContent ?? '',
+      itemCount: document.querySelectorAll('[data-testid="tool-registry-item"]').length,
+      hasRadixSchemaScroll: Boolean(viewport),
+    }
+  })
+  check(`inspector shows current tool registry at ${viewportWidth}px`, metrics.itemCount >= 1 && metrics.text.includes('layout_fixture_tool'), JSON.stringify(metrics))
+  check(`tool registry shows descriptions and approval mode at ${viewportWidth}px`, metrics.text.includes('Exercise the dashboard tool registry view') && metrics.text.includes('approval required'), JSON.stringify(metrics))
+  check(`tool registry shows input schema parameters at ${viewportWidth}px`, metrics.text.includes('path') && metrics.text.includes('recursive'), JSON.stringify(metrics))
+  check(`tool registry schema uses JSON block Radix scroll area at ${viewportWidth}px`, metrics.hasRadixSchemaScroll === true, JSON.stringify(metrics))
+  await page.click('[data-testid="runtime-view-state"]')
+}
+
 function writeLargeSessionFixture() {
-  const config = { tools: [], systemPrompt: 'layout regression fixture' }
+  const config = {
+    tools: [
+      {
+        name: 'layout_fixture_tool',
+        description: 'Exercise the dashboard tool registry view with a realistic JSON schema.',
+        requiresApproval: true,
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['path'],
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Workspace-relative path to inspect.',
+            },
+            recursive: {
+              type: 'boolean',
+              description: 'Whether nested directories should be included.',
+            },
+          },
+        },
+      },
+    ],
+    systemPrompt: 'layout regression fixture',
+  }
   const initialState = {
     sessionId: SESSION_ID,
     messages: [
@@ -472,7 +523,7 @@ function writeLargeSessionFixture() {
       seq,
       ts: new Date().toISOString(),
       event: userEvent,
-      effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+      effects: [{ kind: 'call_llm', messages: [], tools: config.tools }],
     })
 
     const assistantEvent = {

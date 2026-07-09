@@ -33,7 +33,14 @@ import { openaiAdapter } from '../src/llm/openai.js'
 import { routerAdapter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
 import { builtinTools } from '../src/builtin-tools.js'
-import { knownContextWindow, loadRuntimeConfig, modelInfo, type ProviderSpec } from '../src/runtime-config.js'
+import { createHookRunner } from '../src/hooks.js'
+import {
+  knownContextWindow,
+  loadHookConfigs,
+  loadRuntimeConfig,
+  modelInfo,
+  type ProviderSpec,
+} from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
 
 async function main(): Promise<void> {
@@ -46,6 +53,8 @@ async function main(): Promise<void> {
   const sessionsDir =
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
   const staticDir = resolveDashboardDir()
+  const hooks = loadHookConfigs()
+  const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
 
   const server = await startHostServer({
     port,
@@ -64,6 +73,8 @@ async function main(): Promise<void> {
       ? { authToken: process.env.HOST_AUTH_TOKEN }
       : {}),
     ...(staticDir ? { staticDir } : {}),
+    ...(hooks.length > 0 ? { hooks } : {}),
+    ...(hookRunner ? { hookRunner } : {}),
   })
 
   console.log(`agent-kernel-host listening on port ${server.port}`)
@@ -74,6 +85,7 @@ async function main(): Promise<void> {
   )
   if (defaultModel) console.log(`default model: ${defaultModel}`)
   if (staticDir) console.log(`serving dashboard from ${staticDir}`)
+  if (hooks.length > 0) console.log(`hooks: ${hooks.length} loaded`)
 
   const shutdown = async (): Promise<void> => {
     console.log('shutting down...')

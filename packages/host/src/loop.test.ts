@@ -668,6 +668,117 @@ describe('host loop', () => {
     expect(childLog.header.parentSessionId).toBe(parent.sessionId)
     expect(children[0]!.state.status).toBe('done')
   })
+
+  it('pre_tool_use hook blocks the tool call when it fails', async () => {
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'c1',
+              name: 'read',
+              input: { path: '/tmp/x' },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      },
+    ])
+    let executorCalled = false
+    const tools = nullTools({
+      callTool: async () => {
+        executorCalled = true
+        return { ok: true, content: 'nope' }
+      },
+    })
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools,
+      broadcast: silentBroadcast(),
+      hooks: [{ event: 'pre_tool_use', command: '_ignored' }],
+      hookRunner: {
+        run: async () => ({
+          ok: false,
+          exitCode: 3,
+          stdout: 'denied by policy',
+          stderr: '',
+        }),
+      },
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'read x' })
+
+    expect(executorCalled).toBe(false)
+    const rec = store.get(sessionId)!
+    const parsed = await readSessionLog(rec.logPath)
+    const toolResult = parsed.events.find((e) => e.event.kind === 'tool_result')
+    expect(toolResult?.event).toMatchObject({
+      kind: 'tool_result',
+      ok: false,
+    })
+    const content =
+      toolResult?.event.kind === 'tool_result' ? toolResult.event.content : ''
+    expect(content).toContain('blocked by pre_tool_use hook')
+    expect(content).toContain('denied by policy')
+  })
+
+  it('post_tool_use hook fires after a successful tool call', async () => {
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'c1',
+              name: 'read',
+              input: { path: '/tmp/x' },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'ok' }],
+        },
+      },
+    ])
+    const tools = nullTools({
+      callTool: async () => ({ ok: true, content: 'hello file' }),
+    })
+    let postSeen = false
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools,
+      broadcast: silentBroadcast(),
+      hooks: [{ event: 'post_tool_use', command: '_ignored' }],
+      hookRunner: {
+        run: async (_hook, payload) => {
+          if (payload.event === 'post_tool_use') {
+            postSeen = true
+            expect(payload.toolResult).toEqual({ ok: true, content: 'hello file' })
+          }
+          return { ok: true, exitCode: 0, stdout: '', stderr: '' }
+        },
+      },
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'read x' })
+
+    expect(postSeen).toBe(true)
+    const rec = store.get(sessionId)!
+    expect(rec.state.status).toBe('done')
+  })
 })
 
 describe('SessionStore', () => {

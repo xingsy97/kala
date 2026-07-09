@@ -12,6 +12,7 @@ import type {
   AgentState,
   ApprovalMode,
   Effect,
+  MessageContent,
   UsageTotal,
 } from '@agent-kernel/kernel'
 
@@ -96,6 +97,13 @@ export type SessionForkedEvent = {
 export type ClientUserMessage = {
   sessionId: string
   text: string
+  mode?: 'steer' | 'queue'
+  /**
+   * Structured content blocks. When present, kernel uses these verbatim
+   * (mixing text + image blocks from pasted screenshots); `text` is kept as
+   * a plain-text mirror for logs and non-image adapters.
+   */
+  content?: readonly MessageContent[]
 }
 
 export type ClientUserApprove = {
@@ -148,6 +156,13 @@ export type ClientFork = {
   sourceSessionId: string
   cursor: number
   newSessionId?: string
+  /**
+   * Optional first user message to dispatch on the freshly-forked session in
+   * the same operation. Used by "edit and rerun" — dashboard forks at the
+   * cursor *before* the message the user edited, then seeds the edited text
+   * so the child session runs to completion without a second roundtrip.
+   */
+  seedMessage?: string
 }
 
 /**
@@ -161,6 +176,14 @@ export type ClientCreateSession = {
   sessionId: string
   workspaceId: string
   workspaceName?: string
+  /** Initial tool cwd for the session. Validated against the workspace sandbox. */
+  cwd?: string
+}
+
+export type ClientListDirs = {
+  requestId: string
+  workspaceId: string
+  path?: string
 }
 
 export type ClientSubscribe = {
@@ -248,6 +271,20 @@ export type ExecutorToolResult = {
   callId: string
   ok: boolean
   content: string
+}
+
+export type DirListEntry = {
+  name: string
+  path: string
+}
+
+export type DirListResult = {
+  requestId: string
+  workspaceId: string
+  path: string
+  roots: readonly string[]
+  entries: readonly DirListEntry[]
+  error?: string
 }
 
 // ============================================================================
@@ -390,6 +427,7 @@ export type DashboardClientToServerEvents = {
   'client:set_approval_mode': (payload: ClientSetApprovalMode) => void
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession) => void
+  'client:list_dirs': (payload: ClientListDirs) => void
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
@@ -410,11 +448,18 @@ export type DashboardServerToClientEvents = {
   'session:model_changed': (payload: SessionModelChangedEvent) => void
   'session:token_delta': (payload: ServerTokenDeltaEvent) => void
   'session:approval_mode': (payload: SessionApprovalModeEvent) => void
+  'server:message_queue': (payload: ServerMessageQueueEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
   'server:sessions': (payload: ServerSessionsPayload) => void
+  'server:dir_list': (payload: DirListResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
+}
+
+export type ServerMessageQueueEvent = {
+  sessionId: string
+  pending: number
 }
 
 export type ExecutorClientToServerEvents = {
@@ -432,6 +477,10 @@ export type ExecutorServerToClientEvents = {
     ack: (result: ToolResultAck) => void,
   ) => void
   'tool:cancel': (payload: ToolCancelMessage) => void
+  'fs:list_dirs': (
+    payload: ClientListDirs,
+    ack: (result: DirListResult) => void,
+  ) => void
 }
 
 export const PROTOCOL_VERSION = '0.1.0' as const

@@ -1,15 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AttachedExecutor } from '@agent-kernel/shared'
+import type { AttachedExecutor, DirListResult } from '@agent-kernel/shared'
 
-import { WorkspacePicker } from './WorkspacePicker.js'
+import { NewSessionDialog } from './WorkspacePicker.js'
 
 const wsA: AttachedExecutor = {
   executorId: 'ex-a',
   workspaceId: 'ws-a',
   workspaceName: 'mbp',
   tools: [],
+  sandboxRoots: ['/tmp/root'],
   runtime: 'node',
   runtimeVersion: 'v22',
   os: 'darwin',
@@ -17,99 +18,122 @@ const wsA: AttachedExecutor = {
   attachedAt: '2026-07-05T10:00:00.000Z',
 }
 
-const wsB: AttachedExecutor = {
-  executorId: 'ex-b',
-  workspaceId: 'ws-b',
-  workspaceName: 'linux-box',
-  tools: [],
-  runtime: 'node',
-  runtimeVersion: 'v22',
-  os: 'linux',
-  ipAddresses: ['192.0.2.2'],
-  attachedAt: '2026-07-05T10:00:00.000Z',
+type Handler = (payload: DirListResult) => void
+
+function makeSocket(): {
+  socket: { on: ReturnType<typeof vi.fn>; off: ReturnType<typeof vi.fn>; emit: ReturnType<typeof vi.fn> }
+  emitDirList(payload: DirListResult): void
+} {
+  let handler: Handler | null = null
+  return {
+    socket: {
+      on: vi.fn((event: string, cb: Handler) => {
+        if (event === 'server:dir_list') handler = cb
+      }),
+      off: vi.fn((event: string, cb: Handler) => {
+        if (event === 'server:dir_list' && handler === cb) handler = null
+      }),
+      emit: vi.fn(),
+    },
+    emitDirList(payload) {
+      handler?.(payload)
+    },
+  }
 }
 
-describe('WorkspacePicker', () => {
+describe('NewSessionDialog', () => {
   it('renders nothing when closed', () => {
     const { container } = render(
-      <WorkspacePicker
+      <NewSessionDialog
         open={false}
-        workspaces={[wsA, wsB]}
-        onPick={() => {}}
+        workspaces={[wsA]}
+        socket={makeSocket().socket as never}
+        onCreate={() => {}}
         onCancel={() => {}}
       />,
     )
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders one button per online workspace', () => {
+  it('requests directories, expands finder columns, and creates with selected cwd', async () => {
+    const onCreate = vi.fn()
+    const harness = makeSocket()
     render(
-      <WorkspacePicker
+      <NewSessionDialog
         open
-        workspaces={[wsA, wsB]}
-        onPick={() => {}}
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={onCreate}
         onCancel={() => {}}
       />,
     )
-    expect(screen.getByTestId('workspace-pick-ws-a')).toBeTruthy()
-    expect(screen.getByTestId('workspace-pick-ws-b')).toBeTruthy()
-    expect(screen.getByText('mbp')).toBeTruthy()
-    expect(screen.getByText('linux-box')).toBeTruthy()
+
+    await waitFor(() => {
+      expect(harness.socket.emit).toHaveBeenCalledWith(
+        'client:list_dirs',
+        expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root' }),
+      )
+    })
+
+    act(() => {
+      harness.emitDirList({
+        requestId: 'r1',
+        workspaceId: 'ws-a',
+        path: '/tmp/root',
+        roots: ['/tmp/root'],
+        entries: [{ name: 'project', path: '/tmp/root/project' }],
+      })
+    })
+
+    fireEvent.click(await screen.findByText('project'))
+    expect(harness.socket.emit).toHaveBeenLastCalledWith(
+      'client:list_dirs',
+      expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+    )
+
+    act(() => {
+      harness.emitDirList({
+        requestId: 'r2',
+        workspaceId: 'ws-a',
+        path: '/tmp/root/project',
+        roots: ['/tmp/root'],
+        entries: [{ name: 'src', path: '/tmp/root/project/src' }],
+      })
+    })
+
+    expect(screen.getAllByTestId('finder-column')).toHaveLength(2)
+    expect(screen.getByDisplayValue('/tmp/root/project')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('new-session-create'))
+    expect(onCreate).toHaveBeenCalledWith({
+      workspaceId: 'ws-a',
+      workspaceName: 'mbp',
+      cwd: '/tmp/root/project',
+    })
   })
 
-  it('fires onPick with workspaceId + workspaceName on click', () => {
-    const onPick = vi.fn()
+  it('allows manual cwd entry', () => {
+    const onCreate = vi.fn()
+    const harness = makeSocket()
     render(
-      <WorkspacePicker
+      <NewSessionDialog
         open
-        workspaces={[wsA, wsB]}
-        onPick={onPick}
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={onCreate}
         onCancel={() => {}}
       />,
     )
-    fireEvent.click(screen.getByTestId('workspace-pick-ws-b'))
-    expect(onPick).toHaveBeenCalledWith('ws-b', 'linux-box')
-  })
 
-  it('fires onCancel when the cancel button is clicked', () => {
-    const onCancel = vi.fn()
-    render(
-      <WorkspacePicker
-        open
-        workspaces={[wsA]}
-        onPick={() => {}}
-        onCancel={onCancel}
-      />,
-    )
-    fireEvent.click(screen.getByTestId('workspace-picker-cancel'))
-    expect(onCancel).toHaveBeenCalledTimes(1)
-  })
+    fireEvent.change(screen.getByTestId('new-session-cwd-input'), {
+      target: { value: '/tmp/root/manual' },
+    })
+    fireEvent.click(screen.getByTestId('new-session-create'))
 
-  it('fires onCancel when the overlay is clicked', () => {
-    const onCancel = vi.fn()
-    render(
-      <WorkspacePicker
-        open
-        workspaces={[wsA]}
-        onPick={() => {}}
-        onCancel={onCancel}
-      />,
-    )
-    fireEvent.click(screen.getByTestId('workspace-picker-overlay'))
-    expect(onCancel).toHaveBeenCalledTimes(1)
-  })
-
-  it('fires onCancel on Escape key', () => {
-    const onCancel = vi.fn()
-    render(
-      <WorkspacePicker
-        open
-        workspaces={[wsA]}
-        onPick={() => {}}
-        onCancel={onCancel}
-      />,
-    )
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onCreate).toHaveBeenCalledWith({
+      workspaceId: 'ws-a',
+      workspaceName: 'mbp',
+      cwd: '/tmp/root/manual',
+    })
   })
 })

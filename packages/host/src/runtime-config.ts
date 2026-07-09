@@ -25,6 +25,8 @@ import process from 'node:process'
 
 import type { ModelInfo } from '@agent-kernel/shared'
 
+import type { HookConfig, HookEvent } from './hooks.js'
+
 export type ProviderSpec = {
   id: string
   label: string
@@ -284,4 +286,86 @@ function tryReadFile(path: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+// ============================================================================
+// Hooks config (`~/.config/agent-kernel/config.toml`)
+// ============================================================================
+
+const KNOWN_HOOK_EVENTS: readonly HookEvent[] = [
+  'pre_tool_use',
+  'post_tool_use',
+  'session_start',
+  'session_end',
+]
+
+export function loadHookConfigs(
+  path?: string,
+): readonly HookConfig[] {
+  const home = homedir()
+  const target = path ?? join(home, '.config', 'agent-kernel', 'config.toml')
+  const raw = tryReadFile(target)
+  if (raw === undefined) return []
+  return parseHookConfigToml(raw)
+}
+
+/**
+ * Extracts `[[hooks]]` array-of-tables blocks from a TOML file. Each block
+ * must carry an `event` field and a `command` field; `match` is optional.
+ * Malformed blocks (unknown event, missing command) are dropped silently so a
+ * typo in one hook can't disable the rest.
+ */
+export function parseHookConfigToml(text: string): readonly HookConfig[] {
+  const lines = text.split('\n')
+  const hooks: HookConfig[] = []
+  let current: Partial<HookConfig> | undefined
+  const flush = (): void => {
+    if (!current) return
+    const event = current.event
+    const command = current.command
+    if (
+      event !== undefined &&
+      KNOWN_HOOK_EVENTS.includes(event) &&
+      typeof command === 'string' &&
+      command.length > 0
+    ) {
+      hooks.push({
+        event,
+        command,
+        ...(current.match !== undefined && current.match.length > 0
+          ? { match: current.match }
+          : {}),
+      })
+    }
+    current = undefined
+  }
+  for (const rawLine of lines) {
+    const line = stripComment(rawLine).trim()
+    if (line.length === 0) continue
+    if (line === '[[hooks]]') {
+      flush()
+      current = {}
+      continue
+    }
+    const otherHeader = line.match(/^\[\[?[^\]]+\]?\]$/)
+    if (otherHeader) {
+      flush()
+      continue
+    }
+    if (!current) continue
+    const kv = line.match(/^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.+)$/)
+    if (!kv) continue
+    const key = kv[1]!
+    const value = parseTomlValue(kv[2]!)
+    if (value === undefined) continue
+    if (key === 'event' && KNOWN_HOOK_EVENTS.includes(value as HookEvent)) {
+      current.event = value as HookEvent
+    } else if (key === 'command') {
+      current.command = value
+    } else if (key === 'match') {
+      current.match = value
+    }
+  }
+  flush()
+  return hooks
 }

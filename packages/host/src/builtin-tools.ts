@@ -201,4 +201,26 @@ export const builtinTools: readonly ToolSchema[] = [
     },
     requiresApproval: false,
   },
+  {
+    name: 'websearch',
+    description:
+      'Search the web via DuckDuckGo and return the top results as text. Use for looking up current information, documentation, error messages, or facts not in the conversation. Returns a numbered list of `{title, url, snippet}` entries. `limit` defaults to 5 and is capped at 10.',
+    inputSchema: {
+      type: 'object',
+      required: ['query'],
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The search query.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 10,
+          description: 'Maximum results to return (default 5, max 10).',
+        },
+      },
+    },
+    requiresApproval: false,
+  },
 ]

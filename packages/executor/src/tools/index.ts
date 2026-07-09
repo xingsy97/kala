@@ -8,6 +8,7 @@ export { bashTool } from './bash.js'
 export { bashOutputTool } from './bash-output.js'
 export { killShellTool } from './kill-shell.js'
 export { todowriteTool } from './todowrite.js'
+export { websearchTool } from './websearch.js'
 export { agentToolSchema } from './agent.js'
 export { createToolRegistry, ToolError } from './registry.js'
 export type { Tool, ToolContext, ToolRunner } from './registry.js'
@@ -23,6 +24,7 @@ import { bashTool } from './bash.js'
 import { bashOutputTool } from './bash-output.js'
 import { killShellTool } from './kill-shell.js'
 import { todowriteTool } from './todowrite.js'
+import { websearchTool } from './websearch.js'
 
 export const allTools: readonly Tool[] = [
   readTool,
@@ -35,4 +37,5 @@ export const allTools: readonly Tool[] = [
   bashOutputTool,
   killShellTool,
   todowriteTool,
+  websearchTool,
 ]
