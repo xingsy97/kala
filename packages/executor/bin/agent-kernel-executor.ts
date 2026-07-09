@@ -229,9 +229,13 @@ async function main(): Promise<void> {
   const updateRepo = args.updateRepo ?? process.env.AGENT_KERNEL_UPDATE_REPO
 
   if (!host) {
-    process.stderr.write(
-      'agent-kernel-executor: missing --host (or HOST_URL env var)\n' +
-        '  example: HOST_URL=http://localhost:3000 EXECUTOR_INVITE=ak_invite_... node agent-kernel-executor.cjs\n',
+    logger.error(
+      {
+        flag: '--host',
+        env: 'HOST_URL',
+        example: 'HOST_URL=http://localhost:3000 EXECUTOR_INVITE=ak_invite_... node agent-kernel-executor.cjs',
+      },
+      'missing host url',
     )
     process.exit(1)
   }
