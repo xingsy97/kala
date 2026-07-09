@@ -2,7 +2,7 @@
   "name": "agent-kernel",
   "version": "0.0.0",
   "private": true,
-  "description": "Open-source, minimal, model-agnostic coding agent reference implementation. Core/executor decoupled, replay + fork built in.",
+  "description": "Agent RunLab backend and dashboard for replayable agent sessions, benchmarks, and RL rollout integration.",
   "packageManager": "pnpm@11.3.0",
   "engines": {
     "node": ">=22"

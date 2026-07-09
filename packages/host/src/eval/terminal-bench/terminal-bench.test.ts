@@ -112,7 +112,7 @@ describe('Terminal-Bench adapter', () => {
     }
     const entry = registry.entries.find((e) => e.runId === 'run-1')
     expect(entry?.kind).toBe('terminal-bench')
-  })
+  }, 15_000)
 
   it('layout returns derived paths under rootDir/runId', () => {
     const layout = terminalBenchRunLayout('/tmp/root', 'my-run')

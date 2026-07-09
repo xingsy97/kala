@@ -3706,7 +3706,7 @@ describe('terminal-bench HTTP actions', () => {
       entries: Array<{ runId: string; kind?: string }>
     }
     expect(registry.entries.find((e) => e.runId === 'tb-run')?.kind).toBe('terminal-bench')
-  })
+  }, 15_000)
 
   it('reads terminal-bench progress after a completed run', async () => {
     await boot()

@@ -107,8 +107,8 @@ OS / architecture, and selects a runtime:
 Example one-line commands for a full release tag:
 
 ```bash
-bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh"; COMPONENT=host bash "$tmp"'
-bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh"; HOST_URL=http://localhost:3000 COMPONENT=executor bash "$tmp"'
+wget -nv -O - "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh" | COMPONENT=host-frontend bash
+wget -nv -O - "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh" | HOST_URL=http://localhost:3000 COMPONENT=executor bash
 ```
 
 The host also accepts `--port <port>` directly when launching an unpacked or
@@ -146,7 +146,7 @@ startup and logs a reminder when a newer release is available. Automatic update
 is opt-in:
 
 ```bash
-bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh"; HOST_URL=http://localhost:3000 COMPONENT=executor AGENT_KERNEL_AUTO_UPDATE=1 bash "$tmp"'
+wget -nv -O - "https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh" | HOST_URL=http://localhost:3000 COMPONENT=executor AGENT_KERNEL_AUTO_UPDATE=1 bash
 ```
 
 `--auto-update` is equivalent when launching a downloaded executor asset

@@ -1,6 +1,6 @@
 # Web-native paths — implementation plan
 
-Companion to `docs/planning/enhancement/12-web-native-path-handling.md`. This file
+Companion to `docs/capabilities/12-web-native-path-handling.md`. This file
 enumerates the concrete files to touch and the order of work.
 
 ## Order of operations
@@ -304,10 +304,10 @@ The `EnhancementActionPanel` renders each field via a switch on `kind`:
 
 ## Step 7 — Doc updates
 
-- `docs/planning/enhancement/01-swe-bench-evaluation-integration.md` — add a
+- `docs/capabilities/01-swe-bench-evaluation-integration.md` — add a
   "Web-native flow" section referencing feature 12
-- `docs/planning/enhancement/03-agent-eval-benchmark-platform.md` — same
-- `docs/planning/enhancement/04-agentic-rl-rollout-export.md` — same for the
+- `docs/capabilities/03-agent-eval-benchmark-platform.md` — same
+- `docs/capabilities/04-agentic-rl-rollout-export.md` — same for the
   rollout actions
 
 ## Risk register

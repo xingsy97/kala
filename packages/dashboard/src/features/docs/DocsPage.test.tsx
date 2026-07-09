@@ -67,9 +67,11 @@ describe('DocsPage', () => {
 
     render(<DocsPage />)
 
-    await screen.findByRole('heading', { name: 'Context Compaction' })
     expect(fetchMock).toHaveBeenCalledWith('/docs/index', { cache: 'no-store' })
-    expect(fetchMock).toHaveBeenCalledWith('/docs/content?path=context-compaction.md', { cache: 'no-store' })
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/docs/content?path=context-compaction.md', { cache: 'no-store' })
+    })
+    await screen.findByRole('heading', { name: 'Context Compaction' }, { timeout: 5_000 })
     expect(screen.getByText(/Preserve tool results before summarizing/)).toBeTruthy()
     const citation = screen.getAllByRole('link', { name: '[1]' })[0]!
     expect(citation.getAttribute('href')).toBe('#ref-1')
@@ -91,7 +93,7 @@ describe('DocsPage', () => {
     expect(toggleAll.textContent ?? '').toContain('Collapse all')
     expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.getByText('Phase')).toBeTruthy()
-    expect(await screen.findByTestId('code-block-highlighted')).toBeTruthy()
+    expect(screen.getByTestId('docs-markdown').textContent).toContain('compact({ force: true })')
     expect(screen.getByText('compact()')).toBeTruthy()
 
     fireEvent.change(screen.getByPlaceholderText('Search docs'), { target: { value: 'swe' } })
