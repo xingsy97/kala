@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -110,6 +111,48 @@ describe('host loop', () => {
     expect(parsed.events[0]?.event.kind).toBe('user_message')
     expect(parsed.events[1]?.event.kind).toBe('llm_response')
     void state
+  })
+
+  it('writes message assembly artifacts outside the replay log when configured', async () => {
+    const artifactRootDir = join(dir, 'artifacts')
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'artifact captured' }],
+        },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+      artifactRootDir,
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+
+    const artifact = JSON.parse(await readFile(
+      join(artifactRootDir, 'message-assembly', sessionId, '1.json'),
+      'utf8',
+    ))
+    const routerDecision = JSON.parse(await readFile(
+      join(artifactRootDir, 'router-decisions', sessionId, '1.json'),
+      'utf8',
+    ))
+    const toolCatalog = JSON.parse(await readFile(
+      join(artifactRootDir, 'tool-catalog', sessionId, '1.json'),
+      'utf8',
+    ))
+    expect(artifact.sessionId).toBe(sessionId)
+    expect(artifact.messageCount).toBeGreaterThan(0)
+    expect(artifact.toolCount).toBe(1)
+    expect(artifact.parts.map((part: { name: string }) => part.name)).toContain('tools')
+    expect(routerDecision.reasonCodes).toContain('adapter_default_model')
+    expect(toolCatalog.tools[0]).toMatchObject({ name: 'read', kind: 'executor', skillBacked: false })
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    expect(parsed.events).toHaveLength(2)
   })
 
   it('records the active model on LLM response entries and broadcasts', async () => {

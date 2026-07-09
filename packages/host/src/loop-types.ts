@@ -106,6 +106,7 @@ export type HostLoopDeps = {
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
   skills?: SkillRegistry
+  artifactRootDir?: string
 }
 
 export type LoopHandle = {

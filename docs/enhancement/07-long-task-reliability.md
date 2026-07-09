@@ -39,6 +39,25 @@ On startup:
    otherwise append synthetic failed `tool_result` with recovery metadata.
 6. Keep the raw log append-only.
 
+The host store already performs append-only recovery when a session is loaded:
+pending tool calls receive synthetic failed `tool_result` events, pending
+approvals are approved then failed so the reducer can settle them, and dangling
+mid-stream LLM calls receive a minimal interrupted assistant response.
+
+Implemented offline audit command:
+
+```bash
+agent-kernel-host enhancement reliability audit-session \
+  --root-dir runs/reliability/session \
+  --session-log ~/.agent-kernel/sessions/<session>.jsonl
+```
+
+This command folds the raw log without triggering store recovery and writes
+`reliability-audit.json` with final status, pending calls, dangling kind
+(`llm_call`, `tool_call`, or `approval`), recovery event count, parse warnings,
+and last event kind. It is intended for CI checks, crash triage, and validating
+that recovered sessions no longer show impossible active work.
+
 ## Executor Reliability
 
 Background shell state should include:
@@ -84,6 +103,8 @@ Add tests that intentionally terminate components:
 - Kill executor during background shell.
 - Restart dashboard during active stream.
 - Resume a session with pending approvals.
+- Implemented unit tests for dangling LLM/tool audit and recovery-event
+  detection.
 
 Each test should assert that replay succeeds and the UI does not show impossible
 active counts.
@@ -93,4 +114,3 @@ active counts.
 - Do not make the reducer aware of OS processes.
 - Do not auto-replay uncertain side-effecting tools after crash.
 - Do not hide recovery events; they are part of the audit trail.
-

@@ -64,10 +64,24 @@ Show subagents as expandable linked sessions:
 - Link to child trace and transcript.
 - Clear empty state if the child produced no visible output.
 
+Implemented subagent graph export:
+
+```bash
+agent-kernel-host enhancement subagents graph \
+  --root-dir runs/subagents \
+  --sessions-dir ~/.agent-kernel/sessions
+```
+
+The command scans JSONL headers and writes `subagent-graph.json` with session
+nodes and parent-child edges using `parentSessionId` and `parentCursor`. It does
+not introduce a multi-agent protocol or mutate sessions. The graph is a derived
+view for dashboard navigation, eval comparison, and subagent failure analysis.
+
 ## Testing Plan
 
 - Unit tests for max depth and timeout enforcement.
 - Integration test parent spawning child and receiving final result.
+- Implemented unit tests for exported parent-child session graph.
 - Browser test for expanded subagent card content.
 - Eval test comparing single-agent vs subagent-enabled runs.
 
@@ -76,4 +90,3 @@ Show subagents as expandable linked sessions:
 - Do not create a new multi-agent protocol in the reducer.
 - Do not let child agents mutate parent messages except through tool result.
 - Do not enable unbounded recursive delegation.
-

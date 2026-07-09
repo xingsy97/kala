@@ -2,14 +2,26 @@ import { readFile } from 'node:fs/promises'
 
 import {
   exportSessionForSweBench,
+  inferSweBenchPatchRun,
+  ingestSweBenchResults,
   runSweBenchGrade,
   type ExportSessionForSweBenchInput,
+  type InferSweBenchPatchRunInput,
+  type SweBenchIngestResultsInput,
   type SweBenchGradeInput,
 } from './swebench.js'
 
 export type SweBenchCliCommand =
   | { kind: 'none' }
   | ({ kind: 'grade' } & SweBenchGradeInput)
+  | ({ kind: 'infer' } & InferSweBenchPatchRunInput)
+  | ({ kind: 'ingest-results' } & SweBenchIngestResultsInput)
+  | ({ kind: 'run' } & InferSweBenchPatchRunInput & {
+      maxWorkers?: number
+      modal?: boolean
+      execute?: boolean
+      cwd?: string
+    })
   | ({ kind: 'export-session' } & Omit<ExportSessionForSweBenchInput, 'modelPatch'> & {
       modelPatchPath: string
     })
@@ -45,6 +57,37 @@ export function parseSweBenchCli(argv: readonly string[]): SweBenchCliCommand {
       workspaceRoot: value(rest, '--workspace-root'),
     }
   }
+  if (subcommand === 'ingest-results') {
+    return {
+      kind: 'ingest-results',
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      resultsDir: required(rest, '--results-dir'),
+    }
+  }
+  if (subcommand === 'infer' || subcommand === 'run') {
+    const base = {
+      rootDir: value(rest, '--root-dir') ?? 'runs/swebench',
+      runId: required(rest, '--run-id'),
+      dataset: required(rest, '--dataset'),
+      split: value(rest, '--split'),
+      model: required(rest, '--model'),
+      instancesJsonl: required(rest, '--instances-jsonl'),
+      patchesDir: required(rest, '--patches-dir'),
+      instanceIds: listArg(rest, '--instance-ids'),
+      limit: numberArg(rest, '--limit'),
+      workspaceRoot: value(rest, '--workspace-root'),
+    }
+    if (subcommand === 'infer') return { kind: 'infer', ...base }
+    return {
+      kind: 'run',
+      ...base,
+      maxWorkers: numberArg(rest, '--max-workers'),
+      modal: flag(rest, '--modal'),
+      execute: flag(rest, '--execute'),
+      cwd: value(rest, '--cwd'),
+    }
+  }
   throw new Error(`unknown swebench subcommand: ${subcommand ?? '<missing>'}`)
 }
 
@@ -54,6 +97,43 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
     const result = await runSweBenchGrade(command)
     console.log(result.command.map(shellQuote).join(' '))
     if (result.exitCode !== undefined) process.exitCode = result.exitCode
+    return true
+  }
+  if (command.kind === 'infer' || command.kind === 'run') {
+    const result = await inferSweBenchPatchRun(command)
+    const payload: Record<string, unknown> = {
+      runId: result.layout.runId,
+      predictionsPath: result.layout.predictionsPath,
+      experimentPath: result.layout.experimentPath,
+      summaryPath: result.layout.summaryPath,
+      trialCount: result.trials.length,
+    }
+    if (command.kind === 'run') {
+      const grade = await runSweBenchGrade({
+        datasetName: command.dataset,
+        predictionsPath: result.layout.predictionsPath,
+        runId: command.runId,
+        maxWorkers: command.maxWorkers,
+        instanceIds: command.instanceIds,
+        modal: command.modal,
+        execute: command.execute,
+        cwd: command.cwd,
+      })
+      payload.gradeCommand = grade.command.map(shellQuote).join(' ')
+      if (grade.exitCode !== undefined) process.exitCode = grade.exitCode
+    }
+    console.log(JSON.stringify(payload, null, 2))
+    return true
+  }
+  if (command.kind === 'ingest-results') {
+    const result = await ingestSweBenchResults(command)
+    console.log(JSON.stringify({
+      runId: result.layout.runId,
+      resultsPath: result.resultsPath,
+      summaryPath: result.summaryPath,
+      trialCount: result.trials.length,
+      resolved: result.trials.filter((trial) => trial.resolved).length,
+    }, null, 2))
     return true
   }
   const modelPatch = await readFile(command.modelPatchPath, 'utf8')
@@ -104,4 +184,3 @@ function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
-
