@@ -13,6 +13,8 @@ import type {
   ExecutorServerToClientEvents,
   ExecutorToolResult,
   HandshakeAuth,
+  ServerBgTaskEvicted,
+  ServerBgTaskUpdated,
   SessionErrorScope,
 } from '@agent-kernel/shared'
 import type { AgentConfig } from '@agent-kernel/kernel'
@@ -20,6 +22,7 @@ import type { Namespace } from 'socket.io'
 
 import { SessionStore } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
+import type { DashboardNs } from './dashboard-ns.js'
 
 export type ExecutorNs = Namespace<
   ExecutorClientToServerEvents,
@@ -36,6 +39,13 @@ export type ExecutorDeps = {
     scope: SessionErrorScope,
     message: string,
   ): void
+  /**
+   * Dashboard namespace used to fan out background-task push events into
+   * per-workspace rooms. When a dashboard subscribes to `workspace:<id>`,
+   * it receives `server:bg_task_updated` / `server:bg_task_evicted` for
+   * every task running on that workspace's executor.
+   */
+  dashboardNs: DashboardNs
 }
 
 export function configureExecutorNamespace(
@@ -64,6 +74,16 @@ export function configureExecutorNamespace(
     })
     socket.on('executor:tool_result', (payload: ExecutorToolResult) => {
       deps.executors.fulfill(payload.sessionId, payload)
+    })
+    socket.on('executor:bg_task_updated', (payload: ServerBgTaskUpdated) => {
+      deps.dashboardNs
+        .to(`workspace:${payload.workspaceId}`)
+        .emit('server:bg_task_updated', payload)
+    })
+    socket.on('executor:bg_task_evicted', (payload: ServerBgTaskEvicted) => {
+      deps.dashboardNs
+        .to(`workspace:${payload.workspaceId}`)
+        .emit('server:bg_task_evicted', payload)
     })
     socket.on('disconnect', () => {
       deps.executors.detach(socket)

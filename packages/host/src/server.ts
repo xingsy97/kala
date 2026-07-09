@@ -362,6 +362,7 @@ export async function startHostServer(
     defaultConfig: options.defaultConfig,
     authToken: options.authToken,
     broadcastError,
+    dashboardNs,
   })
 
   // Executor attach/detach/updated events fan out to every connected

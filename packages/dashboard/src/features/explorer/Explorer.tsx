@@ -14,18 +14,18 @@ import { NodeApi, Tree } from 'react-arborist'
 import type { RowRendererProps } from 'react-arborist'
 import {
   AlertCircle,
-  CheckCircle2,
+  Cable,
   ChevronDown,
   ChevronRight,
   Clock3,
   Folder,
   GitFork,
   Info,
-  Loader2,
-  MessageSquare,
   Pencil,
   Plus,
+  TriangleAlert,
   Trash2,
+  Wrench,
 } from 'lucide-react'
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
 
@@ -54,14 +54,15 @@ type Props = {
   sessions: readonly SessionSummary[]
   selectedSessionId: string | null
   onSelect(sessionId: string): void
-  onNewSession(): void
+  onNewSession(workspaceId?: string): void
+  onConnectWorkspace(): void
   onDelete(sessionId: string): void
   onRename(sessionId: string, label: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
 }
 
-const SESSION_ROW_HEIGHT = 88
+const SESSION_ROW_HEIGHT = 60
 const WORKSPACE_ROW_HEIGHT = 48
 const BUCKET_ROW_HEIGHT = 28
 
@@ -71,6 +72,7 @@ export function Explorer({
   selectedSessionId,
   onSelect,
   onNewSession,
+  onConnectWorkspace,
   onDelete,
   onRename,
   onOpenSessionInfo,
@@ -94,7 +96,7 @@ export function Explorer({
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/30">
-      <Header onNewSession={onNewSession} />
+      <Header onConnectWorkspace={onConnectWorkspace} />
       <div
         ref={ref}
         className="flex-1 min-h-0"
@@ -148,6 +150,7 @@ export function Explorer({
                 }}
                 onOpenSessionInfo={onOpenSessionInfo}
                 onWorkspaceInfo={onWorkspaceInfo}
+                onNewSession={onNewSession}
               />
             )}
           </Tree>
@@ -210,7 +213,7 @@ function rowHeightFor(node: NodeApi<TreeNode>): number {
   return SESSION_ROW_HEIGHT
 }
 
-function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
+function Header({ onConnectWorkspace }: { onConnectWorkspace: () => void }): JSX.Element {
   return (
     <div className="flex items-center justify-between bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
       <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -219,13 +222,13 @@ function Header({ onNewSession }: { onNewSession: () => void }): JSX.Element {
       <Button
         variant="ghost"
         size="sm"
-        onClick={onNewSession}
+        onClick={onConnectWorkspace}
         data-testid="new-session-button"
-        title="Start a new session"
+        title="Connect a new workspace"
         className="h-7 gap-1 rounded-full px-2.5 text-xs"
       >
-        <Plus className="h-3 w-3" />
-        New
+        <Cable className="h-3 w-3" />
+        Workspace
       </Button>
     </div>
   )
@@ -241,6 +244,7 @@ function Row({
   onSubmitEdit,
   onOpenSessionInfo,
   onWorkspaceInfo,
+  onNewSession,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
@@ -251,6 +255,7 @@ function Row({
   onSubmitEdit(sess: SessionNode, label: string): void
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
+  onNewSession(workspaceId?: string): void
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
@@ -258,6 +263,7 @@ function Row({
         node={node as NodeApi<WorkspaceNode>}
         style={style}
         onWorkspaceInfo={onWorkspaceInfo}
+        onNewSession={onNewSession}
       />
     )
   }
@@ -282,10 +288,12 @@ function WorkspaceRow({
   node,
   style,
   onWorkspaceInfo,
+  onNewSession,
 }: {
   node: NodeApi<WorkspaceNode>
   style: React.CSSProperties
   onWorkspaceInfo?(workspaceId: string): void
+  onNewSession(workspaceId?: string): void
 }): JSX.Element {
   const w = node.data
   const dotCls = w.online
@@ -298,6 +306,7 @@ function WorkspaceRow({
           .filter((s) => typeof s === 'string' && s.length > 0)
           .join(' · ') || 'offline'
   const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
+  const canCreateSession = w.workspaceId !== null
   return (
     <div
       style={style}
@@ -317,6 +326,23 @@ function WorkspaceRow({
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
           {w.name}
         </span>
+        {canCreateSession ? (
+          <button
+            type="button"
+            data-testid={`workspace-new-session-${w.workspaceId}`}
+            title={w.online ? 'New session in this workspace' : 'Workspace offline'}
+            aria-label="New session in this workspace"
+            disabled={!w.online}
+            className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground group-hover/ws:opacity-100"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (!w.online) return
+              onNewSession(w.workspaceId ?? undefined)
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         {canShowInfo ? (
           <button
             type="button"
@@ -411,14 +437,9 @@ function SessionRow({
         onStartEdit(s)
       }}
     >
-      <div className="min-w-0 cursor-pointer px-3 py-2.5 pl-6 pr-16">
+      <div className="min-w-0 cursor-pointer px-3 py-2 pl-6 pr-16">
         <div className="flex min-w-0 items-center gap-2">
-          <MessageSquare
-            className={cn(
-              'h-3.5 w-3.5 flex-none',
-              selected ? 'text-primary' : 'text-muted-foreground',
-            )}
-          />
+          <SessionStatusIndicator status={s.status} selected={selected} />
           {editing ? (
             <RenameInput
               initial={s.label}
@@ -437,25 +458,26 @@ function SessionRow({
             </div>
           )}
         </div>
-        <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-[11px] text-muted-foreground">
-          <StatusChip status={s.status} />
-          <span className="truncate tabular-nums">{s.eventCount} evt</span>
-          <span className="ml-auto truncate tabular-nums opacity-70">
-            {formatWhen(s.lastActivityIso)}
+        <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-[11px] leading-4 text-muted-foreground">
+          {s.currentCwd ? (
+            <span
+              className="flex min-w-0 items-center gap-1.5 truncate font-mono"
+              title={s.currentCwd}
+              data-testid="session-row-cwd"
+            >
+              <Folder className="h-3 w-3 flex-none opacity-70" />
+              <span className="min-w-0 truncate">{s.currentCwd}</span>
+            </span>
+          ) : null}
+          <span className="ml-auto flex-none tabular-nums opacity-70">
+            <span className="inline-flex items-center gap-1">
+              <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
+              {formatWhen(s.lastActivityIso)}
+            </span>
           </span>
         </div>
-        {s.currentCwd ? (
-          <div
-            className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] leading-4 text-muted-foreground"
-            title={s.currentCwd}
-            data-testid="session-row-cwd"
-          >
-            <Folder className="h-3 w-3 flex-none opacity-70" />
-            <span className="min-w-0 truncate font-mono">cwd {s.currentCwd}</span>
-          </div>
-        ) : null}
         {s.parentSessionId ? (
-          <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-amber-600 dark:text-amber-400">
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-amber-600 dark:text-amber-400">
             <GitFork className="h-3 w-3 flex-none" />
             <span className="min-w-0 truncate font-mono">
               fork of {s.parentSessionId.slice(0, 8)}...
@@ -518,60 +540,128 @@ function SessionRow({
   )
 }
 
-function StatusChip({
+function SessionStatusIndicator({
   status,
+  selected,
 }: {
-  status?: SessionSummary['status']
+  status: SessionSummary['status'] | undefined
+  selected: boolean
 }): JSX.Element {
-  const meta = statusMeta(status)
-  const Icon = meta.icon
+  const label = statusIndicatorLabel(status)
+  const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
+  if (status === 'thinking') {
+    return (
+      <span
+        className={base}
+        data-testid="session-status-indicator"
+        data-status={status}
+        aria-label={label}
+        title={label}
+      >
+        <span
+          className={cn(
+            'h-2 w-2 rounded-full animate-pulse',
+            selected ? 'bg-sky-500 dark:bg-sky-400' : 'bg-sky-500/80 dark:bg-sky-400/80',
+          )}
+        />
+      </span>
+    )
+  }
+  if (status === 'executing_tools') {
+    return (
+      <span
+        className={base}
+        data-testid="session-status-indicator"
+        data-status={status}
+        aria-label={label}
+        title={label}
+      >
+        <Wrench
+          className={cn(
+            'h-3 w-3 animate-[spin_2s_linear_infinite]',
+            selected ? 'text-violet-600 dark:text-violet-400' : 'text-violet-500 dark:text-violet-400/90',
+          )}
+          strokeWidth={2.4}
+        />
+      </span>
+    )
+  }
+  if (status === 'awaiting_approval') {
+    return (
+      <span
+        className={base}
+        data-testid="session-status-indicator"
+        data-status={status}
+        aria-label={label}
+        title={label}
+      >
+        <TriangleAlert
+          className={cn(
+            'h-3 w-3',
+            selected ? 'text-amber-600 dark:text-amber-400' : 'text-amber-500 dark:text-amber-400/90',
+          )}
+          strokeWidth={2.4}
+        />
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span
+        className={base}
+        data-testid="session-status-indicator"
+        data-status={status}
+        aria-label={label}
+        title={label}
+      >
+        <AlertCircle
+          className={cn(
+            'h-3 w-3',
+            selected ? 'text-rose-600 dark:text-rose-400' : 'text-rose-500 dark:text-rose-400/90',
+          )}
+          strokeWidth={2.4}
+        />
+      </span>
+    )
+  }
+  // idle | done | undefined → static gray dot; done gets a slightly stronger tone
+  const dotTone =
+    status === 'done'
+      ? selected
+        ? 'bg-emerald-500 dark:bg-emerald-400'
+        : 'bg-emerald-500/70 dark:bg-emerald-400/70'
+      : selected
+        ? 'bg-muted-foreground'
+        : 'bg-muted-foreground/60'
   return (
-    <span className={cn('inline-flex min-w-0 items-center gap-1 truncate', meta.className)}>
-      <Icon className={cn('h-3 w-3 flex-none', meta.spin ? 'animate-spin' : '')} />
-      <span className="truncate">{meta.label}</span>
+    <span
+      className={base}
+      data-testid="session-status-indicator"
+      data-status={status ?? 'unknown'}
+      aria-label={label}
+      title={label}
+    >
+      <span className={cn('h-2 w-2 rounded-full', dotTone)} />
     </span>
   )
 }
 
-function statusMeta(status: SessionSummary['status'] | undefined): {
-  label: string
-  icon: typeof CheckCircle2
-  spin?: boolean
-  className: string
-} {
-  if (!status) {
-    return {
-      label: 'unknown',
-      icon: Clock3,
-      className: 'text-muted-foreground',
-    }
-  }
-  if (status === 'done' || status === 'idle') {
-    return {
-      label: status === 'done' ? 'done' : 'ready',
-      icon: CheckCircle2,
-      className: 'text-emerald-600 dark:text-emerald-400',
-    }
-  }
-  if (status === 'error') {
-    return {
-      label: 'error',
-      icon: AlertCircle,
-      className: 'text-rose-600 dark:text-rose-400',
-    }
-  }
-  if (status === 'awaiting_approval') {
-    return {
-      label: 'approval',
-      icon: Clock3,
-      className: 'text-amber-600 dark:text-amber-400',
-    }
-  }
-  return {
-    label: status === 'executing_tools' ? 'tools' : 'thinking',
-    icon: Loader2,
-    spin: status === 'thinking',
-    className: 'text-sky-600 dark:text-sky-400',
+function statusIndicatorLabel(status: SessionSummary['status'] | undefined): string {
+  switch (status) {
+    case 'thinking':
+      return 'Thinking'
+    case 'executing_tools':
+      return 'Running tools'
+    case 'awaiting_approval':
+      return 'Awaiting approval'
+    case 'error':
+      return 'Error'
+    case 'done':
+      return 'Done'
+    case 'idle':
+      return 'Ready'
+    default:
+      return 'Unknown'
   }
 }
 

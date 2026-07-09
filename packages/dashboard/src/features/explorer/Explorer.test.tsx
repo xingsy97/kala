@@ -30,6 +30,7 @@ const sessionSummary: SessionSummary = {
   eventCount: 4,
   firstUserMessage: 'please write hello.txt',
   status: 'done',
+  currentCwd: '/tmp',
 }
 
 describe('Explorer', () => {
@@ -41,6 +42,7 @@ describe('Explorer', () => {
         selectedSessionId={null}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={() => {}}
       />,
@@ -49,21 +51,40 @@ describe('Explorer', () => {
     expect(screen.getByText(/pnpm executor:dev/i)).toBeTruthy()
   })
 
-  it('fires onNewSession when the header + button is clicked', () => {
-    const onNewSession = vi.fn()
+  it('opens workspace connection help from the header button', () => {
+    const onConnectWorkspace = vi.fn()
     render(
       <Explorer
         executors={[]}
         sessions={[]}
         selectedSessionId={null}
         onSelect={() => {}}
-        onNewSession={onNewSession}
+        onNewSession={() => {}}
+        onConnectWorkspace={onConnectWorkspace}
         onDelete={() => {}}
         onRename={() => {}}
       />,
     )
     fireEvent.click(screen.getByTestId('new-session-button'))
-    expect(onNewSession).toHaveBeenCalled()
+    expect(onConnectWorkspace).toHaveBeenCalled()
+  })
+
+  it('starts a new session from a workspace row', () => {
+    const onNewSession = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={onNewSession}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('workspace-new-session-ws-1'))
+    expect(onNewSession).toHaveBeenCalledWith('ws-1')
   })
 
   it('renders a workspace row for an attached executor', () => {
@@ -74,6 +95,7 @@ describe('Explorer', () => {
         selectedSessionId={null}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={() => {}}
       />,
@@ -92,6 +114,7 @@ describe('Explorer', () => {
         selectedSessionId={null}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={() => {}}
       />,
@@ -101,7 +124,11 @@ describe('Explorer', () => {
       sessionSummary.sessionId,
     )
     expect(sessionRow.textContent).toContain('please write hello.txt')
-    expect(sessionRow.textContent).toContain('done')
+    expect(sessionRow.textContent).not.toContain('done')
+    expect(sessionRow.textContent).not.toContain('4 evt')
+    expect(screen.getByTestId('session-status-indicator').getAttribute('title')).toBe('Done')
+    expect(screen.getByTestId('session-row-cwd').textContent).toContain('/tmp')
+    expect(screen.getByTestId('session-row-cwd').textContent).not.toContain('cwd')
   })
 
   it('places sessions with no workspaceId under an Unassigned bucket', () => {
@@ -119,6 +146,7 @@ describe('Explorer', () => {
         selectedSessionId={null}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={() => {}}
       />,
@@ -140,6 +168,7 @@ describe('Explorer', () => {
         selectedSessionId={null}
         onSelect={onSelect}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={() => {}}
       />,
@@ -157,6 +186,7 @@ describe('Explorer', () => {
         selectedSessionId={null}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={onDelete}
         onRename={() => {}}
       />,
@@ -175,6 +205,7 @@ describe('Explorer', () => {
         selectedSessionId={null}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={onRename}
       />,
@@ -199,6 +230,7 @@ describe('Explorer', () => {
         selectedSessionId={sessionSummary.sessionId}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={onRename}
         onOpenSessionInfo={onOpenSessionInfo}
@@ -226,6 +258,7 @@ describe('Explorer', () => {
         selectedSessionId={sessionSummary.sessionId}
         onSelect={() => {}}
         onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
         onDelete={() => {}}
         onRename={() => {}}
       />,

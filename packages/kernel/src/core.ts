@@ -38,6 +38,7 @@ import { noop, withPressure } from './helpers.js'
 import {
   onApprovalModeChanged,
   onCancel,
+  onClear,
   onCompactReplaced,
   onCwdChanged,
   onLlmError,
@@ -64,6 +65,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
   idle: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
     cancel: (s) => noop(s),
+    clear: (s) => onClear(s),
     compact_replaced: (s, e) => onCompactReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
@@ -72,6 +74,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     llm_response: (s, e, c) => onLlmResponse(s, e.message, e.usage, c),
     llm_error: (s, e) => onLlmError(s, e.error),
     cancel: (s) => onCancel(s),
+    clear: (s) => onClear(s),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   awaiting_approval: {
@@ -79,20 +82,24 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     user_reject: (s, e, c) => onUserReject(s, e.callId, e.reason, c),
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
     cancel: (s) => onCancel(s),
+    clear: (s) => onClear(s),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   executing_tools: {
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
     cancel: (s) => onCancel(s),
+    clear: (s) => onClear(s),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   done: {
     user_message: (s, e, c) => onUserMessage(s, e, c),
+    clear: (s) => onClear(s),
     compact_replaced: (s, e) => onCompactReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
   },
   error: {
+    clear: (s) => onClear(s),
     compact_replaced: (s, e) => onCompactReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },

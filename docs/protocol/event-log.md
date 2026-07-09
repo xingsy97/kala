@@ -91,10 +91,10 @@ type EventEntry = {
 in SPEC §1.5. `cwd_changed` is the durable source for `AgentState.cwd`;
 session summaries derive `currentCwd` by folding the log. `compact_replaced`
 stores `summary`, `replacedCount`, `tokensBefore`, `tokensAfter`, `trigger`
-(`manual` | `auto`), the summarizer `request` (`model`, `systemPrompt`,
-`messages`, `tools`), and optional `responseUsage`. Replay ignores the
-request/trigger/responseUsage metadata; dashboard history uses them to
-inspect the compact LLM call.
+(`manual` | `auto`), required `preserveFrom`, the summarizer `request`
+(`model`, `systemPrompt`, `messages`, `tools`), and optional `responseUsage`.
+Replay applies `preserveFrom` and ignores the request/trigger/responseUsage
+metadata; dashboard history uses them to inspect the compact LLM call.
 
 **Storage of `usage`**: To keep log lines small, `usage` is written only on lines where it changed (i.e. after an `llm_response` with a delta). Consumers reconstructing running usage can pull it from these lines.
 
@@ -149,11 +149,11 @@ type SnapshotEntry = {
 A four-event session ("hi" → LLM tool call → tool result → LLM text reply):
 
 ```jsonl
-{"kind":"header","seq":0,"ts":"2026-07-04T17:30:15.000Z","sessionId":"01J1XZ8T4W9F2A3B4C5D6E7F8G","formatVersion":1,"kernelVersion":"@agent-kernel/kernel@0.1.0","config":{"tools":[{"name":"read","description":"Read a file","inputSchema":{"type":"object"},"requiresApproval":false}],"systemPrompt":"You are a coding agent."},"initialState":{"sessionId":"01J1XZ8T4W9F2A3B4C5D6E7F8G","messages":[{"role":"system","content":[{"type":"text","text":"You are a coding agent."}]}],"pendingCalls":[],"status":"idle","usage":{"inputTokens":0,"outputTokens":0,"costUsd":0},"cursor":0}}
+{"kind":"header","seq":0,"ts":"2026-07-04T17:30:15.000Z","sessionId":"01J1XZ8T4W9F2A3B4C5D6E7F8G","formatVersion":1,"kernelVersion":"@agent-kernel/kernel@0.1.0","config":{"tools":[{"name":"read","description":"Read a file","inputSchema":{"type":"object"},"requiresApproval":false}],"systemPrompt":"You are a coding agent."},"initialState":{"sessionId":"01J1XZ8T4W9F2A3B4C5D6E7F8G","messages":[{"role":"system","content":[{"type":"text","text":"You are a coding agent."}]}],"pendingCalls":[],"status":"idle","usage":{"inputTokens":0,"outputTokens":0,"cacheCreationTokens":0,"cacheReadTokens":0},"cursor":0}}
 {"kind":"event","seq":1,"ts":"2026-07-04T17:30:15.412Z","event":{"kind":"user_message","text":"Read /tmp/notes.md"},"effects":[{"kind":"call_llm","messages":[...],"tools":[...]}]}
-{"kind":"event","seq":2,"ts":"2026-07-04T17:30:17.891Z","event":{"kind":"llm_response","message":{"role":"assistant","content":[{"type":"tool_call","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"}}]},"usage":{"inputTokens":142,"outputTokens":38}},"effects":[{"kind":"call_tool","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"}}],"usage":{"inputTokens":142,"outputTokens":38,"costUsd":0}}
+{"kind":"event","seq":2,"ts":"2026-07-04T17:30:17.891Z","event":{"kind":"llm_response","message":{"role":"assistant","content":[{"type":"tool_call","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"}}]},"usage":{"inputTokens":142,"outputTokens":38}},"effects":[{"kind":"call_tool","callId":"c1","name":"read","input":{"path":"/tmp/notes.md"}}],"usage":{"inputTokens":142,"outputTokens":38,"cacheCreationTokens":0,"cacheReadTokens":0}}
 {"kind":"event","seq":3,"ts":"2026-07-04T17:30:18.104Z","event":{"kind":"tool_result","callId":"c1","ok":true,"content":"# My notes\n..."},"effects":[{"kind":"call_llm","messages":[...],"tools":[...]}]}
-{"kind":"event","seq":4,"ts":"2026-07-04T17:30:20.552Z","event":{"kind":"llm_response","message":{"role":"assistant","content":[{"type":"text","text":"The file contains your notes about..."}]},"usage":{"inputTokens":210,"outputTokens":56}},"effects":[{"kind":"finish"}],"usage":{"inputTokens":352,"outputTokens":94,"costUsd":0}}
+{"kind":"event","seq":4,"ts":"2026-07-04T17:30:20.552Z","event":{"kind":"llm_response","message":{"role":"assistant","content":[{"type":"text","text":"The file contains your notes about..."}]},"usage":{"inputTokens":210,"outputTokens":56}},"effects":[{"kind":"finish"}],"usage":{"inputTokens":352,"outputTokens":94,"cacheCreationTokens":0,"cacheReadTokens":0}}
 ```
 
 Reformatted for reading (real files are one-object-per-line):

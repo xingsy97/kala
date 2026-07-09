@@ -579,8 +579,8 @@ describe('host loop', () => {
     const last = rec.state.messages[1]!
     expect(last.role).toBe('system')
     expect(last.content[0]).toEqual({ type: 'text', text: 'SUMMARY-OF-CONVO' })
-    // Summarizer call carried the fixed prompt.
-    expect(llmCalls[1]!.sys).toMatch(/summarizer/i)
+    // Summarizer call carried the fixed compaction prompt.
+    expect(llmCalls[1]!.sys).toMatch(/compacting an agent-kernel coding-agent session/i)
     expect(llmCalls[1]!.model).toBe('compact-model')
     // usage.inputTokens is reset to the compacted-message estimate.
     expect(rec.state.usage.inputTokens).toBeLessThan(10)
@@ -589,7 +589,7 @@ describe('host loop', () => {
       ?.event as Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> | undefined
     expect(compact?.trigger).toBe('manual')
     expect(compact?.request?.model).toBe('compact-model')
-    expect(compact?.request?.systemPrompt).toMatch(/summarizer/i)
+    expect(compact?.request?.systemPrompt).toMatch(/compacting an agent-kernel coding-agent session/i)
     expect(compact?.request?.messages).toHaveLength(beforeCount)
     expect(compact?.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
   })
@@ -710,7 +710,7 @@ describe('host loop', () => {
 
     // Two LLM calls: the turn itself, then the auto-compact summarizer.
     expect(llmCalls).toHaveLength(2)
-    expect(llmCalls[1]!.sys).toMatch(/summarizer/i)
+    expect(llmCalls[1]!.sys).toMatch(/compacting an agent-kernel coding-agent session/i)
     const after = store.get(sid)!
     // After compact: system prompt + summary = 2 messages.
     expect(after.state.messages).toHaveLength(2)
@@ -720,6 +720,73 @@ describe('host loop', () => {
     })
     // Pressure recomputed on the reduced input tokens → back to 'none'.
     expect(after.state.contextPressureLevel).toBe('none')
+  })
+
+  it('auto-compact summarizes the old prefix and preserves the latest user turn', async () => {
+    const tightConfig = createConfig({
+      tools: [],
+      systemPrompt: 'sys',
+      contextLimit: 100,
+      softThreshold: 0.5,
+      hardThreshold: 0.9,
+    })
+    const rec = await store.create({ config: tightConfig, sessionId: 'sess-compact-tail' })
+    const sid = rec.sessionId
+
+    const compactInputs: import('@agent-kernel/kernel').Message[][] = []
+    let callCount = 0
+    let normalCallCount = 0
+    const llm: LLMAdapter = {
+      name: 'compact-tail-mock',
+      async call(p) {
+        callCount += 1
+        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+          compactInputs.push([...p.messages])
+          return {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: '# Compacted Context\nold work summarized' }],
+            },
+          }
+        }
+        normalCallCount += 1
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: `answer ${callCount}` }],
+          },
+          usage: normalCallCount === 2
+            ? { inputTokens: 95, outputTokens: 5 }
+            : { inputTokens: 20, outputTokens: 5 },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sid, { kind: 'user_message', text: 'old task' })
+    await loop.dispatch(sid, { kind: 'user_message', text: 'latest task' })
+
+    expect(compactInputs).toHaveLength(1)
+    expect(compactInputs[0]!.map((m) => m.role)).toEqual(['system', 'user', 'assistant'])
+    expect(compactInputs[0]![1]!.content[0]).toEqual({ type: 'text', text: 'old task' })
+    const after = store.get(sid)!
+    expect(after.state.messages.map((m) => m.role)).toEqual([
+      'system',
+      'system',
+      'user',
+      'assistant',
+    ])
+    expect(after.state.messages[1]!.content[0]).toEqual({
+      type: 'text',
+      text: '# Compacted Context\nold work summarized',
+    })
+    expect(after.state.messages[2]!.content[0]).toEqual({ type: 'text', text: 'latest task' })
+    expect(after.state.messages[3]!.content[0]).toEqual({ type: 'text', text: 'answer 2' })
   })
 
   it('pipes streaming text deltas through the broadcast', async () => {

@@ -34,7 +34,7 @@ describe('migrate-memory-tools', () => {
         messages: [],
         pendingCalls: [],
         status: 'idle',
-        usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+        usage: { inputTokens: 0, outputTokens: 0 },
         cursor: 0,
       },
     }

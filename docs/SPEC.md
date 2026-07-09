@@ -128,7 +128,6 @@ type PendingToolCall = {
 type UsageTotal = {
   readonly inputTokens: number
   readonly outputTokens: number
-  readonly costUsd: number
 }
 
 type ApprovalMode = 'auto' | 'ask' | 'deny' | 'allow_all'
@@ -177,7 +176,6 @@ Approval mode is reducer-owned state, not host state; it is set by `approval_mod
 type UsageDelta = {
   inputTokens: number
   outputTokens: number
-  costUsd?: number                       // optional; not every provider reports cost
 }
 
 type UserMessageEvent   = {
@@ -191,9 +189,11 @@ type UserApproveEvent   = { kind: 'user_approve';   callId: string }
 type UserRejectEvent    = { kind: 'user_reject';    callId: string; reason?: string }
 type ToolResultEvent    = { kind: 'tool_result';    callId: string; ok: boolean; content: string }
 type CancelEvent        = { kind: 'cancel' }
+type ClearEvent         = { kind: 'clear' }
 type CompactReplacedEvent = {
   kind: 'compact_replaced'
   trigger?: 'manual' | 'auto'
+  preserveFrom: number
   request?: {
     model?: string
     systemPrompt: string
@@ -217,6 +217,7 @@ type AgentEvent =
   | UserRejectEvent
   | ToolResultEvent
   | CancelEvent
+  | ClearEvent
   | CompactReplacedEvent
   | ApprovalModeChangedEvent
   | CwdChangedEvent
@@ -408,12 +409,9 @@ function addUsage(total: UsageTotal, delta: UsageDelta): UsageTotal {
   return {
     inputTokens: total.inputTokens + delta.inputTokens,
     outputTokens: total.outputTokens + delta.outputTokens,
-    costUsd: total.costUsd + (delta.costUsd ?? 0),
   }
 }
 ```
-
-`costUsd` defaults to 0 when the delta doesn't include it.
 
 ### 4.3 `llm_error`
 
@@ -502,9 +500,10 @@ After removing a settled call, examine remaining `pendingCalls`:
 - None on `status` — compaction may be applied at any point in the log. The host is responsible for choosing a safe moment (typically `idle` / `done`).
 
 **Transition**
-- Locate the pivot: the first `messages` index that must be kept verbatim (kernel keeps the tail of the transcript from the pivot onward — Host chooses the pivot; the reducer only applies whatever the event says).
-- Replace everything before the pivot with a single assistant message: `{ role: 'assistant', content: [{ type: 'text', text: event.summary }] }`.
-- `usage` and `cursor` semantics for tokens: the reducer records `event.tokensBefore` / `event.tokensAfter` for observability but does not mutate `state.usage`; the host's next `llm_response` naturally re-establishes the running total against the shorter transcript.
+- Preserve the leading system prompt when present.
+- Keep `messages.slice(event.preserveFrom)` verbatim. Host must choose a safe pivot, normally a recent `user` message, so no orphan `tool_result` enters the next provider request. Use `messages.length` when no recent tail should be preserved.
+- Insert one synthetic system message after the leading system prompt: `{ role: 'system', content: [{ type: 'text', text: event.summary }] }`.
+- `usage.inputTokens` is set to `event.tokensAfter`; output and cache token totals are unchanged. The next real `llm_response` refines the count from provider usage.
 - `event.trigger`, `event.request`, and `event.responseUsage` are recorded in the JSONL log for the dashboard's compaction timeline; the reducer ignores them.
 
 **Effects**

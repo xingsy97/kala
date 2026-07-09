@@ -51,7 +51,7 @@ const APPROVAL_MODE_ITEMS: ReadonlyArray<{ value: ApprovalMode; label: string }>
   { value: 'auto', label: 'Auto (ask on unsafe tools)' },
   { value: 'ask', label: 'Ask everything' },
   { value: 'deny', label: 'Deny unsafe' },
-  { value: 'allow_all', label: 'Allow all (danger)' },
+  { value: 'allow_all', label: 'Allow all' },
 ]
 
 export function SessionMetadataDialog({
@@ -133,8 +133,8 @@ export function SessionMetadataDialog({
           />
           {state?.usage ? (
             <ReadOnlyRow
-              label="Tokens (in / out / cost)"
-              value={`${state.usage.inputTokens.toLocaleString()} / ${state.usage.outputTokens.toLocaleString()} / $${state.usage.costUsd.toFixed(4)}`}
+              label="Tokens (in / out)"
+              value={`${state.usage.inputTokens.toLocaleString()} / ${state.usage.outputTokens.toLocaleString()}`}
             />
           ) : null}
         </div>

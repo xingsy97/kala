@@ -2,11 +2,11 @@
  * Context compaction.
  *
  * When `state.contextPressureLevel === 'hard'` (auto) or the user fires
- * `/compact` (manual), summarise the entire message history down to one
- * synthetic system message and reset `usage.inputTokens`. The reducer does
- * the actual message replacement in response to a `compact_replaced` event
- * — this module drives the LLM call that produces the summary and then
- * dispatches that event through the normal loop path.
+ * `/compact` (manual), summarize the old message prefix into one synthetic
+ * system message while keeping the most recent user turn verbatim. The reducer
+ * applies the replacement in response to a `compact_replaced` event; this
+ * module chooses the pivot, drives the summarizer LLM call, and dispatches the
+ * event through the normal loop path.
  */
 
 import type { AgentEvent, Message } from '@agent-kernel/kernel'
@@ -16,12 +16,40 @@ import { dispatchOne } from './loop.js'
 
 /**
  * Fixed instruction fed to the summarizer LLM call. The output replaces the
- * session's message list, so preserving every decision / file path / open
- * TODO matters more than prose polish.
+ * old transcript prefix, not the recent suffix. It must therefore behave like
+ * a durable engineering handoff: concrete state beats narrative prose.
  */
-const SUMMARIZER_PROMPT =
-  'You are a summarizer. Compress the conversation above into a single, dense summary under 800 tokens. Preserve every decision, file path, tool result, and open task. Do not add commentary. Reply with ONLY the summary text.'
+const SUMMARIZER_PROMPT = `You are compacting an agent-kernel coding-agent session.
+
+Summarize ONLY the messages provided in this compaction request. A recent suffix of the conversation will be kept verbatim after your summary, so do not invent or describe messages you cannot see.
+
+Write a concise but complete engineering handoff in Markdown with exactly these sections:
+
+# Compacted Context
+## User Intent And Constraints
+Capture explicit user requests, corrections, preferences, and constraints that should continue to govern future work.
+
+## Repository And Runtime State
+Capture relevant project architecture, current working directory if known, important files/modules, active session state, selected model/provider facts if they matter, and durable environment assumptions.
+
+## Decisions And Rationale
+Capture decisions already made and why, especially rejected alternatives or constraints that prevent rework.
+
+## Work Completed
+List concrete changes, file paths, commands run, tests run, and observed outcomes. Include failures and partial attempts when they matter.
+
+## Open Work
+List remaining tasks, blockers, uncertainties, and the next best action.
+
+Rules:
+- Preserve exact file paths, command names, tool names, identifiers, error messages, test names, API shapes, and user wording when important.
+- Preserve todo/task state from todowrite or equivalent tool calls.
+- Preserve tool-result evidence, but summarize noisy logs to the command, exit/status, and decisive lines.
+- Do not include generic advice, filler, or commentary about being a summary.
+- Do not claim work is done unless the provided messages establish it.
+- Keep the whole response under 1600 tokens.`
 const COMPACT_TIMEOUT_MS = 60_000
+const TARGET_RECENT_TAIL_TOKENS = 12_000
 
 export async function maybeAutoCompact(
   deps: HostLoopDeps,
@@ -63,17 +91,24 @@ export async function runCompact(
   try {
     const tokensBefore = record.state.usage.inputTokens
     const replacedCount = record.state.messages.length
-    const compact = await summarize(deps, sessionId, record.state.messages)
+    const preserveFrom = choosePreserveFrom(record.state.messages)
+    const compactedPrefix = record.state.messages.slice(0, preserveFrom)
+    const preservedTail = record.state.messages.slice(preserveFrom)
+    const compact = await summarize(deps, sessionId, compactedPrefix)
     // No provider gives a reliable prompt-token count for the summary alone
     // before it's used. Estimate cheaply: 4 chars ≈ 1 token. Refined on the
     // next real LLM call where usage.inputTokens is reported by the provider.
-    const tokensAfter = Math.max(0, Math.round(compact.summary.length / 4))
+    const tokensAfter = Math.max(
+      0,
+      Math.round(compact.summary.length / 4) + estimateTokens(preservedTail),
+    )
     await dispatchOne(
       deps,
       sessionId,
       {
         kind: 'compact_replaced',
         trigger,
+        preserveFrom,
         request: compact.request,
         ...(compact.usage ? { responseUsage: compact.usage } : {}),
         summary: compact.summary,
@@ -131,4 +166,37 @@ async function summarize(
 
 function hasCompactableContent(messages: readonly Message[]): boolean {
   return messages.some((m) => m.role !== 'system')
+}
+
+function choosePreserveFrom(messages: readonly Message[]): number {
+  let candidate = messages.length
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role !== 'user') continue
+    if (!hasCompactableContent(messages.slice(0, i))) continue
+    candidate = i
+    const tail = messages.slice(i)
+    if (estimateTokens(tail) <= TARGET_RECENT_TAIL_TOKENS) return i
+  }
+  return candidate
+}
+
+function estimateTokens(messages: readonly Message[]): number {
+  let chars = 0
+  for (const message of messages) {
+    chars += message.role.length + 8
+    for (const content of message.content) {
+      if (content.type === 'text' || content.type === 'thinking') {
+        chars += content.text.length
+      } else if (content.type === 'tool_call') {
+        chars += content.name.length + content.callId.length + JSON.stringify(content.input).length
+      } else if (content.type === 'tool_result') {
+        chars += content.callId.length + content.content.length + 16
+      } else {
+        chars += content.source.kind === 'file_ref'
+          ? content.source.path.length + 64
+          : Math.round(content.source.data.length / 4)
+      }
+    }
+  }
+  return Math.ceil(chars / 4)
 }
