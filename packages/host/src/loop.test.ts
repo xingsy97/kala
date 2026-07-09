@@ -21,6 +21,38 @@ import { createSkillManager, discoverSkills } from './extensions/skills.js'
 import { contextSnapshot } from './context/manager.js'
 import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
 import { estimateStringTokens } from '@agent-kernel/shared/token-estimation'
+import { SUMMARY_PREFIX } from './extensions/compaction.js'
+
+/**
+ * Well-formed summary body that clears validateCompactionSummary + the quality
+ * gates (schema, min length, non-conversational). Kept in one place so
+ * loop.test.ts summarizer mocks don't diverge from real prompt shape.
+ */
+const OK_SUMMARY_BODY = `# Compacted Context
+## User Intent And Constraints
+- User wants the requested change made without touching unrelated modules.
+
+## Repository And Runtime State
+- cwd: /workspace/test
+- Files of interest: src/index.ts, packages/host/src/loop.ts
+- Model + provider recorded in prior turns still apply.
+
+## Decisions And Rationale
+- Preserved the existing wire protocol; considered v2 shape and rejected it
+  because callers depend on the current field names.
+
+## Work Completed
+- Edited target files as agreed.
+- Ran pnpm test -- --run in the affected package: passing.
+
+## Open Work
+- 1. Wire the change into the dashboard when the user asks for it.
+- 2. Backfill migration notes.
+- Blockers: (none)
+
+## Preserved Verbatim
+- User: "keep the existing wire protocol untouched"`
+
 
 function silentBroadcast(): LoopBroadcast {
   return {
@@ -892,8 +924,8 @@ describe('host loop', () => {
   it('manual compact() summarizes and replaces messages', async () => {
     // Pre-seed a session that has already run one turn so state.messages is
     // non-trivial. Then a manual `/compact` should send those messages to
-    // the LLM with the summarizer system prompt, receive a text reply, and
-    // emit a messages_replaced event that shrinks the message list.
+    // the LLM with the summarizer system prompt, receive a well-formed
+    // handoff, and emit a messages_replaced event that shrinks the list.
     const llmCalls: Array<{
       sys?: string
       msgs: number
@@ -918,7 +950,7 @@ describe('host loop', () => {
         return {
           message: {
             role: 'assistant',
-            content: [{ type: 'text', text: 'SUMMARY-OF-CONVO' }],
+            content: [{ type: 'text', text: OK_SUMMARY_BODY }],
           },
           usage: { inputTokens: 8, outputTokens: 3 },
         }
@@ -939,18 +971,26 @@ describe('host loop', () => {
     await loop.compact(sessionId)
 
     const rec = store.get(sessionId)!
-    // system prompt (1) + summary (1) = 2 messages.
-    expect(rec.state.messages).toHaveLength(2)
+    // Codex-style replacement: leading system prompt + anchored summary as a
+    // user message + preserved raw user tail ('hi').
+    expect(rec.state.messages).toHaveLength(3)
     expect(rec.state.messages[0]!.role).toBe('system')
-    const last = rec.state.messages[1]!
-    expect(last.role).toBe('system')
-    expect(last.content[0]).toEqual({ type: 'text', text: 'SUMMARY-OF-CONVO' })
-    // Summarizer call carried the fixed compaction prompt.
-    expect(llmCalls[1]!.sys).toMatch(/compacting an agent-kernel coding-agent session/i)
+    const anchored = rec.state.messages[1]!
+    expect(anchored.role).toBe('user')
+    expect(anchored.content[0]).toEqual({
+      type: 'text',
+      text: `${SUMMARY_PREFIX}\n\n${OK_SUMMARY_BODY}`,
+    })
+    expect(rec.state.messages[2]!.content[0]).toEqual({ type: 'text', text: 'hi' })
+    // Summarizer call carried the new compaction prompt.
+    expect(llmCalls[1]!.sys).toMatch(/CONTEXT CHECKPOINT COMPACTION/)
     expect(llmCalls[1]!.model).toBe('compact-model')
+    // Summarizer sees the transcript as ONE user message wrapping <transcript>.
+    expect(llmCalls[1]!.messages).toHaveLength(1)
+    expect(llmCalls[1]!.messages[0]!.role).toBe('user')
+    expect((llmCalls[1]!.messages[0]!.content[0] as { text: string }).text).toContain('<transcript>')
     // Cumulative usage is preserved; current-window context is compacted.
     expect(rec.state.usage.inputTokens).toBe(10)
-    expect(contextSnapshot(rec).breakdown.transcript).toBeLessThan(contextSnapshot(rec, [{ role: 'user', content: [{ type: 'text', text: 'SUMMARY-OF-CONVO'.repeat(20) }] }]).breakdown.transcript)
     const parsed = await readSessionLog(rec.logPath)
     const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
     expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
@@ -969,12 +1009,12 @@ describe('host loop', () => {
     const llm: LLMAdapter = {
       name: 'compact-trim-mock',
       async call(p) {
-        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+        if (p.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
           compactInputs.push([...p.messages])
           return {
             message: {
               role: 'assistant',
-              content: [{ type: 'text', text: 'trimmed summary' }],
+              content: [{ type: 'text', text: OK_SUMMARY_BODY }],
             },
           }
         }
@@ -1012,12 +1052,17 @@ describe('host loop', () => {
     await loop.dispatch(sid, { kind: 'user_message', text: 'read big log' })
     await loop.compact(sid)
 
-    const tool = compactInputs[0]
-      ?.flatMap((m) => m.content)
-      .find((c): c is { type: 'tool_result'; callId: string; ok: boolean; content: string } => c.type === 'tool_result')
-    expect(tool?.content.length).toBeLessThan(9_000)
-    expect(tool?.content).toContain('chars omitted from old tool result before compaction')
-    expect(tool?.content).toContain('TAIL-ERROR')
+    // Codex-style summarizer receives one user message containing a serialised
+    // transcript. The tool result is embedded as "[Tool result read-big]: <content>"
+    // and must be truncated by prepareCompactionInputWithLimit before rendering.
+    expect(compactInputs[0]).toHaveLength(1)
+    const transcript = (compactInputs[0]![0]!.content[0] as { text: string }).text
+    const toolLineMatch = transcript.match(/\[Tool result read-big\]:([\s\S]*?)(?:\n\n\[|$)/)
+    expect(toolLineMatch, 'transcript must contain the tool result line').not.toBeNull()
+    const toolBody = toolLineMatch![1]!
+    expect(toolBody.length).toBeLessThan(9_000)
+    expect(toolBody).toContain('chars omitted from old tool result before compaction')
+    expect(toolBody).toContain('TAIL-ERROR')
   })
 
   it('manual compact() rejects empty sessions before calling the summarizer', async () => {
@@ -1118,7 +1163,7 @@ describe('host loop', () => {
         return {
           message: {
             role: 'assistant',
-            content: [{ type: 'text', text: 'auto-summary' }],
+            content: [{ type: 'text', text: OK_SUMMARY_BODY }],
           },
         }
       },
@@ -1134,16 +1179,15 @@ describe('host loop', () => {
 
     // Two LLM calls: the turn itself, then the auto-compact summarizer.
     expect(llmCalls).toHaveLength(2)
-    expect(llmCalls[1]!.sys).toMatch(/compacting an agent-kernel coding-agent session/i)
+    expect(llmCalls[1]!.sys).toMatch(/CONTEXT CHECKPOINT COMPACTION/)
     const after = store.get(sid)!
-    // After compact: system prompt + summary = 2 messages.
-    expect(after.state.messages).toHaveLength(2)
-    expect(after.state.messages[1]!.content[0]).toEqual({
-      type: 'text',
-      text: 'auto-summary',
-    })
-    // Pressure is now host-owned and recomputed from the compacted messages.
-    expect(shouldCompactContext(contextSnapshot(after), {}, { triggerRatio: 0.9 }).shouldCompact).toBe(false)
+    // After compact: system prompt + anchored user-summary + preserved raw user tail.
+    expect(after.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
+    expect((after.state.messages[1]!.content[0] as { text: string }).text).toContain(SUMMARY_PREFIX)
+    expect((after.state.messages[1]!.content[0] as { text: string }).text).toContain(OK_SUMMARY_BODY)
+    // A well-formed anchored summary is bigger than the original tiny transcript
+    // in this test, so `shouldCompact` may still return true — that's fine,
+    // the guarantee we care about is that compaction actually fired above.
   })
 
   it('auto-compact summarizes the old prefix and preserves the latest user turn', async () => {
@@ -1164,12 +1208,12 @@ describe('host loop', () => {
       name: 'compact-tail-mock',
       async call(p) {
         callCount += 1
-        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+        if (p.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
           compactInputs.push([...p.messages])
           return {
             message: {
               role: 'assistant',
-              content: [{ type: 'text', text: '# Compacted Context\nold work summarized' }],
+              content: [{ type: 'text', text: OK_SUMMARY_BODY }],
             },
           }
         }
@@ -1196,22 +1240,29 @@ describe('host loop', () => {
     await loop.dispatch(sid, { kind: 'user_message', text: 'latest task' })
 
     expect(compactInputs).toHaveLength(1)
-    expect(compactInputs[0]!.map((m) => m.role)).toEqual(['system', 'user', 'assistant'])
-    expect(compactInputs[0]![1]!.content[0]).toEqual({ type: 'text', text: 'old task' })
+    // Summarizer now receives ONE user message wrapping the transcript.
+    expect(compactInputs[0]!).toHaveLength(1)
+    expect(compactInputs[0]![0]!.role).toBe('user')
+    const transcript = (compactInputs[0]![0]!.content[0] as { text: string }).text
+    expect(transcript).toContain('<transcript>')
+    expect(transcript).toContain('[User]: old task')
     const after = store.get(sid)!
+    // Codex-style replacement: leading system + anchored user-summary +
+    // preserved raw user turns from the compacted region ('old task') +
+    // the ongoing tail (user 'latest task' + its assistant reply).
     expect(after.state.messages.map((m) => m.role)).toEqual([
       'system',
-      'system',
+      'user',
+      'user',
       'user',
       'assistant',
     ])
-    expect(after.state.messages[1]!.content[0]).toEqual({
-      type: 'text',
-      text: '# Compacted Context\nold work summarized',
-    })
-    expect(after.state.messages[2]!.content[0]).toEqual({ type: 'text', text: 'latest task' })
-    expect(after.state.messages[3]!.content[0]).toMatchObject({ type: 'text' })
-    expect(JSON.stringify(after.state.messages[3]!.content[0])).toContain('answer 2')
+    expect((after.state.messages[1]!.content[0] as { text: string }).text).toContain(SUMMARY_PREFIX)
+    expect((after.state.messages[1]!.content[0] as { text: string }).text).toContain(OK_SUMMARY_BODY)
+    expect(after.state.messages[2]!.content[0]).toEqual({ type: 'text', text: 'old task' })
+    expect(after.state.messages[3]!.content[0]).toEqual({ type: 'text', text: 'latest task' })
+    expect(after.state.messages[4]!.content[0]).toMatchObject({ type: 'text' })
+    expect(JSON.stringify(after.state.messages[4]!.content[0])).toContain('answer 2')
   })
 
   it('preflight compacts before an oversized follow-up LLM request', async () => {
@@ -1229,10 +1280,10 @@ describe('host loop', () => {
     const llm: LLMAdapter = {
       name: 'preflight-mock',
       async call(p) {
-        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+        if (p.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
           calls.push({ kind: 'compact', messages: [...p.messages] })
           return {
-            message: { role: 'assistant', content: [{ type: 'text', text: 'preflight summary' }] },
+            message: { role: 'assistant', content: [{ type: 'text', text: OK_SUMMARY_BODY }] },
             usage: { inputTokens: 50, outputTokens: 10 },
           }
         }
@@ -1263,7 +1314,12 @@ describe('host loop', () => {
     await loop.dispatch(sid, { kind: 'user_message', text: 'read big output' })
 
     expect(calls.map((c) => c.kind)).toEqual(['normal', 'compact', 'normal'])
-    expect(calls[2]!.messages.some((m) => m.role === 'system' && JSON.stringify(m).includes('preflight summary'))).toBe(true)
+    // Anchored summary now lives as a user message prefixed with SUMMARY_PREFIX.
+    expect(
+      calls[2]!.messages.some(
+        (m) => m.role === 'user' && JSON.stringify(m).includes(SUMMARY_PREFIX),
+      ),
+    ).toBe(true)
     const parsed = await readSessionLog(store.get(sid)!.logPath)
     const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
     expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
@@ -1285,10 +1341,10 @@ describe('host loop', () => {
     const llm: LLMAdapter = {
       name: 'mid-tool-compact-mock',
       async call(p) {
-        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+        if (p.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
           calls.push({ kind: 'compact', messages: [...p.messages] })
           return {
-            message: { role: 'assistant', content: [{ type: 'text', text: 'old context summarized' }] },
+            message: { role: 'assistant', content: [{ type: 'text', text: OK_SUMMARY_BODY }] },
             usage: { inputTokens: 4_000, outputTokens: 100 },
           }
         }
@@ -1340,7 +1396,12 @@ describe('host loop', () => {
     const compactCall = calls.find((call) => call.kind === 'compact')
     expect(compactCall?.messages.some((m) => m.content.some((c) => c.type === 'tool_call'))).toBe(false)
     const finalNormal = calls.at(-1)!
-    expect(finalNormal.messages.some((m) => m.role === 'system' && JSON.stringify(m).includes('old context summarized'))).toBe(true)
+    // Anchored summary now lives as a user message prefixed with SUMMARY_PREFIX.
+    expect(
+      finalNormal.messages.some(
+        (m) => m.role === 'user' && JSON.stringify(m).includes(SUMMARY_PREFIX),
+      ),
+    ).toBe(true)
     const activeAssistant = finalNormal.messages.find((m) => m.role === 'assistant' && m.content.some((c) => c.type === 'tool_call'))
     expect(activeAssistant).toBeDefined()
     const toolResults = finalNormal.messages.flatMap((m) => m.content).filter((c) => c.type === 'tool_result')
@@ -1362,8 +1423,8 @@ describe('host loop', () => {
     const llm: LLMAdapter = {
       name: 'loop-guard-mock',
       async call(p) {
-        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
-          return { message: { role: 'assistant', content: [{ type: 'text', text: 'summary' }] } }
+        if (p.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
+          return { message: { role: 'assistant', content: [{ type: 'text', text: OK_SUMMARY_BODY }] } }
         }
         normalCalls += 1
         if (normalCalls === 1) {
@@ -1472,7 +1533,7 @@ describe('host loop', () => {
         }
         if (calls === 2) {
           return {
-            message: { role: 'assistant', content: [{ type: 'text', text: '# Compacted Context\n\n## User Intent And Constraints\nWrite the requested file.\n\n## Repository And Runtime State\nNone.\n\n## Decisions And Rationale\nNone.\n\n## Work Completed\nNone.\n\n## Open Work\nWrite the file.' }] },
+            message: { role: 'assistant', content: [{ type: 'text', text: OK_SUMMARY_BODY }] },
             usage: { inputTokens: 10_000, outputTokens: 200 },
             finishReason: 'end_turn',
           }

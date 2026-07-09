@@ -105,6 +105,63 @@ The kernel validates the range against current `state.messages`. Invalid
 `messages_replaced` events are no-ops. The host should use the same validation
 rules before dispatching, and log unexpected rejection as runtime metadata.
 
+## Handoff-Style Summary Format (as of 2026-07-23)
+
+The summarizer is called with a codex-style structured request rather than the
+raw multi-turn history:
+
+1. The compaction window (head slice up to `preserveFrom`) is serialised to
+   plain text with `[User]:` / `[Assistant]:` / `[Assistant tool call]:` /
+   `[Tool result]:` prefixes and sent as a single `user` message wrapped in
+   `<transcript>…</transcript>`. This prevents the summarizer from treating an
+   unfinished assistant turn as a conversation to continue.
+2. If a prior compaction already installed an anchored summary (identified by
+   the `SUMMARY_PREFIX` marker), that summary is passed alongside as
+   `<previous-summary>…</previous-summary>` so the model can update rather
+   than rewrite it.
+3. The summarizer prompt requires a fixed `<template>` structure (Objective,
+   User Intent, Repository/Runtime State, Decisions, Work Completed, Open
+   Work, Preserved Verbatim).
+
+The replacement written back to the transcript is:
+
+```
+[ leading system prompt (sticky),
+  user: SUMMARY_PREFIX + "\n\n" + <summary body>,
+  ...most recent raw user turns from the compacted region (≤ 20k tokens),
+  ...preservedTail ]
+```
+
+Summary lands as a **`user` message**, not a `system` message. The
+`SUMMARY_PREFIX` string is a stable marker used both to signal handoff intent
+to the resuming model and to detect the anchor for the next compaction.
+
+### Validation as a gate (not observability)
+
+`validateCompactionSummary` results and additional quality checks now decide
+whether the replacement is dispatched. A summary is rejected — counting as
+`consecutiveFailures += 1` and, for manual triggers, throwing to the caller —
+when any of the following hold:
+
+- `validation.ok === false` (schema-invalid: missing or empty required sections).
+- `summary.length < 400` characters.
+- `tokensBefore / summaryTokensApprox > 200` (pathological compression, e.g.
+  the box regression where 427k tokens collapsed to a 50-character reply).
+- A conservative conversational-reply heuristic fires
+  (`looksLikeConversationalReply`).
+
+Failed attempts write `runtime_metadata { action: 'compaction_skipped',
+reason: 'summary_schema_invalid' | 'summary_too_short' | 'summary_too_lossy' |
+'summary_conversational' | ... }` and never dispatch a `messages_replaced`
+event. The prior behaviour (persist validation only as an artifact, always
+dispatch) is retired.
+
+### Applied metadata payload
+
+Successful `compaction_applied` entries carry, in addition to the previous
+fields, `compressionRatio`, `previousSummaryChars`, `recentRawUsersCount`,
+and `validationReasonCodes` for observability.
+
 ## Replay, Resume, and Fork
 
 Compaction changes the model-visible messages. Therefore the successful

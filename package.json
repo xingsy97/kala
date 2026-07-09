@@ -11,6 +11,7 @@
     "build": "pnpm -r run build",
     "prepare:socket-admin-ui": "node scripts/release/fetch-socket-admin-ui.mjs",
     "build:release-assets": "node scripts/release/build-release-assets.mjs",
+    "deploy:remote": "node scripts/deploy/deploy-remote.mjs",
     "verify:release-assets": "node scripts/release/verify-release-assets.mjs",
     "verify:release-install": "node scripts/release/verify-release-install.mjs",
     "test": "pnpm -r --parallel run test",

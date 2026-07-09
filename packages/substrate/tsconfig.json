@@ -2,6 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
     "types": ["node"],
     "paths": {
       "@agent-kernel/host": ["../host/src/index.ts"],

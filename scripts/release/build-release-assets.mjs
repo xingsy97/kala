@@ -14,7 +14,7 @@ const dashboardDist = join(root, 'packages/dashboard/dist')
 const socketAdminDist = join(root, '.presq/socket.io-admin-ui/dist')
 const options = parseOptions(process.argv.slice(2))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-const { component, tag, nativeOnly, finalizeOnly, noNative } = options
+const { component, tag, nativeOnly, finalizeOnly, noNative, skipDashboardBuild, skipPackageBuild } = options
 const repo = options.repo ?? repoFromPackageJson(packageJson)
 if (!repo && component !== 'dashboard') {
   throw new Error('release repo is required; pass --repo owner/name or set GITHUB_REPOSITORY')
@@ -64,18 +64,30 @@ if (wantsNativeBuild && nativeTarget !== currentNativeTarget) {
   throw new Error(`native target ${nativeTarget} does not match this runner (${currentNativeTarget}); Node SEA builds are not cross-compiled`)
 }
 
-if (includeDashboard) {
+if (includeDashboard && !skipDashboardBuild) {
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'])
 }
+if (includeDashboard && skipDashboardBuild) {
+  assertDashboardDistReady(dashboardDist)
+}
 
-if (!nativeOnly) {
+if (!nativeOnly && !skipPackageBuild) {
   await run('pnpm', ['--filter', '@agent-kernel/kernel', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/shared', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/executor', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/host', 'build'])
 }
 
-for (const item of entries) {
+const buildEntries = [...entries].sort((a, b) => {
+  if (a.component === 'host' && b.component !== 'host') return 1
+  if (b.component === 'host' && a.component !== 'host') return -1
+  return 0
+})
+
+for (const item of buildEntries) {
+  const embeddedReleaseAssets = item.component === 'host'
+    ? prepareEmbeddedReleaseAssetsForHost()
+    : ''
   const embeddedDashboard = item.component === 'host' && includeDashboard
     ? embeddedDashboardBanner(dashboardDist)
     : ''
@@ -94,7 +106,8 @@ for (const item of entries) {
     platform: 'node',
     target: 'node22',
     format: 'cjs',
-    banner: { js: `#!/usr/bin/env node\n${buildInfo}${embeddedDashboard}${embeddedSocketAdmin}` },
+    mainFields: ['module', 'main'],
+    banner: { js: `#!/usr/bin/env node\n${buildInfo}${embeddedDashboard}${embeddedSocketAdmin}${embeddedReleaseAssets}` },
     sourcemap: false,
     legalComments: 'none',
     logLevel: 'info',
@@ -172,8 +185,12 @@ function finalizeRelease() {
   writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   writeFileSync(join(outDir, 'RELEASE_NOTES.md'), releaseNotes(manifest))
 
-  const files = releaseFiles()
+  writeSha256Sums(releaseFiles())
+}
+
+function writeSha256Sums(files) {
   const sums = files
+    .filter((file) => exists(file))
     .map((file) => `${sha256(join(outDir, file))}  ${file}`)
     .join('\n')
   writeFileSync(join(outDir, 'SHA256SUMS'), `${sums}\n`)
@@ -221,15 +238,19 @@ function cjsAssetName(entry) {
 }
 
 function embeddedDashboardBanner(dir) {
-  if (!existsSync(join(dir, 'index.html'))) {
-    throw new Error(`dashboard dist missing index.html at ${dir}; build dashboard first`)
-  }
+  assertDashboardDistReady(dir)
   const assets = []
   for (const file of walkFiles(dir)) {
     const rel = relative(dir, file).replace(/\\/g, '/')
     assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
   }
   return `globalThis.__AGENT_KERNEL_EMBEDDED_DASHBOARD__=${JSON.stringify(assets)};\n`
+}
+
+function assertDashboardDistReady(dir) {
+  if (!existsSync(join(dir, 'index.html'))) {
+    throw new Error(`dashboard dist missing index.html at ${dir}; run pnpm --filter @agent-kernel/dashboard build or omit --skip-dashboard-build`)
+  }
 }
 
 function embeddedSocketAdminBanner(dir) {
@@ -242,6 +263,32 @@ function embeddedSocketAdminBanner(dir) {
     assets.push({ path: rel, contentBase64: readFileSync(file).toString('base64') })
   }
   return `globalThis.__AGENT_KERNEL_EMBEDDED_SOCKET_ADMIN_UI__=${JSON.stringify(assets)};\n`
+}
+
+function prepareEmbeddedReleaseAssetsForHost() {
+  if (nativeOnly) return ''
+  const executorEntry = allEntries.find((entry) => entry.component === 'executor')
+  if (!executorEntry) return ''
+  const executorCjs = cjsAssetName(executorEntry)
+  if (!exists(executorCjs)) return ''
+  if (!exists('run.sh')) {
+    const path = join(outDir, 'run.sh')
+    writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
+    chmodSync(path, 0o755)
+  }
+  writeSha256Sums([executorCjs, 'run.sh'])
+  return embeddedReleaseAssetsBanner(outDir, [executorCjs, 'run.sh', 'SHA256SUMS'])
+}
+
+function embeddedReleaseAssetsBanner(dir, names) {
+  const assets = []
+  for (const name of names) {
+    const file = join(dir, name)
+    if (!existsSync(file) || !statSync(file).isFile()) continue
+    assets.push({ path: name, contentBase64: readFileSync(file).toString('base64') })
+  }
+  if (assets.length === 0) return ''
+  return `globalThis.__AGENT_KERNEL_EMBEDDED_RELEASE_ASSETS__=${JSON.stringify(assets)};\n`
 }
 
 function buildInfoBanner({ artifactKind, dashboardMode, socketAdminMode }) {
@@ -303,6 +350,8 @@ function parseOptions(args) {
     nativeOnly: normalized.includes('--native-only'),
     finalizeOnly: normalized.includes('--finalize-only'),
     noNative: normalized.includes('--no-native'),
+    skipDashboardBuild: normalized.includes('--skip-dashboard-build'),
+    skipPackageBuild: normalized.includes('--skip-package-build'),
     nativeTarget: optionValue(normalized, '--native-target'),
   }
 }
