@@ -227,4 +227,43 @@ describe('SessionStore crash recovery', () => {
     expect(parsed.events[2]!.event.kind).toBe('user_approve')
     expect(parsed.events[3]!.event.kind).toBe('tool_result')
   })
+
+  it('closes a session that was mid-stream (thinking) when the host died', async () => {
+    // Host issued call_llm and died before the response returned. On disk we
+    // see user_message → status=thinking → nothing else. Without recovery the
+    // session sits in `thinking` forever: reducer refuses new user_message
+    // from that state, so the client can never continue. Load must synthesize
+    // an assistant llm_response with a [interrupted] marker so the session
+    // becomes `done` and the dashboard sees the closure event.
+    const sessionId = 'sess-crash-thinking'
+    const path = join(dir, `2026-07-05T00-00-02.000Z_${sessionId}.jsonl`)
+    const cfg = createConfig({ tools: [], systemPrompt: 'sys' })
+    const initial = createInitialState({ sessionId, systemPrompt: 'sys' })
+    await writeHeader({ path, sessionId, config: cfg, initialState: initial })
+    await appendEventEntry({
+      path,
+      seq: 1,
+      event: { kind: 'user_message', text: 'hello' },
+      effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+    })
+
+    const store = new SessionStore(dir)
+    const rec = await store.load(sessionId)
+
+    expect(rec.state.status).toBe('done')
+    expect(rec.state.pendingCalls).toEqual([])
+
+    const parsed = await readSessionLog(path)
+    expect(parsed.events).toHaveLength(2)
+    const recovery = parsed.events[1]!.event
+    expect(recovery.kind).toBe('llm_response')
+    if (recovery.kind === 'llm_response') {
+      expect(recovery.message.role).toBe('assistant')
+      const text = recovery.message.content
+        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+        .map((c) => c.text)
+        .join('')
+      expect(text).toBe('[interrupted]')
+    }
+  })
 })
