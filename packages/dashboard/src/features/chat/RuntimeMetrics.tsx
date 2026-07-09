@@ -40,7 +40,7 @@ export function RuntimeMetrics({
 
   return (
     <div
-      className="flex min-w-[16rem] flex-1 items-center gap-1.5 overflow-hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300"
+      className="flex min-w-[16rem] flex-1 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-secondary px-2 py-1 text-[11px] text-secondary-foreground"
       title={title}
       aria-label={title}
       data-testid="context-usage-indicator"
@@ -53,7 +53,7 @@ export function RuntimeMetrics({
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-          className="text-slate-200 dark:text-slate-800"
+          className="text-border"
         />
         <circle
           cx="10"
@@ -132,13 +132,13 @@ function Metric({
           ? 'border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300'
           : tone === 'sky'
             ? 'border-sky-300 text-sky-700 dark:border-sky-800 dark:text-sky-300'
-            : 'border-slate-300 dark:border-slate-700',
+            : 'border-border',
         className,
       )}
       title={`${title} Current value: ${value}.`}
     >
-      <span className="text-slate-500 dark:text-slate-400">{label}</span>
-      <span className="font-mono text-slate-800 dark:text-slate-100">{value}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono text-foreground">{value}</span>
     </span>
   )
 }

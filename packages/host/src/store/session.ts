@@ -21,6 +21,7 @@ import { ulid } from 'ulid'
 
 import {
   appendEventEntry,
+  appendMetadataEntry,
   readSessionLog,
   writeHeader,
 } from './log.js'
@@ -35,6 +36,12 @@ export type SessionRecord = {
   readonly workspaceId?: string
   readonly workspaceName?: string
   state: AgentState
+  /**
+   * Operator-set display label from the most recent `client:rename_session`.
+   * Loaded from the last MetadataEntry in the JSONL and updated in place
+   * whenever the host writes a new metadata line.
+   */
+  label?: string
 }
 
 export type CreateSessionParams = {
@@ -47,6 +54,7 @@ export type CreateSessionParams = {
   workspaceId?: string
   workspaceName?: string
   initialCwd?: string
+  initialApprovalMode?: import('@agent-kernel/kernel').ApprovalMode
 }
 
 export class SessionStore {
@@ -79,12 +87,15 @@ export class SessionStore {
     const stateWithCwd: AgentState = params.initialCwd
       ? { ...stateForSession, cwd: params.initialCwd }
       : stateForSession
+    const stateWithApproval: AgentState = params.initialApprovalMode
+      ? { ...stateWithCwd, approvalMode: params.initialApprovalMode }
+      : stateWithCwd
     const logPath = this.pathFor(sessionId)
     await writeHeader({
       path: logPath,
       sessionId,
       config: params.config,
-      initialState: stateWithCwd,
+      initialState: stateWithApproval,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
@@ -105,7 +116,7 @@ export class SessionStore {
       sessionId,
       logPath,
       config: params.config,
-      state: stateWithCwd,
+      state: stateWithApproval,
       ...(params.parentSessionId
         ? { parentSessionId: params.parentSessionId }
         : {}),
@@ -238,6 +249,20 @@ export class SessionStore {
 
   list(): SessionRecord[] {
     return [...this.records.values()]
+  }
+
+  /**
+   * Persist a rename. Empty/whitespace label clears the override so summaries
+   * fall back to firstUserMessage. Returns the applied value so the caller can
+   * broadcast it without re-reading the record.
+   */
+  async rename(sessionId: string, label: string): Promise<string> {
+    const rec = this.records.get(sessionId) ?? (await this.load(sessionId))
+    const trimmed = label.trim()
+    await appendMetadataEntry(rec.logPath, { label: trimmed })
+    if (trimmed.length === 0) delete rec.label
+    else rec.label = trimmed
+    return trimmed
   }
 
   async delete(sessionId: string): Promise<void> {
@@ -395,6 +420,9 @@ export class SessionStore {
       ...(parsed.header.workspaceName !== undefined
         ? { workspaceName: parsed.header.workspaceName }
         : {}),
+      ...(latestLabelFromMetadata(parsed.metadata)
+        ? { label: latestLabelFromMetadata(parsed.metadata) }
+        : {}),
     }
     this.records.set(sessionId, record)
     return record
@@ -416,6 +444,7 @@ function summarizeLog(
     firstUserEvent && firstUserEvent.event.kind === 'user_message'
       ? firstUserEvent.event.text
       : undefined
+  const label = latestLabelFromMetadata(parsed.metadata)
   // executorId is deliberately not inferred from the log — the JSONL doesn't
   // record which executor produced each tool_result, so any inference here
   // would be a guess. Host can layer it on later by tracking attach history.
@@ -445,7 +474,26 @@ function summarizeLog(
     ...(firstUserText
       ? { firstUserMessage: firstUserText.slice(0, 120) }
       : {}),
+    ...(label ? { label } : {}),
   }
+}
+
+/**
+ * Walk metadata entries in reverse to find the most recent `label` value.
+ * Returns undefined when no entry set `label` yet — the summariser then falls
+ * back to `firstUserMessage`. An explicit empty string acts as a clear signal
+ * and returns undefined too.
+ */
+function latestLabelFromMetadata(
+  metadata: readonly { label?: string }[],
+): string | undefined {
+  for (let i = metadata.length - 1; i >= 0; i--) {
+    const entry = metadata[i]!
+    if (entry.label === undefined) continue
+    const trimmed = entry.label.trim()
+    return trimmed.length === 0 ? undefined : trimmed
+  }
+  return undefined
 }
 
 // Older logs (pre-snapshot-writer) have no snapshot lines. Recover an

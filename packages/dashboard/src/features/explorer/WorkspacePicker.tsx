@@ -116,19 +116,19 @@ export function NewSessionDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent className="max-w-4xl h-[78vh] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]" data-testid="new-session-dialog">
-        <DialogHeader className="border-b border-border px-4 py-3 dark:border-border">
+        <DialogHeader className="border-b border-border px-4 py-3">
           <DialogTitle>New session</DialogTitle>
           <DialogDescription>
             Choose the workspace and initial directory for tool calls.
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 grid-cols-[220px_minmax(0,1fr)]">
-          <aside className="min-h-0 border-r border-border bg-muted dark:border-border dark:bg-background/70">
+          <aside className="min-h-0 border-r border-border bg-muted">
             <div className="px-3 py-2 text-xs font-medium text-muted-foreground">Workspaces</div>
             <ScrollArea className="h-[calc(78vh-9.5rem)]">
               <div className="space-y-1 px-2 pb-2">
                 {workspaces.length === 0 ? (
-                  <div className="rounded border border-dashed border-border px-3 py-3 text-xs text-muted-foreground dark:border-border">
+                  <div className="rounded border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
                     No executor is online.
                   </div>
                 ) : null}
@@ -139,13 +139,13 @@ export function NewSessionDialog({
                     data-testid={`workspace-pick-${w.workspaceId}`}
                     onClick={() => selectWorkspace(w.workspaceId)}
                     className={cn(
-                      'w-full rounded-md border px-2 py-2 text-left',
+                      'w-full rounded-md border px-2 py-2 text-left transition-colors',
                       workspaceId === w.workspaceId
-                        ? 'border-sky-400 bg-sky-50 dark:border-sky-500 dark:bg-sky-950/30'
-                        : 'border-border bg-white hover:border-border dark:border-border dark:bg-background dark:hover:border-border',
+                        ? 'border-primary bg-primary/10 text-foreground'
+                        : 'border-border bg-card hover:bg-secondary',
                     )}
                   >
-                    <div className="truncate font-mono text-sm text-foreground dark:text-foreground">
+                    <div className="truncate font-mono text-sm text-foreground">
                       {w.workspaceName}
                     </div>
                     <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
@@ -157,7 +157,7 @@ export function NewSessionDialog({
             </ScrollArea>
           </aside>
           <main className="flex min-h-0 min-w-0 flex-col">
-            <div className="border-b border-border p-3 dark:border-border">
+            <div className="border-b border-border p-3">
               <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="new-session-cwd">
                 Initial directory
               </label>
@@ -192,7 +192,7 @@ export function NewSessionDialog({
             </div>
           </main>
         </div>
-        <DialogFooter className="border-t border-border px-4 py-3 dark:border-border">
+        <DialogFooter className="border-t border-border px-4 py-3">
           <Button variant="outline" onClick={onCancel} data-testid="workspace-picker-cancel">
             Cancel
           </Button>
@@ -223,8 +223,8 @@ function DirectoryColumn({
   onOpen(path: string): void
 }): JSX.Element {
   return (
-    <div className="w-64 shrink-0 border-r border-border dark:border-border" data-testid="finder-column">
-      <div className="truncate border-b border-border px-3 py-2 font-mono text-[11px] text-muted-foreground dark:border-border">
+    <div className="w-64 shrink-0 border-r border-border" data-testid="finder-column">
+      <div className="truncate border-b border-border px-3 py-2 font-mono text-[11px] text-muted-foreground">
         {column.path}
       </div>
       {column.error ? (
@@ -240,8 +240,8 @@ function DirectoryColumn({
               onClick={() => onOpen(entry.path)}
               data-testid="finder-dir"
               className={cn(
-                'flex h-8 w-full items-center gap-2 px-2 text-left text-sm hover:bg-secondary dark:hover:bg-card',
-                cwd === entry.path && 'bg-sky-50 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200',
+                'flex h-8 w-full items-center gap-2 px-2 text-left text-sm hover:bg-secondary transition-colors',
+                cwd === entry.path && 'bg-primary/10 text-foreground',
               )}
             >
               <Folder className="h-4 w-4 flex-none text-sky-600 dark:text-sky-300" />

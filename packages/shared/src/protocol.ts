@@ -200,6 +200,21 @@ export type ClientSetCwd = {
   cwd: string
 }
 
+/**
+ * Rename a session. Empty/whitespace label clears the override, causing the
+ * dashboard to fall back to `firstUserMessage`. Host writes a metadata log
+ * entry so summaries survive host restarts.
+ */
+export type ClientRenameSession = {
+  sessionId: string
+  label: string
+}
+
+export type SessionRenamedEvent = {
+  sessionId: string
+  label: string
+}
+
 // ============================================================================
 // Host → Dashboard only
 // ============================================================================
@@ -284,6 +299,52 @@ export type DirListResult = {
   path: string
   roots: readonly string[]
   entries: readonly DirListEntry[]
+  error?: string
+}
+
+/**
+ * Dashboard-driven fuzzy file search for the composer's `@file` mention picker.
+ * Executor walks the workspace root(s), skipping node_modules/.git/dist, and
+ * returns up to `limit` file paths (workspace-relative) that match `query`.
+ */
+export type ClientListFiles = {
+  requestId: string
+  workspaceId: string
+  query?: string
+  limit?: number
+}
+
+export type FileListEntry = {
+  path: string
+  size: number
+}
+
+export type FileListResult = {
+  requestId: string
+  workspaceId: string
+  files: readonly FileListEntry[]
+  truncated: boolean
+  error?: string
+}
+
+/**
+ * Dashboard-driven read of a single workspace file for `@file` inline expansion.
+ * Executor refuses paths outside the workspace or files above `maxBytes`
+ * (default 64 KiB) so the composer can render an inline toast.
+ */
+export type ClientReadFile = {
+  requestId: string
+  workspaceId: string
+  path: string
+  maxBytes?: number
+}
+
+export type FileContentsResult = {
+  requestId: string
+  workspaceId: string
+  path: string
+  content?: string
+  size?: number
   error?: string
 }
 
@@ -372,6 +433,11 @@ export type SessionSummary = {
   status?: AgentState['status']
   currentCwd?: string
   firstUserMessage?: string
+  /**
+   * Operator-provided display label from the most recent `client:rename_session`.
+   * When unset the dashboard uses `firstUserMessage` as before.
+   */
+  label?: string
 }
 
 export type ServerSessionsPayload = {
@@ -471,12 +537,15 @@ export type DashboardClientToServerEvents = {
   'client:fork': (payload: ClientFork) => void
   'client:create_session': (payload: ClientCreateSession) => void
   'client:list_dirs': (payload: ClientListDirs) => void
+  'client:list_files': (payload: ClientListFiles) => void
+  'client:read_file': (payload: ClientReadFile) => void
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
   'client:delete_session': (payload: ClientDeleteSession) => void
   'client:set_model': (payload: ClientSetModel) => void
   'client:set_cwd': (payload: ClientSetCwd) => void
+  'client:rename_session': (payload: ClientRenameSession) => void
   subscribe: (payload: ClientSubscribe) => void
 }
 
@@ -491,11 +560,14 @@ export type DashboardServerToClientEvents = {
   'session:model_changed': (payload: SessionModelChangedEvent) => void
   'session:token_delta': (payload: ServerTokenDeltaEvent) => void
   'session:approval_mode': (payload: SessionApprovalModeEvent) => void
+  'session:renamed': (payload: SessionRenamedEvent) => void
   'server:message_queue': (payload: ServerMessageQueueEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
   'server:sessions': (payload: ServerSessionsPayload) => void
   'server:dir_list': (payload: DirListResult) => void
+  'server:file_list': (payload: FileListResult) => void
+  'server:file_contents': (payload: FileContentsResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
 }
@@ -531,6 +603,14 @@ export type ExecutorServerToClientEvents = {
   'fs:list_dirs': (
     payload: ClientListDirs,
     ack: (result: DirListResult) => void,
+  ) => void
+  'fs:list_files': (
+    payload: ClientListFiles,
+    ack: (result: FileListResult) => void,
+  ) => void
+  'fs:read_file': (
+    payload: ClientReadFile,
+    ack: (result: FileContentsResult) => void,
   ) => void
 }
 

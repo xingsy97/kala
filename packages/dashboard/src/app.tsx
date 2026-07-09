@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, Moon, PanelRight, PanelRightClose, Settings, Sun } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FolderOpen, Info, Moon, PanelRight, PanelRightClose, Settings, Sun } from 'lucide-react'
 
-import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
+import type {
+  FileContentsResult,
+  FileListEntry,
+  FileListResult,
+  ModelInfo,
+  ServerModelsPayload,
+} from '@agent-kernel/shared'
 
 import { Button } from './components/ui/button.js'
 import {
@@ -25,6 +31,8 @@ import { BackgroundTerminalPanel } from './features/chat/BackgroundTerminalPanel
 import { ChatPanel } from './features/chat/ChatPanel.js'
 import { Composer } from './features/chat/Composer.js'
 import { ContextPressureBanner } from './features/chat/ContextPressureBanner.js'
+import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
+import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { TodoDock } from './features/chat/TodoDock.js'
 import { Explorer } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
@@ -33,6 +41,7 @@ import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import {
   createSession,
   deleteSession,
+  renameSession,
   respondApproval,
   setSessionApprovalMode,
   setSessionModel,
@@ -120,6 +129,8 @@ export function App(): JSX.Element {
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [cwdDraft, setCwdDraft] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [metadataOpen, setMetadataOpen] = useState(false)
+  const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
@@ -305,6 +316,10 @@ export function App(): JSX.Element {
       }
     }
   }
+  const renameSessionAt = (sessionId: string, label: string): void => {
+    if (!session.socket) return
+    renameSession(session.socket, sessionId, label)
+  }
 
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
@@ -324,12 +339,18 @@ export function App(): JSX.Element {
   }, [config.explicit, config.sessionId, control.sessions])
 
   const currentCwd = session.state?.cwd ?? currentSession?.currentCwd ?? ''
+  const overrideLabel = currentSession?.label?.trim()
   const firstMsg = currentSession?.firstUserMessage
-  const sessionLabel = firstMsg
-    ? firstMsg.length > 40
-      ? `${firstMsg.slice(0, 40)}…`
+  const sessionLabel =
+    overrideLabel && overrideLabel.length > 0
+      ? overrideLabel.length > 40
+        ? `${overrideLabel.slice(0, 40)}…`
+        : overrideLabel
       : firstMsg
-    : 'new session'
+        ? firstMsg.length > 40
+          ? `${firstMsg.slice(0, 40)}…`
+          : firstMsg
+        : 'new session'
   const chatMessages = visibleMessages(
     session.state?.messages ?? [],
     session.timeline,
@@ -341,6 +362,20 @@ export function App(): JSX.Element {
     session.streamingText,
   )
   const backgroundTasks = backgroundTerminalTasks(session.timeline)
+
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const chatItemsCount = chatItems.length
+  const streamingLen = session.streamingText.length
+  const pendingApprovalsCount = session.pendingApprovals.length
+  useEffect(() => {
+    const root = chatScrollRef.current
+    if (!root) return
+    const viewport = root.querySelector<HTMLElement>(
+      '[data-radix-scroll-area-viewport]',
+    )
+    if (!viewport) return
+    viewport.scrollTop = viewport.scrollHeight
+  }, [chatItemsCount, streamingLen, pendingApprovalsCount, config.sessionId])
 
   // A bound session (`workspaceId` set) is only useful while its executor is
   // attached. Legacy sessions without workspaceId keep working through the
@@ -370,8 +405,86 @@ export function App(): JSX.Element {
     }
   }
 
+  const changeCwdInline = (cwd: string): void => {
+    if (!cwd || !session.socket) return
+    session.socket.emit('client:set_cwd', {
+      sessionId: config.sessionId,
+      cwd,
+    })
+    if (!config.explicit) {
+      setConfig((prev) => ({ ...prev, explicit: true }))
+    }
+  }
+
+  const executorHost = useMemo(() => {
+    if (!currentSession?.workspaceId) return undefined
+    const ex = control.executors.find(
+      (e) => e.workspaceId === currentSession.workspaceId,
+    )
+    if (!ex) return undefined
+    return ex.hostname ?? ex.ipAddresses?.[0]
+  }, [currentSession?.workspaceId, control.executors])
+
+  const listWorkspaceFiles = useCallback(
+    async (query: string): Promise<readonly FileListEntry[]> => {
+      const socket = session.socket
+      const workspaceId = currentSession?.workspaceId
+      if (!socket || !workspaceId) return []
+      return await new Promise((resolve) => {
+        const requestId = crypto.randomUUID()
+        const timer = setTimeout(() => {
+          socket.off('server:file_list', handler)
+          resolve([])
+        }, 3000)
+        const handler = (result: FileListResult): void => {
+          if (result.requestId !== requestId) return
+          clearTimeout(timer)
+          socket.off('server:file_list', handler)
+          resolve(result.error ? [] : result.files)
+        }
+        socket.on('server:file_list', handler)
+        socket.emit('client:list_files', {
+          requestId,
+          workspaceId,
+          ...(query ? { query } : {}),
+          limit: 40,
+        })
+      })
+    },
+    [session.socket, currentSession?.workspaceId],
+  )
+
+  const readWorkspaceFile = useCallback(
+    async (path: string): Promise<{ content?: string; error?: string }> => {
+      const socket = session.socket
+      const workspaceId = currentSession?.workspaceId
+      if (!socket || !workspaceId) return { error: 'no active workspace' }
+      return await new Promise((resolve) => {
+        const requestId = crypto.randomUUID()
+        const timer = setTimeout(() => {
+          socket.off('server:file_contents', handler)
+          resolve({ error: 'timed out' })
+        }, 5000)
+        const handler = (result: FileContentsResult): void => {
+          if (result.requestId !== requestId) return
+          clearTimeout(timer)
+          socket.off('server:file_contents', handler)
+          if (result.error) resolve({ error: result.error })
+          else resolve({ content: result.content ?? '' })
+        }
+        socket.on('server:file_contents', handler)
+        socket.emit('client:read_file', {
+          requestId,
+          workspaceId,
+          path,
+        })
+      })
+    },
+    [session.socket, currentSession?.workspaceId],
+  )
+
   return (
-    <div className="h-screen w-screen bg-white text-foreground dark:bg-background dark:text-foreground overflow-hidden">
+    <div className="h-screen w-screen bg-background text-foreground overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
@@ -380,7 +493,7 @@ export function App(): JSX.Element {
               defaultSize={20}
               minSize={17}
               maxSize={22}
-              className="min-w-[240px]"
+              className="min-w-[240px] bg-sidebar text-sidebar-foreground"
               data-testid="explorer-panel"
             >
               <div className="h-full border-r border-border dark:border-border">
@@ -391,6 +504,8 @@ export function App(): JSX.Element {
                   onSelect={selectSession}
                   onNewSession={newSession}
                   onDelete={deleteSessionAt}
+                  onRename={renameSessionAt}
+                  onWorkspaceInfo={setWorkspaceInfoId}
                 />
               </div>
             </ResizablePanel>
@@ -400,6 +515,7 @@ export function App(): JSX.Element {
         <ResizablePanel
           defaultSize={wideLayout ? 80 : 100}
           minSize={wideLayout ? 78 : 100}
+          className="bg-background"
           data-testid="workbench-panel"
         >
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
@@ -409,6 +525,7 @@ export function App(): JSX.Element {
               status={session.status}
               onChangeCwd={openCwdDialog}
               onOpenSettings={() => setSettingsOpen(true)}
+              onOpenMetadata={() => setMetadataOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
               inspectorAvailable={wideLayout}
@@ -435,7 +552,11 @@ export function App(): JSX.Element {
                     />
                   ) : null}
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                    <ScrollArea className="flex-1 min-h-0" data-testid="chat-panel">
+                    <ScrollArea
+                      ref={chatScrollRef}
+                      className="flex-1 min-h-0 bg-background"
+                      data-testid="chat-panel"
+                    >
                       <ChatPanel
                         items={chatItems}
                         highlightIndex={highlightIndex}
@@ -443,7 +564,6 @@ export function App(): JSX.Element {
                         onApprovalDecision={(callId, decision) => {
                           if (!session.socket) return
                           respondApproval(session.socket, config.sessionId, callId, decision)
-                          session.dismissApproval(callId)
                         }}
                         onEditAndRerun={(seq, text) => {
                           if (!session.socket) return
@@ -499,13 +619,19 @@ export function App(): JSX.Element {
                       config={session.config}
                       queuedMessages={session.queuedMessages}
                       onCompact={runCompactNow}
-                      onSubmit={(text, mode, images) => {
+                      workspaceOnline={sessionWorkspaceOnline}
+                      onListFiles={listWorkspaceFiles}
+                      onReadFile={readWorkspaceFile}
+                      onSubmit={(text, mode, images, extraBlocks) => {
                         const imageBlocks = images ?? []
-                        const content = imageBlocks.length > 0
+                        const extras = extraBlocks ?? []
+                        const hasStructured = imageBlocks.length > 0 || extras.length > 0
+                        const content = hasStructured
                           ? [
                               ...(text.length > 0
                                 ? [{ type: 'text' as const, text }]
                                 : []),
+                              ...extras,
                               ...imageBlocks,
                             ]
                           : undefined
@@ -524,7 +650,7 @@ export function App(): JSX.Element {
               {wideLayout && inspectorOpen ? (
                 <>
                   <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={26} minSize={22} maxSize={36} data-testid="inspector-panel">
+                  <ResizablePanel defaultSize={26} minSize={22} maxSize={36} className="bg-card text-card-foreground" data-testid="inspector-panel">
                     <div className="h-full border-l border-border dark:border-border min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <InspectorPanel
                         state={session.state}
@@ -559,6 +685,18 @@ export function App(): JSX.Element {
         onOpenChange={setCwdDialogOpen}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SessionMetadataDialog
+        open={metadataOpen}
+        onOpenChange={setMetadataOpen}
+        sessionId={config.sessionId}
+        summary={currentSession}
+        state={session.state}
+        selectedModel={session.selectedModel}
+        {...(executorHost !== undefined ? { executorHost } : {})}
+        onRename={(label) => renameSessionAt(config.sessionId, label)}
+        onChangeCwd={changeCwdInline}
+        onChangeApprovalMode={onApprovalModeChange}
+      />
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
         workspaces={control.executors}
@@ -567,6 +705,15 @@ export function App(): JSX.Element {
           pickWorkspaceForNew(workspaceId, workspaceName, cwd)
         }
         onCancel={() => setPendingWorkspacePick(null)}
+      />
+      <WorkspaceMetadataDialog
+        open={workspaceInfoId !== null}
+        onOpenChange={(open) => {
+          if (!open) setWorkspaceInfoId(null)
+        }}
+        workspaceId={workspaceInfoId ?? ''}
+        executor={control.executors.find((e) => e.workspaceId === workspaceInfoId)}
+        sessions={control.sessions.filter((s) => s.workspaceId === workspaceInfoId)}
       />
     </div>
   )
@@ -601,6 +748,7 @@ function WorkbenchToolbar({
   status,
   onChangeCwd,
   onOpenSettings,
+  onOpenMetadata,
   onToggleInspector,
   inspectorOpen,
   inspectorAvailable,
@@ -612,6 +760,7 @@ function WorkbenchToolbar({
   status: string
   onChangeCwd(): void
   onOpenSettings(): void
+  onOpenMetadata(): void
   onToggleInspector(): void
   inspectorOpen: boolean
   inspectorAvailable: boolean
@@ -620,7 +769,7 @@ function WorkbenchToolbar({
 }): JSX.Element {
   return (
     <div
-      className="h-12 flex-none px-3 border-b border-border/60 bg-background/60 backdrop-blur-md supports-[backdrop-filter]:bg-background/50 flex items-center gap-2 text-sm min-w-0"
+      className="h-12 flex-none px-3 border-b border-border bg-card text-card-foreground backdrop-blur-md flex items-center gap-2 text-sm min-w-0"
       data-testid="workbench-toolbar"
     >
       <span
@@ -646,6 +795,16 @@ function WorkbenchToolbar({
       </Button>
       <span className="min-w-0 flex-1" />
       <ConnectionStatus status={status} />
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onOpenMetadata}
+        title="Session info"
+        aria-label="open session info"
+        data-testid="metadata-button"
+      >
+        <Info className="h-4 w-4" />
+      </Button>
       <Button
         variant="ghost"
         size="icon"

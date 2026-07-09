@@ -19,6 +19,7 @@ import type {
   EventEntry,
   HeaderEntry,
   LogEntry,
+  MetadataEntry,
   SnapshotEntry,
 } from '@agent-kernel/shared'
 import { LOG_FORMAT_VERSION } from '@agent-kernel/shared'
@@ -103,10 +104,24 @@ export async function appendSnapshotEntry(
   return entry
 }
 
+export async function appendMetadataEntry(
+  path: string,
+  patch: { label?: string },
+): Promise<MetadataEntry> {
+  const entry: MetadataEntry = {
+    kind: 'metadata',
+    ts: new Date().toISOString(),
+    ...(patch.label !== undefined ? { label: patch.label } : {}),
+  }
+  await appendFile(path, JSON.stringify(entry) + '\n', 'utf8')
+  return entry
+}
+
 export type ParsedLog = {
   header: HeaderEntry
   events: EventEntry[]
   snapshots: SnapshotEntry[]
+  metadata: MetadataEntry[]
   /**
    * Non-fatal parse warnings. Populated when the last line of the file was
    * truncated (the process crashed mid-`appendFile`). The recovered log is
@@ -157,9 +172,11 @@ export async function readSessionLog(path: string): Promise<ParsedLog> {
 
   const events: EventEntry[] = []
   const snapshots: SnapshotEntry[] = []
+  const metadata: MetadataEntry[] = []
   for (const e of entries.slice(1)) {
     if (e.kind === 'event') events.push(e)
     else if (e.kind === 'snapshot') snapshots.push(e)
+    else if (e.kind === 'metadata') metadata.push(e)
   }
-  return { header, events, snapshots, warnings }
+  return { header, events, snapshots, metadata, warnings }
 }
