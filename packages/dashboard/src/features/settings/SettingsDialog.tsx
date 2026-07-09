@@ -2375,12 +2375,24 @@ function BackgroundPushSettings(): JSX.Element {
   const [endpoint, setEndpoint] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [serverStatus, setServerStatus] = useState<{ configured: boolean; subscribers: number } | null>(null)
+  const [testResult, setTestResult] = useState<string | null>(null)
+
+  const refreshStatus = async (): Promise<void> => {
+    try {
+      const res = await fetch('/push/status', { credentials: 'same-origin', cache: 'no-store' })
+      if (res.ok) setServerStatus(await res.json())
+    } catch {
+      // Non-fatal: status is diagnostic only.
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
     void currentPushEndpoint().then((ep) => {
       if (!cancelled) setEndpoint(ep)
     })
+    void refreshStatus()
     return () => { cancelled = true }
   }, [])
 
@@ -2394,6 +2406,7 @@ function BackgroundPushSettings(): JSX.Element {
       const result = await subscribeToPush(kinds)
       if (result.ok) {
         setEndpoint(result.endpoint)
+        await refreshStatus()
       } else {
         setError(explainPushFailure(result.reason))
       }
@@ -2410,8 +2423,28 @@ function BackgroundPushSettings(): JSX.Element {
     try {
       await unsubscribeFromPush()
       setEndpoint(null)
+      await refreshStatus()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const sendTest = async (): Promise<void> => {
+    setBusy(true)
+    setTestResult(null)
+    setError(null)
+    try {
+      const res = await fetch('/push/test', { method: 'POST', credentials: 'same-origin' })
+      if (!res.ok) {
+        setTestResult(`HTTP ${res.status}`)
+      } else {
+        const body = (await res.json()) as { delivered?: number }
+        setTestResult(`server dispatched to ${body.delivered ?? 0} subscriber(s) — check for the notification`)
+      }
+    } catch (err) {
+      setTestResult(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -2435,6 +2468,11 @@ function BackgroundPushSettings(): JSX.Element {
                 ? 'Not subscribed on this device.'
                 : `Unavailable: ${explainSupport(support.reason)}`}
           </p>
+          {serverStatus ? (
+            <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="settings-push-server-status">
+              Host: VAPID {serverStatus.configured ? 'configured' : 'missing'} · {serverStatus.subscribers} subscriber(s) known.
+            </p>
+          ) : null}
         </div>
         <Toggle
           checked={active}
@@ -2444,6 +2482,22 @@ function BackgroundPushSettings(): JSX.Element {
           disabled={busy || !support.supported}
         />
       </div>
+      {active ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-testid="settings-push-test"
+            onClick={() => { void sendTest() }}
+            disabled={busy}
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+          >
+            Send test push
+          </button>
+          {testResult ? (
+            <span className="text-[11px] text-muted-foreground">{testResult}</span>
+          ) : null}
+        </div>
+      ) : null}
       {error ? (
         <div className="mt-3 rounded-md border border-rose-300/70 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
           {error}
