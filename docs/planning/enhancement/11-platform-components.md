@@ -173,7 +173,7 @@ and artifact infrastructure:
 
 - Host, executor, kernel, shared, substrate, and dashboard packages build under
   the pnpm workspace.
-- `scripts/build-release-assets.mjs` and `scripts/verify-release-assets.mjs`
+- `scripts/release/build-release-assets.mjs` and `scripts/release/verify-release-assets.mjs`
   build and verify release artifacts.
 - GitHub Actions include CI, release asset verification, release publishing, and
   a manual/scheduled eval smoke workflow.
@@ -188,7 +188,7 @@ and artifact infrastructure:
   that cover every current enhancement artifact family.
 - Real browser e2e covers dashboard-equivalent enhancement actions against a
   production dashboard bundle and real host.
-- `scripts/verify-release-install.mjs` (`pnpm run verify:release-install`)
+- `scripts/release/verify-release-install.mjs` (`pnpm run verify:release-install`)
   simulates a fresh install of the pre-built `release/` assets: copies the
   host CJS bundle and dashboard tarball into a clean temp directory, boots the
   host on an ephemeral port with clean sessions/artifacts dirs, and verifies

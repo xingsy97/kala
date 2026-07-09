@@ -98,90 +98,15 @@ describe('BenchmarksPage', () => {
     await waitFor(() => expect(screen.getByTestId('terminalbench-wizard')).toBeTruthy())
   })
 
-  it('renders inline eval workspace and badcases sub-view', async () => {
+  it('does not inline the artifacts eval workspace, RL readiness, or global badcases panels', async () => {
     render(<BenchmarksPage />)
-    await waitFor(() => expect(screen.getByTestId('eval-workspace-section')).toBeTruthy())
-    await waitFor(() => expect(screen.getByTestId('eval-inline-panel')).toBeTruthy())
-    expect(screen.getByTestId('rl-readiness-panel')).toBeTruthy()
-    await waitFor(() => expect(screen.getByTestId('rl-readiness-empty')).toBeTruthy())
-    expect(screen.getByTestId('benchmarks-badcases-panel')).toBeTruthy()
-  })
-
-  it('renders Agentic RL rollout readiness from artifact manifest', async () => {
-    fetchMock.mockImplementation(async (input) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
-      if (url.includes('/enhancement/action')) return new Response(JSON.stringify(runsResponse), { status: 200 })
-      if (url.includes('/artifacts/manifest')) {
-        return new Response(JSON.stringify({
-          entries: [{ path: 'rl-rollouts/rollout-1.json', kind: 'rl_rollout_result', bytes: 100, mtime: '2026-07-12T00:00:00Z' }],
-        }), { status: 200 })
-      }
-      if (url.includes('/artifacts/content')) {
-        return new Response(JSON.stringify({ content: {
-          rolloutId: 'rollout-1',
-          taskId: 'task-1',
-          sessionId: 's1',
-          status: 'completed',
-          readiness: 'slime-sample-ready',
-          tokenCaptureRefs: [{ uri: 'rl-token-captures/rollout-1/c.json' }],
-          rewardRef: { uri: 'rl-rewards/rollout-1.json' },
-          sampleValidationRef: { uri: 'rl-sample-validations/rollout-1.json' },
-        } }), { status: 200 })
-      }
-      return new Response('{}', { status: 200 })
+    await waitFor(() => {
+      expect(screen.getByTestId('benchmarks-run-row-run-tb-1')).toBeTruthy()
     })
-
-    render(<BenchmarksPage />)
-    await waitFor(() => expect(screen.getByTestId('rl-readiness-row-rollout-1')).toBeTruthy())
-    expect(screen.getByTestId('rl-readiness-summary').textContent).toContain('1')
-    expect(screen.getByTestId('rl-readiness-row-rollout-1').textContent).toContain('slime-sample-ready')
-  })
-
-  it('renders artifact ENOENT as an empty RL readiness state', async () => {
-    fetchMock.mockImplementation(async (input) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
-      if (url.includes('/enhancement/action')) return new Response(JSON.stringify(runsResponse), { status: 200 })
-      if (url.includes('/artifacts/manifest')) return new Response(JSON.stringify({ error: "ENOENT: no such file or directory, scandir 'Z:\\private\\artifacts'" }), { status: 500 })
-      return new Response('{}', { status: 200 })
-    })
-
-    const { container } = render(<BenchmarksPage />)
-    await waitFor(() => expect(screen.getByTestId('rl-readiness-empty')).toBeTruthy())
-    expect(container.textContent).not.toContain('ENOENT')
-    expect(container.textContent).not.toContain('Z:\\private')
-  })
-
-  it('redacts private paths from expanded RL artifact details and content errors', async () => {
-    fetchMock.mockImplementation(async (input) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
-      if (url.includes('/enhancement/action')) return new Response(JSON.stringify(runsResponse), { status: 200 })
-      if (url.includes('/artifacts/manifest')) {
-        return new Response(JSON.stringify({
-          entries: [{ path: 'Z:\\private\\artifacts\\rl-rollouts\\private.json', kind: 'rl_rollout_result', bytes: 100, mtime: '2026-07-12T00:00:00Z' }],
-        }), { status: 200 })
-      }
-      if (url.includes('/artifacts/content')) {
-        return new Response(JSON.stringify({ content: {
-          rolloutId: 'rollout-private',
-          taskId: 'task-private',
-          status: 'blocked',
-          readiness: 'blocked',
-          blockedReason: "ENOENT: no such file or directory, scandir 'Z:\\private\\workspace'",
-          metadata: { workspace: 'Z:\\tmp\\agent-kernel\\private-workspace' },
-          tokenCaptureRefs: [],
-        } }), { status: 200 })
-      }
-      return new Response('{}', { status: 200 })
-    })
-
-    const { container } = render(<BenchmarksPage />)
-    await waitFor(() => expect(screen.getByTestId('rl-readiness-row-rollout-private')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('rl-readiness-row-rollout-private').querySelector('button')!)
-    await waitFor(() => expect(screen.getByTestId('rl-readiness-detail')).toBeTruthy())
-    expect(container.textContent).not.toContain('Z:\\private')
-    expect(container.textContent).not.toContain('Z:\\tmp')
-    expect(container.textContent).not.toContain('ENOENT')
-    expect(screen.getByTestId('rl-readiness-detail').textContent).toContain('[redacted-path]')
+    expect(screen.queryByTestId('eval-workspace-section')).toBeNull()
+    expect(screen.queryByTestId('eval-inline-panel')).toBeNull()
+    expect(screen.queryByTestId('rl-readiness-panel')).toBeNull()
+    expect(screen.queryByTestId('benchmarks-badcases-panel')).toBeNull()
   })
 
   it('does not leak absolute paths into the DOM', async () => {
@@ -206,8 +131,7 @@ describe('BenchmarksPage', () => {
     expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行评测向导')
     expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行 Benchmark（引导式）')
 
-    await waitFor(() => expect(screen.getByTestId('eval-inline-panel')).toBeTruthy())
-    expect(screen.getByTestId('eval-inline-panel').textContent).toContain('评测产物操作')
-    expect(screen.getByTestId('rl-readiness-panel').textContent).toContain('Agentic RL readiness')
+    expect(screen.queryByTestId('eval-inline-panel')).toBeNull()
+    expect(screen.queryByTestId('rl-readiness-panel')).toBeNull()
   })
 })

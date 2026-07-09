@@ -2,6 +2,66 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .ak-chat-container {
+    max-width: min(var(--ak-chat-content-width, 68rem), 100%);
+    padding-left: var(--ak-chat-side-space, 1rem);
+    padding-right: var(--ak-chat-side-space, 1rem);
+  }
+
+  .ak-chat-item,
+  .ak-chat-item .ak-chat-text {
+    font-size: var(--ak-chat-font-size, 15px);
+    line-height: var(--ak-chat-line-height, 1.7);
+  }
+
+  .ak-chat-item .katex {
+    font-size: var(--ak-chat-math-scale, 2em);
+  }
+
+  .ak-chat-item .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0;
+  }
+
+  .ak-streaming-cursor {
+    display: inline-block;
+    width: 0.45em;
+    height: 1.05em;
+    margin-left: 0.25em;
+    border-radius: 1px;
+    background: hsl(var(--primary));
+    transform: translateY(0.16em);
+    animation: ak-streaming-cursor 1s steps(2, start) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ak-streaming-cursor {
+      animation: none;
+    }
+  }
+
+  @keyframes ak-streaming-cursor {
+    0%, 45% { opacity: 1; }
+    46%, 100% { opacity: 0; }
+  }
+
+  @media (min-width: 640px) {
+    .ak-chat-container {
+      padding-left: var(--ak-chat-side-space-sm, 2rem);
+      padding-right: var(--ak-chat-side-space-sm, 2rem);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .ak-chat-container {
+      padding-left: var(--ak-chat-side-space-lg, 3rem);
+      padding-right: var(--ak-chat-side-space-lg, 3rem);
+    }
+  }
+}
+
 /**
  * Design tokens — shadcn/ui semantic layer.
  *
@@ -113,6 +173,23 @@
     animation: ak-status-pulse 2s ease-in-out infinite;
   }
 
+  .ak-thinking-dot {
+    animation: ak-thinking-dot 1.4s ease-in-out infinite;
+  }
+
+  .ak-thinking-row {
+    position: relative;
+  }
+
+  .ak-thinking-row::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-120%);
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.08), transparent);
+    animation: ak-thinking-sheen 2.2s ease-in-out infinite;
+  }
+
   .ak-explorer-loading-row {
     position: relative;
     animation: ak-loading-rise 260ms ease-out both;
@@ -194,6 +271,16 @@
   50% { opacity: 1; transform: scale(1.08); }
 }
 
+@keyframes ak-thinking-dot {
+  0%, 100% { opacity: 0.18; transform: scale(0.82); }
+  50% { opacity: 0.42; transform: scale(1.55); }
+}
+
+@keyframes ak-thinking-sheen {
+  0% { transform: translateX(-120%); }
+  55%, 100% { transform: translateX(120%); }
+}
+
 @keyframes ak-loading-rise {
   from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: translateY(0); }
@@ -212,6 +299,8 @@
   .ak-chat-item,
   .ak-expand-in,
   .ak-status-pulse,
+  .ak-thinking-dot,
+  .ak-thinking-row::after,
   .ak-explorer-loading-row,
   .ak-explorer-loading-row::after {
     animation: none !important;
@@ -351,6 +440,14 @@ body {
 
   .ak-composer-simple[data-empty="true"]::before {
     content: attr(data-placeholder);
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: hsl(var(--muted-foreground));
     pointer-events: none;
   }

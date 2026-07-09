@@ -7,6 +7,7 @@ import { GroupedToolCallsDemo } from './demoGroupedToolCalls.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import './i18n/index.js'
 import './index.css'
+import 'katex/dist/katex.min.css'
 
 const root = document.getElementById('root')
 if (!root) throw new Error('missing #root')

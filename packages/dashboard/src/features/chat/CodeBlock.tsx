@@ -12,7 +12,7 @@
  * `.dark` on `html`, so theme flips are instant.
  */
 
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
 
 import { cn } from '../../lib/utils.js'
 import { highlightToHtml } from '../../lib/shiki.js'
@@ -21,9 +21,10 @@ type Props = {
   code: string
   lang?: string
   className?: string
+  trailingSlot?: ReactNode
 }
 
-export const CodeBlock = memo(function CodeBlock({ code, lang, className }: Props): JSX.Element {
+export const CodeBlock = memo(function CodeBlock({ code, lang, className, trailingSlot }: Props): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className }: Prop
     }
   }, [code, lang])
 
-  if (html) {
+  if (html && !trailingSlot) {
     return (
       <div
         data-testid="code-block-highlighted"
@@ -62,8 +63,8 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className }: Prop
         'my-3 max-w-full overflow-x-auto rounded-lg bg-muted/60 px-3 py-2 text-xs text-foreground',
         className,
       )}
-    >
-      <code>{code}</code>
+  >
+      <code>{code}{trailingSlot}</code>
     </pre>
   )
 })

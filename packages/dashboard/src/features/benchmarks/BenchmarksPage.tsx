@@ -2,18 +2,15 @@ import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { BadCasesView } from '../artifacts/BadCasesView.js'
 import { RunListPanel } from './RunListPanel.js'
 import { RunDetailPanel } from './RunDetailPanel.js'
 import { RunLauncherPanel } from './RunLauncherPanel.js'
 import { RunTerminalBenchWizard } from './RunTerminalBenchWizard.js'
 import { RunBenchmarkWizardModal } from './RunBenchmarkWizardModal.js'
-import { EvalWorkspacePanel } from './EvalWorkspacePanel.js'
-import { RlReadinessPanel } from './RlReadinessPanel.js'
 import type { BenchmarkRunSummary } from './types.js'
 
 export function BenchmarksPage({
-  onOpenSession,
+  onOpenSession: _onOpenSession,
 }: {
   onOpenSession?(sessionId: string): void
 }): JSX.Element {
@@ -55,15 +52,35 @@ export function BenchmarksPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-testid="benchmarks-page">
-      <header className="sticky top-0 z-20 border-b border-border/60 bg-background/95 px-4 py-2 backdrop-blur">
-        <h1 className="text-sm font-semibold" data-testid="benchmarks-page-title">
-          {t('benchmarks.page.title')}
-        </h1>
-        <p className="text-xs text-muted-foreground">{t('benchmarks.page.subtitle')}</p>
+      <header className="sticky top-0 z-20 flex flex-col gap-2 border-b border-border/60 bg-background/95 px-4 py-2 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-sm font-semibold" data-testid="benchmarks-page-title">
+            {t('benchmarks.page.title')}
+          </h1>
+          <p className="text-xs text-muted-foreground">{t('benchmarks.page.subtitle')}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            className="h-7 rounded border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={() => { loadRuns() }}
+            data-testid="benchmarks-page-refresh"
+          >
+            {t('benchmarks.runList.refresh')}
+          </button>
+          <button
+            type="button"
+            className="h-7 rounded bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            onClick={openWizardModal}
+            data-testid="benchmarks-page-new-run"
+          >
+            {t('benchmarks.page.newRun')}
+          </button>
+        </div>
       </header>
-      <div className="flex-1 min-h-0 overflow-auto">
-        <div className="grid min-h-[300px] grid-cols-[minmax(220px,1fr)_minmax(0,3fr)_minmax(240px,1fr)]">
-          <div className="min-h-0 border-r border-border/50">
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden md:grid-cols-[minmax(220px,0.85fr)_minmax(0,2.4fr)] xl:grid-cols-[minmax(240px,0.85fr)_minmax(0,2.2fr)_minmax(260px,0.8fr)]">
+          <div className="min-h-0 border-b border-border/50 md:border-b-0 md:border-r">
             <RunListPanel
               runs={runs}
               loading={loading}
@@ -73,29 +90,17 @@ export function BenchmarksPage({
               onRefresh={() => { loadRuns() }}
             />
           </div>
-          <div className="min-h-0">
+          <div className="min-h-0 min-w-0 overflow-hidden">
             <RunDetailPanel run={selectedRun} />
           </div>
-          <div className="min-h-0 border-l border-border/50">
+          <div className="min-h-0 border-t border-border/50 md:hidden xl:block xl:border-l xl:border-t-0">
             <RunLauncherPanel
+              run={selectedRun}
               onLaunchSwebench={openWizardModal}
               onLaunchTerminalBench={() => setTerminalWizardOpen(true)}
             />
           </div>
         </div>
-        <section className="border-t border-border/60 min-h-[600px]" data-testid="eval-workspace-section">
-          <EvalWorkspacePanel onOpenSession={onOpenSession} />
-        </section>
-        <RlReadinessPanel />
-        <section className="border-t border-border/60 min-h-[420px]" data-testid="benchmarks-badcases-panel">
-          <div className="border-b border-border/60 px-4 py-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {t('benchmarks.badcasesTitle')}
-            </h2>
-            <p className="text-[11px] text-muted-foreground">{t('benchmarks.badcasesSubtitle')}</p>
-          </div>
-          <BadCasesView />
-        </section>
       </div>
       <RunTerminalBenchWizard
         open={terminalWizardOpen}

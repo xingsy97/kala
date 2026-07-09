@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { createRef } from 'react'
+import { createRef, useState } from 'react'
 
 import {
   VirtualTranscript,
@@ -76,6 +76,42 @@ describe('VirtualTranscript', () => {
     )
 
     expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+  })
+
+  it('does not force-scroll to the bottom after the user scrolls up during live output', () => {
+    const scrollTo = (globalThis as typeof globalThis & {
+      __virtuosoScrollToMock?: ReturnType<typeof vi.fn>
+    }).__virtuosoScrollToMock
+    scrollTo?.mockClear()
+
+    function Harness(): JSX.Element {
+      const [pinned, setPinned] = useState(true)
+      const [footerText, setFooterText] = useState('thinking')
+      return (
+        <>
+          <button data-testid="update-footer" onClick={() => setFooterText('still-thinking')}>
+            update
+          </button>
+          <VirtualTranscript<Item>
+            items={makeItems(2)}
+            renderItem={(it) => <span>{it.label}</span>}
+            keyFor={(it) => it.id}
+            pinnedToBottom={pinned}
+            onPinnedChange={setPinned}
+            footerSlot={<div data-testid="footer">{footerText}</div>}
+          />
+        </>
+      )
+    }
+
+    render(<Harness />)
+    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+
+    scrollTo?.mockClear()
+    fireEvent.wheel(screen.getByTestId('virtuoso-scroller'), { deltaY: -48 })
+    fireEvent.click(screen.getByTestId('update-footer'))
+
+    expect(scrollTo).not.toHaveBeenCalled()
   })
 
   it('scrollToBottom on the imperative handle jumps to the last item', () => {

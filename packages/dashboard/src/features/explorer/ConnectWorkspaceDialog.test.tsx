@@ -45,7 +45,8 @@ describe('ConnectWorkspaceDialog', () => {
     expect(text).toContain('HOST_URL=')
     expect(text).toContain('COMPONENT=executor')
     expect(text).toContain('AGENT_KERNEL_RELEASE_BASE_URL=')
-    expect(text).toContain('SANDBOX_ROOTS="$PWD"')
+    expect(text).toContain('SANDBOX_ROOTS="$HOME"')
+    expect(text).not.toContain('SANDBOX_ROOTS="$PWD"')
     expect(text).toContain('EXECUTOR_INVITE=')
     expect(text).toContain('ak_invite_test')
     expect(text).toContain('http://localhost:3000/release-assets')
@@ -53,6 +54,8 @@ describe('ConnectWorkspaceDialog', () => {
     expect(text).toContain('Mac/Linux')
     expect(text).not.toContain('WORKSPACE_NAME')
     expect(text).not.toContain('agent-kernel-executor')
+    const inviteCreateCall = vi.mocked(fetch).mock.calls.find((call) => String(call[0]) === '/auth/executor-invites')
+    expect(inviteCreateCall?.[1]).toMatchObject({ method: 'POST', body: '{}' })
   })
 
   it('uses the dashboard origin for local release assets', async () => {
@@ -100,7 +103,8 @@ describe('ConnectWorkspaceDialog', () => {
     expect(windowsText).toContain('Get-FileHash')
     expect(windowsText).toContain('$env:HOST_URL=')
     expect(windowsText).toContain('$env:EXECUTOR_INVITE=')
-    expect(windowsText).toContain('$env:SANDBOX_ROOTS=')
+    expect(windowsText).toContain('$env:SANDBOX_ROOTS=$env:USERPROFILE')
+    expect(windowsText).not.toContain('(Get-Location).Path')
     expect(windowsText).not.toContain('wget -qO-')
     expect(windowsText).not.toContain('COMPONENT=executor')
 

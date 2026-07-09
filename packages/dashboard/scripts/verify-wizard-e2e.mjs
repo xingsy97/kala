@@ -8,7 +8,7 @@
  *   - Agent-recipe dropdown does NOT contain "executor" as the default option label
  *   - No wizard text leaks server paths
  *
- * This IS the test that catches "broad wizard regressions". Any assertion failure
+ * This is the test that catches broad wizard regressions. Any assertion failure
  * fails the script with a non-zero exit code.
  */
 
@@ -53,7 +53,7 @@ try {
   await wait(600)
   await page.evaluate(() => {
     const nodes = [...document.querySelectorAll('button, [role="tab"]')]
-    const target = nodes.find((n) => /^(Eval)$/i.test((n.textContent ?? '').trim()))
+    const target = nodes.find((n) => /^Eval$/i.test((n.textContent ?? '').trim()))
     if (target) target.click()
   })
   await wait(400)

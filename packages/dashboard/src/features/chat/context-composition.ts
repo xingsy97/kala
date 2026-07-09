@@ -26,7 +26,6 @@ export type LlmCall = {
   effect: CallLlmEffect
   response?: Extract<AgentEvent, { kind: 'llm_response' }>
   error?: Extract<AgentEvent, { kind: 'llm_error' }>
-  compact?: Extract<AgentEvent, { kind: 'compact_replaced' }>
   trace?: LLMTrace
   model?: string
 }
@@ -35,22 +34,6 @@ export function buildLlmCalls(timeline: readonly TimelineEntry[]): readonly LlmC
   const calls: LlmCall[] = []
   for (let i = 0; i < timeline.length; i++) {
     const entry = timeline[i]!
-    if (entry.event.kind === 'compact_replaced' && entry.event.request) {
-      calls.push({
-        id: `compact-llm-${entry.seq}`,
-        source: 'compact',
-        requestSeq: entry.seq,
-        responseSeq: entry.seq,
-        effect: {
-          kind: 'call_llm',
-          messages: entry.event.request.messages,
-          tools: entry.event.request.tools ?? [],
-        },
-        compact: entry.event,
-        ...(entry.llmTrace ? { trace: entry.llmTrace } : {}),
-        ...(entry.model ?? entry.event.request.model ? { model: entry.model ?? entry.event.request.model } : {}),
-      })
-    }
     for (const effect of entry.effects) {
       if (effect.kind !== 'call_llm') continue
       const call: LlmCall = {

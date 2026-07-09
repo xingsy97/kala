@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ImageContent, TextContent } from '@agent-kernel/kernel'
+import { createInitialState, type ImageContent, type TextContent } from '@agent-kernel/kernel'
 import type { FileListEntry } from '@agent-kernel/shared'
 
 import { Composer } from './Composer.js'
@@ -20,6 +20,8 @@ function renderComposer(props?: {
   onReadFile?: (path: string) => Promise<{ content?: string; error?: string }>
   queuedMessages?: React.ComponentProps<typeof Composer>['queuedMessages']
   onQueuedDelete?: (id: string) => void
+  state?: React.ComponentProps<typeof Composer>['state']
+  awaitingAck?: boolean
 }) {
   return render(
     <Composer
@@ -28,7 +30,7 @@ function renderComposer(props?: {
       onModelChange={() => {}}
       approvalMode="auto"
       onApprovalModeChange={() => {}}
-      state={null}
+      state={props?.state ?? null}
       config={null}
       queuedMessages={props?.queuedMessages ?? []}
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
@@ -38,6 +40,7 @@ function renderComposer(props?: {
       {...(props?.onClearSession ? { onClearSession: props.onClearSession } : {})}
       {...(props?.onListFiles ? { onListFiles: props.onListFiles } : {})}
       {...(props?.onReadFile ? { onReadFile: props.onReadFile } : {})}
+      awaitingAck={props?.awaitingAck}
     />,
   )
 }
@@ -117,6 +120,30 @@ describe('Composer', () => {
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
   })
 
+  it('uses the send button position for stop only while running with empty input', () => {
+    const onSubmit = vi.fn()
+    const onCancel = vi.fn()
+    renderComposer({
+      onSubmit,
+      onCancel,
+      state: { ...createInitialState({}), status: 'thinking' },
+    })
+
+    expect(screen.getByTestId('composer-stop')).toBeTruthy()
+    expect(screen.queryByTestId('composer-send')).toBeNull()
+    fireEvent.click(screen.getByTestId('composer-stop'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: 'new instruction' },
+    })
+
+    expect(screen.getByTestId('composer-send')).toBeTruthy()
+    expect(screen.queryByTestId('composer-stop')).toBeNull()
+    fireEvent.click(screen.getByTestId('composer-send'))
+    expect(onSubmit).toHaveBeenCalledWith('new instruction', 'steer', undefined, undefined)
+  })
+
   it('runs /clear as a command when fresh-session creation is available', () => {
     const onSubmit = vi.fn()
     const onClearSession = vi.fn()
@@ -173,6 +200,55 @@ describe('Composer', () => {
     fireEvent.click(screen.getByTestId('composer-send'))
 
     expect(onSubmit).toHaveBeenCalledWith('later from simple', 'queue', undefined, undefined)
+  })
+
+  it('keeps simple mode placeholder visual-only and replaces it on paste', () => {
+    const onSubmit = vi.fn()
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({ onSubmit })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const input = screen.getByTestId('composer-input-simple')
+    expect(input.getAttribute('data-placeholder')).toBeTruthy()
+    expect(input.getAttribute('data-empty')).toBe('true')
+    expect(input.textContent).toBe('')
+
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: (type: string) => (type === 'text/plain' ? 'pasted text' : ''),
+        items: [],
+      },
+    })
+
+    expect(input.getAttribute('data-empty')).toBeNull()
+    expect(input.textContent).toBe('pasted text')
+    fireEvent.click(screen.getByTestId('composer-send'))
+    expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined)
+  })
+
+  it('keeps context usage next to send in simple mode', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer()
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const shell = screen.getByTestId('composer-simple-shell')
+    const indicator = screen.getByTestId('context-usage-indicator')
+    const send = screen.getByTestId('composer-send')
+    const sendMode = screen.getByTestId('send-mode-toggle')
+    const modeToggle = screen.getByTestId('composer-mode-toggle')
+
+    expect(shell.contains(indicator)).toBe(true)
+    expect(shell.contains(send)).toBe(true)
+    expect(indicator.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(indicator.className).toContain('h-9')
+    expect(send.className).toContain('h-9')
+    expect(sendMode.className).toContain('h-9')
+    expect(modeToggle.className).toContain('h-9')
+    expect(modeToggle.className).toContain('sm:h-9')
   })
 
   it('shows queued message management in simple mode', () => {
@@ -324,6 +400,25 @@ describe('Composer', () => {
     expect(picker).toBeTruthy()
     expect(picker.textContent ?? '').toContain('Auto')
     expect(picker.textContent ?? '').not.toContain('ask only for tools marked unsafe')
+  })
+
+  it('keeps model and approval picker labels hidden below desktop width', () => {
+    render(
+      <Composer
+        model="claude-opus"
+        models={[{ id: 'claude-opus', label: 'Claude Opus', provider: 'Anthropic', providerId: 'anthropic' }]}
+        onModelChange={() => {}}
+        approvalMode="auto"
+        onApprovalModeChange={() => {}}
+        state={null}
+        config={null}
+        queuedMessages={[]}
+        onSubmit={() => {}}
+        onCompact={() => {}}
+      />,
+    )
+    expect(screen.getByTestId('model-picker').className).toContain('md:w-24')
+    expect(screen.getByTestId('approval-mode-picker').className).toContain('md:w-16')
   })
 
   it('keeps allow all danger copy out of the compact approval picker label', () => {

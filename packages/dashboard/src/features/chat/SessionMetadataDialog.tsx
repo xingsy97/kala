@@ -2,11 +2,9 @@
  * Read-only + editable "session info" modal opened from the workbench toolbar.
  *
  * Read-only rows show what the operator can't change (sessionId, parent,
- * timestamps, workspace, executor, activity counters). The three editable
- * rows (label / cwd / approvalMode) each fire their own protocol event on
- * blur or submit so the modal can stay open while the host echoes the
- * result back through `session:renamed` or `event:appended` (cwd_changed /
- * approval_mode_changed).
+ * timestamps, workspace, executor, activity counters). Label and approval
+ * mode are draft edits committed by the Save button. CWD still opens the
+ * dedicated directory picker because it has its own validation flow.
  */
 
 import { useEffect, useState } from 'react'
@@ -73,17 +71,24 @@ export function SessionMetadataDialog({
   const approvalMode = state?.approvalMode ?? 'auto'
 
   const [labelDraft, setLabelDraft] = useState(initialLabel)
+  const [approvalDraft, setApprovalDraft] = useState<ApprovalMode>(approvalMode)
 
   useEffect(() => {
     if (open) {
       setLabelDraft(initialLabel)
+      setApprovalDraft(approvalMode)
     }
-  }, [open, initialLabel])
+  }, [open, initialLabel, approvalMode])
 
-  const commitLabel = (): void => {
-    const next = labelDraft.trim()
-    if (next === (summary?.label ?? '').trim()) return
-    onRename(next)
+  const labelChanged = labelDraft.trim() !== (summary?.label ?? '').trim()
+  const approvalChanged = approvalDraft !== approvalMode
+  const canSave = labelChanged || approvalChanged
+
+  const save = (): void => {
+    const nextLabel = labelDraft.trim()
+    if (labelChanged) onRename(nextLabel)
+    if (approvalChanged) onChangeApprovalMode(approvalDraft)
+    onOpenChange(false)
   }
 
   return (
@@ -150,11 +155,10 @@ export function SessionMetadataDialog({
               data-testid="session-metadata-label"
               value={labelDraft}
               onChange={(e) => setLabelDraft(e.target.value)}
-              onBlur={commitLabel}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
-                  ;(e.currentTarget as HTMLInputElement).blur()
+                  if (canSave) save()
                 }
               }}
               placeholder={t('dialogs.clearOverridePlaceholder')}
@@ -188,8 +192,8 @@ export function SessionMetadataDialog({
           </FieldRow>
           <FieldRow label={t('dialogs.approvals')}>
             <Select
-              value={approvalMode}
-              onValueChange={(v) => onChangeApprovalMode(v as ApprovalMode)}
+              value={approvalDraft}
+              onValueChange={(v) => setApprovalDraft(v as ApprovalMode)}
             >
               <SelectTrigger data-testid="session-metadata-approval">
                 <SelectValue />
@@ -206,6 +210,14 @@ export function SessionMetadataDialog({
         </div>
 
         <DialogFooter>
+          <Button
+            type="button"
+            onClick={save}
+            disabled={!canSave}
+            data-testid="session-metadata-save"
+          >
+            {t('common.save')}
+          </Button>
           <DialogClose asChild>
             <Button type="button" variant="outline">
               {t('common.close')}

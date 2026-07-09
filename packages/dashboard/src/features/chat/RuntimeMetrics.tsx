@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
-import type { ModelInfo } from '@agent-kernel/shared'
+import type { ContextSnapshot, ModelInfo } from '@agent-kernel/shared'
 
 import { formatTokens } from '../../lib/format.js'
 import { cn } from '../../lib/utils.js'
@@ -14,9 +14,11 @@ import {
 type Props = {
   state: AgentState | null
   config: AgentConfig | null
+  contextSnapshot: ContextSnapshot | null
   modelInfo: ModelInfo | null
   queuedMessages: number
   timeline?: readonly TimelineEntry[]
+  density?: 'default' | 'simple'
   onCompact?: () => void
   compactDisabled?: boolean
 }
@@ -24,9 +26,11 @@ type Props = {
 export function RuntimeMetrics({
   state,
   config,
+  contextSnapshot,
   modelInfo,
   queuedMessages: _queuedMessages,
   timeline = [],
+  density = 'default',
   onCompact,
   compactDisabled,
 }: Props): JSX.Element {
@@ -43,17 +47,18 @@ export function RuntimeMetrics({
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [open])
 
-  const contextTokens = state?.contextTokens ?? 0
-  const totalContextWindow = modelInfo?.contextWindow ?? config?.contextLimit ?? null
-  const userContextWindow = config?.contextLimit ?? totalContextWindow
+  const contextTokens = contextSnapshot?.estimatedTotalInputTokens ?? 0
+  const totalContextWindow = contextSnapshot?.contextWindow ?? modelInfo?.contextWindow ?? config?.contextLimit ?? null
+  const userContextWindow = contextSnapshot?.effectiveLimit ?? contextSnapshot?.contextTokens ?? totalContextWindow
+  const contextSource = contextSnapshot?.contextWindowSource ?? (modelInfo?.contextWindow ? 'model' : config?.contextLimit ? 'session-config' : 'unknown')
   const ratio = userContextWindow && userContextWindow > 0
     ? Math.max(0, contextTokens / userContextWindow)
     : 0
   const percent = Math.round(ratio * 100)
   const visualRatio = Math.min(1, ratio)
-  const tone = state?.contextPressureLevel === 'hard'
+  const tone = contextSnapshot?.pressureLevel === 'hard'
     ? 'text-rose-600 dark:text-rose-300'
-    : state?.contextPressureLevel === 'soft'
+    : contextSnapshot?.pressureLevel === 'soft'
       ? 'text-amber-600 dark:text-amber-300'
       : 'text-sky-600 dark:text-sky-300'
   const title = userContextWindow && userContextWindow > 0
@@ -73,12 +78,16 @@ export function RuntimeMetrics({
   const usedWidth = userContextWindow && userContextWindow > 0 ? `${Math.min(100, visualRatio * 100)}%` : '0%'
   const reservedStart = `${Math.max(0, Math.min(100, (1 - reservedRatio) * 100))}%`
   const reservedWidth = `${Math.max(0, Math.min(100, reservedRatio * 100))}%`
+  const isSimple = density === 'simple'
 
   return (
     <div className="relative flex-none" ref={ref}>
       <button
         type="button"
-        className="flex h-8 flex-none items-center gap-1.5 rounded px-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className={cn(
+          'flex flex-none items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+          isSimple ? 'h-9 min-w-9 rounded-full px-2' : 'h-8 rounded px-1',
+        )}
         title={title}
         aria-label={title}
         aria-expanded={open}
@@ -139,6 +148,18 @@ export function RuntimeMetrics({
               {formatTokens(contextTokens)} / {userContextWindow ? formatTokens(userContextWindow) : t('chat.runtimeMetrics.unknown')} tokens
             </span>
             <span className={cn('text-lg', tone)}>{userContextWindow ? `${percent}%` : 'n/a'}</span>
+          </div>
+          {totalContextWindow && userContextWindow && totalContextWindow !== userContextWindow ? (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Effective {formatTokens(userContextWindow)} / model {formatTokens(totalContextWindow)}
+            </div>
+          ) : totalContextWindow ? (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Model context {formatTokens(totalContextWindow)}
+            </div>
+          ) : null}
+          <div className="mt-1 text-xs text-muted-foreground">
+            Source: {contextSource}{contextSnapshot?.contextWindowModel ? ` (${contextSnapshot.contextWindowModel})` : ''}
           </div>
           <div className="relative mt-3 h-2 overflow-hidden rounded-full border border-border bg-muted">
             <div className="absolute inset-y-0 left-0 rounded-full bg-sky-500" style={{ width: usedWidth }} />

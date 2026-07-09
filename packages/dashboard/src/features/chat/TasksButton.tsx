@@ -98,7 +98,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
               {t('tasks.done', { done, total })}
             </span>
           </div>
-          <ScrollArea className="max-h-[60vh]">
+          <ScrollArea className="h-[min(60vh,24rem)]" data-testid="tasks-popover-scroll">
             <ul ref={listRef} className="flex flex-col gap-0.5 px-2 py-2" data-testid="tasks-popover-list">
               {todos.map((todo, i) => (
                 <TaskRow key={i} todo={todo} />
@@ -122,7 +122,7 @@ function TaskRow({ todo }: { todo: TaskItem }): JSX.Element {
       <StatusIcon status={todo.status} />
       <span
         className={cn(
-          'min-w-0 flex-1 leading-snug',
+          'min-w-0 flex-1 whitespace-pre-wrap break-words leading-snug [overflow-wrap:anywhere]',
           strike && 'text-muted-foreground line-through',
           todo.status === 'in_progress' && 'font-medium text-foreground',
           todo.status === 'pending' && 'text-foreground',

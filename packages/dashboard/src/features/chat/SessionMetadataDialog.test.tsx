@@ -1,8 +1,42 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
+
+vi.mock('../../components/ui/select.js', async () => {
+  const React = await import('react')
+  type SelectContextValue = {
+    value?: string
+    onValueChange?(value: string): void
+  }
+  const SelectContext = React.createContext<SelectContextValue>({})
+  return {
+    Select: ({ value, onValueChange, children }: React.PropsWithChildren<SelectContextValue>) => React.createElement(
+      SelectContext.Provider,
+      { value: { value, onValueChange } },
+      children,
+    ),
+    SelectTrigger: ({ children, ...props }: React.PropsWithChildren<React.ButtonHTMLAttributes<HTMLButtonElement>>) => React.createElement(
+      'button',
+      { type: 'button', ...props },
+      children,
+    ),
+    SelectValue: () => {
+      const ctx = React.useContext(SelectContext)
+      return React.createElement('span', null, ctx.value)
+    },
+    SelectContent: ({ children }: React.PropsWithChildren) => React.createElement('div', null, children),
+    SelectItem: ({ value, children }: React.PropsWithChildren<{ value: string }>) => {
+      const ctx = React.useContext(SelectContext)
+      return React.createElement(
+        'button',
+        { type: 'button', role: 'option', onClick: () => ctx.onValueChange?.(value) },
+        children,
+      )
+    },
+  }
+})
 
 import { SessionMetadataDialog } from './SessionMetadataDialog.js'
 
@@ -16,7 +50,6 @@ const baseState: AgentState = {
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
   },
-  contextPressureLevel: 'none',
   approvalMode: 'auto',
   cwd: '/tmp/current',
 }
@@ -34,6 +67,15 @@ const baseSummary: SessionSummary = {
 }
 
 describe('SessionMetadataDialog', () => {
+  beforeEach(() => {
+    if (!HTMLElement.prototype.hasPointerCapture) {
+      Object.defineProperty(HTMLElement.prototype, 'hasPointerCapture', {
+        configurable: true,
+        value: () => false,
+      })
+    }
+  })
+
   it('renders read-only summary fields', () => {
     render(
       <SessionMetadataDialog
@@ -101,7 +143,7 @@ describe('SessionMetadataDialog', () => {
     expect(onOpenChangeCwdDialog).toHaveBeenCalledTimes(1)
   })
 
-  it('fires onRename with the trimmed value on blur when label changes', () => {
+  it('saves the trimmed label only when Save is clicked', () => {
     const onRename = vi.fn()
     render(
       <SessionMetadataDialog
@@ -119,6 +161,8 @@ describe('SessionMetadataDialog', () => {
     const input = screen.getByTestId('session-metadata-label') as HTMLInputElement
     fireEvent.change(input, { target: { value: '  renamed  ' } })
     fireEvent.blur(input)
+    expect(onRename).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('session-metadata-save'))
     expect(onRename).toHaveBeenCalledWith('renamed')
   })
 
@@ -138,7 +182,29 @@ describe('SessionMetadataDialog', () => {
       />,
     )
     const labelInput = screen.getByTestId('session-metadata-label') as HTMLInputElement
-    fireEvent.blur(labelInput)
+    fireEvent.change(labelInput, { target: { value: '' } })
+    fireEvent.click(screen.getByTestId('session-metadata-save'))
     expect(onRename).not.toHaveBeenCalled()
+  })
+
+  it('saves approval mode changes only when Save is clicked', () => {
+    const onChangeApprovalMode = vi.fn()
+    render(
+      <SessionMetadataDialog
+        open
+        onOpenChange={() => {}}
+        sessionId={baseSummary.sessionId}
+        summary={baseSummary}
+        state={baseState}
+        selectedModel={null}
+        onRename={() => {}}
+        onOpenChangeCwdDialog={() => {}}
+        onChangeApprovalMode={onChangeApprovalMode}
+      />,
+    )
+    fireEvent.click(screen.getByRole('option', { name: 'Ask everything' }))
+    expect(onChangeApprovalMode).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('session-metadata-save'))
+    expect(onChangeApprovalMode).toHaveBeenCalledWith('ask')
   })
 })

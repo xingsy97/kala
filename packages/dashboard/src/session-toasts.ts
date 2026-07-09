@@ -25,14 +25,14 @@
 
 import { useEffect, useRef } from 'react'
 
-import type { ApprovalRequiredEvent, SessionErrorEvent } from '@agent-kernel/shared'
+import type { ApprovalRequiredEvent, SessionErrorEvent, SessionSummary } from '@agent-kernel/shared'
 
 import type { BackgroundTerminalTask } from './background-terminal.js'
 import { notify } from './notify.js'
 import type { DashboardSocket } from './session.js'
 
 export type SessionToastInput = {
-  sessionId: string
+  sessionId: string | null
   sessionLabel: string
   connectionStatus: string
   pendingApprovals: readonly ApprovalRequiredEvent[]
@@ -65,6 +65,10 @@ export function useSessionToasts({
 
   useEffect(() => {
     const previous = prev.current
+    if (sessionId === null) {
+      prev.current = null
+      return
+    }
     prev.current = { approvalSig, errorSig, connectionStatus }
 
     if (firstApproval && approvalSig !== previous?.approvalSig) {
@@ -116,6 +120,50 @@ export function useSessionToasts({
     sessionId,
     sessionLabel,
   ])
+}
+
+export function useInactiveSessionSummaryToasts({
+  sessions,
+  activeSessionId,
+}: {
+  sessions: readonly SessionSummary[]
+  activeSessionId: string | null
+}): void {
+  const previous = useRef<Map<string, SessionSummary['status'] | undefined>>(new Map())
+
+  useEffect(() => {
+    const prev = previous.current
+    const next = new Map<string, SessionSummary['status'] | undefined>()
+
+    for (const session of sessions) {
+      next.set(session.sessionId, session.status)
+      if (session.sessionId === activeSessionId) continue
+
+      const before = prev.get(session.sessionId)
+      if (!isActiveSummaryStatus(before)) continue
+      if (session.status === before) continue
+
+      const label = sessionSummaryLabel(session)
+      if (session.status === 'awaiting_approval') {
+        notify.info(`Approval requested — ${label}`, {
+          id: `inactive-session-approval-${session.sessionId}`,
+          duration: 8000,
+        })
+      } else if (session.status === 'error') {
+        notify.error(`Session failed — ${label}`, {
+          id: `inactive-session-error-${session.sessionId}`,
+          duration: 10000,
+        })
+      } else if (isRestingSummaryStatus(session.status)) {
+        notify.success(`Session finished — ${label}`, {
+          id: `inactive-session-finished-${session.sessionId}`,
+          duration: 6000,
+        })
+      }
+    }
+
+    previous.current = next
+  }, [activeSessionId, sessions])
 }
 
 /**
@@ -225,4 +273,17 @@ export function commandHead(cmd: string): string {
   if (head.length === 0) return '(shell)'
   if (head.length <= 32) return head
   return `${head.slice(0, 29)}…`
+}
+
+function isActiveSummaryStatus(status: SessionSummary['status'] | undefined): boolean {
+  return status === 'thinking' || status === 'executing_tools'
+}
+
+function isRestingSummaryStatus(status: SessionSummary['status'] | undefined): boolean {
+  return status === 'idle' || status === 'done'
+}
+
+function sessionSummaryLabel(session: SessionSummary): string {
+  const raw = session.label?.trim() || session.firstUserMessage?.trim() || session.sessionId
+  return raw.length <= 48 ? raw : `${raw.slice(0, 45)}...`
 }

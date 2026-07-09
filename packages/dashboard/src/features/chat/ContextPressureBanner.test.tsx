@@ -2,18 +2,32 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AgentState } from '@agent-kernel/kernel'
+import type { ContextSnapshot } from '@agent-kernel/shared'
 
 import { ContextPressureBanner } from './ContextPressureBanner.js'
 
-function stateWithLevel(level: AgentState['contextPressureLevel'], status: AgentState['status'] = 'idle'): AgentState {
-  return { contextPressureLevel: level, status } as AgentState
+function stateWithStatus(status: AgentState['status'] = 'idle'): AgentState {
+  return { status } as AgentState
+}
+
+function snapshotWithLevel(level: ContextSnapshot['pressureLevel']): ContextSnapshot {
+  return {
+    estimatedMessageTokens: 100,
+    estimatedToolSchemaTokens: 0,
+    estimatedTotalInputTokens: 100,
+    reserveTokens: 0,
+    effectiveLimit: 1_000,
+    pressureLevel: level,
+    reasonCodes: level === 'none' ? [] : [`pressure_${level}`],
+  }
 }
 
 describe('ContextPressureBanner', () => {
   it('renders nothing when there is no pressure', () => {
     const { container } = render(
       <ContextPressureBanner
-        state={stateWithLevel('none')}
+        state={stateWithStatus()}
+        contextSnapshot={snapshotWithLevel('none')}
         compactRunning={false}
         onCompactNow={() => {}}
       />,
@@ -25,6 +39,7 @@ describe('ContextPressureBanner', () => {
     const { container } = render(
       <ContextPressureBanner
         state={null}
+        contextSnapshot={null}
         compactRunning={false}
         onCompactNow={() => {}}
       />,
@@ -36,7 +51,8 @@ describe('ContextPressureBanner', () => {
     const onCompactNow = vi.fn()
     render(
       <ContextPressureBanner
-        state={stateWithLevel('soft')}
+        state={stateWithStatus()}
+        contextSnapshot={snapshotWithLevel('soft')}
         compactRunning={false}
         onCompactNow={onCompactNow}
       />,
@@ -52,7 +68,8 @@ describe('ContextPressureBanner', () => {
   it('disables the soft-tier button while a compact is running', () => {
     render(
       <ContextPressureBanner
-        state={stateWithLevel('soft')}
+        state={stateWithStatus()}
+        contextSnapshot={snapshotWithLevel('soft')}
         compactRunning
         onCompactNow={() => {}}
       />,
@@ -65,7 +82,8 @@ describe('ContextPressureBanner', () => {
   it('renders nothing at the hard tier (auto-compact now surfaces in the transcript, not here)', () => {
     const { container } = render(
       <ContextPressureBanner
-        state={stateWithLevel('hard')}
+        state={stateWithStatus()}
+        contextSnapshot={snapshotWithLevel('hard')}
         compactRunning={false}
         onCompactNow={() => {}}
       />,
@@ -76,7 +94,8 @@ describe('ContextPressureBanner', () => {
   it('does not show context-pressure copy while the current turn is active', () => {
     const { container } = render(
       <ContextPressureBanner
-        state={stateWithLevel('hard', 'thinking')}
+        state={stateWithStatus('thinking')}
+        contextSnapshot={snapshotWithLevel('hard')}
         compactRunning={false}
         onCompactNow={() => {}}
       />,
@@ -88,7 +107,8 @@ describe('ContextPressureBanner', () => {
   it('can be suppressed while the client is awaiting submit acknowledgement', () => {
     const { container } = render(
       <ContextPressureBanner
-        state={stateWithLevel('soft')}
+        state={stateWithStatus()}
+        contextSnapshot={snapshotWithLevel('soft')}
         compactRunning={false}
         suppressed
         onCompactNow={() => {}}

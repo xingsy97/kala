@@ -16,16 +16,20 @@ describe('DocsPage', () => {
   })
 
   it('loads docs dynamically and renders the selected markdown body as-is', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === '/docs/index') {
+        return new Response(JSON.stringify({
         root: 'docs',
         docs: [
           { path: 'context-compaction.md', title: 'Context Compaction', size: 128, updatedAt: '2026-07-11T00:00:00.000Z' },
           { path: 'protocol/wire-protocol.md', title: 'Wire Protocol', size: 512, updatedAt: '2026-07-11T00:02:00.000Z' },
           { path: 'domain-knowledge/swe-bench.md', title: 'SWE-bench', size: 256, updatedAt: '2026-07-11T00:01:00.000Z' },
         ],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+        }), { status: 200 })
+      }
+      if (url === '/docs/content?path=context-compaction.md') {
+        return new Response(JSON.stringify({
         path: 'context-compaction.md',
         title: 'Context Compaction',
         updatedAt: '2026-07-11T00:00:00.000Z',
@@ -48,13 +52,18 @@ describe('DocsPage', () => {
           '',
           '[1] https://example.org/reference',
         ].join('\n'),
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+        }), { status: 200 })
+      }
+      if (url === '/docs/content?path=domain-knowledge%2Fswe-bench.md') {
+        return new Response(JSON.stringify({
         path: 'domain-knowledge/swe-bench.md',
         title: 'SWE-bench',
         updatedAt: '2026-07-11T00:01:00.000Z',
         body: '# SWE-bench\n\nOfficial harness applies patches and runs repository tests.',
-      }), { status: 200 }))
+        }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ error: `unexpected docs request: ${url}` }), { status: 404 })
+    })
 
     render(<DocsPage />)
 

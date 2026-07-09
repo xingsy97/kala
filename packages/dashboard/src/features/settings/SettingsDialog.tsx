@@ -1,8 +1,33 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Check, Copy, ExternalLink, Monitor, Moon, Plus, RefreshCw, Sun, Trash2 } from 'lucide-react'
+import {
+  Bell,
+  Blocks,
+  Bot,
+  Cable,
+  Check,
+  Copy,
+  Cpu,
+  ExternalLink,
+  KeyRound,
+  Monitor,
+  Moon,
+  Palette,
+  PlugZap,
+  Plus,
+  RefreshCw,
+  Rocket,
+  ServerCog,
+  Shield,
+  SlidersHorizontal,
+  Sun,
+  TerminalSquare,
+  Trash2,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react'
 import { Trans, useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AttachedExecutor, ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { AttachedExecutor, BuildMetadata, ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload, ServerSettingsPayload } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -17,14 +42,34 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  DEFAULT_CHAT_CONTENT_WIDTH,
+  DEFAULT_CHAT_FONT_SIZE,
+  DEFAULT_CHAT_LINE_HEIGHT,
+  DEFAULT_CHAT_MATH_SCALE,
+  DEFAULT_CHAT_SIDE_SPACE,
+  DEFAULT_FILE_EXPLORER_FONT_SIZE,
+  DEFAULT_FILE_VIEW_FONT_SIZE,
+  DEFAULT_SESSION_EXPLORER_FONT_SIZE,
+  PREF_CHAT_CONTENT_WIDTH,
+  PREF_CHAT_FONT_SIZE,
+  PREF_CHAT_LINE_HEIGHT,
+  PREF_CHAT_MATH_SCALE,
+  PREF_CHAT_SIDE_SPACE,
+  PREF_FILE_EXPLORER_FONT_SIZE,
+  PREF_FILE_VIEW_FONT_SIZE,
   PREF_EXPLORER_OPEN,
   PREF_INSPECTOR_OPEN,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_SHOW_TOOL_CALL_TAB,
   PREF_TOPBAR_OPEN,
   useBooleanPref,
   useNumberPref,
 } from '../../lib/prefs.js'
+import {
+  DEFAULT_SESSION_VIEW_CACHE_MAX_MB,
+  PREF_SESSION_VIEW_CACHE_MAX_MB,
+} from '../../session-view-cache.js'
 import { useTheme } from '../../lib/theme.js'
 import { getStoredHostEndpoint, resolveHostEndpoint, setStoredHostEndpoint } from '../../host-endpoint.js'
 import {
@@ -45,25 +90,28 @@ type Props = {
   executors?: readonly AttachedExecutor[]
 }
 
-type SectionKey = 'runtime' | 'connection' | 'models' | 'security' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'versions'
+type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
 
-const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
-  { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint' },
-  { key: 'versions', label: 'settings.sections.versions.label', hint: 'settings.sections.versions.hint' },
-  { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint' },
-  { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint' },
-  { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint' },
-  { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint' },
-  { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint' },
-  { key: 'hooks', label: 'settings.sections.hooks.label', hint: 'settings.sections.hooks.hint' },
-  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint' },
-  { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint' },
+const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: LucideIcon }[] = [
+  { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint', icon: Cable },
+  { key: 'agent', label: 'settings.sections.agent.label', hint: 'settings.sections.agent.hint', icon: Bot },
+  { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint', icon: Cpu },
+  { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint', icon: KeyRound },
+  { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint', icon: TerminalSquare },
+  { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint', icon: Palette },
+  { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint', icon: Shield },
+  { key: 'socketAdmin', label: 'settings.sections.socketAdmin.label', hint: 'settings.sections.socketAdmin.hint', icon: ServerCog },
+  { key: 'hooks', label: 'settings.sections.hooks.label', hint: 'settings.sections.hooks.hint', icon: PlugZap },
+  { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint', icon: SlidersHorizontal },
+  { key: 'deployment', label: 'settings.sections.deployment.label', hint: 'settings.sections.deployment.hint', icon: Rocket },
+  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: Blocks },
+  { key: 'notifications', label: 'settings.sections.notifications.label', hint: 'settings.sections.notifications.hint', icon: Bell },
 ]
 
 export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [] }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [section, setSection] = useState<SectionKey>('interface')
+  const [section, setSection] = useState<SectionKey>('connection')
 
   const settingsQuery = useQuery({
     queryKey: ['settings'],
@@ -85,41 +133,43 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[min(90dvh,44rem)] max-w-6xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)]"
+        className="h-[calc(100dvh-0.5rem)] max-w-6xl overflow-hidden border-white/10 bg-[#1f1f1f] p-0 text-zinc-100 shadow-2xl gap-0 grid-rows-[auto_minmax(0,1fr)] sm:h-[min(90dvh,44rem)] [&_input]:border-white/10 [&_input]:bg-[#111111] [&_input]:text-zinc-100 [&_select]:border-white/10 [&_select]:bg-[#111111] [&_select]:text-zinc-100 [&_table]:bg-black/10 [&_td]:text-zinc-300 [&_textarea]:border-white/10 [&_textarea]:bg-[#111111] [&_textarea]:text-zinc-100 [&_th]:bg-white/[0.04] [&_th]:text-zinc-200"
         data-testid="settings-dialog"
       >
-        <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle>{t('settings.title')}</DialogTitle>
-          <DialogDescription>
+        <DialogHeader className="border-b border-white/10 bg-[#202020] px-4 py-3 sm:px-5">
+          <DialogTitle className="text-base font-semibold text-zinc-50">{t('settings.title')}</DialogTitle>
+          <DialogDescription className="line-clamp-2 text-xs text-zinc-400 sm:line-clamp-none">
             {t('settings.description')}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="min-h-0 border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r">
-            <ScrollArea className="h-full">
-              <nav className="flex gap-1 p-2 md:block md:space-y-1" aria-label={t('settings.sectionsLabel')}>
-                {SECTIONS.map((s) => (
-                  <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
-                ))}
-              </nav>
-            </ScrollArea>
+        <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
+          <aside className="min-h-0 min-w-0 border-b border-white/10 bg-[#232323] md:border-b-0 md:border-r">
+            <nav className="flex w-full max-w-full gap-1 overflow-x-auto p-2 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:block md:h-full md:space-y-1 md:overflow-x-hidden md:overflow-y-auto md:p-3" aria-label={t('settings.sectionsLabel')}>
+              {SECTIONS.map((s) => (
+                <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
+              ))}
+            </nav>
           </aside>
-          <ScrollArea className="min-h-0">
-            <div className="p-4 sm:p-6">
+          <ScrollArea className="min-h-0 min-w-0 bg-[#1f1f1f]">
+            <div className="min-w-0 p-4 text-zinc-100 sm:p-7">
               {loadError ? (
-                <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                <div className="rounded-md border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                   {t('settings.loadFailed', { error: loadError })}
                 </div>
               ) : payload === null ? (
-                <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
+                <div className="text-sm text-zinc-400">{t('common.loading')}</div>
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
               ) : section === 'connection' ? (
                 <ConnectionSection />
+              ) : section === 'agent' ? (
+                <AgentSection payload={payload} onPayloadChange={applyPayload} />
               ) : section === 'models' ? (
                 <ModelsSection payload={payload} onPayloadChange={applyPayload} onModelsChanged={onModelsChanged} />
               ) : section === 'security' ? (
                 <SecuritySection payload={payload} />
+              ) : section === 'socketAdmin' ? (
+                <SocketAdminSection payload={payload} onPayloadChange={applyPayload} />
               ) : section === 'executorAccess' ? (
                 <ExecutorAccessSection />
               ) : section === 'approvals' ? (
@@ -128,8 +178,10 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 <HooksSection payload={payload} />
               ) : section === 'interface' ? (
                 <InterfaceSection />
-              ) : section === 'versions' ? (
-                <VersionsSection payload={payload} executors={executors} />
+              ) : section === 'deployment' ? (
+                <DeploymentSection payload={payload} executors={executors} />
+              ) : section === 'notifications' ? (
+                <NotificationsSection />
               ) : (
                 <McpSection payload={payload} />
               )}
@@ -153,20 +205,24 @@ function SettingsSectionButton({
   const { t } = useTranslation()
   const label = t(`settings.sections.${section.key}.label`)
   const hint = t(`settings.sections.${section.key}.hint`)
+  const Icon = section.icon
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={`settings-tab-${section.key}`}
       className={cn(
-        'w-36 flex-none rounded-md px-3 py-2 text-left text-sm transition-colors md:w-full',
+        'w-32 flex-none rounded-md px-3 py-2 text-left text-sm transition-colors sm:w-36 md:w-full',
         active
-          ? 'bg-primary/10 text-foreground shadow-inner ring-1 ring-primary/30'
-          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+          ? 'bg-[#3a3a3a] text-zinc-50 shadow-sm ring-1 ring-white/10'
+          : 'text-zinc-300 hover:bg-[#2c2c2c] hover:text-zinc-50',
       )}
     >
-      <div className="font-medium">{label}</div>
-      <div className="mt-0.5 hidden text-[11px] text-muted-foreground md:block">{hint}</div>
+      <div className="flex min-w-0 items-center gap-2">
+        <Icon className={cn('h-4 w-4 flex-none', active ? 'text-zinc-50' : 'text-zinc-400')} aria-hidden="true" />
+        <div className="min-w-0 truncate font-medium">{label}</div>
+      </div>
+      <div className="mt-1 hidden truncate pl-6 text-[11px] text-zinc-500 md:block">{hint}</div>
     </button>
   )
 }
@@ -179,10 +235,10 @@ function SectionHeader({
   subtitle?: string
 }): JSX.Element {
   return (
-    <div className="mb-4">
-      <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
+    <div className="mb-6 min-w-0 border-b border-white/10 pb-5">
+      <h3 className="text-2xl font-semibold text-zinc-50">{title}</h3>
       {subtitle ? (
-        <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-zinc-400">{subtitle}</p>
       ) : null}
     </div>
   )
@@ -190,7 +246,14 @@ function SectionHeader({
 
 function executorSetupCommand(inviteToken: string): string {
   const hostUrl = resolveHostEndpoint().url
-  return `HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(inviteToken)} SANDBOX_ROOTS="$PWD" agent-kernel-executor`
+  return `HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(inviteToken)} SANDBOX_ROOTS="$HOME" agent-kernel-executor`
+}
+
+function meaningfulInviteLabel(label: string | undefined): string | undefined {
+  const trimmed = label?.trim()
+  if (!trimmed) return undefined
+  if (trimmed.toLocaleLowerCase() === 'connect workspace') return undefined
+  return trimmed
 }
 
 function shellQuote(value: string): string {
@@ -216,8 +279,8 @@ function RuntimeSection({
         title={t('settings.sections.runtime.label')}
         subtitle={t('settings.runtime.subtitle')}
       />
-      <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-        <table className="w-full text-sm">
+      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+        <table className="min-w-[34rem] w-full text-sm">
           <tbody>
             {rows.map(([label, path], i) => (
               <tr
@@ -227,12 +290,12 @@ function RuntimeSection({
                   i !== rows.length - 1 && 'border-b',
                 )}
               >
-                <th className="w-56 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">
+                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
                   {label}
                 </th>
                 <td className="px-3 py-2.5 font-mono text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="truncate" title={path}>{path}</span>
+                    <span className="min-w-0 break-all" title={path}>{path}</span>
                     <CopyButton value={path} />
                   </div>
                 </td>
@@ -245,7 +308,85 @@ function RuntimeSection({
   )
 }
 
-function VersionsSection({
+function AgentSection({
+  payload,
+  onPayloadChange,
+}: {
+  payload: ServerSettingsPayload
+  onPayloadChange(payload: ServerSettingsPayload): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const agentPrompt = payload.agentPrompt
+
+  const updatePreset = useMutation({
+    mutationFn: async (preset: string): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings/agent-prompt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ preset }),
+      })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      onPayloadChange(next)
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+
+  return (
+    <div>
+      <SectionHeader title={t('settings.sections.agent.label')} subtitle={t('settings.agent.subtitle')} />
+      {!agentPrompt ? (
+        <EmptyRow>{t('settings.agent.unavailable')}</EmptyRow>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {agentPrompt.presets.map((preset) => {
+              const selected = preset.id === agentPrompt.selectedPreset
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={cn(
+                    'min-h-28 rounded-md border p-4 text-left transition-colors',
+                    selected
+                      ? 'border-primary bg-primary/10 ring-1 ring-primary/40'
+                      : 'border-border bg-card/60 hover:bg-accent/60',
+                  )}
+                  onClick={() => {
+                    setError(null)
+                    if (!selected) updatePreset.mutate(preset.id)
+                  }}
+                  disabled={updatePreset.isPending}
+                  data-testid={`settings-agent-preset-${preset.id}`}
+                  aria-pressed={selected}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-foreground">{preset.label}</div>
+                    {selected ? <Check className="h-4 w-4 text-primary" aria-hidden="true" /> : null}
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{preset.description}</p>
+                </button>
+              )
+            })}
+          </div>
+          {error ? <div className="text-xs text-destructive">{error}</div> : null}
+          <div className="rounded-md bg-muted/30 p-3 text-xs text-muted-foreground ring-1 ring-border/50">
+            <div>{t('settings.agent.appliesToNewSessions')}</div>
+            <div className="mt-1 break-all font-mono">{agentPrompt.configPath}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DeploymentSection({
   payload,
   executors,
 }: {
@@ -253,41 +394,125 @@ function VersionsSection({
   executors: readonly AttachedExecutor[]
 }): JSX.Element {
   const { t } = useTranslation()
-  const rows: Array<[string, string]> = [
-    [t('settings.versions.dashboard'), DASHBOARD_VERSION],
-    [t('settings.versions.host'), payload.versions?.host ?? '—'],
-    [t('settings.versions.protocol'), payload.versions?.protocol ?? PROTOCOL_VERSION],
+  const build = payload.versions?.build
+  const rows: Array<{
+    component: string
+    detail?: string
+    version: string
+    commit: string
+    builtAt: string
+    instance: string
+    health: string
+  }> = [
+    {
+      component: t('settings.deployment.hostRuntime'),
+      detail: hostDeliveryLabel(build),
+      version: payload.versions?.host ?? '—',
+      commit: build?.gitCommit ?? 'unknown',
+      builtAt: build?.builtAt ?? 'unknown',
+      instance: typeof window === 'undefined' ? t('settings.deployment.sameOriginHost') : window.location.host,
+      health: t('settings.deployment.running'),
+    },
+    {
+      component: t('settings.deployment.dashboardComponent'),
+      detail: dashboardDeliveryLabel(build),
+      version: DASHBOARD_VERSION,
+      commit: build?.gitCommit ?? 'unknown',
+      builtAt: build?.builtAt ?? 'unknown',
+      instance: t('settings.deployment.embeddedInHost'),
+      health: t('settings.deployment.loaded'),
+    },
+    {
+      component: t('settings.deployment.protocolComponent'),
+      detail: t('settings.deployment.wireContract'),
+      version: payload.versions?.protocol ?? PROTOCOL_VERSION,
+      commit: '—',
+      builtAt: '—',
+      instance: t('settings.deployment.sharedByComponents'),
+      health: t('settings.deployment.compatible'),
+    },
+    ...executors.map((executor) => ({
+      component: `${t('settings.deployment.executorComponent')}: ${executor.workspaceName}`,
+      detail: executor.build ? executorDeliveryLabel(executor.build) : t('settings.deployment.legacyExecutor'),
+      version: executor.executorVersion ?? t('settings.deployment.notReported'),
+      commit: executor.build?.gitCommit ?? t('settings.deployment.notReported'),
+      builtAt: executor.build?.builtAt ?? t('settings.deployment.notReported'),
+      instance: executorInstanceLabel(executor),
+      health: executorHealthLabel(executor, t('settings.deployment.connected'), t('settings.deployment.legacyMetadataMissing')),
+    })),
   ]
   return (
     <div>
-      <SectionHeader title={t('settings.sections.versions.label')} subtitle={t('settings.versions.subtitle')} />
-      <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-        <table className="w-full text-sm">
+      <SectionHeader title={t('settings.sections.deployment.label')} subtitle={t('settings.deployment.subtitle')} />
+      <h4 className="mb-2 text-sm font-semibold text-foreground">{t('settings.deployment.componentInventory')}</h4>
+      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+        <table className="min-w-[820px] w-full text-sm">
+          <thead className="bg-muted/50 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.component')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.version')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.commit')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.buildTime')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.instance')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.health')}</th>
+            </tr>
+          </thead>
           <tbody>
-            {rows.map(([label, value], i) => (
-              <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
-                <th className="w-48 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">{label}</th>
-                <td className="px-3 py-2.5 font-mono text-xs">{value}</td>
+            {rows.map((row, i) => (
+              <tr key={row.component} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
+                <td className="max-w-56 px-3 py-2" title={row.component}>
+                  <div className="font-medium">{row.component}</div>
+                  {row.detail ? <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={row.detail}>{row.detail}</div> : null}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs">{row.version}</td>
+                <td className="px-3 py-2 font-mono text-xs">{row.commit}</td>
+                <td className="max-w-48 px-3 py-2 font-mono text-xs" title={row.builtAt}>{row.builtAt}</td>
+                <td className="px-3 py-2 font-mono text-xs">{row.instance}</td>
+                <td className="px-3 py-2 text-xs">{row.health}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {payload.agentModule ? (
+        <div className="mt-5 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h4 className="text-sm font-semibold text-foreground">Agent module</h4>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={`${payload.agentModule.id}@${payload.agentModule.version}`}>
+                {payload.agentModule.label} · {payload.agentModule.id}@{payload.agentModule.version}
+              </div>
+            </div>
+            <div className="flex-none text-right font-mono text-[11px] text-muted-foreground">
+              <div>prompt {payload.agentModule.systemPromptHash.slice(0, 12)}</div>
+              <div>tools {payload.agentModule.toolRegistryHash.slice(0, 12)}</div>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {payload.agentModule.toolsets.map((toolset) => (
+              <span key={toolset.id} className="inline-flex h-5 items-center rounded bg-background/80 px-1.5 font-mono text-[11px] leading-none text-muted-foreground ring-1 ring-border/40" title={`${toolset.id}@${toolset.version}`}>
+                {toolset.label} · {toolset.toolCount}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-5">
-        <h4 className="text-sm font-semibold text-foreground">{t('settings.versions.connectedExecutors')}</h4>
-        <p className="mt-1 text-xs text-muted-foreground">{t('settings.versions.connectedExecutorsDesc')}</p>
+        <h4 className="text-sm font-semibold text-foreground">{t('settings.deployment.connectedExecutors')}</h4>
+        <p className="mt-1 text-xs text-muted-foreground">{t('settings.deployment.connectedExecutorsDesc')}</p>
         {executors.length === 0 ? (
-          <EmptyRow>{t('settings.versions.noExecutors')}</EmptyRow>
+          <EmptyRow>{t('settings.deployment.noExecutors')}</EmptyRow>
         ) : (
-          <div className="mt-3 overflow-hidden rounded-md ring-1 ring-border/50">
-            <table className="w-full text-sm">
+          <div className="mt-3 max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+            <table className="min-w-[760px] w-full text-sm">
               <thead className="bg-muted/50 text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.workspace')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executor')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executorVersion')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executorProtocol')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.runtime')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.workspace')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executor')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executorVersion')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executorProtocol')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.runtime')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.features')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -301,6 +526,7 @@ function VersionsSection({
                     <td className="px-3 py-2 font-mono text-xs">{executor.executorVersion ?? '—'}</td>
                     <td className="px-3 py-2 font-mono text-xs">{executor.clientVersion ?? '—'}</td>
                     <td className="px-3 py-2 font-mono text-xs">{executor.runtime} {executor.runtimeVersion}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{executorCapabilitiesLabel(executor, t)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -310,6 +536,59 @@ function VersionsSection({
       </div>
     </div>
   )
+}
+
+function dashboardDeliveryLabel(build: BuildMetadata | undefined): string {
+  if (!build) return 'unknown'
+  const files = typeof build.embeddedDashboardFiles === 'number' ? `, ${build.embeddedDashboardFiles} files` : ''
+  if (build.dashboardMode === 'embedded') return `embedded in host bundle${files}`
+  if (build.dashboardMode === 'static') return 'static dashboard directory'
+  if (build.dashboardMode === 'vite') return 'Vite development server'
+  return `not bundled (${build.releaseTag})`
+}
+
+function hostDeliveryLabel(build: BuildMetadata | undefined): string {
+  if (!build) return 'local source checkout'
+  if (build.artifactKind === 'cjs') return 'bundle-dashboard-with-runtime.cjs'
+  if (build.artifactKind === 'native') return 'native host binary'
+  return 'source checkout'
+}
+
+function executorDeliveryLabel(build: BuildMetadata): string {
+  if (build.artifactKind === 'cjs') return 'agent-kernel-executor.cjs'
+  if (build.artifactKind === 'native') return 'native executor binary'
+  return 'source checkout'
+}
+
+function runtimeLabel(runtime: AttachedExecutor['runtime']): string {
+  if (runtime === 'node') return 'Node.js'
+  if (runtime === 'browser-webcontainer') return 'Browser WebContainer'
+  return runtime
+}
+
+function executorInstanceLabel(executor: AttachedExecutor): string {
+  const parts: string[] = []
+  if (executor.hostname) parts.push(executor.hostname)
+  parts.push(`${runtimeLabel(executor.runtime)} ${executor.runtimeVersion}`)
+  if (executor.pid !== undefined) parts.push(`pid ${executor.pid}`)
+  return parts.join(' | ')
+}
+
+function executorHealthLabel(executor: AttachedExecutor, connected: string, legacyMetadataMissing: string): string {
+  if (!executor.build) return legacyMetadataMissing
+  return connected
+}
+
+function executorCapabilitiesLabel(executor: AttachedExecutor, t: ReturnType<typeof useTranslation>['t']): string {
+  const features = executor.capabilities?.features
+  if (!features) return t('settings.deployment.legacyMetadataMissing')
+  const labels = [
+    features.backgroundShell ? t('settings.deployment.featureBackgroundShell') : null,
+    features.filePicker ? t('settings.deployment.featureFilePicker') : null,
+    features.overflowFiles ? t('settings.deployment.featureOverflowFiles') : null,
+    features.workspaceSandbox ? t('settings.deployment.featureWorkspaceSandbox') : null,
+  ].filter((label): label is string => Boolean(label))
+  return labels.length > 0 ? labels.join(', ') : t('settings.deployment.noSpecialFeatures')
 }
 
 function SecuritySection({ payload }: { payload: ServerSettingsPayload }): JSX.Element {
@@ -335,22 +614,205 @@ function SecuritySection({ payload }: { payload: ServerSettingsPayload }): JSX.E
         title={t('settings.sections.security.label')}
         subtitle={t('settings.security.subtitle')}
       />
-      <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-        <table className="w-full text-sm">
+      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+        <table className="min-w-[34rem] w-full text-sm">
           <tbody>
             {rows.map(([label, value], i) => (
               <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
-                <th className="w-56 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">
+                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
                   {label}
                 </th>
-                <td className="px-3 py-2.5 text-sm text-muted-foreground">{value}</td>
+                <td className="px-3 py-2.5 text-sm text-muted-foreground"><span className="break-words [overflow-wrap:anywhere]">{value}</span></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div className="mt-4 rounded-md bg-muted/40 px-4 py-3 text-xs text-muted-foreground ring-1 ring-border/50">
-        <div className="font-mono">HOST_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, EXECUTOR_TOKENS, HOST_AUDIT_DIR</div>
+        <div className="break-words font-mono">HOST_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, EXECUTOR_TOKENS, HOST_AUDIT_DIR</div>
+      </div>
+    </div>
+  )
+}
+
+function SocketAdminSection({ payload, onPayloadChange }: { payload: ServerSettingsPayload; onPayloadChange(payload: ServerSettingsPayload): void }): JSX.Element {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [password, setPassword] = useState('')
+  const [mode, setMode] = useState<'development' | 'production'>(payload.socketAdmin?.configuredMode ?? payload.socketAdmin?.runtimeMode ?? 'development')
+  const [error, setError] = useState<string | null>(null)
+  const admin = payload.socketAdmin
+  useEffect(() => {
+    setMode(payload.socketAdmin?.configuredMode ?? payload.socketAdmin?.runtimeMode ?? 'development')
+  }, [payload.socketAdmin?.configuredMode, payload.socketAdmin?.runtimeMode])
+  const init = useMutation({
+    mutationFn: async (): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings/socket-admin/init', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password, mode }),
+      })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      setPassword('')
+      setError(null)
+      onPayloadChange(next)
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+  const updateMode = useMutation({
+    mutationFn: async (nextMode: 'development' | 'production'): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings/socket-admin/mode', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: nextMode }),
+      })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      setError(null)
+      onPayloadChange(next)
+      setMode(next.socketAdmin?.configuredMode ?? next.socketAdmin?.runtimeMode ?? mode)
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+  if (!admin) {
+    return (
+      <div>
+        <SectionHeader title={t('settings.sections.socketAdmin.label')} subtitle={t('settings.socketAdmin.subtitle')} />
+        <EmptyRow>{t('settings.socketAdmin.unavailable')}</EmptyRow>
+      </div>
+    )
+  }
+  if (!admin.initialized) {
+    return (
+      <div>
+        <SectionHeader title={t('settings.sections.socketAdmin.label')} subtitle={t('settings.socketAdmin.subtitle')} />
+        <form
+          className="space-y-4 rounded-md bg-muted/30 p-4 ring-1 ring-border/50"
+          onSubmit={(event) => {
+            event.preventDefault()
+            setError(null)
+            init.mutate()
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,0.6fr)]">
+            <div className="min-w-0">
+              <label className="text-sm font-medium text-foreground" htmlFor="socket-admin-password">{t('settings.socketAdmin.initialPassword')}</label>
+              <input
+                id="socket-admin-password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.currentTarget.value)}
+                className="mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                autoComplete="new-password"
+                minLength={8}
+                required
+              />
+              <p className="mt-2 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('settings.socketAdmin.initialPasswordDesc', { path: admin.configPath })}</p>
+            </div>
+            <label className="min-w-0 text-sm font-medium text-foreground">
+              {t('settings.socketAdmin.initialMode')}
+              <select
+                className="mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                value={mode}
+                onChange={(event) => setMode(event.currentTarget.value === 'development' ? 'development' : 'production')}
+                disabled={init.isPending}
+                data-testid="settings-socket-admin-initial-mode-select"
+              >
+                <option value="production">{t('settings.socketAdmin.modeProduction')}</option>
+                <option value="development">{t('settings.socketAdmin.modeDevelopment')}</option>
+              </select>
+              <p className="mt-2 text-xs text-muted-foreground">{t('settings.socketAdmin.modeDesc')}</p>
+            </label>
+          </div>
+          {error ? <div className="text-xs text-destructive">{error}</div> : null}
+          <Button type="submit" size="sm" className="w-full sm:w-auto" disabled={init.isPending || password.trim().length < 8}>{t('settings.socketAdmin.initialize')}</Button>
+        </form>
+      </div>
+    )
+  }
+  const origin = typeof window === 'undefined' ? '' : window.location.origin
+  const href = `${origin}${admin.path}`
+  const configuredMode = admin.configuredMode
+  const rows: Array<[string, string]> = [
+    [t('settings.socketAdmin.path'), admin.path],
+    [t('settings.socketAdmin.username'), admin.username],
+    [t('settings.socketAdmin.runtimeMode'), admin.runtimeMode],
+    [t('settings.socketAdmin.configuredMode'), configuredMode],
+    [t('settings.socketAdmin.configPath'), admin.configPath],
+    ...(admin.createdAt ? [[t('settings.socketAdmin.createdAt'), admin.createdAt] as [string, string]] : []),
+    ...(admin.distSource ? [[t('settings.socketAdmin.distSource'), t(`settings.socketAdmin.dist.${admin.distSource}`)] as [string, string]] : []),
+  ]
+  return (
+    <div>
+      <SectionHeader title={t('settings.sections.socketAdmin.label')} subtitle={t('settings.socketAdmin.subtitle')} />
+      {admin.restartRequired ? (
+        <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300" data-testid="settings-socket-admin-restart-required">
+          {t('settings.socketAdmin.modeRestartRequired', { current: admin.runtimeMode, configured: configuredMode })}
+        </div>
+      ) : null}
+      <div className="mb-4 flex min-w-0 flex-col gap-3 rounded-md bg-black/[0.18] p-4 ring-1 ring-white/10 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-foreground">{t('settings.socketAdmin.openTitle')}</div>
+          <div className="mt-1 break-all font-mono text-xs text-muted-foreground" title={href}>{href}</div>
+        </div>
+        {admin.active ? (
+          <Button type="button" variant="outline" size="sm" className="h-8 flex-none" asChild>
+            <a href={href} target="_blank" rel="noreferrer">
+              <ExternalLink className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.socketAdmin.open')}
+            </a>
+          </Button>
+        ) : (
+          <Button type="button" variant="outline" size="sm" className="h-8 flex-none" disabled>
+            <ExternalLink className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.socketAdmin.open')}
+          </Button>
+        )}
+      </div>
+      <div className="mb-4 rounded-md bg-black/[0.18] p-4 ring-1 ring-white/10">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+          <div className="min-w-0">
+            <label className="text-sm font-medium text-foreground" htmlFor="socket-admin-mode-select">
+              {t('settings.socketAdmin.configuredMode')}
+            </label>
+            <select
+              id="socket-admin-mode-select"
+              className="mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              value={mode}
+              onChange={(event) => setMode(event.currentTarget.value === 'development' ? 'development' : 'production')}
+              disabled={updateMode.isPending}
+              data-testid="settings-socket-admin-mode-select"
+            >
+              <option value="production">{t('settings.socketAdmin.modeProduction')}</option>
+              <option value="development">{t('settings.socketAdmin.modeDevelopment')}</option>
+            </select>
+          </div>
+          <Button type="button" size="sm" className="h-9 w-full sm:mt-7 sm:w-auto" disabled={updateMode.isPending || mode === configuredMode} onClick={() => updateMode.mutate(mode)} data-testid="settings-socket-admin-save-mode">
+            {t('settings.socketAdmin.saveMode')}
+          </Button>
+        </div>
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">{t('settings.socketAdmin.modeDesc')}</p>
+      </div>
+      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+        <table className="min-w-[34rem] w-full text-sm">
+          <tbody>
+            {rows.map(([label, value], i) => (
+              <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
+                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
+                  {label}
+                </th>
+                <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground"><span className="break-all">{value}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
@@ -459,7 +921,8 @@ function ExecutorAccessSection(): JSX.Element {
   }
 
   const saveLabel = (invite: ExecutorInviteSummary): void => {
-    const next = editing[invite.id] ?? invite.label ?? ''
+    if (!Object.prototype.hasOwnProperty.call(editing, invite.id)) return
+    const next = editing[invite.id] ?? ''
     setError(null)
     patchInvite.mutate({ id: invite.id, label: next })
   }
@@ -467,8 +930,8 @@ function ExecutorAccessSection(): JSX.Element {
   return (
     <div>
       <SectionHeader title={t('settings.sections.executorAccess.label')} subtitle={t('settings.executorAccess.subtitle')} />
-      <form onSubmit={submit} className="mb-4 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
-        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+      <form onSubmit={submit} className="mb-4 min-w-0 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <label className="text-xs font-medium text-muted-foreground">
             {t('settings.executorAccess.label')}
             <input
@@ -489,15 +952,17 @@ function ExecutorAccessSection(): JSX.Element {
               disabled={busy}
             />
           </label>
-          <Button type="submit" className="mt-5 h-9" disabled={busy}>
-            <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.executorAccess.create')}
-          </Button>
+          <div className="flex items-end">
+            <Button type="submit" className="h-9 w-full lg:w-auto" disabled={busy}>
+              <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.executorAccess.create')}
+            </Button>
+          </div>
         </div>
         {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
       </form>
       {plainInvite ? (
-        <div className="mb-4 rounded-md bg-primary/5 px-3 py-2 ring-1 ring-primary/30">
-          <div className="flex items-center justify-between gap-2">
+        <div className="mb-4 min-w-0 rounded-md bg-primary/5 px-3 py-2 ring-1 ring-primary/30">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-medium text-foreground">{t('settings.executorAccess.plaintextTitle')}</div>
             <select
               value={copyMode}
@@ -509,8 +974,8 @@ function ExecutorAccessSection(): JSX.Element {
               <option value="token">{t('settings.executorAccess.copyToken')}</option>
             </select>
           </div>
-          <div className="mt-1 flex items-center gap-2 rounded bg-background px-2 py-1.5 font-mono text-xs ring-1 ring-border/50">
-            <span className="min-w-0 flex-1 truncate" title={inviteCopyValue}>{inviteCopyValue}</span>
+          <div className="mt-1 flex items-start gap-2 rounded bg-background px-2 py-1.5 font-mono text-xs ring-1 ring-border/50">
+            <span className="min-w-0 flex-1 break-all" title={inviteCopyValue}>{inviteCopyValue}</span>
             <CopyButton value={inviteCopyValue} />
           </div>
         </div>
@@ -520,55 +985,73 @@ function ExecutorAccessSection(): JSX.Element {
       ) : invites.length === 0 ? (
         <EmptyRow>{t('settings.executorAccess.empty')}</EmptyRow>
       ) : (
-        <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 text-left [box-shadow:inset_0_-1px_0_hsl(var(--border)/0.5)]">{t('settings.executorAccess.label')}</th>
-                <th className="px-3 py-2 text-left [box-shadow:inset_0_-1px_0_hsl(var(--border)/0.5)]">{t('settings.executorAccess.workspaceId')}</th>
-                <th className="px-3 py-2 text-left [box-shadow:inset_0_-1px_0_hsl(var(--border)/0.5)]">{t('settings.executorAccess.lastUsed')}</th>
-                <th className="px-3 py-2 text-left [box-shadow:inset_0_-1px_0_hsl(var(--border)/0.5)]">{t('settings.executorAccess.status')}</th>
-                <th className="px-3 py-2 text-right [box-shadow:inset_0_-1px_0_hsl(var(--border)/0.5)]">{t('settings.executorAccess.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invites.map((invite, i) => (
-                <tr key={invite.id} className={cn(i !== invites.length - 1 && '[box-shadow:inset_0_-1px_0_hsl(var(--border)/0.5)]')}>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
+        <div className="space-y-2" data-testid="executor-invite-list">
+          {invites.map((invite) => {
+            const labelValue = meaningfulInviteLabel(invite.label) ?? ''
+            const title = invite.workspaceId ?? (labelValue || t('settings.executorAccess.unboundInvite'))
+            const subtitle = invite.workspaceId
+              ? labelValue || t('settings.executorAccess.boundInvite')
+              : t('settings.executorAccess.waitingForFirstUse')
+            return (
+              <article key={invite.id} className="rounded-md border border-border bg-card/60 px-3 py-3" data-testid="executor-invite-row">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className={cn('min-w-0 break-words text-sm font-semibold text-foreground [overflow-wrap:anywhere]', invite.workspaceId && 'font-mono')} title={title}>
+                          {title}
+                        </div>
+                        <div className="mt-0.5 min-w-0 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]" title={subtitle}>
+                          {subtitle}
+                        </div>
+                      </div>
+                      <span className={cn('rounded px-1.5 py-0.5 text-xs ring-1', invite.revoked ? 'bg-destructive/10 text-destructive ring-destructive/40' : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300')}>
+                        {invite.revoked ? t('settings.executorAccess.revoked') : t('settings.executorAccess.inviteActive')}
+                      </span>
+                    </div>
+                    <label className="block max-w-md text-[11px] font-medium text-muted-foreground">
+                      {t('settings.executorAccess.label')}
                       <input
-                        className="h-8 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50 disabled:opacity-70"
-                        value={editing[invite.id] ?? invite.label ?? ''}
+                        className="mt-1 h-8 w-full rounded-md border-0 bg-background px-2 text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50 disabled:opacity-70"
+                        value={editing[invite.id] ?? labelValue}
                         onChange={(event) => setEditing((prev) => ({ ...prev, [invite.id]: event.target.value }))}
                         onBlur={() => saveLabel(invite)}
-                        placeholder={t('settings.executorAccess.untitled')}
+                        placeholder={t('settings.executorAccess.optionalLabelPlaceholder')}
+                        aria-label={t('settings.executorAccess.label')}
                         disabled={busy || invite.revoked}
                       />
+                    </label>
+                    <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                      <InviteMeta label={t('settings.executorAccess.inviteId')} value={invite.id.slice(0, 12)} mono />
+                      <InviteMeta label={t('settings.executorAccess.created')} value={formatDate(invite.createdAt)} />
+                      <InviteMeta label={t('settings.executorAccess.lastUsed')} value={invite.lastUsedAt ? formatDate(invite.lastUsedAt) : t('settings.executorAccess.never')} />
                     </div>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{invite.workspaceId ?? t('settings.executorAccess.unbound')}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{invite.lastUsedAt ? formatDate(invite.lastUsedAt) : t('settings.executorAccess.never')}</td>
-                  <td className="px-3 py-2 text-xs">
-                    <span className={cn('rounded px-1.5 py-0.5 ring-1', invite.revoked ? 'bg-destructive/10 text-destructive ring-destructive/40' : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300')}>
-                      {invite.revoked ? t('settings.executorAccess.revoked') : t('settings.executorAccess.active')}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex justify-end gap-1">
-                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => regenerateInvite.mutate(invite.id)} disabled={busy} aria-label={t('settings.executorAccess.regenerate')}>
-                        <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Button>
-                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => revokeInvite.mutate(invite.id)} disabled={busy || invite.revoked} aria-label={t('settings.executorAccess.revoke')}>
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <div className="flex flex-none flex-wrap justify-end gap-1.5">
+                    <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => regenerateInvite.mutate(invite.id)} disabled={busy} aria-label={t('settings.executorAccess.regenerate')}>
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                      {t('settings.executorAccess.regenerate')}
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" className="h-8 text-muted-foreground hover:text-destructive" onClick={() => revokeInvite.mutate(invite.id)} disabled={busy || invite.revoked} aria-label={t('settings.executorAccess.revoke')}>
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                      {t('settings.executorAccess.revoke')}
+                    </Button>
+                  </div>
+                </div>
+              </article>
+            )
+          })}
         </div>
       )}
+    </div>
+  )
+}
+
+function InviteMeta({ label, value, mono = false }: { label: string; value: string; mono?: boolean }): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">{label}</div>
+      <div className={cn('mt-0.5 break-words text-foreground [overflow-wrap:anywhere]', mono && 'break-all font-mono')} title={value}>{value}</div>
     </div>
   )
 }
@@ -584,8 +1067,14 @@ function ModelsSection({
 }): JSX.Element {
   const { t } = useTranslation()
   const [providerId, setProviderId] = useState(payload.providers[0]?.id ?? '')
+  const [newProviderId, setNewProviderId] = useState('')
+  const [newProviderLabel, setNewProviderLabel] = useState('')
+  const [newProviderWire, setNewProviderWire] = useState<'openai' | 'anthropic'>('openai')
+  const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('')
+  const [newProviderApiKey, setNewProviderApiKey] = useState('')
   const [modelId, setModelId] = useState('')
   const [label, setLabel] = useState('')
+  const [contextWindow, setContextWindow] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -595,7 +1084,7 @@ function ModelsSection({
   }, [payload.providers, providerId])
 
   const addModel = useMutation({
-    mutationFn: async (input: { providerId: string; id: string; label?: string }): Promise<ServerSettingsPayload> => {
+    mutationFn: async (input: { providerId: string; id: string; label?: string; contextWindow?: number }): Promise<ServerSettingsPayload> => {
       const res = await fetch('/settings/models', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -610,6 +1099,44 @@ function ModelsSection({
       onModelsChanged?.()
       setModelId('')
       setLabel('')
+      setContextWindow('')
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+
+  const addProvider = useMutation({
+    mutationFn: async (input: { id: string; label?: string; wire: 'anthropic' | 'openai'; baseUrl: string; apiKey: string }): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings/providers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      onPayloadChange(next)
+      setProviderId(newProviderId.trim())
+      setNewProviderId('')
+      setNewProviderLabel('')
+      setNewProviderBaseUrl('')
+      setNewProviderApiKey('')
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+
+  const deleteProvider = useMutation({
+    mutationFn: async (input: { providerId: string }): Promise<ServerSettingsPayload> => {
+      const params = new URLSearchParams({ providerId: input.providerId })
+      const res = await fetch(`/settings/providers?${params.toString()}`, { method: 'DELETE' })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      onPayloadChange(next)
+      onModelsChanged?.()
     },
     onError: (err) => setError(err instanceof Error ? err.message : String(err)),
   })
@@ -629,16 +1156,49 @@ function ModelsSection({
     onError: (err) => setError(err instanceof Error ? err.message : String(err)),
   })
 
-  const busy = addModel.isPending || deleteModel.isPending
+  const setDefaultModel = useMutation({
+    mutationFn: async (input: { model: string }): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings/default-model', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      onPayloadChange(next)
+      onModelsChanged?.()
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+
+  const busy = addModel.isPending || deleteModel.isPending || addProvider.isPending || deleteProvider.isPending || setDefaultModel.isPending
+
+  const submitProvider = (event: FormEvent): void => {
+    event.preventDefault()
+    setError(null)
+    const trimmedLabel = newProviderLabel.trim()
+    addProvider.mutate({
+      id: newProviderId.trim(),
+      ...(trimmedLabel ? { label: trimmedLabel } : {}),
+      wire: newProviderWire,
+      baseUrl: newProviderBaseUrl.trim(),
+      apiKey: newProviderApiKey,
+    })
+  }
 
   const submit = (event: FormEvent): void => {
     event.preventDefault()
     setError(null)
     const trimmedLabel = label.trim()
+    const parsedContextWindow = Number(contextWindow.trim())
     addModel.mutate({
       providerId,
       id: modelId.trim(),
       ...(trimmedLabel ? { label: trimmedLabel } : {}),
+      ...(Number.isSafeInteger(parsedContextWindow) && parsedContextWindow > 0 ? { contextWindow: parsedContextWindow } : {}),
     })
   }
 
@@ -647,15 +1207,89 @@ function ModelsSection({
     deleteModel.mutate({ providerId: deleteProviderId, id })
   }
 
+  const deleteManualProvider = (deleteProviderId: string): void => {
+    setError(null)
+    deleteProvider.mutate({ providerId: deleteProviderId })
+  }
+
   return (
     <div>
       <SectionHeader
         title={t('settings.sections.models.label')}
         subtitle={t('settings.models.subtitle')}
       />
-      <form onSubmit={submit} className="mb-4 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
-        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
-          <label className="text-xs font-medium text-muted-foreground">
+      <form onSubmit={submitProvider} className="mb-4 min-w-0 space-y-3 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
+            {t('settings.models.providerId')}
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
+              value={newProviderId}
+              onChange={(event) => setNewProviderId(event.target.value)}
+              placeholder="openai-local"
+              disabled={busy}
+              data-testid="settings-provider-id-input"
+            />
+          </label>
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
+            {t('settings.models.label')}
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              value={newProviderLabel}
+              onChange={(event) => setNewProviderLabel(event.target.value)}
+              placeholder={t('settings.models.optional')}
+              disabled={busy}
+              data-testid="settings-provider-label-input"
+            />
+          </label>
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
+            {t('settings.models.wire')}
+            <select
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              value={newProviderWire}
+              onChange={(event) => setNewProviderWire(event.target.value as 'openai' | 'anthropic')}
+              disabled={busy}
+              data-testid="settings-provider-wire-select"
+            >
+              <option value="openai">OpenAI-compatible</option>
+              <option value="anthropic">Anthropic-compatible</option>
+            </select>
+          </label>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1.5fr)_minmax(14rem,1fr)_auto]">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
+            {t('settings.models.baseUrl')}
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
+              value={newProviderBaseUrl}
+              onChange={(event) => setNewProviderBaseUrl(event.target.value)}
+              placeholder="http://localhost:8000/v1"
+              disabled={busy}
+              data-testid="settings-provider-base-url-input"
+            />
+          </label>
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
+            {t('settings.models.apiKey')}
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
+              type="password"
+              value={newProviderApiKey}
+              onChange={(event) => setNewProviderApiKey(event.target.value)}
+              placeholder="sk-..."
+              disabled={busy}
+              data-testid="settings-provider-api-key-input"
+            />
+          </label>
+          <div className="flex items-end">
+            <Button type="submit" className="h-9 w-full lg:w-auto" disabled={busy || newProviderId.trim().length === 0 || newProviderBaseUrl.trim().length === 0 || newProviderApiKey.length === 0}>
+              <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.models.addProvider')}
+            </Button>
+          </div>
+        </div>
+      </form>
+      <form onSubmit={submit} className="mb-4 min-w-0 space-y-3 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <div className="grid gap-3 lg:grid-cols-[minmax(14rem,1fr)_minmax(14rem,1fr)_minmax(11rem,0.8fr)]">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.provider')}
             <select
               className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
@@ -669,7 +1303,7 @@ function ModelsSection({
               ))}
             </select>
           </label>
-          <label className="text-xs font-medium text-muted-foreground">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.modelId')}
             <input
               className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
@@ -680,7 +1314,21 @@ function ModelsSection({
               data-testid="settings-model-id-input"
             />
           </label>
-          <label className="text-xs font-medium text-muted-foreground">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
+            {t('settings.models.contextWindow')}
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
+              value={contextWindow}
+              onChange={(event) => setContextWindow(event.target.value)}
+              placeholder="1000000"
+              disabled={payload.providers.length === 0 || busy}
+              inputMode="numeric"
+              data-testid="settings-model-context-window-input"
+            />
+          </label>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1fr)_auto]">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.label')}
             <input
               className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
@@ -690,12 +1338,14 @@ function ModelsSection({
               disabled={payload.providers.length === 0 || busy}
             />
           </label>
-          <Button type="submit" className="mt-5 h-9" disabled={payload.providers.length === 0 || busy || modelId.trim().length === 0}>
-            <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.models.add')}
-          </Button>
+          <div className="flex items-end">
+            <Button type="submit" className="h-9 w-full lg:w-auto" disabled={payload.providers.length === 0 || busy || modelId.trim().length === 0} data-testid="settings-model-add-button">
+              <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.models.add')}
+            </Button>
+          </div>
         </div>
         {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
-        <div className="mt-2 text-xs text-muted-foreground">
+        <div className="mt-2 break-words text-xs text-muted-foreground">
           <Trans i18nKey="settings.models.manualStored" values={{ path: payload.paths.manualModels }} components={{ code: <code className="font-mono" /> }} />
         </div>
       </form>
@@ -708,28 +1358,39 @@ function ModelsSection({
           {payload.providers.map((p) => (
             <div
               key={p.id}
-              className="rounded-md bg-card/60 p-4 ring-1 ring-border/50"
+              className="min-w-0 rounded-md bg-card/60 p-3 ring-1 ring-border/50 sm:p-4"
               data-testid={`settings-provider-${p.id}`}
             >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
                   <div className="font-medium">{p.label}</div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="min-w-0 break-words text-xs text-muted-foreground">
                     <span className="font-mono">{p.wire}</span>
                     {' · '}
                     <SourceBadge source={p.source ?? 'unknown'} />
                     {p.baseUrl ? (
                       <>
                         {' · '}
-                        <span className="font-mono">{p.baseUrl}</span>
+                        <span className="break-all font-mono">{p.baseUrl}</span>
                       </>
                     ) : null}
                   </div>
                 </div>
-                {p.models.some((m) => m.id === payload.defaultModel) ? (
+                {p.models.some((m) => modelKey(m) === payload.defaultModel || m.id === payload.defaultModel) ? (
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground ring-1 ring-primary/40">
                     {t('settings.models.defaultProvider')}
                   </span>
+                ) : null}
+                {p.source === 'manual' ? (
+                  <button
+                    type="button"
+                    onClick={() => { deleteManualProvider(p.id) }}
+                    className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={t('settings.models.deleteProvider', { provider: p.id })}
+                    disabled={busy}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
                 ) : null}
               </div>
               {p.models.length === 0 ? (
@@ -741,16 +1402,32 @@ function ModelsSection({
                   {p.models.map((m) => (
                     <li
                       key={m.id}
-                      className="flex items-center justify-between gap-2 rounded bg-muted/40 px-2.5 py-1.5 text-xs ring-1 ring-border/50"
+                      className="flex flex-col gap-2 rounded bg-muted/40 px-2.5 py-1.5 text-xs ring-1 ring-border/50 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <span className="min-w-0 truncate font-mono">{m.id}</span>
-                      <span className="flex flex-none items-center gap-2">
+                      <span className="min-w-0 break-all font-mono" title={m.id}>{m.id}</span>
+                      <span className="flex flex-wrap items-center gap-2 sm:flex-none sm:justify-end">
                         <SourceBadge source={m.source ?? p.source ?? 'unknown'} />
-                        {m.id === payload.defaultModel ? (
+                        {m.contextWindow ? (
+                          <span className="font-mono text-[10px] text-muted-foreground">{m.contextWindow.toLocaleString()}</span>
+                        ) : null}
+                        {modelKey(m) === payload.defaultModel || m.id === payload.defaultModel ? (
                           <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
                             {t('settings.models.default')}
                           </span>
-                        ) : null}
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setError(null)
+                              setDefaultModel.mutate({ model: modelKey(m) })
+                            }}
+                            className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent hover:text-foreground"
+                            aria-label={t('settings.models.setDefaultModel', { model: modelKey(m) })}
+                            disabled={busy}
+                          >
+                            {t('settings.models.setDefault')}
+                          </button>
+                        )}
                         {m.source === 'manual' ? (
                           <button
                             type="button"
@@ -773,6 +1450,10 @@ function ModelsSection({
       )}
     </div>
   )
+}
+
+function modelKey(model: { ref?: string; id: string }): string {
+  return model.ref ?? model.id
 }
 
 function SourceBadge({ source }: { source: string }): JSX.Element {
@@ -836,8 +1517,8 @@ function HooksSection({
           {t('settings.hooks.none', { path: payload.paths.hooksConfig })}
         </EmptyRow>
       ) : (
-        <div className="overflow-hidden rounded-md border border-border">
-          <table className="w-full text-sm">
+        <div className="max-w-full overflow-x-auto rounded-md border border-border">
+          <table className="min-w-[640px] w-full text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.event')}</th>
@@ -860,7 +1541,7 @@ function HooksSection({
                   </td>
                   <td className="px-3 py-2 font-mono text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="truncate" title={h.command}>{h.command}</span>
+                      <span className="min-w-0 break-all" title={h.command}>{h.command}</span>
                       <CopyButton value={h.command} />
                     </div>
                   </td>
@@ -894,6 +1575,15 @@ function InterfaceSection(): JSX.Element {
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     { min: 0, max: 10 },
   )
+  const [chatFontSize, setChatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: 6 })
+  const [sessionExplorerFontSize, setSessionExplorerFontSize] = useNumberPref(PREF_SESSION_EXPLORER_FONT_SIZE, DEFAULT_SESSION_EXPLORER_FONT_SIZE, { min: 0, max: 4 })
+  const [fileExplorerFontSize, setFileExplorerFontSize] = useNumberPref(PREF_FILE_EXPLORER_FONT_SIZE, DEFAULT_FILE_EXPLORER_FONT_SIZE, { min: 0, max: 4 })
+  const [fileViewFontSize, setFileViewFontSize] = useNumberPref(PREF_FILE_VIEW_FONT_SIZE, DEFAULT_FILE_VIEW_FONT_SIZE, { min: 0, max: 4 })
+  const [chatContentWidth, setChatContentWidth] = useNumberPref(PREF_CHAT_CONTENT_WIDTH, DEFAULT_CHAT_CONTENT_WIDTH, { min: 0, max: 2 })
+  const [chatSideSpace, setChatSideSpace] = useNumberPref(PREF_CHAT_SIDE_SPACE, DEFAULT_CHAT_SIDE_SPACE, { min: 0, max: 2 })
+  const [chatLineHeight, setChatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
+  const [chatMathScale, setChatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
+  const [sessionCacheMaxMb, setSessionCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
   const [theme, , setTheme] = useTheme()
   return (
     <div>
@@ -902,7 +1592,7 @@ function InterfaceSection(): JSX.Element {
         subtitle={t('settings.interface.subtitle')}
       />
       <ul className="space-y-3 text-sm">
-        <li className="flex items-start justify-between gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
+        <li className="flex flex-col gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.theme.label')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -965,7 +1655,95 @@ function InterfaceSection(): JSX.Element {
             </button>
           </div>
         </li>
-        <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+        <SegmentedNumberPref
+          label={t('settings.interface.chatFontSize')}
+          description={t('settings.interface.chatFontSizeDesc')}
+          value={chatFontSize}
+          onChange={setChatFontSize}
+          testId="settings-chat-font-size"
+          options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
+            value,
+            label: t(`settings.interface.chatFontSizeOptions.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.fileViewFontSize')}
+          description={t('settings.interface.fileViewFontSizeDesc')}
+          value={fileViewFontSize}
+          onChange={setFileViewFontSize}
+          testId="settings-file-view-font-size"
+          options={[0, 1, 2, 3, 4].map((value) => ({
+            value,
+            label: t(`settings.interface.fileViewFontSizeOptions.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.sessionExplorerFontSize')}
+          description={t('settings.interface.sessionExplorerFontSizeDesc')}
+          value={sessionExplorerFontSize}
+          onChange={setSessionExplorerFontSize}
+          testId="settings-session-explorer-font-size"
+          options={[0, 1, 2, 3, 4].map((value) => ({
+            value,
+            label: t(`settings.interface.explorerFontSizeOptions.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.fileExplorerFontSize')}
+          description={t('settings.interface.fileExplorerFontSizeDesc')}
+          value={fileExplorerFontSize}
+          onChange={setFileExplorerFontSize}
+          testId="settings-file-explorer-font-size"
+          options={[0, 1, 2, 3, 4].map((value) => ({
+            value,
+            label: t(`settings.interface.explorerFontSizeOptions.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatContentWidth')}
+          description={t('settings.interface.chatContentWidthDesc')}
+          value={chatContentWidth}
+          onChange={setChatContentWidth}
+          testId="settings-chat-content-width"
+          options={[0, 1, 2].map((value) => ({
+            value,
+            label: t(`settings.interface.size3.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatSideSpace')}
+          description={t('settings.interface.chatSideSpaceDesc')}
+          value={chatSideSpace}
+          onChange={setChatSideSpace}
+          testId="settings-chat-side-space"
+          options={[0, 1, 2].map((value) => ({
+            value,
+            label: t(`settings.interface.size3.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatLineHeight')}
+          description={t('settings.interface.chatLineHeightDesc')}
+          value={chatLineHeight}
+          onChange={setChatLineHeight}
+          testId="settings-chat-line-height"
+          options={[0, 1, 2].map((value) => ({
+            value,
+            label: t(`settings.interface.size3.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatMathScale')}
+          description={t('settings.interface.chatMathScaleDesc')}
+          value={chatMathScale}
+          onChange={setChatMathScale}
+          testId="settings-chat-math-scale"
+          options={[0, 1, 2, 3, 4].map((value) => ({
+            value,
+            label: t(`settings.interface.chatMathScaleOptions.${value}`),
+          }))}
+        />
+        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.showToolCallTab')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1000,7 +1778,7 @@ function InterfaceSection(): JSX.Element {
           onChange={setTopbarOpen}
           testId="settings-toggle-topbar-open"
         />
-        <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.liveToolActivityTail')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1019,6 +1797,92 @@ function InterfaceSection(): JSX.Element {
             data-testid="settings-live-tool-activity-tail"
           />
         </li>
+        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="font-medium">{t('settings.interface.sessionCacheMaxMb')}</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t('settings.interface.sessionCacheMaxMbDesc')}
+            </p>
+          </div>
+          <div className="flex flex-none items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={4096}
+              step={50}
+              value={sessionCacheMaxMb}
+              onChange={(event) => setSessionCacheMaxMb(Number(event.currentTarget.value))}
+              className="h-8 w-24 rounded-md bg-background px-2 text-sm ring-1 ring-border/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t('settings.interface.sessionCacheMaxMb')}
+              data-testid="settings-session-cache-max-mb"
+            />
+            <span className="text-xs text-muted-foreground">MB</span>
+          </div>
+        </li>
+      </ul>
+    </div>
+  )
+}
+
+function SegmentedNumberPref({
+  label,
+  description,
+  value,
+  onChange,
+  options,
+  testId,
+}: {
+  label: string
+  description: string
+  value: number
+  onChange(next: number): void
+  options: readonly { value: number; label: string }[]
+  testId: string
+}): JSX.Element {
+  return (
+    <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">{label}</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="flex max-w-full flex-wrap gap-1 rounded-md border border-border bg-background/70 p-1"
+        data-testid={testId}
+      >
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={value === option.value}
+            onClick={() => onChange(option.value)}
+            data-testid={`${testId}-${option.value}`}
+            className={cn(
+              'min-h-8 rounded px-2.5 py-1 text-xs transition-colors',
+              value === option.value
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </li>
+  )
+}
+
+function NotificationsSection(): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div>
+      <SectionHeader
+        title={t('settings.sections.notifications.label')}
+        subtitle={t('settings.notifications.subtitle')}
+      />
+      <ul className="space-y-3 text-sm">
         <DesktopNotificationsSettings />
       </ul>
     </div>
@@ -1039,7 +1903,7 @@ function InterfaceToggle({
   testId: string
 }): JSX.Element {
   return (
-    <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+    <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
         <div className="font-medium">{label}</div>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
@@ -1084,7 +1948,7 @@ function DesktopNotificationsSettings(): JSX.Element {
   const unavailable = permission === 'denied' || permission === 'unsupported'
   return (
     <li className="rounded-md border border-border bg-card/60 px-4 py-3">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="font-medium">{t('settings.interface.desktopNotifications')}</div>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1138,7 +2002,7 @@ function NotificationKindToggle({
   const { t } = useTranslation()
   const [checked, setChecked] = useBooleanPref(prefKey, true)
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md bg-muted/30 px-3 py-2">
+    <div className="flex flex-col gap-3 rounded-md bg-muted/30 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <div className="text-xs font-medium text-foreground">{label}</div>
         <div className="text-[11px] text-muted-foreground">{description}</div>
@@ -1249,7 +2113,7 @@ function McpSection({
 
 function EmptyRow({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
+    <div className="rounded-md border border-dashed border-white/15 bg-black/20 px-4 py-6 text-sm text-zinc-400">
       {children}
     </div>
   )
@@ -1272,7 +2136,7 @@ function CopyButton({ value }: { value: string }): JSX.Element {
       type="button"
       variant="ghost"
       size="icon"
-      className="h-6 w-6 flex-none text-muted-foreground hover:text-foreground"
+      className="h-6 w-6 flex-none text-zinc-400 hover:bg-white/10 hover:text-zinc-50"
       aria-label={copied ? t('settings.copy.copied') : t('settings.copy.copyValue')}
       onClick={() => {
         void copy()
@@ -1333,10 +2197,10 @@ function ConnectionSection(): JSX.Element {
     <div className="space-y-6">
       <SectionHeader title="Host endpoint" subtitle="Where this dashboard connects for Socket.IO, models, and settings." />
 
-      <div className="space-y-3 rounded border border-border p-4 text-sm">
+      <div className="space-y-3 rounded-md bg-card/60 p-4 text-sm ring-1 ring-border/50">
         <div>
           <div className="text-xs uppercase tracking-wider text-muted-foreground">Currently used</div>
-          <div className="mt-1 font-mono">{current.url || '(none)'}</div>
+          <div className="mt-1 break-all font-mono">{current.url || '(none)'}</div>
           <div className="mt-1 text-xs text-muted-foreground">Source: {sourceLabel[current.source]}</div>
         </div>
         <div className="text-xs text-muted-foreground">
@@ -1348,7 +2212,7 @@ function ConnectionSection(): JSX.Element {
         <label className="block text-sm font-medium">Override host endpoint</label>
         <input
           type="url"
-          className="w-full rounded border border-border bg-background px-3 py-2 font-mono text-sm"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
           placeholder={window.location.origin}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -1357,12 +2221,12 @@ function ConnectionSection(): JSX.Element {
           Leave empty to fall back to the default. Cross-origin endpoints require the host to set
           {' '}<code className="rounded bg-muted px-1">AGENT_KERNEL_ALLOWED_ORIGINS</code>.
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={save}>Save</Button>
-          <Button size="sm" variant="outline" onClick={() => void test()} disabled={testState.kind === 'testing'}>
+        <div className="grid gap-2 sm:flex sm:flex-wrap">
+          <Button size="sm" className="w-full sm:w-auto" onClick={save}>Save</Button>
+          <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => void test()} disabled={testState.kind === 'testing'}>
             {testState.kind === 'testing' ? 'Testing…' : 'Test connection'}
           </Button>
-          <Button size="sm" variant="ghost" onClick={reset}>Reset to default</Button>
+          <Button size="sm" variant="ghost" className="w-full sm:w-auto" onClick={reset}>Reset to default</Button>
         </div>
         {testState.kind === 'ok' && (
           <div className="text-xs text-emerald-500">✓ {testState.msg}</div>

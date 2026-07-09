@@ -15,6 +15,7 @@ const prefs: DesktopNotificationPrefs = {
   sound: true,
   byKind: {
     approval_required: true,
+    waiting_for_user: true,
     session_error: true,
     connection_lost: true,
     workspace_offline: true,
@@ -109,6 +110,7 @@ describe('desktop notification helpers', () => {
         sessionId: 's1',
         sessionLabel: 'demo session',
         pendingApprovalsCount: 0,
+        waitingForUser: false,
         lastError: null,
         connectionStatus: 'ready',
         workspaceOnline: true,
@@ -131,5 +133,156 @@ describe('desktop notification helpers', () => {
 
     rerender(<Harness workspaceOnline={false} workspaceLabel="ws-a" />)
     expect(NotificationMock).toHaveBeenCalledWith('Workspace offline', expect.objectContaining({ body: 'demo session: ws-a is offline' }))
+  })
+
+  it('notifies when a busy session becomes ready for user input', () => {
+    localStorage.setItem('ak-desktop-notifications-enabled', '1')
+    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+
+    function Harness({ waitingForUser }: { waitingForUser: boolean }): JSX.Element {
+      useInterventionDesktopNotifications({
+        sessionId: 's1',
+        sessionLabel: 'demo session',
+        pendingApprovalsCount: 0,
+        waitingForUser,
+        lastError: null,
+        connectionStatus: 'ready',
+        workspaceOnline: true,
+      })
+      return <div />
+    }
+
+    const { rerender } = render(<Harness waitingForUser={false} />)
+    expect(NotificationMock).not.toHaveBeenCalled()
+
+    rerender(<Harness waitingForUser />)
+    expect(NotificationMock).toHaveBeenCalledWith('Waiting for you', expect.objectContaining({ body: 'demo session: ready for your next message' }))
+
+    rerender(<Harness waitingForUser />)
+    expect(NotificationMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('can suppress the ready notification for a user-initiated message round trip', () => {
+    localStorage.setItem('ak-desktop-notifications-enabled', '1')
+    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+    const { AudioContextMock } = stubAudioContext()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+
+    function Harness({ waitingForUser, suppressWaitingForUser }: { waitingForUser: boolean; suppressWaitingForUser?: boolean }): JSX.Element {
+      useInterventionDesktopNotifications({
+        sessionId: 's1',
+        sessionLabel: 'demo session',
+        pendingApprovalsCount: 0,
+        waitingForUser,
+        lastError: null,
+        connectionStatus: 'ready',
+        workspaceOnline: true,
+        suppressWaitingForUser,
+      })
+      return <div />
+    }
+
+    const { rerender } = render(<Harness waitingForUser={false} />)
+    rerender(<Harness waitingForUser suppressWaitingForUser />)
+    expect(NotificationMock).not.toHaveBeenCalled()
+    expect(AudioContextMock).not.toHaveBeenCalled()
+
+    rerender(<Harness waitingForUser={false} />)
+    rerender(<Harness waitingForUser />)
+    expect(AudioContextMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('plays only local sound when the focused dashboard becomes ready for user input', () => {
+    localStorage.setItem('ak-desktop-notifications-enabled', '1')
+    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+    const { AudioContextMock } = stubAudioContext()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+
+    function Harness({ waitingForUser }: { waitingForUser: boolean }): JSX.Element {
+      useInterventionDesktopNotifications({
+        sessionId: 's1',
+        sessionLabel: 'demo session',
+        pendingApprovalsCount: 0,
+        waitingForUser,
+        lastError: null,
+        connectionStatus: 'ready',
+        workspaceOnline: true,
+      })
+      return <div />
+    }
+
+    const { rerender } = render(<Harness waitingForUser={false} />)
+    rerender(<Harness waitingForUser />)
+
+    expect(NotificationMock).not.toHaveBeenCalled()
+    expect(AudioContextMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not treat switching sessions as a new waiting-for-user transition', () => {
+    localStorage.setItem('ak-desktop-notifications-enabled', '1')
+    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+    const { AudioContextMock } = stubAudioContext()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+
+    function Harness({ sessionId, waitingForUser }: { sessionId: string; waitingForUser: boolean }): JSX.Element {
+      useInterventionDesktopNotifications({
+        sessionId,
+        sessionLabel: sessionId,
+        pendingApprovalsCount: 0,
+        waitingForUser,
+        lastError: null,
+        connectionStatus: 'ready',
+        workspaceOnline: true,
+      })
+      return <div />
+    }
+
+    const { rerender } = render(<Harness sessionId="running" waitingForUser={false} />)
+    rerender(<Harness sessionId="idle" waitingForUser />)
+
+    expect(NotificationMock).not.toHaveBeenCalled()
+    expect(AudioContextMock).not.toHaveBeenCalled()
+  })
+
+  it('does not notify when a newly selected session becomes hydrated already waiting', () => {
+    localStorage.setItem('ak-desktop-notifications-enabled', '1')
+    const NotificationMock = vi.fn().mockImplementation(() => ({ close: vi.fn(), onclick: null }))
+    Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+    const { AudioContextMock } = stubAudioContext()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+
+    function Harness({ ready, waitingForUser }: { ready: boolean; waitingForUser: boolean }): JSX.Element {
+      useInterventionDesktopNotifications({
+        sessionId: 'selected-session',
+        sessionLabel: 'selected-session',
+        pendingApprovalsCount: 0,
+        waitingForUser,
+        lastError: null,
+        connectionStatus: 'ready',
+        workspaceOnline: true,
+        ready,
+      })
+      return <div />
+    }
+
+    const { rerender } = render(<Harness ready={false} waitingForUser={false} />)
+    rerender(<Harness ready={false} waitingForUser />)
+    rerender(<Harness ready waitingForUser />)
+
+    expect(NotificationMock).not.toHaveBeenCalled()
+    expect(AudioContextMock).not.toHaveBeenCalled()
   })
 })

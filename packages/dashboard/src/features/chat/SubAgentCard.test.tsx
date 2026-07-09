@@ -279,7 +279,7 @@ describe('SubAgentCard', () => {
     const group = makeGroup([call], [['c1', result]])
     const socket = makeImmediateReadySocket('child-9', [
       { role: 'user', content: [{ type: 'text', text: 'child prompt' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'child answer visible' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'child answer visible with $a^2$' }] },
     ])
 
     render(
@@ -292,7 +292,34 @@ describe('SubAgentCard', () => {
     )
 
     fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
-    await waitFor(() => expect(screen.getByText('child answer visible')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/child answer visible/)).toBeTruthy())
+    expect(document.querySelector('.katex')).toBeTruthy()
+  })
+
+  it('recovers a running child session from sub_agent:list after refresh', async () => {
+    const call = makeCall('c-live', { prompt: 'summarize', agent_type: 'Explore' })
+    const group = makeGroup([call])
+    const socket = makeRecoveringSocket({
+      parentSessionId: 'parent-1',
+      parentCallId: 'c-live',
+      childSessionId: 'child-live',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'child prompt' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'child is still working' }] },
+      ],
+    })
+
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={socket}
+        group={group}
+        approvalByCallId={new Map()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-live').getAttribute('data-sub-agent-status')).toBe('running'))
+    await waitFor(() => expect(screen.getByText(/child is still working/)).toBeTruthy())
   })
 
   it('surfaces a resolved policy artifact inline on the expanded row', async () => {
@@ -563,7 +590,63 @@ function makeImmediateReadySocket(childSessionId: string, messages: Message[]): 
               usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
               cursor: messages.length,
               memory: [],
-              contextPressureLevel: 'none',
+              approvalMode: 'auto',
+            },
+          })
+        }
+      }
+      return this
+    },
+  } as unknown as DashboardSocket
+}
+
+function makeRecoveringSocket(input: {
+  parentSessionId: string
+  parentCallId: string
+  childSessionId: string
+  messages: Message[]
+}): DashboardSocket {
+  const listeners = new Map<string, Set<(payload: unknown) => void>>()
+  return {
+    on(event: string, listener: (payload: unknown) => void) {
+      const set = listeners.get(event) ?? new Set()
+      set.add(listener)
+      listeners.set(event, set)
+      return this
+    },
+    off(event: string, listener: (payload: unknown) => void) {
+      listeners.get(event)?.delete(listener)
+      return this
+    },
+    emit(event: string, payload: { parentSessionId?: string; sessionId?: string }, ack?: (payload: unknown) => void) {
+      if (event === 'sub_agent:list' && payload.parentSessionId === input.parentSessionId && ack) {
+        ack({
+          requestId: 'recover',
+          parentSessionId: input.parentSessionId,
+          children: [
+            {
+              childSessionId: input.childSessionId,
+              parentCallId: input.parentCallId,
+              agentType: 'Explore',
+              status: 'running',
+              startedAt: new Date().toISOString(),
+            },
+          ],
+        })
+      }
+      if (event === 'subscribe' && payload.sessionId === input.childSessionId) {
+        for (const listener of listeners.get('session:ready') ?? []) {
+          listener({
+            sessionId: input.childSessionId,
+            config: { tools: [], systemPrompt: '' },
+            state: {
+              sessionId: input.childSessionId,
+              messages: input.messages,
+              pendingCalls: [],
+              status: 'thinking',
+              usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+              cursor: input.messages.length,
+              memory: [],
               approvalMode: 'auto',
             },
           })

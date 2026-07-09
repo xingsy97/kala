@@ -178,7 +178,7 @@ describe('InspectorPanel', () => {
     expect(topology.textContent ?? '').toContain('Host')
     expect(topology.textContent ?? '').toContain('Executor')
     expect(topology.textContent ?? '').toContain('LLM')
-    expect(topology.textContent ?? '').toContain('kernel / model unknown')
+    expect(topology.textContent ?? '').toContain('model unknown')
     const stateRuntime = screen.getByTestId('state-runtime')
     expect(screen.getByTestId('run-health-panel')).toBeTruthy()
     expect(screen.queryByTestId('watch-expressions')).toBeNull()
@@ -521,6 +521,76 @@ describe('InspectorPanel', () => {
     expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('Load a skill.')
   })
 
+  it('hydrates selected LLM call kernel messages from a prior effects artifact', () => {
+    const harness = makeSocket()
+    const messagesTimeline: TimelineEntry[] = [
+      {
+        seq: 10,
+        ts: '2026-07-06T06:20:00Z',
+        event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'loaded skill' },
+        effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+        hasEffectsArtifact: true,
+      },
+      {
+        seq: 11,
+        ts: '2026-07-06T06:20:01Z',
+        event: {
+          kind: 'llm_response',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Reviewed.' }] },
+        },
+        effects: [],
+        llmTrace: {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          request: {
+            url: 'https://api.openai.com/v1/chat/completions',
+            headers: {},
+            body: undefined,
+          },
+          response: { status: 200 },
+        },
+      },
+    ]
+    render(<InspectorPanel state={baseState} timeline={messagesTimeline} socket={harness.socket as never} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
+    fireEvent.click(screen.getByTestId('llm-call-row'))
+    expect(screen.getByTestId('kernel-messages-view').textContent ?? '').toContain('No kernel messages')
+    expect(harness.socket.emit).toHaveBeenCalledWith('client:load_log_artifact', { sessionId: baseState.sessionId, seq: 10 })
+
+    act(() => {
+      harness.emit('server:log_artifact', {
+        sessionId: baseState.sessionId,
+        seq: 10,
+        effects: [
+          {
+            kind: 'call_llm',
+            messages: [
+              { role: 'user', content: [{ type: 'text', text: 'Use code review skill.' }] },
+              {
+                role: 'assistant',
+                content: [{ type: 'tool_call', callId: 'c1', name: 'skill', input: { name: 'code-review' } }],
+              },
+            ],
+            tools: [
+              {
+                name: 'skill',
+                description: 'Load a skill.',
+                inputSchema: { type: 'object' },
+                requiresApproval: false,
+              },
+            ],
+          },
+        ],
+      })
+    })
+
+    expect(screen.getByTestId('kernel-messages-view').textContent ?? '').toContain('Use code review skill.')
+    expect(screen.getByTestId('kernel-messages-view').textContent ?? '').toContain('tool_call skill')
+    fireEvent.click(screen.getByTestId('llm-context-view-switch-tools'))
+    expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('Load a skill.')
+  })
+
   it('requires confirmation before forking from a kernel message card', () => {
     const onFork = vi.fn()
     const messagesTimeline: TimelineEntry[] = [
@@ -829,7 +899,7 @@ describe('InspectorPanel', () => {
     expect(onFork).toHaveBeenCalledWith(120)
   })
 
-  it('shows recorded compact request metadata for compact events', () => {
+  it('shows message replacement details for compaction events', () => {
     const compactMessages = [
       { role: 'system' as const, content: [{ type: 'text' as const, text: 'sys' }] },
       { role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello?' }] },
@@ -850,18 +920,10 @@ describe('InspectorPanel', () => {
             seq: 3,
             ts: '2026-07-04T00:00:02Z',
             event: {
-              kind: 'compact_replaced',
-              preserveFrom: 3,
-              request: {
-                model: 'gpt-test',
-                systemPrompt: 'compact prompt',
-                messages: compactMessages,
-                tools: [],
-              },
-              summary: 'Hello!',
-              replacedCount: 3,
-              tokensBefore: 1008,
-              tokensAfter: 2,
+              kind: 'messages_replaced',
+              reason: 'compaction',
+              replaceRange: { start: 1, end: 3 },
+              replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'Hello!' }] }],
             },
             effects: [],
           },
@@ -872,12 +934,11 @@ describe('InspectorPanel', () => {
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     fireEvent.click(screen.getAllByTestId('timeline-row')[2]!.querySelector('[data-testid="timeline-row-inspect-json"]')!)
     const details = screen.getByTestId('timeline-row-details')
-    expect(details.textContent ?? '').toContain('Compaction Request')
-    expect(details.textContent ?? '').toContain('compact prompt')
-    expect(details.textContent ?? '').not.toContain('reconstructed_from_timeline')
+    expect(details.textContent ?? '').toContain('replace range')
+    expect(details.textContent ?? '').toContain('Message Replacement')
   })
 
-  it('lists compact summarizer requests in the LLM API view with duration metrics', () => {
+  it('does not list compaction replacement events as ordinary LLM calls', () => {
     render(
       <InspectorPanel
         state={baseState}
@@ -886,19 +947,10 @@ describe('InspectorPanel', () => {
             seq: 3,
             ts: '2026-07-04T00:00:02Z',
             event: {
-              kind: 'compact_replaced',
-              preserveFrom: 2,
-              request: {
-                model: 'gpt-compact-test',
-                systemPrompt: 'compact prompt',
-                messages: [{ role: 'user', content: [{ type: 'text', text: 'old context' }] }],
-                tools: [],
-              },
-              summary: 'compact summary body',
-              responseUsage: { inputTokens: 10, outputTokens: 4 },
-              replacedCount: 2,
-              tokensBefore: 1008,
-              tokensAfter: 20,
+              kind: 'messages_replaced',
+              reason: 'compaction',
+              replaceRange: { start: 1, end: 2 },
+              replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'compact summary body' }] }],
             },
             effects: [],
             model: 'gpt-compact-test',
@@ -918,15 +970,6 @@ describe('InspectorPanel', () => {
     )
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
-    expect(screen.getAllByTestId('llm-call-row')).toHaveLength(1)
-    expect(screen.getByTestId('llm-calls-list').textContent ?? '').toContain('compact summary')
-
-    fireEvent.click(screen.getByTestId('llm-call-row'))
-    expect(document.body.textContent ?? '').toContain('Compaction LLM #3')
-    fireEvent.click(screen.getByTestId('llm-detail-view-switch-api'))
-    const apiText = screen.getByTestId('api-call-view').textContent ?? ''
-    expect(apiText).toContain('duration1.2s')
-    expect(apiText).toContain('TTFT210ms')
-    expect(apiText).not.toContain('Parsed Kernel Response')
+    expect(screen.queryAllByTestId('llm-call-row')).toHaveLength(0)
   })
 })

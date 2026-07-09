@@ -1,399 +1,336 @@
-# Dashboard UI upgrades — 2026 batch
+# Dashboard UI Upgrades: 2026 Batch
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text UI translated historical texttranslated historical text,translated historical text**translated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical text mount translated historical texttranslated historical text)translated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text —— translated historical texttranslated historical texttranslated historical text PR translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+This document lists eight independent UI upgrades ordered by expected value. Each item should be reversible on its own. Structural changes are scheduled before visual polish so later changes touch fewer mount points.
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical text**:translated historical texttranslated historical texttranslated historical texttranslated historical text "translated historical texttranslated historical text" translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text PR translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text/translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+This document is also the acceptance contract: each section's interface and test list define what the implementation PR must satisfy.
 
----
+## Global Rules
 
-## translated historical texttranslated historical texttranslated historical texttranslated historical text
+- Prefer copied single-file components in the shadcn style over broad package dependencies.
+- Every visual animation must respect `prefers-reduced-motion`; no-animation mode must preserve functionality.
+- Every item must add or update tests using the existing Testing Library plus Vitest pattern.
+- Historical line numbers are orientation only. Implementation should use nearby symbols and file anchors, not fixed line numbers.
+- Rollout order: 1 -> 3 -> 2 -> 6 -> 4 -> 5 -> 7 -> 8.
 
-- **translated historical texttranslated historical texttranslated historical texttranslated historical text**:translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(shadcn translated historical texttranslated historical texttranslated historical texttranslated historical text),translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- **translated historical texttranslated historical text**:translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `prefers-reduced-motion`,translated historical text wow-factor translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- **translated historical texttranslated historical text**:translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text/translated historical texttranslated historical texttranslated historical text。ChatPanel/Composer/SubAgentCard translated historical texttranslated historical text test translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `@testing-library/react + vitest` translated historical texttranslated historical text。
-- **translated historical texttranslated historical texttranslated historical texttranslated historical text**:translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical text HEAD**(2026-07-07)translated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical text PR translated historical texttranslated historical texttranslated historical texttranslated historical text+translated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text/translated historical texttranslated historical text)translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- **translated historical texttranslated historical text**:1 → 3 → 2 → 6 → 4 → 5 → 7 → 8。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text "translated historical texttranslated historical text" translated historical text。
+## 1. Virtualized Transcript with `react-virtuoso`
 
----
+### Current State
 
-## #1 translated historical texttranslated historical texttranslated historical text transcript(`react-virtuoso`)
+`ChatPanel` directly maps `transcriptItems`, so every message stays mounted. Long sessions with many messages or large diffs can cause scroll and tab-switch jank. Auto-follow was previously owned by app-level scroll calculations against a Radix scroll viewport, and highlight-jump used DOM ids plus `scrollIntoView`. `NestedTranscript` had the same `.map()` behavior inside a fixed-height `ScrollArea`.
 
-### translated historical texttranslated historical text
-- `packages/dashboard/src/features/chat/ChatPanel.tsx` translated historical text `ChatPanel` translated historical texttranslated historical text `transcriptItems.map(...)`(translated historical text line 146-169)。
-- translated historical texttranslated historical text assistant translated historical texttranslated historical texttranslated historical text DOM,ScrollArea viewport translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical text(>200 translated historical texttranslated historical texttranslated historical text + translated historical text diff)translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text/translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Auto-follow translated historical texttranslated historical texttranslated historical text `app.tsx` translated historical text `pinnedToBottomRef`(translated historical text line 455-483),translated historical texttranslated historical text `[data-radix-scroll-area-viewport]` translated historical texttranslated historical texttranslated historical texttranslated historical text `scrollTop = scrollHeight`。
-- Highlight-jump translated historical text `app.tsx` line 890-896:`document.getElementById('msg-${index}')` + `scrollIntoView`。
-- `NestedTranscript`(SubAgentCard translated historical texttranslated historical text)translated historical texttranslated historical texttranslated historical text `.map()`,translated historical texttranslated historical text `ScrollArea` translated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical text `h-56` / `h-[28rem]`。
+### Goal
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,DOM translated historical texttranslated historical text viewport translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text:translated historical texttranslated historical text vs translated historical texttranslated historical texttranslated historical text diff)。
-- Auto-follow translated historical texttranslated historical texttranslated historical texttranslated historical text:pinned translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,unpinned translated historical texttranslated historical texttranslated historical text。
-- Highlight-jump translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text index。
-- Nested transcript translated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Keep only viewport-relevant rows mounted regardless of message count.
+- Support dynamic row heights.
+- Preserve pinned-to-bottom behavior: follow output when pinned, do not move when unpinned.
+- Preserve highlight jump to a selected message index.
+- Apply the same pattern to nested transcripts.
 
-### translated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical text `packages/dashboard/src/features/chat/VirtualTranscript.tsx`,translated historical texttranslated historical text:
+### Interface
 
-```tsx
-type Props = {
-  items: readonly TranscriptItem[]
-  renderItem: (item: TranscriptItem, index: number) => JSX.Element
-  pinnedToBottom: boolean            // translated historical texttranslated historical text ref-owner translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text pin translated historical texttranslated historical text
-  onPinnedChange: (pinned: boolean) => void  // translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text pin translated historical texttranslated historical texttranslated historical text
-  highlightIndex?: number | null     // translated historical texttranslated historical texttranslated historical text scrollToIndex + translated historical texttranslated historical text
+Add `packages/dashboard/src/features/chat/VirtualTranscript.tsx`:
+
+```typescript
+type Props<Item> = {
+  items: readonly Item[]
+  renderItem: (item: Item, index: number) => JSX.Element
+  keyFor: (item: Item, index: number) => string | number
+  pinnedToBottom: boolean
+  onPinnedChange: (pinned: boolean) => void
+  highlightIndex?: number | null
   footerSlot?: JSX.Element | null
 }
 ```
 
-`ChatPanel` translated historical texttranslated historical texttranslated historical texttranslated historical text API translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical text `.map()` translated historical texttranslated historical text `<VirtualTranscript items renderItem={...}>`。translated historical texttranslated historical text `app.tsx` translated historical texttranslated historical texttranslated historical texttranslated historical text `pinnedToBottomRef` + `viewport.scrollTop = scrollHeight` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text VirtualTranscript(translated historical text virtuoso translated historical text `atBottomStateChange` + `followOutput`),`app.tsx` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+`ChatPanel` keeps its public API stable but replaces direct `.map()` rendering with `VirtualTranscript`. App-level code owns the pin state and reset signal; the virtual transcript owns the scroll container. `NestedTranscript` follows the same internal pattern and relies on its parent for fixed height.
 
-`NestedTranscript` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(SubAgentCard translated historical texttranslated historical texttranslated historical text `h-56`/`h-[28rem]`),virtuoso translated historical texttranslated historical texttranslated historical text fit。
+### Implementation Notes
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
-- `pnpm add react-virtuoso`(translated historical texttranslated historical texttranslated historical texttranslated historical text `react` 18,~30KB min+gz)。
-- `Virtuoso` translated historical text `followOutput: 'smooth'` translated historical texttranslated historical texttranslated historical texttranslated historical text "pinned translated historical texttranslated historical texttranslated historical texttranslated historical text,unpinned translated historical texttranslated historical texttranslated historical texttranslated historical text" translated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical text `atBottomStateChange` translated historical texttranslated historical texttranslated historical text pin translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 64px translated historical texttranslated historical texttranslated historical texttranslated historical text(virtuoso translated historical texttranslated historical texttranslated historical texttranslated historical text)。
-- Highlight-jump translated historical text `virtuosoRef.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' })`。
-- translated historical texttranslated historical text `id={msg-${index}}` translated historical texttranslated historical text(Inspector translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text),translated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical text。
-- **translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**:virtuoso translated historical text `useResizeObserver` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。markdown streaming translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical text `AssistantMarkdown` translated historical text `React.memo` translated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Add `react-virtuoso` as a direct dependency.
+- Use `atBottomStateChange` to report pin changes.
+- Use `followOutput` for pinned auto-follow.
+- Use `virtuosoRef.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' })` for highlight jumps.
+- Preserve `id="msg-${index}"` where needed for anchors, but stop depending on it for scrolling.
+- Provide a rough `defaultItemHeight` to reduce first-measurement jitter.
+- In tests, mock or polyfill the virtualizer APIs that jsdom lacks.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text `VirtualTranscript.test.tsx`:
-  - 100 translated historical texttranslated historical texttranslated historical texttranslated historical text DOM translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `MessageRow` translated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical text `[data-testid^="message-"]`)。
-  - `pinnedToBottom=true` + translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text → translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(mock `scrollToIndex` translated historical texttranslated historical texttranslated historical text virtuoso translated historical text `atBottom` translated historical texttranslated historical text)。
-  - `highlightIndex` translated historical texttranslated historical text → translated historical texttranslated historical text `scrollToIndex`。
-- translated historical texttranslated historical text `ChatPanel.test.tsx`:translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(items rendered、compact boundary、footerSlot translated historical texttranslated historical text)。
-- translated historical texttranslated historical text `SubAgentCard.test.tsx`:nested transcript translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Tests
 
-### translated historical texttranslated historical text
-- Virtuoso translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text:translated historical texttranslated historical texttranslated historical text item translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `defaultItemHeight`。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text jsdom,virtuoso translated historical texttranslated historical text `ResizeObserver`。translated historical texttranslated historical texttranslated historical text `vitest.setup.ts` translated historical text polyfill(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text)。
+- Long transcript renders through the virtualized wrapper rather than a plain `.map()` list.
+- `pinnedToBottom=true` plus new output scrolls to the bottom.
+- `highlightIndex` calls `scrollToIndex`.
+- `footerSlot` renders after items.
+- Nested transcripts still render long lists.
 
-### translated historical texttranslated historical text:translated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text ChatPanel。translated historical texttranslated historical text list translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical text renderItem translated historical text**translated historical texttranslated historical texttranslated historical text/translated historical texttranslated historical text/toast translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Risk
 
----
+Dynamic height measurement can briefly shift on first paint. A good default height and memoized markdown rendering reduce the visible impact.
 
-## #2 Cmd+K translated historical texttranslated historical texttranslated historical texttranslated historical text(`cmdk`)
+## 2. Cmd/Ctrl+K Command Palette
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text action translated historical texttranslated historical texttranslated historical texttranslated historical text:
-  - `selectSession` / `newSession` / `deleteSessionAt` / `renameSessionAt` translated historical text `app.tsx` translated historical text sidebar translated historical texttranslated historical text。
-  - `openCwdDialog` / `submitCwd` translated historical text header translated historical texttranslated historical text。
-  - `setSessionModel` / `setSessionApprovalMode` translated historical text Composer translated historical texttranslated historical text Select。
-  - `runCompactNow` / `runConsolidateMemory` / `toggleTheme` translated historical texttranslated historical texttranslated historical text header translated historical text slash command。
-- Slash command translated historical texttranslated historical text Composer translated historical texttranslated historical texttranslated historical texttranslated historical text `/` translated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical text Composer.tsx line 119-163),translated historical texttranslated historical texttranslated historical texttranslated historical text 4 translated historical text(`/compact`, `/cancel`, `/clear`, `/consolidate-memory`)。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text:translated historical texttranslated historical text Composer translated historical texttranslated historical texttranslated historical text arrow/enter/tab/esc(mention/slash),ApprovalCard translated historical texttranslated historical texttranslated historical text enter/esc/arrow(carousel)。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Current State
 
-### translated historical texttranslated historical text
-- Cmd/Ctrl+K translated historical texttranslated historical texttranslated historical texttranslated historical text palette。
-- Fuzzy translated historical texttranslated historical texttranslated historical texttranslated historical text action。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text(Session / Workspace / Runtime / Composer)。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text focus:translated historical texttranslated historical texttranslated historical text focus translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text slash command translated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text),translated historical text palette translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text action —— translated historical texttranslated historical text registry。
+Actions are spread across sidebar menus, header menus, composer selects, and slash commands. There is no global keyboard command surface. Slash commands only exist inside the composer and include a small fixed set.
 
-### translated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text:
+### Goal
 
-1. `packages/dashboard/src/commands/registry.ts`:
-```ts
+- Cmd/Ctrl+K opens a global palette.
+- Fuzzy search all registered actions.
+- Group commands by Session, Workspace, Runtime, Composer, and View.
+- Closing restores focus to the previously focused element.
+- Slash commands remain available and should derive from the same registry where practical.
+
+### Interface
+
+Add a command registry:
+
+```typescript
 export type Command = {
-  id: string                    // translated historical texttranslated historical text ID,translated historical text:'session.new'
+  id: string
   group: 'Session' | 'Workspace' | 'Runtime' | 'Composer' | 'View'
   label: string
-  hint?: string                 // translated historical texttranslated historical texttranslated historical text
+  hint?: string
   icon?: LucideIcon
-  keywords?: readonly string[]  // translated historical texttranslated historical text fuzzy translated historical texttranslated historical texttranslated historical text
-  shortcut?: readonly string[]  // translated historical texttranslated historical texttranslated historical text,translated historical text:['⌘', 'K']
+  keywords?: readonly string[]
+  shortcut?: readonly string[]
   run: () => void | Promise<void>
-  when?: () => boolean          // translated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical text true
+  when?: () => boolean
 }
 
 export type CommandRegistry = {
-  register: (cmd: Command) => () => void  // translated historical texttranslated historical text unregister
+  register: (command: Command) => () => void
   list: () => readonly Command[]
 }
 ```
 
-2. `packages/dashboard/src/features/palette/CommandPalette.tsx`:
-```tsx
-type Props = { registry: CommandRegistry }
-// translated historical texttranslated historical text:translated historical texttranslated historical text keydown listener(Cmd/Ctrl+K),cmdk Dialog + CommandList + CommandGroup
-```
+Add `features/palette/CommandPalette.tsx` around `cmdk`. App-level actions register commands at the top level. Palette code must only call `command.run()` and must not contain business logic.
 
-`app.tsx` translated historical texttranslated historical texttranslated historical texttranslated historical text registry,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text action translated historical texttranslated historical texttranslated historical texttranslated historical text。Composer translated historical text slash command list translated historical texttranslated historical texttranslated historical text registry translated historical texttranslated historical text(translated historical texttranslated historical text `group === 'Composer' || when()`),translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Implementation Notes
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
-- `pnpm add cmdk`(translated historical texttranslated historical texttranslated historical text shadcn translated historical texttranslated historical texttranslated historical texttranslated historical text,~6KB)。
-- translated historical texttranslated historical text listener translated historical texttranslated historical text `document`,mount translated historical text `addEventListener('keydown')`。**translated historical texttranslated historical text** input/textarea translated historical texttranslated historical texttranslated historical text Cmd+K(translated historical text `e.target.tagName` translated historical texttranslated historical text)。
-- translated historical texttranslated historical text `document.activeElement` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical text `focus()` translated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text Mac vs translated historical texttranslated historical text:`navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'`。
-- Palette translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical text `cmd.run()`。
+- `cmdk` is the intended dependency and matches the shadcn ecosystem.
+- Register a document-level keydown listener for Cmd/Ctrl+K.
+- Avoid hijacking text inputs and textareas.
+- Store `document.activeElement` before opening and restore it after closing.
+- Display shortcut labels using platform-aware `⌘` or `Ctrl`.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text `CommandPalette.test.tsx`:
-  - translated historical text Cmd+K translated historical texttranslated historical text、Esc translated historical texttranslated historical text。
-  - translated historical texttranslated historical text "new" → translated historical texttranslated historical text label/keywords translated historical texttranslated historical texttranslated historical text command translated historical texttranslated historical text。
-  - Enter translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text → `run` translated historical texttranslated historical texttranslated historical text。
-  - translated historical texttranslated historical texttranslated historical text focus translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text `registry.test.ts`:register/unregister translated historical texttranslated historical texttranslated historical texttranslated historical text,`when()` translated historical texttranslated historical text。
+### Tests
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text listener translated historical texttranslated historical text:translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text Cmd+K translated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text —— translated historical texttranslated historical texttranslated historical texttranslated historical text `!input && !textarea` translated historical texttranslated historical texttranslated historical text)。
-- Composer translated historical text slash list UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `matchingCommands` state,translated historical texttranslated historical texttranslated historical text registry-driven translated historical texttranslated historical texttranslated historical texttranslated historical text UI translated historical texttranslated historical text。
+- Cmd/Ctrl+K opens and Escape closes.
+- Search filters by label and keywords.
+- Enter runs the selected command.
+- Disabled or unavailable commands respect `when()`.
+- Register/unregister lifecycle is deterministic.
+- Focus returns to the previously focused element.
 
-### translated historical texttranslated historical text:translated historical text #1 translated historical texttranslated historical text
-palette translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text "translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text #X",translated historical texttranslated historical texttranslated historical text VirtualTranscript translated historical text `scrollToIndex` API。
+### Risk
 
----
+Global keyboard listeners can conflict with input editing. Restrict interception to non-input targets.
 
-## #3 Sonner toast translated historical texttranslated historical text
+## 3. Sonner Toast Notifications
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text UI translated historical texttranslated historical text `app.tsx` line 758-773 translated historical texttranslated historical texttranslated historical text banner + `ErrorBoundary` translated historical texttranslated historical text。
-- Socket translated historical texttranslated historical text(connect_error / disconnect,session.ts line 256-260)translated historical text setState `status`,UI translated historical texttranslated historical texttranslated historical text header translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Sub-agent translated historical texttranslated historical text/translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text —— translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Background shell exit translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Approval translated historical texttranslated historical texttranslated historical texttranslated historical text Composer translated historical texttranslated historical texttranslated historical text flip translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text composer translated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Current State
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text sonner,translated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text banner translated historical texttranslated historical text(translated historical texttranslated historical text"session translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"),toast translated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical text**。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text:
-  - Socket disconnect / reconnect
-  - Sub-agent translated historical texttranslated historical text(translated historical texttranslated historical text/translated historical texttranslated historical text,shows agent_type + duration)
-  - Background shell exit(shows command head + exit status)
-  - Approval required(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text "Review")
+Session errors have a persistent red banner and connection state is mostly a small header indicator. Sub-agent completion, background shell exit, and approval arrival can be missed if the user is reading another part of the UI.
 
-### translated historical texttranslated historical text
-translated historical texttranslated historical text `packages/dashboard/src/notify.ts`:
-```ts
+### Goal
+
+Use toasts for transient events while keeping persistent session errors in the existing banner.
+
+Initial trigger points:
+
+- Disconnect and reconnect.
+- Sub-agent completion or failure.
+- Background shell exit.
+- Approval required.
+
+### Interface
+
+Add a local wrapper, not direct Sonner imports at call sites:
+
+```typescript
 export type NotifyKind = 'info' | 'success' | 'warning' | 'error'
 
 export const notify = {
-  info: (msg: string, opts?: NotifyOpts) => void,
-  success: (msg: string, opts?: NotifyOpts) => void,
-  warning: (msg: string, opts?: NotifyOpts) => void,
-  error: (msg: string, opts?: NotifyOpts) => void,
+  info(message: string, options?: NotifyOptions): void,
+  success(message: string, options?: NotifyOptions): void,
+  warning(message: string, options?: NotifyOptions): void,
+  error(message: string, options?: NotifyOptions): void,
 }
 
-type NotifyOpts = {
+type NotifyOptions = {
   description?: string
   action?: { label: string; onClick: () => void }
-  duration?: number  // ms, undefined = default (4s), Infinity = translated historical texttranslated historical texttranslated historical text
-  id?: string        // dedupe key
+  duration?: number
+  id?: string
 }
 ```
 
-translated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical text `notify.*`**,translated historical texttranslated historical texttranslated historical text import sonner。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+Mount the toaster at the app root using the project-standard position and theme.
 
-`app.tsx` translated historical texttranslated historical text `<Toaster position="bottom-right" richColors />`(sonner translated historical text shadcn translated historical texttranslated historical texttranslated historical text `bottom-right`)。
+### Implementation Notes
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical text)
-- `session.ts` socket handlers:
-  - `on('connect')` translated historical texttranslated historical texttranslated historical text `status === 'disconnected'` → `notify.success('Reconnected')`。
-  - `on('disconnect')` → `notify.warning('Disconnected — trying to reconnect')`。
-- `session.ts` translated historical texttranslated historical text hook `useSubAgentNotifier`:translated historical texttranslated historical text `server:sub_agent_completed` / `server:sub_agent_failed` → `notify.success` / `notify.error`,description translated historical text agent_type + duration。
-- `background-terminal.ts`:translated historical texttranslated historical texttranslated historical text `done` / `killed` translated historical text → `notify.info('Shell finished: ' + splitCommand(cmd).head)`,action `{ label: 'View', onClick: () => openBackgroundShellsPanel() }`。
-- `session.ts` approval:`state.pendingCalls` translated historical text 0 translated historical texttranslated historical texttranslated historical text → `notify.info('Approval requested')`,action `{ label: 'Review', onClick: () => focusApprovalCard() }`。
+- Socket disconnect should warn; reconnect after a previous disconnect should succeed.
+- Approval toasts should dedupe by approval call id.
+- Sub-agent toasts should include agent type and duration when available.
+- Background shell toasts should provide a View action when the panel can be opened.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text `notify.test.ts`:mock sonner,translated historical texttranslated historical text `notify.error(...)` translated historical texttranslated historical text `sonner.error` translated historical text opts translated historical texttranslated historical text。
-- translated historical texttranslated historical text `useSubAgentNotifier.test.tsx`:translated historical texttranslated historical texttranslated historical text `sub_agent_completed` translated historical texttranslated historical text → notify.success translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Reconnect notification:mock socket translated historical texttranslated historical text disconnect → connect,translated historical texttranslated historical text notify.warning + notify.success translated historical texttranslated historical texttranslated historical text。
+### Tests
 
-### translated historical texttranslated historical text
-- Dedup:translated historical text session translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical text `id` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical text approval banner translated historical texttranslated historical text:banner translated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text",toast translated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical text",translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text pending translated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical text(translated historical text `id: 'approval-${callId}'` dedupe)。
+- `notify.*` maps to the underlying toast implementation.
+- Replayed events with the same id do not duplicate.
+- Disconnect/reconnect emits expected notifications.
+- Approval count transition emits one toast for a new call id.
 
-### translated historical texttranslated historical text:translated historical text #1 translated historical texttranslated historical texttranslated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text #2 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical text #2 translated historical texttranslated historical text palette translated historical texttranslated historical texttranslated historical texttranslated historical text `notify` translated historical text hint,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Risk
 
----
+Toasts can become noisy if tied to replayed session history. Use stable ids and transition-based hooks.
 
-## #4 Animated Beam translated historical texttranslated historical text
+## 4. Animated Border Beam
 
-### translated historical texttranslated historical text
-- `SubAgentCard.tsx` line 173-183 translated historical texttranslated historical texttranslated historical text:running translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `border-sky-300/50`。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text completed/failed translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text" vs "translated historical texttranslated historical texttranslated historical texttranslated historical text(sky translated historical texttranslated historical text sky-300 vs emerald-300)"。
-- `Loader2` translated historical text spinner translated historical text header,translated historical texttranslated historical texttranslated historical texttranslated historical text header translated historical texttranslated historical text chip translated historical text badge translated historical texttranslated historical text。
+### Current State
 
-### translated historical texttranslated historical text
-- Running translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Reduced-motion translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text sky translated historical text。
-- translated historical texttranslated historical text running,idle/completed/failed translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+Running sub-agent cards differ mainly by a border color and a small spinner. In dense views, running and completed cards can look too similar.
 
-### translated historical texttranslated historical text
-translated historical texttranslated historical text `packages/dashboard/src/components/ui/border-beam.tsx`(translated historical texttranslated historical texttranslated historical text,shadcn translated historical texttranslated historical text):
-```tsx
+### Goal
+
+Running cards get a subtle animated border beam. Reduced-motion users fall back to a static border. Completed, failed, and idle cards have no beam.
+
+### Interface
+
+Add `packages/dashboard/src/components/ui/border-beam.tsx`:
+
+```typescript
 type Props = {
   className?: string
-  duration?: number      // translated historical text,translated historical texttranslated historical text 8
-  colorFrom?: string     // translated historical texttranslated historical text 'hsl(var(--sky-500))'
-  colorTo?: string       // translated historical texttranslated historical text 'transparent'
-  size?: number          // px,translated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical text 200
+  duration?: number
+  colorFrom?: string
+  colorTo?: string
+  size?: number
 }
-// translated historical texttranslated historical text:absolute inset-0 pointer-events-none translated historical text conic-gradient translated historical texttranslated historical text,translated historical text CSS animation translated historical text
 ```
 
-translated historical text SubAgentCard translated historical text,`status === 'running'` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `<BorderBeam />` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text overlay。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `relative overflow-hidden rounded-lg`。
+The output is an absolute, pointer-events-none decorative layer. The parent card remains `relative overflow-hidden rounded-*`.
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
-- **translated historical texttranslated historical text Framer Motion**(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text)。translated historical text**translated historical text CSS**:conic-gradient + `animation: spin`。
-- Tailwind v3 translated historical texttranslated historical texttranslated historical text `conic-gradient` translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical text `style={{ background: 'conic-gradient(...)' }}`。
-- `@media (prefers-reduced-motion: reduce)` → `animation: none`,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text sky。
+### Implementation Notes
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text `border-beam.test.tsx`:mount translated historical text `[data-testid=border-beam]` translated historical texttranslated historical text,`prefers-reduced-motion` mock translated historical text**translated historical text**translated historical texttranslated historical text beam。
-- translated historical texttranslated historical text `SubAgentCard.test.tsx`:running translated historical texttranslated historical texttranslated historical texttranslated historical text beam,completed/failed translated historical texttranslated historical texttranslated historical text。
+- Do not add Motion for this effect. Use CSS conic gradients and keyframes.
+- Respect `prefers-reduced-motion` by disabling or not rendering the animated layer.
+- Keep the component purely decorative.
 
-### translated historical texttranslated historical text
-- translated historical text。translated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Tests
 
-### translated historical texttranslated historical text:translated historical text #1 translated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical text #1 translated historical texttranslated historical texttranslated historical text SubAgentCard translated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical text nested transcript translated historical texttranslated historical texttranslated historical texttranslated historical text)。translated historical texttranslated historical text #1 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- The beam renders for running sub-agent cards.
+- Completed and failed cards do not render it.
+- Reduced-motion mode disables the animated layer.
 
----
+### Risk
 
-## #5 Number Ticker
+Low. The component is decorative and must not affect layout.
 
-### translated historical texttranslated historical text
-- `TasksButton.tsx` line 70-74:`{total} Tasks · {done}/{total}` translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- `BackgroundTerminalPanel.tsx` line 86-88:`{rows.length} Shells` translated historical texttranslated historical text。
-- `SubAgentCard.tsx` line 219/342-345:`${turns} turns · ${duration}` translated historical texttranslated historical text(duration translated historical text elapsed clock,turn translated historical texttranslated historical texttranslated historical text)。
+## 5. Number Ticker
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,60fps tween translated historical texttranslated historical texttranslated historical texttranslated historical text(200-400ms)。
-- Reduced-motion translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical text**translated historical text tween;translated historical texttranslated historical text(translated historical text session)translated historical text tween,translated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text。
+### Current State
 
-### translated historical texttranslated historical text
-translated historical texttranslated historical text `packages/dashboard/src/lib/useNumberTicker.ts`:
-```ts
+Some counts jump instantly, such as task counts, shell counts, turn counts, and benchmark scores. A ticker can help in milestone moments but is distracting in dense tables.
+
+### Goal
+
+Tween only meaningful milestone numbers, especially final benchmark completion scores. Do not animate every table cell.
+
+### Interface
+
+Add a small hook:
+
+```typescript
 export function useNumberTicker(
   target: number,
-  opts?: { durationMs?: number; disabled?: boolean }
+  options?: { durationMs?: number; disabled?: boolean },
 ): number
-// translated historical texttranslated historical texttranslated historical texttranslated historical text tween translated historical text(translated historical texttranslated historical text)。target translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text rAF tween,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text target。
-// prefers-reduced-motion translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text target。
 ```
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text `{count}` translated historical text `{useNumberTicker(count)}`,translated historical texttranslated historical text `<Ticker value={count} />` translated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical text memo)。
+The hook returns an integer value. When the target increases, it tweens with `requestAnimationFrame`; when the target decreases, it jumps immediately to avoid odd backwards animation. Reduced-motion returns the target immediately.
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
-- `easeOutCubic`。
-- translated historical text `useReducedMotion()` translated historical text mediaquery translated historical texttranslated historical text。
-- translated historical text `startedAt` / `from` / `to` in ref,rAF translated historical texttranslated historical text。
-- translated historical texttranslated historical text unmount translated historical text cancel rAF。
+### Implementation Notes
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text `useNumberTicker.test.ts`:
-  - `target=10`,`durationMs=100`,`vi.advanceTimersByTime(50)` → translated historical texttranslated historical text (0, 10) translated historical texttranslated historical text。
-  - `advanceTimersByTime(150)` → translated historical text === 10。
-  - target translated historical text 10 → 5:translated historical texttranslated historical texttranslated historical texttranslated historical text 5。
-  - `prefers-reduced-motion` mock:target=10 translated historical texttranslated historical texttranslated historical texttranslated historical text 10。
+- Use `easeOutCubic`.
+- Store start time, from value, and target in refs.
+- Cancel animation frames on unmount.
+- Prefer a small `Ticker` component if many call sites need the hook.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Tests
 
-### translated historical texttranslated historical text:translated historical text #4 translated historical texttranslated historical text
-translated historical texttranslated historical text,translated historical text #4 translated historical texttranslated historical texttranslated historical text SubAgentCard translated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Mid-animation values are between start and target.
+- End value equals target after duration.
+- Decreases jump immediately.
+- Reduced-motion jumps immediately.
 
----
+### Risk
 
-## #6 View Transitions API translated historical texttranslated historical text
+Low if limited to milestone surfaces.
 
-### translated historical texttranslated historical text
-- `InspectorPanel.tsx` line 173 translated historical text `setInspectorView(tab)` translated historical texttranslated historical texttranslated historical text。
-- `SubAgentCard.tsx` line 189 translated historical text `setOpen((v) => !v)` translated historical texttranslated historical texttranslated historical text。
-- app.tsx translated historical text 7 translated historical text Dialog translated historical text `onOpenChange` translated historical text Radix translated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical text CSS translated historical texttranslated historical text)。
-- Workspace translated historical texttranslated historical text(`selectSession` translated historical text chatItems translated historical texttranslated historical text)translated historical texttranslated historical text。
+## 6. View Transitions API Wrapper
 
-### translated historical texttranslated historical text
-- translated historical text View Transitions API translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Chrome / Safari / Edge translated historical texttranslated historical texttranslated historical text,Firefox translated historical texttranslated historical text —— translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text setState。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Current State
 
-### translated historical texttranslated historical text
-translated historical texttranslated historical text `packages/dashboard/src/lib/viewTransition.ts`:
-```ts
-export function withViewTransition(fn: () => void): void {
-  const anyDoc = document as any
-  if (typeof anyDoc.startViewTransition !== 'function') {
-    fn()
-    return
-  }
-  anyDoc.startViewTransition(() => {
-    flushSync(fn)
-  })
-}
+Some hard switches, such as inspector tabs, sub-agent expansion, and workspace/session changes, happen without a transition. Dialogs already have Radix behavior and do not need this.
+
+### Goal
+
+Use the browser View Transitions API where supported, with no-op fallback elsewhere.
+
+### Interface
+
+Add `packages/dashboard/src/lib/viewTransition.ts`:
+
+```typescript
+export function withViewTransition(fn: () => void): void
 ```
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text `setInspectorView(tab)` → `withViewTransition(() => setInspectorView(tab))`。translated historical texttranslated historical text SubAgentCard translated historical text `setOpen`、workspace translated historical texttranslated historical text。
+Implementation should check `document.startViewTransition`. When available, run the update inside `flushSync` so the browser captures the before/after DOM. When unavailable, run the callback directly.
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
-- **translated historical texttranslated historical text `flushSync`**,translated historical texttranslated historical text React 18 translated historical text batch,VT translated historical texttranslated historical texttranslated historical text before/after。
-- CSS translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text override:`::view-transition-old(root), ::view-transition-new(root) { animation-duration: 200ms; }`(translated historical texttranslated historical texttranslated historical text css)。
-- **translated historical texttranslated historical text Dialog**,Radix translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Implementation Notes
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text `viewTransition.test.ts`:
-  - `document.startViewTransition` translated historical texttranslated historical texttranslated historical texttranslated historical text,fn translated historical texttranslated historical texttranslated historical texttranslated historical text。
-  - translated historical texttranslated historical texttranslated historical text,`startViewTransition` translated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text fn。
-- translated historical texttranslated historical text `InspectorPanel.test.tsx`:translated historical texttranslated historical text tab translated historical text(mock startViewTransition)translated historical texttranslated historical texttranslated historical text。
+- Add a small global CSS duration override for root view transitions.
+- Do not wrap Radix dialog open/close.
+- Use around inspector tab switches, sub-agent open toggles, and deliberate workspace/session switches.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical text jsdom translated historical texttranslated historical text,translated historical text fallback,translated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Tests
 
-### translated historical texttranslated historical text:translated historical text #2 translated historical texttranslated historical text
-palette translated historical text "translated historical texttranslated historical text session #X" / "translated historical text tab" translated historical texttranslated historical texttranslated historical texttranslated historical text withViewTransition。#2 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Fallback path calls the function immediately.
+- Supported path calls `startViewTransition` and executes the callback.
+- A representative tab switch calls the wrapper.
 
----
+### Risk
 
-## #7 Streamdown for streaming markdown
+Only supported browsers see the effect. Unsupported browsers retain existing behavior.
 
-### translated historical texttranslated historical text
-- `session.ts` line 93/104-159:streaming text translated historical texttranslated historical text `streamBufferRef` + rAF drain translated historical text `streamingText` state。
-- `ChatPanel.tsx` line 586-619:`AssistantMarkdown` translated historical text `react-markdown` + `remark-gfm` translated historical texttranslated historical text。
-- **translated historical texttranslated historical texttranslated historical text**:streaming translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text ` ``` ` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `**` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+## 7. Streamdown for Streaming Markdown
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text markdown translated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical text raw text translated historical text pending translated historical texttranslated historical text)。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text assistant translated historical texttranslated historical text)translated historical texttranslated historical text react-markdown(streamdown translated historical texttranslated historical text react-markdown,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text)。
+### Current State
 
-### translated historical texttranslated historical text
-- **translated historical texttranslated historical texttranslated historical texttranslated historical text**:translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text LLM streaming translated historical texttranslated historical text,translated historical texttranslated historical text/translated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical text"。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text:`pnpm add streamdown`,translated historical texttranslated historical text `packages/dashboard/src/features/chat/StreamingMarkdown.tsx` translated historical texttranslated historical text,translated historical texttranslated historical text `ChatPanel` translated historical text"translated historical texttranslated historical text streaming translated historical texttranslated historical text bubble" translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `AssistantMarkdown`)。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text:**translated historical texttranslated historical texttranslated historical texttranslated historical text**,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"。
+Streaming text is rAF-batched into `streamingText`, and completed assistant messages use `react-markdown` plus `remark-gfm`. It was unclear whether incomplete streaming markdown fences or emphasis markers caused visible flicker.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical texttranslated historical text:`StreamingMarkdown.test.tsx` translated historical text:
-  - translated historical texttranslated historical text ` ```typescript\nconst x` (translated historical texttranslated historical texttranslated historical text) → translated historical text crash,translated historical texttranslated historical texttranslated historical text(translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text DOM)。
-  - translated historical texttranslated historical text `**bold ` (translated historical texttranslated historical texttranslated historical text) → translated historical texttranslated historical texttranslated historical text raw text translated historical text pending translated historical texttranslated historical text。
+### Goal
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical texttranslated historical text"。
+Do not add `streamdown` unless measurement proves the currently streaming bubble visibly flickers or parses too slowly. Completed messages stay on `react-markdown`.
 
-### translated historical texttranslated historical text:translated historical text #1 translated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text message rendering translated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical text#1 translated historical texttranslated historical text memo/virtualization,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Interface
 
-### translated historical texttranslated historical text (2026-07-07 measurement pass)
-**Deferred.** After #1 landed, `AssistantMarkdown` is `React.memo`'d and lives inside a
-Virtuoso viewport, so historical assistant bubbles no longer re-parse on scroll and
-non-visible bubbles don't render at all. The remaining candidate for flicker is the
-*currently streaming* bubble, which re-parses the whole growing string on each
-rAF drain. Empirically this is not visually distracting at typical LLM token
-rates (~30–60 tok/s) — the DOM churn is bounded by markdown structure, not
-token count, and browser paint coalesces intermediate frames.
+Before implementation, run a real long streaming output and capture evidence. If flicker exists, add `StreamingMarkdown.tsx` and use it only for the active streaming bubble.
 
-**Trigger to revisit:** if a user reports visible layout jump/flicker mid-stream,
-or if we switch to a provider whose deltas arrive faster than 100 tok/s, do the
-measurement:
+### Tests If Implemented
 
-```ts
-// Temporary instrumentation inside AssistantMarkdown:
+- Unclosed code fence does not crash.
+- Unclosed emphasis renders predictably.
+- Completed messages still use the existing markdown path.
+
+### Measurement Conclusion
+
+Deferred. After virtualization and memoization, historical bubbles no longer reparse or render when not visible. The remaining active streaming bubble reparses the growing string, but typical provider rates do not make this visually distracting. Revisit only if users report mid-stream layout jumps or provider deltas exceed normal rates.
+
+Suggested temporary instrumentation:
+
+```typescript
 const t = performance.now()
 useEffect(() => {
   const dt = performance.now() - t
@@ -401,73 +338,65 @@ useEffect(() => {
 })
 ```
 
-If p95 parse time exceeds one frame (~16ms) for streamed lengths, revive this
-item — install `streamdown` and swap the streaming bubble's renderer only,
-leaving completed bubbles on `react-markdown`.
+If p95 parse time exceeds one frame for streamed lengths, revive this item and swap only the streaming bubble renderer.
 
----
+## 8. Shiki Syntax Highlighting
 
-## #8 Shiki syntax highlighting
+### Current State
 
-### translated historical texttranslated historical text
-- `AssistantMarkdown` translated historical text `components.pre` slot(ChatPanel.tsx line 605-611)translated historical texttranslated historical texttranslated historical text pre translated historical text ScrollArea,**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**。
-- translated historical texttranslated historical texttranslated historical text prism / hljs / shiki。
-- `DiffPreview.tsx` translated historical texttranslated historical text TODO translated historical texttranslated historical text:"Syntax highlighting via shiki is a planned follow-up"。
+Markdown code blocks render as plain `pre` content, and `DiffPreview` already has a planned syntax-highlighting follow-up. There is no global Prism, highlight.js, or Shiki dependency.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text markdown code block translated historical text shiki translated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tailwind theme translated historical texttranslated historical text(translated historical texttranslated historical text `github-dark` + `github-light`)。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text lazy load(translated historical texttranslated historical text bundle translated historical texttranslated historical text 100+ translated historical texttranslated historical text)。
-- Unknown language fallback translated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Goal
 
-### translated historical texttranslated historical text
-translated historical texttranslated historical text `packages/dashboard/src/features/chat/CodeBlock.tsx`:
-```tsx
+- Highlight markdown code blocks with Shiki.
+- Match light and dark themes.
+- Lazy-load languages where practical.
+- Fall back to plain text for unknown languages.
+- Reuse the same path for diff previews when possible.
+
+### Interface
+
+Add `packages/dashboard/src/features/chat/CodeBlock.tsx`:
+
+```typescript
 type Props = {
   code: string
-  lang?: string   // translated historical text markdown fence translated historical text,translated historical text:'typescript'
+  lang?: string
 }
-// translated historical texttranslated historical text:translated historical texttranslated historical text import shiki/bundle/web,useEffect translated historical text highlight,translated historical texttranslated historical text HTML。
 ```
 
-translated historical text `AssistantMarkdown` translated historical text `NestedMessage` translated historical text `components.code` slot translated historical texttranslated historical texttranslated historical text inline vs block code(react-markdown translated historical text code translated historical texttranslated historical text signature translated historical text `className` translated historical text `language-xxx` translated historical texttranslated historical text block)。Block translated historical texttranslated historical text `<CodeBlock>`,inline translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+Use the markdown `code` renderer to distinguish inline code from fenced blocks via `language-*` class names. Blocks use `CodeBlock`; inline code keeps the existing style.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text `DiffPreview`**,translated historical text TODO translated historical texttranslated historical text shiki translated historical texttranslated historical texttranslated historical text(diff translated historical texttranslated historical texttranslated historical text shiki translated historical text `diff` translated historical texttranslated historical text grammar)。
+### Implementation Notes
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
-- `pnpm add shiki`(~200KB wasm,translated historical texttranslated historical text fetch)。
-- translated historical text `shiki/bundle/web` translated historical text `createHighlighter` + lazy `loadLanguage`。
-- Highlighter translated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical text**,translated historical texttranslated historical texttranslated historical text CodeBlock translated historical texttranslated historical text。translated historical text `lib/shiki.ts` translated historical text memo。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text:`useEffect` translated historical texttranslated historical text dark-mode class translated historical texttranslated historical text,translated historical texttranslated historical text highlight(translated historical texttranslated historical texttranslated historical text shiki translated historical texttranslated historical texttranslated historical texttranslated historical text `defaultColor: false` translated historical texttranslated historical text `--shiki-light` / `--shiki-dark` CSS vars)。**translated historical texttranslated historical texttranslated historical texttranslated historical text**,translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text:`loadingElement={<pre>{code}</pre>}` translated historical texttranslated historical texttranslated historical texttranslated historical text raw code。
+- Add `shiki` and use the web bundle.
+- Keep a single global highlighter instance in a helper module.
+- Prefer dual-theme CSS variables so theme switches do not require re-highlighting.
+- Show raw code while highlighter setup loads.
+- Mock Shiki in jsdom tests.
 
-### translated historical texttranslated historical text
-- translated historical texttranslated historical text `CodeBlock.test.tsx`(mock shiki):
-  - translated historical texttranslated historical texttranslated historical texttranslated historical text(typescript)translated historical texttranslated historical texttranslated historical text `<span style>` translated historical text HTML。
-  - translated historical texttranslated historical texttranslated historical texttranslated historical text fallback pre + code。
-  - translated historical texttranslated historical text unmount translated historical texttranslated historical text setState(translated historical texttranslated historical text warning)。
-- translated historical texttranslated historical text `AssistantMarkdown` snapshot:code block translated historical text CodeBlock translated historical texttranslated historical text。
+### Tests
 
-### translated historical texttranslated historical text
-- Bundle size:200KB wasm translated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical text scroll translated historical texttranslated historical text code block translated historical texttranslated historical texttranslated historical text"translated historical texttranslated historical texttranslated historical text,translated historical text**translated historical texttranslated historical texttranslated historical text**,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- SSR / test:jsdom translated historical text wasm。translated historical texttranslated historical text mock shiki module。
+- Known language renders highlighted HTML.
+- Unknown language falls back to plain code.
+- Unmount during async highlight does not set state.
+- Assistant markdown routes fenced code through `CodeBlock`.
 
-### translated historical texttranslated historical text:translated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text 7 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+### Risk
 
----
+Shiki can increase payload size. Defer it until the structural UI work is stable.
 
-## Rollout translated historical texttranslated historical texttranslated historical texttranslated historical text
+## Rollout Order
 
-| translated historical texttranslated historical text | translated historical texttranslated historical text | translated historical texttranslated historical text | translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text |
-|---|---|---|---|
-| 1 | #1 | translated historical texttranslated historical texttranslated historical text transcript | translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text ChatPanel,translated historical texttranslated historical text list translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text |
-| 2 | #3 | Sonner toast | translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical text action translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text |
-| 3 | #2 | Cmd+K palette | translated historical texttranslated historical text #1 translated historical text scrollToIndex + #3 translated historical text notify |
-| 4 | #6 | View Transitions | translated historical texttranslated historical text #2 palette translated historical text setState translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text |
-| 5 | #4 | Animated Beam | SubAgentCard translated historical texttranslated historical text,translated historical texttranslated historical text |
-| 6 | #5 | Number Ticker | translated historical texttranslated historical texttranslated historical text SubAgentCard / TasksButton translated historical texttranslated historical texttranslated historical texttranslated historical text |
-| 7 | #7 | Streamdown | translated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical text |
-| 8 | #8 | Shiki | translated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical text |
+| Order | Item | Reason |
+| --- | --- | --- |
+| 1 | Virtualized transcript | Stabilizes the central rendering structure before other changes. |
+| 2 | Sonner toast | Independent and provides feedback plumbing for later actions. |
+| 3 | Cmd/Ctrl+K palette | Benefits from transcript scroll APIs and notification plumbing. |
+| 4 | View transitions | Can wrap palette and tab state changes after command actions exist. |
+| 5 | Animated border beam | Isolated sub-agent decoration. |
+| 6 | Number ticker | Small numerical polish after sub-agent/task surfaces are stable. |
+| 7 | Streamdown | Measurement-gated and likely unnecessary. |
+| 8 | Shiki | Highest payload risk; do it last. |
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text,translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+Each item should remain independently revertible.

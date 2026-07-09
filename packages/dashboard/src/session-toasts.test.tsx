@@ -20,6 +20,7 @@ import {
   commandHead,
   formatDuration,
   useBackgroundShellToasts,
+  useInactiveSessionSummaryToasts,
   useSessionToasts,
   useSubAgentToasts,
 } from './session-toasts.js'
@@ -38,6 +39,11 @@ beforeEach(() => {
 
 function SessionToastHarness(props: Parameters<typeof useSessionToasts>[0]): React.ReactElement {
   useSessionToasts(props)
+  return <div />
+}
+
+function InactiveSummaryHarness(props: Parameters<typeof useInactiveSessionSummaryToasts>[0]): React.ReactElement {
+  useInactiveSessionSummaryToasts(props)
   return <div />
 }
 
@@ -202,6 +208,95 @@ describe('useSessionToasts', () => {
     expect(mockedNotify.error.mock.calls[0][1].description).toBe('boom')
   })
 })
+
+describe('useInactiveSessionSummaryToasts', () => {
+  it('does not toast historical terminal sessions on first observation', () => {
+    render(
+      <InactiveSummaryHarness
+        activeSessionId="a"
+        sessions={[summary('b', 'done')]}
+      />,
+    )
+
+    expect(mockedNotify.success).not.toHaveBeenCalled()
+    expect(mockedNotify.error).not.toHaveBeenCalled()
+    expect(mockedNotify.info).not.toHaveBeenCalled()
+  })
+
+  it('toasts when an inactive running session finishes', () => {
+    const { rerender } = render(
+      <InactiveSummaryHarness
+        activeSessionId="a"
+        sessions={[summary('a', 'idle'), summary('b', 'thinking', 'background task')]}
+      />,
+    )
+
+    rerender(
+      <InactiveSummaryHarness
+        activeSessionId="a"
+        sessions={[summary('a', 'idle'), summary('b', 'done', 'background task')]}
+      />,
+    )
+
+    expect(mockedNotify.success).toHaveBeenCalledTimes(1)
+    expect(mockedNotify.success.mock.calls[0][0]).toBe('Session finished — background task')
+    expect(mockedNotify.success.mock.calls[0][1].id).toBe('inactive-session-finished-b')
+  })
+
+  it('does not toast the active session summary transition', () => {
+    const { rerender } = render(
+      <InactiveSummaryHarness
+        activeSessionId="b"
+        sessions={[summary('b', 'thinking', 'active task')]}
+      />,
+    )
+
+    rerender(
+      <InactiveSummaryHarness
+        activeSessionId="b"
+        sessions={[summary('b', 'done', 'active task')]}
+      />,
+    )
+
+    expect(mockedNotify.success).not.toHaveBeenCalled()
+  })
+
+  it('toasts inactive error and approval transitions', () => {
+    const { rerender } = render(
+      <InactiveSummaryHarness
+        activeSessionId="a"
+        sessions={[summary('b', 'executing_tools', 'needs help'), summary('c', 'thinking', 'will fail')]}
+      />,
+    )
+
+    rerender(
+      <InactiveSummaryHarness
+        activeSessionId="a"
+        sessions={[summary('b', 'awaiting_approval', 'needs help'), summary('c', 'error', 'will fail')]}
+      />,
+    )
+
+    expect(mockedNotify.info).toHaveBeenCalledTimes(1)
+    expect(mockedNotify.info.mock.calls[0][0]).toBe('Approval requested — needs help')
+    expect(mockedNotify.error).toHaveBeenCalledTimes(1)
+    expect(mockedNotify.error.mock.calls[0][0]).toBe('Session failed — will fail')
+  })
+})
+
+function summary(
+  sessionId: string,
+  status: NonNullable<import('@agent-kernel/shared').SessionSummary['status']>,
+  firstUserMessage = sessionId,
+): import('@agent-kernel/shared').SessionSummary {
+  return {
+    sessionId,
+    createdAt: '2026-07-21T00:00:00.000Z',
+    lastEventAt: '2026-07-21T00:00:00.000Z',
+    eventCount: 1,
+    firstUserMessage,
+    status,
+  }
+}
 
 function SubAgentHarness({ socket }: { socket: DashboardSocket | null }): React.ReactElement {
   useSubAgentToasts(socket)

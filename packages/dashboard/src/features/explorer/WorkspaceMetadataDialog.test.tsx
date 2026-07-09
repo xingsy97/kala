@@ -13,6 +13,7 @@ const executor: AttachedExecutor = {
   runtime: 'node',
   runtimeVersion: 'v22',
   os: 'darwin',
+  workingDir: '/tmp/not-a-workspace-property',
   attachedAt: '2026-07-05T10:00:00.000Z',
 }
 
@@ -48,6 +49,22 @@ describe('WorkspaceMetadataDialog', () => {
     fireEvent.click(screen.getByTestId('workspace-metadata-rename-button'))
 
     expect(onRename).toHaveBeenCalledWith('primary dev box')
+  })
+
+  it('does not present executor workingDir as a workspace property', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ identities: [] }), { status: 200 })))
+    render(
+      <WorkspaceMetadataDialog
+        open
+        onOpenChange={() => {}}
+        workspaceId="ws-1"
+        executor={executor}
+        sessions={[session]}
+      />,
+    )
+
+    expect(screen.queryByText('Working dir')).toBeNull()
+    expect(screen.queryByText('/tmp/not-a-workspace-property')).toBeNull()
   })
 
   it('shows and revokes a saved executor identity', async () => {

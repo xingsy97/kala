@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
@@ -6,11 +6,162 @@ import { createInitialState } from '@agent-kernel/kernel'
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
 import { ChatPanel } from './ChatPanel.js'
+import { InlineStatusRow } from './InlineStatusRow.js'
 
 describe('ChatPanel', () => {
   it('renders empty state', () => {
     render(<ChatPanel messages={[]} />)
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
+  })
+
+  it('renders the thinking status row even when the transcript is empty', () => {
+    render(
+      <ChatPanel
+        messages={[]}
+        footerSlot={(
+          <InlineStatusRow
+            state={{ ...createInitialState({}), status: 'thinking' }}
+            streamingActive={false}
+          />
+        )}
+      />,
+    )
+
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+  })
+
+  it('renders the thinking row from a fallback status while session state is loading', () => {
+    render(
+      <ChatPanel
+        messages={[]}
+        footerSlot={(
+          <InlineStatusRow
+            state={null}
+            fallbackStatus="thinking"
+            streamingActive={false}
+          />
+        )}
+      />,
+    )
+
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+  })
+
+  it('keeps the thinking row visible while the transcript skeleton is loading', () => {
+    render(
+      <ChatPanel
+        loading
+        messages={[]}
+        footerSlot={(
+          <InlineStatusRow
+            state={{ ...createInitialState({}), status: 'thinking' }}
+            streamingActive={false}
+          />
+        )}
+      />,
+    )
+
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+  })
+
+  it('uses the persisted tool execution start time after reload', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-20T12:00:12.500Z'))
+    try {
+      render(
+        <InlineStatusRow
+          state={{
+            ...createInitialState({}),
+            status: 'executing_tools',
+            pendingCalls: [{ callId: 'c1', name: 'bash', input: { command: 'sleep 30' }, status: 'dispatched' }],
+          }}
+          streamingActive={false}
+          toolExecutionStartedAt={Date.parse('2026-07-20T12:00:00.000Z')}
+        />,
+      )
+
+      expect(screen.getByTestId('inline-status-tools').textContent ?? '').toContain('12.5s')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a transcript skeleton instead of the empty welcome while loading', () => {
+    render(<ChatPanel loading messages={[]} />)
+
+    expect(screen.getByTestId('transcript-loading-state')).toBeTruthy()
+    expect(screen.queryByText(/No messages yet/i)).toBeNull()
+  })
+
+  it('applies persisted chat display preferences through CSS variables', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[{ role: 'assistant', content: [{ type: 'text', text: 'hello' }] }]}
+        displayPrefs={{ fontSize: 6, contentWidth: 2, sideSpace: 0, lineHeight: 2, mathScale: 4 }}
+      />,
+    )
+    const root = container.querySelector('[style*="--ak-chat-font-size"]') as HTMLElement | null
+
+    expect(root?.style.getPropertyValue('--ak-chat-font-size')).toBe('20px')
+    expect(root?.style.getPropertyValue('--ak-chat-content-width')).toBe('84rem')
+    expect(root?.style.getPropertyValue('--ak-chat-line-height')).toBe('1.95')
+    expect(root?.style.getPropertyValue('--ak-chat-math-scale')).toBe('3em')
+  })
+
+  it('opens workspace file links from assistant Markdown', () => {
+    const onOpenWorkspaceFile = vi.fn()
+    render(
+      <ChatPanel
+        messages={[{ role: 'assistant', content: [{ type: 'text', text: 'Open [the file](src/app.tsx).' }] }]}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />,
+    )
+
+    const link = screen.getByRole('link', { name: 'View file: src/app.tsx' })
+
+    expect(link.getAttribute('data-testid')).toBe('workspace-file-link')
+    expect(link.getAttribute('title')).toBe('View file: src/app.tsx')
+    expect(link.textContent).toContain('the file')
+
+    fireEvent.click(link)
+
+    expect(onOpenWorkspaceFile).toHaveBeenCalledWith({ path: 'src/app.tsx' })
+  })
+
+  it('keeps line and column targets on workspace file links', () => {
+    const onOpenWorkspaceFile = vi.fn()
+    render(
+      <ChatPanel
+        messages={[{ role: 'assistant', content: [{ type: 'text', text: 'Open [the line](src/app.tsx:12:4).' }] }]}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />,
+    )
+
+    const link = screen.getByRole('link', { name: 'View file: src/app.tsx:12:4' })
+
+    expect(link.getAttribute('title')).toBe('View file: src/app.tsx:12:4')
+    fireEvent.click(link)
+    expect(onOpenWorkspaceFile).toHaveBeenCalledWith({ path: 'src/app.tsx', line: 12, column: 4 })
+  })
+
+  it('does not intercept external assistant Markdown links as workspace files', () => {
+    const onOpenWorkspaceFile = vi.fn()
+    render(
+      <ChatPanel
+        messages={[{ role: 'assistant', content: [{ type: 'text', text: 'Open [site](https://example.com).' }] }]}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />,
+    )
+
+    const link = screen.getByRole('link', { name: 'site' })
+
+    expect(link.getAttribute('href')).toBe('https://example.com')
+    expect(link.getAttribute('data-testid')).not.toBe('workspace-file-link')
+    expect(link.getAttribute('title')).toBeNull()
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    link.addEventListener('click', (event) => event.preventDefault(), { once: true })
+    link.dispatchEvent(click)
+    expect(onOpenWorkspaceFile).not.toHaveBeenCalled()
   })
 
   it('does not render the seed system prompt as a Tool result bubble', () => {
@@ -97,7 +248,7 @@ describe('ChatPanel', () => {
     const row = screen.getAllByTestId('virtuoso-test-item')[0]
     expect(row?.textContent).toContain('hello')
     const contentWrapper = row?.querySelector('[data-virt-index]')
-    expect(contentWrapper?.className).toContain('max-w-[68rem]')
+    expect(contentWrapper?.className).toContain('ak-chat-container')
     expect(contentWrapper?.className).toContain('mx-auto')
   })
 
@@ -277,6 +428,22 @@ describe('ChatPanel', () => {
       expect.anything(),
     )
     errorSpy.mockRestore()
+  })
+
+  it('renders assistant TeX math with KaTeX', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Inline $x^2$ and block:\n\n$$\\int_0^1 x dx$$' }],
+          },
+        ]}
+      />,
+    )
+
+    expect(container.querySelectorAll('.katex').length).toBeGreaterThanOrEqual(2)
+    expect(container.textContent ?? '').toContain('x')
   })
 
   it('leaves user text as literal (no markdown parsing)', () => {
@@ -471,6 +638,80 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('assistant-message-cancelled').textContent ?? '').toContain('Response cancelled')
   })
 
+  it('marks only the streaming assistant draft with a cursor class', () => {
+    const { container } = render(
+      <ChatPanel
+        items={[
+          {
+            kind: 'message',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'finished' }] },
+          },
+          {
+            kind: 'message',
+            streaming: true,
+            message: { role: 'assistant', content: [{ type: 'text', text: 'still generating' }] },
+          },
+        ]}
+      />,
+    )
+
+    const textBlocks = container.querySelectorAll('.ak-chat-text')
+    expect(textBlocks).toHaveLength(2)
+    expect(textBlocks[0]?.classList.contains('ak-streaming-markdown')).toBe(false)
+    expect(textBlocks[1]?.classList.contains('ak-streaming-markdown')).toBe(true)
+    expect(screen.getByTestId('streaming-cursor').parentElement?.tagName).toBe('P')
+  })
+
+  it('does not show assistant message actions while the draft is streaming', () => {
+    render(
+      <ChatPanel
+        items={[
+          {
+            kind: 'message',
+            streaming: true,
+            message: { role: 'assistant', content: [{ type: 'text', text: 'still generating' }] },
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByTestId('message-actions-start')).toBeNull()
+    expect(screen.queryByTestId('copy-message')).toBeNull()
+  })
+
+  it('places the streaming cursor inside the last visible markdown element', () => {
+    const { rerender } = render(
+      <ChatPanel
+        items={[
+          {
+            kind: 'message',
+            streaming: true,
+            message: { role: 'assistant', content: [{ type: 'text', text: '- first\n- second' }] },
+          },
+        ]}
+      />,
+    )
+
+    const listCursor = screen.getByTestId('streaming-cursor')
+    expect(screen.getAllByTestId('streaming-cursor')).toHaveLength(1)
+    expect(listCursor.parentElement?.tagName).toBe('LI')
+    expect(listCursor.parentElement?.textContent).toContain('second')
+
+    rerender(
+      <ChatPanel
+        items={[
+          {
+            kind: 'message',
+            streaming: true,
+            message: { role: 'assistant', content: [{ type: 'text', text: '```ts\nconst x = 1' }] },
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('streaming-cursor').parentElement?.tagName).toBe('CODE')
+  })
+
   it('fires onEditAndRerun with the correct seq when a user message is edited', () => {
     const onEditAndRerun = vi.fn()
     render(
@@ -496,6 +737,132 @@ describe('ChatPanel', () => {
     })
     fireEvent.click(screen.getByTestId('edit-message-submit-0'))
     expect(onEditAndRerun).toHaveBeenCalledWith(4, 'revised text')
+  })
+
+  it('renders user message copy and edit actions at the message tail', () => {
+    render(
+      <ChatPanel
+        onEditAndRerun={vi.fn()}
+        items={[
+          {
+            kind: 'message',
+            seq: 4,
+            message: { role: 'user', content: [{ type: 'text', text: 'copy me' }] },
+          },
+        ]}
+      />,
+    )
+
+    const actions = screen.getByTestId('message-actions-end')
+    expect(actions.contains(screen.getByTestId('copy-message'))).toBe(true)
+    expect(actions.contains(screen.getByTestId('edit-message-0'))).toBe(true)
+  })
+
+  it('copies message text from message actions', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    try {
+      render(
+        <ChatPanel
+          messages={[
+            { role: 'assistant', content: [{ type: 'text', text: 'assistant answer' }] },
+          ]}
+        />,
+      )
+
+      fireEvent.click(screen.getByTestId('copy-message'))
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith('assistant answer'))
+      await waitFor(() => expect(screen.getByTestId('copy-message').getAttribute('aria-label')).toBe('Copied'))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('reruns the preceding user message from assistant try again', () => {
+    const onEditAndRerun = vi.fn()
+    render(
+      <ChatPanel
+        onEditAndRerun={onEditAndRerun}
+        items={[
+          {
+            kind: 'message',
+            seq: 10,
+            message: { role: 'user', content: [{ type: 'text', text: 'original prompt' }] },
+          },
+          {
+            kind: 'message',
+            seq: 11,
+            message: { role: 'assistant', content: [{ type: 'text', text: 'assistant answer' }] },
+          },
+        ]}
+      />,
+    )
+
+    const actions = screen.getByTestId('message-actions-start')
+    expect(actions.contains(screen.getAllByTestId('copy-message')[1]!)).toBe(true)
+    fireEvent.click(screen.getByTestId('try-again-message-1'))
+    expect(onEditAndRerun).toHaveBeenCalledWith(10, 'original prompt')
+  })
+
+  it('does not show message actions beside pure tool activity cards', () => {
+    render(
+      <ChatPanel
+        onEditAndRerun={vi.fn()}
+        items={[
+          {
+            kind: 'message',
+            seq: 10,
+            message: { role: 'user', content: [{ type: 'text', text: 'run tools' }] },
+          },
+          {
+            kind: 'message',
+            seq: 11,
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'tool_call', callId: 'c1', name: 'read', input: { path: '/repo/a.ts' } },
+                { type: 'tool_call', callId: 'c2', name: 'grep', input: { pattern: 'needle' } },
+              ],
+            },
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.queryByTestId('message-actions-start')).toBeNull()
+    expect(screen.queryByTestId('try-again-message-1')).toBeNull()
+  })
+
+  it('does not show assistant message actions on mixed text and tool call messages', () => {
+    render(
+      <ChatPanel
+        onEditAndRerun={vi.fn()}
+        items={[
+          {
+            kind: 'message',
+            seq: 10,
+            message: { role: 'user', content: [{ type: 'text', text: 'inspect file' }] },
+          },
+          {
+            kind: 'message',
+            seq: 11,
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: 'I will inspect it.' },
+                { type: 'tool_call', callId: 'c1', name: 'read', input: { path: '/repo/a.ts' } },
+              ],
+            },
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('I will inspect it.')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.queryByTestId('message-actions-start')).toBeNull()
+    expect(screen.queryByTestId('try-again-message-1')).toBeNull()
   })
 
   it('flags a pending tool_call but shows no inline approve/reject buttons (they live in the composer flip)', () => {
@@ -820,13 +1187,13 @@ describe('ChatPanel', () => {
 
     render(<ChatPanel items={visibleTranscript([], timeline, '')} />)
 
-    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.getAllByText('Tool activity')).toHaveLength(2)
     expect(screen.getByText('checking next')).toBeTruthy()
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
-    expect(screen.getByTestId('tool-call-group-c4')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-c3')).toBeTruthy()
   })
 
-  it('keeps short mixed tool runs as separate compact rows', () => {
+  it('collapses short mixed tool runs into one activity block', () => {
     render(
       <ChatPanel
         messages={[
@@ -841,11 +1208,27 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.getByText('Tool activity')).toBeTruthy()
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
-    expect(screen.getByTestId('tool-call-group-c2')).toBeTruthy()
-    expect(screen.getByText('read')).toBeTruthy()
-    expect(screen.getByText('bash')).toBeTruthy()
+    expect(screen.getByText('2 ops')).toBeTruthy()
+    expect(screen.getByText(/read 1, bash 1/)).toBeTruthy()
+  })
+
+  it('collapses short mixed tool activity split across timeline items', () => {
+    const timeline: TimelineEntry[] = [
+      toolCallEntry(1, 'c1', 'grep', { pattern: 'foo', path: '/repo' }),
+      toolResultEntry(2, 'c1', true, 'hit'),
+      toolCallEntry(3, 'c2', 'read', { path: '/repo/a.ts' }),
+      toolResultEntry(4, 'c2', true, 'file'),
+    ]
+
+    render(<ChatPanel items={visibleTranscript([], timeline, '')} />)
+
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.getByText('2 ops')).toBeTruthy()
+    expect(screen.getByText(/grep 1, read 1/)).toBeTruthy()
+    expect(screen.queryByText('Tool result')).toBeNull()
   })
 
   it('renders empty state end-to-end for an ephemeral session (system prompt only, no timeline)', () => {

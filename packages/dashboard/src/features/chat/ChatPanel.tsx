@@ -9,20 +9,25 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from 'react'
 import {
   Archive,
   Ban,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronsDown,
   Code2,
+  Copy,
   FileText,
   GripVertical,
+  Image,
   Lightbulb,
   Maximize2,
   Pencil,
+  RotateCcw,
   Sparkles,
   Terminal,
   Wrench,
@@ -31,6 +36,8 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { useTranslation } from 'react-i18next'
 
 import type {
@@ -105,9 +112,37 @@ type Props = {
   /** UI-level compaction operation status rendered inline at transcript tail. */
   compactStatus?: CompactStatus
   liveToolActivityTailCount?: number
+  displayPrefs?: ChatDisplayPrefs
   onDismissCompactStatus?: () => void
   loading?: boolean
+  onOpenWorkspaceFile?: (target: WorkspaceFileTarget) => void
 }
+
+export type WorkspaceFileTarget = {
+  path: string
+  line?: number
+  column?: number
+}
+
+export type ChatDisplayPrefs = {
+  fontSize: number
+  contentWidth: number
+  sideSpace: number
+  lineHeight: number
+  mathScale?: number
+}
+
+const CHAT_FONT_SIZE_PX = [12, 13, 14, 15, 16, 18, 20] as const
+const CHAT_LINE_HEIGHT = [1.45, 1.7, 1.95] as const
+const CHAT_CONTENT_WIDTH_REM = [54, 68, 84] as const
+const CHAT_MATH_SCALE_EM = [1.25, 1.5, 2, 2.5, 3] as const
+const CHAT_SIDE_SPACE = [
+  { base: '0.75rem', sm: '1.5rem', lg: '2rem' },
+  { base: '1rem', sm: '2rem', lg: '3rem' },
+  { base: '1.25rem', sm: '3rem', lg: '5rem' },
+] as const
+
+const WorkspaceFileLinkContext = createContext<((target: WorkspaceFileTarget) => void) | null>(null)
 
 type RenderTranscriptItem = TranscriptItem | {
   kind: 'compact_feedback'
@@ -119,6 +154,11 @@ type RenderTranscriptItem = TranscriptItem | {
   lastMessageIndex: number
   seq?: number
   ts?: string
+}
+
+type MessageRerunTarget = {
+  seq: number
+  text: string
 }
 
 type OverflowReader = (callId: string) => Promise<{ content?: string; error?: string }>
@@ -168,8 +208,10 @@ export function ChatPanel({
   scrollToBottomToken,
   compactStatus,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  displayPrefs,
   onDismissCompactStatus,
   loading = false,
+  onOpenWorkspaceFile,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const fallbackItems: TranscriptItem[] = (messages ?? [])
@@ -327,10 +369,15 @@ export function ChatPanel({
         return <PendingUserMessageRow item={item} />
       }
       const currentMessageIndex = messageIndexByItem[itemIndex] ?? 0
+      const assistantRerunTarget =
+        item.message.role === 'assistant'
+          ? previousUserRerunTarget(transcriptItems, itemIndex)
+          : null
       return (
         <MessageRow
           index={currentMessageIndex}
           message={item.message}
+          streaming={item.streaming === true}
           highlighted={highlightIndex === currentMessageIndex}
           toolNameByCallId={toolNameByCallId}
           approvalByCallId={approvalByCallId}
@@ -344,6 +391,7 @@ export function ChatPanel({
           parentSessionId={parentSessionId}
           socket={socket ?? null}
           liveToolActivityTailCount={liveToolActivityTailCount}
+          assistantRerunTarget={assistantRerunTarget}
         />
       )
     },
@@ -392,14 +440,19 @@ export function ChatPanel({
     transcriptRef.current?.scrollToBottom()
     effectiveOnPinnedChange(true)
   }, [effectiveOnPinnedChange, transcriptRef])
+  const displayStyle = chatDisplayStyle(displayPrefs)
 
   return (
-    <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
-      <div className="relative flex h-full w-full min-w-0 flex-1 flex-col">
+    <WorkspaceFileLinkContext.Provider value={onOpenWorkspaceFile ?? null}>
+      <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
+      <div className="relative flex h-full w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden" style={displayStyle}>
         {loading ? (
-          <TranscriptLoadingState />
+          <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
+            <TranscriptLoadingState />
+            {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
+          </div>
         ) : isEmpty ? (
-          <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
             <EmptyState onSuggest={onSuggest} />
             {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
           </div>
@@ -420,7 +473,7 @@ export function ChatPanel({
                 <div className="pl-0 pt-4 sm:pl-10">{footerSlot}</div>
               ) : null
             }
-            itemClassName="ak-chat-item mx-auto w-full max-w-[68rem] px-3 py-2 sm:px-6 sm:py-3 lg:px-8"
+            itemClassName="ak-chat-container ak-chat-item mx-auto w-full min-w-0 overflow-x-hidden py-2 sm:py-3"
             defaultItemHeight={80}
             dataTestId="virtual-transcript"
           />
@@ -440,8 +493,43 @@ export function ChatPanel({
           </Button>
         ) : null}
       </div>
-    </OverflowReaderContext.Provider>
+      </OverflowReaderContext.Provider>
+    </WorkspaceFileLinkContext.Provider>
   )
+}
+
+function previousUserRerunTarget(items: readonly RenderTranscriptItem[], beforeIndex: number): MessageRerunTarget | null {
+  for (let i = beforeIndex - 1; i >= 0; i -= 1) {
+    const item = items[i]
+    if (!item || item.kind !== 'message') continue
+    if (item.message.role !== 'user') continue
+    if (item.seq === undefined) return null
+    const text = messagePlainText(item.message.content).trim()
+    return text.length > 0 ? { seq: item.seq, text } : null
+  }
+  return null
+}
+
+function chatDisplayStyle(displayPrefs: ChatDisplayPrefs | undefined): CSSProperties {
+  const fontSize = clampIndex(displayPrefs?.fontSize, CHAT_FONT_SIZE_PX, 3)
+  const lineHeight = clampIndex(displayPrefs?.lineHeight, CHAT_LINE_HEIGHT, 1)
+  const contentWidth = clampIndex(displayPrefs?.contentWidth, CHAT_CONTENT_WIDTH_REM, 1)
+  const mathScale = clampIndex(displayPrefs?.mathScale, CHAT_MATH_SCALE_EM, 2)
+  const sideSpace = CHAT_SIDE_SPACE[clampIndex(displayPrefs?.sideSpace, CHAT_SIDE_SPACE, 1)] ?? CHAT_SIDE_SPACE[1]
+  return {
+    '--ak-chat-font-size': `${CHAT_FONT_SIZE_PX[fontSize]}px`,
+    '--ak-chat-line-height': String(CHAT_LINE_HEIGHT[lineHeight]),
+    '--ak-chat-content-width': `${CHAT_CONTENT_WIDTH_REM[contentWidth]}rem`,
+    '--ak-chat-math-scale': `${CHAT_MATH_SCALE_EM[mathScale]}em`,
+    '--ak-chat-side-space': sideSpace.base,
+    '--ak-chat-side-space-sm': sideSpace.sm,
+    '--ak-chat-side-space-lg': sideSpace.lg,
+  } as CSSProperties
+}
+
+function clampIndex<T extends readonly unknown[]>(value: number | undefined, values: T, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(values.length - 1, Math.max(0, Math.round(value ?? fallback)))
 }
 
 function CompactFeedbackTranscriptRow({
@@ -473,8 +561,8 @@ function PendingUserMessageRow({
   const content = item.content ?? [{ type: 'text' as const, text: item.text }]
   const statusLabel = t('chat.transcript.sendingMessage')
   return (
-    <div className="group relative flex justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
-      <div className="relative max-w-[92%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
+    <div className="group relative flex min-w-0 max-w-full justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
+      <div className="relative min-w-0 max-w-[92%] overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
         <InlineTimestamp
           ts={item.createdAt}
           className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
@@ -485,6 +573,7 @@ function PendingUserMessageRow({
               key={i}
               content={c}
               role="user"
+              streaming={false}
               toolNameByCallId={new Map()}
               approvalByCallId={new Map()}
             />
@@ -552,7 +641,7 @@ function collectTranscriptToolActivity(
   }
 
   const toolNames = new Set(calls.map((call) => call.name))
-  if (calls.length < 4 || toolNames.size <= 1 || firstMessageIndex === null) return null
+  if (calls.length < 2 || toolNames.size <= 1 || firstMessageIndex === null) return null
 
   return {
     group: makeToolCallGroup(calls, resultsByCallId, true),
@@ -644,7 +733,7 @@ function GripHandle(): JSX.Element {
       className="pointer-events-none flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
       aria-hidden="true"
     >
-      <GripVertical className="h-3.5 w-3.5 text-muted-foreground/70" />
+      <GripVertical className="h-3 w-3 text-muted-foreground/60" />
     </div>
   )
 }
@@ -722,7 +811,7 @@ function useVirtualTranscriptScrollToken(
 
 function TranscriptLoadingState(): JSX.Element {
   return (
-    <div className="mx-auto flex w-full max-w-[68rem] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6 lg:px-8" data-testid="transcript-loading-state">
+    <div className="mx-auto flex w-full flex-col gap-4 py-4 sm:py-6" data-testid="transcript-loading-state">
       {Array.from({ length: 3 }).map((_, index) => (
         <div key={index} className="flex min-w-0 gap-3">
           <div className="h-7 w-7 flex-none rounded-full bg-muted" />
@@ -849,6 +938,7 @@ function CompactBoundaryRow({
 function MessageRow({
   index,
   message,
+  streaming,
   highlighted,
   toolNameByCallId,
   approvalByCallId,
@@ -862,9 +952,11 @@ function MessageRow({
   parentSessionId,
   socket,
   liveToolActivityTailCount,
+  assistantRerunTarget,
 }: {
   index: number
   message: Message
+  streaming: boolean
   highlighted: boolean
   toolNameByCallId: ReadonlyMap<string, string>
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
@@ -878,18 +970,15 @@ function MessageRow({
   parentSessionId?: string
   socket?: DashboardSocket | null
   liveToolActivityTailCount: number
+  assistantRerunTarget?: MessageRerunTarget | null
 }): JSX.Element | null {
   const { t } = useTranslation()
+  const messageText = messagePlainText(message.content)
   const editable =
     message.role === 'user' &&
     seq !== undefined &&
     typeof onEditAndRerun === 'function'
-  const initialText = editable
-    ? message.content
-        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-        .map((c) => c.text)
-        .join('\n')
-    : ''
+  const initialText = editable ? messageText : ''
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(initialText)
 
@@ -948,46 +1037,47 @@ function MessageRow({
         id={`msg-${index}`}
         data-message-index={index}
         className={cn(
-          'group relative flex justify-end gap-2',
+          'group relative flex min-w-0 max-w-full justify-end gap-2',
           highlighted ? 'rounded-2xl bg-amber-50/60 p-1 dark:bg-amber-950/20' : '',
         )}
       >
-        <div className="relative max-w-[92%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
-          <InlineTimestamp
-            ts={ts}
-            className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
-          />
-          <div className="flex min-w-0 flex-col gap-2">
-            {message.content.map((c, i) => (
-              <ContentBlock
-                key={i}
-                content={c}
-                role={message.role}
-                toolNameByCallId={toolNameByCallId}
-                approvalByCallId={approvalByCallId}
-                onApprovalDecision={onApprovalDecision}
-              />
-            ))}
+        <div className="flex min-w-0 max-w-[92%] flex-col items-end gap-1.5 sm:max-w-[85%]">
+          <div className="relative max-w-full overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+            <InlineTimestamp
+              ts={ts}
+              className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
+            />
+            <div className="flex min-w-0 flex-col gap-2">
+              {message.content.map((c, i) => (
+                <ContentBlock
+                  key={i}
+                  content={c}
+                  role={message.role}
+                  streaming={false}
+                  toolNameByCallId={toolNameByCallId}
+                  approvalByCallId={approvalByCallId}
+                  onApprovalDecision={onApprovalDecision}
+                />
+              ))}
+            </div>
           </div>
+          <MessageActions
+            align="end"
+            copyText={messageText}
+            editAction={editable ? {
+              label: t('chat.transcript.editMessage'),
+              onClick: () => {
+                setDraft(initialText)
+                setEditing(true)
+              },
+              testId: `edit-message-${index}`,
+            } : undefined}
+          />
         </div>
         {hideHeader ? (
           <div className="flex w-4 flex-none items-center">
             <GripHandle />
           </div>
-        ) : null}
-        {editable ? (
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(initialText)
-              setEditing(true)
-            }}
-            className="absolute -left-8 top-2 rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
-            title={t('chat.transcript.editRerun')}
-            data-testid={`edit-message-${index}`}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
         ) : null}
       </div>
     )
@@ -1008,6 +1098,7 @@ function MessageRow({
       : [...message.content]
 
   if (visibleContent.length === 0) return null
+  const assistantActions = assistantMessageActions(message, visibleContent)
 
   const groupedItems: GroupedContentItem[] =
     message.role === 'assistant'
@@ -1040,7 +1131,7 @@ function MessageRow({
           </div>
         )}
       </div>
-      <div className="relative min-w-0 flex-1">
+      <div className="relative min-w-0 max-w-full flex-1 overflow-hidden">
         {hideHeader ? null : (
           <div
             className={cn(
@@ -1052,7 +1143,7 @@ function MessageRow({
           </div>
         )}
         <InlineTimestamp ts={ts} className="absolute right-0 top-0 text-muted-foreground" />
-        <div className="flex min-w-0 flex-col gap-3">
+        <div className="flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
           {groupedItems.map((item, i) => {
             if (item.kind === 'tool_call_group') {
               if (item.toolName === 'agent' && parentSessionId) {
@@ -1082,27 +1173,59 @@ function MessageRow({
                 key={i}
                 content={item.content}
                 role={message.role}
+                streaming={streaming}
                 toolNameByCallId={toolNameByCallId}
                 approvalByCallId={approvalByCallId}
                 onApprovalDecision={onApprovalDecision}
               />
             )
           })}
+          {message.role === 'assistant' && !streaming && assistantActions ? (
+            <MessageActions
+              align="start"
+              copyText={assistantActions.copyText}
+              tryAgainAction={
+                !streaming && assistantRerunTarget && onEditAndRerun
+                  ? {
+                      label: t('chat.transcript.tryAgain'),
+                      onClick: () => onEditAndRerun(assistantRerunTarget.seq, assistantRerunTarget.text),
+                      testId: `try-again-message-${index}`,
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
         </div>
       </div>
     </div>
   )
 }
 
+function assistantMessageActions(
+  message: Message,
+  visibleContent: readonly MessageContent[],
+): { copyText: string } | null {
+  if (message.role !== 'assistant') return null
+  if (visibleContent.some((content) => content.type === 'tool_call' || content.type === 'tool_result')) return null
+  const text = visibleContent
+    .filter((content): content is Extract<MessageContent, { type: 'text' }> => content.type === 'text')
+    .map((content) => content.text)
+    .join('\n')
+    .trim()
+  return text.length > 0 ? { copyText: text } : null
+}
+
 function ContentBlock({
   content,
   role,
+  streaming,
   toolNameByCallId,
   approvalByCallId,
   onApprovalDecision,
 }: {
   content: MessageContent
   role: Message['role']
+  streaming?: boolean
   toolNameByCallId: ReadonlyMap<string, string>
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
@@ -1111,17 +1234,17 @@ function ContentBlock({
     if (role === 'assistant') {
       const cancelled = splitCancelledSuffix(content.text)
       if (cancelled) return <CancelledAssistantMessage text={cancelled.text} />
-      return <AssistantMarkdown text={content.text} />
+      return <AssistantMarkdown text={content.text} streaming={streaming === true} />
     }
     if (role === 'user') {
       return (
-        <div className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
+        <div className="ak-chat-text min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {content.text}
         </div>
       )
     }
     return (
-      <div className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">
+      <div className="ak-chat-text min-w-0 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere]">
         {content.text}
       </div>
     )
@@ -1145,6 +1268,118 @@ function ContentBlock({
   }
   if (content.type === 'thinking') return <ThinkingBlock content={content} />
   return <ImageBlock content={content} />
+}
+
+function MessageActions({
+  align,
+  copyText,
+  editAction,
+  tryAgainAction,
+}: {
+  align: 'start' | 'end'
+  copyText: string
+  editAction?: { label: string; onClick: () => void; testId: string }
+  tryAgainAction?: { label: string; onClick: () => void; testId: string }
+}): JSX.Element | null {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  const canCopy = copyText.trim().length > 0
+  if (!canCopy && !editAction && !tryAgainAction) return null
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-1 text-muted-foreground opacity-70 transition-opacity group-hover:opacity-100 focus-within:opacity-100',
+        align === 'end' ? 'justify-end' : 'justify-start',
+      )}
+      data-testid={`message-actions-${align}`}
+    >
+      {canCopy ? (
+        <button
+          type="button"
+          className={cn(
+            'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+            copied && 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15 hover:text-emerald-700 dark:text-emerald-400',
+          )}
+          title={copied ? t('common.copied') : t('common.copy')}
+          aria-label={copied ? t('common.copied') : t('common.copy')}
+          data-testid="copy-message"
+          onClick={() => {
+            void copyTextToClipboard(copyText).then(() => {
+              setCopied(true)
+              window.setTimeout(() => setCopied(false), 1200)
+            })
+          }}
+        >
+          {copied ? (
+            <Check className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Copy className="h-4 w-4" aria-hidden="true" />
+          )}
+        </button>
+      ) : null}
+      {editAction ? (
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          title={editAction.label}
+          aria-label={editAction.label}
+          data-testid={editAction.testId}
+          onClick={editAction.onClick}
+        >
+          <Pencil className="h-4 w-4" aria-hidden="true" />
+        </button>
+      ) : null}
+      {tryAgainAction ? (
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          title={tryAgainAction.label}
+          aria-label={tryAgainAction.label}
+          data-testid={tryAgainAction.testId}
+          onClick={tryAgainAction.onClick}
+        >
+          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+function messagePlainText(content: readonly MessageContent[]): string {
+  return content
+    .map((item) => {
+      if (item.type === 'text' || item.type === 'thinking') return item.text
+      if (item.type === 'tool_call') return `${item.name} ${formatMessageActionValue(item.input)}`.trim()
+      if (item.type === 'tool_result') return item.content
+      if (item.type === 'image') return '[image]'
+      return ''
+    })
+    .filter((text) => text.length > 0)
+    .join('\n')
+}
+
+function formatMessageActionValue(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 function splitCancelledSuffix(text: string): { text: string } | null {
@@ -1254,11 +1489,16 @@ function ThinkingBlock({
   )
 }
 
-const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: string }): JSX.Element {
+const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
+  const onOpenWorkspaceFile = useContext(WorkspaceFileLinkContext)
+  const cursorTarget = streaming ? findStreamingCursorTarget(text) : null
+  const cursorEndOffset = text.trimEnd().length
+  const cursor = <StreamingCursor />
   return (
     <div
       className={cn(
-        'min-w-0 max-w-full break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]',
+        'ak-chat-text min-w-0 max-w-full overflow-hidden break-words text-foreground [overflow-wrap:anywhere]',
+        streaming && 'ak-streaming-markdown',
         '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
         '[&_p]:my-3',
@@ -1267,32 +1507,96 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
         '[&_h3]:mb-1.5 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:font-semibold',
         '[&_h4]:mb-1.5 [&_h4]:mt-4 [&_h4]:text-sm [&_h4]:font-semibold',
         '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground',
+        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere]',
         '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg sm:[&_img]:max-w-xs',
         '[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5',
         '[&_li]:my-1 [&_li>p]:my-1',
         '[&_li_ul]:my-1 [&_li_ol]:my-1',
-        '[&_pre]:my-3 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0',
+        '[&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:bg-transparent [&_pre]:p-0',
         '[&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:text-foreground',
         '[&_hr]:my-4 [&_hr]:border-border/50',
-        '[&_table]:my-3 [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-2 [&_th]:px-2',
+        '[&_table]:my-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-2 [&_th]:px-2',
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
-          pre({ children }) {
-            return <MarkdownPre>{children}</MarkdownPre>
+          pre({ children, node: _node }) {
+            const trailingSlot = shouldPlaceStreamingCursor(cursorTarget, 'code', _node, cursorEndOffset) ? cursor : undefined
+            return <MarkdownPre trailingSlot={trailingSlot}>{children}</MarkdownPre>
           },
-          code({ inline, className, children, ...rest }: {
+          code({ inline, className, children, node: _node, ...rest }: {
             inline?: boolean
             className?: string
             children?: React.ReactNode
+            node?: MarkdownNodeWithPosition
           }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'code', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
             return (
               <code className={className} {...rest}>
-                {children}
+                {withCursor}
               </code>
+            )
+          },
+          p({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'p', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <p {...rest}>{withCursor}</p>
+          },
+          li({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'li', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <li {...rest}>{withCursor}</li>
+          },
+          h1({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h1', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <h1 {...rest}>{withCursor}</h1>
+          },
+          h2({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h2', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <h2 {...rest}>{withCursor}</h2>
+          },
+          h3({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h3', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <h3 {...rest}>{withCursor}</h3>
+          },
+          h4({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h4', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <h4 {...rest}>{withCursor}</h4>
+          },
+          td({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'td', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <td {...rest}>{withCursor}</td>
+          },
+          th({ children, node: _node, ...rest }) {
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'th', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            return <th {...rest}>{withCursor}</th>
+          },
+          a({ href, children, ...rest }) {
+            const fileTarget = href ? workspaceFileTargetFromHref(href) : null
+            if (!fileTarget || !onOpenWorkspaceFile) {
+              return <a href={href} {...rest}>{children}</a>
+            }
+            const label = reactNodeText(children).trim() || fileTarget.path
+            const Icon = workspaceFileIcon(fileTarget.path)
+            const title = fileTarget.line !== undefined
+              ? `View file: ${fileTarget.path}:${fileTarget.line}${fileTarget.column !== undefined ? `:${fileTarget.column}` : ''}`
+              : `View file: ${fileTarget.path}`
+            return (
+              <a
+                href={href}
+                {...rest}
+                className="not-prose inline-flex max-w-full items-center gap-1 rounded border border-border/70 bg-muted/50 px-1.5 py-0.5 align-baseline font-mono text-[0.85em] leading-snug text-foreground no-underline shadow-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title={title}
+                aria-label={title}
+                data-testid="workspace-file-link"
+                onClick={(event) => {
+                  event.preventDefault()
+                  onOpenWorkspaceFile(fileTarget)
+                }}
+              >
+                <Icon className="h-3 w-3 flex-none text-muted-foreground" aria-hidden="true" />
+                <span className="min-w-0 truncate">{label}</span>
+              </a>
             )
           },
         }}
@@ -1303,15 +1607,121 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
   )
 })
 
-function MarkdownPre({ children }: { children?: React.ReactNode }): JSX.Element {
+type StreamingCursorTarget = 'p' | 'li' | 'code' | 'h1' | 'h2' | 'h3' | 'h4' | 'td' | 'th'
+
+function StreamingCursor(): JSX.Element {
+  return <span className="ak-streaming-cursor" aria-hidden="true" data-testid="streaming-cursor" />
+}
+
+function appendCursor(children: React.ReactNode, cursor: JSX.Element): React.ReactNode {
+  return <>{children}{cursor}</>
+}
+
+type MarkdownNodeWithPosition = {
+  position?: {
+    start?: { offset?: number }
+    end?: { offset?: number }
+  }
+}
+
+function shouldPlaceStreamingCursor(
+  target: StreamingCursorTarget | null,
+  tag: StreamingCursorTarget,
+  node: MarkdownNodeWithPosition | undefined,
+  cursorEndOffset: number,
+): boolean {
+  if (target !== tag) return false
+  const start = node?.position?.start?.offset
+  const end = node?.position?.end?.offset
+  if (typeof start !== 'number' || typeof end !== 'number') return false
+  return start <= cursorEndOffset && cursorEndOffset <= end
+}
+
+function findStreamingCursorTarget(text: string): StreamingCursorTarget {
+  const trimmed = text.trimEnd()
+  const lastLine = trimmed.split('\n').at(-1)?.trimEnd() ?? ''
+  const tableLine = findLastMeaningfulLine(trimmed)
+
+  if (isInsideTrailingFence(trimmed)) return 'code'
+  if (/^####\s+\S/.test(lastLine)) return 'h4'
+  if (/^###\s+\S/.test(lastLine)) return 'h3'
+  if (/^##\s+\S/.test(lastLine)) return 'h2'
+  if (/^#\s+\S/.test(lastLine)) return 'h1'
+  if (/^(?:[-+*]|\d+[.)])\s+\S/.test(lastLine)) return 'li'
+  if (/^\|.*\|\s*$/.test(tableLine) && !/^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(tableLine)) {
+    return 'td'
+  }
+  return 'p'
+}
+
+function findLastMeaningfulLine(text: string): string {
+  const lines = text.split('\n')
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]?.trimEnd() ?? ''
+    if (line.trim().length > 0) return line
+  }
+  return ''
+}
+
+function isInsideTrailingFence(text: string): boolean {
+  const fenceCount = text
+    .split('\n')
+    .filter((line) => /^\s*```/.test(line) || /^\s*~~~/.test(line))
+    .length
+  return fenceCount % 2 === 1
+}
+
+function workspaceFileTargetFromHref(href: string): WorkspaceFileTarget | null {
+  const trimmed = safeDecodeUri(href).trim()
+  if (trimmed.length === 0) return null
+  if (/^(?:https?|mailto|data|blob|tel):/i.test(trimmed) || trimmed.startsWith('#')) return null
+  const fileHref = /^file:\/\//i.test(trimmed) ? trimmed.replace(/^file:\/\//i, '') : trimmed
+  const parsed = splitFileTarget(fileHref)
+  if (!parsed.path) return null
+  if (parsed.path.startsWith('/') || parsed.path.startsWith('./') || parsed.path.startsWith('../')) return parsed
+  if (!parsed.path.includes('/')) return null
+  if (/\.[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/.test(parsed.path)) return parsed
+  return null
+}
+
+function splitFileTarget(value: string): WorkspaceFileTarget {
+  const match = value.match(/^(.*?)(?::(\d+))(?::(\d+))?$/)
+  if (!match) return { path: value }
+  const path = match[1] ?? value
+  if (!/\.[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/.test(path)) return { path: value }
+  const line = Number(match[2])
+  const column = match[3] !== undefined ? Number(match[3]) : undefined
+  return {
+    path,
+    ...(Number.isInteger(line) && line > 0 ? { line } : {}),
+    ...(column !== undefined && Number.isInteger(column) && column > 0 ? { column } : {}),
+  }
+}
+
+function workspaceFileIcon(path: string): typeof FileText {
+  const ext = path.split('.').pop()?.toLowerCase()
+  if (ext && ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return Image
+  if (ext && ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'json', 'css', 'html', 'py', 'rs', 'go', 'java', 'sh', 'bash'].includes(ext)) return Code2
+  return FileText
+}
+
+function safeDecodeUri(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function MarkdownPre({ children, trailingSlot }: { children?: React.ReactNode; trailingSlot?: React.ReactNode }): JSX.Element {
   const code = Children.toArray(children).find((child) => isValidElement(child))
   if (code && isValidElement<{ className?: string; children?: React.ReactNode }>(code)) {
     const className = code.props.className
     const match = /language-(\w+)/.exec(className ?? '')
     const raw = reactNodeText(code.props.children).replace(/\n$/, '')
-    return <CodeBlock code={raw} lang={match?.[1]} />
+    return <CodeBlock code={raw} lang={match?.[1]} trailingSlot={trailingSlot} />
   }
-  return <CodeBlock code={reactNodeText(children).replace(/\n$/, '')} />
+  return <CodeBlock code={reactNodeText(children).replace(/\n$/, '')} trailingSlot={trailingSlot} />
 }
 
 function reactNodeText(node: React.ReactNode): string {
@@ -1640,7 +2050,7 @@ function ToolCallGroupBlock({
         {group.calls.length > 1 ? (
           <span
             className={cn(
-              'flex-none rounded px-1.5 py-0.5 font-mono text-[11px]',
+              'inline-flex h-5 flex-none items-center rounded px-1.5 font-mono text-[11px] leading-none',
               group.mixed
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-background/80 text-muted-foreground',
@@ -1653,7 +2063,7 @@ function ToolCallGroupBlock({
         {singleStatus ? (
           <span
             className={cn(
-              'flex-none rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider',
+              'inline-flex h-5 flex-none items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider',
               singleStatus.className,
             )}
           >
@@ -1669,7 +2079,7 @@ function ToolCallGroupBlock({
       </button>
       {showRows ? (
         <div
-          className="ak-expand-in flex min-w-0 flex-col gap-0.5 border-t border-border/40 px-3 pb-2 pt-1"
+          className="ak-expand-in flex min-w-0 max-w-full flex-col gap-0.5 overflow-hidden border-t border-border/40 px-3 pb-2 pt-1"
           data-testid={`tool-call-group-details-${group.firstCallId}`}
         >
           {rows.map((row) => {
@@ -1683,7 +2093,7 @@ function ToolCallGroupBlock({
                 <div
                   key={row.callId}
                   id={`msg-${messageIndex}-call-${row.callId}`}
-                  className="mt-1 flex min-w-0 flex-col gap-2 pl-1"
+                  className="mt-1 flex min-w-0 max-w-full flex-col gap-2 overflow-hidden pl-1"
                 >
                   <ToolCallBlock
                     call={call}
@@ -1706,7 +2116,7 @@ function ToolCallGroupBlock({
               <div
                 key={row.callId}
                 id={`msg-${messageIndex}-call-${row.callId}`}
-                className="min-w-0"
+                className="min-w-0 max-w-full overflow-hidden"
               >
                 <GroupSummaryRow
                   row={row}
@@ -1715,7 +2125,7 @@ function ToolCallGroupBlock({
                   }
                 />
                 {expanded || pending ? (
-                  <div className="ak-expand-in mt-1 flex min-w-0 flex-col gap-2 pl-5">
+                  <div className="ak-expand-in mt-1 flex min-w-0 max-w-full flex-col gap-2 overflow-hidden pl-5">
                     <ToolCallBlock
                       call={call}
                       approval={pending}
@@ -1809,13 +2219,13 @@ function summarizeToolGroupLifecycle(
 function ToolLifecycleSummaryBadges({ summary }: { summary: Partial<Record<ToolLifecycleKind, number>> }): JSX.Element {
   const kinds: readonly ToolLifecycleKind[] = ['approval', 'running', 'failed', 'succeeded', 'orphaned']
   return (
-    <span className="flex min-w-0 flex-none items-center gap-1">
+    <span className="flex min-w-0 flex-none items-center gap-1 leading-none">
       {kinds.map((kind) => {
         const count = summary[kind] ?? 0
         if (count === 0) return null
         const badge = toolLifecycleBadge(kind)
         return (
-          <span key={kind} className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider', badge.className)}>
+          <span key={kind} className={cn('inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider', badge.className)}>
             {count} {badge.label}
           </span>
         )
