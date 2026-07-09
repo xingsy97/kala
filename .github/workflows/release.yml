@@ -23,6 +23,10 @@ on:
           - dashboard
         required: false
         default: ''
+      native_targets:
+        description: 'Comma-separated native targets to build: any of linux-x64, darwin-x64, win32-x64. Empty = linux-x64 only.'
+        required: false
+        default: 'linux-x64'
 
 jobs:
   resolve:
@@ -30,6 +34,9 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       component: ${{ steps.release.outputs.component }}
+      native_targets: ${{ steps.release.outputs.native_targets }}
+      native_matrix: ${{ steps.release.outputs.native_matrix }}
+      has_native: ${{ steps.release.outputs.has_native }}
     steps:
       - name: Resolve release target
         id: release
@@ -37,9 +44,11 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
             COMPONENT="${{ inputs.component }}"
+            NATIVE_TARGETS="${{ inputs.native_targets }}"
           else
             TAG="${GITHUB_REF#refs/tags/}"
             COMPONENT=""
+            NATIVE_TARGETS=""
           fi
 
           if [ -z "$COMPONENT" ]; then
@@ -63,22 +72,43 @@ jobs:
               ;;
           esac
 
+          if [ -z "$NATIVE_TARGETS" ]; then
+            NATIVE_TARGETS="linux-x64"
+          fi
+          MATRIX_ENTRIES=""
+          for t in $(echo "$NATIVE_TARGETS" | tr ',' ' '); do
+            case "$t" in
+              linux-x64) OS="ubuntu-latest" ;;
+              darwin-x64) OS="macos-13" ;;
+              win32-x64) OS="windows-latest" ;;
+              *) echo "Unsupported native target: $t (allowed: linux-x64, darwin-x64, win32-x64)" >&2; exit 1 ;;
+            esac
+            ENTRY="{\"os\":\"$OS\",\"target\":\"$t\"}"
+            if [ -z "$MATRIX_ENTRIES" ]; then
+              MATRIX_ENTRIES="$ENTRY"
+            else
+              MATRIX_ENTRIES="$MATRIX_ENTRIES,$ENTRY"
+            fi
+          done
+          NATIVE_MATRIX="{\"include\":[$MATRIX_ENTRIES]}"
+          if [ -n "$MATRIX_ENTRIES" ]; then
+            HAS_NATIVE="true"
+          else
+            HAS_NATIVE="false"
+          fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "component=$COMPONENT" >> "$GITHUB_OUTPUT"
+          echo "native_targets=$NATIVE_TARGETS" >> "$GITHUB_OUTPUT"
+          echo "native_matrix=$NATIVE_MATRIX" >> "$GITHUB_OUTPUT"
+          echo "has_native=$HAS_NATIVE" >> "$GITHUB_OUTPUT"
 
   native-assets:
     needs: resolve
-    if: needs.resolve.outputs.component != 'dashboard'
+    if: needs.resolve.outputs.component != 'dashboard' && needs.resolve.outputs.has_native == 'true'
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x64
-          - os: macos-13
-            target: darwin-x64
-          - os: windows-latest
-            target: win32-x64
+      matrix: ${{ fromJSON(needs.resolve.outputs.native_matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -154,7 +184,7 @@ jobs:
 
   native-release:
     needs: [resolve, cjs-release, native-assets]
-    if: always() && needs.resolve.result == 'success' && needs.cjs-release.result == 'success' && needs.native-assets.result == 'success' && needs.resolve.outputs.component != 'dashboard'
+    if: always() && needs.resolve.result == 'success' && needs.cjs-release.result == 'success' && needs.native-assets.result == 'success' && needs.resolve.outputs.component != 'dashboard' && needs.resolve.outputs.has_native == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -180,6 +210,10 @@ jobs:
           pattern: native-*
           path: release
           merge-multiple: true
+      - name: Restore executable bit on downloaded assets
+        run: |
+          find release -maxdepth 1 -type f \( -name 'agent-kernel-*' -o -name '*.cjs' -o -name '*.sh' \) -print0 \
+            | xargs -0 -r chmod +x
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --finalize-only
       - run: pnpm run verify:release-assets
       - name: Upload native assets and refreshed metadata

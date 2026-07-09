@@ -1,0 +1,49 @@
+const STORAGE_KEY = 'agent-kernel:host-endpoint'
+
+export type HostEndpointSource = 'query' | 'settings' | 'build' | 'default'
+
+export interface ResolvedHostEndpoint {
+  url: string
+  source: HostEndpointSource
+}
+
+function normalize(input: string): string {
+  const trimmed = input.trim().replace(/\/+$/, '')
+  return trimmed
+}
+
+export function resolveHostEndpoint(): ResolvedHostEndpoint {
+  if (typeof window === 'undefined') {
+    return { url: '', source: 'default' }
+  }
+  const query = new URLSearchParams(window.location.search).get('host')
+  if (query) return { url: normalize(query), source: 'query' }
+  try {
+    const stored = window.localStorage?.getItem(STORAGE_KEY)
+    if (stored) return { url: normalize(stored), source: 'settings' }
+  } catch {}
+  const buildTime = (import.meta.env?.VITE_AGENT_KERNEL_HOST as string | undefined)?.trim()
+  if (buildTime) return { url: normalize(buildTime), source: 'build' }
+  return { url: window.location.origin, source: 'default' }
+}
+
+export function getStoredHostEndpoint(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage?.getItem(STORAGE_KEY) ?? null
+  } catch {
+    return null
+  }
+}
+
+export function setStoredHostEndpoint(url: string | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (url === null || url.trim() === '') {
+      window.localStorage.removeItem(STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(STORAGE_KEY, normalize(url))
+    }
+    window.dispatchEvent(new CustomEvent('agent-kernel:host-endpoint-changed'))
+  } catch {}
+}

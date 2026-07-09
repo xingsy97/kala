@@ -314,6 +314,7 @@ export const resources = {
         sectionsLabel: 'Settings sections',
         sections: {
           runtime: { label: 'Runtime', hint: 'Host paths and sessions' },
+          connection: { label: 'Connection', hint: 'Host endpoint override' },
           models: { label: 'Models', hint: 'Providers and default' },
           security: { label: 'Security', hint: 'Login and executors' },
           approvals: { label: 'Approvals', hint: 'Per-session, not global' },
@@ -1786,6 +1787,7 @@ export const resources = {
         sectionsLabel: '设置分区',
         sections: {
           runtime: { label: '运行时', hint: 'Host 路径和会话' },
+          connection: { label: '连接', hint: 'Host endpoint 覆盖' },
           models: { label: '模型', hint: 'Provider 和默认值' },
           security: { label: '安全', hint: '登录和 executor' },
           approvals: { label: '审批', hint: '按会话控制，非全局' },

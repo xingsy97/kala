@@ -78,6 +78,7 @@ import {
   useSession,
 } from './session.js'
 import { backgroundTerminalTasks } from './background-terminal.js'
+import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.js'
 import { cn } from './lib/utils.js'
 import { withViewTransition } from './lib/viewTransition.js'
 import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
@@ -212,8 +213,19 @@ export function App(): JSX.Element {
     }
   }, [config])
 
+  const [hostEndpoint, setHostEndpoint] = useState<ResolvedHostEndpoint>(() => resolveHostEndpoint())
+  useEffect(() => {
+    const refresh = () => setHostEndpoint(resolveHostEndpoint())
+    window.addEventListener('agent-kernel:host-endpoint-changed', refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener('agent-kernel:host-endpoint-changed', refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [])
+
   const session = useSession({
-    host: window.location.origin,
+    host: hostEndpoint.url,
     sessionId: config.sessionId,
     ...(config.token !== undefined ? { token: config.token } : {}),
     onForked: (p) => {
