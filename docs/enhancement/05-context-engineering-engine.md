@@ -116,8 +116,11 @@ and `Compaction Summary`.
 - Tests that tool-call/tool-result pairs are not split incorrectly.
 - Implemented tests for structured memory tool contribution in assembly
   artifacts.
+- Implemented headless browser coverage in `scripts/verify-dashboard-debugger.mjs`
+  for Message Assembler contribution proportions, context segment selection,
+  tool-registry visibility, API Call request/response separation, API body
+  redaction, and the absence of duplicated API body rendering in the assembler.
 - Tests that compaction summaries preserve required fields.
-- Browser tests for token breakdown and no duplicate API body rendering.
 
 ## Non-Goals
 

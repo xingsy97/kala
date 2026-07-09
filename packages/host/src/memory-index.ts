@@ -8,6 +8,7 @@ export type MemoryIndexEntry = {
   key: string
   path: string
   bytes: number
+  status: 'active' | 'tombstoned'
   name?: string
   description?: string
   type?: string
@@ -15,6 +16,8 @@ export type MemoryIndexEntry = {
   confidence?: number
   generatedAt?: string
   sessionId?: string
+  deletedAt?: string
+  archivedPath?: string
 }
 
 export type MemoryIndex = {
@@ -72,6 +75,7 @@ async function readMemoryDir(
         key: file.replace(/\.md$/, ''),
         path,
         bytes: Buffer.byteLength(content, 'utf8'),
+        status: 'active',
         ...(frontmatter.get('name') ? { name: frontmatter.get('name') } : {}),
         ...(frontmatter.get('description') ? { description: frontmatter.get('description') } : {}),
         ...(frontmatter.get('type') ? { type: frontmatter.get('type') } : {}),
@@ -79,6 +83,43 @@ async function readMemoryDir(
         ...(Number.isFinite(confidence) ? { confidence } : {}),
         ...(frontmatter.get('generatedAt') ? { generatedAt: frontmatter.get('generatedAt') } : {}),
         ...(frontmatter.get('sessionId') ? { sessionId: frontmatter.get('sessionId') } : {}),
+      })
+    } catch (err) {
+      warnings.push(`${path}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  out.push(...await readTombstoneDir(scope, join(dir, '.tombstones'), warnings))
+  return out
+}
+
+async function readTombstoneDir(
+  scope: MemoryIndexEntry['scope'],
+  dir: string,
+  warnings: string[],
+): Promise<MemoryIndexEntry[]> {
+  if (!existsSync(dir)) return []
+  const files = (await readdir(dir)).filter((file) => file.endsWith('.json')).sort()
+  const out: MemoryIndexEntry[] = []
+  for (const file of files) {
+    const path = join(dir, file)
+    try {
+      const content = await readFile(path, 'utf8')
+      const body = JSON.parse(content) as {
+        key?: unknown
+        deletedAt?: unknown
+        archivedPath?: unknown
+      }
+      if (typeof body.key !== 'string' || body.key.length === 0) {
+        throw new Error('tombstone key is missing')
+      }
+      out.push({
+        scope,
+        key: body.key,
+        path,
+        bytes: Buffer.byteLength(content, 'utf8'),
+        status: 'tombstoned',
+        ...(typeof body.deletedAt === 'string' ? { deletedAt: body.deletedAt } : {}),
+        ...(typeof body.archivedPath === 'string' ? { archivedPath: body.archivedPath } : {}),
       })
     } catch (err) {
       warnings.push(`${path}: ${err instanceof Error ? err.message : String(err)}`)

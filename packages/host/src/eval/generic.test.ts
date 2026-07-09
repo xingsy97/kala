@@ -98,6 +98,12 @@ describe('generic eval and profile runners', () => {
       event: { kind: 'llm_response', message: { role: 'assistant', content: [] } },
       effects: [{ kind: 'call_tool', callId: 'c1', name: 'read', input: {} }],
       model: 'gpt-test',
+      llmTrace: {
+        provider: 'openai',
+        model: 'gpt-test',
+        request: { url: 'https://api.openai.com/v1/chat/completions', headers: {}, body: {} },
+        response: { status: 200, metrics: { durationMs: 2400, timeToFirstChunkMs: 320 } },
+      },
       usage: { inputTokens: 1000, outputTokens: 1000, cacheCreationTokens: 0, cacheReadTokens: 0 },
     })
     await writeFile(pricingPath, JSON.stringify({
@@ -114,7 +120,10 @@ describe('generic eval and profile runners', () => {
 
     expect(result.profile.llmCalls).toBe(1)
     expect(result.profile.toolCalls).toBe(1)
-    expect(result.profile.llmTraceMissingCalls).toBe(1)
+    expect(result.profile.llmTraceMissingCalls).toBe(0)
+    expect(result.profile.llmLatencyCalls).toBe(1)
+    expect(result.profile.averageLlmDurationMs).toBe(2400)
+    expect(result.profile.averageTimeToFirstChunkMs).toBe(320)
     expect(result.profile.estimatedCostUsd).toBe(0.003)
   })
 
