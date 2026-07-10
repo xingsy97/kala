@@ -28,6 +28,7 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
 
@@ -44,6 +45,7 @@ type Props = {
 }
 
 export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | null {
+  const { t } = useTranslation()
   const [current, setCurrent] = useState(0)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const approveBtnRef = useRef<HTMLButtonElement>(null)
@@ -133,21 +135,21 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
       )}
       data-testid="approval-card"
       role="dialog"
-      aria-label="Tool approval required"
+      aria-label={t('chat.approval.requiredAria')}
       onKeyDown={onKey}
       tabIndex={-1}
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-amber-200/70 px-3 py-2 dark:border-amber-500/30">
         <TriangleAlert className="h-4 w-4 flex-none text-amber-600 dark:text-amber-400" />
         <span className="text-xs font-semibold uppercase tracking-wide">
-          Approval required
+          {t('chat.approval.required')}
         </span>
         {total > 1 ? (
           <span
             className="ml-1 rounded-full bg-amber-200/60 px-2 py-0.5 text-[10px] font-medium tabular-nums text-amber-900 dark:bg-amber-500/20 dark:text-amber-100"
             data-testid="approval-card-index"
           >
-            {current + 1} of {total}
+            {t('chat.approval.index', { current: current + 1, total })}
           </span>
         ) : null}
         <span className="flex-1" />
@@ -160,7 +162,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               data-testid="approval-reject-all"
               className="h-6 px-2 text-[11px] text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20"
             >
-              Reject all
+              {t('chat.approval.rejectAll')}
             </Button>
             <Button
               size="sm"
@@ -169,7 +171,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               data-testid="approval-approve-all"
               className="h-6 px-2 text-[11px] text-emerald-800 hover:bg-emerald-200/60 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
             >
-              Approve all
+              {t('chat.approval.approveAll')}
             </Button>
           </>
         ) : null}
@@ -190,7 +192,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
             </span>
           ) : (
             <span className="text-[12px] italic text-amber-800/70 dark:text-amber-200/70">
-              (no arguments)
+              {t('chat.approval.noArguments')}
             </span>
           )}
           <button
@@ -203,12 +205,12 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
             {detailsOpen ? (
               <>
                 <ChevronUp className="h-3 w-3" />
-                Hide details
+                {t('chat.approval.hideDetails')}
               </>
             ) : (
               <>
                 <ChevronDown className="h-3 w-3" />
-                View details
+                {t('chat.approval.viewDetails')}
               </>
             )}
           </button>
@@ -236,11 +238,11 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               variant="ghost"
               onClick={goPrev}
               data-testid="approval-prev"
-              aria-label="Previous approval"
+              aria-label={t('chat.approval.previous')}
               className="h-8 flex-none px-2 text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20"
             >
               <ChevronLeft className="h-4 w-4" />
-              Prev
+              {t('chat.approval.prev')}
             </Button>
           ) : null}
           <span className="flex-1" />
@@ -252,7 +254,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
             className="h-8 flex-none border-amber-300 px-3 text-amber-900 hover:bg-amber-200/70 dark:border-amber-500/40 dark:text-amber-100 dark:hover:bg-amber-500/20"
           >
             <X className="mr-1 h-4 w-4" />
-            Reject
+            {t('chat.approval.reject')}
           </Button>
           <Button
             ref={approveBtnRef}
@@ -262,7 +264,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
             className="h-8 flex-none bg-emerald-600 px-4 text-white shadow hover:bg-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-500/60 dark:bg-emerald-600 dark:hover:bg-emerald-500"
           >
             <Check className="mr-1 h-4 w-4" />
-            Approve
+            {t('chat.approval.approve')}
           </Button>
           {total > 1 ? (
             <Button
@@ -270,17 +272,17 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
               variant="ghost"
               onClick={goNext}
               data-testid="approval-next"
-              aria-label="Next approval"
+              aria-label={t('chat.approval.nextAria')}
               className="h-8 flex-none px-2 text-amber-800 hover:bg-amber-200/60 dark:text-amber-200 dark:hover:bg-amber-500/20"
             >
-              Next
+              {t('chat.approval.next')}
               <ChevronRight className="h-4 w-4" />
             </Button>
           ) : null}
         </div>
 
         <p className="text-[10px] text-amber-800/70 dark:text-amber-200/60">
-          Enter · approve · Esc · reject{total > 1 ? ' · ← / → · switch' : ''}
+          {t('chat.approval.shortcuts', { switchHint: total > 1 ? t('chat.approval.switchHint') : '' })}
         </p>
       </div>
     </div>

@@ -3,6 +3,14 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
 const HOST_URL = process.env.HOST_URL ?? 'http://localhost:3000'
+const HOST_HTTP_ROUTES = [
+  '/models',
+  '/settings',
+  '/artifacts',
+  '/eval',
+  '/enhancement',
+  '/router',
+] as const
 
 export default defineConfig({
   plugins: [react()],
@@ -21,10 +29,15 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
-      '/models': {
-        target: HOST_URL,
-        changeOrigin: true,
-      },
+      ...Object.fromEntries(
+        HOST_HTTP_ROUTES.map((route) => [
+          route,
+          {
+            target: HOST_URL,
+            changeOrigin: true,
+          },
+        ]),
+      ),
     },
   },
   test: {

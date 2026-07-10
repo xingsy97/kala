@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AttachedExecutor } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -30,6 +31,7 @@ export function ChangeCwdDialog({
   onSave,
   onOpenChange,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [cwd, setCwd] = useState(currentCwd)
 
   useEffect(() => {
@@ -52,14 +54,14 @@ export function ChangeCwdDialog({
         data-testid="change-cwd-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle>Change session cwd</DialogTitle>
+          <DialogTitle>{t('dialogs.changeCwd')}</DialogTitle>
           <DialogDescription>
-            Tool calls for this session will run from the selected directory after the host accepts it.
+            {t('dialogs.changeCwdDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
           <aside className="min-h-0 border-b border-border/50 bg-muted md:border-b-0 md:border-r">
-            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">Workspace</div>
+            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">{t('dialogs.workspace')}</div>
             <div className="px-2 pb-2">
               {workspace ? (
                 <div
@@ -75,11 +77,11 @@ export function ChangeCwdDialog({
                 </div>
               ) : (
                 <div className="rounded border border-dashed border-border/60 px-3 py-3 text-xs text-muted-foreground">
-                  Workspace offline — start its executor to browse directories.
+                  {t('dialogs.workspaceOfflineBrowse')}
                 </div>
               )}
               <p className="mt-3 px-1 text-[11px] text-muted-foreground">
-                A session stays in its workspace. To use another workspace, start a new session.
+                {t('dialogs.workspaceSticky')}
               </p>
             </div>
           </aside>
@@ -88,7 +90,7 @@ export function ChangeCwdDialog({
               className="border-b border-border/50 px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground"
               htmlFor="change-cwd-input"
             >
-              Working directory
+              {t('dialogs.workingDirectory')}
             </label>
             <DirectoryPicker
               socket={socket}
@@ -107,14 +109,14 @@ export function ChangeCwdDialog({
             onClick={() => onOpenChange(false)}
             data-testid="change-cwd-cancel"
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={submit}
             disabled={!dirty}
             data-testid="cwd-save-button"
           >
-            Save cwd
+            {t('dialogs.saveCwd')}
           </Button>
         </DialogFooter>
       </DialogContent>

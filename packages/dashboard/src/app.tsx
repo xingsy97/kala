@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, BarChart3, Boxes, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 
 import type {
@@ -45,6 +46,7 @@ import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import { ArtifactExplorerDialog } from './features/artifacts/ArtifactExplorerDialog.js'
+import { LanguageSwitcher } from './features/i18n/LanguageSwitcher.js'
 import {
   cancelSession,
   clearSession,
@@ -139,6 +141,7 @@ function useMinWidth(px: number): boolean {
 }
 
 export function App(): JSX.Element {
+  const { t } = useTranslation()
   const [config, setConfig] = useState(() => readInitialConfig())
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(true)
@@ -151,6 +154,7 @@ export function App(): JSX.Element {
   const [explorerDrawerOpen, setExplorerDrawerOpen] = useState(false)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pipelineGuideOpen, setPipelineGuideOpen] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
   const [artifactInitialMode, setArtifactInitialMode] = useState<'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops'>('artifacts')
   const [metadataOpen, setMetadataOpen] = useState(false)
@@ -255,7 +259,7 @@ export function App(): JSX.Element {
     const timer = window.setTimeout(() => {
       setCompactStatus({
         kind: 'error',
-        message: 'compact did not finish after the host timeout window',
+        message: t('app.compactTimeout'),
       })
     }, COMPACT_WATCHDOG_MS)
     return () => window.clearTimeout(timer)
@@ -296,12 +300,12 @@ export function App(): JSX.Element {
 
   const runCompactNow = (): void => {
     if (!hasCompactableContent(session.state)) {
-      setCompactStatus({ kind: 'empty', message: 'send a message before compacting context' })
+      setCompactStatus({ kind: 'empty', message: t('app.compactEmpty') })
       scheduleCompactIdle(6000)
       return
     }
     if (session.state && !isResting(session.state.status)) {
-      setCompactStatus({ kind: 'error', message: 'wait for the current turn to finish before compacting' })
+      setCompactStatus({ kind: 'error', message: t('app.compactBusy') })
       scheduleCompactIdle(6000)
       return
     }
@@ -334,16 +338,20 @@ export function App(): JSX.Element {
         window.clearTimeout(consolidateToastTimer.current)
       }
       if (result.error) {
-        setConsolidateToast({ kind: 'error', message: `Consolidate memory failed: ${result.error}` })
+        setConsolidateToast({ kind: 'error', message: t('app.consolidateFailed', { error: result.error }) })
       } else if (result.saved.length > 0) {
         setConsolidateToast({
           kind: 'success',
-          message: `Saved ${result.saved.length} memor${result.saved.length === 1 ? 'y' : 'ies'}: ${result.saved.join(', ')}`,
+          message: t('app.savedMemories', {
+            count: result.saved.length,
+            label: t(result.saved.length === 1 ? 'app.memory_one' : 'app.memory_other'),
+            items: result.saved.join(', '),
+          }),
         })
       } else {
         setConsolidateToast({
           kind: 'info',
-          message: result.reason ?? 'Nothing worth saving',
+          message: result.reason ?? t('app.nothingWorthSaving'),
         })
       }
       consolidateToastTimer.current = window.setTimeout(() => {
@@ -380,7 +388,7 @@ export function App(): JSX.Element {
     if (!pendingWorkspacePick) return
     const { sessionId } = pendingWorkspacePick
     if (!session.socket) {
-      setWorkspacePickError('dashboard socket is not connected')
+      setWorkspacePickError(t('app.socketNotConnected'))
       return
     }
     setWorkspacePickSubmitting(true)
@@ -482,7 +490,7 @@ export function App(): JSX.Element {
         ? firstMsg.length > 40
           ? `${firstMsg.slice(0, 40)}…`
           : firstMsg
-        : 'new session'
+        : t('app.newSession')
   const chatMessages = visibleMessages(
     session.state?.messages ?? [],
     session.timeline,
@@ -563,81 +571,81 @@ export function App(): JSX.Element {
     cmds.push(
       {
         id: 'session.new',
-        group: 'Session',
-        label: 'New session',
-        hint: 'Create a session in an attached workspace.',
+        group: t('commandPalette.groups.session'),
+        label: t('commandPalette.commands.newSession'),
+        hint: t('commandPalette.commands.newSessionHint'),
         icon: Plus,
         keywords: ['create', 'start'],
         disabled: control.executors.length === 0,
-        disabledReason: 'No workspace online',
+        disabledReason: t('commandPalette.disabled.noWorkspaceOnline'),
         run: () => newSession(),
       },
       {
         id: 'session.info',
-        group: 'Session',
-        label: 'Session info',
-        hint: 'Open metadata for the selected session.',
+        group: t('commandPalette.groups.session'),
+        label: t('commandPalette.commands.sessionInfo'),
+        hint: t('commandPalette.commands.sessionInfoHint'),
         icon: Info,
         keywords: ['metadata', 'details'],
         disabled: !hasSelectedSession,
-        disabledReason: 'No session selected',
+        disabledReason: t('commandPalette.disabled.noSessionSelected'),
         run: () => setMetadataOpen(true),
       },
       {
         id: 'session.change-cwd',
-        group: 'Session',
-        label: 'Change cwd',
-        hint: 'Change the current workspace directory.',
+        group: t('commandPalette.groups.session'),
+        label: t('commandPalette.commands.changeCwd'),
+        hint: t('commandPalette.commands.changeCwdHint'),
         icon: FolderOpen,
         keywords: ['directory', 'folder'],
         disabled: !hasSelectedSession || !sessionWorkspaceOnline,
-        disabledReason: !hasSelectedSession ? 'No session selected' : 'Workspace is offline',
+        disabledReason: !hasSelectedSession ? t('commandPalette.disabled.noSessionSelected') : t('commandPalette.disabled.workspaceOffline'),
         run: openCwdDialog,
       },
       {
         id: 'session.compact',
-        group: 'Session',
-        label: 'Compact context',
-        hint: 'Summarise older transcript context.',
+        group: t('commandPalette.groups.session'),
+        label: t('commandPalette.commands.compactContext'),
+        hint: t('commandPalette.commands.compactContextHint'),
         icon: Archive,
         keywords: ['summarize', 'shrink'],
         disabled: !canRun || !hasCompactableContent(session.state),
-        disabledReason: !canRun ? 'No active session' : 'Nothing to compact yet',
+        disabledReason: !canRun ? t('commandPalette.disabled.noActiveSession') : t('commandPalette.disabled.nothingToCompact'),
         run: runCompactNow,
       },
       {
         id: 'session.consolidate-memory',
-        group: 'Session',
-        label: 'Consolidate memory',
-        hint: 'Merge durable memory notes through the memory flow.',
+        group: t('commandPalette.groups.session'),
+        label: t('commandPalette.commands.consolidateMemory'),
+        hint: t('commandPalette.commands.consolidateMemoryHint'),
         icon: ListChecks,
         keywords: ['memory'],
         disabled: !canRun,
-        disabledReason: 'No active session',
+        disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => runConsolidateMemory(),
       },
       {
         id: 'session.cancel',
-        group: 'Session',
-        label: 'Stop current turn',
-        hint: 'Ask the host to cancel the active run.',
+        group: t('commandPalette.groups.session'),
+        label: t('commandPalette.commands.stopCurrentTurn'),
+        hint: t('commandPalette.commands.stopCurrentTurnHint'),
         icon: Square,
         keywords: ['stop', 'abort'],
         disabled: !canRun,
-        disabledReason: 'No active session',
+        disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => {
           if (socket) cancelSession(socket, config.sessionId)
         },
       },
       {
         id: 'session.clear',
-        group: 'Session',
-        label: 'Clear session',
-        hint: 'Reset the transcript and runtime state for this session.',
+        group: t('commandPalette.groups.session'),
+        label: t('commandPalette.commands.clearSession'),
+        hint: t('commandPalette.commands.clearSessionHint'),
         icon: Eraser,
         keywords: ['reset'],
         disabled: !canRun,
-        disabledReason: 'No active session',
+        disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => {
           if (socket) clearSession(socket, config.sessionId)
         },
@@ -646,9 +654,9 @@ export function App(): JSX.Element {
 
     cmds.push({
       id: 'workspace.connect',
-      group: 'Workspace',
-      label: 'Connect workspace…',
-      hint: 'Attach an executor to a workspace directory.',
+      group: t('commandPalette.groups.workspace'),
+      label: t('commandPalette.commands.connectWorkspace'),
+      hint: t('commandPalette.commands.connectWorkspaceHint'),
       icon: FolderOpen,
       keywords: ['attach', 'executor'],
       run: () => setConnectWorkspaceOpen(true),
@@ -657,65 +665,65 @@ export function App(): JSX.Element {
     cmds.push(
       {
         id: 'view.settings',
-        group: 'View',
-        label: 'Open settings',
-        hint: 'Configure models and dashboard settings.',
+        group: t('commandPalette.groups.view'),
+        label: t('commandPalette.commands.openSettings'),
+        hint: t('commandPalette.commands.openSettingsHint'),
         icon: Settings,
         keywords: ['preferences', 'config'],
         run: () => setSettingsOpen(true),
       },
       {
         id: 'view.eval',
-        group: 'View',
-        label: 'Open eval dashboard',
-        hint: 'Inspect benchmark runs, trial evidence, and comparisons.',
+        group: t('commandPalette.groups.view'),
+        label: t('commandPalette.commands.openEval'),
+        hint: t('commandPalette.commands.openEvalHint'),
         icon: BarChart3,
         keywords: ['swebench', 'benchmark', 'comparison', 'score'],
         run: () => openArtifacts('eval'),
       },
       {
         id: 'view.artifacts',
-        group: 'View',
-        label: 'Open artifacts',
-        hint: 'Inspect host artifact manifests and run outputs.',
+        group: t('commandPalette.groups.view'),
+        label: t('commandPalette.commands.openArtifacts'),
+        hint: t('commandPalette.commands.openArtifactsHint'),
         icon: Boxes,
         keywords: ['manifest', 'trace', 'eval'],
         run: () => openArtifacts('artifacts'),
       },
       {
         id: 'view.ops-artifacts',
-        group: 'View',
-        label: 'Open ops artifacts',
-        hint: 'Inspect reliability, rollout, trace, router, and sub-agent artifacts.',
+        group: t('commandPalette.groups.view'),
+        label: t('commandPalette.commands.openOps'),
+        hint: t('commandPalette.commands.openOpsHint'),
         icon: Workflow,
         keywords: ['reliability', 'rollout', 'trace', 'router', 'subagent'],
         run: () => openArtifacts('ops'),
       },
       {
         id: 'view.toggle-theme',
-        group: 'View',
-        label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
-        hint: 'Toggle dashboard color scheme.',
+        group: t('commandPalette.groups.view'),
+        label: theme === 'dark' ? t('commandPalette.commands.switchLight') : t('commandPalette.commands.switchDark'),
+        hint: t('commandPalette.commands.toggleThemeHint'),
         icon: theme === 'dark' ? Sun : Moon,
         keywords: ['dark', 'light', 'appearance'],
         run: () => toggleTheme(),
       },
       {
         id: 'view.toggle-inspector',
-        group: 'View',
-        label: inspectorOpen ? 'Hide inspector' : 'Show inspector',
-        hint: 'Toggle the debugger side panel.',
+        group: t('commandPalette.groups.view'),
+        label: inspectorOpen ? t('commandPalette.commands.hideInspector') : t('commandPalette.commands.showInspector'),
+        hint: t('commandPalette.commands.toggleInspectorHint'),
         icon: inspectorOpen ? PanelRightClose : PanelRight,
         keywords: ['debug', 'panel'],
         disabled: !wideLayout || !hasSelectedSession,
-        disabledReason: !wideLayout ? 'Inspector is only available on wide layouts' : 'No session selected',
+        disabledReason: !wideLayout ? t('commandPalette.disabled.inspectorWideOnly') : t('commandPalette.disabled.noSessionSelected'),
         run: () => setInspectorOpen((value) => !value),
       },
       {
         id: 'view.open-explorer',
-        group: 'View',
-        label: 'Open explorer',
-        hint: wideLayout ? 'Explorer is already visible.' : 'Open the workspace/session drawer.',
+        group: t('commandPalette.groups.view'),
+        label: t('commandPalette.commands.openExplorer'),
+        hint: wideLayout ? t('commandPalette.commands.explorerAlreadyVisible') : t('commandPalette.commands.openExplorerHint'),
         icon: Menu,
         keywords: ['sidebar', 'drawer'],
         run: () => setExplorerDrawerOpen(true),
@@ -725,13 +733,13 @@ export function App(): JSX.Element {
     for (const mode of APPROVAL_MODES) {
       cmds.push({
         id: `runtime.approval-${mode.value}`,
-        group: 'Runtime',
-        label: `Approval: ${mode.label}`,
+        group: t('commandPalette.groups.runtime'),
+        label: t('commandPalette.commands.approval', { label: mode.label }),
         hint: mode.hint,
         icon: ShieldCheck,
         keywords: ['approval', 'safety', mode.value],
         disabled: !canRun,
-        disabledReason: 'No active session',
+        disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => {
           if (socket) setSessionApprovalMode(socket, config.sessionId, mode.value)
         },
@@ -741,13 +749,13 @@ export function App(): JSX.Element {
     for (const modelInfo of models) {
       cmds.push({
         id: `runtime.model-${modelInfo.id}`,
-        group: 'Runtime',
-        label: `Model: ${modelInfo.label ?? modelInfo.id}`,
-        hint: `Use ${modelInfo.id} for the active session.`,
+        group: t('commandPalette.groups.runtime'),
+        label: t('commandPalette.commands.model', { label: modelInfo.label ?? modelInfo.id }),
+        hint: t('commandPalette.commands.modelHint', { model: modelInfo.id }),
         icon: Sparkles,
         keywords: ['model', 'switch', modelInfo.id],
         disabled: !canRun,
-        disabledReason: 'No active session',
+        disabledReason: t('commandPalette.disabled.noActiveSession'),
         run: () => onModelChange(modelInfo.id),
       })
     }
@@ -765,6 +773,7 @@ export function App(): JSX.Element {
     session.socket,
     session.state,
     sessionWorkspaceOnline,
+    t,
     theme,
     toggleTheme,
     wideLayout,
@@ -927,6 +936,7 @@ export function App(): JSX.Element {
               onOpenEval={() => openArtifacts('eval')}
               onOpenOps={() => openArtifacts('ops')}
               onOpenArtifacts={() => openArtifacts('artifacts')}
+              onOpenPipelineGuide={() => setPipelineGuideOpen(true)}
               onOpenSettings={() => setSettingsOpen(true)}
               onToggleInspector={() => setInspectorOpen((v) => !v)}
               inspectorOpen={wideLayout && inspectorOpen}
@@ -1196,8 +1206,8 @@ export function App(): JSX.Element {
           data-testid="explorer-drawer"
         >
           <DialogHeader className="sr-only">
-            <DialogTitle>Explorer</DialogTitle>
-            <DialogDescription>Workspace and session navigation</DialogDescription>
+            <DialogTitle>{t('common.explorer')}</DialogTitle>
+            <DialogDescription>{t('app.explorerDescription')}</DialogDescription>
           </DialogHeader>
           <Explorer
             executors={control.executors}
@@ -1238,6 +1248,7 @@ export function App(): JSX.Element {
         onOpenChange={setCwdDialogOpen}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
+      <PipelineGuideDialog open={pipelineGuideOpen} onOpenChange={setPipelineGuideOpen} />
       <ArtifactExplorerDialog
         open={artifactsOpen}
         initialMode={artifactInitialMode}
@@ -1357,6 +1368,7 @@ function NoSessionArea({
   onNewSession(): void
   hasSessions: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div
       className="flex-1 min-h-0 flex items-center justify-center bg-background"
@@ -1367,18 +1379,141 @@ function NoSessionArea({
           <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          No session selected
+          {t('app.noSessionTitle')}
         </h1>
         <p className="text-sm text-muted-foreground">
           {hasSessions
-            ? 'Pick a session from the sidebar, or start a new one.'
-            : 'Create your first session to start a conversation with the agent.'}
+            ? t('app.noSessionWithSessions')
+            : t('app.noSessionEmpty')}
         </p>
         <Button type="button" onClick={onNewSession} data-testid="no-session-new-button">
-          New session
+          {t('app.newSessionButton')}
         </Button>
       </div>
     </div>
+  )
+}
+
+function PipelineGuideDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange(open: boolean): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const runtimeSteps = t('pipeline.steps', { returnObjects: true }) as Array<{
+    title: string
+    subtitle: string
+    detail: string
+    signal: string
+  }>
+  const benchmarkSteps = t('pipeline.benchmarkSteps', { returnObjects: true }) as Array<{
+    title: string
+    subtitle: string
+    detail: string
+    signal: string
+  }>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl overflow-hidden p-0 gap-0" data-testid="pipeline-guide-dialog">
+        <DialogHeader className="border-b border-border/50 px-5 py-4">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+            {t('pipeline.title')}
+          </DialogTitle>
+          <DialogDescription>
+            {t('pipeline.description')}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[min(78dvh,46rem)] overflow-y-auto px-5 py-4 space-y-6">
+          <PipelineTrack
+            title={t('pipeline.tracks.runtime.title')}
+            description={t('pipeline.tracks.runtime.description')}
+            steps={runtimeSteps}
+            whereToLook={t('pipeline.whereToLook')}
+            ariaLabel={t('pipeline.overviewLabel')}
+            testid="pipeline-track-runtime"
+          />
+          <PipelineTrack
+            title={t('pipeline.tracks.benchmark.title')}
+            description={t('pipeline.tracks.benchmark.description')}
+            steps={benchmarkSteps}
+            whereToLook={t('pipeline.whereToLook')}
+            ariaLabel={t('pipeline.tracks.benchmark.title')}
+            testid="pipeline-track-benchmark"
+            accent="emerald"
+          />
+          <div className="grid gap-3 md:grid-cols-3">
+            <PipelinePrinciple title={t('pipeline.principles.coreBoundary.title')} body={t('pipeline.principles.coreBoundary.body')} />
+            <PipelinePrinciple title={t('pipeline.principles.replayFirst.title')} body={t('pipeline.principles.replayFirst.body')} />
+            <PipelinePrinciple title={t('pipeline.principles.teaching.title')} body={t('pipeline.principles.teaching.body')} />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function PipelineTrack({
+  title,
+  description,
+  steps,
+  whereToLook,
+  ariaLabel,
+  testid,
+  accent = 'primary',
+}: {
+  title: string
+  description: string
+  steps: Array<{ title: string; subtitle: string; detail: string; signal: string }>
+  whereToLook: string
+  ariaLabel: string
+  testid: string
+  accent?: 'primary' | 'emerald'
+}): JSX.Element {
+  const badge = accent === 'emerald'
+    ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/25 dark:text-emerald-300'
+    : 'bg-primary/10 text-primary ring-primary/25'
+  return (
+    <section data-testid={testid}>
+      <header className="mb-2">
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{description}</p>
+      </header>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3" aria-label={ariaLabel}>
+        {steps.map((step, index) => (
+          <article
+            key={step.title}
+            className="rounded-md border border-border/55 bg-card/70 p-3 shadow-sm"
+            data-testid="pipeline-step"
+          >
+            <div className="mb-2 flex items-start gap-2">
+              <span className={`flex h-6 w-6 flex-none items-center justify-center rounded-full font-mono text-[11px] font-semibold ring-1 ${badge}`}>
+                {index + 1}
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-xs font-semibold text-foreground">{step.title}</h3>
+                <p className="text-[11px] text-muted-foreground">{step.subtitle}</p>
+              </div>
+            </div>
+            <p className="text-[11px] leading-5 text-muted-foreground">{step.detail}</p>
+            <div className="mt-2 rounded bg-background/65 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground ring-1 ring-border/25">
+              <span className="font-medium text-foreground">{whereToLook} </span>{step.signal}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function PipelinePrinciple({ title, body }: { title: string; body: string }): JSX.Element {
+  return (
+    <section className="rounded-md border border-border/45 bg-background/70 p-3">
+      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
+      <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{body}</p>
+    </section>
   )
 }
 
@@ -1392,6 +1527,7 @@ function WorkbenchToolbar({
   onOpenEval,
   onOpenOps,
   onOpenArtifacts,
+  onOpenPipelineGuide,
   onOpenSettings,
   onToggleInspector,
   inspectorOpen,
@@ -1409,6 +1545,7 @@ function WorkbenchToolbar({
   onOpenEval(): void
   onOpenOps(): void
   onOpenArtifacts(): void
+  onOpenPipelineGuide(): void
   onOpenSettings(): void
   onToggleInspector(): void
   inspectorOpen: boolean
@@ -1417,6 +1554,7 @@ function WorkbenchToolbar({
   onToggleTheme(): void
   sessionSelected: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div
       className="flex min-h-12 flex-none items-center gap-1.5 bg-card px-2 py-2 text-sm text-card-foreground backdrop-blur-md sm:gap-2 sm:px-3"
@@ -1427,8 +1565,8 @@ function WorkbenchToolbar({
           variant="ghost"
           size="icon"
           onClick={onOpenExplorer}
-          title="Open explorer"
-          aria-label="open explorer"
+          title={t('app.openExplorer')}
+          aria-label={t('app.openExplorer')}
           data-testid="explorer-toggle"
           className="flex-none"
         >
@@ -1437,10 +1575,10 @@ function WorkbenchToolbar({
       ) : null}
       <span
         className="min-w-0 max-w-[38vw] truncate font-medium sm:max-w-none"
-        title={sessionSelected ? sessionLabel : 'no session selected'}
+        title={sessionSelected ? sessionLabel : t('app.noSessionSelected')}
         data-testid="session-label"
       >
-        {sessionSelected ? sessionLabel : 'no session selected'}
+        {sessionSelected ? sessionLabel : t('app.noSessionSelected')}
       </span>
       {sessionSelected ? (
       <Button
@@ -1448,112 +1586,139 @@ function WorkbenchToolbar({
         variant="ghost"
         size="sm"
         onClick={onChangeCwd}
-        title={cwd ? `change session cwd: ${cwd}` : 'set session cwd'}
+        title={cwd ? t('app.changeSessionCwd', { cwd }) : t('app.setSessionCwd')}
         data-testid="cwd-button"
         className="hidden min-w-0 max-w-[34vw] justify-start gap-1.5 px-2 text-xs text-muted-foreground dark:text-muted-foreground sm:inline-flex lg:max-w-[45%]"
       >
         <FolderOpen className="h-3.5 w-3.5 flex-none" />
         <span className="min-w-0 truncate font-mono" data-testid="cwd-label">
-          {cwd || 'cwd unset'}
+          {cwd || t('app.cwdUnset')}
         </span>
       </Button>
       ) : null}
       <span className="min-w-0 flex-1" />
-      {sessionSelected ? <ConnectionStatus status={status} /> : null}
       <Button
         variant="ghost"
-        size="icon"
+        size="sm"
         onClick={onOpenEval}
-        title="Eval dashboard"
-        aria-label="open eval dashboard"
+        title={t('app.openEvalDashboard')}
+        aria-label={t('app.openEvalDashboard')}
         data-testid="eval-dashboard-button"
+        className="h-8 gap-1.5 px-2 text-xs"
       >
-        <BarChart3 className="h-4 w-4" />
+        <BarChart3 className="h-4 w-4 flex-none" />
+        <span>{t('common.eval')}</span>
       </Button>
       <Button
         variant="ghost"
-        size="icon"
+        size="sm"
         onClick={onOpenOps}
-        title="Ops artifacts"
-        aria-label="open ops artifacts"
+        title={t('app.openOpsArtifacts')}
+        aria-label={t('app.openOpsArtifacts')}
         data-testid="ops-artifacts-button"
+        className="h-8 gap-1.5 px-2 text-xs"
       >
-        <Workflow className="h-4 w-4" />
+        <Workflow className="h-4 w-4 flex-none" />
+        <span>{t('common.ops')}</span>
       </Button>
       <Button
         variant="ghost"
-        size="icon"
+        size="sm"
         onClick={onOpenArtifacts}
-        title="Artifacts"
-        aria-label="open artifacts"
+        title={t('app.openArtifacts')}
+        aria-label={t('app.openArtifacts')}
         data-testid="artifacts-button"
+        className="h-8 gap-1.5 px-2 text-xs"
       >
-        <Boxes className="h-4 w-4" />
+        <Boxes className="h-4 w-4 flex-none" />
+        <span>{t('common.artifacts')}</span>
       </Button>
       <Button
         variant="ghost"
-        size="icon"
+        size="sm"
+        onClick={onOpenPipelineGuide}
+        title={t('pipeline.buttonTitle')}
+        aria-label={t('pipeline.buttonTitle')}
+        data-testid="pipeline-guide-button"
+        className="h-8 gap-1.5 px-2 text-xs"
+      >
+        <Sparkles className="h-4 w-4 flex-none" />
+        <span>{t('pipeline.buttonLabel')}</span>
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onOpenSettings}
-        title="Settings"
-        aria-label="open settings"
+        title={t('app.openSettings')}
+        aria-label={t('app.openSettings')}
         data-testid="settings-button"
+        className="h-8 gap-1.5 px-2 text-xs"
       >
-        <Settings className="h-4 w-4" />
+        <Settings className="h-4 w-4 flex-none" />
+        <span>{t('common.settings')}</span>
       </Button>
+      <LanguageSwitcher />
       <Button
         variant="ghost"
-        size="icon"
+        size="sm"
         onClick={onToggleTheme}
-        title={theme === 'dark' ? 'switch to light mode' : 'switch to dark mode'}
+        title={theme === 'dark' ? t('app.switchToLight') : t('app.switchToDark')}
         data-testid="theme-toggle"
-        aria-label="toggle theme"
+        aria-label={t('app.toggleTheme')}
+        className="h-8 gap-1.5 px-2 text-xs"
       >
         {theme === 'dark' ? (
-          <Sun className="h-4 w-4" />
+          <Sun className="h-4 w-4 flex-none" />
         ) : (
-          <Moon className="h-4 w-4" />
+          <Moon className="h-4 w-4 flex-none" />
         )}
+        <span>{theme === 'dark' ? t('common.light') : t('common.dark')}</span>
       </Button>
       {inspectorAvailable ? (
         <Button
           variant="ghost"
-          size="icon"
+          size="sm"
           onClick={onToggleInspector}
-          title={inspectorOpen ? 'hide inspector' : 'show inspector'}
-          aria-label={inspectorOpen ? 'hide inspector' : 'show inspector'}
+          title={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
+          aria-label={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
           data-testid="inspector-toggle"
+          className="h-8 gap-1.5 px-2 text-xs"
         >
           {inspectorOpen ? (
-            <PanelRightClose className="h-4 w-4" />
+            <PanelRightClose className="h-4 w-4 flex-none" />
           ) : (
-            <PanelRight className="h-4 w-4" />
+            <PanelRight className="h-4 w-4 flex-none" />
           )}
+          <span>{inspectorOpen ? t('app.hideDebugger') : t('app.debugger')}</span>
         </Button>
       ) : null}
+      {sessionSelected ? <ConnectionStatus status={status} /> : null}
     </div>
   )
 }
 
 function ConnectionStatus({ status }: { status: string }): JSX.Element {
-  const label = hostStatusLabel(status)
+  const { t } = useTranslation()
+  const label = hostStatusLabel(status, t)
   return (
     <div
-      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md hover:bg-accent/60 transition-colors"
+      className="inline-flex h-8 flex-none items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
       data-testid="connection-status"
       data-status={status}
       title={label}
       aria-label={label}
     >
-      <span className={cn('h-2 w-2 rounded-full', statusDot(status))} />
+      <span className={cn('h-2 w-2 flex-none rounded-full', statusDot(status))} />
+      <span>{label}</span>
     </div>
   )
 }
 
-function hostStatusLabel(status: string): string {
-  if (status === 'ready') return 'Connected'
-  if (status === 'connecting') return 'Connecting'
-  if (status === 'disconnected') return 'Disconnected'
-  if (status === 'error') return 'Connection error'
+function hostStatusLabel(status: string, t: ReturnType<typeof useTranslation>['t']): string {
+  if (status === 'ready') return t('common.connected')
+  if (status === 'connecting') return t('common.connecting')
+  if (status === 'disconnected') return t('common.disconnected')
+  if (status === 'error') return t('common.connectionError')
   return status
 }
 
