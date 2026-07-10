@@ -84,6 +84,7 @@ export type HostServerOptions = {
   settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
   addManualModel?: Parameters<typeof attachJsonRoutes>[1]['addManualModel']
   deleteManualModel?: Parameters<typeof attachJsonRoutes>[1]['deleteManualModel']
+  routerHealth?: () => unknown
 }
 
 export type HostServer = {
@@ -105,6 +106,12 @@ export async function startHostServer(
 
   const store = new SessionStore(options.sessionsDir)
 
+  const executors = createExecutorRegistry(
+    io,
+    { workspaceIdFor: (sid) => store.get(sid)?.workspaceId },
+    options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+  )
+
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
@@ -112,7 +119,9 @@ export async function startHostServer(
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
+    ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
     sessions: store,
+    executorsSnapshot: () => executors.snapshot(),
   })
 
   if (options.dashboardHandler) {
@@ -120,12 +129,6 @@ export async function startHostServer(
   } else if (options.staticDir) {
     attachStaticHandler(http, options.staticDir)
   }
-
-  const executors = createExecutorRegistry(
-    io,
-    { workspaceIdFor: (sid) => store.get(sid)?.workspaceId },
-    options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
-  )
 
   // Per-session model override, keyed by sessionId. Ephemeral: not persisted
   // to the JSONL log (the log tracks conversation, not runtime knobs). If

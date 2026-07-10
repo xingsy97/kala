@@ -298,6 +298,30 @@ describe('wire protocol', () => {
     expect(handled).toEqual(['/custom-route'])
   })
 
+  it('exposes router health payload when the option is provided', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    let calls = 0
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      routerHealth: () => {
+        calls += 1
+        return { providers: [{ provider: 'anthropic', totalCalls: 3, successCount: 3, errorCount: 0 }] }
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const health = await fetch(`${url}/router/health`).then((r) => r.json())
+    expect(health).toEqual({ providers: [{ provider: 'anthropic', totalCalls: 3, successCount: 3, errorCount: 0 }] })
+    expect(calls).toBe(1)
+  })
+
   it('exposes artifact manifests only when artifact capture is configured', async () => {
     const missing = await fetch(`${url}/artifacts/manifest`).then(async (r) => ({
       status: r.status,
@@ -404,11 +428,20 @@ describe('wire protocol', () => {
         maxWorkers: 2,
         timeoutMs: 300000,
       }),
-    }).then((r) => r.json() as Promise<{ planPath: string; selectedCount: number; shardCount: number }>)
+    }).then((r) => r.json() as Promise<{ planPath: string; registryPath: string; selectedCount: number; shardCount: number }>)
 
     expect(response.selectedCount).toBe(2)
     expect(response.shardCount).toBe(2)
     expect(response.planPath).toBe(join(artifactRootDir, 'dash-plan', 'worker-plan.json'))
+    expect(response.registryPath).toBe(join(artifactRootDir, 'registry', 'run-index.json'))
+    const registry = JSON.parse(await readFile(response.registryPath, 'utf8')) as {
+      schemaVersion: number
+      entries: Array<{ runId: string; planPath: string; selectedCount: number }>
+    }
+    expect(registry.schemaVersion).toBe(1)
+    expect(registry.entries).toHaveLength(1)
+    expect(registry.entries[0]?.runId).toBe('dash-plan')
+    expect(registry.entries[0]?.selectedCount).toBe(2)
 
     const plan = JSON.parse(await readFile(response.planPath, 'utf8')) as {
       runId: string
@@ -456,6 +489,17 @@ describe('wire protocol', () => {
     expect(memory.indexPath).toBe(join(artifactRootDir, 'memory-index.json'))
     expect(memory.entries).toBe(1)
 
+    const retrieval = await postEnhancementAction(url, {
+      action: 'memory-retrieve',
+      workspaceRoot,
+      query: 'concise answers',
+      maxHits: 5,
+    }) as { artifactPath: string; hitCount: number; reasonCodes: string[]; hits: Array<{ key: string; score: number }> }
+    expect(retrieval.artifactPath).toBe(join(artifactRootDir, 'memory-retrieval.json'))
+    expect(retrieval.hitCount).toBe(1)
+    expect(retrieval.hits[0]!.key).toBe('style')
+    expect(retrieval.reasonCodes).toContain('hits_selected')
+
     const graph = await postEnhancementAction(url, { action: 'subagents-graph' }) as { graphPath: string; nodes: number }
     expect(graph.graphPath).toBe(join(artifactRootDir, 'subagent-graph.json'))
     expect(graph.nodes).toBeGreaterThanOrEqual(1)
@@ -491,8 +535,10 @@ describe('wire protocol', () => {
     expect(ingested.resolved).toBe(1)
 
     const grade = await postEnhancementAction(url, { action: 'swebench-grade-command', runId: 'dash-export', dataset: 'SWE-bench/local', predictionsPath: exported.predictionsPath, maxWorkers: 2, instanceIds: 'local__repo-1' }) as { command: string[]; shellCommand: string }
-    expect(grade.command).toContain(exported.predictionsPath)
+    expect(grade.command).toContain('predictions.jsonl')
+    expect(grade.command).not.toContain(exported.predictionsPath)
     expect(grade.shellCommand).toContain('dash-export')
+    expect(grade.shellCommand).not.toContain(exported.predictionsPath)
 
     const unsupported = await fetch(`${url}/enhancement/action`, {
       method: 'POST',
@@ -519,8 +565,252 @@ describe('wire protocol', () => {
 
     const grade = await postEnhancementAction(url, { action: 'swebench-grade-command', runId: 'dry-grade', dataset: 'SWE-bench/local', predictionsPath: '/tmp/predictions.jsonl' }) as { shellCommand: string }
     expect(grade.shellCommand).toContain('dry-grade')
-    expect(grade.shellCommand).toContain('/tmp/predictions.jsonl')
+    expect(grade.shellCommand).toContain('predictions.jsonl')
+    expect(grade.shellCommand).not.toContain('/tmp/predictions.jsonl')
   })
+
+  it('resolves inline SWE-bench instances and rejects oversized payloads', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const inlineContent = `${JSON.stringify({ instance_id: 'org__repo-1' })}\n${JSON.stringify({ instance_id: 'org__repo-2' })}\n`
+    const resolved = await postEnhancementAction(url, {
+      action: 'swebench-resolve-instances',
+      runId: 'resolve-inline',
+      source: 'inline',
+      inlineContent,
+    }) as { instancesJsonlPath: string; rowCount: number; source: { kind: string } }
+    expect(resolved.rowCount).toBe(2)
+    expect(resolved.source.kind).toBe('inline')
+    expect(resolved.instancesJsonlPath).toBe(join(artifactRootDir, 'resolve-inline', 'instances.jsonl'))
+    const persisted = await readFile(resolved.instancesJsonlPath, 'utf8')
+    expect(persisted.trim().split('\n')).toHaveLength(2)
+
+    const oneLine = `${JSON.stringify({ instance_id: 'i', filler: 'x'.repeat(1024) })}\n`
+    const oversized = oneLine.repeat(Math.ceil(20 * 1024 * 1024 / oneLine.length) + 1)
+    const overSizedRes = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'swebench-resolve-instances',
+        runId: 'resolve-huge',
+        source: 'inline',
+        inlineContent: oversized,
+      }),
+    })
+    expect(overSizedRes.status).toBe(413)
+  })
+
+  it('resolves SWE-bench instances from a stubbed huggingface datasets-server', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const stub = createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://stub.local')
+      if (url.pathname !== '/rows') {
+        res.statusCode = 404
+        res.end()
+        return
+      }
+      const offset = Number(url.searchParams.get('offset') ?? '0')
+      const length = Number(url.searchParams.get('length') ?? '100')
+      const total = 2
+      const rows = []
+      for (let i = offset; i < Math.min(offset + length, total); i++) {
+        rows.push({ row_idx: i, row: { instance_id: `hf__row-${i}`, repo: 'org/repo' } })
+      }
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ rows, num_rows_total: total }))
+    })
+    await new Promise<void>((resolve) => stub.listen(0, resolve))
+    const stubUrl = `http://localhost:${(stub.address() as AddressInfo).port}`
+
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    try {
+      const resolved = await postEnhancementAction(url, {
+        action: 'swebench-resolve-instances',
+        runId: 'resolve-hf',
+        source: 'huggingface',
+        datasetRef: 'org/swebench-fork',
+        datasetSplit: 'test',
+        hfDatasetsServerBaseUrl: stubUrl,
+      }) as { rowCount: number; source: { kind: string; datasetRef?: string }; instancesJsonlPath: string }
+      expect(resolved.rowCount).toBe(2)
+      expect(resolved.source.kind).toBe('huggingface')
+      expect(resolved.source.datasetRef).toBe('org/swebench-fork')
+      const persisted = await readFile(resolved.instancesJsonlPath, 'utf8')
+      const lines = persisted.trim().split('\n').map((line) => JSON.parse(line) as { instance_id: string })
+      expect(lines.map((row) => row.instance_id)).toEqual(['hf__row-0', 'hf__row-1'])
+    } finally {
+      await new Promise<void>((resolve) => stub.close(() => resolve()))
+    }
+  })
+
+  it('uploads SWE-bench patches inline and enforces size limits', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const uploaded = await postEnhancementAction(url, {
+      action: 'swebench-upload-patches',
+      runId: 'upload-patches',
+      patches: {
+        'org__repo-1': 'diff --git a/x b/x\n+one\n',
+        'org__repo-2': 'diff --git a/y b/y\n+two\n',
+      },
+    }) as { patchesDir: string; instanceCount: number; bytes: number }
+    expect(uploaded.instanceCount).toBe(2)
+    expect(uploaded.patchesDir).toBe(join(artifactRootDir, 'upload-patches', 'patches'))
+    const first = await readFile(join(uploaded.patchesDir, 'org__repo-1.diff'), 'utf8')
+    expect(first).toBe('diff --git a/x b/x\n+one\n')
+
+    const emptyRes = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'swebench-upload-patches', runId: 'upload-empty', patches: {} }),
+    })
+    expect(emptyRes.status).toBe(400)
+
+    const unsafeRes = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'swebench-upload-patches',
+        runId: 'upload-unsafe',
+        patches: { '../etc/passwd': 'x' },
+      }),
+    })
+    expect(unsafeRes.status).toBe(400)
+  })
+
+  it('uploads SWE-bench results inline under grade-results', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const uploaded = await postEnhancementAction(url, {
+      action: 'swebench-upload-results',
+      runId: 'upload-results',
+      resultsFiles: {
+        'instance_results.jsonl': '{"instance_id":"a","resolved":true}\n',
+        'summary.json': '{"total":1}',
+      },
+    }) as { resultsDir: string; fileCount: number; bytes: number }
+    expect(uploaded.fileCount).toBe(2)
+    expect(uploaded.resultsDir).toBe(join(artifactRootDir, 'upload-results', 'grade-results'))
+    const first = await readFile(join(uploaded.resultsDir, 'instance_results.jsonl'), 'utf8')
+    expect(first).toContain('resolved')
+  })
+
+  it('derives predictionsPath from runId when omitted on swebench-grade-command', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    const grade = await postEnhancementAction(url, {
+      action: 'swebench-grade-command',
+      runId: 'derive-grade',
+      dataset: 'SWE-bench/local',
+    }) as { shellCommand: string }
+    const derivedPath = join(artifactRootDir, 'derive-grade', 'predictions.jsonl')
+    expect(grade.shellCommand).toContain('predictions.jsonl')
+    expect(grade.shellCommand).not.toContain(derivedPath)
+  })
+
+  it('derives resultsDir from runId when omitted on swebench-ingest-results', async () => {
+    await server.close()
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+
+    await postEnhancementAction(url, {
+      action: 'swebench-upload-results',
+      runId: 'derive-ingest',
+      resultsFiles: {
+        'instance_results.jsonl': '{"instance_id":"org__repo-1","resolved":true}\n',
+      },
+    })
+
+    // Confirm the ingest handler picks up the derived grade-results directory.
+    // We assert against the failure mode: without a prior plan (experiment.json
+    // missing) the ingest fails, but the error path references the derived
+    // resultsDir under <runId>/grade-results, proving the derivation ran.
+    const res = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'swebench-ingest-results', runId: 'derive-ingest' }),
+    })
+    const payload = await res.json() as { error?: string }
+    expect(res.ok).toBe(false)
+    expect(payload.error ?? '').toContain('derive-ingest')
+  })
+
 
   it('drives a full round-trip with dashboard + executor', async () => {
     const sessionId = 'wire-1'
@@ -882,6 +1172,124 @@ describe('wire protocol', () => {
     }
     expect(toolResultContent).toContain('status="cancelled"')
     expect(toolResultContent).toContain('sub-agent interrupted by user')
+
+    dashboard.close()
+  })
+
+  it('surfaces a failed sub-agent to the dashboard and lets the parent recover', async () => {
+    // End-to-end coverage for the doc-declared failure path: parent LLM
+    // spawns a child agent, the child's LLM throws → the host emits a
+    // `server:sub_agent_finished` with status=failed, writes a failure
+    // envelope tool_result into the parent log, and the parent's next LLM
+    // call still completes normally.
+    await server.close()
+    const sessionId = 'wire-subagent-fail-parent'
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'subagent-fail-test',
+      async call() {
+        call += 1
+        if (call === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_call',
+                  callId: 'agent-wire-fail-1',
+                  name: 'agent',
+                  input: { prompt: 'crash please' },
+                },
+              ],
+            },
+          }
+        }
+        // The child session's LLM turn — throw to trigger the failure envelope.
+        if (call === 2) throw new Error('child llm exploded')
+        // The parent's next turn after receiving the failure envelope.
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'parent recovered after child failure' }],
+          },
+        }
+      },
+    }
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const agentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm,
+      defaultConfig: agentConfig,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: agentConfig })
+
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const started = new Promise<ServerSubAgentStartedEvent>((resolve) => {
+      dashboard.once('server:sub_agent_started', resolve)
+    })
+    const finished = new Promise<ServerSubAgentFinishedEvent>((resolve) => {
+      dashboard.once('server:sub_agent_finished', resolve)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'go' })
+
+    const start = await started
+    expect(start.parentSessionId).toBe(sessionId)
+    expect(start.parentCallId).toBe('agent-wire-fail-1')
+
+    const finish = await finished
+    expect(finish.parentSessionId).toBe(sessionId)
+    expect(finish.parentCallId).toBe('agent-wire-fail-1')
+    expect(finish.status).toBe('failed')
+    expect(finish.error).toContain('child llm exploded')
+
+    const deadline = Date.now() + 2000
+    let parentStatus: string | undefined
+    let toolResultContent = ''
+    while (Date.now() < deadline) {
+      const rec = server.store.get(sessionId)
+      parentStatus = rec?.state.status
+      if (rec?.state.status === 'done') {
+        const log = await readSessionLog(rec.logPath)
+        const toolResult = log.events.find(
+          (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-wire-fail-1',
+        )
+        if (toolResult?.event.kind === 'tool_result') {
+          toolResultContent = toolResult.event.content
+        }
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    // Parent must reach `done` after seeing the failure envelope; it does not
+    // get stuck waiting for a child that already reported terminal state.
+    expect(parentStatus).toBe('done')
+    expect(toolResultContent).toContain('status="failed"')
+    expect(toolResultContent).toContain('child llm exploded')
+    // The parent's final assistant message reflects recovery.
+    const finalState = server.store.get(sessionId)?.state
+    const finalMsg = finalState?.messages.at(-1)
+    const finalText = finalMsg?.role === 'assistant'
+      ? finalMsg.content.filter((c): c is { type: 'text'; text: string } => c.type === 'text').map((c) => c.text).join('')
+      : ''
+    expect(finalText).toContain('parent recovered after child failure')
 
     dashboard.close()
   })

@@ -127,6 +127,7 @@ export function parseSweBenchCli(argv: readonly string[]): SweBenchCliCommand {
       timeoutMs: numberArg(rest, '--timeout-ms'),
       maxWorkers: numberArg(rest, '--max-workers'),
       skipCompleted: flag(rest, '--skip-completed'),
+      sessionLogsDir: value(rest, '--session-logs-dir'),
     }
   }
   throw new Error(`unknown swebench subcommand: ${subcommand ?? '<missing>'}`)
@@ -136,7 +137,15 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
   if (command.kind === 'none') return false
   if (command.kind === 'grade') {
     const result = await runSweBenchGrade(command)
-    console.log(result.command.map(shellQuote).join(' '))
+    console.log(JSON.stringify({
+      action: 'swebench-grade-command',
+      gradingAuthority: 'official-swebench-harness',
+      gradingMode: command.execute ? 'execute' : 'dry-run',
+      requiresDocker: true,
+      command: result.command,
+      shellCommand: result.command.map(shellQuote).join(' '),
+      ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+    }, null, 2))
     if (result.exitCode !== undefined) process.exitCode = result.exitCode
     return true
   }
@@ -160,7 +169,11 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
         execute: command.execute,
         cwd: command.cwd,
       })
-      payload.gradeCommand = grade.command.map(shellQuote).join(' ')
+      payload.gradingAuthority = 'official-swebench-harness'
+      payload.gradingMode = command.execute ? 'execute' : 'dry-run'
+      payload.requiresDocker = true
+      payload.officialHarnessCommand = grade.command
+      payload.officialHarnessShellCommand = grade.command.map(shellQuote).join(' ')
       if (grade.exitCode !== undefined) process.exitCode = grade.exitCode
     }
     console.log(JSON.stringify(payload, null, 2))
@@ -175,6 +188,9 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
       progressPath: result.layout.progressPath,
       summaryPath: result.layout.summaryPath,
       trialCount: result.trials.length,
+      gradingAuthority: 'official-swebench-harness',
+      gradingStatus: 'not_graded',
+      nextStep: 'Run agent-kernel-host eval swebench grade to generate or execute the official Docker harness command, then ingest official results.',
     }, null, 2))
     return true
   }
@@ -183,6 +199,7 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
     console.log(JSON.stringify({
       runId: result.layout.runId,
       planPath: result.planPath,
+      registryPath: result.registryPath,
       selectedCount: result.plan.selectedCount,
       maxWorkers: result.plan.maxWorkers,
       shardCount: result.plan.shards.length,
@@ -198,6 +215,8 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
       summaryPath: result.summaryPath,
       trialCount: result.trials.length,
       resolved: result.trials.filter((trial) => trial.resolved).length,
+      gradingAuthority: 'official-swebench-harness',
+      gradingStatus: 'ingested',
     }, null, 2))
     return true
   }
@@ -208,6 +227,8 @@ export async function runSweBenchCli(command: SweBenchCliCommand): Promise<boole
     predictionsPath: result.layout.predictionsPath,
     experimentPath: result.layout.experimentPath,
     traceArtifact: result.traceArtifact,
+    gradingAuthority: 'official-swebench-harness',
+    gradingStatus: 'not_graded',
   }, null, 2))
   return true
 }

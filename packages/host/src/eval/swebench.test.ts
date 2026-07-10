@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -70,6 +70,9 @@ describe('SWE-bench eval runner', () => {
     const experiment = JSON.parse(await readFile(result.layout.experimentPath, 'utf8'))
     expect(experiment.dataset).toBe('princeton-nlp/SWE-bench_Lite')
     expect(experiment.split).toBe('test')
+    expect(experiment.memoryPolicy).toBeDefined()
+    expect(experiment.memoryPolicy.mode).toBe('disabled')
+    expect(experiment.memoryPolicy.reasonCodes).toContain('benchmark_isolation')
   })
 
   it('exports an existing session log into a SWE-bench run with trace artifact', async () => {
@@ -148,6 +151,42 @@ describe('SWE-bench eval runner', () => {
     expect(result.trial.artifacts.map((artifact) => artifact.kind)).toEqual(['trace', 'diff'])
     const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
     expect(summary.failureCounts.empty_patch).toBe(1)
+  })
+
+  it('records subagent usage in the summary when child session logs exist alongside the parent', async () => {
+    const sessionsDir = join(dir, 'multi-agent-sessions')
+    await mkdir(sessionsDir, { recursive: true })
+    const parentLog = join(sessionsDir, 'parent.jsonl')
+    await writeHeader({ path: parentLog, sessionId: 'parent-1', config, initialState })
+    await appendEventEntry({
+      path: parentLog,
+      seq: 1,
+      event: { kind: 'user_message', text: 'delegate please' },
+      effects: [],
+    })
+    const childLog = join(sessionsDir, 'child.jsonl')
+    await writeHeader({
+      path: childLog,
+      sessionId: 'child-1',
+      parentSessionId: 'parent-1',
+      config,
+      initialState: { ...initialState, sessionId: 'child-1' },
+    })
+
+    const result = await exportSessionForSweBench({
+      rootDir: dir,
+      runId: 'run-subagent-summary',
+      dataset: 'local',
+      model: 'gpt-test',
+      instanceId: 'local__multi-1',
+      sessionLogPath: parentLog,
+      modelPatch: 'diff --git a/x b/x\n',
+    })
+    const summary = JSON.parse(await readFile(result.layout.summaryPath, 'utf8'))
+    expect(summary.subagentUsage).toBeDefined()
+    expect(summary.subagentUsage.totalCount).toBe(1)
+    expect(summary.subagentUsage.trialsWithSubagents).toBe(1)
+    expect(summary.subagentUsage.maxDepth).toBe(1)
   })
 
   it('builds official harness command without executing by default', () => {
@@ -395,6 +434,13 @@ describe('SWE-bench eval runner', () => {
       timeoutMs: 60000,
     })
     expect(await readFile(result.planPath, 'utf8')).toContain('workerId')
+    expect(result.registryPath).toBe(join(dir, 'runs', 'registry', 'run-index.json'))
+    const registry = JSON.parse(await readFile(result.registryPath, 'utf8'))
+    expect(registry.schemaVersion).toBe(1)
+    expect(registry.entries).toHaveLength(1)
+    expect(registry.entries[0].runId).toBe('plan-run')
+    expect(registry.entries[0].planPath).toBe(result.planPath)
+    expect(registry.entries[0].selectedCount).toBe(3)
     const manifest = await buildArtifactManifest({ rootDir: result.layout.rootDir })
     expect(manifest.manifest.entries.find((entry) => entry.path === 'worker-plan.json')?.kind).toBe('eval_worker_plan')
   })
@@ -481,6 +527,128 @@ describe('SWE-bench eval runner', () => {
 
     const manifest = await buildArtifactManifest({ rootDir: result.layout.rootDir })
     expect(manifest.manifest.entries.find((entry) => entry.path === 'progress.json')?.kind).toBe('eval_progress')
+  })
+
+  it('captures sessionId and OpenInference trace when the agent writes to $AGENT_KERNEL_SWEBENCH_SESSION_LOG', async () => {
+    const sourceRepo = join(dir, 'source-managed-repo')
+    mkdirSync(sourceRepo)
+    await writeFile(join(sourceRepo, 'bug.txt'), 'before\n', 'utf8')
+    runGit(sourceRepo, 'init')
+    runGit(sourceRepo, 'config', 'user.email', 'test@example.com')
+    runGit(sourceRepo, 'config', 'user.name', 'Test User')
+    runGit(sourceRepo, 'add', 'bug.txt')
+    runGit(sourceRepo, 'commit', '-m', 'init')
+    const baseCommit = runGit(sourceRepo, 'rev-parse', 'HEAD').trim()
+    const instancesPath = join(dir, 'instances-managed.jsonl')
+    await writeFile(instancesPath, JSON.stringify({
+      instance_id: 'local__managed-1',
+      repo_path: sourceRepo,
+      repo: 'local/managed',
+      base_commit: baseCommit,
+      problem_statement: 'fix it',
+    }) + '\n', 'utf8')
+
+    const fixtureSessionLog = join(dir, 'fixture-session.jsonl')
+    await writeHeader({
+      path: fixtureSessionLog,
+      sessionId: 'managed-session-42',
+      config,
+      initialState: { ...initialState, sessionId: 'managed-session-42' },
+    })
+    await appendEventEntry({
+      path: fixtureSessionLog,
+      seq: 1,
+      event: { kind: 'user_message', text: 'fix it' },
+      effects: [],
+    })
+    await appendEventEntry({
+      path: fixtureSessionLog,
+      seq: 2,
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [] } },
+      effects: [],
+      model: 'gpt-managed',
+      usage: {
+        inputTokens: 3,
+        outputTokens: 4,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+    })
+
+    const scriptPath = join(dir, 'managed-agent.sh')
+    await writeFile(
+      scriptPath,
+      [
+        '#!/bin/sh',
+        'set -e',
+        'printf "after\\n" > bug.txt',
+        'mkdir -p "$(dirname "$AGENT_KERNEL_SWEBENCH_SESSION_LOG")"',
+        `cp "${fixtureSessionLog}" "$AGENT_KERNEL_SWEBENCH_SESSION_LOG"`,
+      ].join('\n') + '\n',
+      { encoding: 'utf8', mode: 0o755 },
+    )
+
+    const result = await runSweBenchAgentPatchRun({
+      rootDir: dir,
+      runId: 'run-managed',
+      dataset: 'local',
+      model: 'agent-managed',
+      instancesJsonl: instancesPath,
+      agentCommand: `sh ${scriptPath}`,
+      timeoutMs: 5000,
+    })
+
+    const trial = result.trials[0]
+    expect(trial?.sessionId).toBe('managed-session-42')
+    expect(trial?.failureLabel).toBeUndefined()
+    expect(trial?.metrics.eventCount).toBe(2)
+    const traceArtifact = trial?.artifacts.find(
+      (artifact) => artifact.uri === 'traces/local__managed-1.openinference.json',
+    )
+    expect(traceArtifact).toBeDefined()
+    const trace = JSON.parse(
+      await readFile(join(result.layout.rootDir, traceArtifact!.uri), 'utf8'),
+    )
+    expect(trace.spans.map((span: { kind: string }) => span.kind)).toEqual(['AGENT', 'LLM'])
+    const persistedTrial = JSON.parse(
+      await readFile(join(result.layout.trialsDir, 'local__managed-1.json'), 'utf8'),
+    )
+    expect(persistedTrial.sessionId).toBe('managed-session-42')
+  })
+
+  it('tolerates a missing agent session log without failing the trial', async () => {
+    const sourceRepo = join(dir, 'source-nolog-repo')
+    mkdirSync(sourceRepo)
+    await writeFile(join(sourceRepo, 'bug.txt'), 'before\n', 'utf8')
+    runGit(sourceRepo, 'init')
+    runGit(sourceRepo, 'config', 'user.email', 'test@example.com')
+    runGit(sourceRepo, 'config', 'user.name', 'Test User')
+    runGit(sourceRepo, 'add', 'bug.txt')
+    runGit(sourceRepo, 'commit', '-m', 'init')
+    const baseCommit = runGit(sourceRepo, 'rev-parse', 'HEAD').trim()
+    const instancesPath = join(dir, 'instances-nolog.jsonl')
+    await writeFile(instancesPath, JSON.stringify({
+      instance_id: 'local__nolog-1',
+      repo_path: sourceRepo,
+      repo: 'local/nolog',
+      base_commit: baseCommit,
+      problem_statement: 'x',
+    }) + '\n', 'utf8')
+
+    const result = await runSweBenchAgentPatchRun({
+      rootDir: dir,
+      runId: 'run-nolog',
+      dataset: 'local',
+      model: 'agent-nolog',
+      instancesJsonl: instancesPath,
+      agentCommand: 'printf "after\\n" > bug.txt',
+      timeoutMs: 5000,
+    })
+
+    const trial = result.trials[0]
+    expect(trial?.sessionId).toBeUndefined()
+    expect(trial?.failureLabel).toBeUndefined()
+    expect(trial?.artifacts.some((artifact) => artifact.uri.endsWith('.openinference.json'))).toBe(false)
   })
 
   it('resumes agent inference by skipping completed instances', async () => {
