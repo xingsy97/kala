@@ -1,7 +1,8 @@
 # Model and Tool Router
 
-Status: proposed enhancement  
+Status: observability implemented; policy routing incomplete
 Priority: 6
+Last reviewed against implementation: 2026-07-09
 
 ## Why This Matters
 
@@ -120,3 +121,75 @@ Retries should be typed:
 - Do not add router decisions to reducer state.
 - Do not let router fallback change benchmark configs silently.
 - Do not hide tool schema changes from traces.
+
+## Current Implementation Alignment
+
+### Implemented In Code
+
+The current codebase has router/tool visibility artifacts, not a full adaptive
+routing system:
+
+- Host artifact capture writes
+  `router-decisions/<session_id>/<event_seq>.json` before LLM calls when
+  artifact capture is enabled.
+- Router decision artifacts record selected/requested model, inferred provider
+  or adapter, reason codes, context budget, and tool visibility policy.
+- Tool visibility policy includes total visible tools, approval-gated count,
+  skill-backed count, and whether subagent or memory tools were available.
+- Host artifact capture writes
+  `tool-catalog/<session_id>/<event_seq>.json` with tool kind, approval policy,
+  skill-backed flag, and schema hash.
+- The `tool-catalog diff` CLI/HTTP verb compares two catalog snapshots (either
+  individual files or directories) and writes a
+  `tool-catalog-diff.json` artifact recording added, removed, changed, and
+  unchanged tools. Changed entries list which fields moved (`schemaHash`,
+  `requiresApproval`, `kind`, `skillBacked`, `descriptionChars`).
+- The dashboard marks skill-backed tools in inspector/tool views and Ops
+  artifacts can render tool catalog summaries and diffs.
+- The opencode-style `skill` builtin is modeled as an ordinary tool call, so
+  skill selection is visible in transcripts and logs.
+
+Example: diffing two tool catalog snapshots.
+
+```bash
+pnpm --filter @agent-kernel/host exec agent-kernel-host enhancement \
+  tool-catalog diff \
+  --baseline runs/baseline/tool-catalog/session-A \
+  --candidate runs/router/tool-catalog/session-A \
+  --root-dir runs/router/tool-catalog-diff \
+  --output tool-catalog-diff.json
+```
+
+### Important Gaps
+
+- There is no provider health model or circuit breaker.
+- There is no typed retry/fallback artifact stream for transient provider
+  failures.
+- Fallback selection is not policy-driven by required capabilities, benchmark
+  config, cost ceiling, latency SLO, or context length.
+- Executor capability discovery is still basic; tool routing does not yet reject
+  stale registrations or choose among multiple executors by capability/health.
+- Tool schema versioning exists only as hashes in artifacts, not as a negotiated
+  compatibility contract.
+
+### Production Quality Criteria
+
+Routing is production-level when:
+
+- Every model selection has a structured decision with stable reason codes and
+  fallback candidates.
+- Provider errors are classified into retryable, non-retryable, rate-limited,
+  auth, schema, and unknown categories.
+- Fallbacks are blocked unless the candidate provider supports required model
+  features such as tool calling, images, reasoning settings, and context window.
+- Eval/benchmark configs can pin routing so model changes do not silently change
+  experiment meaning.
+- Tool catalogs have schema version compatibility checks and dashboard diffing.
+
+### Next Implementation Steps
+
+1. Add a provider health registry in the host with low-cardinality error labels.
+2. Persist retry/fallback attempts as router artifacts and trace events.
+3. Add capability requirements to model/tool decisions without changing reducer
+   effects.
+4. Add executor capability snapshots and stale-registration rejection.

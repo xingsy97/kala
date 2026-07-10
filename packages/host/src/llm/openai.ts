@@ -28,6 +28,12 @@ export type OpenAIOptions = {
   maxTokens?: number
   baseUrl?: string
   fetchImpl?: typeof fetch
+  /**
+   * Optional model weight version to stamp on every trace. Local gateways
+   * (SGLang, vLLM) or A/B configs can set this so rollout capture and eval
+   * comparisons can pin generations to a specific policy checkpoint.
+   */
+  weightVersion?: string
 }
 
 const DEFAULT_MODEL = 'gpt-4o-mini'
@@ -88,6 +94,7 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
   const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '')
   const url = `${baseUrl}/chat/completions`
+  const weightVersion = opts.weightVersion
 
   return {
     name: `openai:${model}`,
@@ -105,6 +112,7 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
           fetchImpl,
           params.signal,
           params.onTextDelta,
+          weightVersion,
         )
       }
       const res = await fetchImpl(url, {
@@ -127,6 +135,9 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
         trace: makeOpenAITrace(url, effectiveModel, body, {
           status: res.status,
           body: json,
+        }, {
+          gatewayRequestId: extractOpenAIRequestId(res.headers, json),
+          ...(weightVersion ? { weightVersion } : {}),
         }),
       }
     },
@@ -158,6 +169,7 @@ async function callStreaming(
   fetchImpl: typeof fetch,
   signal: AbortSignal | undefined,
   onTextDelta: (delta: string) => void,
+  weightVersion: string | undefined,
 ): Promise<LLMResponse> {
   const startedAt = performance.now()
   const res = await fetchImpl(url, {
@@ -180,6 +192,7 @@ async function callStreaming(
   let promptTokens = 0
   let completionTokens = 0
   let cachedTokens = 0
+  let streamChatId: string | undefined
   const streamEventTypes: string[] = []
   let firstChunkAt: number | undefined
 
@@ -198,6 +211,7 @@ async function callStreaming(
       const payload = line.slice(6)
       if (!payload || payload === '[DONE]') continue
       let evt: {
+        id?: string
         choices?: Array<{
           delta?: {
             content?: string
@@ -220,6 +234,7 @@ async function callStreaming(
         continue
       }
       streamEventTypes.push('chat.completion.chunk')
+      if (!streamChatId && typeof evt.id === 'string' && evt.id) streamChatId = evt.id
       const choice = evt.choices?.[0]
       const delta = choice?.delta
       if (delta?.content) {
@@ -294,6 +309,9 @@ async function callStreaming(
           }
         }),
       },
+    }, {
+      gatewayRequestId: extractOpenAIRequestId(res.headers, streamChatId),
+      ...(weightVersion ? { weightVersion } : {}),
     }),
   }
 }
@@ -311,6 +329,7 @@ function makeOpenAITrace(
   model: string,
   body: Record<string, unknown>,
   response: NonNullable<LLMTrace['response']>,
+  meta?: { gatewayRequestId?: string; weightVersion?: string },
 ): LLMTrace {
   return {
     provider: 'openai',
@@ -324,7 +343,27 @@ function makeOpenAITrace(
       body,
     },
     response,
+    ...(meta?.gatewayRequestId ? { gatewayRequestId: meta.gatewayRequestId } : {}),
+    ...(meta?.weightVersion ? { weightVersion: meta.weightVersion } : {}),
   }
+}
+
+/**
+ * OpenAI returns `x-request-id`; OpenAI-compatible gateways (SGLang, vLLM,
+ * newapi) may return the same header or `openai-request-id`. Fall back to the
+ * response body / streaming chunk `id`. Undefined when nothing was returned.
+ */
+function extractOpenAIRequestId(
+  headers: Headers,
+  bodyOrStreamId: OpenAIResponseBody | string | undefined,
+): string | undefined {
+  const header =
+    headers.get('x-request-id') ??
+    headers.get('openai-request-id') ??
+    headers.get('request-id')
+  if (header) return header
+  if (typeof bodyOrStreamId === 'string') return bodyOrStreamId || undefined
+  return bodyOrStreamId?.id
 }
 
 export class OpenAIHTTPError extends Error {
