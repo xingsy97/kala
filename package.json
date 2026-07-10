@@ -11,6 +11,7 @@
     "build": "pnpm -r run build",
     "build:release-assets": "node scripts/build-release-assets.mjs",
     "verify:release-assets": "node scripts/verify-release-assets.mjs",
+    "verify:release-install": "node scripts/verify-release-install.mjs",
     "test": "pnpm -r --parallel run test",
     "typecheck": "pnpm -r --parallel run typecheck",
     "dev": "pnpm -r --parallel run dev",
