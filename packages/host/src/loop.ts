@@ -295,6 +295,7 @@ async function maybeWriteMessageAssemblyArtifact(
       messages,
       tools: effect.tools,
       stages: messageAssemblyStages(deps.llm.name, effect.messages, messages, effect.tools),
+      ...(record?.config.contextLimit ? { budget: { contextLimit: record.config.contextLimit } } : {}),
     })
     await store.writeJson(
       'message_assembly',
@@ -310,6 +311,8 @@ async function maybeWriteMessageAssemblyArtifact(
         adapterName: deps.llm.name,
         maxInputTokens: record?.config.contextLimit,
         tools: effect.tools,
+        hasImageInput: messagesHaveImage(messages),
+        reasoningBudgetRequested: messagesHaveReasoning(messages),
       }),
     )
     await store.writeJson(
@@ -321,6 +324,14 @@ async function maybeWriteMessageAssemblyArtifact(
     // Assembly artifacts are observability data. Failure to write them must not
     // affect the reducer, LLM call, or replay ledger.
   }
+}
+
+function messagesHaveImage(messages: readonly import('@agent-kernel/kernel').Message[]): boolean {
+  return messages.some((m) => m.content.some((c) => c.type === 'image'))
+}
+
+function messagesHaveReasoning(messages: readonly import('@agent-kernel/kernel').Message[]): boolean {
+  return messages.some((m) => m.content.some((c) => c.type === 'thinking'))
 }
 
 function messageAssemblyStages(
@@ -440,6 +451,24 @@ async function performCallTool(
           callId: effect.callId,
           ok: false,
           content: blockedByLoop,
+        },
+        aborts,
+        undefined,
+        undefined,
+        runtime,
+      )
+      return
+    }
+    const memoryPolicyBlock = guardMemoryPolicy(deps, sessionId, effect)
+    if (memoryPolicyBlock) {
+      await dispatchOne(
+        deps,
+        sessionId,
+        {
+          kind: 'tool_result',
+          callId: effect.callId,
+          ok: false,
+          content: memoryPolicyBlock,
         },
         aborts,
         undefined,
@@ -575,6 +604,29 @@ function guardPostCompactionLoop(
   if (count <= POST_COMPACTION_REPEAT_LIMIT) return undefined
   guards?.delete(sessionId)
   return `blocked: repeated identical tool call after context compaction (${effect.name}). Re-read compacted context and choose a different next step.`
+}
+
+/**
+ * Reject `memory` tool calls that would reach across-task disk state when the
+ * session's memoryPolicy is `disabled`. Benchmark trials set `mode: disabled`
+ * by default so a SWE-bench task cannot inadvertently read workspace/global
+ * memory notes written during unrelated sessions. Session-scope memory is
+ * kernel-managed and stays available regardless of policy.
+ */
+function guardMemoryPolicy(
+  deps: HostLoopDeps,
+  sessionId: string,
+  effect: CallToolEffect,
+): string | undefined {
+  if (effect.name !== 'memory') return undefined
+  const record = deps.store.get(sessionId)
+  const policy = record?.memoryPolicy
+  if (!policy) return undefined
+  if (policy.mode !== 'disabled') return undefined
+  const input = (effect.input ?? {}) as Record<string, unknown>
+  const scope = input['scope']
+  if (scope !== 'workspace' && scope !== 'global') return undefined
+  return `ERROR: EMEMDISABLED: memory disabled in this session by memoryPolicy (scope=${scope}). Session-scope memory is still available.`
 }
 
 function stableStringify(value: unknown): string {

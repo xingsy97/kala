@@ -16,6 +16,7 @@ import type {
   UsageTotal,
 } from '@agent-kernel/kernel'
 import type { LLMTrace } from '@agent-kernel/shared'
+import type { EvalMemoryPolicy } from '@agent-kernel/shared/enhancement'
 import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
@@ -43,6 +44,15 @@ export type SessionRecord = {
    * whenever the host writes a new metadata line.
    */
   label?: string
+  /**
+   * Host-side memory policy for this session. When `mode: 'disabled'`, the
+   * loop rejects `memory` tool calls to workspace/global scope so a benchmark
+   * session cannot inadvertently pull cross-task state from disk. Not part of
+   * kernel state  -  the reducer never sees it and it is never persisted into
+   * the JSONL ledger. Callers (eval runners, tests, CLI) attach it via
+   * `CreateSessionParams.memoryPolicy`.
+   */
+  memoryPolicy?: EvalMemoryPolicy
 }
 
 export type CreateSessionParams = {
@@ -56,6 +66,7 @@ export type CreateSessionParams = {
   workspaceName?: string
   initialCwd?: string
   initialApprovalMode?: import('@agent-kernel/kernel').ApprovalMode
+  memoryPolicy?: EvalMemoryPolicy
 }
 
 export class SessionStore {
@@ -133,6 +144,9 @@ export class SessionStore {
         : {}),
       ...(params.workspaceName !== undefined
         ? { workspaceName: params.workspaceName }
+        : {}),
+      ...(params.memoryPolicy !== undefined
+        ? { memoryPolicy: params.memoryPolicy }
         : {}),
     }
     this.records.set(sessionId, record)
@@ -309,6 +323,18 @@ export class SessionStore {
 
   list(): SessionRecord[] {
     return [...this.records.values()]
+  }
+
+  /**
+   * Attach or clear a memory policy on a live session record. Called by eval
+   * runners after `ensure`/`create` when the session is a benchmark trial and
+   * cross-task memory must be disabled. Pass `undefined` to clear.
+   */
+  setMemoryPolicy(sessionId: string, policy: EvalMemoryPolicy | undefined): void {
+    const rec = this.records.get(sessionId)
+    if (!rec) return
+    if (policy === undefined) delete rec.memoryPolicy
+    else rec.memoryPolicy = policy
   }
 
   /**

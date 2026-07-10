@@ -213,6 +213,101 @@ describe('host loop', () => {
     expect(memoryStage.estimatedTokens).toBeGreaterThan(0)
   })
 
+  it('rejects workspace/global memory tool calls when memoryPolicy.mode is disabled', async () => {
+    const memoryConfig = createConfig({ tools: [MEMORY], systemPrompt: 'sys' })
+    const memoryRecord = await store.create({
+      config: memoryConfig,
+      sessionId: 'sess-memory-blocked',
+      memoryPolicy: {
+        mode: 'disabled',
+        includeGlobal: false,
+        reasonCodes: ['memory_mode:disabled', 'benchmark_isolation', 'memory_disabled'],
+      },
+    })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_call', callId: 'mem-block', name: 'memory', input: { operation: 'read', scope: 'workspace', key: 'style' } }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'acknowledged' }],
+        },
+      },
+    ])
+    let executorSaw = false
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          executorSaw = true
+          return { ok: true, content: 'should not reach executor' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(memoryRecord.sessionId, { kind: 'user_message', text: 'read style memory' })
+
+    expect(executorSaw).toBe(false)
+    const parsed = await readSessionLog(memoryRecord.logPath)
+    const result = parsed.events.find(
+      (entry) => entry.event.kind === 'tool_result' && entry.event.callId === 'mem-block',
+    )
+    expect(result).toBeDefined()
+    if (result?.event.kind !== 'tool_result') throw new Error('unreachable')
+    expect(result.event.ok).toBe(false)
+    expect(result.event.content).toContain('EMEMDISABLED')
+    expect(result.event.content).toContain('scope=workspace')
+  })
+
+  it('allows session-scope memory when memoryPolicy.mode is disabled', async () => {
+    const memoryConfig = createConfig({ tools: [MEMORY], systemPrompt: 'sys' })
+    const memoryRecord = await store.create({
+      config: memoryConfig,
+      sessionId: 'sess-memory-session-ok',
+      memoryPolicy: {
+        mode: 'disabled',
+        includeGlobal: false,
+        reasonCodes: ['memory_mode:disabled', 'benchmark_isolation', 'memory_disabled'],
+      },
+    })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_call', callId: 'mem-session', name: 'memory', input: { operation: 'read', scope: 'session', key: 'plan' } }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'read complete' }],
+        },
+      },
+    ])
+    let executorSaw = false
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          executorSaw = true
+          return { ok: true, content: 'session memory reply' }
+        },
+      }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(memoryRecord.sessionId, { kind: 'user_message', text: 'read session plan' })
+
+    expect(executorSaw).toBe(true)
+  })
+
   it('records the active model on LLM response entries and broadcasts', async () => {
     const llm = scriptedLlm([
       {
@@ -1243,6 +1338,73 @@ describe('host loop', () => {
     expect(children[0]!.state.status).toBe('done')
   })
 
+  it('persists a resolved sub-agent policy artifact when a role is requested', async () => {
+    const parentConfig = createConfig({ tools: [AGENT, READ], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-policy-parent',
+      workspaceId: 'ws-agent-policy',
+    })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'agent-policy-1',
+              name: 'agent',
+              input: {
+                prompt: 'find things',
+                role: 'research',
+                objective: 'summarize repo layout',
+              },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'child done' }],
+        },
+      },
+      {
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'parent done' }],
+        },
+      },
+    ])
+    const artifactRootDir = join(dir, 'agent-policy-artifacts')
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({
+        callTool: async () => {
+          throw new Error('agent should not dispatch to executor')
+        },
+      }),
+      broadcast: silentBroadcast(),
+      artifactRootDir,
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    const artifactPath = join(artifactRootDir, 'subagent-policies', parent.sessionId, 'agent-policy-1.json')
+    const artifact = JSON.parse(await readFile(artifactPath, 'utf8'))
+    expect(artifact.schemaVersion).toBe(1)
+    expect(artifact.parentSessionId).toBe(parent.sessionId)
+    expect(artifact.parentCallId).toBe('agent-policy-1')
+    expect(artifact.policy.role).toBe('research')
+    expect(artifact.policy.objective).toBe('summarize repo layout')
+    expect(artifact.policy.reasons).toContain('role_template_applied')
+    expect(artifact.policy.allowedTools).toContain('read')
+    expect(artifact.policy.maxTurns).toBeGreaterThan(0)
+    expect(artifact.policy.timeoutMs).toBeGreaterThan(0)
+    expect(artifact.policy.expectedOutput).toMatch(/summary/i)
+  })
+
   it('emits sub_agent_started + sub_agent_finished around the child run', async () => {
     const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
     const parent = await store.create({
@@ -1469,6 +1631,143 @@ describe('host loop', () => {
     expect(toolResult.event.ok).toBe(false)
     expect(toolResult.event.content).toContain('status="failed"')
     expect(toolResult.event.content).toContain('<error>')
+  })
+
+  it('refuses to spawn a sub-agent once the recursive depth cap is reached', async () => {
+    // Force the cap to 1 so a single nested delegate trips the guard. We
+    // build a parent (depth 0)  -  child (depth 1) chain; when the child tries
+    // to spawn a grand-child, the host must return a failure envelope with
+    // `agent depth exceeded` and never create a third session.
+    const parentConfig = createConfig({
+      tools: [AGENT],
+      systemPrompt: 'sys',
+      maxAgentDepth: 1,
+    })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-depth-parent',
+      workspaceId: 'ws-depth',
+    })
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'nested',
+      async call() {
+        call += 1
+        if (call === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_call',
+                  callId: 'agent-parent',
+                  name: 'agent',
+                  input: { prompt: 'delegate one level' },
+                },
+              ],
+            },
+          }
+        }
+        if (call === 2) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_call',
+                  callId: 'agent-child',
+                  name: 'agent',
+                  input: { prompt: 'delegate one more level' },
+                },
+              ],
+            },
+          }
+        }
+        return {
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+          },
+        }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    const descendants = store.list().filter((r) => r.parentSessionId === parent.sessionId)
+    // Exactly one child (depth 1). No grand-child was created.
+    expect(descendants).toHaveLength(1)
+    const grandChildren = store.list().filter((r) => r.parentSessionId === descendants[0]!.sessionId)
+    expect(grandChildren).toHaveLength(0)
+
+    // The child session should record a tool_result explaining the refusal.
+    const childRec = descendants[0]!
+    const childLog = await readSessionLog(childRec.logPath)
+    const refused = childLog.events.find(
+      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-child',
+    )
+    if (refused?.event.kind !== 'tool_result') throw new Error('unreachable')
+    expect(refused.event.ok).toBe(false)
+    expect(refused.event.content).toContain('agent depth exceeded')
+  })
+
+  it('refuses to spawn a sub-agent when the fan-out cap is already reached', async () => {
+    // Fan-out cap = 0 means *no* sibling sub-agents are allowed. The parent's
+    // very first delegate call must be refused with `fan-out exceeded`.
+    const parentConfig = createConfig({
+      tools: [AGENT],
+      systemPrompt: 'sys',
+      maxAgentFanOut: 0,
+    })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-fanout-parent',
+      workspaceId: 'ws-fanout',
+    })
+    const llm = scriptedLlm([
+      {
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              callId: 'agent-first',
+              name: 'agent',
+              input: { prompt: 'try to delegate' },
+            },
+          ],
+        },
+      },
+      {
+        message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      },
+    ])
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+
+    // No child was created because fan-out is 0.
+    const children = store.list().filter((r) => r.parentSessionId === parent.sessionId)
+    expect(children).toHaveLength(0)
+
+    const parentLog = await readSessionLog(parent.logPath)
+    const refused = parentLog.events.find(
+      (e) => e.event.kind === 'tool_result' && e.event.callId === 'agent-first',
+    )
+    if (refused?.event.kind !== 'tool_result') throw new Error('unreachable')
+    expect(refused.event.ok).toBe(false)
+    expect(refused.event.content).toContain('fan-out exceeded')
   })
 
   it('spawned sub-agents run with allow_all regardless of parent approval mode (ADR 0014)', async () => {

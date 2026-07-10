@@ -75,6 +75,21 @@ export type LLMTrace = {
       timeToFirstChunkMs?: number
     }
   }
+  /**
+   * Provider- or gateway-issued request id, when the response carried one.
+   * Anthropic returns `request-id`; OpenAI returns `x-request-id`; local
+   * gateways may inject their own id. Recording it lets us cross-link a
+   * session event with provider-side traces, and lets RL rollout capture
+   * artifacts reference the exact generation call.
+   */
+  gatewayRequestId?: string
+  /**
+   * Serving-side model weight version. Hosted providers rarely expose this;
+   * a local SGLang/vLLM gateway or an adapter with policy metadata may set
+   * it. Written when known so RL rollouts and A/B evals can pin generations
+   * to a specific policy checkpoint.
+   */
+  weightVersion?: string
 }
 
 export type SnapshotEntry = {
