@@ -8,7 +8,7 @@ type FetchArgs = { url: string; init: RequestInit }
 
 function mockFetch(
   bodyJson: unknown,
-  opts: { status?: number; sink?: FetchArgs[] } = {},
+  opts: { status?: number; sink?: FetchArgs[]; headers?: Record<string, string> } = {},
 ): typeof fetch {
   const status = opts.status ?? 200
   const sink = opts.sink
@@ -16,12 +16,15 @@ function mockFetch(
     sink?.push({ url: String(input), init: init ?? {} })
     return new Response(JSON.stringify(bodyJson), {
       status,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(opts.headers ?? {}) },
     })
   }) as unknown as typeof fetch
 }
 
-function mockSseFetch(chunks: readonly string[], opts: { sink?: FetchArgs[] } = {}): typeof fetch {
+function mockSseFetch(
+  chunks: readonly string[],
+  opts: { sink?: FetchArgs[]; headers?: Record<string, string> } = {},
+): typeof fetch {
   const encoder = new TextEncoder()
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     opts.sink?.push({ url: String(input), init: init ?? {} })
@@ -32,7 +35,7 @@ function mockSseFetch(chunks: readonly string[], opts: { sink?: FetchArgs[] } = 
       },
     }), {
       status: 200,
-      headers: { 'content-type': 'text/event-stream' },
+      headers: { 'content-type': 'text/event-stream', ...(opts.headers ?? {}) },
     })
   }) as unknown as typeof fetch
 }
@@ -442,5 +445,60 @@ describe('openaiAdapter', () => {
     expect(res.message.content).toEqual([{ type: 'text', text: 'hello' }])
     expect(res.trace?.response?.metrics?.durationMs).toEqual(expect.any(Number))
     expect(res.trace?.response?.metrics?.timeToFirstChunkMs).toEqual(expect.any(Number))
+  })
+
+  it('captures x-request-id header and optional weight version on non-streaming calls', async () => {
+    const llm = openaiAdapter({
+      apiKey: 'test-redacted-api-key',
+      weightVersion: 'sglang-policy@abcd',
+      fetchImpl: mockFetch(
+        {
+          id: 'chatcmpl_body_1',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        },
+        { headers: { 'x-request-id': 'req_xyz' } },
+      ),
+    })
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      tools: [],
+    })
+    expect(res.trace?.gatewayRequestId).toBe('req_xyz')
+    expect(res.trace?.weightVersion).toBe('sglang-policy@abcd')
+  })
+
+  it('falls back to response body id when no request-id header is present', async () => {
+    const llm = openaiAdapter({
+      apiKey: 'test-redacted-api-key',
+      fetchImpl: mockFetch({
+        id: 'chatcmpl_body_2',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }),
+    })
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      tools: [],
+    })
+    expect(res.trace?.gatewayRequestId).toBe('chatcmpl_body_2')
+    expect(res.trace?.weightVersion).toBeUndefined()
+  })
+
+  it('captures streaming chunk id when no request-id header is present', async () => {
+    const llm = openaiAdapter({
+      apiKey: 'test-redacted-api-key',
+      fetchImpl: mockSseFetch([
+        'data: {"id":"chatcmpl_stream_1","choices":[{"delta":{"content":"ok"}}]}\n\n',
+        'data: {"id":"chatcmpl_stream_1","usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    })
+    const res = await llm.call({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [],
+      onTextDelta: () => {},
+    })
+    expect(res.trace?.gatewayRequestId).toBe('chatcmpl_stream_1')
   })
 })
