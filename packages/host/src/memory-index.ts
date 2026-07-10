@@ -20,16 +20,46 @@ export type MemoryIndexEntry = {
   archivedPath?: string
 }
 
+export type MemoryStaleWarning = {
+  scope: MemoryIndexEntry['scope']
+  key: string
+  path: string
+  generatedAt: string
+  ageDays: number
+  reasonCode: 'stale_memory'
+}
+
+export type MemoryConflictWarning = {
+  reasonCode: 'duplicate_key_across_scopes' | 'duplicate_name'
+  key?: string
+  name?: string
+  entries: readonly {
+    scope: MemoryIndexEntry['scope']
+    key: string
+    path: string
+  }[]
+}
+
 export type MemoryIndex = {
   generatedAt: string
   entries: readonly MemoryIndexEntry[]
   warnings: readonly string[]
+  staleWarnings: readonly MemoryStaleWarning[]
+  conflictWarnings: readonly MemoryConflictWarning[]
 }
 
 export type BuildMemoryIndexInput = {
   rootDir: string
   workspaceRoot?: string
   includeGlobal?: boolean
+  /**
+   * Entries with a `generatedAt` timestamp older than this many days are
+   * flagged as stale. Defaults to 90. Entries without `generatedAt` are never
+   * flagged because there is no evidence of freshness one way or the other.
+   */
+  staleAfterDays?: number
+  /** Override current time for deterministic tests. */
+  now?: () => Date
 }
 
 export async function buildMemoryIndex(
@@ -44,15 +74,89 @@ export async function buildMemoryIndex(
     entries.push(...await readMemoryDir('global', join(homedir(), '.agent-kernel', 'memory'), warnings))
   }
   entries.sort((a, b) => `${a.scope}:${a.key}`.localeCompare(`${b.scope}:${b.key}`))
+  const now = input.now ? input.now() : new Date()
+  const staleAfterDays = input.staleAfterDays ?? 90
+  const staleWarnings = detectStaleMemories(entries, now, staleAfterDays)
+  const conflictWarnings = detectConflictingMemories(entries)
   const index: MemoryIndex = {
-    generatedAt: new Date().toISOString(),
+    generatedAt: now.toISOString(),
     entries,
     warnings,
+    staleWarnings,
+    conflictWarnings,
   }
   await mkdir(input.rootDir, { recursive: true })
   const indexPath = join(input.rootDir, 'memory-index.json')
   await writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, 'utf8')
   return { index, indexPath }
+}
+
+function detectStaleMemories(
+  entries: readonly MemoryIndexEntry[],
+  now: Date,
+  staleAfterDays: number,
+): MemoryStaleWarning[] {
+  const out: MemoryStaleWarning[] = []
+  const nowMs = now.getTime()
+  const thresholdMs = staleAfterDays * 24 * 60 * 60 * 1000
+  for (const entry of entries) {
+    if (entry.status !== 'active') continue
+    if (!entry.generatedAt) continue
+    const t = Date.parse(entry.generatedAt)
+    if (!Number.isFinite(t)) continue
+    const ageMs = nowMs - t
+    if (ageMs < thresholdMs) continue
+    out.push({
+      scope: entry.scope,
+      key: entry.key,
+      path: entry.path,
+      generatedAt: entry.generatedAt,
+      ageDays: Math.floor(ageMs / (24 * 60 * 60 * 1000)),
+      reasonCode: 'stale_memory',
+    })
+  }
+  return out
+}
+
+function detectConflictingMemories(
+  entries: readonly MemoryIndexEntry[],
+): MemoryConflictWarning[] {
+  const active = entries.filter((entry) => entry.status === 'active')
+  const out: MemoryConflictWarning[] = []
+  const byKey = new Map<string, MemoryIndexEntry[]>()
+  for (const entry of active) {
+    const bucket = byKey.get(entry.key) ?? []
+    bucket.push(entry)
+    byKey.set(entry.key, bucket)
+  }
+  for (const [key, group] of byKey) {
+    if (group.length < 2) continue
+    const scopes = new Set(group.map((entry) => entry.scope))
+    if (scopes.size < 2) continue
+    out.push({
+      reasonCode: 'duplicate_key_across_scopes',
+      key,
+      entries: group.map((entry) => ({ scope: entry.scope, key: entry.key, path: entry.path })),
+    })
+  }
+  const byName = new Map<string, MemoryIndexEntry[]>()
+  for (const entry of active) {
+    if (!entry.name) continue
+    const bucket = byName.get(entry.name) ?? []
+    bucket.push(entry)
+    byName.set(entry.name, bucket)
+  }
+  for (const [name, group] of byName) {
+    if (group.length < 2) continue
+    const distinct = new Set(group.map((entry) => `${entry.scope}:${entry.key}`))
+    if (distinct.size < 2) continue
+    out.push({
+      reasonCode: 'duplicate_name',
+      name,
+      entries: group.map((entry) => ({ scope: entry.scope, key: entry.key, path: entry.path })),
+    })
+  }
+  return out
 }
 
 async function readMemoryDir(

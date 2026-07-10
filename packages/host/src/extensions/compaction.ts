@@ -10,6 +10,11 @@
  */
 
 import type { AgentEvent, Message } from '@agent-kernel/kernel'
+import {
+  createArtifactStore,
+  validateCompactionSummary,
+  type CompactionSummaryValidation,
+} from '@agent-kernel/shared/enhancement'
 
 import type { HostLoopDeps, LoopHandle } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
@@ -103,6 +108,8 @@ export async function runCompact(
       0,
       Math.round(compact.summary.length / 4) + estimateTokens(preservedTail),
     )
+    const validation = validateCompactionSummary(compact.summary)
+    await maybeWriteCompactionSummaryValidation(deps, sessionId, trigger, validation, compact.summary)
     await dispatchOne(
       deps,
       sessionId,
@@ -121,6 +128,38 @@ export async function runCompact(
     )
   } finally {
     inFlight.delete(sessionId)
+  }
+}
+
+async function maybeWriteCompactionSummaryValidation(
+  deps: HostLoopDeps,
+  sessionId: string,
+  trigger: 'manual' | 'auto' | 'preflight',
+  validation: CompactionSummaryValidation,
+  summary: string,
+): Promise<void> {
+  if (!deps.artifactRootDir) return
+  try {
+    const record = deps.store.get(sessionId)
+    const store = createArtifactStore(deps.artifactRootDir, {
+      ...(record?.state.cwd ? { workspaceRoot: record.state.cwd } : {}),
+    })
+    const seq = record?.state.cursor ?? 0
+    await store.writeJson(
+      'compaction_summary_validation',
+      `compaction-summaries/${sessionId}/${seq}.json`,
+      {
+        schemaVersion: 1 as const,
+        sessionId,
+        eventSeq: seq,
+        trigger,
+        generatedAt: new Date().toISOString(),
+        summaryChars: summary.length,
+        ...validation,
+      },
+    )
+  } catch {
+    // Validation is observability. Failing to persist it must not break compaction.
   }
 }
 
