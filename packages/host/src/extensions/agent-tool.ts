@@ -18,11 +18,21 @@ import type {
   CallToolEffect,
 } from '@agent-kernel/kernel'
 
+import {
+  createArtifactStore,
+  isSubAgentRole,
+  resolveSubAgentPolicy,
+  type SubAgentPolicy,
+  type SubAgentPolicyInput,
+  type SubAgentRole,
+} from '@agent-kernel/shared/enhancement'
+
 import type { SessionRecord, SessionStore } from '../store/session.js'
 import type { HostLoopDeps, ModelResolver } from '../loop-types.js'
 import { dispatchOne } from '../loop.js'
 
 const DEFAULT_MAX_AGENT_DEPTH = 3
+const DEFAULT_MAX_AGENT_FANOUT = 4
 export const AGENT_TOOL_NAME = 'agent'
 
 type ActiveSubAgent = {
@@ -107,17 +117,45 @@ export async function runAgentTool(
   }
   const depth = depthOf(deps.store, parent)
   const maxDepth = parent.config.maxAgentDepth ?? DEFAULT_MAX_AGENT_DEPTH
-  if (depth >= maxDepth) {
-    // Depth failure has no child session, so we can't emit a start/finish
-    // pair. Just return the enveloped error so the parent's timeline still
-    // shows the SubAgentCard in failed state.
-    return failEnvelope('depth-exceeded', agentTypeOf(effect), 'agent depth exceeded', 0, 0)
-  }
+  const maxFanOut = parent.config.maxAgentFanOut ?? DEFAULT_MAX_AGENT_FANOUT
+  const concurrentSiblingCount = activeSubAgentsForParent(parentSessionId).length
 
   const agentType = agentTypeOf(effect)
   const model = typeof effect.input.model === 'string' ? effect.input.model : undefined
+  const policyInput = readPolicyInput(effect, parent.config)
+  const policy = resolveSubAgentPolicy({
+    input: policyInput,
+    parentTools: parent.config.tools.map((tool) => tool.name),
+    parentDepth: depth,
+    maxDepth,
+    concurrentSiblingCount,
+    maxFanOut,
+  })
+
+  if (policy.reasons.includes('policy_max_depth_exceeded')) {
+    await persistSubAgentPolicyArtifact(deps, parent, undefined, effect.callId, policy)
+    return failEnvelope(
+      'depth-exceeded',
+      agentType,
+      `agent depth exceeded: parent depth ${depth} >= max ${maxDepth}`,
+      0,
+      0,
+    )
+  }
+  if (policy.reasons.includes('policy_max_fanout_exceeded')) {
+    await persistSubAgentPolicyArtifact(deps, parent, undefined, effect.callId, policy)
+    return failEnvelope(
+      'fanout-exceeded',
+      agentType,
+      `agent fan-out exceeded: ${concurrentSiblingCount} live siblings >= max ${maxFanOut}`,
+      0,
+      0,
+    )
+  }
+
+  const effectiveTools = pickEffectiveTools(effect.input.tools, policy.allowedTools)
   const child = await deps.store.create({
-    config: filteredAgentConfig(parent.config, effect.input.tools),
+    config: filteredAgentConfig(parent.config, effectiveTools),
     parentSessionId,
     parentCursor: parent.state.cursor,
     ...(parent.workspaceId !== undefined ? { workspaceId: parent.workspaceId } : {}),
@@ -128,6 +166,8 @@ export async function runAgentTool(
     // of the parent's mode. See docs/adr/0014-subagent-approval-mode.md.
     initialApprovalMode: 'allow_all',
   })
+
+  await persistSubAgentPolicyArtifact(deps, parent, child.sessionId, effect.callId, policy)
 
   const startedAt = new Date()
   deps.broadcast.onSubAgentStarted?.({
@@ -154,6 +194,18 @@ export async function runAgentTool(
   if (model && isSettableModelResolver(deps.models)) {
     deps.models.set(child.sessionId, model)
   }
+  const timeoutHandle = policy.timeoutMs !== undefined
+    ? setTimeout(() => {
+        void interruptSubAgent(
+          deps,
+          aborts,
+          parentSessionId,
+          effect.callId,
+          child.sessionId,
+          `sub-agent exceeded timeoutMs=${policy.timeoutMs}`,
+        )
+      }, policy.timeoutMs)
+    : undefined
   let dispatchError: string | undefined
   try {
     try {
@@ -166,6 +218,7 @@ export async function runAgentTool(
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err)
     } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       if (model && isSettableModelResolver(deps.models)) {
         if (priorModel) deps.models.set(child.sessionId, priorModel)
         else deps.models.delete(child.sessionId)
@@ -195,7 +248,10 @@ export async function runAgentTool(
   }
 
   if (dispatchError || !final || final.status !== 'done') {
-    const error = dispatchError ?? `agent ended with status ${final?.status ?? 'unknown'}`
+    const error =
+      dispatchError ??
+      final?.error ??
+      `agent ended with status ${final?.status ?? 'unknown'}`
     deps.broadcast.onSubAgentFinished?.({
       parentSessionId,
       parentCallId: effect.callId,
@@ -341,4 +397,64 @@ function isSettableModelResolver(
       typeof (models as SettableModelResolver).set === 'function' &&
       typeof (models as SettableModelResolver).delete === 'function',
   )
+}
+
+function readPolicyInput(effect: CallToolEffect, _parentConfig: AgentConfig): SubAgentPolicyInput | undefined {
+  const raw = effect.input as Record<string, unknown>
+  const roleRaw = raw['role']
+  const role = isSubAgentRole(roleRaw) ? roleRaw : undefined
+  const explicitAllowed = Array.isArray(raw['tools']) ? (raw['tools'] as unknown[]).filter((tool): tool is string => typeof tool === 'string') : undefined
+  const input: SubAgentPolicyInput = {
+    ...(role ? { role } : {}),
+    ...(typeof raw['objective'] === 'string' && raw['objective'].length > 0 ? { objective: raw['objective'] as string } : {}),
+    ...(explicitAllowed && explicitAllowed.length > 0 ? { allowedTools: explicitAllowed } : {}),
+    ...(typeof raw['max_turns'] === 'number' && Number.isFinite(raw['max_turns']) ? { maxTurns: Math.floor(raw['max_turns'] as number) } : {}),
+    ...(typeof raw['timeout_ms'] === 'number' && Number.isFinite(raw['timeout_ms']) ? { timeoutMs: Math.floor(raw['timeout_ms'] as number) } : {}),
+    ...(typeof raw['expected_output'] === 'string' && raw['expected_output'].length > 0 ? { expectedOutput: raw['expected_output'] as string } : {}),
+  }
+  if (Object.keys(input).length === 0 && roleRaw === undefined) return undefined
+  return input
+}
+
+function pickEffectiveTools(
+  requestedTools: unknown,
+  policyAllowedTools: readonly string[] | undefined,
+): readonly string[] | undefined {
+  const requested = Array.isArray(requestedTools)
+    ? (requestedTools as unknown[]).filter((t): t is string => typeof t === 'string')
+    : undefined
+  if (policyAllowedTools && policyAllowedTools.length > 0) return policyAllowedTools
+  return requested
+}
+
+async function persistSubAgentPolicyArtifact(
+  deps: HostLoopDeps,
+  parent: SessionRecord,
+  childSessionId: string | undefined,
+  parentCallId: string,
+  policy: SubAgentPolicy,
+): Promise<void> {
+  if (!deps.artifactRootDir) return
+  try {
+    const store = createArtifactStore(deps.artifactRootDir, {
+      ...(parent.state.cwd ? { workspaceRoot: parent.state.cwd } : {}),
+    })
+    const artifact = {
+      schemaVersion: 1 as const,
+      parentSessionId: parent.sessionId,
+      parentCallId,
+      ...(childSessionId ? { childSessionId } : {}),
+      createdAt: new Date().toISOString(),
+      policy,
+    }
+    await store.writeJson(
+      'subagent_policy',
+      `subagent-policies/${parent.sessionId}/${parentCallId}.json`,
+      artifact,
+    )
+  } catch {
+    // Persistence failures must not break the sub-agent run. The policy is a
+    // derived artifact; if the disk is unavailable the sub-agent still runs
+    // under the resolved policy in memory.
+  }
 }

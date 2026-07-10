@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createConfig, createInitialState } from '@agent-kernel/kernel'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { parseEnhancementCli } from './enhancement-cli.js'
+import { parseEnhancementCli } from './ops-cli.js'
 import { writeHeader } from './store/log.js'
 import { exportSubAgentGraph } from './subagent-graph.js'
 

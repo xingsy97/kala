@@ -23,8 +23,10 @@ import {
   ChevronRight,
   Cpu,
   Loader2,
+  Shield,
   Square,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import type { ToolCallContent } from '@agent-kernel/kernel'
 import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
@@ -40,6 +42,7 @@ import {
   useSubAgentSession,
   type SubAgentLifecycle,
 } from './useSubAgentSession.js'
+import { useSubAgentPolicy, type SubAgentPolicyView } from './useSubAgentPolicy.js'
 
 type Props = {
   parentSessionId: string
@@ -108,6 +111,7 @@ const SubAgentRow = memo(function SubAgentRow({
   result,
   compact = false,
 }: RowProps): JSX.Element {
+  const { t } = useTranslation()
   const envelope = result ? parseSubAgentEnvelope(result.content) : null
   const promptInput = readPrompt(call)
   const agentTypeInput = readAgentType(call)
@@ -140,6 +144,8 @@ const SubAgentRow = memo(function SubAgentRow({
     ...(seededLifecycle ? { initialLifecycle: seededLifecycle } : {}),
     ...(envelope?.agentType ? { initialAgentType: envelope.agentType } : {}),
   })
+
+  const policy = useSubAgentPolicy({ parentSessionId, parentCallId: call.callId })
 
   const status = view.lifecycle.status
   const runningChildSessionId = view.lifecycle.status === 'running' ? view.lifecycle.childSessionId : null
@@ -206,7 +212,7 @@ const SubAgentRow = memo(function SubAgentRow({
           )}
           <StatusIcon status={status} />
           <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            sub-agent
+            {t('chat.subAgent.label')}
           </span>
           {agentType ? (
             <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
@@ -214,7 +220,7 @@ const SubAgentRow = memo(function SubAgentRow({
             </span>
           ) : null}
           <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
-            {prompt ?? '(no prompt)'}
+            {prompt ?? t('chat.subAgent.noPrompt')}
           </span>
           {model ? (
             <span
@@ -238,8 +244,8 @@ const SubAgentRow = memo(function SubAgentRow({
               })
             }}
             className="mr-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded bg-background/80 text-muted-foreground ring-1 ring-border/50 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/40 dark:hover:text-rose-300"
-            title="Interrupt sub-agent"
-            aria-label="interrupt sub-agent"
+            title={t('chat.subAgent.interrupt')}
+            aria-label={t('chat.subAgent.interrupt')}
             data-testid={`sub-agent-interrupt-${call.callId}`}
           >
             <Square className="h-3 w-3" aria-hidden="true" />
@@ -252,9 +258,10 @@ const SubAgentRow = memo(function SubAgentRow({
 
       {open ? (
         <div className="border-t border-border/50 bg-background/60">
+          {policy ? <SubAgentPolicyPanel policy={policy} callId={call.callId} /> : null}
           {failureText ? (
             <div className="border-b border-rose-200/60 bg-rose-50/60 px-3 py-2 text-[11px] text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/30 dark:text-rose-200">
-              <strong className="font-semibold">{status === 'cancelled' ? 'Cancelled:' : 'Failed:'}</strong> {failureText}
+              <strong className="font-semibold">{status === 'cancelled' ? t('chat.subAgent.cancelled') : t('chat.subAgent.failed')}</strong> {failureText}
             </div>
           ) : null}
           {view.messages.length > 0 ? (
@@ -271,12 +278,13 @@ const SubAgentRow = memo(function SubAgentRow({
 })
 
 function EmptyChild({ status }: { status: SubAgentLifecycle['status'] }): JSX.Element {
+  const { t } = useTranslation()
   const label =
     status === 'idle'
-      ? 'Waiting for the child session to start - '
+      ? t('chat.subAgent.waiting')
       : status === 'running'
-        ? 'Child session is starting - '
-        : 'No messages recorded.'
+        ? t('chat.subAgent.starting')
+        : t('chat.subAgent.noMessages')
   return (
     <div className="px-3 py-4 text-center text-[11px] italic text-muted-foreground">
       {label}
@@ -321,8 +329,9 @@ function StatusBadge({
   turns: number
   durationMs: number
 }): JSX.Element {
-  const label = statusLabel(status)
-  const suffix = suffixFor(status, turns, durationMs)
+  const { t } = useTranslation()
+  const label = statusLabel(status, t)
+  const suffix = suffixFor(status, turns, durationMs, t)
   return (
     <span
       className={cn(
@@ -352,18 +361,18 @@ function badgeClassFor(status: SubAgentLifecycle['status']): string {
   }
 }
 
-function statusLabel(status: SubAgentLifecycle['status']): string {
+function statusLabel(status: SubAgentLifecycle['status'], t: ReturnType<typeof useTranslation>['t']): string {
   switch (status) {
     case 'completed':
-      return 'Completed'
+      return t('chat.subAgent.completed')
     case 'failed':
-      return 'Failed'
+      return t('chat.subAgent.failed').replace(/:$/, '')
     case 'cancelled':
-      return 'Cancelled'
+      return t('chat.subAgent.cancelled').replace(/:$/, '')
     case 'running':
-      return 'Running'
+      return t('chat.subAgent.running')
     default:
-      return 'Pending'
+      return t('chat.subAgent.pending')
   }
 }
 
@@ -371,10 +380,11 @@ function suffixFor(
   status: SubAgentLifecycle['status'],
   turns: number,
   durationMs: number,
+  t: ReturnType<typeof useTranslation>['t'],
 ): string | null {
   if (status === 'idle') return null
   const parts: string[] = []
-  if (turns > 0) parts.push(`${turns} turn${turns === 1 ? '' : 's'}`)
+  if (turns > 0) parts.push(t('chat.subAgent.turn', { count: turns }))
   if (durationMs > 0) parts.push(formatDuration(durationMs))
   return parts.length > 0 ? ` -  ${parts.join('  -  ')}` : null
 }
@@ -417,4 +427,92 @@ function readAgentType(call: ToolCallContent): string | undefined {
 function readModel(call: ToolCallContent): string | undefined {
   const raw = (call.input as Record<string, unknown>)['model']
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+}
+
+function SubAgentPolicyPanel({
+  policy,
+  callId,
+}: {
+  policy: SubAgentPolicyView
+  callId: string
+}): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div
+      className="border-b border-border/50 bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground"
+      data-testid={`sub-agent-policy-${callId}`}
+    >
+      <div className="mb-1 flex items-center gap-1.5 font-medium uppercase tracking-wider text-foreground/80">
+        <Shield className="h-3 w-3" aria-hidden="true" />
+        {t('chat.subAgent.policy')}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
+        {policy.role ? (
+          <PolicyChip label={t('chat.subAgent.role')} value={policy.role} />
+        ) : null}
+        {policy.maxTurns !== undefined ? (
+          <PolicyChip label={t('chat.subAgent.maxTurns')} value={String(policy.maxTurns)} />
+        ) : null}
+        {policy.timeoutMs !== undefined ? (
+          <PolicyChip label={t('chat.subAgent.timeout')} value={`${Math.round(policy.timeoutMs / 1000)}s`} />
+        ) : null}
+        {policy.maxDepth !== undefined ? (
+          <PolicyChip
+            label={t('chat.subAgent.depth')}
+            value={
+              policy.resolvedDepth !== undefined
+                ? `${policy.resolvedDepth}/${policy.maxDepth}`
+                : String(policy.maxDepth)
+            }
+          />
+        ) : null}
+        {policy.maxFanOut !== undefined ? (
+          <PolicyChip
+            label={t('chat.subAgent.fanOut')}
+            value={
+              policy.concurrentSiblingCount !== undefined
+                ? `${policy.concurrentSiblingCount}/${policy.maxFanOut}`
+                : String(policy.maxFanOut)
+            }
+          />
+        ) : null}
+        {policy.allowedTools && policy.allowedTools.length > 0 ? (
+          <PolicyChip label={t('chat.subAgent.tools')} value={policy.allowedTools.join(', ')} />
+        ) : null}
+      </div>
+      {policy.objective ? (
+        <div className="mt-1 text-[11px]">
+          <span className="font-medium text-foreground/80">{t('chat.subAgent.objective')}</span>{' '}
+          <span className="italic">{policy.objective}</span>
+        </div>
+      ) : null}
+      {policy.expectedOutput ? (
+        <div className="mt-1 text-[11px]">
+          <span className="font-medium text-foreground/80">{t('chat.subAgent.expectedOutput')}</span>{' '}
+          <span className="italic">{policy.expectedOutput}</span>
+        </div>
+      ) : null}
+      {policy.reasons.length > 0 ? (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {policy.reasons.map((reason) => (
+            <span
+              key={reason}
+              className="rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] ring-1 ring-border/50"
+            >
+              {reason}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function PolicyChip({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="uppercase tracking-wider text-[10px] text-muted-foreground/80">{label}</span>
+      <span className="font-mono text-[11px] text-foreground">{value}</span>
+    </span>
+  )
 }
