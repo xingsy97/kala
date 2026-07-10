@@ -6,11 +6,13 @@ import {
   createArtifactStore,
   createModelJudgeTraceArtifact,
   createSessionProfile,
+  diffSubAgentUsage,
   summarizeEvalScores,
   type ArtifactRef,
   type EvalScoreResult,
   type EvalScoreSummary,
   type EvalRunSummary,
+  type EvalSubAgentUsageDelta,
   type PricingTable,
   type SessionProfile,
 } from '@agent-kernel/shared/enhancement'
@@ -227,6 +229,7 @@ export type EvalRunComparison = {
     passRate: number
   }
   failureDeltas: Record<string, number>
+  subagentUsageDelta?: EvalSubAgentUsageDelta
 }
 
 export async function compareEvalRuns(
@@ -239,6 +242,7 @@ export async function compareEvalRuns(
   for (const label of [...failureLabels].sort()) {
     failureDeltas[label] = (candidate.failureCounts[label] ?? 0) - (baseline.failureCounts[label] ?? 0)
   }
+  const subagentUsageDelta = diffSubAgentUsage(baseline.subagentUsage, candidate.subagentUsage)
   const comparison: EvalRunComparison = {
     baseline: pickComparableSummary(baseline),
     candidate: pickComparableSummary(candidate),
@@ -249,6 +253,7 @@ export async function compareEvalRuns(
       passRate: numberMetric(candidate.metrics.passRate) - numberMetric(baseline.metrics.passRate),
     },
     failureDeltas,
+    ...(subagentUsageDelta ? { subagentUsageDelta } : {}),
   }
   await mkdir(input.rootDir, { recursive: true })
   const comparisonPath = join(input.rootDir, 'eval-comparison.json')
