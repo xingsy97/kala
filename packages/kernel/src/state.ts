@@ -32,6 +32,7 @@ export function createConfig(params: {
   softThreshold?: number
   hardThreshold?: number
   maxAgentDepth?: number
+  maxAgentFanOut?: number
 }): AgentConfig {
   return {
     tools: params.tools,
@@ -47,6 +48,9 @@ export function createConfig(params: {
       : {}),
     ...(params.maxAgentDepth !== undefined
       ? { maxAgentDepth: params.maxAgentDepth }
+      : {}),
+    ...(params.maxAgentFanOut !== undefined
+      ? { maxAgentFanOut: params.maxAgentFanOut }
       : {}),
   }
 }
