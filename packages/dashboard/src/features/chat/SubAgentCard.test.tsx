@@ -293,6 +293,135 @@ describe('SubAgentCard', () => {
     fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
     await waitFor(() => expect(screen.getByText('child answer visible')).toBeTruthy())
   })
+
+  it('surfaces a resolved policy artifact inline on the expanded row', async () => {
+    const artifact = {
+      schemaVersion: 1,
+      parentSessionId: 'parent-1',
+      parentCallId: 'c1',
+      childSessionId: 'child-9',
+      createdAt: new Date().toISOString(),
+      policy: {
+        role: 'research',
+        objective: 'summarize the repo layout',
+        allowedTools: ['read', 'grep'],
+        maxTurns: 12,
+        timeoutMs: 90_000,
+        expectedOutput: 'Structured summary with file:line references.',
+        reasons: ['role_template_applied', 'policy_allowed_tools_intersected'],
+      },
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          path: 'subagent-policies/parent-1/c1.json',
+          mediaType: 'application/json',
+          body: artifact,
+        }),
+        { status: 200 },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const call = makeCall('c1', { prompt: 'summarize', agent_type: 'Explore', role: 'research' })
+      const group = makeGroup([call])
+      render(
+        <SubAgentCard
+          parentSessionId="parent-1"
+          socket={null}
+          group={group}
+          approvalByCallId={new Map()}
+        />,
+      )
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/artifacts/content?path=subagent-policies%2Fparent-1%2Fc1.json',
+          { cache: 'no-store' },
+        ),
+      )
+      const panel = await screen.findByTestId('sub-agent-policy-c1')
+      expect(panel.textContent).toContain('research')
+      expect(panel.textContent).toContain('read, grep')
+      expect(panel.textContent).toContain('12')
+      expect(panel.textContent).toContain('90s')
+      expect(panel.textContent).toContain('summarize the repo layout')
+      expect(panel.textContent).toContain('role_template_applied')
+      expect(panel.textContent).toContain('policy_allowed_tools_intersected')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('renders nothing when no policy artifact exists', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'not found' }), { status: 404 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const call = makeCall('c2', { prompt: 'noop' })
+      const group = makeGroup([call])
+      render(
+        <SubAgentCard
+          parentSessionId="parent-1"
+          socket={null}
+          group={group}
+          approvalByCallId={new Map()}
+        />,
+      )
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      expect(screen.queryByTestId('sub-agent-policy-c2')).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('renders depth and fan-out chips when the policy artifact carries them', async () => {
+    const artifact = {
+      schemaVersion: 1,
+      parentSessionId: 'parent-1',
+      parentCallId: 'c3',
+      createdAt: new Date().toISOString(),
+      policy: {
+        role: 'research',
+        allowedTools: ['read'],
+        maxDepth: 3,
+        resolvedDepth: 2,
+        maxFanOut: 4,
+        concurrentSiblingCount: 1,
+        reasons: ['role_template_applied'],
+      },
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          path: 'subagent-policies/parent-1/c3.json',
+          mediaType: 'application/json',
+          body: artifact,
+        }),
+        { status: 200 },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const call = makeCall('c3', { prompt: 'summarize', agent_type: 'Explore', role: 'research' })
+      const group = makeGroup([call])
+      render(
+        <SubAgentCard
+          parentSessionId="parent-1"
+          socket={null}
+          group={group}
+          approvalByCallId={new Map()}
+        />,
+      )
+      const panel = await screen.findByTestId('sub-agent-policy-c3')
+      expect(panel.textContent).toContain('depth')
+      expect(panel.textContent).toContain('2/3')
+      expect(panel.textContent).toContain('fan-out')
+      expect(panel.textContent).toContain('1/4')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
 
 describe('ChatPanel sub-agent dispatch', () => {
