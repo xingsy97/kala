@@ -7,7 +7,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { appendEventEntry, writeHeader } from '../store/log.js'
-import { parseEnhancementCli } from '../enhancement-cli.js'
+import { parseEnhancementCli } from '../ops-cli.js'
 import { compareEvalRuns, judgeScore, profileSession, scoreSession } from './generic.js'
 
 const config: AgentConfig = { tools: [] }
@@ -168,7 +168,66 @@ describe('generic eval and profile runners', () => {
     expect(result.comparison.deltas.resolved).toBe(1)
     expect(result.comparison.deltas.passRate).toBe(0.5)
     expect(result.comparison.failureDeltas.empty_patch).toBe(-1)
+    expect(result.comparison.subagentUsageDelta).toBeUndefined()
     expect(await readFile(result.comparisonPath, 'utf8')).toContain('candidate')
+  })
+
+  it('emits a subagentUsageDelta when either side carries subagentUsage', async () => {
+    const baselinePath = join(dir, 'baseline-sub.json')
+    const candidatePath = join(dir, 'candidate-sub.json')
+    await writeFile(baselinePath, JSON.stringify({
+      experimentId: 'base',
+      dataset: 'local',
+      model: 'm1',
+      trialCount: 2,
+      completed: 2,
+      failed: 0,
+      timedOut: 0,
+      resolved: 2,
+      unresolved: 0,
+      emptyPatch: 0,
+      failureCounts: {},
+      metrics: { passRate: 1 },
+    }), 'utf8')
+    await writeFile(candidatePath, JSON.stringify({
+      experimentId: 'candidate',
+      dataset: 'local',
+      model: 'm2',
+      trialCount: 2,
+      completed: 2,
+      failed: 0,
+      timedOut: 0,
+      resolved: 2,
+      unresolved: 0,
+      emptyPatch: 0,
+      failureCounts: {},
+      metrics: { passRate: 1 },
+      subagentUsage: {
+        totalCount: 3,
+        trialsWithSubagents: 2,
+        maxDepth: 2,
+        perTrialMean: 1.5,
+        resolvedWithSubagents: 2,
+        unresolvedWithSubagents: 0,
+      },
+    }), 'utf8')
+
+    const result = await compareEvalRuns({
+      rootDir: join(dir, 'compare-sub'),
+      baselineSummaryPath: baselinePath,
+      candidateSummaryPath: candidatePath,
+    })
+
+    const delta = result.comparison.subagentUsageDelta
+    expect(delta).toBeDefined()
+    expect(delta?.baseline).toBeNull()
+    expect(delta?.candidate?.totalCount).toBe(3)
+    expect(delta?.totalCount).toBe(3)
+    expect(delta?.trialsWithSubagents).toBe(2)
+    expect(delta?.maxDepth).toBe(2)
+    expect(delta?.perTrialMean).toBeCloseTo(1.5, 5)
+    expect(delta?.resolvedWithSubagents).toBe(2)
+    expect(await readFile(result.comparisonPath, 'utf8')).toContain('subagentUsageDelta')
   })
 
   it('writes model judge traces and score summaries', async () => {
