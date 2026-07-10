@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 
 export type BuildArtifactManifestInput = {
@@ -121,20 +121,31 @@ function inferKind(path: string): string {
   if (inPath(path, 'message-assembly')) return 'message_assembly'
   if (inPath(path, 'router-decisions')) return 'router_decision'
   if (inPath(path, 'tool-catalog')) return 'tool_catalog'
+  if (inPath(path, 'compaction-summaries')) return 'compaction_summary_validation'
   if (inPath(path, 'rl-token-segments')) return 'rl_token_segments'
   if (inPath(path, 'rl-adapters')) return 'rl_adapter'
   if (inPath(path, 'rollouts')) return 'rl_rollout_sidecar'
   if (inPath(path, 'trials')) return 'eval_trial'
   if (path.endsWith('/summary.json')) return 'eval_summary'
   if (path === 'worker-plan.json' || path.endsWith('/worker-plan.json')) return 'eval_worker_plan'
+  if (path === 'registry/run-index.json' || path.endsWith('/registry/run-index.json')) return 'eval_run_registry'
   if (path === 'progress.json' || path.endsWith('/progress.json')) return 'eval_progress'
   if (path.endsWith('/scores.json')) return 'eval_score'
   if (inPath(path, 'judge') || path.endsWith('/judge-trace.json')) return 'eval_judge'
   if (path.endsWith('/profile.json')) return 'profile'
   if (path.endsWith('/reliability-audit.json')) return 'reliability_audit'
   if (path.endsWith('/reliability-chaos.json')) return 'reliability_chaos'
+  if (path.endsWith('/reliability-gate.json')) return 'reliability_gate'
+  if (path.endsWith('/crash-kill-report.json')) return 'reliability_crash_kill'
+  if (path.endsWith('/tool-catalog-diff.json')) return 'tool_catalog_diff'
+  if (path.endsWith('/executor-capabilities.json')) return 'executor_capabilities'
+  if (path.endsWith('/profile-aggregate.json')) return 'profile_aggregate'
+  if (path.endsWith('/profile-budget.json')) return 'profile_budget'
+  if (path.endsWith('/regression-gate.json')) return 'eval_regression_gate'
   if (path.endsWith('/memory-index.json')) return 'memory_index'
+  if (path.endsWith('/memory-retrieval.json') || (inPath(path, 'memory-retrieval'))) return 'memory_retrieval'
   if (path.endsWith('/subagent-graph.json')) return 'subagent_graph'
+  if (inPath(path, 'subagent-policies')) return 'subagent_policy'
   if (path.endsWith('/eval-comparison.json')) return 'eval_comparison'
   if (path.endsWith('.diff') || path.endsWith('.patch')) return 'diff'
   if (path.endsWith('.jsonl')) return 'jsonl_log'
@@ -186,4 +197,151 @@ async function hashFile(path: string): Promise<string> {
     stream.on('end', resolve)
   })
   return hash.digest('hex')
+}
+
+export type PruneArtifactsInput = {
+  rootDir: string
+  olderThanDays?: number
+  maxTotalBytes?: number
+  kinds?: readonly string[]
+  dryRun?: boolean
+  outputPath?: string
+  now?: Date
+}
+
+export type PruneArtifactsRemoval = {
+  path: string
+  kind: string
+  bytes: number
+  mtime: string
+  reason: 'age' | 'size_budget'
+}
+
+export type PruneArtifactsReport = {
+  schemaVersion: 1
+  generatedAt: string
+  rootDir: string
+  dryRun: boolean
+  policy: {
+    olderThanDays?: number
+    maxTotalBytes?: number
+    kinds?: string[]
+  }
+  before: { entryCount: number; totalBytes: number }
+  after: { entryCount: number; totalBytes: number }
+  removed: PruneArtifactsRemoval[]
+  kept: number
+  protected: { path: string; reason: string }[]
+}
+
+const PROTECTED_PATH_MATCHERS: Array<{ match: (path: string) => boolean; reason: string }> = [
+  { match: (p) => p === 'artifact-prune.json' || p.endsWith('/artifact-prune.json'), reason: 'prune_report' },
+  { match: (p) => p === 'registry/run-index.json' || p.endsWith('/registry/run-index.json'), reason: 'run_registry' },
+  { match: (p) => p === 'worker-plan.json' || p.endsWith('/worker-plan.json'), reason: 'worker_plan' },
+]
+
+export async function pruneArtifacts(
+  input: PruneArtifactsInput,
+): Promise<{ report: PruneArtifactsReport; reportPath: string }> {
+  const { rootDir } = input
+  const now = input.now ?? new Date()
+  const dryRun = input.dryRun ?? false
+  const outputPath = input.outputPath ?? join(rootDir, 'artifact-prune.json')
+  const outputRelative = normalizeRelative(rootDir, outputPath)
+
+  await mkdir(rootDir, { recursive: true })
+  const { manifest } = await buildArtifactManifest({ rootDir, outputPath: join(rootDir, 'artifact-manifest.json') })
+
+  const kindsFilter = input.kinds && input.kinds.length > 0 ? new Set(input.kinds) : undefined
+  const cutoffMs = input.olderThanDays !== undefined
+    ? now.getTime() - input.olderThanDays * 86_400_000
+    : undefined
+
+  const beforeTotalBytes = manifest.entries.reduce((sum, entry) => sum + entry.bytes, 0)
+
+  const protectedList: PruneArtifactsReport['protected'] = []
+  const eligible: ArtifactManifestEntry[] = []
+  for (const entry of manifest.entries) {
+    if (entry.path === outputRelative) {
+      protectedList.push({ path: entry.path, reason: 'prune_report' })
+      continue
+    }
+    const protection = PROTECTED_PATH_MATCHERS.find((m) => m.match(entry.path))
+    if (protection) {
+      protectedList.push({ path: entry.path, reason: protection.reason })
+      continue
+    }
+    if (kindsFilter && !kindsFilter.has(entry.kind)) continue
+    eligible.push(entry)
+  }
+
+  const removals: PruneArtifactsRemoval[] = []
+  const remaining: ArtifactManifestEntry[] = []
+  for (const entry of eligible) {
+    if (cutoffMs !== undefined && Date.parse(entry.mtime) < cutoffMs) {
+      removals.push({
+        path: entry.path,
+        kind: entry.kind,
+        bytes: entry.bytes,
+        mtime: entry.mtime,
+        reason: 'age',
+      })
+      continue
+    }
+    remaining.push(entry)
+  }
+
+  if (input.maxTotalBytes !== undefined) {
+    const untouchedBytes = manifest.entries
+      .filter((entry) => !eligible.includes(entry))
+      .reduce((sum, entry) => sum + entry.bytes, 0)
+    let currentBytes = untouchedBytes + remaining.reduce((sum, entry) => sum + entry.bytes, 0)
+    const sortedByAge = [...remaining].sort((a, b) => Date.parse(a.mtime) - Date.parse(b.mtime))
+    while (currentBytes > input.maxTotalBytes && sortedByAge.length > 0) {
+      const victim = sortedByAge.shift()!
+      removals.push({
+        path: victim.path,
+        kind: victim.kind,
+        bytes: victim.bytes,
+        mtime: victim.mtime,
+        reason: 'size_budget',
+      })
+      currentBytes -= victim.bytes
+    }
+  }
+
+  if (!dryRun) {
+    for (const removal of removals) {
+      const absolute = join(rootDir, removal.path)
+      await rm(absolute, { force: true }).catch((err: unknown) => {
+        if (isNodeErrorCode(err, 'ENOENT')) return
+        throw err
+      })
+    }
+  }
+
+  const removedSet = new Set(removals.map((r) => r.path))
+  const afterEntries = manifest.entries.filter((entry) => !removedSet.has(entry.path))
+  const afterTotalBytes = afterEntries.reduce((sum, entry) => sum + entry.bytes, 0)
+
+  const report: PruneArtifactsReport = {
+    schemaVersion: 1,
+    generatedAt: now.toISOString(),
+    rootDir,
+    dryRun,
+    policy: {
+      ...(input.olderThanDays !== undefined ? { olderThanDays: input.olderThanDays } : {}),
+      ...(input.maxTotalBytes !== undefined ? { maxTotalBytes: input.maxTotalBytes } : {}),
+      ...(input.kinds && input.kinds.length > 0 ? { kinds: [...input.kinds] } : {}),
+    },
+    before: { entryCount: manifest.entries.length, totalBytes: beforeTotalBytes },
+    after: { entryCount: afterEntries.length, totalBytes: afterTotalBytes },
+    removed: removals,
+    kept: afterEntries.length,
+    protected: protectedList,
+  }
+
+  await mkdir(dirname(outputPath), { recursive: true })
+  await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+  return { report, reportPath: outputPath }
 }

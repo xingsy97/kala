@@ -31,7 +31,12 @@ import type { ManualModelInput, ModelInfo, ServerSettingsPayload } from '@agent-
 
 import { anthropicAdapter } from '../src/llm/anthropic.js'
 import { openaiAdapter } from '../src/llm/openai.js'
-import { routerAdapter, type MutableRouter } from '../src/llm/router.js'
+import {
+  createProviderHealthRegistry,
+  writeFallbackArtifact,
+  type ProviderHealthRegistry,
+} from '../src/llm/provider-health.js'
+import { routerAdapter, toFallbackArtifact, type MutableRouter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
 import { createBuiltinTools } from '../src/builtin-tools.js'
 import { createHookRunner } from '../src/extensions/hooks.js'
@@ -47,7 +52,7 @@ import {
 import { startHostServer } from '../src/server.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench-cli.js'
-import { parseEnhancementCli, runEnhancementCli } from '../src/enhancement-cli.js'
+import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 
@@ -76,17 +81,21 @@ async function main(): Promise<void> {
     process.env.AK_ALLOW_ALL_OK = '1'
   }
   const runtime = loadRuntimeConfig()
-  const registry = createModelRegistry(runtime.providers, runtime.manualModels, {
-    fallbackDefault: runtime.defaultModel,
-  })
-  const { llm, defaultModel } = registry
-
   const port = Number(argValue(process.argv.slice(2), '--port') ?? process.env.HOST_PORT ?? 3000)
   const sessionsDir =
     process.env.SESSIONS_DIR ?? join(homedir(), '.agent-kernel', 'sessions')
   const artifactRootDir = process.env.AGENT_KERNEL_ARTIFACTS_DIR === '0'
     ? false
     : process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
+  const healthRegistry = createProviderHealthRegistry()
+  const registry = createModelRegistry(runtime.providers, runtime.manualModels, {
+    fallbackDefault: runtime.defaultModel,
+    healthRegistry,
+    ...(artifactRootDir ? { artifactRootDir } : {}),
+    logger,
+  })
+  const { llm, defaultModel } = registry
+
   const dashboard = await createDashboardServing()
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
@@ -155,6 +164,11 @@ async function main(): Promise<void> {
     ...(hookRunner ? { hookRunner } : {}),
     skills,
     artifactRootDir,
+    routerHealth: () => ({
+      generatedAt: new Date().toISOString(),
+      providers: healthRegistry.entries(),
+      lastDecision: 'lastDecision' in llm ? (llm as MutableRouter).lastDecision() : undefined,
+    }),
   })
 
   logger.info(
@@ -200,7 +214,12 @@ type BuildResult = {
 function createModelRegistry(
   providers: readonly ProviderSpec[],
   initialManualModels: readonly ManualModelInput[],
-  opts: { fallbackDefault: string },
+  opts: {
+    fallbackDefault: string
+    healthRegistry?: ProviderHealthRegistry
+    artifactRootDir?: string
+    logger?: ReturnType<typeof createRuntimeLogger>
+  },
 ): BuildResult {
   const byPrefix: Array<{ prefix: string; adapter: LLMAdapter }> = []
   const models: ModelInfo[] = []
@@ -223,7 +242,29 @@ function createModelRegistry(
     primary = legacyEnvAdapter(models)
   }
 
-  const router = routerAdapter({ defaultAdapter: primary, byPrefix })
+  const routerArtifactDir = opts.artifactRootDir
+  const decisionLogger = opts.logger
+  const router = routerAdapter({
+    defaultAdapter: primary,
+    byPrefix,
+    ...(opts.healthRegistry ? { healthRegistry: opts.healthRegistry } : {}),
+    ...(routerArtifactDir
+      ? {
+          onDecision: (decision) => {
+            if (decision.finalOutcome === 'success' && decision.attempts.length <= 1) return
+            void writeFallbackArtifact({
+              rootDir: routerArtifactDir,
+              artifact: toFallbackArtifact(decision),
+            }).catch((err) => {
+              decisionLogger?.warn(
+                { err: err instanceof Error ? err.message : String(err) },
+                'router: failed to persist fallback artifact',
+              )
+            })
+          },
+        }
+      : {}),
+  })
   const defaultModel = process.env.HOST_MODEL ?? opts.fallbackDefault
   return {
     llm: router,

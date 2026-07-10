@@ -1,7 +1,8 @@
 # Platform Components
 
-Status: proposed enhancement  
+Status: TypeScript foundation implemented; Python/Go components not started
 Priority: 11
+Last reviewed against implementation: 2026-07-09
 
 ## Why This Matters
 
@@ -126,7 +127,7 @@ artifact capture to be configured.
   mode for handoff to CI. Agent batch execution and Docker grading execution
   stay CLI/CI-only; their outputs are still rendered here once artifacts are
   written.
-- `Profiles`: session latency, token, missing-trace, and estimated-cost
+- `Profiles`: session latency, token usage, missing-trace, and runtime telemetry
   profiles. The dashboard can generate a profile artifact from a session id or
   explicit session log path.
 - `Memory`: memory index provenance, active/tombstoned entries, confidence, and
@@ -162,3 +163,80 @@ memory indexes, and reliability reports remain the source documents.
 - Do not create separate protocols per language.
 - Do not add Python/Go just for portfolio value; each component must own a real
   integration or operational boundary.
+
+## Current Implementation Alignment
+
+### Implemented In Code
+
+The current platform foundation is still TypeScript-first, with useful release
+and artifact infrastructure:
+
+- Host, executor, kernel, shared, substrate, and dashboard packages build under
+  the pnpm workspace.
+- `scripts/build-release-assets.mjs` and `scripts/verify-release-assets.mjs`
+  build and verify release artifacts.
+- GitHub Actions include CI, release asset verification, release publishing, and
+  a manual/scheduled eval smoke workflow.
+- The host exposes `/artifacts/manifest` and `/artifacts/content` for dashboard
+  artifact discovery and bounded content access.
+- `agent-kernel-host enhancement artifacts manifest` builds the same manifest
+  for local artifact roots.
+- The manifest handles first-use empty artifact roots, indexes file kind/media
+  type/size/mtime/hash, skips payload duplication, and tolerates deletion races
+  during scanning.
+- Dashboard artifact explorer has `Eval`, `Profiles`, `Memory`, and `Ops` modes
+  that cover every current enhancement artifact family.
+- Real browser e2e covers dashboard-equivalent enhancement actions against a
+  production dashboard bundle and real host.
+- `scripts/verify-release-install.mjs` (`pnpm run verify:release-install`)
+  simulates a fresh install of the pre-built `release/` assets: copies the
+  host CJS bundle and dashboard tarball into a clean temp directory, boots the
+  host on an ephemeral port with clean sessions/artifacts dirs, and verifies
+  that `GET /artifacts/manifest` and `GET /` return the expected shapes before
+  shutting the process down. The release CI workflow runs this on every
+  host/all publish.
+- `agent-kernel-host enhancement artifacts prune` reads the artifact root,
+  removes entries older than `--older-than-days` and/or above a
+  `--max-total-bytes` global budget (oldest-first), filters by `--kinds`, and
+  writes a `artifact-prune.json` summary. Protected paths (`worker-plan.json`,
+  `registry/run-index.json`, prior prune reports) are never removed. Supports
+  `--dry-run` for CI validation.
+
+### Important Gaps
+
+- No Python package exists yet for SWE-bench dataset loading, official harness
+  wrapping, Phoenix/LangSmith interop, or RL framework adapters.
+- No Go service exists yet for process supervision, artifact serving, worker
+  orchestration, or OTLP sidecar duties.
+- Artifact retention exists at the CLI, but there is no scheduled cleanup job
+  or remote artifact store backend, and no access control layer.
+- Dashboard action coverage exists, but long-running operations still need a
+  stronger job/control-plane artifact model.
+
+### Production Quality Criteria
+
+Platform components are production-level when:
+
+- Release artifacts can be installed and smoke-tested in a clean environment
+  without the workspace source tree.
+- Python components own Python-native integrations: SWE-bench datasets/harness,
+  verifier jobs, RL adapter validation, and optional observability SDK exports.
+- Go or another systems component owns long-running worker/process supervision
+  only if TypeScript host supervision becomes a real bottleneck.
+- Artifact storage has retention, cleanup, manifest validation, and optional
+  remote backend support.
+- CI separates fast default checks, browser e2e, release dry-runs, and manual
+  expensive benchmark jobs.
+
+### Next Implementation Steps
+
+1. Add release-install smoke: build release assets, unpack them into a temp dir,
+   run host/executor/dashboard, and verify `/artifacts/manifest` plus one simple
+   session path.
+2. Add artifact cleanup/retention CLI based on manifest kind, mtime, and size.
+3. Add a Python `swebench_adapter` package only when it owns Hugging Face dataset
+   loading or official harness orchestration beyond command construction.
+4. Add an optional OTLP/Phoenix export script before building any custom
+   observability service.
+5. Defer Go components until process supervision or high-concurrency worker
+   orchestration exceeds what the current host can safely handle.
