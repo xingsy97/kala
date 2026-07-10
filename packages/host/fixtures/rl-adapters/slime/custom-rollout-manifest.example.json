@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "frameworkTarget": "slime",
+  "rolloutId": "rollout_00000000-0000-4000-8000-000000000000",
+  "taskId": "swebench:sympy__sympy-20590",
+  "eventLogRef": "sessions/example-session.jsonl",
+  "traceRef": "traces/example-session.openinference.json",
+  "tokenSegmentsRef": "rl-token-segments/example-session.json",
+  "rewardRef": "rl-rewards/swebench__sympy__sympy-20590.json",
+  "model": "policy-preview-1",
+  "weightVersion": "policy-preview-1@2026-07-09",
+  "entrypoint": "custom_rollout_manifest",
+  "notes": [
+    "Use this as slime custom data-generation input; it indexes replay, trace, token segments, and reward artifacts.",
+    "It is not a tensor dataset and does not synthesize token ids."
+  ]
+}

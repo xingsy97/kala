@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "example-session",
+  "tokenIdsCaptured": true,
+  "gatewayRequestId": "req_example_0001",
+  "weightVersion": "policy-preview-1@2026-07-09",
+  "prompt_ids": [1, 2, 3, 4, 5],
+  "response_ids": [6, 7, 8],
+  "response_mask": [1, 1, 1],
+  "notes": [
+    "Tiny captured-token fixture for the verl ready-path integration test.",
+    "Real captures come from a controlled generation gateway (SGLang/vLLM).",
+    "Prompt/response ids and mask are illustrative  -  real training requires real captures."
+  ]
+}
