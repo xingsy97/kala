@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './app.js'
 import { GroupedToolCallsDemo } from './demoGroupedToolCalls.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
+import './i18n/index.js'
 import './index.css'
 
 const root = document.getElementById('root')

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AttachedExecutor } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -40,6 +41,7 @@ export function NewSessionDialog({
   onCreate,
   onCancel,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [workspaceId, setWorkspaceId] = useState('')
   const [cwd, setCwd] = useState('')
   const [missingWorkspaceId, setMissingWorkspaceId] = useState<string | null>(null)
@@ -101,19 +103,19 @@ export function NewSessionDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent className="h-[min(90dvh,44rem)] max-w-4xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]" data-testid="new-session-dialog">
         <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle>New session</DialogTitle>
+          <DialogTitle>{t('dialogs.newSession')}</DialogTitle>
           <DialogDescription>
-            Choose the workspace and initial directory for tool calls.
+            {t('dialogs.newSessionDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 grid-rows-[minmax(8rem,0.42fr)_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
           <aside className="min-h-0 border-b border-border/50 bg-muted md:border-b-0 md:border-r">
-            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">Workspaces</div>
+            <div className="px-3 py-2 text-xs font-medium text-muted-foreground">{t('dialogs.workspaces')}</div>
             <ScrollArea className="h-[calc(100%-2rem)]">
               <div className="space-y-1 px-2 pb-2">
                 {workspaces.length === 0 ? (
                   <div className="rounded border border-dashed border-border/60 px-3 py-3 text-xs text-muted-foreground">
-                    No executor is online.
+                    {t('dialogs.noExecutorOnline')}
                   </div>
                 ) : null}
                 {missingWorkspaceId ? (
@@ -121,7 +123,7 @@ export function NewSessionDialog({
                     className="rounded border border-amber-300/70 bg-amber-50 px-3 py-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
                     data-testid="new-session-missing-workspace"
                   >
-                    Selected workspace is offline. Start its executor or choose another workspace.
+                    {t('dialogs.selectedWorkspaceOffline')}
                   </div>
                 ) : null}
                 {workspaces.map((w) => (

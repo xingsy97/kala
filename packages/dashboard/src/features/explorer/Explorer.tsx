@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type ReactElement, type RefCallba
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
 import type { RowRendererProps } from 'react-arborist'
+import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
   Cable,
@@ -81,6 +82,7 @@ export function Explorer({
   onOpenSessionInfo,
   onWorkspaceInfo,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -111,15 +113,11 @@ export function Explorer({
       >
         {empty ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground">
-            No daemons attached. Start an executor with{' '}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
-              pnpm executor:dev
-            </code>
-            .
+            {t('explorer.noDaemons')}
           </div>
         ) : filteredEmpty ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground" data-testid="explorer-filter-empty">
-            No sessions or workspaces match <span className="font-mono text-foreground">{query.trim()}</span>.
+            {t('explorer.noMatches', { query: query.trim() })}
           </div>
         ) : bounds.height > 0 ? (
           <Tree<TreeNode>
@@ -175,17 +173,17 @@ export function Explorer({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete session?</AlertDialogTitle>
+            <AlertDialogTitle>{t('explorer.deleteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
               <span className="font-mono text-foreground">
                 {pendingDelete?.label ?? ''}
               </span>
               <br />
-              The JSONL log will be removed from disk. This cannot be undone.
+              {t('explorer.deleteDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               data-testid="confirm-delete-button"
               onClick={() => {
@@ -193,7 +191,7 @@ export function Explorer({
                 setPendingDelete(null)
               }}
             >
-              Delete
+              {t('explorer.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -232,22 +230,23 @@ function Header({
   onQueryChange(query: string): void
   onConnectWorkspace: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-2 bg-sidebar-accent/60 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-sidebar-accent/40">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Explorer
+          {t('explorer.title')}
         </span>
         <Button
           variant="ghost"
           size="sm"
           onClick={onConnectWorkspace}
           data-testid="new-session-button"
-          title="Connect a new workspace"
+          title={t('explorer.connectWorkspace')}
           className="h-7 gap-1 rounded-full px-2.5 text-xs"
         >
           <Cable className="h-3 w-3" />
-          Workspace
+          {t('explorer.workspace')}
         </Button>
       </div>
       <label className="flex h-7 min-w-0 items-center gap-1.5 rounded bg-background/70 px-2 text-xs ring-1 ring-border/50 focus-within:ring-primary/40">
@@ -255,13 +254,13 @@ function Header({
         <input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search sessions"
+          placeholder={t('explorer.searchPlaceholder')}
           className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
           data-testid="explorer-search"
-          aria-label="Search sessions and workspaces"
+          aria-label={t('explorer.searchLabel')}
         />
         {query ? (
-          <button type="button" onClick={() => onQueryChange('')} className="rounded text-muted-foreground hover:text-foreground" aria-label="Clear explorer search">
+          <button type="button" onClick={() => onQueryChange('')} className="rounded text-muted-foreground hover:text-foreground" aria-label={t('explorer.clearSearch')}>
             <X className="h-3.5 w-3.5" />
           </button>
         ) : null}
@@ -337,16 +336,17 @@ function WorkspaceRow({
   onNewSession(workspaceId?: string): void
   query: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const w = node.data
   const dotCls = w.online
     ? 'bg-emerald-500 dark:bg-emerald-400'
     : 'bg-muted-foreground/40'
   const meta =
     w.workspaceId === null
-      ? 'sessions with no workspace'
+      ? t('explorer.sessionsNoWorkspace')
       : [w.os, w.runtime, w.runtimeVersion, w.ip]
           .filter((s) => typeof s === 'string' && s.length > 0)
-          .join('  -  ') || 'offline'
+          .join('  -  ') || t('explorer.offline')
   const canShowInfo = w.workspaceId !== null && onWorkspaceInfo
   const canCreateSession = w.workspaceId !== null
   return (
@@ -372,8 +372,8 @@ function WorkspaceRow({
           <button
             type="button"
             data-testid={`workspace-new-session-${w.workspaceId}`}
-            title={w.online ? 'New session in this workspace' : 'Workspace offline'}
-            aria-label="New session in this workspace"
+            title={w.online ? t('explorer.newSessionInWorkspace') : t('explorer.workspaceOffline')}
+            aria-label={t('explorer.newSessionInWorkspace')}
             disabled={!w.online}
             className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground group-hover/ws:opacity-100"
             onClick={(e) => {
@@ -389,8 +389,8 @@ function WorkspaceRow({
           <button
             type="button"
             data-testid={`workspace-info-${w.workspaceId}`}
-            title="Workspace info"
-            aria-label="Workspace info"
+            title={t('explorer.workspaceInfo')}
+            aria-label={t('explorer.workspaceInfo')}
             className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/ws:opacity-100"
             onClick={(e) => {
               e.stopPropagation()
@@ -458,6 +458,7 @@ function SessionRow({
   onOpenSessionInfo?(sessionId: string): void
   query: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const s = node.data
   const selected = node.isSelected
   return (
@@ -489,7 +490,7 @@ function SessionRow({
           {s.parentSessionId ? (
             <GitFork
               className="h-3 w-3 flex-none text-amber-600 dark:text-amber-400"
-              aria-label="forked session"
+              aria-label={t('explorer.forkedSession')}
             />
           ) : null}
           {editing ? (
@@ -504,7 +505,7 @@ function SessionRow({
                 'min-w-0 flex-1 truncate text-[13px] font-medium',
                 selected ? 'text-foreground' : 'text-foreground/90',
               )}
-              title="Double-click to rename"
+              title={t('explorer.doubleClickRename')}
             >
               <HighlightText text={s.label} query={query} />
             </div>
@@ -524,7 +525,7 @@ function SessionRow({
           <span className="ml-auto flex-none tabular-nums opacity-70">
             <span className="inline-flex items-center gap-1">
               <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
-              {formatWhen(s.lastActivityIso)}
+              {formatWhen(s.lastActivityIso, t)}
             </span>
           </span>
         </div>
@@ -540,8 +541,8 @@ function SessionRow({
               onStartEdit(s)
             }}
             data-testid="session-rename-button"
-            title="Rename this session"
-            aria-label={`rename session ${s.sessionId}`}
+            title={t('explorer.renameSession')}
+            aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
             className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
@@ -556,8 +557,8 @@ function SessionRow({
                 onOpenSessionInfo(s.sessionId)
               }}
               data-testid="session-info-button"
-              title="Session info"
-              aria-label={`session info ${s.sessionId}`}
+              title={t('explorer.sessionInfoTitle')}
+              aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
               className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground"
             >
               <Info className="h-3.5 w-3.5" strokeWidth={2.2} />
@@ -572,8 +573,8 @@ function SessionRow({
               onDeleteRequest(s)
             }}
             data-testid="session-delete-button"
-            title="Delete this session (irreversible)"
-            aria-label={`delete session ${s.sessionId}`}
+            title={t('explorer.deleteSessionTitle')}
+            aria-label={t('explorer.deleteSessionAria', { sessionId: s.sessionId })}
             className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
@@ -591,7 +592,8 @@ function SessionStatusIndicator({
   status: SessionSummary['status'] | undefined
   selected: boolean
 }): JSX.Element {
-  const label = statusIndicatorLabel(status)
+  const { t } = useTranslation()
+  const label = statusIndicatorLabel(status, t)
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
   if (status === 'thinking') {
     return (
@@ -690,32 +692,32 @@ function SessionStatusIndicator({
   )
 }
 
-function statusIndicatorLabel(status: SessionSummary['status'] | undefined): string {
+function statusIndicatorLabel(status: SessionSummary['status'] | undefined, t: ReturnType<typeof useTranslation>['t']): string {
   switch (status) {
     case 'thinking':
-      return 'Thinking'
+      return t('explorer.status.thinking')
     case 'executing_tools':
-      return 'Running tools'
+      return t('explorer.status.executingTools')
     case 'awaiting_approval':
-      return 'Awaiting approval'
+      return t('explorer.status.awaitingApproval')
     case 'error':
-      return 'Error'
+      return t('explorer.status.error')
     case 'done':
-      return 'Done'
+      return t('explorer.status.done')
     case 'idle':
-      return 'Ready'
+      return t('explorer.status.idle')
     default:
-      return 'Unknown'
+      return t('explorer.status.unknown')
   }
 }
 
-function formatWhen(iso: string): string {
+function formatWhen(iso: string, t: ReturnType<typeof useTranslation>['t']): string {
   try {
     const d = new Date(iso)
     const delta = Date.now() - d.getTime()
-    if (delta < 60_000) return 'just now'
-    if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`
-    if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`
+    if (delta < 60_000) return t('explorer.time.justNow')
+    if (delta < 3_600_000) return t('explorer.time.minutesAgo', { count: Math.floor(delta / 60_000) })
+    if (delta < 86_400_000) return t('explorer.time.hoursAgo', { count: Math.floor(delta / 3_600_000) })
     return d.toISOString().slice(0, 10)
   } catch {
     return iso
@@ -731,6 +733,7 @@ function RenameInput({
   onSubmit(label: string): void
   onCancel(): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [value, setValue] = useState(initial)
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -755,7 +758,7 @@ function RenameInput({
       }}
       onBlur={() => onSubmit(value)}
       data-testid="session-rename-input"
-      aria-label="Rename session"
+      aria-label={t('explorer.renameSession')}
       spellCheck={false}
       className="min-w-0 flex-1 rounded-sm bg-background px-1.5 py-0.5 text-[13px] font-medium text-foreground shadow-inner outline-none ring-1 ring-primary/40 focus:ring-2"
     />

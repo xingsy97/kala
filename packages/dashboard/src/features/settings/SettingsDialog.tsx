@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
+import { Trans, useTranslation } from 'react-i18next'
 import type { ServerSettingsPayload } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -39,6 +40,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
 ]
 
 export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [payload, setPayload] = useState<ServerSettingsPayload | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [section, setSection] = useState<SectionKey>('runtime')
@@ -72,15 +74,15 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
         data-testid="settings-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle>Settings</DialogTitle>
+          <DialogTitle>{t('settings.title')}</DialogTitle>
           <DialogDescription>
-            Runtime config, provider sources, hooks, and manually managed model ids.
+            {t('settings.description')}
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
           <aside className="min-h-0 border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r">
             <ScrollArea className="h-full">
-              <nav className="flex gap-1 p-2 md:block md:space-y-1" aria-label="Settings sections">
+              <nav className="flex gap-1 p-2 md:block md:space-y-1" aria-label={t('settings.sectionsLabel')}>
                 {SECTIONS.map((s) => (
                   <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
                 ))}
@@ -91,10 +93,10 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
             <div className="p-4 sm:p-6">
               {loadError ? (
                 <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  Failed to load settings: {loadError}
+                  {t('settings.loadFailed', { error: loadError })}
                 </div>
               ) : payload === null ? (
-                <div className="text-sm text-muted-foreground">Loading - </div>
+                <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
               ) : section === 'models' ? (
@@ -125,6 +127,9 @@ function SettingsSectionButton({
   active: boolean
   onClick(): void
 }): JSX.Element {
+  const { t } = useTranslation()
+  const label = t(`settings.sections.${section.key}.label`)
+  const hint = t(`settings.sections.${section.key}.hint`)
   return (
     <button
       type="button"
@@ -137,8 +142,8 @@ function SettingsSectionButton({
           : 'text-muted-foreground hover:bg-accent hover:text-foreground',
       )}
     >
-      <div className="font-medium">{section.label}</div>
-      <div className="mt-0.5 hidden text-[11px] text-muted-foreground md:block">{section.hint}</div>
+      <div className="font-medium">{label}</div>
+      <div className="mt-0.5 hidden text-[11px] text-muted-foreground md:block">{hint}</div>
     </button>
   )
 }
@@ -165,18 +170,19 @@ function RuntimeSection({
 }: {
   payload: ServerSettingsPayload
 }): JSX.Element {
+  const { t } = useTranslation()
   const rows: Array<[string, string]> = [
-    ['Anthropic settings', payload.paths.claudeSettings],
-    ['OpenAI-compatible providers', payload.paths.codexConfig],
-    ['Manual models', payload.paths.manualModels],
-    ['Hooks config', payload.paths.hooksConfig],
-    ['Sessions directory', payload.paths.sessionsDir],
+    [t('settings.runtime.anthropicSettings'), payload.paths.claudeSettings],
+    [t('settings.runtime.openaiProviders'), payload.paths.codexConfig],
+    [t('settings.runtime.manualModels'), payload.paths.manualModels],
+    [t('settings.runtime.hooksConfig'), payload.paths.hooksConfig],
+    [t('settings.runtime.sessionsDirectory'), payload.paths.sessionsDir],
   ]
   return (
     <div>
       <SectionHeader
-        title="Runtime"
-        subtitle="Configuration files the host reads on startup. Edit these, then restart the host process."
+        title={t('settings.sections.runtime.label')}
+        subtitle={t('settings.runtime.subtitle')}
       />
       <div className="overflow-hidden rounded-md border border-border">
         <table className="w-full text-sm">
@@ -216,6 +222,7 @@ function ModelsSection({
   onPayloadChange(payload: ServerSettingsPayload): void
   onModelsChanged?(): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [providerId, setProviderId] = useState(payload.providers[0]?.id ?? '')
   const [modelId, setModelId] = useState('')
   const [label, setLabel] = useState('')
@@ -271,13 +278,13 @@ function ModelsSection({
   return (
     <div>
       <SectionHeader
-        title="Models"
-        subtitle="Models advertised by the host. Auto-discovered entries are read-only; manual entries bind a model id to an existing provider endpoint."
+        title={t('settings.sections.models.label')}
+        subtitle={t('settings.models.subtitle')}
       />
       <form onSubmit={(event) => { void submit(event) }} className="mb-4 rounded-md border border-border bg-muted/30 p-3">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
           <label className="text-xs font-medium text-muted-foreground">
-            Provider
+            {t('settings.models.provider')}
             <select
               className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
               value={providerId}
@@ -291,7 +298,7 @@ function ModelsSection({
             </select>
           </label>
           <label className="text-xs font-medium text-muted-foreground">
-            Model id
+            {t('settings.models.modelId')}
             <input
               className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
               value={modelId}
@@ -302,29 +309,27 @@ function ModelsSection({
             />
           </label>
           <label className="text-xs font-medium text-muted-foreground">
-            Label
+            {t('settings.models.label')}
             <input
               className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="optional"
+              placeholder={t('settings.models.optional')}
               disabled={payload.providers.length === 0 || busy}
             />
           </label>
           <Button type="submit" className="mt-5 h-9" disabled={payload.providers.length === 0 || busy || modelId.trim().length === 0}>
-            <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> Add
+            <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.models.add')}
           </Button>
         </div>
         {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
         <div className="mt-2 text-xs text-muted-foreground">
-          Manual models are stored at <code className="font-mono">{payload.paths.manualModels}</code> and never contain API keys.
+          <Trans i18nKey="settings.models.manualStored" values={{ path: payload.paths.manualModels }} components={{ code: <code className="font-mono" /> }} />
         </div>
       </form>
       {payload.providers.length === 0 ? (
         <EmptyRow>
-          No provider is configured. Add one in{' '}
-          <code className="font-mono">{payload.paths.claudeSettings}</code> or{' '}
-          <code className="font-mono">{payload.paths.codexConfig}</code>.
+          {t('settings.models.noProvider', { claudePath: payload.paths.claudeSettings, codexPath: payload.paths.codexConfig })}
         </EmptyRow>
       ) : (
         <div className="space-y-4">
@@ -351,13 +356,13 @@ function ModelsSection({
                 </div>
                 {p.models.some((m) => m.id === payload.defaultModel) ? (
                   <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground">
-                    default provider
+                    {t('settings.models.defaultProvider')}
                   </span>
                 ) : null}
               </div>
               {p.models.length === 0 ? (
                 <div className="text-xs text-muted-foreground">
-                  No model attached  -  set one under this provider.
+                  {t('settings.models.noModelAttached')}
                 </div>
               ) : (
                 <ul className="space-y-1">
@@ -371,7 +376,7 @@ function ModelsSection({
                         <SourceBadge source={m.source ?? p.source ?? 'unknown'} />
                         {m.id === payload.defaultModel ? (
                           <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
-                            default
+                            {t('settings.models.default')}
                           </span>
                         ) : null}
                         {m.source === 'manual' ? (
@@ -379,7 +384,7 @@ function ModelsSection({
                             type="button"
                             onClick={() => { void deleteManual(p.id, m.id) }}
                             className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            aria-label={`delete model ${m.id}`}
+                            aria-label={t('settings.models.deleteModel', { model: m.id })}
                             disabled={busy}
                           >
                             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -416,24 +421,25 @@ function SourceBadge({ source }: { source: string }): JSX.Element {
 }
 
 function ApprovalsSection(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div>
       <SectionHeader
-        title="Approvals"
-        subtitle="Approval mode is per-session, controlled from the composer. There is no global default here."
+        title={t('settings.sections.approvals.label')}
+        subtitle={t('settings.approvals.subtitle')}
       />
       <ul className="space-y-2 text-sm">
         <li>
-          <b>Auto</b>  -  non-destructive tools run immediately; destructive tools ask.
+          <b>{t('composer.approvalModes.auto.label')}</b> - {t('settings.approvals.auto')}
         </li>
         <li>
-          <b>Ask everything</b>  -  every tool call waits for approval.
+          <b>{t('composer.approvalModes.ask.label')}</b> - {t('settings.approvals.ask')}
         </li>
         <li>
-          <b>Deny</b>  -  every approval-requiring tool call fails without dispatching. Used for replay/demo.
+          <b>{t('composer.approvalModes.deny.label')}</b> - {t('settings.approvals.deny')}
         </li>
         <li>
-          <b>Allow all</b>  -  bypass approval for every tool call, including destructive ones. Only permitted when the host was launched with{' '}
+          <b>{t('composer.approvalModes.allowAll.label')}</b> - {t('settings.approvals.allowAll')}{' '}
           <code className="font-mono">AK_ALLOW_ALL_OK=1</code>.
         </li>
       </ul>
@@ -446,25 +452,25 @@ function HooksSection({
 }: {
   payload: ServerSettingsPayload
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div>
       <SectionHeader
-        title="Hooks"
-        subtitle="Commands the host runs around session and tool events. Configured in the hooks TOML file  -  non-zero exit from a pre_tool_use hook blocks the call."
+        title={t('settings.sections.hooks.label')}
+        subtitle={t('settings.hooks.subtitle')}
       />
       {payload.hooks.length === 0 ? (
         <EmptyRow>
-          No hooks configured. Add <code className="font-mono">[[hooks]]</code> entries to{' '}
-          <code className="font-mono">{payload.paths.hooksConfig}</code> and restart the host.
+          {t('settings.hooks.none', { path: payload.paths.hooksConfig })}
         </EmptyRow>
       ) : (
         <div className="overflow-hidden rounded-md border border-border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="border-b border-border/50 px-3 py-2 text-left">Event</th>
-                <th className="border-b border-border/50 px-3 py-2 text-left">Match</th>
-                <th className="border-b border-border/50 px-3 py-2 text-left">Command</th>
+                <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.event')}</th>
+                <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.match')}</th>
+                <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.command')}</th>
               </tr>
             </thead>
             <tbody>
@@ -493,7 +499,7 @@ function HooksSection({
         </div>
       )}
       <details className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-xs">
-        <summary className="cursor-pointer text-muted-foreground">Example hook config</summary>
+        <summary className="cursor-pointer text-muted-foreground">{t('settings.hooks.example')}</summary>
         <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-foreground">
 {`[[hooks]]
 event = "pre_tool_use"
@@ -506,25 +512,26 @@ command = "/usr/local/bin/lint-shell.sh"`}
 }
 
 function InterfaceSection(): JSX.Element {
+  const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
   return (
     <div>
       <SectionHeader
-        title="Interface"
-        subtitle="Dashboard UI toggles. Stored per-browser in localStorage  -  no host restart required."
+        title={t('settings.sections.interface.label')}
+        subtitle={t('settings.interface.subtitle')}
       />
       <ul className="space-y-3 text-sm">
         <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
-            <div className="font-medium">Show Tool Call tab in Inspector</div>
+            <div className="font-medium">{t('settings.interface.showToolCallTab')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Adds a dedicated "Tool Call" tab beside Trace / LLM API / Status. When off, tool calls still appear inside the Trace view  -  use the Trace filter chips to isolate them.
+              {t('settings.interface.showToolCallTabDesc')}
             </p>
           </div>
           <Toggle
             checked={showToolCallTab}
             onChange={setShowToolCallTab}
-            ariaLabel="Show Tool Call tab in Inspector"
+            ariaLabel={t('settings.interface.showToolCallTab')}
             testId="settings-toggle-tool-call-tab"
           />
         </li>
@@ -535,6 +542,7 @@ function InterfaceSection(): JSX.Element {
 }
 
 function DesktopNotificationsSettings(): JSX.Element {
+  const { t } = useTranslation()
   const [enabled, setEnabled] = useBooleanPref(PREF_DESKTOP_NOTIFICATIONS_ENABLED, false)
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => notificationPermission())
   const [busy, setBusy] = useState(false)
@@ -570,18 +578,18 @@ function DesktopNotificationsSettings(): JSX.Element {
     <li className="rounded-md border border-border bg-card/60 px-4 py-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="font-medium">Desktop notifications</div>
+          <div className="font-medium">{t('settings.interface.desktopNotifications')}</div>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Notify when the active session needs user intervention. Browser permission is required.
+            {t('settings.interface.desktopNotificationsDesc')}
           </p>
           <p className="mt-1 text-[11px] text-muted-foreground" data-testid="desktop-notification-permission">
-            Permission: {permissionLabel(permission)}
+            {t('settings.interface.permission', { permission: permissionLabel(permission, t) })}
           </p>
         </div>
         <Toggle
           checked={enabled && permission === 'granted'}
           onChange={(next) => { void setDesktopNotifications(next) }}
-          ariaLabel="Enable desktop notifications"
+          ariaLabel={t('settings.interface.enableDesktopNotifications')}
           testId="settings-toggle-desktop-notifications"
           disabled={busy || unavailable}
         />
@@ -589,15 +597,15 @@ function DesktopNotificationsSettings(): JSX.Element {
       {unavailable ? (
         <div className="mt-3 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
           {permission === 'unsupported'
-            ? 'This browser does not support desktop notifications.'
-            : 'Notifications are blocked in the browser. Re-enable them from site settings.'}
+            ? t('settings.interface.notificationUnsupported')
+            : t('settings.interface.notificationBlocked')}
         </div>
       ) : null}
       <div className="mt-3 grid gap-2 border-t border-border/50 pt-3">
         <NotificationKindToggle
           prefKey={PREF_DESKTOP_NOTIFICATION_SOUND}
-          label="Sound"
-          description="Play a short local sound when a desktop notification is sent."
+          label={t('settings.interface.sound')}
+          description={t('settings.interface.soundDesc')}
           disabled={!enabled || permission !== 'granted'}
         />
         {DESKTOP_NOTIFICATION_PREFS.map((pref) => (
@@ -619,6 +627,7 @@ function NotificationKindToggle({
   description: string
   disabled: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   const [checked, setChecked] = useBooleanPref(prefKey, true)
   return (
     <div className="flex items-center justify-between gap-4 rounded-md bg-muted/30 px-3 py-2">
@@ -629,7 +638,7 @@ function NotificationKindToggle({
       <Toggle
         checked={checked}
         onChange={setChecked}
-        ariaLabel={`Notify: ${label}`}
+        ariaLabel={t('settings.interface.notify', { label })}
         testId={`settings-toggle-notification-${prefKey}`}
         disabled={disabled}
       />
@@ -637,9 +646,9 @@ function NotificationKindToggle({
   )
 }
 
-function permissionLabel(permission: NotificationPermission | 'unsupported'): string {
-  if (permission === 'default') return 'not requested'
-  if (permission === 'unsupported') return 'unsupported'
+function permissionLabel(permission: NotificationPermission | 'unsupported', t: ReturnType<typeof useTranslation>['t']): string {
+  if (permission === 'default') return t('settings.interface.permissionDefault')
+  if (permission === 'unsupported') return t('settings.interface.permissionUnsupported')
   return permission
 }
 
@@ -686,19 +695,19 @@ function McpSection({
 }: {
   payload: ServerSettingsPayload
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div>
       <SectionHeader
-        title="MCP servers"
-        subtitle="Model Context Protocol integration for external tool servers."
+        title={t('settings.sections.mcp.label')}
+        subtitle={t('settings.mcp.subtitle')}
       />
       <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-        <div className="mb-1 font-medium text-foreground">Not implemented yet</div>
+        <div className="mb-1 font-medium text-foreground">{t('settings.mcp.notImplemented')}</div>
         <p className="text-muted-foreground">{payload.mcp.note}</p>
       </div>
       <p className="mt-4 text-sm text-muted-foreground">
-        The design is fixed (executor-side spawning, <code className="font-mono">&lt;server&gt;__&lt;tool&gt;</code> naming, approvals inherit the session's mode). Implementation is deferred  -  the ecosystem overlap with the builtin tool set is small. See{' '}
-        <code className="font-mono">docs/mcp.md</code> in the repo for the full spec.
+        {t('settings.mcp.body')}
       </p>
       <div className="mt-4 flex items-center gap-2 text-sm">
         <a
@@ -724,6 +733,7 @@ function EmptyRow({ children }: { children: React.ReactNode }): JSX.Element {
 }
 
 function CopyButton({ value }: { value: string }): JSX.Element {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const copy = async (): Promise<void> => {
     try {
@@ -740,7 +750,7 @@ function CopyButton({ value }: { value: string }): JSX.Element {
       variant="ghost"
       size="icon"
       className="h-6 w-6 flex-none text-muted-foreground hover:text-foreground"
-      aria-label={copied ? 'copied' : 'copy value'}
+      aria-label={copied ? t('settings.copy.copied') : t('settings.copy.copyValue')}
       onClick={() => {
         void copy()
       }}

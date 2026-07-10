@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Check, Circle, CircleDashed, ListChecks, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
@@ -19,6 +20,7 @@ type Props = {
 }
 
 export function TasksButton({ todos }: Props): JSX.Element | null {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -54,10 +56,10 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
         type="button"
         onClick={() => setOpen((v) => !v)}
         data-testid="tasks-button-trigger"
-        aria-label={`Tasks: ${done} of ${total} done`}
+        aria-label={t('tasks.trigger', { done, total })}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title={`${done}/${total} tasks done`}
+        title={t('tasks.title', { done, total })}
         className={cn(
           'inline-flex h-7 flex-none items-center gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none transition-colors hover:bg-accent',
           open && 'bg-accent text-foreground',
@@ -67,7 +69,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
       >
         <ListChecks className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
         <span className="tabular-nums">
-          {total} <span className="hidden sm:inline">Task{total === 1 ? '' : 's'}</span>
+          {total} <span className="hidden sm:inline">{t('tasks.count', { count: total }).replace(/^\d+\s*/, '')}</span>
           <span className="ml-1 text-muted-foreground">
              -  {done}/{total}
           </span>
@@ -83,15 +85,15 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
       {open ? (
         <div
           role="dialog"
-          aria-label="Tasks"
+          aria-label={t('tasks.label')}
           className="absolute left-0 bottom-full z-20 mb-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
           data-testid="tasks-popover"
         >
           <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2 text-xs">
             <ListChecks className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-            <span className="font-medium text-foreground">Tasks</span>
+            <span className="font-medium text-foreground">{t('tasks.label')}</span>
             <span className="text-[11px] text-muted-foreground">
-              {done}/{total} done
+              {t('tasks.done', { done, total })}
             </span>
           </div>
           <ScrollArea className="max-h-[60vh]">

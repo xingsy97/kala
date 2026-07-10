@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, OctagonX, TerminalSquare } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import type { BackgroundTerminalTask } from '../../background-terminal.js'
 import {
@@ -29,6 +30,7 @@ export function BackgroundShellsButton({
   workspaceId,
   fallbackTasks,
 }: Props): JSX.Element | null {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const { tasks: liveTasks, killTask } = useBackgroundTasks({
@@ -52,7 +54,7 @@ export function BackgroundShellsButton({
     if (hasWorkspaceRegistry) return rows.filter((row) => row.status === 'running')
     return rows
   }, [hasWorkspaceRegistry, rows])
-  const scopeLabel = hasWorkspaceRegistry ? 'Workspace' : 'Session replay'
+  const scopeLabel = hasWorkspaceRegistry ? t('chat.backgroundShells.workspace') : t('chat.backgroundShells.sessionReplay')
 
   useEffect(() => {
     if (selectedTaskId && !rows.some((r) => r.taskId === selectedTaskId)) {
@@ -79,11 +81,11 @@ export function BackgroundShellsButton({
           type="button"
           onClick={() => setOpen(true)}
           data-testid="background-shells-trigger"
-          aria-label={`${visibleRows.length} running ${scopeLabel.toLowerCase()} background shell${visibleRows.length === 1 ? '' : 's'}`}
+          aria-label={t('chat.backgroundShells.trigger', { count: visibleRows.length, scope: scopeLabel.toLowerCase() })}
           title={
             running > 0
-              ? `${scopeLabel} shells  -  ${running} running  -  ${rows.length} total`
-              : `${scopeLabel} shells  -  ${rows.length} total`
+              ? t('chat.backgroundShells.titleRunning', { scope: scopeLabel, running, total: rows.length })
+              : t('chat.backgroundShells.titleTotal', { scope: scopeLabel, total: rows.length })
           }
           className={cn(
             'inline-flex h-7 flex-none items-center gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none transition-colors hover:bg-accent',
@@ -92,7 +94,7 @@ export function BackgroundShellsButton({
         >
           <TerminalSquare className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
           <span className="tabular-nums">
-            {visibleRows.length} <span className="hidden sm:inline">{scopeLabel} Shell{visibleRows.length === 1 ? '' : 's'}</span>
+            {visibleRows.length} <span className="hidden sm:inline">{scopeLabel} {t('chat.backgroundShells.shell', { count: visibleRows.length }).replace(/^\d+\s*/, '')}</span>
           </span>
           {running > 0 ? (
             <span
@@ -111,11 +113,11 @@ export function BackgroundShellsButton({
           <DialogHeader className="border-b border-border/50 px-4 py-3">
             <DialogTitle className="flex items-center gap-2 text-sm">
               <TerminalSquare className="h-4 w-4" aria-hidden="true" />
-              {scopeLabel} shells
+              {t('chat.backgroundShells.dialogTitle', { scope: scopeLabel })}
               <span className="text-[11px] font-normal text-muted-foreground">
                 {running > 0
-                  ? `${running} running  -  ${rows.length} total`
-                  : `${rows.length} shell${rows.length === 1 ? '' : 's'}`}
+                  ? t('chat.backgroundShells.summaryRunning', { running, total: rows.length })
+                  : t('chat.backgroundShells.summaryTotal', { count: rows.length })}
               </span>
             </DialogTitle>
           </DialogHeader>
@@ -196,17 +198,18 @@ function TaskList({
   onSelect: (id: string) => void
   onKill: ((taskId: string) => Promise<unknown>) | null
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <ScrollArea className="h-[28rem] border-r border-border/50">
       {rows.length === 0 ? (
         <div className="px-3 py-6 text-xs text-muted-foreground" data-testid="bg-task-empty">
-          No background shells recorded for this workspace.
+          {t('chat.backgroundShells.empty')}
         </div>
       ) : (
       <ul className="divide-y divide-border/50">
         {rows.map((row) => {
           const selected = row.taskId === selectedTaskId
-          const parts = splitCommand(row.command)
+          const parts = splitCommand(row.command, t('chat.backgroundShells.emptyCommand'))
           return (
             <li key={row.taskId}>
               <div
@@ -233,7 +236,7 @@ function TaskList({
                     </span>
                   ) : null}
                   <span className="mt-0.5 block truncate text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {row.origin === 'live' ? 'workspace live' : 'session replay'}  -  {row.taskId}
+                    {row.origin === 'live' ? t('chat.backgroundShells.live') : t('chat.backgroundShells.replay')}  -  {row.taskId}
                   </span>
                 </button>
                 {onKill && row.status === 'running' ? (
@@ -247,7 +250,7 @@ function TaskList({
                     }}
                     data-testid={`bg-task-kill-${row.taskId}`}
                   >
-                    {row.killing ? ' - ' : 'kill'}
+                    {row.killing ? '...' : t('chat.backgroundShells.kill')}
                   </button>
                 ) : (
                   <span className="mt-0.5 flex-none rounded bg-secondary px-1.5 py-0.5 text-[10px] capitalize text-muted-foreground">
@@ -273,6 +276,7 @@ function OutputPane({
   live: LiveBackgroundTask | null
   onKill: ((taskId: string) => Promise<unknown>) | null
 }): JSX.Element {
+  const { t } = useTranslation()
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const output = row?.output ?? ''
@@ -285,14 +289,14 @@ function OutputPane({
   if (!row) {
     return (
       <div className="flex items-center justify-center px-3 py-8 text-xs text-muted-foreground">
-        Select a task to view its output.
+        {t('chat.backgroundShells.selectTask')}
       </div>
     )
   }
 
   const truncatedNote =
     row.bytesTruncated > 0
-      ? `[ -  ${formatBytes(row.bytesTruncated)} truncated  -  buffer wrapped] `
+      ? t('chat.backgroundShells.truncated', { bytes: formatBytes(row.bytesTruncated) })
       : ''
   const canKill = Boolean(onKill && row.origin === 'live' && row.status === 'running')
 
@@ -305,7 +309,7 @@ function OutputPane({
           {row.cwd ? <span className="min-w-0 truncate font-mono">cwd {row.cwd}</span> : null}
           {live ? (
             <span className="font-mono">
-              {formatBytes(live.bytesLogged)} logged
+              {t('chat.backgroundShells.logged', { bytes: formatBytes(live.bytesLogged) })}
             </span>
           ) : null}
           <span className="ml-auto flex items-center gap-1">
@@ -318,10 +322,10 @@ function OutputPane({
                   void onKill?.(row.taskId)
                 }}
                 data-testid={`bg-task-kill-selected-${row.taskId}`}
-                title="Kill selected background shell"
+                title={t('chat.backgroundShells.killSelected')}
               >
                 <OctagonX className="h-3 w-3" />
-                {row.killing ? 'killing' : 'kill'}
+                {row.killing ? t('chat.backgroundShells.killing') : t('chat.backgroundShells.kill')}
               </button>
             ) : null}
             <label className="flex cursor-pointer items-center gap-1">
@@ -331,7 +335,7 @@ function OutputPane({
                 checked={autoScroll}
                 onChange={(e) => setAutoScroll(e.target.checked)}
               />
-              follow
+              {t('chat.backgroundShells.follow')}
             </label>
             <button
               type="button"
@@ -339,16 +343,16 @@ function OutputPane({
               onClick={() => {
                 void navigator.clipboard.writeText(output)
               }}
-              title="Copy output"
+              title={t('chat.backgroundShells.copyOutput')}
             >
               <Copy className="h-3 w-3" />
-              copy
+              {t('chat.backgroundShells.copy')}
             </button>
           </span>
         </div>
         <div className="rounded-md border border-border/50 bg-muted/40 px-2 py-1.5">
           <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Command
+            {t('chat.backgroundShells.command')}
           </div>
           <pre
             className="max-h-24 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
@@ -365,8 +369,8 @@ function OutputPane({
           {output.length > 0
             ? output
             : row.status === 'running'
-              ? 'No output yet. Streaming - '
-              : 'No output captured.'}
+              ? t('chat.backgroundShells.noOutputRunning')
+              : t('chat.backgroundShells.noOutputCaptured')}
         </pre>
       </ScrollArea>
     </div>
@@ -374,13 +378,14 @@ function OutputPane({
 }
 
 function StatusPill({ status }: { status: TerminalRow['status'] }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <span
       className={cn(
         'mt-0.5 flex-none rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
         statusClass(status),
       )}
-      title={statusHelp(status)}
+      title={statusHelp(status, t)}
     >
       {statusLabel(status)}
     </span>
@@ -388,13 +393,14 @@ function StatusPill({ status }: { status: TerminalRow['status'] }): JSX.Element 
 }
 
 function ProcessDetails({ row }: { row: TerminalRow }): JSX.Element {
+  const { t } = useTranslation()
   const fields: Array<[string, string]> = [
-    ['Status', statusLabel(row.status)],
-    ...(row.pid !== undefined ? [['PID', String(row.pid)] as [string, string]] : []),
-    ...(row.exitCode !== undefined && row.exitCode !== null ? [['Exit', String(row.exitCode)] as [string, string]] : []),
-    ...(row.signal ? [['Signal', row.signal] as [string, string]] : []),
-    ...(row.startedAt ? [['Started', formatTimestamp(row.startedAt)] as [string, string]] : []),
-    ...(row.endedAt ? [['Ended', formatTimestamp(row.endedAt)] as [string, string]] : []),
+    [t('chat.backgroundShells.fields.status'), statusLabel(row.status)],
+    ...(row.pid !== undefined ? [[t('chat.backgroundShells.fields.pid'), String(row.pid)] as [string, string]] : []),
+    ...(row.exitCode !== undefined && row.exitCode !== null ? [[t('chat.backgroundShells.fields.exit'), String(row.exitCode)] as [string, string]] : []),
+    ...(row.signal ? [[t('chat.backgroundShells.fields.signal'), row.signal] as [string, string]] : []),
+    ...(row.startedAt ? [[t('chat.backgroundShells.fields.started'), formatTimestamp(row.startedAt)] as [string, string]] : []),
+    ...(row.endedAt ? [[t('chat.backgroundShells.fields.ended'), formatTimestamp(row.endedAt)] as [string, string]] : []),
   ]
   return (
     <div className="grid grid-cols-2 gap-1 rounded-md border border-border/50 bg-muted/30 px-2 py-1.5 sm:grid-cols-3">
@@ -429,19 +435,19 @@ function statusLabel(status: TerminalRow['status']): string {
   return 'unknown'
 }
 
-function statusHelp(status: TerminalRow['status']): string {
+function statusHelp(status: TerminalRow['status'], t: ReturnType<typeof useTranslation>['t']): string {
   switch (status) {
     case 'running':
-      return 'Process is still running in the workspace executor.'
+      return t('chat.backgroundShells.statusHelp.running')
     case 'killed':
-      return 'Process was terminated by a kill request.'
+      return t('chat.backgroundShells.statusHelp.killed')
     case 'signaled':
-      return 'Process ended because it received a signal.'
+      return t('chat.backgroundShells.statusHelp.signaled')
     case 'exited':
     case 'done':
-      return 'Process has exited and is kept temporarily for inspection.'
+      return t('chat.backgroundShells.statusHelp.exited')
     default:
-      return 'Process status is unknown.'
+      return t('chat.backgroundShells.statusHelp.unknown')
   }
 }
 
@@ -466,9 +472,9 @@ function formatBytes(bytes: number): string {
  * keep the next non-flag token as the subcommand hint (e.g. `pnpm exec`,
  * `git log`, `docker compose`). Falls back to just the binary basename.
  */
-function splitCommand(command: string): { head: string; tail: string } {
+function splitCommand(command: string, emptyLabel: string): { head: string; tail: string } {
   const trimmed = command.trim()
-  if (trimmed.length === 0) return { head: '(empty)', tail: '' }
+  if (trimmed.length === 0) return { head: emptyLabel, tail: '' }
   const tokens = trimmed.split(/\s+/)
   let i = 0
   while (i < tokens.length && /^[A-Z_][A-Z0-9_]*=/.test(tokens[i] ?? '')) i += 1

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
 import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 
 import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
@@ -81,6 +83,15 @@ export const APPROVAL_MODES: ReadonlyArray<{
 
 const APPROVAL_MODE_BY_VALUE = new Map(APPROVAL_MODES.map((mode) => [mode.value, mode]))
 
+function approvalModeDisplay(mode: ApprovalMode, t: TFunction): { label: string; hint: string } {
+  if (mode === 'auto') return { label: t('composer.approvalModes.auto.label'), hint: t('composer.approvalModes.auto.hint') }
+  if (mode === 'ask') return { label: t('composer.approvalModes.ask.label'), hint: t('composer.approvalModes.ask.hint') }
+  if (mode === 'deny') return { label: t('composer.approvalModes.deny.label'), hint: t('composer.approvalModes.deny.hint') }
+  if (mode === 'allow_all') return { label: t('composer.approvalModes.allowAll.label'), hint: t('composer.approvalModes.allowAll.hint') }
+  const fallback = APPROVAL_MODE_BY_VALUE.get(mode)
+  return { label: fallback?.label ?? mode, hint: fallback?.hint ?? '' }
+}
+
 export function Composer({
   disabled,
   onSubmit,
@@ -104,6 +115,7 @@ export function Composer({
   onReadFile,
   footerExtras,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [text, setText] = useState('')
   const [sendMode, setSendMode] = useState<SendMode>('steer')
   const [pastedImages, setPastedImages] = useState<readonly PastedImage[]>([])
@@ -114,7 +126,7 @@ export function Composer({
   const [pendingToast, setPendingToast] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const mentionRequestId = useRef(0)
-  const approvalModeLabel = APPROVAL_MODE_BY_VALUE.get(approvalMode)?.label ?? approvalMode
+  const approvalModeLabel = approvalModeDisplay(approvalMode, t).label
   const slashQuery = text.trimStart().startsWith('/') ? text.trimStart() : ''
   const slashCommands = useMemo(
     () => {
@@ -122,8 +134,8 @@ export function Composer({
         {
           command: '/compact',
           icon: Archive,
-          label: 'Compact context',
-          description: 'Summarize older transcript context for the current session.',
+          label: t('composer.slash.compact'),
+          description: t('composer.slash.compactDesc'),
           run: onCompact,
         },
       ]
@@ -131,8 +143,8 @@ export function Composer({
         commands.push({
           command: '/cancel',
           icon: Square,
-          label: 'Stop the current turn',
-          description: 'Ask the host to cancel the active run.',
+          label: t('composer.slash.cancel'),
+          description: t('composer.slash.cancelDesc'),
           run: onCancel,
         })
       }
@@ -140,8 +152,8 @@ export function Composer({
         commands.push({
           command: '/clear',
           icon: Eraser,
-          label: 'Start a fresh session',
-          description: 'Clear the current session transcript and runtime state.',
+          label: t('composer.slash.clear'),
+          description: t('composer.slash.clearDesc'),
           run: onClearSession,
         })
       }
@@ -149,14 +161,14 @@ export function Composer({
         commands.push({
           command: '/consolidate-memory',
           icon: ListChecks,
-          label: 'Consolidate memory',
-          description: 'Merge durable memory notes through the existing memory flow.',
+          label: t('composer.slash.consolidateMemory'),
+          description: t('composer.slash.consolidateMemoryDesc'),
           run: onConsolidateMemory,
         })
       }
       return commands
     },
-    [onCompact, onCancel, onClearSession, onConsolidateMemory],
+    [onCompact, onCancel, onClearSession, onConsolidateMemory, t],
   )
   const matchingCommands = slashQuery
     ? slashCommands.filter((c) => c.command.startsWith(slashQuery))
@@ -343,7 +355,7 @@ export function Composer({
                     type="button"
                     onClick={() => removeImage(img.id)}
                     className="absolute right-1 top-1 rounded-full bg-black/60 p-0.5 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
-                    aria-label="remove image"
+                    aria-label={t('composer.removeImage')}
                     data-testid={`pasted-image-remove-${img.id}`}
                   >
                     <X className="h-3 w-3" />
@@ -368,7 +380,7 @@ export function Composer({
               rows={2}
               disabled={disabled}
               placeholder={
-                disabled ? 'waiting for host...' : 'Message the agent  -  @ for files, / for commands'
+                disabled ? t('composer.waitingForHost') : t('composer.placeholder')
               }
               className="max-h-56 min-h-[56px] w-full resize-none border-0 bg-transparent px-4 py-3 text-sm leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
               data-testid="composer-input"
@@ -445,7 +457,7 @@ export function Composer({
               >
                 <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
                   <AtSign className="h-3 w-3" aria-hidden="true" />
-                  <span>files</span>
+                  <span>{t('composer.files')}</span>
                   {mentionState.query ? (
                     <span className="font-mono text-foreground">{mentionState.query}</span>
                   ) : null}
@@ -454,7 +466,7 @@ export function Composer({
                 <ScrollArea className="max-h-56" data-testid="mention-list">
                   {mentionFiles.length === 0 && !mentionLoading ? (
                     <div className="px-3 py-2 text-xs text-muted-foreground">
-                      {workspaceOnline === false ? 'workspace offline' : 'no matches'}
+                      {workspaceOnline === false ? t('composer.workspaceOffline') : t('composer.noMatches')}
                     </div>
                   ) : null}
                   {mentionFiles.map((file, idx) => (
@@ -491,11 +503,11 @@ export function Composer({
               <SelectTrigger
                 className="h-7 w-16 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:w-20 md:w-24 xl:w-40"
                 data-testid="model-picker"
-                aria-label="model"
+                aria-label={t('common.model')}
               >
                 <Bot className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
                 <SelectValue
-                  placeholder={models.length === 0 ? 'no models' : 'model'}
+                  placeholder={models.length === 0 ? t('common.noModels') : t('common.model')}
                 />
               </SelectTrigger>
               <SelectContent>
@@ -520,27 +532,29 @@ export function Composer({
                       : '',
                 )}
                 data-testid="approval-mode-picker"
-                aria-label="approval mode"
+                aria-label={t('composer.approvalMode')}
               >
                 <ShieldCheck className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
                 <span className="min-w-0 truncate">{approvalModeLabel}</span>
               </SelectTrigger>
               <SelectContent>
-                {APPROVAL_MODES.map((m) => (
+                {APPROVAL_MODES.map((m) => {
+                  const display = approvalModeDisplay(m.value, t)
+                  return (
                   <SelectItem
                     key={m.value}
                     value={m.value}
-                    textValue={m.label}
+                    textValue={display.label}
                     data-testid={`approval-mode-option-${m.value}`}
                   >
                     <div className="flex flex-col">
-                      <span>{m.label}</span>
+                      <span>{display.label}</span>
                       <span className="text-[10px] text-muted-foreground">
-                        {m.hint}
+                        {display.hint}
                       </span>
                     </div>
                   </SelectItem>
-                ))}
+                )})}
               </SelectContent>
             </Select>
             {footerExtras}
@@ -581,6 +595,7 @@ function SendButton({
   sendMode: SendMode
   onSendModeChange(value: SendMode): void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -594,11 +609,11 @@ function SendButton({
   }, [menuOpen])
 
   const ModeIcon = sendMode === 'steer' ? Navigation : ListChecks
-  const modeLabel = sendMode === 'steer' ? 'Steer active turn' : 'Queue follow-up'
+  const modeLabel = sendMode === 'steer' ? t('composer.steerActiveTurn') : t('composer.queueFollowUp')
   const modeHint =
     sendMode === 'steer'
-      ? 'Send feedback for the current run; promoted at the next safe boundary if the agent is busy.'
-      : 'Hold this message until the current turn finishes, then send it in FIFO order.'
+      ? t('composer.steerHint')
+      : t('composer.queueHint')
 
   return (
     <div
@@ -614,7 +629,7 @@ function SendButton({
           'h-8 rounded-r-none rounded-l-full pl-4 pr-3 text-xs font-medium',
           disabled ? 'opacity-50' : '',
         )}
-        aria-label={`send message (${modeLabel})`}
+        aria-label={t('composer.sendMessage', { mode: modeLabel })}
         title={modeHint}
       >
         <ModeIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
@@ -627,7 +642,7 @@ function SendButton({
           'flex h-8 flex-none items-center justify-center rounded-r-full border-l border-primary-foreground/30 bg-primary px-2 text-primary-foreground transition-colors hover:bg-primary/90',
         )}
         data-testid="send-mode-toggle"
-        aria-label="send mode"
+        aria-label={t('chat.transcript.sendMode')}
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
       >
@@ -646,15 +661,15 @@ function SendButton({
           {(['steer', 'queue'] as const).map((mode) => {
             const Icon = mode === 'steer' ? Navigation : ListChecks
             const selected = sendMode === mode
-            const label = mode === 'steer' ? 'Steer active turn' : 'Queue follow-up'
+            const label = mode === 'steer' ? t('composer.steerActiveTurn') : t('composer.queueFollowUp')
             const hint =
               mode === 'steer'
-                ? 'Send feedback for the current run.'
-                : 'Hold until the active turn finishes.'
+                ? t('composer.steerHint')
+                : t('composer.queueHint')
             const longHint =
               mode === 'steer'
-                ? 'Steer active turn: send feedback for the current run; if the agent is busy, it is promoted at the next safe boundary.'
-                : 'Queue follow-up: hold this message until the current turn finishes, then send it in FIFO order.'
+                ? t('composer.steerHint')
+                : t('composer.queueHint')
             return (
               <button
                 key={mode}
@@ -699,6 +714,7 @@ function QueuedMessagesDock({
   onUpdate?(id: string, text: string): void
   onDelete?(id: string): void
 }): JSX.Element | null {
+  const { t } = useTranslation()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -738,11 +754,11 @@ function QueuedMessagesDock({
         <div className="flex min-w-0 items-center gap-2 font-medium text-foreground">
           <ListChecks className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
           <span>
-            {items.length === 1 ? '1 pending delivery' : `${items.length} pending deliveries`}
+            {t('composer.queued.pending', { count: items.length })}
           </span>
         </div>
         <span className="flex-none text-[11px] text-muted-foreground">
-          Sends after the active turn
+          {t('composer.queued.sendsAfterActiveTurn')}
         </span>
       </div>
       <ScrollArea className="max-h-24" data-testid="queued-messages-scrollarea">

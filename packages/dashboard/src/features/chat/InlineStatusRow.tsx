@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, Square, TriangleAlert, Wrench } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import type { AgentState, PendingToolCall } from '@agent-kernel/kernel'
 
@@ -51,6 +52,7 @@ export function InlineStatusRow({ state, streamingActive, onCancel }: Props): JS
 }
 
 function ThinkingRow({ onCancel }: { onCancel?: () => void }): JSX.Element {
+  const { t } = useTranslation()
   const elapsed = useElapsedSeconds(true)
   return (
     <div
@@ -64,7 +66,7 @@ function ThinkingRow({ onCancel }: { onCancel?: () => void }): JSX.Element {
         <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:150ms]" />
         <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse [animation-delay:300ms]" />
       </span>
-      <span className="font-medium">Assistant is thinking...</span>
+      <span className="font-medium">{t('chatStatus.thinking')}</span>
       <span className="ml-auto flex items-center gap-2">
         <span className="tabular-nums text-sky-700/70 dark:text-sky-300/70"> -  {elapsed.toFixed(1)}s</span>
         {onCancel ? <StopButton onClick={onCancel} /> : null}
@@ -80,6 +82,7 @@ function ToolsRow({
   calls: readonly PendingToolCall[]
   onCancel?: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const elapsed = useElapsedSeconds(true)
   const active = calls.filter((c) => c.status === 'dispatched' || c.status === 'approved')
   const list = active.length > 0 ? active : calls
@@ -93,8 +96,8 @@ function ToolsRow({
     })
   }
   const summary = list.length === 1
-    ? `Running ${list[0]!.name}  -  ${summariseArgs(list[0]!)}`
-    : `Running ${list.length} tools  -  ${list.map((c) => c.name).join(', ')}`
+    ? t('chatStatus.runningTool', { name: list[0]!.name, args: summariseArgs(list[0]!, t) })
+    : t('chatStatus.runningTools', { count: list.length, names: list.map((c) => c.name).join(', ') })
   return (
     <div
       className="rounded-md border border-violet-200 bg-violet-50/70 px-3 py-2 text-xs text-violet-800 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200"
@@ -126,7 +129,7 @@ function ToolsRow({
               )}
               <span className="flex-1 truncate">
                 <span className="font-semibold">{call.name}</span>
-                <span className="text-violet-700/70 dark:text-violet-300/70">  -  {summariseArgs(call)}</span>
+                <span className="text-violet-700/70 dark:text-violet-300/70">  -  {summariseArgs(call, t)}</span>
               </span>
             </button>
             {expanded.has(call.callId) ? (
@@ -142,6 +145,7 @@ function ToolsRow({
 }
 
 function AwaitingApprovalRow(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div
       className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
@@ -150,22 +154,23 @@ function AwaitingApprovalRow(): JSX.Element {
       aria-live="polite"
     >
       <TriangleAlert className="h-3.5 w-3.5 flex-none" />
-      <span className="font-medium">Waiting for your approval below</span>
+      <span className="font-medium">{t('chatStatus.awaitingApproval')}</span>
     </div>
   )
 }
 
 function StopButton({ onClick }: { onClick: () => void }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <button
       type="button"
       onClick={onClick}
-      title="Stop the current turn (dispatches a cancel event)"
+      title={t('chatStatus.stopTitle')}
       className="inline-flex items-center gap-1 rounded border border-current/30 px-1.5 py-0.5 text-[11px] font-medium hover:bg-current/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-current"
       data-testid="inline-status-cancel"
     >
       <Square className="h-3 w-3" />
-      Stop
+      {t('chatStatus.stop')}
     </button>
   )
 }
@@ -183,6 +188,7 @@ export function CompactFeedbackRow({
   tokensBefore?: number
   onDismiss?: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const isRunning = kind === 'running'
   const elapsedMs = useElapsedMs(isRunning, startedAt)
   if (kind === 'running') {
@@ -193,7 +199,7 @@ export function CompactFeedbackRow({
         role="status"
       >
         <Loader2 className="h-3.5 w-3.5 flex-none animate-spin" />
-        <span className="font-medium">Compacting conversation...</span>
+        <span className="font-medium">{t('chatStatus.compacting')}</span>
         <span className="ml-auto tabular-nums text-amber-700/70 dark:text-amber-300/70">
            -  {(elapsedMs / 1000).toFixed(1)}s
           {typeof tokensBefore === 'number' ? `  -   -  ${formatTokensShort(tokensBefore)}` : ''}
@@ -212,9 +218,9 @@ export function CompactFeedbackRow({
       role="status"
     >
       <span className="font-medium">
-        {kind === 'done' && 'Context compacted'}
-        {kind === 'error' && 'Compact failed'}
-        {kind === 'empty' && 'Nothing to compact'}
+        {kind === 'done' && t('chatStatus.compactDone')}
+        {kind === 'error' && t('chatStatus.compactFailed')}
+        {kind === 'empty' && t('chatStatus.nothingToCompact')}
       </span>
       {message ? <span className="truncate opacity-80"> -  {message}</span> : null}
       {onDismiss ? (
@@ -222,7 +228,7 @@ export function CompactFeedbackRow({
           type="button"
           onClick={onDismiss}
           className="ml-auto rounded px-1 opacity-70 hover:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-current"
-          aria-label="Dismiss"
+          aria-label={t('chatStatus.dismiss')}
         >
            - 
         </button>
@@ -231,10 +237,10 @@ export function CompactFeedbackRow({
   )
 }
 
-function summariseArgs(call: PendingToolCall): string {
+function summariseArgs(call: PendingToolCall, t: ReturnType<typeof useTranslation>['t']): string {
   const input = call.input ?? {}
   const primary = pickPrimaryArg(call.name, input)
-  if (primary === null) return '(no args)'
+  if (primary === null) return t('chatStatus.noArgs')
   const truncated = primary.length > 80 ? primary.slice(0, 77) + '...' : primary
   return truncated
 }

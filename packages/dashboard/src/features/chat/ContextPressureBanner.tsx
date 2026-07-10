@@ -1,4 +1,5 @@
 import { AlertTriangle, Zap } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
 
@@ -23,6 +24,7 @@ export function ContextPressureBanner({
   compactRunning,
   onCompactNow,
 }: Props): JSX.Element | null {
+  const { t } = useTranslation()
   const level = state?.contextPressureLevel ?? 'none'
   if (level === 'none') return null
 
@@ -35,11 +37,11 @@ export function ContextPressureBanner({
         role="status"
       >
         <AlertTriangle className="h-3.5 w-3.5 flex-none" />
-        <span className="font-medium">Context is full  -  auto-compacting</span>
+        <span className="font-medium">{t('contextPressure.full')}</span>
         <span className="truncate text-rose-700/80 dark:text-rose-200/70">
           {compactRunning
-            ? 'summarizer is running - '
-            : 'a compact will run before the next turn'}
+            ? t('contextPressure.fullRunning')
+            : t('contextPressure.fullQueued')}
         </span>
       </div>
     )
@@ -53,9 +55,9 @@ export function ContextPressureBanner({
       role="status"
     >
       <Zap className="h-3.5 w-3.5 flex-none" />
-      <span className="font-medium">Context is getting full</span>
+      <span className="font-medium">{t('contextPressure.gettingFull')}</span>
       <span className="truncate text-amber-700/80 dark:text-amber-200/75">
-        compact now to keep this session responsive
+        {t('contextPressure.compactHint')}
       </span>
       <div className="ml-auto flex-none">
         <Button
@@ -66,7 +68,7 @@ export function ContextPressureBanner({
           data-testid="context-pressure-compact-now"
           className="h-6 px-2 bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
         >
-          {compactRunning ? 'Compacting - ' : 'Compact now'}
+          {compactRunning ? t('contextPressure.compacting') : t('contextPressure.compactNow')}
         </Button>
       </div>
     </div>
