@@ -1,7 +1,14 @@
 # Enhancement Design Index
 
-Status: planning documents  
+Status: implementation-aligned design documents
 Created: 2026-07-09
+Last reviewed against implementation: 2026-07-09
+
+Each document now has an implementation alignment section. That section is the
+source of truth for what the repository actually does today versus what remains
+design work. This distinction matters because several enhancement areas already
+have CLI actions, artifact schemas, dashboard readouts, and browser e2e coverage,
+but are not yet full product workflows.
 
 The main rule across all documents is: do not increase the complexity of the
 core reducer, state machine, or wire protocol unless the feature cannot be built
@@ -23,6 +30,42 @@ industrial standards instead of inventing toy protocols.
 9. [Multi-Agent Collaboration](09-multi-agent-collaboration.md)
 10. [Latency and Cost Profiling](10-latency-cost-profiling.md)
 11. [Platform Components](11-platform-components.md)
+
+## Current Implementation Snapshot
+
+| Area | Implemented today | Not production-complete yet |
+| --- | --- | --- |
+| SWE-bench | Host CLI for offline predictions, session export, official grade command, result ingestion, agent-command inference, worker plans with cross-run registry (`runs/registry/run-index.json`); dashboard Eval artifact view and action forms; dashboard `Run Benchmark` guided wizard (Plan  -  Predictions  -  Grade  -  Ingest  -  Review with inline Grading Handoff panel); smoke CI. | Browser does not execute long-running agent shards or Docker grading; managed host/executor benchmark sessions are not fully bound to worker plans. |
+| Production tracing | Redacted request/response artifacts, OpenInference-shaped trace export, OTLP HTTP JSON exporter CLI with retry/header/timeout controls, message assembly artifacts, LLM API modal, router/tool catalog artifacts, adapter capture of provider `gatewayRequestId` + optional `weightVersion` surfaced as `gen_ai.response.id`/`agent_kernel.model.weight_version` span attributes. | No always-on live OTLP streaming from within a running session, no collector integration guide, partial provider request capture depending on adapter path, no cross-run trace comparison backend. |
+| Eval platform | Generic session scoring, judge trace parsing, summary comparison, threshold-based regression gate CLI + HTTP action with reason codes, dashboard Eval summaries/trials/comparisons, real dashboard e2e. | No dataset registry, experiment scheduler, or model-judge execution service. |
+| Agentic RL | Rollout sidecars, conservative segment index, slime handoff manifest with checked-in trainer contract fixture, guarded verl export requiring real token ids with matching checked-in captured-token + AgentLoopOutput fixtures, `verify-reward` runner emitting canonical `rl_reward` artifacts (`resolved`  -  1.0, else 0.0, low-cardinality shaped labels) from graded SWE-bench trials or eval score summaries. | No generation-time token gateway, no trainer integration, no batch rollout controller. |
+| Context engineering | Compaction events, message assembly artifacts, contribution breakdown, debugger modal, structured memory contribution accounting, budget partition reason codes, compaction summary schema validation. | No preflight gate that consumes budget reason codes; no compaction retry when summaries fail schema validation; no objective-aware compaction wizard. |
+| Model/tool router | Router decision artifacts, tool catalog artifacts, `tool-catalog diff` CLI/HTTP action for cross-run catalog comparison, skill-backed tool marking. | No health-aware provider fallback policy, no retry taxonomy artifacts, no capability-based executor routing. |
+| Long task reliability | Append-only recovery, offline reliability audit, chaos replay report, `reliability gate` verdict with CI exit codes, `reliability classify` crash-kill report using heartbeat + audit primitives, background terminal process info/kill UI. | No process supervisor that actually consumes the heartbeat/idempotency-ledger primitives from a live session, no crash-kill e2e matrix across host/executor/provider, no executor-side idempotency enforcement path. |
+| Memory | Workspace/global markdown memory index (with stale/conflict detection), tombstones, dashboard Memory tab with stale/conflict counts, assembly contribution metadata, host-side lexical retrieval prototype (`memory retrieve` CLI + HTTP action) with token budget + reason codes, eval experiment `memoryPolicy` metadata via `deriveEvalMemoryPolicy` (benchmark isolation by default), host-loop runtime enforcement of `memoryPolicy.mode: disabled` rejecting workspace/global `memory` tool calls with `EMEMDISABLED`. | No preflight injection of retrieved hits into the message assembly budget, no memory write approval UX. |
+| Multi-agent | Host `agent` builtin, child sessions, subagent graph export, dashboard expandable subagent cards, role-template policy resolver (`research`/`test`/`review`/`benchmark-triage`) with `subagent-policies/*.json` artifact and runtime `timeoutMs` enforcement, recursive depth cap (`AgentConfig.maxAgentDepth`) and per-parent fan-out cap (`AgentConfig.maxAgentFanOut`) surfaced through the policy artifact with `policy_max_depth_exceeded`/`policy_max_fanout_exceeded` reason codes, dashboard `SubAgentCard` inline policy panel with depth/fan-out chips, `summarizeSubAgentUsage` helper attaching a `subagentUsage` field to `EvalRunSummary` (auto-attached by `exportSessionForSweBench`), dashboard Eval `SubAgentUsagePanel` per-run and `SubAgentUsageDeltaPanel` in comparisons via `diffSubAgentUsage`, failed-child + parent-recovery Socket.IO e2e in `server.test.ts` with the child's underlying `state.error` preserved in the parent's failure envelope. | No cross-run eval comparison of subagent-enabled vs single-agent quality/cost. |
+| Latency/cost profiling | Session profile export, pricing file support, TTFT/duration aggregation, dashboard Profiles tab, eval-level `profile-aggregate` command with cost-per-resolved-task, `profile-budget` gate with per-threshold reason codes. | No always-on session cost panel, no dashboard renderer for aggregate/budget artifacts, no versioned provider pricing bundles, no executor queue-time capture. |
+| Platform components | Release asset build/verify scripts, GitHub Actions release workflow, artifact manifest endpoint, dashboard artifact explorer. | No Python/Go services yet, no packaged SWE-bench Python adapter, no external artifact server. |
+
+## Website Reality Check
+
+The dashboard now provides both a guided `Run Benchmark` wizard for SWE-bench
+and the underlying artifact control/readout surface. For most benchmark work
+the wizard is the recommended entry point:
+
+1. Open `Eval` from the toolbar or command palette.
+2. Expand `Run Benchmark (guided)` and follow the Plan  -  Predictions  -  Grade
+    -  Ingest  -  Review rail. The wizard composes existing actions and surfaces
+   the official Docker grade command inline.
+3. Use CLI/CI for long-running agent batch execution and Docker-based official
+   SWE-bench grading, then paste the results directory back into the wizard's
+   Ingest step (or use the direct-action `SWE-bench ingest results` panel).
+4. Return to Eval to inspect generated summaries, progress, trials, patches,
+   harness evidence, and comparisons.
+
+The direct-action panels (`Create SWE-bench Worker Plan`, `Eval Artifact
+Actions`) remain available for one-off actions that don't fit the guided
+lifecycle. Neither path adds scheduler state to the kernel protocol.
 
 ## Common Architecture Rule
 
