@@ -46,6 +46,8 @@ import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import { ArtifactExplorerDialog } from './features/artifacts/ArtifactExplorerDialog.js'
+import { AppShellNav } from './app-shell/AppShellNav.js'
+import { useAppSection, type AppSection } from './app-shell/section.js'
 import { LanguageSwitcher } from './features/i18n/LanguageSwitcher.js'
 import {
   cancelSession,
@@ -563,6 +565,15 @@ export function App(): JSX.Element {
     setArtifactsOpen(true)
   }
 
+  const [section, setSection] = useAppSection()
+  const handleSectionSelect = (next: AppSection): void => {
+    setSection(next)
+    if (next === 'benchmarks') openArtifacts('eval')
+    else if (next === 'operations') openArtifacts('ops')
+    else if (next === 'artifacts') openArtifacts('artifacts')
+    else if (next === 'settings') setSettingsOpen(true)
+  }
+
   const commandPaletteCommands = useMemo<readonly CommandPaletteItem[]>(() => {
     const cmds: CommandPaletteItem[] = []
     const socket = session.socket
@@ -886,7 +897,9 @@ export function App(): JSX.Element {
   )
 
   return (
-    <div className="h-dvh w-screen bg-background text-foreground overflow-hidden">
+    <div className="h-dvh w-screen bg-background text-foreground overflow-hidden flex flex-col">
+      <AppShellNav section={section} onSelect={handleSectionSelect} />
+      <div className="flex-1 min-h-0">
       <div className="hidden" data-testid="login-column-hidden" />
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
@@ -1305,6 +1318,7 @@ export function App(): JSX.Element {
         commands={commandPaletteCommands}
       />
       <Toaster position="bottom-right" richColors closeButton theme={theme} />
+      </div>
     </div>
   )
 }

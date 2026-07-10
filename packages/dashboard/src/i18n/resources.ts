@@ -23,6 +23,16 @@ export const resources = {
         search: 'search',
         settings: 'Settings',
       },
+      appShell: {
+        nav: {
+          aria: 'Primary navigation',
+          agent: 'Agent',
+          benchmarks: 'Benchmarks',
+          operations: 'Operations',
+          artifacts: 'Artifacts',
+          settings: 'Settings',
+        },
+      },
       app: {
         compactEmpty: 'send a message before compacting context',
         compactBusy: 'wait for the current turn to finish before compacting',
@@ -1022,6 +1032,16 @@ export const resources = {
         reload: '重新加载',
         search: '搜索',
         settings: '设置',
+      },
+      appShell: {
+        nav: {
+          aria: '主导航',
+          agent: 'Agent',
+          benchmarks: 'Benchmarks',
+          operations: '运维',
+          artifacts: '产物',
+          settings: '设置',
+        },
       },
       app: {
         compactEmpty: '请先发送消息再压缩上下文',
