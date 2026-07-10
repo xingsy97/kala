@@ -1,7 +1,8 @@
 # Agentic RL Rollout Export
 
-Status: proposed enhancement  
+Status: adapter foundation implemented; training-ready token capture missing
 Priority: 4
+Last reviewed against implementation: 2026-07-09
 
 ## Why This Matters
 
@@ -237,3 +238,95 @@ gateway.
 - Do not define a universal training trajectory schema.
 - Do not rely on re-tokenizing final messages for RL correctness.
 - Do not couple the kernel to slime, verl, SGLang, or vLLM.
+
+## Current Implementation Alignment
+
+### Implemented In Code
+
+The current RL implementation is correctly adapter-first:
+
+- `agent-kernel-host enhancement rollout export-session` writes a rollout
+  sidecar linking session log, trace, token segment artifact, reward artifact,
+  target framework, model, and weight version.
+- `agent-kernel-host enhancement rollout export-segments` writes a conservative
+  `rl-token-segments/<session_id>.json` artifact derived from the JSONL ledger.
+- Segment artifacts preserve event sequence links, source roles, estimated
+  token counts, loss-mask intent, compaction metadata, subagent topology, and
+  `tokenIdsCaptured=false` when real ids were not captured.
+- `agent-kernel-host enhancement rollout export-adapter --framework slime`
+  emits a ready handoff manifest for custom rollout generation.
+- `--framework verl` is guarded: it only emits AgentLoopOutput-shaped data when
+  a referenced token artifact contains real `prompt_ids`, `response_ids`,
+  `response_mask`, and `tokenIdsCaptured=true`; otherwise it writes a blocked
+  artifact with missing requirements.
+- `agent-kernel-host enhancement rollout verify-reward` reads a graded eval
+  trial (`--trial <path>`) or scored session summary (`--score <path>`) and
+  writes a canonical `rl_reward` artifact under `rl-rewards/<taskId>.json`.
+  Reward is `1.0` when resolved, `0.0` otherwise; shaped labels reuse the
+  low-cardinality `EvalFailureLabel` vocabulary (`resolved`, `empty_patch`,
+  `patch_apply_failed`, `test_failed`, `agent_timeout`, `agent_error`,
+  `harness_error`, `infrastructure_error`) with reason codes recording the
+  source kind and provenance. The same runner is exposed as HTTP action
+  `rollout-verify-reward`.
+- `LLMTrace` records provider `gatewayRequestId` (Anthropic `request-id`
+  header or message id fallback; OpenAI `x-request-id`/`openai-request-id`
+  header or `chatcmpl_*` id fallback) and an optional `weightVersion` set via
+  adapter options. Both fields flow into the OpenInference LLM span
+  attributes `gen_ai.response.id` and `agent_kernel.model.weight_version`,
+  which then land in the OTLP export bundle and every downstream trace
+  artifact. Local gateways (SGLang, vLLM) can set `weightVersion` to pin a
+  policy checkpoint per session.
+- `packages/host/fixtures/rl-adapters/slime/custom-rollout-manifest.example.json`
+  captures the exact shape a slime custom data-generation function will
+  receive. A contract test regenerates the adapter output from a stamped
+  sidecar and asserts byte-equality with the fixture, so trainer authors have
+  a checked-in reference surface and the exporter cannot silently drift.
+- `packages/host/fixtures/rl-adapters/verl/captured-tokens.example.json`
+  and `packages/host/fixtures/rl-adapters/verl/agent-loop-output.example.json`
+  form a matching pair for the verl ready-path. A contract test feeds the
+  captured-token fixture into `exportRolloutFrameworkAdapter --framework verl`
+  and asserts the emitted AgentLoopOutput matches the committed output
+  fixture. Together they give trainer authors both an input and an output
+  reference shape without exposing token ids to fabrication in the exporter.
+- Dashboard Ops view renders rollout sidecars, segment indexes, adapter status,
+  and related trace artifacts.
+- Browser e2e verifies rollout segment, sidecar, and adapter artifacts through
+  dashboard-origin actions and actual files on disk.
+
+### Important Gaps
+
+- There is no generation-time token capture gateway. This is the largest gap.
+  Without sampled token ids and masks from the serving backend, the project must
+  not claim to produce training-ready verl/slime tensors.
+- There is no SGLang/vLLM integration and no model weight/version handshake with
+  a controlled serving stack.
+- No batch rollout controller exists for collecting rollouts at scale.
+- No trainer-side smoke exists with slime or verl consuming generated artifacts.
+- Segment masks are policy metadata, not authoritative training masks unless
+  backed by generation-time token capture.
+- The `verify-reward` runner reads from pre-graded artifacts and is not yet a
+  standalone verifier service; multi-scorer reward shaping (weighted mixes,
+  partial credit, learned reward models) is out of scope.
+
+### Production Quality Criteria
+
+This area is production-level when:
+
+- A controlled model gateway records prompt ids, sampled response ids, logprobs,
+  response masks, sampling parameters, request ids, and weight versions per LLM
+  call.
+- Rollout sidecars link ledger, trace, token capture, reward, and benchmark
+  result artifacts for each task.
+- slime and verl adapters have contract tests against their expected input
+  shapes.
+- Failed or compacted rollouts are explicitly labeled and filtered rather than
+  silently entering training.
+- Rewards are produced in clean verifier workspaces and are reproducible from
+  saved artifacts.
+
+### Next Implementation Steps
+
+1. Design a local generation gateway adapter for one backend, preferably
+   SGLang or vLLM, that captures token ids/logprobs/masks at generation time
+   and populates `LLMTrace.gatewayRequestId` / `weightVersion` from the
+   serving stack.
