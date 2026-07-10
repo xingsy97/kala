@@ -23,6 +23,16 @@ export const resources = {
         search: 'search',
         settings: 'Settings',
       },
+      appShell: {
+        nav: {
+          aria: 'Primary navigation',
+          agent: 'Agent',
+          benchmarks: 'Benchmarks',
+          operations: 'Operations',
+          artifacts: 'Artifacts',
+          settings: 'Settings',
+        },
+      },
       app: {
         compactEmpty: 'send a message before compacting context',
         compactBusy: 'wait for the current turn to finish before compacting',
@@ -1022,6 +1032,16 @@ export const resources = {
         reload: ' - ',
         search: ' - ',
         settings: ' - ',
+      },
+      appShell: {
+        nav: {
+          aria: ' - ',
+          agent: 'Agent',
+          benchmarks: 'Benchmarks',
+          operations: ' - ',
+          artifacts: ' - ',
+          settings: ' - ',
+        },
       },
       app: {
         compactEmpty: ' - ',
