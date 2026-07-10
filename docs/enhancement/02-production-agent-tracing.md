@@ -1,7 +1,8 @@
 # Production Agent Tracing
 
-Status: proposed high-priority enhancement  
+Status: partially implemented; exporter and dashboard exist, live telemetry incomplete
 Priority: 2
+Last reviewed against implementation: 2026-07-09
 
 ## Why This Matters
 
@@ -214,3 +215,90 @@ open standard path should be OpenTelemetry/OpenInference.
 - Do not attach full prompts to telemetry by default.
 - Do not invent a custom trace format as the primary artifact.
 - Do not require Phoenix, LangSmith, or any cloud service to run locally.
+
+## Current Implementation Alignment
+
+### Implemented In Code
+
+The current implementation has a concrete trace/artifact foundation:
+
+- `agent-kernel-host enhancement trace export-session` writes
+  `traces/<session_id>.openinference.json` plus redacted LLM request/response
+  artifacts under `llm/<session_id>/<seq>.*.json`.
+- Live host artifact capture writes `message-assembly`, `router-decisions`, and
+  `tool-catalog` artifacts when `artifactRootDir` is enabled.
+- Provider request/response artifacts are redacted before persistence, including
+  sensitive headers and provider base URL details.
+- The dashboard LLM API modal separates `Message Assembler` and `API Call` so
+  assembled context and actual provider request/response are not shown as the
+  same thing.
+- The dashboard shows captured request and response bodies only from artifacts;
+  display metadata such as call sequence is not injected into the API body.
+- `GET /artifacts/manifest` and `GET /artifacts/content` provide bounded
+  dashboard access to trace, request, response, and assembly artifacts.
+- Headless browser coverage in `verify:dashboard-debugger` and
+  `verify:dashboard-enhancement-actions` checks API body separation, redaction,
+  artifact rendering, and missing-artifact-root first-use behavior.
+- LLM adapters capture the provider `gatewayRequestId` (Anthropic
+  `request-id` header or message id; OpenAI `x-request-id`/`openai-request-id`
+  header or streaming/non-streaming `chatcmpl_*` id) and an optional
+  `weightVersion` from adapter options, and both fields flow into the
+  OpenInference LLM span attributes `gen_ai.response.id` and
+  `agent_kernel.model.weight_version`. Downstream OTLP export bundles carry
+  the same attributes without extra plumbing.
+
+### Current Dashboard Workflow
+
+Trace inspection today is session-first:
+
+1. Open a session in the dashboard.
+2. Use `LLM API` to inspect individual model calls.
+3. Open a call detail modal.
+4. Use `Message Assembler` for kernel messages, tool registry contribution,
+   pipeline stages, and context proportions.
+5. Use `API Call` for the actual captured request/response pair.
+6. Use `Ops` artifact view for exported OpenInference trace artifacts and raw
+   request/response artifacts.
+
+This is useful for debugging a session, but it is not yet a full observability
+pipeline.
+
+### Important Gaps
+
+- There is no live OTLP HTTP/gRPC exporter or collector configuration.
+- OpenInference JSON is local artifact output, not a streamed tracing backend.
+- Provider request capture depends on the adapter path and available metadata;
+  older logs and some calls may still show `not captured` truthfully.
+- There is no trace comparison UI across eval runs beyond artifact-level
+  summaries and links.
+- Span schemas are OpenInference-shaped, but not yet validated against an
+  external collector in CI.
+- Redaction is implemented for current artifacts, but there is no centralized
+  policy UI explaining every redaction rule and capture toggle.
+
+### Production Quality Criteria
+
+This area is production-grade when:
+
+- Every LLM adapter path either captures a redacted provider boundary artifact
+  or records a typed `not_captured` reason.
+- OTLP/OpenInference exports can be sent to a local collector/Phoenix-compatible
+  endpoint from CLI and optionally from live host runtime.
+- Browser trace views can compare two sessions or eval trials and line up LLM,
+  tool, compaction, and error spans.
+- Redaction/truncation status is visible and test-covered for each persisted
+  sensitive payload.
+- Trace export has schema/golden tests with representative OpenAI-compatible and
+  Anthropic tool-call bodies.
+
+### Next Implementation Steps
+
+1. Add typed capture status to LLM trace metadata: `captured`, `redacted`,
+   `truncated`, `not_captured`, and `reason`.
+2. Add an OTLP JSONL/HTTP exporter command that can send local trace artifacts
+   to a configured endpoint.
+3. Add adapter-level tests proving current OpenAI and Anthropic request bodies
+   are captured exactly after provider translation.
+4. Add a dashboard trace compare view for two sessions/trials using existing
+   artifacts.
+5. Add a small collector/Phoenix-compatible smoke test behind an opt-in script.
