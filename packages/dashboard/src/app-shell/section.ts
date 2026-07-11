@@ -1,8 +1,8 @@
 /**
- * Top-level nav for the dashboard. Five tabs, URL-hash routing.
+ * Top-level nav for the dashboard. URL-hash routing.
  *
  * Deep-link contract (per principle C4):
- * - `#/agent`, `#/benchmarks`, `#/operations`, `#/artifacts`, `#/pipeline`
+ * - `#/agent`, `#/benchmarks`, `#/operations`, `#/artifacts`, `#/pipeline`, `#/docs`
  * - default (empty hash) resolves to `#/agent`
  * - back/forward and refresh restore the same section
  *
@@ -14,9 +14,9 @@
 
 import { useEffect, useState } from 'react'
 
-export type AppSection = 'agent' | 'benchmarks' | 'operations' | 'artifacts' | 'pipeline'
+export type AppSection = 'agent' | 'benchmarks' | 'operations' | 'artifacts' | 'pipeline' | 'docs'
 
-const SECTIONS: readonly AppSection[] = ['agent', 'benchmarks', 'operations', 'artifacts', 'pipeline']
+const SECTIONS: readonly AppSection[] = ['agent', 'benchmarks', 'operations', 'artifacts', 'pipeline', 'docs']
 
 function parseHash(hash: string): AppSection {
   const cleaned = hash.replace(/^#\/?/, '').split('/')[0]?.toLowerCase() ?? ''
