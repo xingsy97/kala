@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { BgListResult } from '@agent-kernel/shared'
+import type { BgKillResult, BgListResult } from '@agent-kernel/shared'
 
 import type { DashboardSocket } from '../../session.js'
 import { BackgroundShellsButton } from './BackgroundTerminalPanel.js'
@@ -11,9 +11,11 @@ describe('BackgroundShellsButton', () => {
     const socket = makeBgListSocket({
       requestId: 'ignored',
       workspaceId: 'ws-1',
+      sessionId: 'sess-1',
       tasks: [
         {
           taskId: 'task-live-1',
+          sessionId: 'sess-1',
               command: 'pnpm dev -- --host 0.0.0.0',
               cwd: '/repo',
               pid: 4242,
@@ -30,6 +32,7 @@ describe('BackgroundShellsButton', () => {
       <BackgroundShellsButton
         socket={socket}
         workspaceId="ws-1"
+        sessionId="sess-1"
         fallbackTasks={[]}
       />,
     )
@@ -49,7 +52,7 @@ describe('BackgroundShellsButton', () => {
     fireEvent.click(screen.getByTestId('bg-task-kill-selected-task-live-1'))
     expect(socket.emitMock).toHaveBeenCalledWith(
       'bg:kill',
-      expect.objectContaining({ workspaceId: 'ws-1', taskId: 'task-live-1' }),
+      expect.objectContaining({ workspaceId: 'ws-1', sessionId: 'sess-1', taskId: 'task-live-1' }),
       expect.any(Function),
     )
   })
@@ -59,6 +62,7 @@ describe('BackgroundShellsButton', () => {
       <BackgroundShellsButton
         socket={null}
         workspaceId="ws-1"
+        sessionId="sess-1"
         fallbackTasks={[
           {
             taskId: 'task-replay-1',
@@ -90,9 +94,11 @@ describe('BackgroundShellsButton', () => {
         socket={makeBgListSocket({
           requestId: 'ignored',
           workspaceId: 'ws-1',
+          sessionId: 'sess-1',
           tasks: [
             {
               taskId: 'task-killed-1',
+              sessionId: 'sess-1',
               command: 'sleep 100',
               cwd: '/repo',
               pid: 4243,
@@ -107,6 +113,7 @@ describe('BackgroundShellsButton', () => {
           ],
         })}
         workspaceId="ws-1"
+        sessionId="sess-1"
         fallbackTasks={[]}
       />,
     )
@@ -129,9 +136,11 @@ describe('BackgroundShellsButton', () => {
         socket={makeBgListSocket({
           requestId: 'ignored',
           workspaceId: 'ws-1',
+          sessionId: 'sess-1',
           tasks: [],
         })}
         workspaceId="ws-1"
+        sessionId="sess-1"
         fallbackTasks={[]}
       />,
     )
@@ -157,7 +166,7 @@ function makeBgListSocket(result: BgListResult): DashboardSocket & { emitMock: R
     emit(event: string, _payload: unknown, ack?: (result: BgListResult) => void) {
       this.emitMock(event, _payload, ack)
       if (event === 'bg:list') window.setTimeout(() => ack?.(result), 0)
-      if (event === 'bg:kill') window.setTimeout(() => ack?.({ ..._payload, killed: true } as BgListResult), 0)
+      if (event === 'bg:kill') window.setTimeout(() => ack?.({ ..._payload, killed: true } as BgKillResult), 0)
       return this
     },
   }

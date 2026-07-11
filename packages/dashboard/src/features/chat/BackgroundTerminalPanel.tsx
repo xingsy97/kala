@@ -22,6 +22,7 @@ type Props = {
   /** Bound to the executor's registry. Empty when offline. */
   socket: DashboardSocket | null
   workspaceId: string | undefined
+  sessionId: string
   /** Timeline-derived fallback used when there's no live executor. */
   fallbackTasks: readonly BackgroundTerminalTask[]
 }
@@ -29,6 +30,7 @@ type Props = {
 export function BackgroundShellsButton({
   socket,
   workspaceId,
+  sessionId,
   fallbackTasks,
 }: Props): JSX.Element | null {
   const { t } = useTranslation()
@@ -37,6 +39,7 @@ export function BackgroundShellsButton({
   const { tasks: liveTasks, killTask } = useBackgroundTasks({
     socket,
     workspaceId,
+    sessionId,
     selectedTaskId: open ? selectedTaskId : null,
   })
 

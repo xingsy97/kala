@@ -583,14 +583,14 @@ export function EvalRunsView({
                 <div key={row.path} className="grid gap-2 px-3 py-2">
                   <div className="grid grid-cols-[1fr_1fr_90px_90px_90px_90px_minmax(150px,0.7fr)] gap-3 max-lg:grid-cols-[1fr_1fr_80px_80px]">
                     <div className="min-w-0">
-                      <div className="truncate font-mono text-[11px]">{row.comparison.baseline?.experimentId ?? 'baseline'}</div>
+                      <div className="truncate font-mono text-[11px]">{row.comparison.baseline?.experimentId ?? t('artifacts.eval.details.baseline')}</div>
                       <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
                     </div>
-                    <div className="truncate font-mono text-[11px]">{row.comparison.candidate?.experimentId ?? 'candidate'}</div>
-                    <Delta label="resolved" value={row.comparison.deltas?.resolved} />
-                    <Delta label="failed" value={row.comparison.deltas?.failed} invert />
-                    <Delta label="timeout" value={row.comparison.deltas?.timedOut} invert />
-                    <Delta label="pass" value={row.comparison.deltas?.passRate} percent />
+                    <div className="truncate font-mono text-[11px]">{row.comparison.candidate?.experimentId ?? t('artifacts.eval.details.candidate')}</div>
+                    <Delta label={t('artifacts.eval.details.delta.resolved')} value={row.comparison.deltas?.resolved} />
+                    <Delta label={t('artifacts.eval.details.delta.failed')} value={row.comparison.deltas?.failed} invert />
+                    <Delta label={t('artifacts.eval.details.delta.timeout')} value={row.comparison.deltas?.timedOut} invert />
+                    <Delta label={t('artifacts.eval.details.delta.passRate')} value={row.comparison.deltas?.passRate} percent />
                     <FailureDeltaChips deltas={row.comparison.failureDeltas} />
                   </div>
                   <ComparisonDeltaBars comparison={row.comparison} />
@@ -654,12 +654,12 @@ type IngestCounts = { total: number; resolved: number }
 
 const DEFAULT_AGENT_COMMAND = 'claude --dangerously-skip-permissions --print "$(cat "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE")"'
 
-const WIZARD_STEPS: readonly { id: WizardStepId; label: string }[] = [
-  { id: 'plan', label: 'Plan' },
-  { id: 'infer', label: 'Predictions' },
-  { id: 'grade', label: 'Grade' },
-  { id: 'ingest', label: 'Ingest' },
-  { id: 'review', label: 'Review' },
+const WIZARD_STEPS: readonly { id: WizardStepId }[] = [
+  { id: 'plan' },
+  { id: 'infer' },
+  { id: 'grade' },
+  { id: 'ingest' },
+  { id: 'review' },
 ]
 
 export function RunBenchmarkWizard({ onArtifactActionComplete }: { onArtifactActionComplete?: () => void }): JSX.Element {
@@ -714,7 +714,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
   async function submitPlan(): Promise<void> {
     if (!shared.runId.trim() || !shared.model.trim() || !shared.instancesJsonl.trim()) {
       setError(t('artifacts.eval.wizard.errorRequiredFields'))
-      markStep('plan', { status: 'error', message: 'missing required fields' })
+      markStep('plan', { status: 'error', message: t('artifacts.eval.wizard.errorMissingRequiredFields') })
       return
     }
     setSubmitting(true)
@@ -734,7 +734,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
         body: JSON.stringify(payload),
       })
       const body = await res.json().catch(() => null) as (SweBenchPlanResponse & { error?: string }) | null
-      if (!res.ok) throw new Error(body?.error ?? `SWE-bench plan failed: ${res.status}`)
+      if (!res.ok) throw new Error(body?.error ?? t('artifacts.eval.wizard.errorPlanFailed', { status: res.status }))
       const path = body?.planPath ?? null
       setPlanPath(path)
       setRegistryPath(body?.registryPath ?? null)
@@ -801,7 +801,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
         body: JSON.stringify(payload),
       })
       const body = await res.json().catch(() => null) as EnhancementActionResponse | null
-      if (!res.ok) throw new Error(body?.error ?? `predictions run failed: ${res.status}`)
+      if (!res.ok) throw new Error(body?.error ?? t('artifacts.eval.wizard.errorPredictionsRunFailed', { status: res.status }))
       const completed = typeof body?.passed === 'number' ? body.passed : 0
       const failed = typeof body?.failed === 'number' ? body.failed : 0
       const errored = typeof body?.errored === 'number' ? body.errored : 0
@@ -825,7 +825,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
   async function submitInferUpload(): Promise<void> {
     if (!shared.patchesDir.trim()) {
       setError(t('artifacts.eval.wizard.errorPatchesRequired'))
-      markStep('infer', { status: 'error', message: 'missing patches' })
+      markStep('infer', { status: 'error', message: t('artifacts.eval.wizard.errorMissingPatches') })
       return
     }
     setSubmitting(true)
@@ -846,7 +846,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
         body: JSON.stringify(payload),
       })
       const body = await res.json().catch(() => null) as EnhancementActionResponse | null
-      if (!res.ok) throw new Error(body?.error ?? `predictions inference failed: ${res.status}`)
+      if (!res.ok) throw new Error(body?.error ?? t('artifacts.eval.wizard.errorPredictionsInferenceFailed', { status: res.status }))
       const predictionsPath = typeof body?.predictionsPath === 'string' ? body.predictionsPath : ''
       if (predictionsPath) setShared((prev) => ({ ...prev, predictionsPath }))
       const trialCount = typeof body?.trialCount === 'number' ? body.trialCount : 0
@@ -879,7 +879,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
         body: JSON.stringify(payload),
       })
       const body = await res.json().catch(() => null) as EnhancementActionResponse | null
-      if (!res.ok) throw new Error(body?.error ?? `grade command generation failed: ${res.status}`)
+      if (!res.ok) throw new Error(body?.error ?? t('artifacts.eval.wizard.errorGradeCommandFailed', { status: res.status }))
       const command = typeof body?.shellCommand === 'string' ? body.shellCommand : ''
       const resultsDir = typeof body?.resultsDir === 'string' ? body.resultsDir : ''
       setGradeCommand(command || null)
@@ -914,7 +914,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
         body: JSON.stringify(payload),
       })
       const body = await res.json().catch(() => null) as EnhancementActionResponse | null
-      if (!res.ok) throw new Error(body?.error ?? `ingest failed: ${res.status}`)
+      if (!res.ok) throw new Error(body?.error ?? t('artifacts.eval.wizard.errorIngestFailed', { status: res.status }))
       const summaryPath = typeof body?.summaryPath === 'string' ? body.summaryPath : ''
       const trialCount = typeof body?.trialCount === 'number' ? body.trialCount : 0
       const resolved = typeof body?.resolved === 'number' ? body.resolved : 0
@@ -1003,7 +1003,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
               onSubmit={() => void submitIngest()}
               ingestCounts={ingestCounts}
               onSkipToReview={() => {
-                markStep('ingest', { status: 'done', message: 'skipped' })
+                markStep('ingest', { status: 'done', message: t('artifacts.eval.wizard.skipped') })
                 setCurrent('review')
                 markStep('review', { status: 'active' })
               }}
@@ -1038,7 +1038,7 @@ function WizardProgressRail({
   current,
   onSelect,
 }: {
-  steps: readonly { id: WizardStepId; label: string }[]
+  steps: readonly { id: WizardStepId }[]
   stepState: Record<WizardStepId, WizardStepState>
   current: WizardStepId
   onSelect(step: WizardStepId): void
@@ -1167,17 +1167,17 @@ function InstancesSourcePanel({
   })()
 
   const disabledReason = (() => {
-    if (!shared.runId.trim()) return 'Set Run ID above first.'
-    if (tab === 'dataset' && datasetRepo.length === 0) return 'Enter a HuggingFace dataset repo.'
-    if (tab === 'upload' && uploadContent.length === 0) return 'Choose a .jsonl file to upload.'
-    if (tab === 'paste' && pasteContent.trim().length === 0) return 'Paste at least one JSON line.'
+    if (!shared.runId.trim()) return t('artifacts.eval.wizard.needRunId')
+    if (tab === 'dataset' && datasetRepo.length === 0) return t('artifacts.eval.wizard.errorDatasetRepoRequired')
+    if (tab === 'upload' && uploadContent.length === 0) return t('artifacts.eval.wizard.errorUploadRequired')
+    if (tab === 'paste' && pasteContent.trim().length === 0) return t('artifacts.eval.wizard.errorPasteRequired')
     return null
   })()
 
   async function handleFile(file: File): Promise<void> {
     setResolveError(null)
     if (file.size > 20 * 1024 * 1024) {
-      setResolveError('File too large (max 20MB).')
+      setResolveError(t('artifacts.eval.wizard.errorFileTooLarge'))
       return
     }
     try {
@@ -1206,7 +1206,7 @@ function InstancesSourcePanel({
         if (limitStr.length > 0) {
           const limitNum = Number(limitStr)
           if (!Number.isFinite(limitNum) || limitNum <= 0) {
-            throw new Error('Limit must be a positive number (leave blank for all).')
+            throw new Error(t('artifacts.eval.wizard.errorLimitPositive'))
           }
           body.datasetLimit = limitNum
         }
@@ -1221,9 +1221,9 @@ function InstancesSourcePanel({
         body: JSON.stringify(body),
       })
       const parsed = await res.json().catch(() => null) as { instancesJsonlPath?: string; rowCount?: number; error?: string } | null
-      if (!res.ok) throw new Error(parsed?.error ?? `resolve failed: HTTP ${res.status}`)
+      if (!res.ok) throw new Error(parsed?.error ?? t('artifacts.eval.wizard.errorResolveFailed', { status: res.status }))
       const path = parsed?.instancesJsonlPath
-      if (!path) throw new Error('resolve response missing instancesJsonlPath')
+      if (!path) throw new Error(t('artifacts.eval.wizard.errorMissingInstancesPath'))
       setShared((prev) => ({ ...prev, instancesJsonl: path }))
       setResolveSummary(t('artifacts.eval.wizard.instancesWritten', { count: parsed?.rowCount ?? 0, path }))
     } catch (err) {
@@ -1416,7 +1416,7 @@ function PatchesUploadPanel({
   async function handleFile(file: File): Promise<void> {
     setResolveError(null)
     if (file.size > 20 * 1024 * 1024) {
-      setResolveError('File too large (max 20MB).')
+      setResolveError(t('artifacts.eval.wizard.errorFileTooLarge'))
       return
     }
     try {
@@ -1430,15 +1430,15 @@ function PatchesUploadPanel({
 
   function parsePatches(raw: string): Record<string, string> {
     const trimmed = raw.trim()
-    if (trimmed.length === 0) throw new Error('empty patches payload')
+    if (trimmed.length === 0) throw new Error(t('artifacts.eval.wizard.errorEmptyPatches'))
     const parsed = JSON.parse(trimmed) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('patches must be a JSON object mapping instance_id  -  diff')
+      throw new Error(t('artifacts.eval.wizard.errorPatchesObject'))
     }
     const out: Record<string, string> = {}
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof value !== 'string') {
-        throw new Error(`patch value for "${key}" must be a string`)
+        throw new Error(t('artifacts.eval.wizard.errorPatchValueString', { key }))
       }
       out[key] = value
     }
@@ -1463,9 +1463,9 @@ function PatchesUploadPanel({
         body: JSON.stringify(body),
       })
       const parsed = await res.json().catch(() => null) as { patchesDir?: string; instanceCount?: number; error?: string } | null
-      if (!res.ok) throw new Error(parsed?.error ?? `upload failed: HTTP ${res.status}`)
+      if (!res.ok) throw new Error(parsed?.error ?? t('artifacts.eval.wizard.errorUploadFailed', { status: res.status }))
       const path = parsed?.patchesDir
-      if (!path) throw new Error('response missing patchesDir')
+      if (!path) throw new Error(t('artifacts.eval.wizard.errorMissingPatchesDir'))
       setShared((prev) => ({ ...prev, patchesDir: path }))
       setResolveSummary(t('artifacts.eval.wizard.patchesUploadSummary', { count: parsed?.instanceCount ?? 0, path }))
     } catch (err) {
@@ -1609,7 +1609,7 @@ function ResultsUploadPanel({
   async function handleFile(file: File): Promise<void> {
     setResolveError(null)
     if (file.size > 20 * 1024 * 1024) {
-      setResolveError('File too large (max 20MB).')
+      setResolveError(t('artifacts.eval.wizard.errorFileTooLarge'))
       return
     }
     try {
@@ -1623,15 +1623,15 @@ function ResultsUploadPanel({
 
   function parseResultsFiles(raw: string): Record<string, string> {
     const trimmed = raw.trim()
-    if (trimmed.length === 0) throw new Error('empty results payload')
+    if (trimmed.length === 0) throw new Error(t('artifacts.eval.wizard.errorEmptyResults'))
     const parsed = JSON.parse(trimmed) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('results must be a JSON object mapping fileName  -  content')
+      throw new Error(t('artifacts.eval.wizard.errorResultsObject'))
     }
     const out: Record<string, string> = {}
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof value !== 'string') {
-        throw new Error(`results value for "${key}" must be a string`)
+        throw new Error(t('artifacts.eval.wizard.errorResultsValueString', { key }))
       }
       out[key] = value
     }
@@ -1656,9 +1656,9 @@ function ResultsUploadPanel({
         body: JSON.stringify(body),
       })
       const parsed = await res.json().catch(() => null) as { resultsDir?: string; fileCount?: number; error?: string } | null
-      if (!res.ok) throw new Error(parsed?.error ?? `upload failed: HTTP ${res.status}`)
+      if (!res.ok) throw new Error(parsed?.error ?? t('artifacts.eval.wizard.errorUploadFailed', { status: res.status }))
       const path = parsed?.resultsDir
-      if (!path) throw new Error('response missing resultsDir')
+      if (!path) throw new Error(t('artifacts.eval.wizard.errorMissingResultsDir'))
       setShared((prev) => ({ ...prev, resultsDir: path }))
       setResolveSummary(t('artifacts.eval.wizard.resultsUploadSummary', { count: parsed?.fileCount ?? 0, path }))
     } catch (err) {
@@ -2142,13 +2142,13 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
           const max = field.maxBytes ?? DEFAULT_UPLOAD_MAX_BYTES
           const bytes = new Blob([upload.content]).size
           if (bytes > max) {
-            setError(t('artifacts.actionPanel.uploadTooLarge', { field: field.label, max: formatBytes(max) }))
+            setError(t('artifacts.actionPanel.uploadTooLarge', { field: enhancementFieldLabel(t, field), max: formatBytes(max) }))
             setSubmitting(false)
             return
           }
           payload[field.contentKey] = upload.content
         } else if (field.required) {
-          setError(t('artifacts.actionPanel.uploadRequired', { field: field.label }))
+          setError(t('artifacts.actionPanel.uploadRequired', { field: enhancementFieldLabel(t, field) }))
           setSubmitting(false)
           return
         }
@@ -2189,7 +2189,7 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
           <label className="grid gap-1">
             <span className="text-[11px] font-medium text-muted-foreground">{t('artifacts.actionPanel.action')}</span>
             <select className="h-8 rounded border border-input bg-background px-2 text-sm" value={selectedAction} onChange={(event) => setSelectedAction(event.currentTarget.value)} data-testid={`${testIdPrefix}-select`}>
-              {actions.map((action) => <option key={action.action} value={action.action}>{action.label}</option>)}
+              {actions.map((action) => <option key={action.action} value={action.action}>{enhancementActionLabel(t, action)}</option>)}
             </select>
           </label>
           <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
@@ -2209,11 +2209,11 @@ function EnhancementActionPanel({ title, actions, onComplete }: { title: string;
               return (
                 <LabeledInput
                   key={`${config.action}:${field.key}`}
-                  label={textField.label}
+                  label={enhancementFieldLabel(t, textField)}
                   value={values[textField.key] ?? textField.defaultValue ?? ''}
                   onChange={(value) => setValues((current) => ({ ...current, [textField.key]: value }))}
                   required={textField.required}
-                  placeholder={textField.placeholder}
+                  placeholder={enhancementFieldPlaceholder(t, textField)}
                   inputMode={textField.numeric ? 'numeric' : undefined}
                   data-testid={`${testIdPrefix}-field-${textField.key}`}
                 />
@@ -2240,12 +2240,27 @@ function isTextField(field: EnhancementActionField): field is TextEnhancementAct
   return kind === undefined || kind === 'text'
 }
 
+function enhancementActionLabel(t: TFunction, action: EnhancementActionConfig): string {
+  return t(`artifacts.actionPanel.actions.${action.action}`, { defaultValue: action.label })
+}
+
+function enhancementFieldLabel(t: TFunction, field: EnhancementActionField): string {
+  return t(`artifacts.actionPanel.fields.${field.key}.label`, { defaultValue: field.label })
+}
+
+function enhancementFieldPlaceholder(t: TFunction, field: EnhancementActionField): string | undefined {
+  const fallback = isTextField(field) || isUploadField(field) ? field.placeholder : undefined
+  if (!fallback) return undefined
+  return t(`artifacts.actionPanel.fields.${field.key}.placeholder`, { defaultValue: fallback })
+}
+
 function UploadFieldControl({ field, value, onChange, testId }: { field: UploadEnhancementActionField; value: UploadFieldValue; onChange(next: UploadFieldValue): void; testId: string }): JSX.Element {
   const { t } = useTranslation()
+  const label = enhancementFieldLabel(t, field)
   return (
     <div className="grid gap-1 rounded border border-border bg-background/50 p-2" data-testid={testId}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-muted-foreground">{field.label}{field.required ? ' *' : ''}</span>
+        <span className="text-[11px] font-medium text-muted-foreground">{label}{field.required ? ' *' : ''}</span>
         <div className="flex gap-1">
           <button
             type="button"
@@ -2271,7 +2286,7 @@ function UploadFieldControl({ field, value, onChange, testId }: { field: UploadE
         <textarea
           className="min-h-[60px] w-full rounded border border-input bg-background px-2 py-1 font-mono text-[11px]"
           rows={3}
-          placeholder={field.placeholder ?? t('artifacts.actionPanel.uploadPastePlaceholder')}
+          placeholder={enhancementFieldPlaceholder(t, field) ?? t('artifacts.actionPanel.uploadPastePlaceholder')}
           value={value.content}
           onChange={(event) => onChange({ mode: 'paste', content: event.currentTarget.value })}
           data-testid={`${testId}-textarea`}
@@ -2440,12 +2455,12 @@ function EvalWorkerPlansPanel({ plans, onOpenArtifact }: { plans: readonly EvalW
             <button key={row.path} type="button" onClick={() => onOpenArtifact({ path: row.path, label: row.path })} className="grid w-full grid-cols-[1fr_110px_120px_1.1fr] gap-3 px-3 py-2 text-left hover:bg-muted/30 max-lg:grid-cols-[1fr_100px]">
               <div className="min-w-0">
                 <div className="truncate font-mono text-[11px]">{row.plan.runId ?? row.path}</div>
-                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.plan.dataset ?? 'dataset unknown'} / {row.plan.model ?? 'model unknown'}</div>
+                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.plan.dataset ?? t('artifacts.eval.details.datasetUnknown')} / {row.plan.model ?? t('artifacts.eval.details.modelUnknown')}</div>
               </div>
               <div className="font-mono text-[11px]">{t('artifacts.eval.wizard.instancesCount', { count: row.plan.selectedCount ?? 0 })}</div>
               <div className="font-mono text-[11px]">{t('artifacts.eval.wizard.workersShards', { workers: row.plan.maxWorkers ?? shards.length, shards: shards.length })}</div>
               <div className="min-w-0">
-                <div className="truncate font-mono text-[11px]">{hints.workspaceIsolation ?? 'isolation unknown'} / max {hints.maxConcurrentWorkspaces ?? '-'}</div>
+                <div className="truncate font-mono text-[11px]">{hints.workspaceIsolation ?? t('artifacts.eval.details.isolationUnknown')} / {t('artifacts.eval.details.maxShort')} {hints.maxConcurrentWorkspaces ?? '-'}</div>
                 <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{warnings.length > 0 ? warnings.join(', ') : hints.dockerRequired ? t('artifacts.eval.details.dockerRequired') : row.path}</div>
               </div>
             </button>
@@ -2802,7 +2817,7 @@ function FailureBreakdown({ run }: { run: EvalRunRow }): JSX.Element | null {
     <div className="rounded-md border border-border bg-muted/20 p-2 text-xs">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="font-medium">{t('artifacts.eval.details.failureBreakdown')}</div>
-        <div className="font-mono text-[11px] text-muted-foreground">{total} labeled</div>
+        <div className="font-mono text-[11px] text-muted-foreground">{t('artifacts.eval.details.labeledCount', { count: total })}</div>
       </div>
       <div className="grid gap-1.5">
         {entries.slice(0, 6).map(([label, count]) => (
@@ -2836,14 +2851,14 @@ function SubAgentUsagePanel({ run }: { run: EvalRunRow }): JSX.Element | null {
     >
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="font-medium">{t('artifacts.eval.details.subAgentUsage')}</div>
-        <div className="font-mono text-[11px] text-muted-foreground">{total} spawned</div>
+        <div className="font-mono text-[11px] text-muted-foreground">{t('artifacts.eval.details.spawnedCount', { count: total })}</div>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <UsageStat label="trials w/ sub" value={String(usage.trialsWithSubagents ?? 0)} />
-        <UsageStat label="max depth" value={String(usage.maxDepth ?? 0)} />
-        <UsageStat label="mean / trial" value={(usage.perTrialMean ?? 0).toFixed(2)} />
+        <UsageStat label={t('artifacts.eval.details.subagentStats.trialsWithSubagents')} value={String(usage.trialsWithSubagents ?? 0)} />
+        <UsageStat label={t('artifacts.eval.details.subagentStats.maxDepth')} value={String(usage.maxDepth ?? 0)} />
+        <UsageStat label={t('artifacts.eval.details.subagentStats.meanPerTrial')} value={(usage.perTrialMean ?? 0).toFixed(2)} />
         <UsageStat
-          label="resolved w/ sub"
+          label={t('artifacts.eval.details.subagentStats.resolvedWithSubagents')}
           value={
             passRate === undefined
               ? `${usage.resolvedWithSubagents ?? 0}`
@@ -2887,10 +2902,10 @@ function SubAgentUsageDeltaPanel({
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <DeltaStat label="spawned  - " value={delta.totalCount} />
-        <DeltaStat label="trials w/ sub  - " value={delta.trialsWithSubagents} />
-        <DeltaStat label="max depth  - " value={delta.maxDepth} />
-        <DeltaStat label="resolved w/ sub  - " value={delta.resolvedWithSubagents} />
+        <DeltaStat label={t('artifacts.eval.details.subagentStats.spawnedDelta')} value={delta.totalCount} />
+        <DeltaStat label={t('artifacts.eval.details.subagentStats.trialsWithSubagentsDelta')} value={delta.trialsWithSubagents} />
+        <DeltaStat label={t('artifacts.eval.details.subagentStats.maxDepthDelta')} value={delta.maxDepth} />
+        <DeltaStat label={t('artifacts.eval.details.subagentStats.resolvedWithSubagentsDelta')} value={delta.resolvedWithSubagents} />
       </div>
     </div>
   )

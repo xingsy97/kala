@@ -379,12 +379,80 @@ describe('InspectorPanel', () => {
     expect(screen.getByTestId('api-summary-strip')).toBeTruthy()
     expect(apiCall).toContain('Captured API Request')
     expect(apiCall).toContain('Captured API Response')
-    expect(apiCall).toContain('Parsed Kernel Response')
+    expect(apiCall).not.toContain('Parsed Kernel Response')
     expect(apiCall).toContain('https://<redacted>/v1/messages')
-    expect(apiCall).toContain('test-redacted-api-key')
+    expect(apiCall).toContain('[redacted]')
+    expect(apiCall).not.toContain('test-redacted-api-key')
     expect(apiCall).not.toContain('api.anthropic.com')
     expect(apiCall).not.toContain('API Request Body')
     expect(apiCall).not.toContain('Kernel call_llm Effect')
+  })
+
+  it('keeps long LLM response text out of sidebar cards', () => {
+    const longText = 'This is a very long assistant response that should stay inside the detail modal instead of expanding the sidebar card. '.repeat(8)
+    render(
+      <InspectorPanel
+        state={baseState}
+        timeline={[
+          {
+            seq: 1,
+            ts: '2026-07-06T06:20:00Z',
+            event: { kind: 'user_message', text: 'Summarize.' },
+            effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+          },
+          {
+            seq: 2,
+            ts: '2026-07-06T06:20:01Z',
+            event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: longText }] } },
+            effects: [],
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
+    const cardText = screen.getByTestId('llm-call-row').textContent ?? ''
+    expect(cardText).toContain(`text ${longText.replace(/\s+/g, ' ').trim().length} chars`)
+    expect(cardText).not.toContain('This is a very long assistant response')
+  })
+
+  it('summarizes LLM response tool calls in sidebar cards', () => {
+    render(
+      <InspectorPanel
+        state={baseState}
+        timeline={[
+          {
+            seq: 1,
+            ts: '2026-07-06T06:20:00Z',
+            event: { kind: 'user_message', text: 'Inspect files.' },
+            effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+          },
+          {
+            seq: 2,
+            ts: '2026-07-06T06:20:01Z',
+            event: {
+              kind: 'llm_response',
+              message: {
+                role: 'assistant',
+                content: [
+                  { type: 'tool_call', id: 'call-1', name: 'read', arguments: { path: 'packages/dashboard/src/app.tsx' } },
+                  { type: 'tool_call', id: 'call-2', name: 'read', arguments: { path: 'packages/host/src/server.ts' } },
+                  { type: 'tool_call', id: 'call-3', name: 'bash', arguments: { command: 'pnpm test' } },
+                  { type: 'tool_call', id: 'call-4', name: 'edit', arguments: { path: 'README.md' } },
+                ],
+              },
+            },
+            effects: [],
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
+    const cardText = screen.getByTestId('llm-call-row').textContent ?? ''
+    expect(cardText).toContain('tool calls 4: read x2, bash +1')
+    expect(cardText).not.toContain('tool_call read')
+    expect(cardText).not.toContain('packages/dashboard/src/app.tsx')
   })
 
   it('shows kernel messages for a selected LLM call', () => {
@@ -451,6 +519,43 @@ describe('InspectorPanel', () => {
     expect(screen.getByTestId('tool-registry-context-view')).toBeTruthy()
     expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('skill')
     expect(screen.getByTestId('tool-registry-context-view').textContent ?? '').toContain('Load a skill.')
+  })
+
+  it('requires confirmation before forking from a kernel message card', () => {
+    const onFork = vi.fn()
+    const messagesTimeline: TimelineEntry[] = [
+      {
+        seq: 10,
+        ts: '2026-07-06T06:20:00Z',
+        event: { kind: 'tool_result', callId: 'c1', ok: true, content: 'loaded skill' },
+        effects: [
+          {
+            kind: 'call_llm',
+            messages: [
+              { role: 'user', content: [{ type: 'text', text: 'Use code review skill.' }] },
+              { role: 'assistant', content: [{ type: 'text', text: 'Working.' }] },
+            ],
+            tools: [],
+          },
+        ],
+      },
+      {
+        seq: 11,
+        ts: '2026-07-06T06:20:01Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'Reviewed.' }] } },
+        effects: [],
+      },
+    ]
+
+    render(<InspectorPanel state={baseState} timeline={messagesTimeline} onFork={onFork} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
+    fireEvent.click(screen.getByTestId('llm-call-row'))
+    fireEvent.click(screen.getByTestId('kernel-message-fork-0'))
+
+    expect(onFork).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('confirm-fork-button'))
+    expect(onFork).toHaveBeenCalledWith(10)
   })
 
   it('does not round non-empty system context down to 0 percent', () => {
@@ -770,5 +875,58 @@ describe('InspectorPanel', () => {
     expect(details.textContent ?? '').toContain('Compaction Request')
     expect(details.textContent ?? '').toContain('compact prompt')
     expect(details.textContent ?? '').not.toContain('reconstructed_from_timeline')
+  })
+
+  it('lists compact summarizer requests in the LLM API view with duration metrics', () => {
+    render(
+      <InspectorPanel
+        state={baseState}
+        timeline={[
+          {
+            seq: 3,
+            ts: '2026-07-04T00:00:02Z',
+            event: {
+              kind: 'compact_replaced',
+              preserveFrom: 2,
+              request: {
+                model: 'gpt-compact-test',
+                systemPrompt: 'compact prompt',
+                messages: [{ role: 'user', content: [{ type: 'text', text: 'old context' }] }],
+                tools: [],
+              },
+              summary: 'compact summary body',
+              responseUsage: { inputTokens: 10, outputTokens: 4 },
+              replacedCount: 2,
+              tokensBefore: 1008,
+              tokensAfter: 20,
+            },
+            effects: [],
+            model: 'gpt-compact-test',
+            llmTrace: {
+              provider: 'openai',
+              model: 'gpt-compact-test',
+              request: {
+                url: 'https://api.openai.com/v1/chat/completions',
+                headers: { authorization: 'Bearer test-redacted-api-key' },
+                body: { model: 'gpt-compact-test', messages: [{ role: 'user', content: 'old context' }] },
+              },
+              response: { status: 200, metrics: { durationMs: 1234, timeToFirstChunkMs: 210 } },
+            },
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
+    expect(screen.getAllByTestId('llm-call-row')).toHaveLength(1)
+    expect(screen.getByTestId('llm-calls-list').textContent ?? '').toContain('compact summary')
+
+    fireEvent.click(screen.getByTestId('llm-call-row'))
+    expect(document.body.textContent ?? '').toContain('Compaction LLM #3')
+    fireEvent.click(screen.getByTestId('llm-detail-view-switch-api'))
+    const apiText = screen.getByTestId('api-call-view').textContent ?? ''
+    expect(apiText).toContain('duration1.2s')
+    expect(apiText).toContain('TTFT210ms')
+    expect(apiText).not.toContain('Parsed Kernel Response')
   })
 })

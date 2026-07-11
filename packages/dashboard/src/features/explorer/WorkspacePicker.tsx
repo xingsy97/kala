@@ -28,6 +28,7 @@ type Props = {
     workspaceName: string | undefined
     cwd: string
   }): void
+  onCreateSimpleChat(): void
   onCancel(): void
 }
 
@@ -39,6 +40,7 @@ export function NewSessionDialog({
   error,
   submitting = false,
   onCreate,
+  onCreateSimpleChat,
   onCancel,
 }: Props): JSX.Element {
   const { t } = useTranslation()
@@ -109,9 +111,25 @@ export function NewSessionDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid min-h-0 grid-rows-[minmax(8rem,0.42fr)_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="min-h-0 border-b border-border/50 bg-muted md:border-b-0 md:border-r">
+          <aside className="flex min-h-0 flex-col border-b border-border/50 bg-muted md:border-b-0 md:border-r">
+            <div className="px-2 pt-2">
+              <button
+                type="button"
+                data-testid="new-session-simple-chat"
+                disabled={submitting}
+                onClick={onCreateSimpleChat}
+                className="w-full rounded-md border border-dashed border-primary/50 bg-primary/5 px-2 py-2 text-left transition-colors hover:bg-primary/10 disabled:opacity-50"
+              >
+                <div className="truncate text-sm font-medium text-foreground">
+                  {t('dialogs.simpleChat')}
+                </div>
+                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {t('dialogs.simpleChatDescription')}
+                </div>
+              </button>
+            </div>
             <div className="px-3 py-2 text-xs font-medium text-muted-foreground">{t('dialogs.workspaces')}</div>
-            <ScrollArea className="h-[calc(100%-2rem)]">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-1 px-2 pb-2">
                 {workspaces.length === 0 ? (
                   <div className="rounded border border-dashed border-border/60 px-3 py-3 text-xs text-muted-foreground">
@@ -200,12 +218,7 @@ function initialPathFor(workspace: AttachedExecutor): string {
 }
 
 function workspaceMeta(workspace: AttachedExecutor): string {
-  return [
-    workspace.os,
-    workspace.runtime,
-    workspace.runtimeVersion,
-    workspace.sandboxRoots?.[0] ?? workspace.workingDir,
-  ]
+  return [workspace.os, workspace.runtime, workspace.runtimeVersion]
     .filter((s) => typeof s === 'string' && s.length > 0)
     .join('  -  ')
 }
