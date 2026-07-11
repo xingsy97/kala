@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useAutoAnimate } from '@formkit/auto-animate/react'
 import { Check, Circle, CircleDashed, ListChecks, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -23,6 +24,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const [listRef] = useAutoAnimate<HTMLUListElement>()
 
   useEffect(() => {
     if (!open) return
@@ -61,7 +63,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
         aria-haspopup="dialog"
         title={t('tasks.title', { done, total })}
         className={cn(
-          'inline-flex h-7 flex-none items-center gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none transition-colors hover:bg-accent',
+          'inline-flex h-9 flex-none items-center gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none transition-colors hover:bg-accent sm:h-7',
           open && 'bg-accent text-foreground',
           !open && allDone && 'text-emerald-700 dark:text-emerald-300',
           !open && !allDone && hasActive && 'text-sky-700 dark:text-sky-300',
@@ -97,7 +99,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
             </span>
           </div>
           <ScrollArea className="max-h-[60vh]">
-            <ul className="flex flex-col gap-0.5 px-2 py-2" data-testid="tasks-popover-list">
+            <ul ref={listRef} className="flex flex-col gap-0.5 px-2 py-2" data-testid="tasks-popover-list">
               {todos.map((todo, i) => (
                 <TaskRow key={i} todo={todo} />
               ))}

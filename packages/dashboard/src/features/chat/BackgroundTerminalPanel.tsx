@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useAutoAnimate } from '@formkit/auto-animate/react'
 import { Copy, OctagonX, TerminalSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -88,7 +89,7 @@ export function BackgroundShellsButton({
               : t('chat.backgroundShells.titleTotal', { scope: scopeLabel, total: rows.length })
           }
           className={cn(
-            'inline-flex h-7 flex-none items-center gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none transition-colors hover:bg-accent',
+            'inline-flex h-9 flex-none items-center gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none transition-colors hover:bg-accent sm:h-7',
             running > 0 && 'text-sky-700 dark:text-sky-300',
           )}
         >
@@ -199,6 +200,7 @@ function TaskList({
   onKill: ((taskId: string) => Promise<unknown>) | null
 }): JSX.Element {
   const { t } = useTranslation()
+  const [listRef] = useAutoAnimate<HTMLUListElement>()
   return (
     <ScrollArea className="h-[28rem] border-r border-border/50">
       {rows.length === 0 ? (
@@ -206,7 +208,7 @@ function TaskList({
           {t('chat.backgroundShells.empty')}
         </div>
       ) : (
-      <ul className="divide-y divide-border/50">
+      <ul ref={listRef} className="divide-y divide-border/50">
         {rows.map((row) => {
           const selected = row.taskId === selectedTaskId
           const parts = splitCommand(row.command, t('chat.backgroundShells.emptyCommand'))

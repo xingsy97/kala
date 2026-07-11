@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
 import { Archive, AtSign, Bot, Check, ChevronDown, ChevronUp, CornerDownRight, Eraser, GripVertical, ListChecks, Navigation, Pencil, ShieldCheck, Square, Trash2, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
@@ -25,6 +26,9 @@ import { Textarea } from '../../components/ui/textarea.js'
 import { cn } from '../../lib/utils.js'
 import { RuntimeMetrics } from './RuntimeMetrics.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
+import { ComposerModeToggle } from './composer/ComposerModeToggle.js'
+import { SimpleComposerInput } from './composer/SimpleComposerInput.js'
+import { useComposerMode } from './composer/useComposerMode.js'
 
 type Props = {
   disabled?: boolean
@@ -92,6 +96,22 @@ function approvalModeDisplay(mode: ApprovalMode, t: TFunction): { label: string;
   return { label: fallback?.label ?? mode, hint: fallback?.hint ?? '' }
 }
 
+function useIsNarrow(): boolean {
+  const query = '(max-width: 639px)'
+  const [matches, setMatches] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia(query).matches,
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const media = window.matchMedia(query)
+    const onChange = (): void => setMatches(media.matches)
+    onChange()
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
+  return matches
+}
+
 export function Composer({
   disabled,
   onSubmit,
@@ -116,6 +136,13 @@ export function Composer({
   footerExtras,
 }: Props): JSX.Element {
   const { t } = useTranslation()
+  const isNarrow = useIsNarrow()
+  const placeholderText = disabled
+    ? t('composer.waitingForHost')
+    : isNarrow
+      ? t('composer.placeholderShort')
+      : t('composer.placeholder')
+  const { mode, toggle: toggleMode } = useComposerMode()
   const [text, setText] = useState('')
   const [sendMode, setSendMode] = useState<SendMode>('steer')
   const [pastedImages, setPastedImages] = useState<readonly PastedImage[]>([])
@@ -285,11 +312,9 @@ export function Composer({
     setMentionFiles([])
   }
 
-  async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
-    const items = Array.from(e.clipboardData?.items ?? [])
+  async function extractImagesFromClipboardData(data: DataTransfer | null): Promise<PastedImage[]> {
+    const items = Array.from(data?.items ?? [])
     const imageItems = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
-    if (imageItems.length === 0) return
-    e.preventDefault()
     const added: PastedImage[] = []
     for (const item of imageItems) {
       const file = item.getAsFile()
@@ -306,7 +331,21 @@ export function Composer({
         base64,
       })
     }
-    if (added.length > 0) setPastedImages((prev) => [...prev, ...added])
+    return added
+  }
+
+  async function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
+    const added = await extractImagesFromClipboardData(e.clipboardData)
+    if (added.length === 0) return
+    e.preventDefault()
+    setPastedImages((prev) => [...prev, ...added])
+  }
+
+  async function handleSimplePaste(e: ClipboardEvent<HTMLDivElement>): Promise<void> {
+    const added = await extractImagesFromClipboardData(e.clipboardData)
+    if (added.length === 0) return
+    e.preventDefault()
+    setPastedImages((prev) => [...prev, ...added])
   }
 
   function removeImage(id: string): void {
@@ -323,22 +362,59 @@ export function Composer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-card px-3 py-2.5 sm:px-6 sm:py-4 lg:px-8"
+      className={cn(
+        'bg-card px-3 sm:px-6 lg:px-8',
+        mode === 'simple' ? 'py-1.5 sm:py-2' : 'py-2.5 sm:py-4',
+      )}
       data-testid="composer"
+      data-composer-mode={mode}
     >
-      <div className="mx-auto max-w-[68rem]">
+      <motion.div layout transition={{ type: 'spring', stiffness: 320, damping: 30 }} className="mx-auto max-w-[68rem]">
         <QueuedMessagesDock
           items={queuedMessages}
           onReorder={onQueuedReorder}
           onUpdate={onQueuedUpdate}
           onDelete={onQueuedDelete}
         />
+        {mode === 'simple' ? (
+          <div className="relative flex items-center gap-2" data-testid="composer-simple-shell">
+            <div className="min-w-0 flex-1">
+              <SimpleComposerInput
+                text={text}
+                images={pastedImages.map((img) => ({ id: img.id, dataUrl: img.dataUrl }))}
+                disabled={disabled}
+                placeholder={placeholderText}
+                ariaLabel={t('composer.placeholder')}
+                onTextChange={(next) => setText(next)}
+                onRemoveImage={(id) => removeImage(id)}
+                onPaste={(e) => { void handleSimplePaste(e) }}
+                onEnterSubmit={() => { void submit() }}
+              />
+            </div>
+            <SendButton
+              disabled={!canSubmit}
+              sendMode={sendMode}
+              onSendModeChange={setSendMode}
+              density="simple"
+            />
+            <ComposerModeToggle
+              mode={mode}
+              onToggle={toggleMode}
+              className="h-10 w-10 flex-none rounded-full border border-border/50 bg-muted/45 text-muted-foreground hover:bg-muted hover:text-foreground"
+            />
+          </div>
+        ) : (
         <div
           className={cn(
             'relative rounded-2xl border border-border/60 bg-background/60 transition-shadow',
             'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
           )}
         >
+          <ComposerModeToggle
+            mode={mode}
+            onToggle={toggleMode}
+            className="absolute right-2 top-2 z-10"
+          />
           {pastedImages.length > 0 ? (
             <div
               className="flex flex-wrap gap-2 border-b border-border/50 px-3 py-2"
@@ -379,10 +455,8 @@ export function Composer({
               }}
               rows={2}
               disabled={disabled}
-              placeholder={
-                disabled ? t('composer.waitingForHost') : t('composer.placeholder')
-              }
-              className="max-h-56 min-h-[56px] w-full resize-none border-0 bg-transparent px-4 py-3 text-sm leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              placeholder={placeholderText}
+              className="max-h-56 min-h-[56px] w-full resize-none border-0 bg-transparent px-4 py-3 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
               data-testid="composer-input"
               onPaste={(e) => {
                 void handlePaste(e)
@@ -452,7 +526,7 @@ export function Composer({
             ) : null}
             {mentionState && !disabled && onListFiles ? (
               <div
-                className="absolute inset-x-2 bottom-2 z-10 max-h-64 overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
+                className="absolute inset-x-2 bottom-2 z-10 max-h-[min(16rem,40vh)] overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
                 data-testid="mention-menu"
               >
                 <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -501,16 +575,18 @@ export function Composer({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-7 w-16 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:w-20 md:w-24 xl:w-40"
+                className="h-9 w-11 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:h-7 sm:w-20 md:w-24 xl:w-40"
                 data-testid="model-picker"
                 aria-label={t('common.model')}
               >
                 <Bot className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-                <SelectValue
-                  placeholder={models.length === 0 ? t('common.noModels') : t('common.model')}
-                />
+                <span className="hidden min-w-0 truncate sm:inline">
+                  <SelectValue
+                    placeholder={models.length === 0 ? t('common.noModels') : t('common.model')}
+                  />
+                </span>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
                 {models.map((m) => (
                   <SelectItem key={m.id} value={m.id} data-testid={`model-option-${m.id}`}>
                     {m.label}
@@ -524,7 +600,7 @@ export function Composer({
             >
               <SelectTrigger
                 className={cn(
-                  'h-7 w-12 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:w-14 md:w-16 xl:w-32',
+                  'h-9 w-11 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:h-7 sm:w-14 md:w-16 xl:w-32',
                   approvalMode === 'allow_all'
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
                     : approvalMode === 'ask'
@@ -535,9 +611,9 @@ export function Composer({
                 aria-label={t('composer.approvalMode')}
               >
                 <ShieldCheck className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-                <span className="min-w-0 truncate">{approvalModeLabel}</span>
+                <span className="hidden min-w-0 truncate sm:inline">{approvalModeLabel}</span>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
                 {APPROVAL_MODES.map((m) => {
                   const display = approvalModeDisplay(m.value, t)
                   return (
@@ -573,6 +649,7 @@ export function Composer({
             </div>
           </div>
         </div>
+        )}
         {pendingToast ? (
           <div
             className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
@@ -581,7 +658,7 @@ export function Composer({
             {pendingToast}
           </div>
         ) : null}
-      </div>
+      </motion.div>
     </form>
   )
 }
@@ -590,10 +667,12 @@ function SendButton({
   disabled,
   sendMode,
   onSendModeChange,
+  density = 'default',
 }: {
   disabled: boolean
   sendMode: SendMode
   onSendModeChange(value: SendMode): void
+  density?: 'default' | 'simple'
 }): JSX.Element {
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -614,6 +693,7 @@ function SendButton({
     sendMode === 'steer'
       ? t('composer.steerHint')
       : t('composer.queueHint')
+  const isSimple = density === 'simple'
 
   return (
     <div
@@ -626,7 +706,9 @@ function SendButton({
         disabled={disabled}
         data-testid="composer-send"
         className={cn(
-          'h-8 rounded-r-none rounded-l-full pl-4 pr-3 text-xs font-medium',
+          isSimple
+            ? 'h-10 rounded-r-none rounded-l-full pl-3.5 pr-3 text-xs font-medium shadow-sm'
+            : 'h-8 rounded-r-none rounded-l-full pl-4 pr-3 text-xs font-medium',
           disabled ? 'opacity-50' : '',
         )}
         aria-label={t('composer.sendMessage', { mode: modeLabel })}
@@ -639,7 +721,8 @@ function SendButton({
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
         className={cn(
-          'flex h-8 flex-none items-center justify-center rounded-r-full border-l border-primary-foreground/30 bg-primary px-2 text-primary-foreground transition-colors hover:bg-primary/90',
+          'flex flex-none items-center justify-center rounded-r-full border-l border-primary-foreground/30 bg-primary text-primary-foreground transition-colors hover:bg-primary/90',
+          isSimple ? 'h-10 px-2.5 shadow-sm' : 'h-8 px-2',
         )}
         data-testid="send-mode-toggle"
         aria-label={t('chat.transcript.sendMode')}

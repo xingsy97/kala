@@ -31,24 +31,26 @@ export type CompactStatus =
 type Props = {
   state: AgentState | null
   streamingActive: boolean
+  awaitingAck?: boolean
   onCancel?: () => void
 }
 
-export function InlineStatusRow({ state, streamingActive, onCancel }: Props): JSX.Element | null {
-  if (!state) return null
-  switch (state.status) {
-    case 'thinking':
-      if (streamingActive) return null
-      return <ThinkingRow onCancel={onCancel} />
-    case 'executing_tools':
-      return <ToolsRow calls={state.pendingCalls} onCancel={onCancel} />
-    case 'awaiting_approval':
-      return <AwaitingApprovalRow />
-    case 'idle':
-    case 'done':
-    case 'error':
-      return null
+export function InlineStatusRow({ state, streamingActive, awaitingAck, onCancel }: Props): JSX.Element | null {
+  if (state) {
+    switch (state.status) {
+      case 'thinking':
+        if (streamingActive) return null
+        return <ThinkingRow onCancel={onCancel} />
+      case 'executing_tools':
+        return <ToolsRow calls={state.pendingCalls} onCancel={onCancel} />
+      case 'awaiting_approval':
+        return <AwaitingApprovalRow />
+    }
   }
+  // Bridge the socket round-trip between user submit and the kernel's first
+  // `thinking` status push — otherwise the transcript looks frozen.
+  if (awaitingAck && !streamingActive) return <ThinkingRow onCancel={onCancel} />
+  return null
 }
 
 function ThinkingRow({ onCancel }: { onCancel?: () => void }): JSX.Element {
