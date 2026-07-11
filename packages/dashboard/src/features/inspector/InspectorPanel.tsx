@@ -64,10 +64,13 @@ import {
   diffStates,
   firstDivergence,
   parseTraceQuery,
+  summarizeStateDiff,
   traceEntryMatchesQuery,
   type ReplaySnapshot,
   type RunHealthItem,
   type StateDiff,
+  type StateDiffSummaryGroup,
+  type StateDiffSummaryItem,
 } from './debugger-model.js'
 
 type Props = {
@@ -186,7 +189,7 @@ function statusTopology(socket: DashboardSocket | null, state: AgentState | null
 }
 
 const traceListItemClass =
-  'group relative rounded-md border border-border/55 bg-card/45 px-2 py-1 text-xs shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-colors dark:bg-card/35'
+  'group relative min-w-0 overflow-hidden rounded-md border border-border/55 bg-card/45 px-2 py-1 text-xs shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-colors dark:bg-card/35'
 
 const TRACE_CATEGORY_ORDER = ['user', 'llm', 'tool', 'approval', 'system'] as const
 
@@ -250,13 +253,12 @@ export function InspectorPanel({
   const replayState = replaySeq === null ? state : (replaySnapshot?.after ?? state)
   const selectTraceSeq = (seq: number | null): void => {
     setReplaySeq(seq)
-    if (seq === null) {
-      setSelected(null)
-      return
-    }
+  }
+  const inspectTraceSeq = (seq: number): void => {
     const entryIndex = timeline.findIndex((entry) => entry.seq === seq)
     const entry = timeline[entryIndex]
     if (!entry) return
+    setReplaySeq(seq)
     setSelected({
       kind: 'event',
       entry,
@@ -334,6 +336,7 @@ export function InspectorPanel({
             replaySnapshot={replaySnapshot}
             activeReplaySeq={activeTraceSeq}
             onReplaySeqChange={selectTraceSeq}
+            onInspectReplaySeq={inspectTraceSeq}
             parentHistory={parentHistory}
             parentSessionId={parentSessionId ?? null}
             parentCursor={parentCursor ?? null}
@@ -584,6 +587,7 @@ function TraceSection({
   replaySnapshot,
   activeReplaySeq,
   onReplaySeqChange,
+  onInspectReplaySeq,
   parentHistory,
   parentSessionId,
   parentCursor,
@@ -610,6 +614,7 @@ function TraceSection({
   replaySnapshot: ReplaySnapshot | null
   activeReplaySeq: number | null
   onReplaySeqChange(seq: number | null): void
+  onInspectReplaySeq(seq: number): void
   parentHistory: HistoryTimelineState
   parentSessionId: string | null
   parentCursor: number | null
@@ -637,8 +642,7 @@ function TraceSection({
             <ProtocolFlowView
               timeline={timeline}
               flow={flow}
-              selected={selected}
-              onSelect={onSelect}
+              onInspectReplaySeq={onInspectReplaySeq}
               activeReplaySeq={activeReplaySeq}
               onReplaySeqChange={onReplaySeqChange}
               filter={traceFilter}
@@ -649,19 +653,18 @@ function TraceSection({
             <ForkCompareView timeline={timeline} parentHistory={parentHistory} parentSessionId={parentSessionId} parentCursor={parentCursor} />
           ) : (
             <ReducerTrace
-            timeline={timeline}
-            flow={flow}
-            messagesCount={messagesCount}
-            selected={selected}
-            onSelect={onSelect}
-            onForkRequest={onForkRequest}
-            onJumpToMessage={onJumpToMessage}
-            filter={traceFilter}
-            query={traceQuery}
-            teachingMode={teachingMode}
-            onReplaySeqChange={onReplaySeqChange}
-            activeReplaySeq={activeReplaySeq}
-          />
+              timeline={timeline}
+              flow={flow}
+              messagesCount={messagesCount}
+              onInspectReplaySeq={onInspectReplaySeq}
+              onForkRequest={onForkRequest}
+              onJumpToMessage={onJumpToMessage}
+              filter={traceFilter}
+              query={traceQuery}
+              teachingMode={teachingMode}
+              onReplaySeqChange={onReplaySeqChange}
+              activeReplaySeq={activeReplaySeq}
+            />
           )}
         </>
       ) : view === 'llm' ? (
@@ -677,8 +680,7 @@ function ReducerTrace({
   timeline,
   flow,
   messagesCount,
-  selected,
-  onSelect,
+  onInspectReplaySeq,
   onForkRequest,
   onJumpToMessage,
   filter,
@@ -690,8 +692,7 @@ function ReducerTrace({
   timeline: readonly TimelineEntry[]
   flow: readonly StateFlowStep[]
   messagesCount: number
-  selected: DetailSelection
-  onSelect(selection: DetailSelection): void
+  onInspectReplaySeq(seq: number): void
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
   filter: ReadonlySet<TraceCategory>
@@ -714,9 +715,9 @@ function ReducerTrace({
     return <EmptyBlock label={t('inspector.empty.noEventsMatch')} />
   }
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_1rem] gap-1 bg-sidebar">
-      <ScrollArea className="min-h-0">
-      <div className="space-y-1 px-2 pb-3 pt-1" data-testid="reducer-trace-list">
+    <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_1rem] gap-1 bg-sidebar">
+      <ScrollArea className="min-h-0 min-w-0">
+      <div className="min-w-0 space-y-1 px-2 pb-3 pt-1" data-testid="reducer-trace-list">
         {visible.map((entry) => {
           const i = timeline.indexOf(entry)
           const priorCallLlm = findPriorCallLlm(timeline, i)
@@ -732,8 +733,8 @@ function ReducerTrace({
               messageIndex={messageIndexFor(timeline, i, messagesCount)}
               onSelect={() => {
                 onReplaySeqChange(entry.seq)
-                onSelect({ kind: 'event', entry, priorCallLlm, flow: flowStep })
               }}
+              onInspect={() => onInspectReplaySeq(entry.seq)}
               teachingMode={teachingMode}
               onForkRequest={onForkRequest}
               onJumpToMessage={onJumpToMessage}
@@ -754,6 +755,7 @@ function ReducerTraceRow({
   selected,
   messageIndex,
   onSelect,
+  onInspect,
   teachingMode,
   onForkRequest,
   onJumpToMessage,
@@ -764,6 +766,7 @@ function ReducerTraceRow({
   selected: boolean
   messageIndex: number | null
   onSelect(): void
+  onInspect(): void
   teachingMode: boolean
   onForkRequest?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
@@ -777,6 +780,7 @@ function ReducerTraceRow({
   const inbound = inboundOf(entry.event)
   const jumpable = messageIndex !== null && onJumpToMessage !== undefined
   const effectLabels = entry.effects.map((eff, i) => ({ key: `${eff.kind}-${i}`, effect: eff, target: effectTarget(eff) }))
+  const summary = eventSummary(entry.event, priorCallLlm)
   return (
     <div
       ref={rowRef}
@@ -791,12 +795,12 @@ function ReducerTraceRow({
       <button
         type="button"
         onClick={onSelect}
-        className="grid w-full grid-cols-[2.35rem_minmax(0,1fr)] gap-x-1.5 text-left"
+        className="grid w-full min-w-0 grid-cols-[2.35rem_minmax(0,1fr)] gap-x-1.5 overflow-hidden text-left"
         data-testid="timeline-row-header"
-        aria-label={`inspect timeline event ${entry.seq}`}
+        aria-label={`select timeline event ${entry.seq}`}
       >
         <span className="pt-px text-right font-mono text-[10px] text-muted-foreground">#{entry.seq}</span>
-        <span className="min-w-0">
+        <span className="min-w-0 overflow-hidden">
           <span className="flex min-w-0 items-center gap-1">
             <span className={cn('w-12 flex-none font-mono text-[10px]', inbound.tone)}>{inbound.source}</span>
             <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{entry.event.kind}</span>
@@ -806,26 +810,26 @@ function ReducerTraceRow({
               </span>
             ) : null}
           </span>
-          <span className="mt-0.5 block truncate text-[10px] leading-4 text-muted-foreground">
-            {eventSummary(entry.event, priorCallLlm)}
+          <span className="mt-0.5 block min-w-0 truncate text-[10px] leading-4 text-muted-foreground" data-testid="timeline-row-summary" title={summary}>
+            {summary}
           </span>
           {effectLabels.length > 0 ? (
-            <span className="mt-0.5 flex min-w-0 flex-wrap gap-0.5">
+            <span className="mt-0.5 flex min-w-0 max-w-full flex-wrap gap-0.5 overflow-hidden">
               {effectLabels.map(({ key, effect, target }) => (
-                <span key={key} className="rounded bg-background/80 px-1 py-px font-mono text-[9px] leading-3 text-muted-foreground ring-1 ring-border/40">
+                <span key={key} className="inline-block max-w-full truncate rounded bg-background/80 px-1 py-px font-mono text-[9px] leading-3 text-muted-foreground ring-1 ring-border/40" title={`${target.target} · ${effect.kind}`}>
                   <span className={target.tone}>{target.target}</span> · {effect.kind}
                 </span>
               ))}
             </span>
           ) : null}
           {teachingMode ? (
-            <span className="mt-1 block rounded bg-muted/50 px-2 py-1 text-[10px] leading-4 text-muted-foreground ring-1 ring-border/30">
+            <span className="mt-1 block min-w-0 break-words rounded bg-muted/50 px-2 py-1 text-[10px] leading-4 text-muted-foreground ring-1 ring-border/30">
               {teachingText(entry, flow)}
             </span>
           ) : null}
         </span>
       </button>
-      <div className="mt-0.5 flex justify-end gap-1 pl-10 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
+      <div className="mt-0.5 flex min-w-0 flex-wrap justify-end gap-1 overflow-hidden pl-10 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
         {jumpable ? (
           <MiniAction onClick={() => onJumpToMessage!(messageIndex!)} title={t('inspector.actions.jumpChatTitle', { index: messageIndex })}>
             {t('inspector.actions.jumpChat')}
@@ -836,7 +840,7 @@ function ReducerTraceRow({
             <GitBranch className="h-3 w-3" aria-hidden="true" /> {t('inspector.actions.fork')}
           </MiniAction>
         ) : null}
-        <MiniAction onClick={onSelect} title={t('inspector.actions.inspectRawJson')}>{t('inspector.actions.inspectJson')}</MiniAction>
+        <MiniAction onClick={onInspect} title={t('inspector.actions.inspectRawJson')} testId="timeline-row-inspect-json">{t('inspector.actions.inspectJson')}</MiniAction>
       </div>
     </div>
   )
@@ -939,20 +943,18 @@ function ToolCallsView({
 function ProtocolFlowView({
   timeline,
   flow,
-  selected,
-  onSelect,
   activeReplaySeq,
   onReplaySeqChange,
+  onInspectReplaySeq,
   filter,
   query,
   teachingMode,
 }: {
   timeline: readonly TimelineEntry[]
   flow: readonly StateFlowStep[]
-  selected: DetailSelection
-  onSelect(selection: DetailSelection): void
   activeReplaySeq: number | null
   onReplaySeqChange(seq: number | null): void
+  onInspectReplaySeq(seq: number): void
   filter: ReadonlySet<TraceCategory>
   query: string
   teachingMode: boolean
@@ -981,12 +983,17 @@ function ProtocolFlowView({
           const priorCallLlm = findPriorCallLlm(timeline, i)
           const selectedRow = activeReplaySeq === entry.seq
           return (
-            <button
+            <div
               key={entry.seq}
-              type="button"
               onClick={() => {
                 onReplaySeqChange(entry.seq)
-                onSelect({ kind: 'event', entry, priorCallLlm, flow: step })
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                onReplaySeqChange(entry.seq)
               }}
               className={cn(traceListItemClass, 'w-full text-left', selectedRow ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
               data-testid="protocol-flow-row"
@@ -1003,7 +1010,12 @@ function ProtocolFlowView({
                 </div>
               </div>
               {teachingMode ? <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/30">{teachingText(entry, step)}</div> : null}
-            </button>
+              <div className="mt-1 flex justify-end">
+                <MiniAction onClick={() => {
+                  onInspectReplaySeq(entry.seq)
+                }} title={t('inspector.actions.inspectRawJson')} testId="protocol-flow-inspect-json">{t('inspector.actions.inspectJson')}</MiniAction>
+              </div>
+            </div>
           )
         })}
       </div>
@@ -2041,7 +2053,7 @@ function Segmented<T extends string>({ value, onChange, options, testId }: { val
   )
 }
 
-function MiniAction({ children, onClick, title, ariaLabel }: { children: React.ReactNode; onClick(): void; title: string; ariaLabel?: string }): JSX.Element {
+function MiniAction({ children, onClick, title, ariaLabel, testId }: { children: React.ReactNode; onClick(): void; title: string; ariaLabel?: string; testId?: string }): JSX.Element {
   return (
     <button
       type="button"
@@ -2051,6 +2063,7 @@ function MiniAction({ children, onClick, title, ariaLabel }: { children: React.R
       }}
       title={title}
       aria-label={ariaLabel}
+      data-testid={testId}
       className="inline-flex items-center gap-1 rounded bg-background/80 px-1.5 py-px text-[9px] uppercase tracking-wide text-muted-foreground ring-1 ring-border/30 hover:bg-accent hover:text-foreground"
     >
       {children}
@@ -2197,6 +2210,8 @@ function inboundOf(event: AgentEvent): { source: string; tone: string } {
     case 'clear':
       return { source: 'user', tone: 'text-amber-600 dark:text-amber-300' }
     case 'compact_replaced':
+    case 'compact_skipped':
+    case 'compact_rejected':
       return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
   }
 }
@@ -2386,8 +2401,10 @@ function ReplayPanel({
 }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(true)
+  const [rawOpen, setRawOpen] = useState(false)
   if (snapshots.length === 0 || !selected) return <div className="flex-none bg-card/50 px-2 pb-1" />
-  const diff = diffStates(selected.before, selected.after, 6)
+  const diff = diffStates(selected.before, selected.after, 16)
+  const summary = summarizeStateDiff(selected.before, selected.after, diff)
   const currentIndex = snapshots.findIndex((snapshot) => snapshot.seq === selected.seq)
   const previous = snapshots[currentIndex - 1]
   const next = snapshots[currentIndex + 1]
@@ -2433,13 +2450,59 @@ function ReplayPanel({
             <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={selected.event.kind}>{selected.event.kind}</span>
             <span className="flex-none text-muted-foreground">{t('inspector.trace.changes', { count: diff.length })}</span>
           </div>
-          <div className="min-w-0 space-y-1" data-testid="state-diff-view">
-            {diff.length > 0 ? diff.map((item) => <DiffRow key={`${item.path}-${item.before}-${item.after}`} item={item} />) : <div className="rounded bg-background/55 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/20">{t('inspector.trace.noStateChanges')}</div>}
+          <div className="min-w-0 space-y-1.5" data-testid="state-diff-view">
+            {summary.length > 0 ? summary.map((group) => <DiffSummaryGroup key={group.id} group={group} />) : <div className="rounded bg-background/55 px-2 py-1 text-[10px] text-muted-foreground ring-1 ring-border/20">{t('inspector.trace.noStateChanges')}</div>}
+            {diff.length > 0 ? (
+              <div className="rounded bg-background/45 ring-1 ring-border/20" data-testid="state-raw-diff">
+                <button
+                  type="button"
+                  onClick={() => setRawOpen((value) => !value)}
+                  className="flex w-full items-center gap-2 px-2 py-1 text-left text-[10px] text-muted-foreground hover:text-foreground"
+                  aria-expanded={rawOpen}
+                  data-testid="state-raw-diff-toggle"
+                >
+                  <ChevronDown className={cn('h-3 w-3 flex-none transition-transform', rawOpen ? '' : '-rotate-90')} aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">{t('inspector.trace.rawDiff')}</span>
+                  <span className="font-mono">{diff.length}</span>
+                </button>
+                {rawOpen ? <div className="space-y-1 border-t border-border/25 p-1.5" data-testid="state-raw-diff-view">
+                  {diff.map((item) => <DiffRow key={`${item.path}-${item.before}-${item.after}`} item={item} />)}
+                </div> : null}
+              </div>
+            ) : null}
           </div>
         </div> : null}
       </div>
     </div>
   )
+}
+
+function DiffSummaryGroup({ group }: { group: StateDiffSummaryGroup }): JSX.Element {
+  return (
+    <div className="min-w-0 rounded bg-background/65 ring-1 ring-border/20" data-testid={`state-diff-summary-${group.id}`}>
+      <div className="border-b border-border/20 px-2 py-1 text-[10px] font-medium uppercase text-muted-foreground">{group.title}</div>
+      <div className="divide-y divide-border/15">
+        {group.items.map((item) => <DiffSummaryItem key={`${item.label}-${item.value}`} item={item} />)}
+      </div>
+    </div>
+  )
+}
+
+function DiffSummaryItem({ item }: { item: StateDiffSummaryItem }): JSX.Element {
+  return (
+    <div className="grid min-w-0 grid-cols-[minmax(5.5rem,0.8fr)_minmax(0,1.2fr)] gap-2 px-2 py-1 font-mono text-[10px]">
+      <span className={cn('min-w-0 truncate', diffSummaryTone(item.tone))} title={item.label}>{item.label}</span>
+      <span className="min-w-0 truncate text-foreground" title={item.value}>{item.value}</span>
+      {item.detail ? <span className="col-span-2 min-w-0 truncate text-muted-foreground" title={item.detail}>{item.detail}</span> : null}
+    </div>
+  )
+}
+
+function diffSummaryTone(tone: StateDiffSummaryItem['tone']): string {
+  if (tone === 'added') return 'text-emerald-700 dark:text-emerald-300'
+  if (tone === 'removed') return 'text-rose-700 dark:text-rose-300'
+  if (tone === 'changed') return 'text-amber-700 dark:text-amber-300'
+  return 'text-muted-foreground'
 }
 
 function DiffRow({ item }: { item: StateDiff }): JSX.Element {
@@ -2494,6 +2557,10 @@ function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | null): str
       return event.error
     case 'compact_replaced':
       return `${event.trigger ?? 'unknown'} compact · ${event.replacedCount} messages · ${event.tokensBefore} → ${event.tokensAfter}`
+    case 'compact_skipped':
+      return `${event.trigger} compact skipped · ${event.reason}${event.errorMessage ? ` · ${event.errorMessage}` : ''}`
+    case 'compact_rejected':
+      return `compact rejected · ${event.reason}`
     case 'approval_mode_changed':
       return `approval mode ${event.mode}`
     case 'cwd_changed':
