@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, Clipboard, Monitor, Terminal } from 'lucide-react'
 
 import { Button } from '../../components/ui/button.js'
@@ -26,8 +26,31 @@ const OS_TABS: ReadonlyArray<{ value: OsTab; label: string; icon: typeof Termina
 export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Element {
   const [tab, setTab] = useState<OsTab>(() => detectCurrentOs())
   const [copied, setCopied] = useState(false)
+  const [invite, setInvite] = useState<{ inviteToken: string; expiresAt: string } | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const hostUrl = useMemo(() => hostUrlFromLocation(), [])
-  const command = commandFor(tab, hostUrl)
+  const command = commandFor(tab, hostUrl, invite?.inviteToken)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setError(null)
+    setInvite(null)
+    void fetch('/auth/executor-invites', { method: 'POST' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await res.text())
+        return res.json() as Promise<{ inviteToken: string; expiresAt: string }>
+      })
+      .then((body) => {
+        if (!cancelled) setInvite(body)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   const copy = async (): Promise<void> => {
     await navigator.clipboard.writeText(command)
@@ -52,12 +75,16 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
             tab={tab}
             command={command}
             copied={copied}
+            disabled={!invite}
             onCopy={() => void copy()}
             onTabChange={(next) => {
               setTab(next)
               setCopied(false)
             }}
           />
+          <div className="mt-3 text-xs text-muted-foreground">
+            {error ? <span className="text-destructive">{error}</span> : invite ? `Invite expires at ${new Date(invite.expiresAt).toLocaleTimeString()}` : 'Preparing one-time invite...'}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -68,12 +95,14 @@ function TerminalCommand({
   tab,
   command,
   copied,
+  disabled,
   onCopy,
   onTabChange,
 }: {
   tab: OsTab
   command: string
   copied: boolean
+  disabled: boolean
   onCopy(): void
   onTabChange(tab: OsTab): void
 }): JSX.Element {
@@ -114,6 +143,7 @@ function TerminalCommand({
           size="sm"
           className="h-6 flex-none gap-1 px-2 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-white"
           onClick={onCopy}
+          disabled={disabled}
           data-testid="copy-executor-command"
         >
           {copied ? <Check className="h-3 w-3" /> : <Clipboard className="h-3 w-3" />}
@@ -147,9 +177,11 @@ function powershellQuote(value: string): string {
   return `"${escaped}"`
 }
 
-function commandFor(tab: OsTab, hostUrl: string): string {
+function commandFor(tab: OsTab, hostUrl: string, invite?: string): string {
+  const invitePart = invite ? invite : 'preparing-invite'
   if (tab === 'windows') {
     const quotedHost = powershellQuote(hostUrl)
+    const quotedInvite = powershellQuote(invitePart)
     return [
       `$dir = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "agent-kernel-$([guid]::NewGuid())");`,
       `iwr ${RELEASE_BASE}/agent-kernel-executor.cjs -OutFile "$dir/agent-kernel-executor.cjs";`,
@@ -157,11 +189,12 @@ function commandFor(tab: OsTab, hostUrl: string): string {
       `$exp = (Get-Content "$dir/SHA256SUMS" | Where-Object { $_ -match 'agent-kernel-executor.cjs$' }).Split()[0];`,
       `if ((Get-FileHash "$dir/agent-kernel-executor.cjs" -Algorithm SHA256).Hash -ne $exp.ToUpper()) { throw 'checksum mismatch' };`,
       `$env:HOST_URL=${quotedHost};`,
+      `$env:EXECUTOR_INVITE=${quotedInvite};`,
       `$env:SANDBOX_ROOTS=(Get-Location).Path;`,
       `node "$dir/agent-kernel-executor.cjs"`,
     ].join('\n')
   }
-  return `wget -qO- ${RELEASE_BASE}/run.sh | COMPONENT=executor HOST_URL=${shellQuote(hostUrl)} SANDBOX_ROOTS="$PWD" bash`
+  return `wget -qO- ${RELEASE_BASE}/run.sh | COMPONENT=executor HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(invitePart)} SANDBOX_ROOTS="$PWD" bash`
 }
 
 function detectCurrentOs(): OsTab {
