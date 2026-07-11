@@ -2426,6 +2426,136 @@ describe('terminal-bench HTTP actions', () => {
   })
 })
 
+describe('bad-case HTTP actions', () => {
+  let server: HostServer
+  let dir: string
+  let url: string
+  let config: AgentConfig
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agent-kernel-badcase-http-'))
+    config = createConfig({ tools: [WRITE], systemPrompt: 'sys' })
+  })
+
+  afterEach(async () => {
+    await server?.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  async function boot(): Promise<string> {
+    const artifactRootDir = join(dir, 'artifacts')
+    const http = createServer()
+    await new Promise<void>((r) => http.listen(0, r))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      artifactRootDir,
+    })
+    url = `http://localhost:${server.port}`
+    return artifactRootDir
+  }
+
+  async function seedTerminalBenchFailure(rootDir: string, runId: string): Promise<void> {
+    await mkdir(join(rootDir, runId, 'trials'), { recursive: true })
+    await writeFile(
+      join(rootDir, runId, 'trials', 'task-x.json'),
+      JSON.stringify({
+        taskId: 'task-x',
+        status: 'unresolved',
+        parserOutput: { parser: 'exit-code', allPassed: false, details: 'exit 1' },
+        agentExitCode: 0,
+        agentTimedOut: false,
+        testExitCode: 1,
+        testTimedOut: false,
+        durationMs: 5,
+        agentStdout: 'hello',
+        agentStderr: 'ERROR: nope',
+        testStdout: '',
+        testStderr: '',
+      }),
+      'utf8',
+    )
+  }
+
+  it('badcase-list returns grouped counts and no filesystem paths', async () => {
+    const artifactRootDir = await boot()
+    await seedTerminalBenchFailure(artifactRootDir, 'r-list')
+    const res = await postEnhancementAction(url, {
+      action: 'badcase-list',
+      runId: 'r-list',
+    }) as { counts: Record<string, number>; cases: Array<{ instanceId: string; failureCategory: string }> }
+    expect(res.cases).toHaveLength(1)
+    expect(res.cases[0]!.instanceId).toBe('task-x')
+    expect(res.counts['verifier-failure']).toBe(1)
+    const asString = JSON.stringify(res)
+    expect(asString).not.toContain(dir)
+    expect(asString).not.toContain('.jsonl')
+  })
+
+  it('badcase-annotate persists a label and badcase-list echoes it', async () => {
+    const artifactRootDir = await boot()
+    await seedTerminalBenchFailure(artifactRootDir, 'r-annot')
+    await postEnhancementAction(url, {
+      action: 'badcase-annotate',
+      runId: 'r-annot',
+      instanceId: 'task-x',
+      label: 'worth-retraining',
+      note: 'good SFT candidate',
+    })
+    const res = await postEnhancementAction(url, {
+      action: 'badcase-list',
+      runId: 'r-annot',
+    }) as { cases: Array<{ instanceId: string; annotation?: { label: string; note?: string } }> }
+    expect(res.cases[0]!.annotation?.label).toBe('worth-retraining')
+    expect(res.cases[0]!.annotation?.note).toBe('good SFT candidate')
+  })
+
+  it('badcase-annotate rejects unknown labels', async () => {
+    await boot()
+    const response = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'badcase-annotate',
+        runId: 'r-bad',
+        instanceId: 'task-x',
+        label: 'made-up',
+      }),
+    })
+    expect(response.status).toBe(400)
+  })
+
+  it('badcase-export returns SFT and RL JSONL content strings', async () => {
+    const artifactRootDir = await boot()
+    await seedTerminalBenchFailure(artifactRootDir, 'r-export')
+    const sft = await postEnhancementAction(url, {
+      action: 'badcase-export',
+      runId: 'r-export',
+      instanceIds: ['task-x'],
+      format: 'sft',
+    }) as { format: string; count: number; content: string }
+    expect(sft.format).toBe('sft')
+    expect(sft.count).toBe(1)
+    const sftRow = JSON.parse(sft.content.trim()) as Record<string, unknown>
+    expect(sftRow).toHaveProperty('instruction')
+    expect(sftRow).toHaveProperty('trace')
+
+    const rl = await postEnhancementAction(url, {
+      action: 'badcase-export',
+      runId: 'r-export',
+      instanceIds: ['task-x'],
+      format: 'rl',
+    }) as { content: string }
+    const rlRow = JSON.parse(rl.content.trim()) as Record<string, unknown>
+    expect(rlRow.reward).toBe(0)
+    expect(rlRow.reason).toBe('verifier-failure')
+  })
+})
+
 describe('protocol doc drift', () => {
   it('wire-protocol.md §3.4 session:error scope union matches SESSION_ERROR_SCOPES', async () => {
     // Reviewer round-2 observation: the shared TS type used `'host'` while

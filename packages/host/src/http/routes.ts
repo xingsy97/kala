@@ -55,6 +55,9 @@ import {
   runTerminalBenchRun,
   terminalBenchRunLayout,
 } from '../eval/terminal-bench.js'
+import { mineBadCases } from '../eval/badcase-mining.js'
+import { exportForRL, exportForSFT } from '../eval/badcase-export.js'
+import { annotateBadCase, readBadCaseAnnotations, BAD_CASE_LABELS, type BadCaseLabel } from '../eval/badcase-annotations.js'
 import {
   InstancesSourceError,
   resolveSweBenchInstances,
@@ -256,6 +259,9 @@ type EnhancementActionRequest = {
   tasksJsonl?: string
   tasksContent?: string
   taskIds?: readonly string[] | string
+  label?: string
+  note?: string
+  format?: string
 }
 
 export function attachJsonRoutes(
@@ -1013,6 +1019,73 @@ async function runEnhancementAction(
       errored: summary.errored,
       accuracy: summary.accuracy,
     }
+  }
+  if (action === 'badcase-list') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const [{ cases, counts }, annotations] = await Promise.all([
+      mineBadCases({ rootDir, runId }),
+      readBadCaseAnnotations(rootDir, runId),
+    ])
+    // Response intentionally omits filesystem paths (see docs/principles.md A1).
+    return {
+      action,
+      runId,
+      counts,
+      cases: cases.map((c) => ({
+        instanceId: c.instanceId,
+        failureCategory: c.failureCategory,
+        traceHead: c.traceHead,
+        traceTail: c.traceTail,
+        toolCallErrors: c.toolCallErrors,
+        ...(c.verifierReason ? { verifierReason: c.verifierReason } : {}),
+        ...(c.minimalRepro ? { minimalRepro: c.minimalRepro } : {}),
+        ...(annotations.get(c.instanceId) ? {
+          annotation: {
+            label: annotations.get(c.instanceId)!.label,
+            ...(annotations.get(c.instanceId)!.note ? { note: annotations.get(c.instanceId)!.note } : {}),
+            updatedAt: annotations.get(c.instanceId)!.updatedAt,
+          },
+        } : {}),
+      })),
+    }
+  }
+  if (action === 'badcase-annotate') {
+    const runId = requiredString(body.runId, 'runId')
+    const instanceId = requiredString(body.instanceId, 'instanceId')
+    const rawLabel = requiredString(body.label, 'label')
+    if (!BAD_CASE_LABELS.includes(rawLabel as BadCaseLabel)) {
+      throw new HttpRouteError(400, `unknown label: ${rawLabel}`)
+    }
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const annotation = await annotateBadCase({
+      rootDir,
+      runId,
+      instanceId,
+      label: rawLabel as BadCaseLabel,
+      ...(cleanString(body.note) ? { note: cleanString(body.note) } : {}),
+    })
+    return { action, runId, instanceId, label: annotation.label, updatedAt: annotation.updatedAt }
+  }
+  if (action === 'badcase-export') {
+    const runId = requiredString(body.runId, 'runId')
+    const rawFormat = requiredString(body.format, 'format')
+    if (rawFormat !== 'sft' && rawFormat !== 'rl') {
+      throw new HttpRouteError(400, `unsupported format: ${rawFormat}`)
+    }
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const wanted = listInput(body.instanceIds)
+    const { cases } = await mineBadCases({ rootDir, runId })
+    const selected = wanted && wanted.length > 0
+      ? cases.filter((c) => wanted.includes(c.instanceId))
+      : cases
+    const content = rawFormat === 'sft' ? exportForSFT(selected) : exportForRL(selected)
+    // Content string is returned inline; the browser wraps it in a Blob and
+    // downloads. No absolute path leaks into the response envelope.
+    return { action, runId, format: rawFormat, count: selected.length, content }
   }
   if (action === 'artifacts-manifest') {
     const maxHashBytes = positiveInteger(body.maxHashBytes, 'maxHashBytes')
