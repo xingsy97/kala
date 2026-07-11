@@ -3,6 +3,8 @@ import {
   foldWithTrace,
   type AgentConfig,
   type AgentEvent,
+  type Message,
+  type MessageContent,
   type AgentState,
   type Effect,
 } from '@agent-kernel/kernel'
@@ -23,6 +25,19 @@ export type StateDiff = {
   before: string
   after: string
   kind: 'added' | 'removed' | 'changed'
+}
+
+export type StateDiffSummaryItem = {
+  label: string
+  value: string
+  detail?: string
+  tone?: 'neutral' | 'added' | 'removed' | 'changed'
+}
+
+export type StateDiffSummaryGroup = {
+  id: 'state' | 'messages' | 'usage' | 'other'
+  title: string
+  items: readonly StateDiffSummaryItem[]
 }
 
 export type TraceQuery = {
@@ -72,6 +87,43 @@ export function diffStates(before: unknown, after: unknown, limit = 16): readonl
   const out: StateDiff[] = []
   walkDiff(before, after, '', out, limit)
   return out
+}
+
+export function summarizeStateDiff(before: AgentState, after: AgentState, rawDiff: readonly StateDiff[]): readonly StateDiffSummaryGroup[] {
+  const stateItems: StateDiffSummaryItem[] = []
+  if (before.status !== after.status) stateItems.push({ label: 'status', value: `${before.status} -> ${after.status}`, tone: 'changed' })
+  if (before.cursor !== after.cursor) stateItems.push({ label: 'cursor', value: formatNumberChange(before.cursor, after.cursor), tone: 'changed' })
+  if (before.contextPressureLevel !== after.contextPressureLevel) stateItems.push({ label: 'context', value: `${before.contextPressureLevel} -> ${after.contextPressureLevel}`, tone: 'changed' })
+  if (before.approvalMode !== after.approvalMode) stateItems.push({ label: 'approval', value: `${before.approvalMode} -> ${after.approvalMode}`, tone: 'changed' })
+  if (before.cwd !== after.cwd) stateItems.push({ label: 'cwd', value: `${before.cwd ?? 'unset'} -> ${after.cwd ?? 'unset'}`, tone: 'changed' })
+  if (before.error !== after.error) stateItems.push({ label: 'error', value: `${before.error ?? 'none'} -> ${after.error ?? 'none'}`, tone: after.error ? 'added' : 'removed' })
+
+  const messageItems = summarizeMessageChanges(before.messages, after.messages)
+  const usageItems = summarizeUsageChanges(before.usage, after.usage)
+  const knownPaths = new Set([
+    'status',
+    'cursor',
+    'contextPressureLevel',
+    'approvalMode',
+    'cwd',
+    'error',
+    'messages.length',
+    'usage.inputTokens',
+    'usage.outputTokens',
+    'usage.cacheCreationTokens',
+    'usage.cacheReadTokens',
+  ])
+  const otherItems = rawDiff
+    .filter((item) => !knownPaths.has(item.path) && !item.path.startsWith('messages.') && !item.path.startsWith('usage.'))
+    .slice(0, 4)
+    .map((item) => ({ label: item.path, value: `${item.before} -> ${item.after}`, tone: item.kind }))
+
+  return [
+    { id: 'state' as const, title: 'State', items: stateItems },
+    { id: 'messages' as const, title: 'Messages', items: messageItems },
+    { id: 'usage' as const, title: 'Usage', items: usageItems },
+    { id: 'other' as const, title: 'Other', items: otherItems },
+  ].filter((group) => group.items.length > 0)
 }
 
 function walkDiff(before: unknown, after: unknown, path: string, out: StateDiff[], limit: number): void {
@@ -229,6 +281,85 @@ export function formatDebugValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.length} items]`
   if (typeof value === 'object') return `{${Object.keys(value as Record<string, unknown>).length} keys}`
   return String(value)
+}
+
+function summarizeMessageChanges(before: readonly Message[], after: readonly Message[]): readonly StateDiffSummaryItem[] {
+  if (before === after) return []
+  const shared = Math.min(before.length, after.length)
+  let firstChanged = -1
+  for (let i = 0; i < shared; i++) {
+    if (!messagesEqual(before[i]!, after[i]!)) {
+      firstChanged = i
+      break
+    }
+  }
+  const prefixUnchanged = firstChanged === -1
+  if (before.length === after.length) {
+    if (prefixUnchanged) return []
+    return [{ label: 'message log', value: `${before.length} messages updated`, detail: `first changed #${firstChanged + 1}`, tone: 'changed' }]
+  }
+  if (after.length > before.length && prefixUnchanged) {
+    return after.slice(before.length).map((message, index) => ({
+      label: `+ ${message.role} message #${before.length + index + 1}`,
+      value: summarizeMessageContent(message),
+      tone: 'added' as const,
+    }))
+  }
+  if (before.length > after.length && prefixUnchanged) return before.slice(after.length).map((message, index) => ({
+    label: `- ${message.role} message #${after.length + index + 1}`,
+    value: summarizeMessageContent(message),
+    tone: 'removed' as const,
+  }))
+  return [{
+    label: 'message log',
+    value: `${before.length} -> ${after.length} messages`,
+    detail: firstChanged >= 0 ? `first changed #${firstChanged + 1}` : undefined,
+    tone: 'changed',
+  }]
+}
+
+function messagesEqual(a: Message, b: Message): boolean {
+  return a.role === b.role && JSON.stringify(a.content) === JSON.stringify(b.content)
+}
+
+function summarizeMessageContent(message: Message): string {
+  const counts = new Map<string, number>()
+  for (const part of message.content) counts.set(contentLabel(part), (counts.get(contentLabel(part)) ?? 0) + 1)
+  if (counts.size === 0) return 'empty content'
+  return [...counts].map(([label, count]) => `${count} ${label}${count === 1 ? '' : 's'}`).join(' / ')
+}
+
+function contentLabel(part: MessageContent): string {
+  if (part.type === 'tool_call') return 'tool call'
+  if (part.type === 'tool_result') return 'tool result'
+  if (part.type === 'thinking') return 'thinking block'
+  if (part.type === 'image') return 'image'
+  return 'text block'
+}
+
+function summarizeUsageChanges(before: AgentState['usage'], after: AgentState['usage']): readonly StateDiffSummaryItem[] {
+  const fields: readonly [keyof AgentState['usage'], string][] = [
+    ['inputTokens', 'input'],
+    ['outputTokens', 'output'],
+    ['cacheCreationTokens', 'cache write'],
+    ['cacheReadTokens', 'cache read'],
+  ]
+  return fields.flatMap(([key, label]) => {
+    const beforeValue = before[key] ?? 0
+    const afterValue = after[key] ?? 0
+    if (beforeValue === afterValue) return []
+    return [{ label, value: formatNumberChange(beforeValue, afterValue), tone: 'changed' as const }]
+  })
+}
+
+function formatNumberChange(before: number, after: number): string {
+  const delta = after - before
+  const sign = delta > 0 ? '+' : ''
+  return `${formatInteger(before)} -> ${formatInteger(after)} (${sign}${formatInteger(delta)})`
+}
+
+function formatInteger(value: number): string {
+  return Number.isFinite(value) ? Math.round(value).toLocaleString('en-US') : String(value)
 }
 
 function safeJson(value: unknown): string {
