@@ -136,12 +136,12 @@ export function PipelinePage(): JSX.Element {
         </Button>
 
         <div className="flex flex-col items-center gap-1.5">
-          <div className="flex items-center gap-1.5" role="tablist" aria-label="slides">
+          <div className="flex items-center gap-1.5" role="tablist" aria-label={t('pipeline.slidesLabel')}>
             {slides.map((_, i) => (
               <button
                 key={i}
                 type="button"
-                aria-label={`slide ${i + 1}`}
+                aria-label={t('pipeline.slideNumber', { index: i + 1 })}
                 aria-selected={i === safeCursor}
                 onClick={() => goto(i)}
                 data-testid={`pipeline-dot-${i}`}
