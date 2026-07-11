@@ -56,7 +56,9 @@ import {
   terminalBenchRunLayout,
 } from '../eval/terminal-bench.js'
 import { mineBadCases } from '../eval/badcase-mining.js'
+import { readSweBenchRunRegistry } from '../eval/run-registry.js'
 import { exportForRL, exportForSFT } from '../eval/badcase-export.js'
+import { exportRollouts } from '../eval/rollout-export.js'
 import { annotateBadCase, readBadCaseAnnotations, BAD_CASE_LABELS, type BadCaseLabel } from '../eval/badcase-annotations.js'
 import {
   InstancesSourceError,
@@ -215,6 +217,7 @@ type EnhancementActionRequest = {
   olderThanDays?: number | string
   maxTotalBytes?: number | string
   kinds?: readonly string[] | string
+  kind?: string
   dryRun?: boolean
   endpoint?: string
   headers?: Record<string, string> | string
@@ -262,6 +265,8 @@ type EnhancementActionRequest = {
   label?: string
   note?: string
   format?: string
+  target?: string
+  includeStatuses?: readonly string[] | string
 }
 
 export function attachJsonRoutes(
@@ -1086,6 +1091,75 @@ async function runEnhancementAction(
     // Content string is returned inline; the browser wraps it in a Blob and
     // downloads. No absolute path leaks into the response envelope.
     return { action, runId, format: rawFormat, count: selected.length, content }
+  }
+  if (action === 'rollout-export') {
+    const runId = requiredString(body.runId, 'runId')
+    const rawTarget = requiredString(body.target, 'target')
+    if (rawTarget !== 'verl' && rawTarget !== 'slime') {
+      throw new HttpRouteError(400, `unsupported target: ${rawTarget}`)
+    }
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const includeStatuses = listInput(body.includeStatuses)
+    const { content, rolloutCount } = await exportRollouts({
+      rootDir,
+      runId,
+      target: rawTarget,
+      ...(includeStatuses ? { includeStatuses } : {}),
+    })
+    // No paths in the response — the browser wraps `content` in a Blob.
+    return { action, target: rawTarget, rolloutCount, content }
+  }
+  if (action === 'run-registry-list') {
+    const kindFilter = cleanString(body.kind)
+    const registry = await readSweBenchRunRegistry(rootDir)
+    const entries = registry.entries.filter((entry) => {
+      if (!kindFilter) return true
+      const entryKind = entry.kind ?? 'swebench'
+      return entryKind === kindFilter
+    })
+    const runs = await Promise.all(entries.map(async (entry) => {
+      // Best-effort enrich: read summary.json for resolved/total, or progress.json
+      // for status. Paths intentionally NOT surfaced in the response (principle A1).
+      let status: 'running' | 'complete' | 'failed' | 'pending' = 'pending'
+      let totalInstances: number | undefined
+      let resolved: number | undefined
+      try {
+        const summaryText = await readFile(join(entry.runDir, 'summary.json'), 'utf8')
+        const summary = JSON.parse(summaryText) as { total?: number; resolved?: number }
+        if (typeof summary.total === 'number') totalInstances = summary.total
+        if (typeof summary.resolved === 'number') resolved = summary.resolved
+        status = 'complete'
+      } catch {
+        try {
+          const progressText = await readFile(join(entry.runDir, 'progress.json'), 'utf8')
+          const progress = JSON.parse(progressText) as { status?: string; total?: number }
+          if (progress.status === 'error' || progress.status === 'failed') status = 'failed'
+          else if (progress.status === 'complete' || progress.status === 'done') status = 'complete'
+          else status = 'running'
+          if (typeof progress.total === 'number') totalInstances = progress.total
+        } catch {
+          // Neither summary nor progress present — leave as pending.
+        }
+      }
+      const kind = entry.kind ?? 'swebench'
+      return {
+        runId: entry.runId,
+        kind,
+        label: entry.runId,
+        dataset: entry.dataset,
+        ...(entry.split ? { split: entry.split } : {}),
+        model: entry.model,
+        selectedCount: entry.selectedCount,
+        status,
+        createdAt: entry.registeredAt,
+        updatedAt: entry.updatedAt,
+        ...(totalInstances !== undefined ? { totalInstances } : {}),
+        ...(resolved !== undefined ? { resolved } : {}),
+      }
+    }))
+    runs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+    return { action, runs }
   }
   if (action === 'artifacts-manifest') {
     const maxHashBytes = positiveInteger(body.maxHashBytes, 'maxHashBytes')
