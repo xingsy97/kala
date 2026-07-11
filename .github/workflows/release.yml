@@ -35,6 +35,8 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       component: ${{ steps.release.outputs.component }}
       native_targets: ${{ steps.release.outputs.native_targets }}
+      native_matrix: ${{ steps.release.outputs.native_matrix }}
+      has_native: ${{ steps.release.outputs.has_native }}
     steps:
       - name: Resolve release target
         id: release
@@ -73,59 +75,54 @@ jobs:
           if [ -z "$NATIVE_TARGETS" ]; then
             NATIVE_TARGETS="linux-x64"
           fi
+          MATRIX_ENTRIES=""
           for t in $(echo "$NATIVE_TARGETS" | tr ',' ' '); do
             case "$t" in
-              linux-x64|darwin-x64|win32-x64) ;;
+              linux-x64) OS="ubuntu-latest" ;;
+              darwin-x64) OS="macos-13" ;;
+              win32-x64) OS="windows-latest" ;;
               *) echo "Unsupported native target: $t (allowed: linux-x64, darwin-x64, win32-x64)" >&2; exit 1 ;;
             esac
+            ENTRY="{\"os\":\"$OS\",\"target\":\"$t\"}"
+            if [ -z "$MATRIX_ENTRIES" ]; then
+              MATRIX_ENTRIES="$ENTRY"
+            else
+              MATRIX_ENTRIES="$MATRIX_ENTRIES,$ENTRY"
+            fi
           done
+          NATIVE_MATRIX="{\"include\":[$MATRIX_ENTRIES]}"
+          if [ -n "$MATRIX_ENTRIES" ]; then
+            HAS_NATIVE="true"
+          else
+            HAS_NATIVE="false"
+          fi
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "component=$COMPONENT" >> "$GITHUB_OUTPUT"
           echo "native_targets=$NATIVE_TARGETS" >> "$GITHUB_OUTPUT"
+          echo "native_matrix=$NATIVE_MATRIX" >> "$GITHUB_OUTPUT"
+          echo "has_native=$HAS_NATIVE" >> "$GITHUB_OUTPUT"
 
   native-assets:
     needs: resolve
-    if: needs.resolve.outputs.component != 'dashboard'
+    if: needs.resolve.outputs.component != 'dashboard' && needs.resolve.outputs.has_native == 'true'
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x64
-          - os: macos-13
-            target: darwin-x64
-          - os: windows-latest
-            target: win32-x64
-        exclude: []
+      matrix: ${{ fromJSON(needs.resolve.outputs.native_matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Skip if target not selected
-        id: gate
-        run: |
-          case ",${{ needs.resolve.outputs.native_targets }}," in
-            *,${{ matrix.target }},*) echo "selected=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "selected=false" >> "$GITHUB_OUTPUT"; echo "Skipping ${{ matrix.target }}: not in native_targets=${{ needs.resolve.outputs.native_targets }}" ;;
-          esac
       - uses: actions/checkout@v4
-        if: steps.gate.outputs.selected == 'true'
       - uses: pnpm/action-setup@v4
-        if: steps.gate.outputs.selected == 'true'
         with:
           version: 11.3.0
       - uses: actions/setup-node@v4
-        if: steps.gate.outputs.selected == 'true'
         with:
           node-version: 22
           cache: pnpm
-      - if: steps.gate.outputs.selected == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: steps.gate.outputs.selected == 'true'
-        run: pnpm run build
-      - if: steps.gate.outputs.selected == 'true'
-        run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
-        if: steps.gate.outputs.selected == 'true'
         with:
           name: native-${{ matrix.target }}
           path: release/agent-kernel-*-${{ matrix.target }}*
@@ -187,7 +184,7 @@ jobs:
 
   native-release:
     needs: [resolve, cjs-release, native-assets]
-    if: always() && needs.resolve.result == 'success' && needs.cjs-release.result == 'success' && needs.native-assets.result == 'success' && needs.resolve.outputs.component != 'dashboard'
+    if: always() && needs.resolve.result == 'success' && needs.cjs-release.result == 'success' && needs.native-assets.result == 'success' && needs.resolve.outputs.component != 'dashboard' && needs.resolve.outputs.has_native == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
