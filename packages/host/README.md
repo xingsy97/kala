@@ -42,11 +42,11 @@ node packages/host/bin/agent-kernel-host.js
 
 ## References
 
-- Spec: [`docs/SPEC.md`](../../docs/SPEC.md) (kernel contract Host consumes)
+- Spec: [`docs/kernel/spec.md`](../../docs/kernel/spec.md) (kernel contract Host consumes)
 - Wire: [`docs/protocol/wire-protocol.md`](../../docs/protocol/wire-protocol.md)
 - Log: [`docs/protocol/event-log.md`](../../docs/protocol/event-log.md)
-- Architecture: [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md)
+- Architecture: [`docs/architecture/overview.md`](../../docs/architecture/overview.md)
 
 ## Test coverage target
 
- - 80% (per [`docs/testing.md`](../../docs/testing.md)  - 3). Mock the LLM at the HTTP layer, mock the Executor at the wire layer. **Do not mock the kernel**  -  call it directly with real state.
+ - 80% (per [`docs/meta/testing.md`](../../docs/meta/testing.md)  - 3). Mock the LLM at the HTTP layer, mock the Executor at the wire layer. **Do not mock the kernel**  -  call it directly with real state.

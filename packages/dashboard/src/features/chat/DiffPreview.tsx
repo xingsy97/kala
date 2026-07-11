@@ -11,7 +11,7 @@
  * Non-mutating tools return null; the parent falls back to the JSON view.
  *
  * Syntax highlighting via shiki is a planned follow-up; the design in
- * docs/dashboard-advanced-debugger-features.md calls for build-time preload
+ * docs/dashboard/advanced-debugger-features.md calls for build-time preload
  * with dual-theme CSS variables, which is enough moving parts to warrant
  * its own task. For now we render plaintext with add/del/replace tone.
  */

@@ -13,7 +13,7 @@
  * wait for a `_started` push that will never arrive. Live and replayed
  * children share the same reducer once subscribed.
  *
- * See docs/sub-agent-design.md  - 5 and [[sub-agent-envelope]] for the
+ * See docs/host/sub-agent-design.md  - 5 and [[sub-agent-envelope]] for the
  * envelope parser that seeds `initialChildSessionId`.
  */
 

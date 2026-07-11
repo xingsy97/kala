@@ -1,7 +1,7 @@
 # Tool Set
 
 **Status**: Normative for the executor tool surface.
-Every executor bundled in this repo MUST implement the tools below. Third-party executors MAY implement a subset (declared via `executor:announce.tools`  -  see [wire-protocol.md](protocol/wire-protocol.md)).
+Every executor bundled in this repo MUST implement the tools below. Third-party executors MAY implement a subset (declared via `executor:announce.tools`  -  see [wire-protocol.md](../protocol/wire-protocol.md)).
 
 ---
 
@@ -434,7 +434,7 @@ If an executor announces a tool with a name that clashes with an existing tool b
 
 The tool schemas above are MCP-compatible: they follow JSON Schema draft-07, and the input surface matches the MCP `tools/call` request format. An `agent-kernel` executor can be adapted into an MCP server (stdio transport) with a thin wrapper; third-party MCP tools can be adapted into an executor via the same wrapper in reverse.
 
-The MCP runtime is not yet implemented  -  the design and rationale live in [`mcp.md`](mcp.md). The point of noting MCP compatibility here is that **tool schemas are designed not to close the door on MCP interop.**
+The MCP runtime is not yet implemented  -  the design and rationale live in [`../host/mcp.md`](../host/mcp.md). The point of noting MCP compatibility here is that **tool schemas are designed not to close the door on MCP interop.**
 
 ---
 
@@ -461,7 +461,7 @@ Each tool has a test file at `packages/executor/src/tools/<name>.test.ts` coveri
 - (For `bash`) timeout, non-zero exit, killed process, background start/poll/kill
 - (For `web_search`) mocked DuckDuckGo HTML fixtures
 
-Tools are pure functions of `(input, filesystem, network)`  -  `(output)`. Tests use tmpdir fixtures and `nock`/`msw` for HTTP. See [testing.md](testing.md) for the general strategy.
+Tools are pure functions of `(input, filesystem, network)`  -  `(output)`. Tests use tmpdir fixtures and `nock`/`msw` for HTTP. See [testing.md](../meta/testing.md) for the general strategy.
 
 ---
 

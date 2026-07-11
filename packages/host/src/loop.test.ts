@@ -1861,7 +1861,7 @@ describe('host loop', () => {
     // child. But sub-agents are headless  -  no dashboard is subscribed to the
     // child session, so a RequestApprovalEffect would deadlock forever and
     // the parent would see `tool_result: ok=false, "agent ended with status
-    // awaiting_approval"`. See docs/adr/0014-subagent-approval-mode.md.
+    // awaiting_approval"`. See docs/meta/adr/0014-subagent-approval-mode.md.
     const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
     const parent = await store.create({
       config: parentConfig,

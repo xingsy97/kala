@@ -41,7 +41,7 @@ Approximate share:
 
 ### 2.1 What to test
 
-Every case in [SPEC.md](SPEC.md)  - 3 (legal event  -  status pairs). For each:
+Every case in [SPEC.md](../kernel/spec.md)  - 3 (legal event  -  status pairs). For each:
 - Positive case: legal transition, correct next state, correct effects
 - Negative case: no-op behavior (cursor advances, state otherwise unchanged, effects empty)
 
@@ -133,7 +133,7 @@ Spin up the Socket.IO server on a random port. Use `socket.io-client` to simulat
 **Runner**: `pnpm --filter @agent-kernel/executor test`
 **Coverage target**:  - 90%
 
-Every tool listed in [tools.md](tools.md) has a test file with:
+Every tool listed in [tools.md](../executor/tools.md) has a test file with:
 - **Happy path**: valid input  -  success, output shape matches spec
 - **Missing file**:  -  `ENOENT: ...`
 - **Permission denied**: chmod 000, or path outside workspace  -  `EACCES: ...`

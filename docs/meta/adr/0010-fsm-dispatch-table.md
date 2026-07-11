@@ -5,7 +5,7 @@
 
 ## Context
 
-The kernel's `step(state, event, config)` function is, formally, a finite state machine: six statuses (`idle`, `thinking`, `awaiting_approval`, `executing_tools`, `done`, `error`)  -  the `AgentEvent['kind']` union, with a defined transition per legal `(status, event)` pair and no-op behavior everywhere else (see [`docs/SPEC.md`](../SPEC.md)  - 3).
+The kernel's `step(state, event, config)` function is, formally, a finite state machine: six statuses (`idle`, `thinking`, `awaiting_approval`, `executing_tools`, `done`, `error`)  -  the `AgentEvent['kind']` union, with a defined transition per legal `(status, event)` pair and no-op behavior everywhere else (see [`docs/kernel/spec.md`](../../kernel/spec.md)  - 3).
 
 The v0.1 implementation expressed this as one big `switch (event.kind)` block with per-branch `if (state.status !== expected) return noop(state)` guards. That works, but it doesn't structurally mirror the legality table in SPEC  -  a reader has to trace the branches to reconstruct the FSM shape.
 
@@ -49,7 +49,7 @@ The `transitions` object **is** SPEC  - 3's legality table, expressed as code. I
 1. **Violates [ADR 0001](0001-pure-reducer.md).** The kernel is zero-runtime-dependency by hard rule. That property is what lets a reader open `packages/kernel/src/` and read the whole thing in an afternoon. Adding `xstate` (~30 KB minified, plus its own mental model of actors / interpreters / spawn / send / raise) trades away exactly the property this project is built around.
 2. **Concept mismatch.** XState v5 pushes an actor model  -  machines "run" and communicate via `send`/`spawn`. Our kernel is a pure function that never "runs"; the host calls it once per event. XState's `actions` are callbacks; our `effects` are data the host consumes. Bridging these idioms produces awkward code, not idiomatic XState.
 3. **We use none of XState's power features.** Hierarchical states, parallel regions, `after` timers, `invoke` sub-services  -  the kernel is a flat 7-state machine with no timers and no children. XState is F1-grade for a shopping trip.
-4. **Portability tax.** If someone ever ports the kernel to Rust or Go (see [ROADMAP.md](../ROADMAP.md) Post-v1), "translate a pure function" is a weekend; "translate XState's statechart semantics" is a project.
+4. **Portability tax.** If someone ever ports the kernel to Rust or Go (see [ROADMAP.md](../../planning/roadmap.md) Post-v1), "translate a pure function" is a weekend; "translate XState's statechart semantics" is a project.
 
 **Keep the flat `switch (event.kind)` with inline status guards.**
 

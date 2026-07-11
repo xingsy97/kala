@@ -505,7 +505,7 @@ export type CopyOverflowSessionResult = {
  * (`bash{run_in_background}`, `bash_output`, `kill_shell`)  -  the tools remain
  * the way the agent starts/reads/kills tasks; these RPCs are the way the
  * dashboard operator directly observes and controls them without going
- * through the LLM. See docs/background-shell-design.md.
+ * through the LLM. See docs/host/background-shell-design.md.
  *
  * Routed by `workspaceId`, not `sessionId`: a background task lives in the
  * executor, and multiple sessions on the same workspace can watch the same
@@ -617,7 +617,7 @@ export type ServerBgTaskEvicted = {
  * Both events are fanned into the parent's `session:<parentSessionId>` room.
  * Dashboards use `sub_agent_started.childSessionId` to open a subscription
  * to the child's own room, then render its `event:appended` stream inline
- * via a nested read-only ChatPanel. See docs/sub-agent-design.md  - 5.
+ * via a nested read-only ChatPanel. See docs/host/sub-agent-design.md  - 5.
  */
 export type ServerSubAgentStartedEvent = {
   parentSessionId: string
@@ -710,7 +710,7 @@ export type AgentTypesResult = {
  * User-initiated `/consolidate-memory` slash command. Host reads the
  * session's messages, runs a single LLM call to extract durable signal,
  * and writes the results into the workspace memory root via the executor's
- * `memory` tool. See docs/memory-consolidation.md.
+ * `memory` tool. See docs/host/memory-consolidation.md.
  */
 export type ClientConsolidateMemory = {
   requestId: string

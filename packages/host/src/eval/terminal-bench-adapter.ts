@@ -2,7 +2,7 @@
 //
 // Thin delegation layer over terminal-bench.ts. Semantics of `resolved` are:
 // testScript exit 0 AND every parsed unit passed. See
-// docs/domain-knowledge/terminal-bench-evaluation.md.
+// docs/evals/domain-knowledge/terminal-bench-evaluation.md.
 
 import type {
   BenchmarkAdapter,

@@ -466,7 +466,7 @@ export function configureDashboardNamespace(
       ack({ requestId: p.requestId, parentSessionId: p.parentSessionId, children })
     })
     socket.on('agent_types:list', (p: ClientListAgentTypes, ack) => {
-      // Registry loader lives behind a follow-up (docs/sub-agent-design.md  - 6).
+      // Registry loader lives behind a follow-up (docs/host/sub-agent-design.md  - 6).
       // Return an empty list so dashboards that call this on mount don't crash;
       // the Composer '@agent-name' menu shows an empty state until the loader ships.
       ack({ requestId: p.requestId, types: [] })

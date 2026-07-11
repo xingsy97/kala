@@ -60,6 +60,6 @@ The kernel is intentionally ignorant of task lists, files on disk, and other ses
 
 ## Verification
 
-The kernel spec (`docs/SPEC.md`  - 7) enumerates what the kernel deliberately does NOT do. Any pull request that tries to add planning / memory / subagent logic to the kernel should be rejected on the grounds of this ADR.
+The kernel spec (`docs/kernel/spec.md`  - 7) enumerates what the kernel deliberately does NOT do. Any pull request that tries to add planning / memory / subagent logic to the kernel should be rejected on the grounds of this ADR.
 
 The mental model: **the kernel is a state machine. Everything else is the host's job.**

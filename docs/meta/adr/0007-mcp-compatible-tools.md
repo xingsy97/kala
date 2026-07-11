@@ -15,7 +15,7 @@ For `agent-kernel`, this raised a question: define our own tool schema, or align
 
 **Tool input/output schemas conform to MCP conventions.** Specifically:
 
-- Tool schemas in [`docs/tools.md`](../tools.md) are expressed as JSON Schema, matching MCP's `Tool` type.
+- Tool schemas in [`docs/executor/tools.md`](../../executor/tools.md) are expressed as JSON Schema, matching MCP's `Tool` type.
 - The Executor's `tool:call` / `tool:result` semantics (name + arguments in, structured content out) map 1-to-1 onto MCP's `tools/call` semantics.
 - **Transport is our own**  -  Socket.IO over the reverse-WebSocket described in [ADR 0002](0002-reverse-websocket.md), not MCP's stdio or SSE transports. We're MCP-compatible at the *schema* layer, not the wire layer.
 
@@ -33,7 +33,7 @@ Consequence: it should be a small amount of adapter code (not a rewrite) to expo
 
 **Adopt MCP but hide it as an implementation detail.**
 
-*Rejected*. The interoperability is worth surfacing. Someone reading `docs/tools.md` benefits from noticing "these are MCP tools"  -  it makes the shape obvious and the ecosystem accessible.
+*Rejected*. The interoperability is worth surfacing. Someone reading `docs/executor/tools.md` benefits from noticing "these are MCP tools"  -  it makes the shape obvious and the ecosystem accessible.
 
 ## Consequences
 
@@ -45,9 +45,9 @@ Consequence: it should be a small amount of adapter code (not a rewrite) to expo
 
 **Bad**:
 - We inherit MCP's design decisions, some of which are quirky (e.g., content blocks vs. plain strings for tool output). We express those choices in our schemas even where a simpler shape would suffice.
-- If MCP evolves in a breaking way, `agent-kernel` has a small compatibility problem to track. Mitigation: pin to a stated MCP version in `docs/tools.md` and only bump deliberately.
+- If MCP evolves in a breaking way, `agent-kernel` has a small compatibility problem to track. Mitigation: pin to a stated MCP version in `docs/executor/tools.md` and only bump deliberately.
 
 ## Verification
 
-- `docs/tools.md`  - Tool schemas is expressed in JSON Schema matching MCP's `Tool` type.
+- `docs/executor/tools.md`  - Tool schemas is expressed in JSON Schema matching MCP's `Tool` type.
 - If a future PR introduces a tool with a bespoke schema shape that doesn't fit MCP, that PR should either (a) round-trip the shape through MCP conventions or (b) update this ADR with an argued exception.

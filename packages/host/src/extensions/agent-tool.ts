@@ -9,7 +9,7 @@
  * Sub-agents run headless (no dashboard is subscribed to the child) so we
  * force `allow_all` approval mode regardless of the parent's setting  - 
  * otherwise every RequestApprovalEffect deadlocks. See
- * [ADR 0014](../../../../docs/adr/0014-subagent-approval-mode.md).
+ * [ADR 0014](../../../../docs/meta/adr/0014-subagent-approval-mode.md).
  */
 
 import type {
@@ -163,7 +163,7 @@ export async function runAgentTool(
     ...(parent.state.cwd !== undefined ? { initialCwd: parent.state.cwd } : {}),
     // Sub-agents run headless: no dashboard is attached to the child session,
     // so any RequestApprovalEffect would deadlock. Force allow_all regardless
-    // of the parent's mode. See docs/adr/0014-subagent-approval-mode.md.
+    // of the parent's mode. See docs/meta/adr/0014-subagent-approval-mode.md.
     initialApprovalMode: 'allow_all',
   })
 

@@ -53,4 +53,4 @@ Uses:
 
 ## Verification
 
-The wire protocol is specified independently of Socket.IO in [wire-protocol.md](../protocol/wire-protocol.md). If Socket.IO ever needs to be replaced, that doc is the contract to hold onto  -  Socket.IO event names and payload shapes are the only Socket.IO-specific things.
+The wire protocol is specified independently of Socket.IO in [wire-protocol.md](../../protocol/wire-protocol.md). If Socket.IO ever needs to be replaced, that doc is the contract to hold onto  -  Socket.IO event names and payload shapes are the only Socket.IO-specific things.

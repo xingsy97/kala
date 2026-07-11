@@ -253,7 +253,7 @@ tools, and use hooks for lifecycle/tool mediation.
 
 ## Reference-agent skill mechanisms
 
-The current `docs/references-comparison.md` file mostly compares tools,
+The current `docs/evals/references-comparison.md` file mostly compares tools,
 extensions, permission, memory, and sub-agent mechanisms. A more precise skill
 comparison needs to separate real `SKILL.md` package systems from ordinary tool
 registries.

@@ -40,7 +40,7 @@ const payload: ServerSettingsPayload = {
   },
   mcp: {
     supported: false,
-    note: 'MCP runtime is not implemented yet  -  see docs/mcp.md for the planned design.',
+    note: 'MCP runtime is not implemented yet  -  see docs/host/mcp.md for the planned design.',
   },
 }
 
@@ -171,7 +171,7 @@ describe('SettingsDialog', () => {
 
     fireEvent.click(screen.getByTestId('settings-tab-mcp'))
     await screen.findByText('Not implemented yet')
-    expect(screen.getAllByText(/docs\/mcp\.md/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/docs\/host\/mcp\.md/i).length).toBeGreaterThan(0)
   })
 
   it('surfaces a fetch failure without crashing', async () => {

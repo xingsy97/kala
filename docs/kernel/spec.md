@@ -110,7 +110,7 @@ type AgentConfig = {
 }
 ```
 
-**Rationale for separating config from state**: config is invariant across a session's event log. Keeping it out of the log keeps replay cheap and makes it trivial to "fork with different tools available." See [ADR 0004](adr/0004-config-state-separation.md).
+**Rationale for separating config from state**: config is invariant across a session's event log. Keeping it out of the log keeps replay cheap and makes it trivial to "fork with different tools available." See [ADR 0004](../meta/adr/0004-config-state-separation.md).
 
 ### 1.4 AgentState
 
@@ -629,7 +629,7 @@ function fork(
 
 ### 6.4 Why fold/fork are 3-4 lines each
 
-Because `step` is pure and total (no throws), fold is just a reduce and fork is a slice + reduce. This isn't a coincidence  -  it's the whole reason we chose the pure-function-FSM architecture. See [ADR 0001](adr/0001-pure-reducer.md).
+Because `step` is pure and total (no throws), fold is just a reduce and fork is a slice + reduce. This isn't a coincidence  -  it's the whole reason we chose the pure-function-FSM architecture. See [ADR 0001](../meta/adr/0001-pure-reducer.md).
 
 ---
 

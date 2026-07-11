@@ -41,7 +41,7 @@ Router: `@tanstack/react-router` (or `wouter`  -  a per-file decision, both are 
 
 **A TUI instead of a web dashboard.**
 
-*Considered as an addition, not a replacement*. A TUI would miss the whole point  -  the replay/fork UI is a visual argument. But nothing prevents someone from building a TUI against the same wire protocol later, and the [ROADMAP](../ROADMAP.md) "Post-v1" section keeps that door open.
+*Considered as an addition, not a replacement*. A TUI would miss the whole point  -  the replay/fork UI is a visual argument. But nothing prevents someone from building a TUI against the same wire protocol later, and the [ROADMAP](../../planning/roadmap.md) "Post-v1" section keeps that door open.
 
 ## Consequences
 
@@ -58,6 +58,6 @@ Router: `@tanstack/react-router` (or `wouter`  -  a per-file decision, both are 
 
 ## Verification
 
-- [`packages/dashboard/package.json`](../../packages/dashboard/) declares `vite` as the dev dep, not `next`.
+- [`packages/dashboard/package.json`](../../../packages/dashboard/) declares `vite` as the dev dep, not `next`.
 - No `pages/` or `app/` directory under `packages/dashboard/src/`  -  routes live in `src/routes/`.
 - Build output is a plain `dist/` folder deployable to any static host.

@@ -4,7 +4,7 @@ Optional capabilities layered on top of the host loop. **Each file here is
 something the kernel does not need to run.** Delete any one of them (and its
 single call site in `../loop.ts` / `../connection/dashboard-ns.ts` / `../../bin/`)
 and the agent still drives a session to completion  -  it just loses that one
-feature. This is the concrete expression of [ADR 0005](../../../../docs/adr/0005-kernel-boundary.md):
+feature. This is the concrete expression of [ADR 0005](../../../../docs/meta/adr/0005-kernel-boundary.md):
 planning, memory, and subagents live *outside* the kernel, and  -  by the same
 logic  -  outside the core host driver too.
 
@@ -65,5 +65,5 @@ The dispatch in `loop.ts`'s `performCallTool` still hard-codes
 interface with a `registry.fire(phase)` fan-out is the natural next step, but the
 seven phases above don't collapse into one clean interface without guessing at
 future needs. This round only relocated the code and broke the cycle; the
-registry is a deliberate follow-up. See [ADR 0005](../../../../docs/adr/0005-kernel-boundary.md)
+registry is a deliberate follow-up. See [ADR 0005](../../../../docs/meta/adr/0005-kernel-boundary.md)
 for the boundary this directory enforces.

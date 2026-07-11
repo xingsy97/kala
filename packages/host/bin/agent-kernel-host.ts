@@ -127,7 +127,7 @@ async function main(): Promise<void> {
     },
     mcp: {
       supported: false,
-      note: 'MCP runtime is not implemented yet  -  see docs/mcp.md for the planned design.',
+      note: 'MCP runtime is not implemented yet  -  see docs/host/mcp.md for the planned design.',
     },
   })
 

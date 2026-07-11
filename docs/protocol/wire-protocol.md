@@ -764,7 +764,7 @@ auto-discovered entries from manual ones.
 
 ### 4.3 Background-shell control plane
 
-Runs alongside the three built-in tools (`bash{run_in_background}`, `bash_output`, `kill_shell`). The tools remain the way the *agent* starts, reads, and kills background tasks; the RPCs here are how the *dashboard operator* observes and controls the same tasks without prompting the agent. See `docs/background-shell-design.md`.
+Runs alongside the three built-in tools (`bash{run_in_background}`, `bash_output`, `kill_shell`). The tools remain the way the *agent* starts, reads, and kills background tasks; the RPCs here are how the *dashboard operator* observes and controls the same tasks without prompting the agent. See `docs/host/background-shell-design.md`.
 
 Routed by `workspaceId`, not `sessionId`. A background task lives in the executor's registry; several sessions on the same workspace can watch the same task.
 
@@ -801,7 +801,7 @@ type BackgroundTaskSummary = {
 }
 ```
 
-Returns every task in the executor's registry (including tasks that already exited but haven't been evicted yet  -  see `docs/background-shell-design.md`  - 4.1 for the 15-minute grace window).
+Returns every task in the executor's registry (including tasks that already exited but haven't been evicted yet  -  see `docs/host/background-shell-design.md`  - 4.1 for the 15-minute grace window).
 
 #### `bg:output` (Dashboard  -  Host  -  Executor, ack)
 
@@ -876,7 +876,7 @@ Sent 15 min after a task's `endedAt`. Dashboard drops the task from its map. Lat
 
 ### 4.4 Sub-agent control plane
 
-Runs alongside the `agent` builtin tool (`packages/host/src/extensions/agent-tool.ts`). The tool is how the *parent LLM* starts a child session and receives its final assistant text back as a wrapped envelope in `tool_result.content`. The events + RPCs here are how the *dashboard operator* observes and interrupts the child inline while it runs  -  otherwise the parent's chat panel would show a spinner for the full duration of the child's inner loop. See `docs/sub-agent-design.md`.
+Runs alongside the `agent` builtin tool (`packages/host/src/extensions/agent-tool.ts`). The tool is how the *parent LLM* starts a child session and receives its final assistant text back as a wrapped envelope in `tool_result.content`. The events + RPCs here are how the *dashboard operator* observes and interrupts the child inline while it runs  -  otherwise the parent's chat panel would show a spinner for the full duration of the child's inner loop. See `docs/host/sub-agent-design.md`.
 
 Routed by `sessionId`. Push events fan into the parent's `session:<parentSessionId>` room; the dashboard uses `childSessionId` from `sub_agent_started` to open a subscription on the child's own room (using the existing `subscribe` verb) and render its `event:appended` stream inline.
 

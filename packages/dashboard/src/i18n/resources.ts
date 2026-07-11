@@ -372,7 +372,7 @@ export const resources = {
         mcp: {
           subtitle: 'Model Context Protocol integration for external tool servers.',
           notImplemented: 'Not implemented yet',
-          body: "The design is fixed (executor-side spawning, <server>__<tool> naming, approvals inherit the session's mode). Implementation is deferred - the ecosystem overlap with the builtin tool set is small. See docs/mcp.md in the repo for the full spec.",
+          body: "The design is fixed (executor-side spawning, <server>__<tool> naming, approvals inherit the session's mode). Implementation is deferred - the ecosystem overlap with the builtin tool set is small. See docs/host/mcp.md in the repo for the full spec.",
         },
         copy: {
           copied: 'copied',
@@ -1653,7 +1653,7 @@ export const resources = {
         mcp: {
           subtitle: ' -  Model Context Protocol  - ',
           notImplemented: ' - ',
-          body: ' - ï - executor  - <server>__<tool>  - ï -  -  -  spec  -  docs/mcp.md - ',
+          body: ' - ï - executor  - <server>__<tool>  - ï -  -  -  spec  -  docs/host/mcp.md - ',
         },
         copy: {
           copied: ' - ',

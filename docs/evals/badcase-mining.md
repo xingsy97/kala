@@ -47,4 +47,4 @@ computed separately by a verifier).
 
 The mining layer only exposes per-instance identifiers and short in-line trace
 excerpts. Filesystem paths never appear in the HTTP response envelope or in
-dashboard UI text  -  see docs/principles.md A1.
+dashboard UI text  -  see docs/meta/principles.md A1.

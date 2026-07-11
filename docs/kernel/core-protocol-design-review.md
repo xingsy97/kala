@@ -5,7 +5,7 @@
 
 ## 1. Review Lens
 
-This review applies the core boundary principle from [`ARCHITECTURE.md`](ARCHITECTURE.md)  - 4.4:
+This review applies the core boundary principle from [`../architecture/overview.md`](../architecture/overview.md)  - 4.4:
 
 > Core mechanisms describe domain state and legal transitions. Peripheral mechanisms observe those transitions and perform environment-specific side effects.
 
@@ -180,11 +180,11 @@ Review requirements:
 
 This review corrected the following drift:
 
-- `docs/adr/0010-fsm-dispatch-table.md` used old state names (`awaiting_llm`, `calling_tool`, `cancelled`). It now names the current six statuses.
-- `docs/SPEC.md` described `ImageSource.kind: 'file'`; implementation uses `file_ref`.
-- `docs/SPEC.md` omitted `ThinkingContent`, cache token usage fields, `thinkingBudget`, and `preflight` compaction trigger.
-- `docs/SPEC.md` described `ask` as equivalent to `auto`; implementation and tests define `ask` as approval for every tool.
-- `docs/SPEC.md` described `compact_replaced` and `cwd_changed` as legal in broader status sets than the reducer table allows.
+- `docs/meta/adr/0010-fsm-dispatch-table.md` used old state names (`awaiting_llm`, `calling_tool`, `cancelled`). It now names the current six statuses.
+- `docs/kernel/spec.md` described `ImageSource.kind: 'file'`; implementation uses `file_ref`.
+- `docs/kernel/spec.md` omitted `ThinkingContent`, cache token usage fields, `thinkingBudget`, and `preflight` compaction trigger.
+- `docs/kernel/spec.md` described `ask` as equivalent to `auto`; implementation and tests define `ask` as approval for every tool.
+- `docs/kernel/spec.md` described `compact_replaced` and `cwd_changed` as legal in broader status sets than the reducer table allows.
 - `docs/protocol/wire-protocol.md` was missing newer queue-edit and file/overflow control-plane messages, plus `client:fork.seedMessage`.
 - `docs/protocol/wire-protocol.md` had one stale statement implying executor routing by `workspaceName`; routing is by `workspaceId`.
 
@@ -192,7 +192,7 @@ This review corrected the following drift:
 
 ### P0: Keep Specs Synchronized
 
-- Treat `docs/SPEC.md` and `packages/kernel/src/types.ts` as a pair.
+- Treat `docs/kernel/spec.md` and `packages/kernel/src/types.ts` as a pair.
 - Treat `docs/protocol/wire-protocol.md` and `packages/shared/src/protocol.ts` as a pair.
 - Add a lightweight CI check or review checklist that fails when shared/kernel protocol files change without corresponding docs changes.
 

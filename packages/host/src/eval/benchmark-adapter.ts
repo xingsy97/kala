@@ -1,7 +1,7 @@
 // BenchmarkAdapter contract.
 //
 // Extracted once SWE-bench and Terminal-Bench were both in tree (task #78).
-// Per docs/principles.md D2, abstraction lands with the second concrete
+// Per docs/meta/principles.md D2, abstraction lands with the second concrete
 // consumer and a clear third planned (WebArena)  -  not before. The interface
 // captures ONLY what both adapters actually share today:
 //

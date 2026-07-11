@@ -20,7 +20,7 @@ reward metadata, rollout grouping, weight versions, and verifier outputs.
 - slime describes custom data generation and rollout functions over SGLang,
   verifier rewards, data buffers, fault tolerance, tracing, and coding-agent RL
   examples.
-- Existing project note: [agentic-rl-integration.md](../agentic-rl-integration.md)
+- Existing project note: [agentic-rl-integration.md](../../evals/agentic-rl-integration.md)
   already states the right direction: adapter-first, not custom trajectory-first.
 
 ## Design Principle
