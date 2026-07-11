@@ -185,7 +185,7 @@ try {
     const diag = await page.evaluate(() => ({
       url: location.href,
       body: document.body.textContent?.slice(0, 2000) ?? '',
-      hasInspectorToggle: Boolean(document.querySelector('[data-testid="inspector-toggle"]')),
+      hasInspectorToggle: Boolean(document.querySelector('[data-testid="app-shell-nav-inspector-icon"]')),
       hasInspectorPanel: Boolean(document.querySelector('[data-testid="inspector-panel"]')),
       rows: Array.from(document.querySelectorAll('[data-testid="session-row"]')).map((e) => ({
         id: e.getAttribute('data-session-id'),
@@ -216,12 +216,19 @@ try {
   const flowText = await page.$eval('[data-testid="protocol-flow-view"]', el => el.textContent || '')
   check('protocol flow view shows event state machine action lanes', flowText.includes('Input Event') && flowText.includes('State Machine') && flowText.includes('Output Actions') && flowText.includes('call_tool'), flowText.slice(0, 300))
   await page.$eval('[data-testid="trace-mode-switch-list"]', (el) => el.click())
-  await page.$eval('[data-testid="theme-toggle"]', (el) => el.click())
+  // Theme control moved from top-bar toggle into Settings  -  Interface. Open
+  // Settings via the nav icon, flip to light, close, then flip back to dark.
+  await page.$eval('[data-testid="app-shell-nav-settings-icon"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="settings-tab-interface"]')
+  await page.$eval('[data-testid="settings-tab-interface"]', (el) => el.click())
+  await page.waitForSelector('[data-testid="settings-theme-light"]')
+  await page.$eval('[data-testid="settings-theme-light"]', (el) => el.click())
   await page.waitForFunction(() => !document.documentElement.classList.contains('dark'))
   await verifySurfaceContrast(page, 'light')
   await page.screenshot({ path: join(shotsDir, '01-debugger-reducer-light.png'), fullPage: false })
-  await page.$eval('[data-testid="theme-toggle"]', (el) => el.click())
+  await page.$eval('[data-testid="settings-theme-dark"]', (el) => el.click())
   await page.waitForFunction(() => document.documentElement.classList.contains('dark'))
+  await page.keyboard.press('Escape')
   await page.$eval('[data-testid="inspector-sidebar-tab-llm"]', (el) => el.click())
   await page.waitForSelector('[data-testid="llm-call-row"]')
   await page.$eval('[data-testid="llm-call-row"]', (el) => el.click())

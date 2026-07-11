@@ -2,20 +2,21 @@
  * Top-level nav for the dashboard. Five tabs, URL-hash routing.
  *
  * Deep-link contract (per principle C4):
- * - `#/agent`, `#/benchmarks`, `#/operations`, `#/artifacts`, `#/settings`
+ * - `#/agent`, `#/benchmarks`, `#/operations`, `#/artifacts`, `#/pipeline`
  * - default (empty hash) resolves to `#/agent`
  * - back/forward and refresh restore the same section
  *
  * Phase-1 scope: the tab bar is a router only. Agent stays in the current
  * layout; the other four tabs open the existing surfaces (ArtifactExplorer
- * modes, SettingsDialog) as a bridge. Phase-2 replaces them with real pages.
+ * modes, PipelineGuideDialog) as a bridge. Phase-2 replaces them with real
+ * pages. Settings is not a tab  -  it lives as an icon on the right of the nav.
  */
 
 import { useEffect, useState } from 'react'
 
-export type AppSection = 'agent' | 'benchmarks' | 'operations' | 'artifacts' | 'settings'
+export type AppSection = 'agent' | 'benchmarks' | 'operations' | 'artifacts' | 'pipeline'
 
-const SECTIONS: readonly AppSection[] = ['agent', 'benchmarks', 'operations', 'artifacts', 'settings']
+const SECTIONS: readonly AppSection[] = ['agent', 'benchmarks', 'operations', 'artifacts', 'pipeline']
 
 function parseHash(hash: string): AppSection {
   const cleaned = hash.replace(/^#\/?/, '').split('/')[0]?.toLowerCase() ?? ''

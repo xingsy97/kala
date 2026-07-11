@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Check, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
+import { Check, Copy, ExternalLink, Moon, Plus, Sun, Trash2 } from 'lucide-react'
 import { Trans, useTranslation } from 'react-i18next'
 import type { ServerSettingsPayload } from '@agent-kernel/shared'
 
@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import { PREF_SHOW_TOOL_CALL_TAB, useBooleanPref } from '../../lib/prefs.js'
+import { useTheme } from '../../lib/theme.js'
 import {
   DESKTOP_NOTIFICATION_PREFS,
   PREF_DESKTOP_NOTIFICATIONS_ENABLED,
@@ -514,6 +515,7 @@ command = "/usr/local/bin/lint-shell.sh"`}
 function InterfaceSection(): JSX.Element {
   const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
+  const [theme, toggleTheme] = useTheme()
   return (
     <div>
       <SectionHeader
@@ -521,6 +523,57 @@ function InterfaceSection(): JSX.Element {
         subtitle={t('settings.interface.subtitle')}
       />
       <ul className="space-y-3 text-sm">
+        <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-medium">{t('settings.interface.theme.label')}</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t('settings.interface.theme.desc')}
+            </p>
+          </div>
+          <div
+            role="radiogroup"
+            aria-label={t('settings.interface.theme.label')}
+            className="inline-flex flex-none overflow-hidden rounded-md border border-border"
+            data-testid="settings-theme-toggle"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={theme === 'dark'}
+              onClick={() => {
+                if (theme !== 'dark') toggleTheme()
+              }}
+              data-testid="settings-theme-dark"
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs',
+                theme === 'dark'
+                  ? 'bg-primary/10 text-primary'
+                  : 'bg-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Moon className="h-3.5 w-3.5" aria-hidden />
+              <span>{t('settings.interface.theme.dark')}</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={theme === 'light'}
+              onClick={() => {
+                if (theme !== 'light') toggleTheme()
+              }}
+              data-testid="settings-theme-light"
+              className={cn(
+                'inline-flex items-center gap-1.5 border-l border-border px-3 py-1.5 text-xs',
+                theme === 'light'
+                  ? 'bg-primary/10 text-primary'
+                  : 'bg-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Sun className="h-3.5 w-3.5" aria-hidden />
+              <span>{t('settings.interface.theme.light')}</span>
+            </button>
+          </div>
+        </li>
         <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.showToolCallTab')}</div>

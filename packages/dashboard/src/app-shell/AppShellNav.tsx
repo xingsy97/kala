@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BarChart3, Bot, Boxes, Settings as SettingsIcon, Workflow } from 'lucide-react'
+import { BarChart3, Bot, Boxes, PanelRight, PanelRightClose, Settings as SettingsIcon, Sparkles, Workflow } from 'lucide-react'
 
 import { Button } from '../components/ui/button.js'
 import { cn } from '../lib/utils.js'
+import { LanguageSwitcher } from '../features/i18n/LanguageSwitcher.js'
 import type { AppSection } from './section.js'
 
 type NavItem = {
@@ -18,25 +18,25 @@ const NAV_ITEMS: readonly NavItem[] = [
   { id: 'benchmarks', labelKey: 'appShell.nav.benchmarks', Icon: BarChart3, testid: 'app-shell-nav-benchmarks' },
   { id: 'operations', labelKey: 'appShell.nav.operations', Icon: Workflow, testid: 'app-shell-nav-operations' },
   { id: 'artifacts', labelKey: 'appShell.nav.artifacts', Icon: Boxes, testid: 'app-shell-nav-artifacts' },
-  { id: 'settings', labelKey: 'appShell.nav.settings', Icon: SettingsIcon, testid: 'app-shell-nav-settings' },
+  { id: 'pipeline', labelKey: 'appShell.nav.pipeline', Icon: Sparkles, testid: 'app-shell-nav-pipeline' },
 ]
 
 export function AppShellNav({
   section,
   onSelect,
+  onOpenSettings,
+  onToggleInspector,
+  inspectorOpen,
+  inspectorAvailable,
 }: {
   section: AppSection
   onSelect(section: AppSection): void
+  onOpenSettings(): void
+  onToggleInspector(): void
+  inspectorOpen: boolean
+  inspectorAvailable: boolean
 }): JSX.Element {
   const { t } = useTranslation()
-  // Bridging effect: switching into non-Agent sections opens the corresponding
-  // surface. Phase-2 replaces this with real page mounts.
-  useEffect(() => {
-    if (section === 'agent') return
-    // Signal handled by app.tsx via onSelect callback + hash listener; nothing
-    // to do here beyond letting parent open the dialog. Kept as a hook slot
-    // for future page-level cleanup logic.
-  }, [section])
 
   return (
     <nav
@@ -70,6 +70,38 @@ export function AppShellNav({
           </Button>
         )
       })}
+      <span className="ml-auto flex items-center gap-1">
+        <LanguageSwitcher />
+        {inspectorAvailable ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            data-testid="app-shell-nav-inspector-icon"
+            onClick={onToggleInspector}
+            title={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
+            aria-label={inspectorOpen ? t('app.hideInspector') : t('app.showInspector')}
+            aria-pressed={inspectorOpen}
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+          >
+            {inspectorOpen ? (
+              <PanelRightClose className="h-4 w-4" aria-hidden />
+            ) : (
+              <PanelRight className="h-4 w-4" aria-hidden />
+            )}
+          </Button>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="icon"
+          data-testid="app-shell-nav-settings-icon"
+          onClick={onOpenSettings}
+          title={t('app.openSettings')}
+          aria-label={t('app.openSettings')}
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+        >
+          <SettingsIcon className="h-4 w-4" aria-hidden />
+        </Button>
+      </span>
     </nav>
   )
 }

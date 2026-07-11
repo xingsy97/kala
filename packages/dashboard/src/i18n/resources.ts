@@ -30,7 +30,7 @@ export const resources = {
           benchmarks: 'Benchmarks',
           operations: 'Operations',
           artifacts: 'Artifacts',
-          settings: 'Settings',
+          pipeline: 'Pipeline',
         },
       },
       benchmarks: {
@@ -311,6 +311,12 @@ export const resources = {
         },
         interface: {
           subtitle: 'Dashboard UI toggles. Stored per-browser in localStorage - no host restart required.',
+          theme: {
+            label: 'Theme',
+            desc: 'Switch between dark and light color schemes.',
+            dark: 'Dark',
+            light: 'Light',
+          },
           showToolCallTab: 'Show Tool Call tab in Inspector',
           showToolCallTabDesc: 'Adds a dedicated "Tool Call" tab beside Trace / LLM API / Status. When off, tool calls still appear inside the Trace view - use the Trace filter chips to isolate them.',
           desktopNotifications: 'Desktop notifications',
@@ -1190,7 +1196,7 @@ export const resources = {
           benchmarks: 'Benchmarks',
           operations: ' - ',
           artifacts: ' - ',
-          settings: ' - ',
+          pipeline: ' - ',
         },
       },
       benchmarks: {
@@ -1471,6 +1477,12 @@ export const resources = {
         },
         interface: {
           subtitle: 'Dashboard UI  -  localStorage  -  -  -  host - ',
+          theme: {
+            label: ' - ',
+            desc: ' - ',
+            dark: ' - ',
+            light: ' - ',
+          },
           showToolCallTab: ' -  Inspector  -  Tool Call tab',
           showToolCallTabDesc: ' -  Trace / LLM API / Status  -  Tool Call tab - ï - tool call  -  Trace viewï -  Trace filter chips  - ',
           desktopNotifications: ' - ',
