@@ -5,7 +5,7 @@
  * expected case for sub-agents launched without a `role` policy.
  */
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 
 export type SubAgentPolicyView = {
   role?: 'research' | 'test' | 'review' | 'benchmark-triage'
@@ -45,32 +45,25 @@ export function useSubAgentPolicy(opts: {
   parentCallId: string
 }): SubAgentPolicyView | null {
   const { parentSessionId, parentCallId } = opts
-  const [policy, setPolicy] = useState<SubAgentPolicyView | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    const relativePath = `subagent-policies/${parentSessionId}/${parentCallId}.json`
-    void fetch(`/artifacts/content?path=${encodeURIComponent(relativePath)}`, { cache: 'no-store' })
-      .then(async (res) => {
-        if (!res.ok) return null
-        const body = (await res.json().catch(() => null)) as ContentResponse | null
-        if (!body || typeof body !== 'object') return null
-        const artifact = body.body as PolicyArtifact | undefined
-        return artifact?.policy ?? null
-      })
-      .then((raw) => {
-        if (cancelled || !raw) return
-        setPolicy(normalize(raw))
-      })
-      .catch(() => {
-        // Silent  -  the policy panel is optional context.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [parentSessionId, parentCallId])
+  const query = useQuery({
+    queryKey: ['subagent-policy', parentSessionId, parentCallId],
+    queryFn: async (): Promise<SubAgentPolicyView | null> => {
+      const relativePath = `subagent-policies/${parentSessionId}/${parentCallId}.json`
+      const res = await fetch(`/artifacts/content?path=${encodeURIComponent(relativePath)}`, { cache: 'no-store' })
+      if (!res.ok) return null
+      const body = (await res.json().catch(() => null)) as ContentResponse | null
+      if (!body || typeof body !== 'object') return null
+      const artifact = body.body as PolicyArtifact | undefined
+      const raw = artifact?.policy
+      if (!raw) return null
+      return normalize(raw)
+    },
+    enabled: Boolean(parentSessionId) && Boolean(parentCallId),
+    staleTime: 60_000,
+  })
 
-  return policy
+  return query.data ?? null
 }
 
 function normalize(raw: Required<PolicyArtifact>['policy']): SubAgentPolicyView {

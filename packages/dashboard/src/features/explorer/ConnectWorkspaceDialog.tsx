@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, Clipboard, Monitor, Terminal } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -26,31 +27,25 @@ const OS_TABS: ReadonlyArray<{ value: OsTab; label: string; icon: typeof Termina
 export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Element {
   const [tab, setTab] = useState<OsTab>(() => detectCurrentOs())
   const [copied, setCopied] = useState(false)
-  const [invite, setInvite] = useState<{ inviteToken: string; expiresAt: string } | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const hostUrl = useMemo(() => hostUrlFromLocation(), [])
-  const command = commandFor(tab, hostUrl, invite?.inviteToken)
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setError(null)
-    setInvite(null)
-    void fetch('/auth/executor-invites', { method: 'POST' })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(await res.text())
-        return res.json() as Promise<{ inviteToken: string; expiresAt: string }>
-      })
-      .then((body) => {
-        if (!cancelled) setInvite(body)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open])
+  // Executor invites are single-use tokens minted by the host. We mint one
+  // per dialog session (keyed by `open`) so re-opening the dialog issues a
+  // fresh invite rather than showing a stale/consumed one.
+  const inviteQuery = useQuery({
+    queryKey: ['executor-invite'],
+    queryFn: async (): Promise<{ inviteToken: string; expiresAt: string }> => {
+      const res = await fetch('/auth/executor-invites', { method: 'POST' })
+      if (!res.ok) throw new Error(await res.text())
+      return (await res.json()) as { inviteToken: string; expiresAt: string }
+    },
+    enabled: open,
+    staleTime: 0,
+    gcTime: 0,
+  })
+  const invite = inviteQuery.data ?? null
+  const error = inviteQuery.error ? (inviteQuery.error as Error).message : null
+  const command = commandFor(tab, hostUrl, invite?.inviteToken)
 
   const copy = async (): Promise<void> => {
     await navigator.clipboard.writeText(command)
