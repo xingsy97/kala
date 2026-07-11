@@ -45,6 +45,16 @@ describe('bash', () => {
     expect(out).toContain('--- exit code: 0')
   })
 
+  it('allows the workspace root itself as cwd', async () => {
+    const out = await bashTool.run(
+      { command: 'pwd', cwd: root },
+      makeCtx(root),
+    )
+
+    expect(normalizePath(out.split('\n')[0]!)).toBe(normalizePath(root))
+    expect(out).toContain('--- exit code: 0')
+  })
+
   it('uses the session cwd instead of process.cwd() when no sandbox root is configured', async () => {
     const out = await bashTool.run(
       { command: 'pwd' },

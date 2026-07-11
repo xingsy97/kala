@@ -24,6 +24,9 @@ import type { Namespace } from 'socket.io'
 import { SessionStore } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
 import type { DashboardNs } from './dashboard-ns.js'
+import type { AuthConfig, ExecutorIdentity } from '../auth-control.js'
+import { authenticateExecutorToken, validateExecutorAnnouncement } from '../auth-control.js'
+import type { AuditLogger } from '../audit-log.js'
 
 export type ExecutorNs = Namespace<
   ExecutorClientToServerEvents,
@@ -34,7 +37,8 @@ export type ExecutorDeps = {
   store: SessionStore
   executors: ReturnType<typeof createExecutorRegistry>
   defaultConfig: AgentConfig
-  authToken?: string
+  auth?: AuthConfig
+  audit?: AuditLogger
   broadcastError(
     sessionId: string,
     scope: SessionErrorScope,
@@ -63,10 +67,14 @@ export function configureExecutorNamespace(
       nextFn(new Error('version_incompatible'))
       return
     }
-    if (deps.authToken && auth.token !== deps.authToken) {
-      nextFn(new Error('auth_failed'))
+    const identity = authenticateExecutorToken(auth, deps.auth)
+    if (!identity.accepted) {
+      deps.audit?.log({ action: 'executor.socket_reject', actor: { kind: 'anonymous' }, outcome: 'denied', error: identity.reason ?? 'auth_failed' })
+      nextFn(new Error(identity.reason ?? 'auth_failed'))
       return
     }
+    socket.data.executorIdentity = identity
+    deps.audit?.log({ action: 'executor.socket_accept', actor: { kind: 'token', ...(identity.label ? { label: identity.label } : {}) }, outcome: 'ok', metadata: { scopedWorkspaceId: identity.workspaceId } })
     nextFn()
   })
 
@@ -75,6 +83,35 @@ export function configureExecutorNamespace(
     // An executor is a daemon: no session binding at connect time. Host
     // routes each `tool:call` to it by sessionId when needed.
     socket.on('executor:announce', (payload: ExecutorAnnounce) => {
+      const identity = socket.data.executorIdentity as ExecutorIdentity | undefined
+      const valid = validateExecutorAnnouncement(identity ?? { accepted: true }, payload.workspaceId)
+      if (!valid.ok) {
+        deps.audit?.log({ action: 'executor.announce_reject', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'denied', error: valid.reason })
+        const code: 'workspace_identity_mismatch' | 'auth_failed' =
+          valid.reason === 'workspace_identity_mismatch' ? 'workspace_identity_mismatch' : 'auth_failed'
+        socket.emit('executor:host_reject', {
+          code,
+          message: valid.reason,
+        })
+        socket.disconnect(true)
+        return
+      }
+      if (identity?.inviteToken) {
+        const bound = deps.auth?.executorIdentityStore?.consumeInvite(identity.inviteToken, payload.workspaceId, payload.workspaceName)
+        if (!bound?.ok) {
+          const reason = bound?.reason ?? 'invalid_invite'
+          deps.audit?.log({ action: 'executor.invite_reject', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: 'denied', error: reason })
+          socket.emit('executor:host_reject', { code: 'auth_failed', message: reason })
+          socket.disconnect(true)
+          return
+        }
+        socket.emit('executor:welcome', { token: bound.token, workspaceId: payload.workspaceId })
+        socket.data.executorIdentity = { accepted: true, token: bound.token, workspaceId: payload.workspaceId, label: payload.workspaceName }
+        deps.audit?.log({ action: 'executor.invite_bound', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId }, target: { workspaceId: payload.workspaceId }, outcome: 'ok' })
+      } else if (identity?.token) {
+        deps.auth?.executorIdentityStore?.markSeen(identity.token)
+      }
+      deps.audit?.log({ action: 'executor.announce_accept', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'ok', metadata: { workspaceName: payload.workspaceName } })
       deps.executors.attach(socket, payload, auth.clientVersion)
     })
     socket.on('executor:tool_result', (payload: ExecutorToolResult) => {

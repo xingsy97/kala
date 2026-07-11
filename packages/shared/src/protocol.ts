@@ -33,6 +33,7 @@ export type HandshakeAuth = {
   role: ClientRole
   sessionId?: string
   token?: string
+  invite?: string
   clientVersion: string
 }
 
@@ -128,6 +129,7 @@ export type SessionPreferencesChangedEvent = {
  */
 export type ControlUpdate =
   | ({ kind: 'session_meta_changed' } & SessionMetaChanged)
+  | ({ kind: 'workspace_meta_changed' } & WorkspaceMetaChanged)
   | ({ kind: 'executor_changed' } & ServerExecutorChangedPayload)
   | ({ kind: 'bg_task_updated' } & ServerBgTaskUpdated)
   | ({ kind: 'bg_task_evicted' } & ServerBgTaskEvicted)
@@ -145,6 +147,11 @@ export type SessionMetaChanged = {
   sessionId: string
   label?: string
   preferences?: SessionPreferences
+}
+
+export type WorkspaceMetaChanged = {
+  workspaceId: string
+  workspaceName: string
 }
 
 /**
@@ -326,9 +333,24 @@ export type ClientRenameSession = {
   label: string
 }
 
+/**
+ * Rename a workspace display label. The stable `workspaceId` used for tool
+ * routing is unchanged; this only changes the operator-facing name shown in
+ * dashboards and persisted session summaries.
+ */
+export type ClientRenameWorkspace = {
+  workspaceId: string
+  workspaceName: string
+}
+
 export type SessionRenamedEvent = {
   sessionId: string
   label: string
+}
+
+export type WorkspaceRenamedEvent = {
+  workspaceId: string
+  workspaceName: string
 }
 
 // ============================================================================
@@ -737,22 +759,6 @@ export type ToolCallMessage = {
   input: Record<string, unknown>
   cwd?: string
   timeoutMs?: number
-  /**
-   * Delivery mode. `'kernel'` (default when omitted)  -  the tool call
-   * originates from a kernel `call_tool` effect, its result is fed back
-   * as a `tool_result` event, appended to the session log, and echoed
-   * to dashboards. `'direct'`  -  a host-initiated internal RPC (fs
-   * inspection, background-task control, overflow spill management, ...);
-   * the executor runs the tool identically but the host never dispatches
-   * the result through kernel `step()`  -  it just returns `ToolResultAck`
-   * to the original caller. The `sessionId` field is a routing convenience
-   * only in this mode; it does NOT mutate any real session.
-   *
-   * Direct-mode tool names are conventionally prefixed `__` so a reader
-   * scanning the executor's tool registry can tell at a glance which are
-   * LLM-visible.
-   */
-  dispatchMode?: 'kernel' | 'direct'
 }
 
 export type ToolCancelMessage = {
@@ -923,6 +929,19 @@ export type ServerSettingsPayload = {
   providers: readonly SettingsProviderSummary[]
   defaultModel: string
   hooks: readonly SettingsHookSummary[]
+  auth?: {
+    dashboardAuthRequired: boolean
+    githubOAuth: {
+      required: boolean
+      configured: boolean
+      usernameWhitelistEnabled: boolean
+      usernameWhitelist: readonly string[]
+    }
+    executorIdentity: {
+      tokenScoped: boolean
+      tokenCount: number
+    }
+  }
   paths: {
     claudeSettings: string
     codexConfig: string
@@ -934,6 +953,23 @@ export type ServerSettingsPayload = {
     supported: false
     note: string
   }
+}
+
+export type ExecutorIdentitySummary = {
+  workspaceId: string
+  label?: string
+  createdAt: string
+  lastSeenAt?: string
+}
+
+export type ServerExecutorIdentitiesPayload = {
+  identities: readonly ExecutorIdentitySummary[]
+}
+
+export type ServerExecutorIdentityRevokedPayload = {
+  ok: true
+  workspaceId: string
+  revoked: boolean
 }
 
 // ============================================================================
@@ -967,6 +1003,7 @@ export type DashboardClientToServerEvents = {
   'client:update_queued_message': (payload: ClientUpdateQueuedMessage) => void
   'client:delete_queued_message': (payload: ClientDeleteQueuedMessage) => void
   'client:rename_session': (payload: ClientRenameSession) => void
+  'client:rename_workspace': (payload: ClientRenameWorkspace) => void
   'client:consolidate_memory': (payload: ClientConsolidateMemory) => void
   'bg:list': (
     payload: ClientListBgTasks,
@@ -1002,6 +1039,7 @@ export type DashboardServerToClientEvents = {
   'session:preferences_changed': (payload: SessionPreferencesChangedEvent) => void
   'session:token_delta': (payload: ServerTokenDeltaEvent) => void
   'session:renamed': (payload: SessionRenamedEvent) => void
+  'workspace:renamed': (payload: WorkspaceRenamedEvent) => void
   'server:message_queue': (payload: ServerMessageQueueEvent) => void
   'server:executors': (payload: ServerExecutorsPayload) => void
   'server:executor_changed': (payload: ServerExecutorChangedPayload) => void
@@ -1052,9 +1090,10 @@ export type ExecutorClientToServerEvents = {
  * deployed in the field only has to speak two message shapes: "run this
  * tool" and "cancel that one". Everything the host previously exposed as
  * a bespoke RPC (fs inspection, background-task inspection, overflow
- * spill management) now travels through `tool:call` with `dispatchMode:
- * 'direct'`  -  the tool's own name (conventionally prefixed `__`) tells
- * the executor which built-in to run.
+ * spill management) now travels through `tool:call` using internal tool names
+ * conventionally prefixed `__`. The executor runs the named tool; only the
+ * host decides whether the result is a kernel tool result or an internal RPC
+ * response.
  *
  * The kernel-echo events (`session:ready`, `state:changed`, `event:appended`,
  * `session:error`) that used to be declared here were never actually
@@ -1078,9 +1117,18 @@ export type ExecutorServerToClientEvents = {
    * pick a distinct exit code per class of failure.
    */
   'executor:host_reject': (payload: {
-    code: 'workspace_id_conflict' | 'version_incompatible' | 'auth_failed'
+    code: 'workspace_id_conflict' | 'workspace_identity_mismatch' | 'version_incompatible' | 'auth_failed'
     message: string
   }) => void
+  'executor:welcome': (payload: {
+    token: string
+    workspaceId: string
+  }) => void
+}
+
+export type ExecutorInviteCreated = {
+  inviteToken: string
+  expiresAt: string
 }
 
 // ============================================================================

@@ -8,10 +8,12 @@
  *                               Free to rename  -  routing uses the workspaceId
  *                               (persisted at ~/.agent-kernel/workspace-id).
  *   SANDBOX_ROOTS / --sandbox-root
- *     optional filesystem jail(s). Absolute path(s). `SANDBOX_ROOTS` is a
- *     `:`-separated list; `--sandbox-root <path>` is repeatable. Empty = no
- *     jail (executor trusts the whole machine).
- *   EXECUTOR_TOKEN / --token    optional; must match host's HOST_AUTH_TOKEN if set
+ *     optional workspace root(s). Absolute path(s). `SANDBOX_ROOTS` is a
+ *     `:`-separated list; `--sandbox-root <path>` is repeatable. Session cwd
+ *     may be the root itself or any child directory. Empty = no jail
+ *     (executor trusts the whole machine).
+ *   EXECUTOR_TOKEN / --token    optional long-term executor token
+ *   EXECUTOR_INVITE / --invite  optional one-time invite token from Dashboard
  *   EXECUTOR_ID / --id          optional; defaults to a ULID
  *   AGENT_KERNEL_AUTO_UPDATE / --auto-update
  *     optional; update the release asset from the latest GitHub Release before connecting.
@@ -33,6 +35,7 @@ import lockfile from 'proper-lockfile'
 import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
+import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
 
@@ -41,6 +44,7 @@ type Args = {
   name?: string
   sandboxRoots: string[]
   token?: string
+  invite?: string
   id?: string
   autoUpdate?: boolean
   noUpdateCheck?: boolean
@@ -66,6 +70,7 @@ function parseArgs(argv: readonly string[]): Args {
       case '--name':
       case '--sandbox-root':
       case '--token':
+      case '--invite':
       case '--id':
       case '--update-repo': {
         const value = inline ?? argv[++i]
@@ -74,6 +79,7 @@ function parseArgs(argv: readonly string[]): Args {
         else if (key === '--name') out.name = value
         else if (key === '--sandbox-root') out.sandboxRoots.push(value)
         else if (key === '--token') out.token = value
+        else if (key === '--invite') out.invite = value
         else if (key === '--id') out.id = value
         else out.updateRepo = value
         break
@@ -143,7 +149,8 @@ async function main(): Promise<void> {
     ? process.env.SANDBOX_ROOTS.split(':').filter((s) => s.length > 0)
     : []
   const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : envRoots
-  const token = args.token ?? process.env.EXECUTOR_TOKEN
+  const invite = args.invite ?? process.env.EXECUTOR_INVITE
+  const token = args.token ?? process.env.EXECUTOR_TOKEN ?? (invite ? undefined : loadExecutorToken())
   const executorId = args.id ?? process.env.EXECUTOR_ID
   const autoUpdate = args.autoUpdate === true || process.env.AGENT_KERNEL_AUTO_UPDATE === '1'
   const noUpdateCheck = args.noUpdateCheck === true || process.env.AGENT_KERNEL_NO_UPDATE_CHECK === '1'
@@ -187,7 +194,12 @@ async function main(): Promise<void> {
     ...(name !== undefined ? { workspaceName: name } : {}),
     ...(sandboxRoots.length > 0 ? { sandboxRoots } : {}),
     ...(token !== undefined ? { token } : {}),
+    ...(invite !== undefined ? { invite } : {}),
     ...(executorId !== undefined ? { executorId } : {}),
+    onToken(nextToken) {
+      saveExecutorToken(nextToken)
+      logger.info('executor identity saved for future reconnects')
+    },
   })
 
   handle.socket.on('connect', () => {
@@ -224,6 +236,7 @@ async function main(): Promise<void> {
   const failure = await handle.permanentError
   const exitCodeByReason: Record<string, number> = {
     workspace_id_conflict: 2,
+    workspace_identity_mismatch: 2,
     version_incompatible: 3,
     auth_failed: 4,
     reconnect_exhausted: 5,

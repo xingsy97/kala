@@ -1,15 +1,14 @@
 /**
- * Direct-mode built-in tools.
+ * Host-internal built-in tools.
  *
  * Host-initiated RPCs (filesystem inspection, background-task control,
  * overflow-spill management) used to travel over bespoke Socket.IO event
  * names (`fs:list_dirs`, `bg:list`, ...). That gave the executor a wide
  * inbound surface that had to move in lockstep with the host. It doesn't
- * anymore: the host now sends these as `tool:call` messages with
- * `dispatchMode: 'direct'` and a conventional `__`-prefixed tool name.
- * The executor doesn't need to distinguish direct-mode from kernel-mode
- * calls  -  it just runs the tool. The prefix is a hint for humans reading
- * the tool list, nothing more.
+ * anymore: the host now sends these as `tool:call` messages with a
+ * conventional `__`-prefixed tool name. The executor doesn't distinguish
+ * host-internal RPCs from kernel tool calls  -  it just runs the tool. The
+ * prefix is a hint for humans reading the tool list, nothing more.
  *
  * Tool runners return strings, so each of these serializes its structured
  * result via `JSON.stringify` and the host de-serializes on the other end.

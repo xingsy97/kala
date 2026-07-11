@@ -35,6 +35,7 @@ import type {
   ClientReadOverflow,
   ClientDeleteQueuedMessage,
   ClientReorderQueuedMessage,
+  ClientRenameWorkspace,
   ClientRenameSession,
   ClientSetApprovalMode,
   ClientSetCwd,
@@ -48,6 +49,7 @@ import type {
   DashboardServerToClientEvents,
   EventAppendedEvent,
   HandshakeAuth,
+  AttachedExecutor,
   ServerHistoryPayload,
   ServerMessageQueueEvent,
   SessionErrorScope,
@@ -69,10 +71,14 @@ import { ulid } from 'ulid'
 import type { HostLoopDeps, LoopHandle } from '../loop.js'
 import { consolidateMemory, type ConsolidationOutcome } from '../extensions/memory-consolidation.js'
 import { markSubAgentInterrupted } from '../extensions/agent-tool.js'
+import { resetCompactRuntime } from '../extensions/compaction.js'
 import { readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
 import { resolve as resolvePath, sep } from 'node:path'
+import type { AuthConfig } from '../auth-control.js'
+import { authenticateDashboardHandshake } from '../auth-control.js'
+import type { AuditActor, AuditLogger } from '../audit-log.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -107,7 +113,8 @@ export type DashboardDeps = {
   loopDeps: HostLoopDeps
   executors: ReturnType<typeof createExecutorRegistry>
   defaultConfig: AgentConfig
-  authToken?: string
+  auth?: AuthConfig
+  audit?: AuditLogger
   broadcastError(
     sessionId: string,
     scope: SessionErrorScope,
@@ -116,8 +123,10 @@ export type DashboardDeps = {
   selectedModels: Map<string, string>
   dashboardNs: DashboardNs
   messageQueues: MessageQueueManager
+  executorSnapshot?(): readonly AttachedExecutor[]
   onSessionCreated?(record: SessionRecord): void | Promise<void>
   onSessionDeleted?(record: SessionRecord): void | Promise<void>
+  renameWorkspace?(workspaceId: string, workspaceName: string): Promise<string>
 }
 
 export function configureDashboardNamespace(
@@ -134,14 +143,18 @@ export function configureDashboardNamespace(
       nextFn(new Error('version_incompatible'))
       return
     }
-    if (deps.authToken && auth.token !== deps.authToken) {
-      nextFn(new Error('auth_failed'))
+    const authResult = authenticateDashboardHandshake(auth, socket.request, deps.auth)
+    if (!authResult.ok) {
+      deps.audit?.log({ action: 'dashboard.socket_reject', actor: { kind: 'anonymous' }, target: { sessionId: auth.sessionId }, outcome: 'denied', error: authResult.reason })
+      nextFn(new Error(authResult.reason))
       return
     }
     if (!auth.sessionId) {
       nextFn(new Error('missing_session_id'))
       return
     }
+    socket.data.dashboardActor = authResult.actor
+    deps.audit?.log({ action: 'dashboard.socket_accept', actor: authResult.actor, target: { sessionId: auth.sessionId }, outcome: 'ok' })
     nextFn()
   })
 
@@ -155,7 +168,7 @@ export function configureDashboardNamespace(
     // after `session:ready`; if we install handlers later, those one-shot
     // requests can be lost and the UI stays on "no session selected".
     socket.on('client:list_executors', (_p: ClientListExecutors) => {
-      socket.emit('server:executors', { executors: deps.executors.snapshot() })
+      socket.emit('server:executors', { executors: executorSnapshotFor(deps) })
     })
 
     socket.on('client:list_sessions', async (_p: ClientListSessions) => {
@@ -254,13 +267,16 @@ export function configureDashboardNamespace(
     })
 
     socket.on('client:user_message', async (p: ClientUserMessage) => {
+      deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
       await handleUserMessage(deps, p)
     })
     socket.on('client:user_approve', async (p: ClientUserApprove) => {
+      deps.audit?.log({ action: 'dashboard.user_approve', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok' })
       const evt: AgentEvent = { kind: 'user_approve', callId: p.callId }
       await safeDispatch(deps, p.sessionId, evt)
     })
     socket.on('client:user_reject', async (p: ClientUserReject) => {
+      deps.audit?.log({ action: 'dashboard.user_reject', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok', metadata: { reasonBytes: p.reason ? Buffer.byteLength(p.reason, 'utf8') : 0 } })
       const evt: AgentEvent = {
         kind: 'user_reject',
         callId: p.callId,
@@ -289,6 +305,7 @@ export function configureDashboardNamespace(
       }
     })
     socket.on('client:clear', async (p: ClientClear) => {
+      deps.audit?.log({ action: 'dashboard.session_clear', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok' })
       deps.loopDeps.tools.cancelPending(p.sessionId)
       deps.loop.cancelStream(p.sessionId)
       const evt: AgentEvent = { kind: 'clear' }
@@ -333,6 +350,7 @@ export function configureDashboardNamespace(
       // silently disabling every approval prompt on an unattended session.
       // The other three modes are freely settable.
       if (p.mode === 'allow_all' && process.env.AK_ALLOW_ALL_OK !== '1') {
+        deps.audit?.log({ action: 'dashboard.approval_mode_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'denied', metadata: { mode: p.mode }, error: 'AK_ALLOW_ALL_OK is not enabled' })
         deps.broadcastError(
           p.sessionId,
           'host',
@@ -344,6 +362,7 @@ export function configureDashboardNamespace(
         kind: 'approval_mode_changed',
         mode: p.mode,
       })
+      deps.audit?.log({ action: 'dashboard.approval_mode_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { mode: p.mode } })
     })
     socket.on('client:set_cwd', async (p: ClientSetCwd) => {
       const record = await loadRecordForDashboard(deps, p.sessionId)
@@ -361,6 +380,7 @@ export function configureDashboardNamespace(
       }
       const validation = await validateSessionCwd(deps, record, p.cwd)
       if (!validation.ok) {
+        deps.audit?.log({ action: 'dashboard.cwd_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'denied', metadata: { cwd: p.cwd }, error: validation.reason })
         deps.broadcastError(p.sessionId, 'host', validation.reason)
         return
       }
@@ -368,6 +388,7 @@ export function configureDashboardNamespace(
         kind: 'cwd_changed',
         cwd: validation.cwd,
       })
+      deps.audit?.log({ action: 'dashboard.cwd_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { cwd: validation.cwd } })
       await broadcastSessionList(deps)
     })
     socket.on('client:reorder_queued_message', (p: ClientReorderQueuedMessage) => {
@@ -400,7 +421,32 @@ export function configureDashboardNamespace(
         )
       }
     })
+    socket.on('client:rename_workspace', async (p: ClientRenameWorkspace) => {
+      try {
+        const applied = deps.renameWorkspace
+          ? await deps.renameWorkspace(p.workspaceId, p.workspaceName)
+          : p.workspaceName.trim()
+        deps.dashboardNs.emit('workspace:renamed', {
+          workspaceId: p.workspaceId,
+          workspaceName: applied,
+        })
+        deps.dashboardNs.emit('server:control_update', {
+          kind: 'workspace_meta_changed',
+          workspaceId: p.workspaceId,
+          workspaceName: applied,
+        })
+        deps.dashboardNs.emit('server:executors', { executors: executorSnapshotFor(deps) })
+        await broadcastSessionList(deps)
+      } catch (err) {
+        deps.broadcastError(
+          p.workspaceId,
+          'host',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
+    })
     socket.on('client:list_dirs', async (p: ClientListDirs) => {
+      deps.audit?.log({ action: 'internal_tool.list_dirs', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
       socket.emit('server:dir_list', result)
     })
@@ -409,10 +455,12 @@ export function configureDashboardNamespace(
       socket.emit('server:file_list', result)
     })
     socket.on('client:read_file', async (p: ClientReadFile) => {
+      deps.audit?.log({ action: 'internal_tool.read_file', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.readFile(p)
       socket.emit('server:file_contents', result)
     })
     socket.on('client:read_overflow', async (p: ClientReadOverflow) => {
+      deps.audit?.log({ action: 'internal_tool.read_overflow', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok' })
       const record = deps.store.get(p.sessionId) ?? (await deps.store.load(p.sessionId).catch(() => undefined))
       const workspaceId = record?.workspaceId
       if (!workspaceId) {
@@ -495,6 +543,7 @@ export function configureDashboardNamespace(
         if (cwd && cwd.length > 0) {
           const validation = await validateWorkspaceCwd(deps, p.workspaceId, cwd)
           if (!validation.ok) {
+            deps.audit?.log({ action: 'dashboard.session_create', actor: auditActor(socket), target: { sessionId: p.sessionId, workspaceId: p.workspaceId }, outcome: 'denied', metadata: { cwd }, error: validation.reason })
             socket.emit('session:error', {
               sessionId: p.sessionId,
               scope: 'host',
@@ -523,6 +572,7 @@ export function configureDashboardNamespace(
           ),
         )
         if (created) {
+          deps.audit?.log({ action: 'dashboard.session_create', actor: auditActor(socket), target: { sessionId: record.sessionId, workspaceId: record.workspaceId }, outcome: 'ok', metadata: { cwd: record.state.cwd } })
           await broadcastSessionList(deps)
           if (deps.onSessionCreated) {
             try {
@@ -593,6 +643,7 @@ export function configureDashboardNamespace(
             : {}),
         }
         socket.emit('session:forked', forked)
+        deps.audit?.log({ action: 'dashboard.session_fork', actor: auditActor(socket), target: { sessionId: record.sessionId, sourceSessionId: p.sourceSessionId }, outcome: 'ok', refs: { parentCursor: p.cursor } })
         await broadcastSessionList(deps)
         if (typeof p.seedMessage === 'string' && p.seedMessage.trim().length > 0) {
           await deps.loop.dispatch(record.sessionId, {
@@ -624,6 +675,8 @@ export function configureDashboardNamespace(
         }
         await deps.store.delete(p.sessionId)
         deps.selectedModels.delete(p.sessionId)
+        resetCompactRuntime(p.sessionId)
+        deps.audit?.log({ action: 'dashboard.session_delete', actor: auditActor(socket), target: { sessionId: p.sessionId, workspaceId: record?.workspaceId }, outcome: 'ok' })
         ns.emit('server:session_deleted', { sessionId: p.sessionId })
       } catch (err) {
         deps.broadcastError(
@@ -636,12 +689,22 @@ export function configureDashboardNamespace(
 
     socket.on('client:set_model', (p: ClientSetModel) => {
       const trimmed = p.model.trim()
+      deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: trimmed } })
       applyPreferencesUpdate(deps, p.sessionId, { selectedModel: trimmed })
     })
     socket.on('client:update_preferences', (p) => {
       applyPreferencesUpdate(deps, p.sessionId, p.preferences)
     })
   })
+}
+
+function executorSnapshotFor(deps: DashboardDeps): readonly AttachedExecutor[] {
+  return deps.executorSnapshot ? deps.executorSnapshot() : deps.executors.snapshot()
+}
+
+function auditActor(socket: { data: Record<string, unknown> }): AuditActor {
+  const actor = socket.data.dashboardActor as AuditActor | undefined
+  return actor ?? { kind: 'anonymous' }
 }
 
 /**

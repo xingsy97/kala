@@ -31,22 +31,25 @@ On connect, the client sends an authentication payload via Socket.IO's `auth` fi
 type HandshakeAuth = {
   role: 'dashboard' | 'executor'
   sessionId?: string         // required for `dashboard`; MUST be absent for `executor`
-  token?: string             // v1: optional. v2: JWT bearer token
+  token?: string             // bearer token for private deployments / executors
+  invite?: string            // one-time executor onboarding token from `POST /auth/executor-invites`
   clientVersion: string      // e.g. "@agent-kernel/executor@0.1.0"
 }
 ```
 
 Host validates:
 - Dashboard connections MUST carry a `sessionId` (the session they subscribe to). It matches an existing session OR the connection is allowed to lazy-create one on first user message.
-- Executor connections MUST NOT carry a `sessionId`  -  an executor is a daemon that serves any session whose `workspaceName` matches its own (see  - 5).
+- Executor connections MUST NOT carry a `sessionId`  -  an executor is a daemon that serves any session whose `workspaceId` matches its accepted identity (see  - 5).
 - `role` matches the namespace (`role: 'executor'` MUST use `/executor`)
-- `token` valid if server is configured to require auth
+- Executor handshakes use one of three identities: `invite` for first-time onboarding, a saved long-term `token`, or an explicitly configured static token. If the host has an executor identity store configured, anonymous executor handshakes MUST be rejected.
+- Executor tokens may be scoped to one `workspaceId`; if so, `executor:announce.workspaceId` MUST match that scope.
+- When GitHub OAuth is required, dashboard handshakes are authorized by the host-issued login cookie, not by the executor token.
 
 **On success (dashboard)**: server calls `socket.join(\`session:\${sessionId}\`)` and sends a `session:ready` event (see  - 3).
 
-**On success (executor)**: connection is accepted; the executor MUST then emit `executor:announce` ( - 5.1) to become routable. No `session:ready` is sent  -  executor rooms are joined lazily when Host receives `tool:call` traffic for a matching session.
+**On success (executor)**: connection is accepted; the executor MUST then emit `executor:announce` ( - 5.1) to become routable. The host validates the announcement against the authenticated executor identity before accepting it. No `session:ready` is sent.
 
-**On failure**: server disconnects with a reason string (`auth_failed`, `unknown_session`, `role_mismatch`, `version_incompatible`, `missing_session_id`).
+**On failure**: server disconnects with a reason string (`auth_failed`, `unknown_session`, `role_mismatch`, `version_incompatible`, `missing_session_id`, `workspace_identity_mismatch`).
 
 ---
 
@@ -304,6 +307,19 @@ this session. Host appends a metadata entry to the JSONL log and broadcasts a
 refreshed `server:sessions` payload so every dashboard picks up the new
 label. When cleared, `SessionSummary.label` becomes undefined and the
 Explorer falls back to `firstUserMessage`.
+
+#### `client:rename_workspace`
+
+```ts
+{ workspaceId: string; workspaceName: string }
+```
+
+Set the operator-defined display label for a workspace. `workspaceId` remains
+the stable routing key; this event does not move sessions or change executor
+routing. Host persists the alias, updates any existing session metadata for
+that `workspaceId`, broadcasts `workspace:renamed`, refreshes
+`server:executors`, and re-broadcasts `server:sessions` so online and offline
+workspace labels stay consistent.
 
 #### `client:delete_session`
 
@@ -573,6 +589,20 @@ Broadcast (not response-scoped) whenever an executor attaches, detaches, or re-a
 
 `updated` fires when the same executor re-announces with different capabilities (e.g., after a reconnect).
 
+#### `workspace:renamed`
+
+Broadcast after `client:rename_workspace` succeeds.
+
+```ts
+{
+  workspaceId: string
+  workspaceName: string
+}
+```
+
+Dashboards may use this as a low-latency signal, but the canonical refreshed
+views are still `server:executors` and `server:sessions`.
+
 #### `server:sessions`
 
 Response to `client:list_sessions`. Also re-broadcast after
@@ -759,6 +789,44 @@ are read-only in this endpoint.
 `ModelInfo.contextWindow` combined with `AgentConfig.contextLimit` drives the
 Composer context usage ring. `ModelInfo.source` lets the dashboard distinguish
 auto-discovered entries from manual ones.
+
+#### HTTP `POST /auth/executor-invites`
+
+Creates a short-lived one-time executor invite for the Connect Workspace dialog.
+When GitHub OAuth is required, the request MUST carry a valid host login cookie.
+
+```ts
+{
+  inviteToken: string          // opaque, starts with `ak_invite_`
+  expiresAt: string            // ISO-8601
+}
+```
+
+#### HTTP `GET /auth/executor-identities`
+
+Returns saved executor identity summaries. Plaintext tokens and token hashes are
+never serialized.
+
+```ts
+{
+  identities: Array<{
+    workspaceId: string
+    label?: string
+    createdAt: string
+    lastSeenAt?: string
+  }>
+}
+```
+
+#### HTTP `DELETE /auth/executor-identities?workspaceId=<id>`
+
+Revokes the saved reconnect identity for one workspace. A currently connected
+executor may remain online until its socket drops; the next reconnect requires a
+fresh invite.
+
+```ts
+{ ok: true; workspaceId: string; revoked: boolean }
+```
 
 ---
 
@@ -1027,29 +1095,44 @@ Sent by executor immediately after the handshake succeeds. Declares the workspac
 }
 ```
 
-A workspace is a machine, not a directory. Two executor processes with the same `workspaceId` (rare  -  same user, same machine, same id file) are treated as replicas. `workspaceName` is display-only and free to change; if the same executor re-announces with a new name, the Dashboard picks up the new label but existing sessions stay bound via `workspaceId`.
+A workspace is a machine identity with one or more filesystem roots. `workspaceName` is display-only and free to change; existing sessions stay bound via `workspaceId`. In public deployments, `workspaceId` MUST be validated against the authenticated executor token scope before the host accepts the announce.
 
 Host stores the attach in a registry keyed by `executorId`. A second `executor:announce` from the same executorId replaces the first entry and fires `server:executor_changed { change: 'updated' }` ( - 4.2).
 
+If the executor handshake used `invite`, the host consumes that invite during
+`executor:announce`, binds the first announced `workspaceId`, persists only a
+hash of a newly minted long-term token, and replies with `executor:welcome`.
+
 ### 5.2 Host  -  Executor
 
-#### `fs:list_dirs`
+#### `executor:welcome`
 
-Host forwards `client:list_dirs` to the executor currently attached for the requested `workspaceId`. The executor resolves the requested path through its sandbox and returns directory entries only, sorted by name. The ACK payload is the same `DirListResult` shape emitted back to Dashboard as `server:dir_list`.
+Sent only after a successful invite-based first attach. The executor persists
+`token` locally and uses it for future reconnects instead of reusing the invite.
 
 ```ts
 {
-  requestId: string
-  workspaceId: string
-  path?: string
+  token: string                // opaque long-term token, starts with `ak_exec_`
+  workspaceId: string          // workspace identity the host bound the token to
 }
 ```
 
-If `path` is omitted, executor lists its first sandbox root, falling back to `process.cwd()` when no roots are configured.
+#### `executor:host_reject`
+
+Permanent failure sent immediately before host-side disconnect.
+
+```ts
+{
+  code: 'workspace_id_conflict' | 'workspace_identity_mismatch' | 'version_incompatible' | 'auth_failed'
+  message: string
+}
+```
 
 #### `tool:call`
 
-Sent when the kernel emits a `call_tool` effect and Host has an executor connected for the session.
+Sent when Host needs the executor to run a tool. The same wire message carries
+kernel-originated tool calls and host-internal RPCs. The executor does not know
+or decide whether the result enters the agent transcript.
 
 ```ts
 {
@@ -1073,7 +1156,12 @@ Sent when the kernel emits a `call_tool` effect and Host has an executor connect
 }
 ```
 
-Host translates the reply into `{ kind: 'tool_result', callId, ok, content }` and feeds to `step`.
+For kernel-originated calls, Host translates the reply into
+`{ kind: 'tool_result', callId, ok, content }` and feeds it to `step`. For
+host-internal RPCs such as `__fs_list_dirs`, `__fs_read_file`, `__bg_list`, and
+`__bg_kill`, Host parses the ACK and returns it only to the original dashboard
+or HTTP caller. This distinction is host-local and MUST NOT appear in the
+executor protocol.
 
 #### `tool:cancel`
 
@@ -1156,6 +1244,7 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Dashboard | `bg:kill` | Host  -  Executor (`bg:kill`) |
 | Dashboard | `sub_agent:list` | Host (storage) |
 | Dashboard | `agent_types:list` | Host (registry) |
+| Dashboard | `client:rename_workspace` | Host (storage) |
 | Dashboard | `client:load_history` | Host (storage) |
 | Dashboard | `subscribe` | Host (routing) |
 | Executor | `executor:announce` | Host (routing) |
@@ -1166,6 +1255,7 @@ Emitted 15 minutes after a task's `endedAt`. Host rebroadcasts as `server:bg_tas
 | Host | `session:ready` | Dashboard OR Executor |
 | Host | `session:token_delta` | Dashboard only |
 | Host | `session:model_changed` | Dashboard only |
+| Host | `workspace:renamed` | Dashboard only (broadcast) |
 | Host | `state:changed` | All in room |
 | Host | `event:appended` | All in room |
 | Host | `session:error` | All in room |

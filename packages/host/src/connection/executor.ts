@@ -49,6 +49,7 @@ import type {
 } from '@agent-kernel/shared'
 
 import type { ToolDispatcher } from '../loop.js'
+import type { AuditLogger } from '../audit-log.js'
 
 export const DEFAULT_TOOL_TIMEOUT_MS = 60_000
 
@@ -104,6 +105,7 @@ export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
   fulfill(sessionId: string, result: ExecutorToolResult): void
   activeSessions(): string[]
   snapshot(): AttachedExecutor[]
+  renameWorkspace(workspaceId: string, workspaceName: string): AttachedExecutor | undefined
   onChange(listener: ExecutorChangeListener): () => void
 }
 
@@ -111,6 +113,7 @@ export function createExecutorRegistry(
   _io: Server,
   resolver: WorkspaceResolver,
   toolTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS,
+  audit?: AuditLogger,
 ): ExecutorRegistry {
   type Bind = {
     socket: Socket<
@@ -250,15 +253,11 @@ export function createExecutorRegistry(
   }
 
   /**
-   * Host-initiated direct-mode tool call. Sent as an ordinary `tool:call`
-   * with `dispatchMode: 'direct'`  -  the executor runs the tool identically
-   * to a kernel-initiated call, but the host doesn't feed the result back
-   * through the kernel FSM. The tool's stdout string is expected to be
-   * JSON; we parse it and hand the caller the typed result. On timeout
-   * or wire failure the caller gets a synthetic error result of type T
-   * built via `onError(errorMessage)`.
+   * Host-initiated internal tool RPC. Sent as an ordinary `tool:call`; the
+   * executor runs the tool identically to a kernel-initiated call, while host
+   * keeps the result out of the kernel FSM and returns it to the caller.
    */
-  function dispatchDirectTool<T>(
+  function callInternalTool<T>(
     bind: Bind,
     workspaceId: string,
     name: string,
@@ -269,23 +268,22 @@ export function createExecutorRegistry(
       const callId = `direct-${Math.random().toString(36).slice(2, 10)}`
       const timer = setTimeout(() => {
         resolve(onError(`${name} timed out after ${toolTimeoutMs}ms`))
+        audit?.log({ action: 'internal_tool.result', actor: { kind: 'system' }, target: { workspaceId, callId, toolName: name }, outcome: 'error', error: 'timeout' })
       }, toolTimeoutMs)
-      // sessionId here is a routing convenience; the direct-mode flag tells
-      // the executor's runOne to skip the tool_result event dispatch on
-      // the host side. Use the workspaceId as the pseudo-sessionId so any
-      // future audit trace can correlate.
+      // sessionId here is a routing convenience for executor-side overflow
+      // paths and audit correlation. It never mutates a real session.
       bind.socket.emit(
         'tool:call',
         {
-          sessionId: `__direct:${workspaceId}`,
+          sessionId: `__internal:${workspaceId}`,
           callId,
           name,
           input,
           timeoutMs: toolTimeoutMs,
-          dispatchMode: 'direct',
         },
         (ack: ToolResultAck) => {
           clearTimeout(timer)
+          audit?.log({ action: 'internal_tool.result', actor: { kind: 'system' }, target: { workspaceId, callId, toolName: name }, outcome: ack.ok ? 'ok' : 'error', metadata: { contentBytes: Buffer.byteLength(ack.content, 'utf8') }, ...(ack.ok ? {} : { error: ack.content.slice(0, 200) }) })
           if (!ack.ok) {
             resolve(onError(ack.content || `${name} failed`))
             return
@@ -403,6 +401,7 @@ export function createExecutorRegistry(
         if (!pending) continue
         clearTimeout(pending.timer)
         bind.pending.delete(result.callId)
+        audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId: pending.sessionId, callId: result.callId, toolName: pending.name }, outcome: result.ok ? 'ok' : 'error', metadata: { contentBytes: Buffer.byteLength(result.content, 'utf8') }, ...(result.ok ? {} : { error: result.content.slice(0, 200) }) })
         pending.resolve({ ok: result.ok, content: result.content })
         return
       }
@@ -411,9 +410,11 @@ export function createExecutorRegistry(
       const picked = pickBindFor(sessionId)
       if (!picked.ok) return { ok: false, content: picked.reason }
       const bind = picked.bind
+      audit?.log({ action: 'tool.dispatch', actor: { kind: 'system' }, target: { sessionId, workspaceId: bind.announcement.workspaceId, callId: eff.callId, toolName: eff.name }, outcome: 'ok', metadata: { cwd: eff.cwd } })
       return await new Promise<{ ok: boolean; content: string }>((resolve) => {
         const timer = setTimeout(() => {
           if (bind.pending.delete(eff.callId)) {
+            audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId, callId: eff.callId, toolName: eff.name }, outcome: 'error', error: 'timeout' })
             resolve({
               ok: false,
               content: `tool call timed out after ${toolTimeoutMs}ms`,
@@ -444,6 +445,7 @@ export function createExecutorRegistry(
             if (!pending) return
             clearTimeout(pending.timer)
             bind.pending.delete(ack.callId)
+            audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId, callId: ack.callId, toolName: eff.name }, outcome: ack.ok ? 'ok' : 'error', metadata: { contentBytes: Buffer.byteLength(ack.content, 'utf8') }, ...(ack.ok ? {} : { error: ack.content.slice(0, 200) }) })
             pending.resolve({ ok: ack.ok, content: ack.content })
           },
         )
@@ -473,6 +475,18 @@ export function createExecutorRegistry(
     snapshot() {
       return [...byExecutor.values()].map(toAttached)
     },
+    renameWorkspace(workspaceId, workspaceName) {
+      const bind = findBindByWorkspace(workspaceId)
+      if (!bind) return undefined
+      bind.announcement = { ...bind.announcement, workspaceName }
+      const executor = toAttached(bind)
+      emitChange({
+        change: 'updated',
+        executorId: bind.announcement.executorId,
+        executor,
+      })
+      return executor
+    },
     executorForSession(sessionId) {
       const picked = pickBindFor(sessionId)
       return picked.ok ? toAttached(picked.bind) : undefined
@@ -482,7 +496,7 @@ export function createExecutorRegistry(
       if (!bind) {
         return defaultDirList(requestId, workspaceId, path, 'workspace offline')
       }
-      return await dispatchDirectTool<DirListResult>(
+      return await callInternalTool<DirListResult>(
         bind,
         workspaceId,
         '__fs_list_dirs',
@@ -501,7 +515,7 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await dispatchDirectTool<FileListResult>(
+      return await callInternalTool<FileListResult>(
         bind,
         payload.workspaceId,
         '__fs_list_files',
@@ -525,7 +539,7 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await dispatchDirectTool<FileContentsResult>(
+      return await callInternalTool<FileContentsResult>(
         bind,
         payload.workspaceId,
         '__fs_read_file',
@@ -548,7 +562,7 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await dispatchDirectTool<OverflowContentsResult>(
+      return await callInternalTool<OverflowContentsResult>(
         bind,
         workspaceId,
         '__fs_read_overflow',
@@ -569,7 +583,7 @@ export function createExecutorRegistry(
         targetSessionId,
       }
       if (!bind) return { ...payload, copied: false, error: 'workspace offline' }
-      return await dispatchDirectTool<CopyOverflowSessionResult>(
+      return await callInternalTool<CopyOverflowSessionResult>(
         bind,
         workspaceId,
         '__fs_copy_overflow_session',
@@ -584,7 +598,7 @@ export function createExecutorRegistry(
         sessionId,
       }
       if (!bind) return { ...payload, deleted: false, error: 'workspace offline' }
-      return await dispatchDirectTool<DeleteOverflowSessionResult>(
+      return await callInternalTool<DeleteOverflowSessionResult>(
         bind,
         workspaceId,
         '__fs_delete_overflow_session',
@@ -602,7 +616,7 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await dispatchDirectTool<BgListResult>(
+      return await callInternalTool<BgListResult>(
         bind,
         payload.workspaceId,
         '__bg_list',
@@ -630,7 +644,7 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await dispatchDirectTool<BgOutputResult>(
+      return await callInternalTool<BgOutputResult>(
         bind,
         payload.workspaceId,
         '__bg_output',
@@ -659,7 +673,7 @@ export function createExecutorRegistry(
           error: 'workspace offline',
         }
       }
-      return await dispatchDirectTool<BgKillResult>(
+      return await callInternalTool<BgKillResult>(
         bind,
         payload.workspaceId,
         '__bg_kill',
