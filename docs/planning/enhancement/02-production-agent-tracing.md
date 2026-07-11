@@ -18,14 +18,10 @@ and how this run scored in eval.
 
 ## Production References
 
-- OpenTelemetry GenAI semantic conventions:
-  `https://github.com/open-telemetry/semantic-conventions-genai`
-- OpenInference trace spec:
-  `https://arize-ai.github.io/openinference/spec/`
-- Phoenix observability and evaluation platform:
-  `https://github.com/Arize-ai/phoenix`
-- LangSmith tracing/evaluation SDK:
-  `https://github.com/langchain-ai/langsmith-sdk`
+- OpenTelemetry GenAI semantic conventions [1].
+- OpenInference trace spec [2].
+- Phoenix observability and evaluation platform [3].
+- LangSmith tracing/evaluation SDK [4].
 - Codex reference includes an OpenTelemetry integration under
   `references/codex/codex-rs/otel/`.
 
@@ -302,3 +298,13 @@ This area is production-grade when:
 4. Add a dashboard trace compare view for two sessions/trials using existing
    artifacts.
 5. Add a small collector/Phoenix-compatible smoke test behind an opt-in script.
+
+## References
+
+[1] https://github.com/open-telemetry/semantic-conventions-genai
+
+[2] https://arize-ai.github.io/openinference/spec/
+
+[3] https://github.com/Arize-ai/phoenix
+
+[4] https://github.com/langchain-ai/langsmith-sdk
