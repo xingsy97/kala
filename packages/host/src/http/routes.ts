@@ -14,7 +14,7 @@
  */
 
 import { createReadStream } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
 import { extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
@@ -49,6 +49,12 @@ import {
   runSweBenchGrade,
   sweBenchRunLayout,
 } from '../eval/swebench.js'
+import {
+  importTerminalBenchResults,
+  resolveTerminalBenchTasks,
+  runTerminalBenchRun,
+  terminalBenchRunLayout,
+} from '../eval/terminal-bench.js'
 import {
   InstancesSourceError,
   resolveSweBenchInstances,
@@ -247,6 +253,9 @@ type EnhancementActionRequest = {
   pricingContent?: string
   agentCommand?: string
   skipCompleted?: boolean
+  tasksJsonl?: string
+  tasksContent?: string
+  taskIds?: readonly string[] | string
 }
 
 export function attachJsonRoutes(
@@ -911,6 +920,98 @@ async function runEnhancementAction(
     } catch (err) {
       if (err instanceof ResultsSourceError) throw new HttpRouteError(err.httpStatus, err.message)
       throw err
+    }
+  }
+  if (action === 'terminal-bench-resolve-tasks') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to resolve tasks')
+    const inline = cleanString(body.tasksContent)
+    const path = cleanString(body.tasksJsonl)
+    if (!inline && !path) throw new HttpRouteError(400, 'tasksContent or tasksJsonl is required')
+    const taskIds = listInput(body.taskIds)
+    const limit = positiveInteger(body.limit, 'limit')
+    const tasks = await resolveTerminalBenchTasks({
+      ...(inline ? { inlineContent: inline } : {}),
+      ...(path ? { tasksJsonlPath: path } : {}),
+      ...(taskIds ? { taskIds } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    })
+    const layout = terminalBenchRunLayout(rootDir, runId)
+    await mkdir(layout.rootDir, { recursive: true })
+    await writeFile(layout.tasksJsonl, tasks.map((t) => JSON.stringify(t)).join('\n') + (tasks.length ? '\n' : ''), 'utf8')
+    // Response intentionally omits filesystem paths (see docs/principles.md A1).
+    return { action, runId, taskCount: tasks.length }
+  }
+  if (action === 'terminal-bench-run-agent') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run terminal-bench')
+    const layout = terminalBenchRunLayout(rootDir, runId)
+    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
+    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+    const started = Date.now()
+    const result = await runTerminalBenchRun({
+      rootDir,
+      runId,
+      agentCommand: cleanString(body.agentCommand) ?? 'true',
+      tasksJsonl: cleanString(body.tasksJsonl) ?? layout.tasksJsonl,
+      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
+      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
+      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    })
+    return {
+      action,
+      runId,
+      total: result.summary.total,
+      resolved: result.summary.resolved,
+      unresolved: result.summary.unresolved,
+      errored: result.summary.errored,
+      accuracy: result.summary.accuracy,
+      durationMs: Date.now() - started,
+    }
+  }
+  if (action === 'terminal-bench-read-progress') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const layout = terminalBenchRunLayout(rootDir, runId)
+    let raw: string
+    try {
+      raw = await readFile(layout.progressPath, 'utf8')
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code
+      if (code === 'ENOENT') return { action, runId, status: 'not_started', total: 0, completed: 0 }
+      throw err
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      action,
+      runId,
+      status: typeof parsed.status === 'string' ? parsed.status : 'running',
+      total: typeof parsed.total === 'number' ? parsed.total : 0,
+      completed: typeof parsed.completed === 'number' ? parsed.completed : 0,
+      resolved: typeof parsed.resolved === 'number' ? parsed.resolved : 0,
+      unresolved: typeof parsed.unresolved === 'number' ? parsed.unresolved : 0,
+      errored: typeof parsed.errored === 'number' ? parsed.errored : 0,
+      ...(typeof parsed.currentTask === 'string' ? { currentTask: parsed.currentTask } : {}),
+      lastUpdatedAt: typeof parsed.lastUpdatedAt === 'string' ? parsed.lastUpdatedAt : null,
+    }
+  }
+  if (action === 'terminal-bench-import-results') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const summary = await importTerminalBenchResults({ rootDir, runId })
+    return {
+      action,
+      runId,
+      total: summary.total,
+      resolved: summary.resolved,
+      unresolved: summary.unresolved,
+      errored: summary.errored,
+      accuracy: summary.accuracy,
     }
   }
   if (action === 'artifacts-manifest') {
