@@ -92,6 +92,103 @@ export type LLMTrace = {
   weightVersion?: string
 }
 
+/**
+ * Redact provider endpoint and credential headers before a trace is persisted,
+ * broadcast, exported, or rendered. Message/request bodies are preserved so the
+ * debugger still shows the real API payload sent to the provider.
+ */
+export function redactLlmTrace(trace: LLMTrace): LLMTrace {
+  const response = trace.response
+    ? {
+        ...trace.response,
+        ...(trace.response.body !== undefined
+          ? { body: redactLlmTracePayload(trace.response.body) }
+          : {}),
+      }
+    : undefined
+  return {
+    ...trace,
+    request: {
+      ...trace.request,
+      url: redactLlmTraceUrl(trace.request.url),
+      headers: redactLlmTraceHeaders(trace.request.headers),
+      body: redactLlmTracePayload(trace.request.body),
+    },
+    ...(response ? { response } : {}),
+  }
+}
+
+function redactLlmTraceUrl(url: string): string {
+  if (url === '<redacted>') return url
+  const alreadyRedacted = url.match(/^([a-z][a-z0-9+.-]*:)\/\/<redacted>(\/[^?#]*)?/i)
+  if (alreadyRedacted) return `${alreadyRedacted[1]}//<redacted>${alreadyRedacted[2] ?? ''}`
+  try {
+    const parsed = new URL(url)
+    return `${parsed.protocol}//<redacted>${parsed.pathname}`
+  } catch {
+    return '<redacted>'
+  }
+}
+
+function redactLlmTraceHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    out[key] = isLlmTraceSecretKey(key) ? '[redacted]' : redactLlmTraceSecretString(value)
+  }
+  return out
+}
+
+function isLlmTraceSecretKey(key: string): boolean {
+  const lower = key.toLowerCase()
+  return (
+    lower === 'authorization' ||
+    lower === 'x-api-key' ||
+    lower === 'api-key' ||
+    lower === 'apikey' ||
+    lower === 'api_key' ||
+    lower === 'proxy-authorization' ||
+    lower === 'token' ||
+    lower === 'access_token' ||
+    lower === 'refresh_token' ||
+    lower === 'password' ||
+    lower === 'secret' ||
+    lower === 'clientsecret' ||
+    lower === 'client_secret' ||
+    lower === 'sessionsecret' ||
+    lower === 'session_secret' ||
+    lower.endsWith('_key') ||
+    lower.endsWith('_token') ||
+    lower.endsWith('-api-key') ||
+    lower.endsWith('-token')
+  )
+}
+
+function redactLlmTracePayload(input: unknown): unknown {
+  if (typeof input === 'string') return redactLlmTraceSecretString(input)
+  if (input === null || typeof input !== 'object') return input
+  if (Array.isArray(input)) return input.map(redactLlmTracePayload)
+
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    const lower = key.toLowerCase()
+    if (isLlmTraceSecretKey(key)) {
+      out[key] = '[redacted]'
+    } else if (lower === 'url' || lower === 'baseurl' || lower === 'apiurl') {
+      out[key] = typeof value === 'string' ? redactLlmTraceUrl(value) : redactLlmTracePayload(value)
+    } else {
+      out[key] = redactLlmTracePayload(value)
+    }
+  }
+  return out
+}
+
+function redactLlmTraceSecretString(value: string): string {
+  return value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redacted]')
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[redacted]')
+    .replace(/(ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|TOKEN)=([^\s]+)/g, (_m, name) => `${name}=[redacted]`)
+}
+
 export type SnapshotEntry = {
   kind: 'snapshot'
   seq: number
