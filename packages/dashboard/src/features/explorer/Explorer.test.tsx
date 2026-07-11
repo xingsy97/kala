@@ -69,6 +69,25 @@ describe('Explorer', () => {
     expect(onConnectWorkspace).toHaveBeenCalled()
   })
 
+  it('collapses from the explorer header when provided', () => {
+    const onCollapse = vi.fn()
+    render(
+      <Explorer
+        executors={[]}
+        sessions={[]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+        onCollapse={onCollapse}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('explorer-collapse-button'))
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+  })
+
   it('starts a new session from a workspace row', () => {
     const onNewSession = vi.fn()
     render(

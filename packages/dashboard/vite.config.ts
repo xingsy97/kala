@@ -2,10 +2,21 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
-const HOST_URL = process.env.HOST_URL ?? 'http://localhost:3000'
+function argValue(argv: readonly string[], name: string): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (arg === name) return argv[i + 1]
+    if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1)
+  }
+  return undefined
+}
+
+const dashboardPort = Number(argValue(process.argv, '--port') ?? 5288)
+const HOST_URL = process.env.HOST_URL ?? (dashboardPort === 3000 ? 'http://localhost:3001' : 'http://localhost:3000')
 const HOST_HTTP_ROUTES = [
   '/models',
   '/settings',
+  '/docs',
   '/artifacts',
   '/eval',
   '/enhancement',
