@@ -325,6 +325,9 @@ export function onCompactReplaced(
     Math.max(event.preserveFrom, preserved.length),
     state.messages.length,
   )
+  if (state.pendingCalls.length > 0 && !preservesPendingToolCallGroup(state, preserveFrom)) {
+    return noop(state)
+  }
   const tail = state.messages.slice(preserveFrom)
   const summaryMsg: Message = {
     role: 'system',
@@ -342,6 +345,21 @@ export function onCompactReplaced(
     },
     effects: [],
   }
+}
+
+function preservesPendingToolCallGroup(state: AgentState, preserveFrom: number): boolean {
+  const pending = new Set(state.pendingCalls.map((call) => call.callId))
+  if (pending.size === 0) return true
+  for (let i = preserveFrom; i < state.messages.length; i++) {
+    const message = state.messages[i]
+    if (!message || message.role !== 'assistant') continue
+    for (const content of message.content) {
+      if (content.type !== 'tool_call') continue
+      pending.delete(content.callId)
+    }
+    if (pending.size === 0) return true
+  }
+  return false
 }
 
 export function onApprovalModeChanged(
