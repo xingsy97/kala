@@ -1,16 +1,22 @@
 /**
  * Session  -  OpenInference/OpenTelemetry GenAI span export.
  *
- * The reducer knows nothing about traces. We derive an AGENT span, one LLM
- * span per llm_response/llm_error, and one TOOL span per tool_result. The
- * shape follows the OpenInference semantic conventions so it can be ingested
- * by Phoenix/Arize collectors and the OpenTelemetry Collector's GenAI
- * pipeline.
+ * The reducer knows nothing about traces. We derive:
+ *   - one AGENT root span per session
+ *   - one LLM span per llm_response / llm_error
+ *   - one TOOL span per tool_result (or MEMORY if it's the memory tool)
+ *   - one CHAIN span per compaction attempt (compact_replaced / _skipped /
+ *     _rejected), so summarizer runs are visible alongside main-loop traffic
+ *
+ * The shape follows the OpenInference semantic conventions so it can be
+ * ingested by Phoenix/Arize collectors and the OpenTelemetry Collector's
+ * GenAI pipeline.
  */
 
 import { createHash } from 'node:crypto'
 
 import type { Effect } from '@agent-kernel/kernel'
+import { MEMORY_TOOL_NAME } from '@agent-kernel/kernel'
 
 import type { EventEntry, HeaderEntry } from './log.js'
 
@@ -61,6 +67,8 @@ export function exportSessionSpans(input: {
         'gen_ai.operation.name': 'invoke_agent',
         'agent_kernel.session_id': input.header.sessionId,
         'agent_kernel.workspace_id': input.header.workspaceId,
+        'agent_kernel.parent_session_id': input.header.parentSessionId,
+        'agent_kernel.parent_cursor': input.header.parentCursor,
         'agent_kernel.run_id': input.runId,
         'agent_kernel.eval.instance_id': input.evalInstanceId,
       }),
@@ -76,6 +84,14 @@ export function exportSessionSpans(input: {
     if (entry.event.kind === 'tool_result') {
       const toolName = findToolNameForResult(input.events, entry.event.callId)
       spans.push(toolSpan(traceId, rootSpanId, entry, toolName))
+      continue
+    }
+    if (
+      entry.event.kind === 'compact_replaced' ||
+      entry.event.kind === 'compact_skipped' ||
+      entry.event.kind === 'compact_rejected'
+    ) {
+      spans.push(compactSpan(traceId, rootSpanId, entry))
     }
   }
   return spans
@@ -124,22 +140,76 @@ function toolSpan(
   toolName: string | undefined,
 ): EnhancementSpan {
   const event = entry.event.kind === 'tool_result' ? entry.event : undefined
+  const isMemory = toolName === MEMORY_TOOL_NAME
+  const kind: EnhancementSpanKind = isMemory ? 'MEMORY' : 'TOOL'
   return {
     traceId,
     spanId: stableId(`span:tool:${entry.seq}:${event?.callId ?? ''}`, 16),
     parentSpanId,
-    name: `execute_tool ${toolName ?? 'unknown'}`,
-    kind: 'TOOL',
+    name: isMemory ? `memory ${toolName}` : `execute_tool ${toolName ?? 'unknown'}`,
+    kind,
     startTime: entry.ts,
     endTime: entry.ts,
     status: event?.ok === false ? 'ERROR' : 'OK',
     attributes: compactRecord({
-      'openinference.span.kind': 'TOOL',
-      'gen_ai.operation.name': 'execute_tool',
+      'openinference.span.kind': kind,
+      'gen_ai.operation.name': isMemory ? 'memory_operation' : 'execute_tool',
       'gen_ai.tool.name': toolName,
       'gen_ai.tool.call.id': event?.callId,
       'agent_kernel.event_seq': entry.seq,
       'error.type': event?.ok === false ? 'tool_error' : undefined,
+    }),
+    events: [],
+  }
+}
+
+/**
+ * CHAIN span for a compaction attempt. All three terminal events
+ * (compact_replaced / compact_skipped / compact_rejected) map here; the
+ * status and attributes carry the outcome so a single query can find every
+ * compaction attempt in a trace regardless of whether it succeeded.
+ *
+ * We deliberately do NOT emit a separate LLM span for the summarizer call  - 
+ * `compact_replaced.request` carries the messages/tools but the actual LLM
+ * call is a synthetic one that never yields an `llm_response` event on the
+ * main ledger, so there's no seq to bind an LLM span to. If we ever start
+ * emitting a `llm_response` for summarizer calls, add the child LLM span
+ * here.
+ */
+function compactSpan(
+  traceId: string,
+  parentSpanId: string,
+  entry: EventEntry,
+): EnhancementSpan {
+  const kind = entry.event.kind
+  const attemptId =
+    (entry.event as { attemptId?: string }).attemptId ?? String(entry.seq)
+  const trigger = (entry.event as { trigger?: string }).trigger
+  const reason = (entry.event as { reason?: string }).reason
+  const status: EnhancementSpan['status'] =
+    kind === 'compact_replaced' ? 'OK' : 'ERROR'
+  const replaced = kind === 'compact_replaced' ? entry.event : undefined
+  return {
+    traceId,
+    spanId: stableId(`span:compact:${entry.seq}:${attemptId}`, 16),
+    parentSpanId,
+    name: `compaction ${kind}`,
+    kind: 'CHAIN',
+    startTime: entry.ts,
+    endTime: entry.ts,
+    status,
+    attributes: compactRecord({
+      'openinference.span.kind': 'CHAIN',
+      'gen_ai.operation.name': 'compact_context',
+      'agent_kernel.event_seq': entry.seq,
+      'agent_kernel.compact.attempt_id': attemptId,
+      'agent_kernel.compact.trigger': trigger,
+      'agent_kernel.compact.outcome': kind.replace('compact_', ''),
+      'agent_kernel.compact.reason': reason,
+      'agent_kernel.compact.replaced_count': replaced?.replacedCount,
+      'agent_kernel.compact.tokens_before': replaced?.tokensBefore,
+      'agent_kernel.compact.tokens_after': replaced?.tokensAfter,
+      'error.type': status === 'ERROR' ? kind : undefined,
     }),
     events: [],
   }
