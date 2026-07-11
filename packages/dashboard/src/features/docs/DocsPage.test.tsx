@@ -29,7 +29,25 @@ describe('DocsPage', () => {
         path: 'context-compaction.md',
         title: 'Context Compaction',
         updatedAt: '2026-07-11T00:00:00.000Z',
-        body: '# Context Compaction\n\n- Preserve tool results before summarizing.\n\n| Phase | Owner |\n| --- | --- |\n| Compact | Host |\n\n```ts\ncompact({ force: true })\n```\n\n`compact()` stays literal.',
+        body: [
+          '# Context Compaction',
+          '',
+          '- Preserve tool results before summarizing [1].',
+          '',
+          '| Phase | Owner |',
+          '| --- | --- |',
+          '| Compact | Host |',
+          '',
+          '```ts',
+          'compact({ force: true })',
+          '```',
+          '',
+          '`compact()` stays literal.',
+          '',
+          '## References',
+          '',
+          '[1] https://example.org/reference',
+        ].join('\n'),
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         path: 'domain-knowledge/swe-bench.md',
@@ -43,7 +61,12 @@ describe('DocsPage', () => {
     await screen.findByRole('heading', { name: 'Context Compaction' })
     expect(fetchMock).toHaveBeenCalledWith('/docs/index', { cache: 'no-store' })
     expect(fetchMock).toHaveBeenCalledWith('/docs/content?path=context-compaction.md', { cache: 'no-store' })
-    expect(screen.getByText('Preserve tool results before summarizing.')).toBeTruthy()
+    expect(screen.getByText(/Preserve tool results before summarizing/)).toBeTruthy()
+    const citation = screen.getAllByRole('link', { name: '[1]' })[0]!
+    expect(citation.getAttribute('href')).toBe('#ref-1')
+    const reference = screen.getByRole('link', { name: 'https://example.org/reference' })
+    expect(reference.getAttribute('href')).toBe('https://example.org/reference')
+    expect(reference.closest('p')?.id).toBe('ref-1')
     expect(screen.getByTestId('docs-tree-folder-domain-knowledge')).toBeTruthy()
     expect(screen.getByTestId('docs-tree-folder-protocol')).toBeTruthy()
     expect(screen.getByRole('table')).toBeTruthy()

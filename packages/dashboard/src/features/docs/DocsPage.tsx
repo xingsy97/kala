@@ -6,6 +6,7 @@ import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, RefreshCw, Searc
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '../../components/ui/button.js'
 import { cn } from '../../lib/utils.js'
@@ -46,58 +47,51 @@ type DocFileNode = {
 
 export function DocsPage(): JSX.Element {
   const { t } = useTranslation()
-  const [docs, setDocs] = useState<readonly DocEntry[]>([])
+  const queryClient = useQueryClient()
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [content, setContent] = useState<DocContent | null>(null)
   const [query, setQuery] = useState('')
-  const [loadingIndex, setLoadingIndex] = useState(false)
-  const [loadingContent, setLoadingContent] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [treeRef, treeBounds] = useMeasure({ debounce: 30 })
 
-  const loadIndex = useCallback(async (): Promise<void> => {
-    setLoadingIndex(true)
-    setError(null)
-    try {
+  const indexQuery = useQuery({
+    queryKey: ['docs', 'index'],
+    queryFn: async (): Promise<readonly DocEntry[]> => {
       const res = await fetch('/docs/index', { cache: 'no-store' })
       const body = (await res.json().catch(() => null)) as { docs?: DocEntry[]; error?: string } | null
       if (!res.ok) throw new Error(body?.error ?? `status ${res.status}`)
-      const nextDocs = body?.docs ?? []
-      setDocs(nextDocs)
-      setSelectedPath((current) => current ?? nextDocs[0]?.path ?? null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoadingIndex(false)
-    }
-  }, [])
+      return body?.docs ?? []
+    },
+    staleTime: 30_000,
+  })
+  const docs = indexQuery.data ?? []
+  const loadingIndex = indexQuery.isLoading
 
-  const loadContent = useCallback(async (path: string): Promise<void> => {
-    setLoadingContent(true)
-    setError(null)
-    try {
-      const res = await fetch(`/docs/content?path=${encodeURIComponent(path)}`, { cache: 'no-store' })
-      const body = (await res.json().catch(() => null)) as DocContent & { error?: string } | null
+  useEffect(() => {
+    if (docs.length === 0) return
+    setSelectedPath((current) => current ?? docs[0]?.path ?? null)
+  }, [docs])
+
+  const contentQuery = useQuery({
+    queryKey: ['docs', 'content', selectedPath],
+    queryFn: async (): Promise<DocContent | null> => {
+      if (!selectedPath) return null
+      const res = await fetch(`/docs/content?path=${encodeURIComponent(selectedPath)}`, { cache: 'no-store' })
+      const body = (await res.json().catch(() => null)) as (DocContent & { error?: string }) | null
       if (!res.ok) throw new Error(body?.error ?? `status ${res.status}`)
-      setContent(body)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoadingContent(false)
-    }
-  }, [])
+      return body
+    },
+    enabled: Boolean(selectedPath),
+    staleTime: 15_000,
+  })
+  const content = contentQuery.data ?? null
+  const loadingContent = contentQuery.isFetching && Boolean(selectedPath)
+  const error =
+    (indexQuery.error as Error | undefined)?.message ??
+    (contentQuery.error as Error | undefined)?.message ??
+    null
 
-  useEffect(() => {
-    void loadIndex()
-  }, [loadIndex])
-
-  useEffect(() => {
-    if (!selectedPath) {
-      setContent(null)
-      return
-    }
-    void loadContent(selectedPath)
-  }, [loadContent, selectedPath])
+  const refresh = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: ['docs'] })
+  }, [queryClient])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -123,7 +117,7 @@ export function DocsPage(): JSX.Element {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => { void loadIndex(); if (selectedPath) void loadContent(selectedPath) }}
+            onClick={() => { refresh() }}
             className="ml-auto h-7 gap-1.5 px-2 text-xs text-muted-foreground"
             title={t('docs.page.refresh')}
           >
@@ -202,6 +196,7 @@ export function DocsPage(): JSX.Element {
 }
 
 function DocsMarkdown({ body }: { body: string }): JSX.Element {
+  const renderedBody = useMemo(() => linkReferenceCitations(body), [body])
   return (
     <div
       className={cn(
@@ -239,12 +234,55 @@ function DocsMarkdown({ body }: { body: string }): JSX.Element {
             }
             return <code className={className} {...rest}>{children}</code>
           },
+          p({ children }) {
+            const reference = parseReferenceParagraph(children)
+            if (reference) {
+              return (
+                <p id={`ref-${reference.number}`} className="scroll-mt-20">
+                  <a href={`#ref-${reference.number}`} aria-label={`Reference ${reference.number}`}>
+                    [{reference.number}]
+                  </a>{' '}
+                  <a href={reference.url} target="_blank" rel="noreferrer">
+                    {reference.url}
+                  </a>
+                </p>
+              )
+            }
+            return <p>{children}</p>
+          },
         }}
       >
-        {body}
+        {renderedBody}
       </ReactMarkdown>
     </div>
   )
+}
+
+function linkReferenceCitations(body: string): string {
+  const lines = body.split(/\r?\n/u)
+  let inCodeFence = false
+  let inReferences = false
+  return lines
+    .map((line) => {
+      if (/^\s*```/u.test(line)) {
+        inCodeFence = !inCodeFence
+        return line
+      }
+      if (!inCodeFence && /^##\s+References\s*$/u.test(line)) {
+        inReferences = true
+        return line
+      }
+      if (inCodeFence || inReferences) return line
+      return line.replace(/(?<!!)\[(\d+)\](?!\()/gu, (_match, number: string) => `[[${number}]](#ref-${number})`)
+    })
+    .join('\n')
+}
+
+function parseReferenceParagraph(children: React.ReactNode): { number: string; url: string } | null {
+  const text = reactNodeText(children).trim()
+  const match = /^\[(\d+)\]\s+(https?:\/\/\S+)$/u.exec(text)
+  if (!match) return null
+  return { number: match[1]!, url: match[2]! }
 }
 
 function MarkdownPre({ children }: { children?: React.ReactNode }): JSX.Element {

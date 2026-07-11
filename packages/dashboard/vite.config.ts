@@ -14,6 +14,7 @@ function argValue(argv: readonly string[], name: string): string | undefined {
 const dashboardPort = Number(argValue(process.argv, '--port') ?? 5288)
 const HOST_URL = process.env.HOST_URL ?? (dashboardPort === 3000 ? 'http://localhost:3001' : 'http://localhost:3000')
 const HOST_HTTP_ROUTES = [
+  '/auth',
   '/models',
   '/settings',
   '/docs',
