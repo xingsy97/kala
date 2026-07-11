@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, BarChart3, Boxes, ChevronLeft, ChevronRight, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+
+import type { MessageContent } from '@agent-kernel/kernel'
 
 import type {
   ConsolidateMemoryResult,
@@ -41,7 +44,7 @@ import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDial
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { TasksButton } from './features/chat/TasksButton.js'
 import { tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
-import { Explorer } from './features/explorer/Explorer.js'
+import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { SettingsDialog } from './features/settings/SettingsDialog.js'
@@ -51,6 +54,7 @@ import { BenchmarksPage } from './features/benchmarks/BenchmarksPage.js'
 import { OperationsPage } from './features/operations/OperationsPage.js'
 import { ArtifactsPage } from './features/artifacts-browser/ArtifactsPage.js'
 import { DocsPage } from './features/docs/DocsPage.js'
+import { PipelinePage } from './features/pipeline/PipelinePage.js'
 import {
   cancelSession,
   clearSession,
@@ -59,6 +63,7 @@ import {
   deleteSession,
   reorderQueuedMessage,
   renameSession,
+  renameWorkspace,
   respondApproval,
   setSessionApprovalMode,
   setSessionModel,
@@ -69,7 +74,8 @@ import {
 import { backgroundTerminalTasks } from './background-terminal.js'
 import { cn } from './lib/utils.js'
 import { withViewTransition } from './lib/viewTransition.js'
-import { visibleMessages, visibleTranscript } from './transcript.js'
+import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
+import type { PendingUserTranscriptMessage } from './transcript.js'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
 import { useTheme, type Theme } from './lib/theme.js'
 import {
@@ -87,30 +93,23 @@ const COMPACT_WATCHDOG_MS = 75_000
  * would drift away from what the host actually accepts.
  */
 function useModels(): { models: readonly ModelInfo[]; defaultModel: string; reload(): void } {
-  const [state, setState] = useState<{
-    models: readonly ModelInfo[]
-    defaultModel: string
-  }>({ models: [], defaultModel: '' })
-  const [version, setVersion] = useState(0)
-  useEffect(() => {
-    let cancelled = false
-    void fetch('/models', { cache: 'no-store' })
-      .then((r) => (r.ok ? (r.json() as Promise<ServerModelsPayload>) : null))
-      .then((payload) => {
-        if (cancelled || !payload) return
-        setState({
-          models: payload.models,
-          defaultModel: payload.defaultModel,
-        })
-      })
-      .catch(() => {
-        // Non-fatal: dashboard just shows an empty picker until config is fixed.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [version])
-  return { ...state, reload: () => setVersion((v) => v + 1) }
+  const client = useQueryClient()
+  const query = useQuery({
+    queryKey: ['models'],
+    queryFn: async (): Promise<ServerModelsPayload | null> => {
+      const r = await fetch('/models', { cache: 'no-store' })
+      if (!r.ok) return null
+      return (await r.json()) as ServerModelsPayload
+    },
+    staleTime: 60_000,
+  })
+  return {
+    models: query.data?.models ?? [],
+    defaultModel: query.data?.defaultModel ?? '',
+    reload: () => {
+      void client.invalidateQueries({ queryKey: ['models'] })
+    },
+  }
 }
 
 function useMinWidth(px: number): boolean {
@@ -126,6 +125,10 @@ function useMinWidth(px: number): boolean {
   return matches
 }
 
+function useIsMobile(): boolean {
+  return !useMinWidth(640)
+}
+
 export function App(): JSX.Element {
   const { t } = useTranslation()
   const [config, setConfig] = useState(() => readInitialConfig())
@@ -139,17 +142,21 @@ export function App(): JSX.Element {
   const [workspacePickSubmitting, setWorkspacePickSubmitting] = useState(false)
   const [connectWorkspaceOpen, setConnectWorkspaceOpen] = useState(false)
   const [explorerDrawerOpen, setExplorerDrawerOpen] = useState(false)
+  const [inspectorDrawerOpen, setInspectorDrawerOpen] = useState(false)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [pipelineGuideOpen, setPipelineGuideOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
+  const [awaitingAck, setAwaitingAck] = useState(false)
+  const [pendingUserMessages, setPendingUserMessages] = useState<readonly PendingUserTranscriptMessage[]>([])
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
+  const inferredCompactSeq = useRef<number | null>(null)
   const [themePreference, toggleTheme, , effectiveTheme] = useTheme()
-  const wideLayout = useMinWidth(1180)
+  const wideLayout = useMinWidth(1024)
+  const isMobile = useIsMobile()
   const { models, defaultModel, reload: reloadModels } = useModels()
   const [storedModel, setStoredModel] = useState<string | null>(() => {
     try {
@@ -209,7 +216,28 @@ export function App(): JSX.Element {
   useEffect(() => {
     setCompactStatus({ kind: 'idle' })
     compactStartSeq.current = null
+    inferredCompactSeq.current = null
+    setAwaitingAck(false)
+    setPendingUserMessages([])
   }, [config.sessionId])
+
+  useEffect(() => {
+    if (!awaitingAck) return
+    const status = session.state?.status
+    if ((status && status !== 'idle') || session.streamingText.length > 0) {
+      setAwaitingAck(false)
+    }
+  }, [awaitingAck, session.state, session.streamingText])
+
+  useEffect(() => {
+    setPendingUserMessages((prev) => reconcilePendingUserMessages(
+      prev,
+      session.timeline,
+      session.queuedMessages,
+      session.state?.status,
+      session.streamingText,
+    ))
+  }, [session.timeline, session.queuedMessages, session.state?.status, session.streamingText])
 
   const scheduleCompactIdle = (ms: number): void => {
     if (compactResetTimer.current !== null) {
@@ -224,11 +252,31 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (compactStartSeq.current === null) return
     const last = session.timeline[session.timeline.length - 1]
-    if (last?.event.kind !== 'compact_replaced') return
+    if (!last || !isCompactTerminalEvent(last.event.kind)) return
     if (last.seq <= compactStartSeq.current) return
     compactStartSeq.current = null
-    setCompactStatus({ kind: 'done' })
+    inferredCompactSeq.current = null
+    setCompactStatus(last.event.kind === 'compact_replaced' ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(last.event) })
     scheduleCompactIdle(2500)
+  }, [compactStatus, session.timeline])
+
+  useEffect(() => {
+    if (compactStatus.kind !== 'running') return
+    const startSeq = inferredCompactSeq.current
+    if (startSeq === null) return
+    const terminal = session.timeline.find((entry) => entry.seq > startSeq && isCompactTerminalEvent(entry.event.kind))
+    if (terminal) {
+      compactStartSeq.current = null
+      inferredCompactSeq.current = null
+      setCompactStatus(terminal.event.kind === 'compact_replaced' ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(terminal.event) })
+      scheduleCompactIdle(2500)
+      return
+    }
+    const llmResponse = session.timeline.some((entry) => entry.seq > startSeq && (entry.event.kind === 'llm_response' || entry.event.kind === 'llm_error'))
+    if (!llmResponse) return
+    compactStartSeq.current = null
+    inferredCompactSeq.current = null
+    setCompactStatus({ kind: 'idle' })
   }, [compactStatus, session.timeline])
 
   useEffect(() => {
@@ -414,6 +462,10 @@ export function App(): JSX.Element {
     if (!session.socket) return
     renameSession(session.socket, sessionId, label)
   }
+  const renameWorkspaceAt = (workspaceId: string, workspaceName: string): void => {
+    if (!session.socket || workspaceId.length === 0) return
+    renameWorkspace(session.socket, workspaceId, workspaceName)
+  }
 
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
@@ -485,9 +537,17 @@ export function App(): JSX.Element {
     session.state?.messages ?? [],
     session.timeline,
     session.streamingText,
+    pendingUserMessages,
+    session.queuedMessages,
   )
   const backgroundTasks = backgroundTerminalTasks(session.timeline)
   const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
+  const activeSessionStatus = sessionActivityStatus({
+    status: session.state?.status ?? currentSession?.status,
+    streamingActive: session.streamingText.length > 0,
+    awaitingAck,
+    compactRunning: compactStatus.kind === 'running',
+  })
 
   const pendingApprovalsCount = session.pendingApprovals.length
   // Pinned-to-bottom is owned by ChatPanel/VirtualTranscript now; we mirror
@@ -517,6 +577,12 @@ export function App(): JSX.Element {
       (e) => e.workspaceId === currentSession.workspaceId,
     )
   }, [currentSession?.workspaceId, control.executors])
+  const sessionWorkspaceKnownOffline = Boolean(
+    hasSelectedSession &&
+      session.status === 'ready' &&
+      control.executorsLoaded &&
+      !sessionWorkspaceOnline,
+  )
 
   useInterventionDesktopNotifications({
     sessionId: config.sessionId,
@@ -525,7 +591,7 @@ export function App(): JSX.Element {
     pendingApprovalSummary: session.pendingApprovals[0],
     lastError: session.lastError,
     connectionStatus: session.status,
-    workspaceOnline: hasSelectedSession ? sessionWorkspaceOnline : null,
+    workspaceOnline: hasSelectedSession && control.executorsLoaded ? sessionWorkspaceOnline : null,
     workspaceLabel: currentSession?.workspaceName ?? currentSession?.workspaceId,
   })
 
@@ -546,10 +612,7 @@ export function App(): JSX.Element {
   const [section, setSection] = useAppSection()
   const handleSectionSelect = (next: AppSection): void => {
     setSection(next)
-    // Benchmarks, Operations & Artifacts are now real pages  -  rendered inline below, not a modal.
-    if (next === 'operations') { /* rendered inline */ }
-    else if (next === 'artifacts') { /* rendered inline */ }
-    else if (next === 'pipeline') setPipelineGuideOpen(true)
+    // Benchmarks, Operations, Artifacts, Pipeline & Docs are all real pages  -  rendered inline below.
   }
 
   const commandPaletteCommands = useMemo<readonly CommandPaletteItem[]>(() => {
@@ -587,7 +650,7 @@ export function App(): JSX.Element {
         hint: t('commandPalette.commands.changeCwdHint'),
         icon: FolderOpen,
         keywords: ['directory', 'folder'],
-        disabled: !hasSelectedSession || !sessionWorkspaceOnline,
+        disabled: !hasSelectedSession || sessionWorkspaceKnownOffline,
         disabledReason: !hasSelectedSession ? t('commandPalette.disabled.noSessionSelected') : t('commandPalette.disabled.workspaceOffline'),
         run: openCwdDialog,
       },
@@ -770,7 +833,7 @@ export function App(): JSX.Element {
     runConsolidateMemory,
     session.socket,
     session.state,
-    sessionWorkspaceOnline,
+    sessionWorkspaceKnownOffline,
     t,
     effectiveTheme,
     themePreference,
@@ -902,6 +965,8 @@ export function App(): JSX.Element {
         <ArtifactsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
       ) : section === 'docs' ? (
         <DocsPage />
+      ) : section === 'pipeline' ? (
+        <PipelinePage />
       ) : (
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
@@ -920,11 +985,13 @@ export function App(): JSX.Element {
                       executors={control.executors}
                       sessions={control.sessions}
                       selectedSessionId={config.sessionId}
+                      activeSessionStatus={activeSessionStatus}
                       onSelect={selectSession}
                       onNewSession={newSession}
                       onConnectWorkspace={() => setConnectWorkspaceOpen(true)}
                       onDelete={deleteSessionAt}
                       onRename={renameSessionAt}
+                      onRenameWorkspace={renameWorkspaceAt}
                       onOpenSessionInfo={(sid) => {
                         if (sid !== config.sessionId) selectSession(sid)
                         setMetadataOpen(true)
@@ -958,9 +1025,12 @@ export function App(): JSX.Element {
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
             <WorkbenchToolbar
               sessionLabel={sessionLabel}
+              sessionActivityStatus={activeSessionStatus}
               cwd={currentCwd}
               onOpenExplorer={() => setExplorerDrawerOpen(true)}
               explorerAvailable={!wideLayout}
+              onOpenInspector={() => setInspectorDrawerOpen(true)}
+              inspectorAvailable={!wideLayout && hasSelectedSession}
               onChangeCwd={openCwdDialog}
               sessionSelected={hasSelectedSession}
             />
@@ -1019,7 +1089,7 @@ export function App(): JSX.Element {
                           })
                         }}
                         onSuggest={(text) => {
-                          if (!session.socket || session.status !== 'ready' || !sessionWorkspaceOnline) return
+                          if (!session.socket || session.status !== 'ready' || sessionWorkspaceKnownOffline) return
                           session.socket.emit('client:user_message', {
                             sessionId: config.sessionId,
                             text,
@@ -1032,6 +1102,7 @@ export function App(): JSX.Element {
                             <InlineStatusRow
                               state={session.state}
                               streamingActive={session.streamingText.length > 0}
+                              awaitingAck={awaitingAck}
                               onCancel={() => {
                                 if (!session.socket) return
                                 cancelSession(session.socket, config.sessionId)
@@ -1062,7 +1133,7 @@ export function App(): JSX.Element {
                         }
                       />
                     </div>
-                    <div className="min-h-0">
+                    <div className="min-h-0 pb-[env(safe-area-inset-bottom)]">
                       {session.lastError ? (
                         <div
                           className="px-3 py-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900"
@@ -1071,7 +1142,7 @@ export function App(): JSX.Element {
                           [{session.lastError.scope}] {session.lastError.message}
                         </div>
                       ) : null}
-                      {!sessionWorkspaceOnline ? (
+                      {sessionWorkspaceKnownOffline ? (
                         <div
                           className="px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900"
                           data-testid="workspace-offline-banner"
@@ -1098,13 +1169,14 @@ export function App(): JSX.Element {
                       <ContextPressureBanner
                         state={session.state}
                         compactRunning={compactStatus.kind === 'running'}
+                        suppressed={awaitingAck || compactStatus.kind === 'running'}
                         onCompactNow={runCompactNow}
                       />
                       <ComposerFlipContainer
                         showApproval={session.pendingApprovals.length > 0}
                         front={
                           <Composer
-                          disabled={session.status !== 'ready' || !sessionWorkspaceOnline}
+                          disabled={session.status !== 'ready' || sessionWorkspaceKnownOffline}
                           model={session.selectedModel ?? preferredModel}
                           models={models}
                           onModelChange={onModelChange}
@@ -1153,14 +1225,40 @@ export function App(): JSX.Element {
                                     : []),
                                   ...extras,
                                   ...imageBlocks,
-                                ]
+                                ] satisfies readonly MessageContent[]
                               : undefined
+                            setPendingUserMessages((prev) => [
+                              ...prev,
+                              {
+                                id: newPendingMessageId(),
+                                text,
+                                mode,
+                                ...(content ? { content } : {}),
+                                createdAt: new Date().toISOString(),
+                                afterSeq: session.timeline.at(-1)?.seq ?? 0,
+                              },
+                            ])
                             session.socket?.emit('client:user_message', {
                               sessionId: config.sessionId,
                               text,
                               mode,
                               ...(content ? { content } : {}),
                             })
+                            if (mode === 'steer' && session.state?.contextPressureLevel === 'hard') {
+                              if (compactResetTimer.current !== null) {
+                                window.clearTimeout(compactResetTimer.current)
+                                compactResetTimer.current = null
+                              }
+                              const startSeq = session.timeline.at(-1)?.seq ?? 0
+                              compactStartSeq.current = startSeq
+                              inferredCompactSeq.current = startSeq
+                              setCompactStatus({
+                                kind: 'running',
+                                startedAt: Date.now(),
+                                tokensBefore: session.state?.usage.inputTokens ?? 0,
+                              })
+                            }
+                            setAwaitingAck(true)
                             // Sending is an explicit "I'm at the end" signal:
                             // re-pin and force a jump even if the user had
                             // scrolled up (or was never pinned because the
@@ -1241,6 +1339,7 @@ export function App(): JSX.Element {
             executors={control.executors}
             sessions={control.sessions}
             selectedSessionId={config.sessionId}
+            activeSessionStatus={activeSessionStatus}
             onSelect={(sid) => {
               selectSession(sid)
               setExplorerDrawerOpen(false)
@@ -1255,6 +1354,7 @@ export function App(): JSX.Element {
             }}
             onDelete={deleteSessionAt}
             onRename={renameSessionAt}
+            onRenameWorkspace={renameWorkspaceAt}
             onOpenSessionInfo={(sid) => {
               if (sid !== config.sessionId) selectSession(sid)
               setExplorerDrawerOpen(false)
@@ -1267,6 +1367,40 @@ export function App(): JSX.Element {
           />
         </DialogContent>
       </Dialog>
+      <Dialog open={inspectorDrawerOpen && !wideLayout && hasSelectedSession} onOpenChange={setInspectorDrawerOpen}>
+        <DialogContent
+          className="right-0 top-0 h-dvh w-[min(26rem,100vw)] max-w-none !left-auto !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 sm:rounded-none"
+          data-testid="inspector-drawer-mobile"
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>{t('app.openInspector')}</DialogTitle>
+            <DialogDescription>{t('app.inspectorDescription')}</DialogDescription>
+          </DialogHeader>
+          <InspectorPanel
+            state={session.state}
+            config={session.config}
+            timeline={session.timeline}
+            visibleMessagesCount={chatMessages.length}
+            socket={session.socket}
+            parentSessionId={session.parentSessionId}
+            parentCursor={session.parentCursor}
+            onFork={(cursor) => {
+              session.socket?.emit('client:fork', { sourceSessionId: config.sessionId, cursor })
+              setInspectorDrawerOpen(false)
+            }}
+            onJumpToMessage={(index) => {
+              setHighlightIndex(index)
+              const el = document.getElementById(`msg-${index}`)
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              window.setTimeout(() => {
+                setHighlightIndex((cur) => (cur === index ? null : cur))
+              }, 1400)
+              setInspectorDrawerOpen(false)
+            }}
+            onCollapse={() => setInspectorDrawerOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
       <ChangeCwdDialog
         open={cwdDialogOpen}
         socket={session.socket}
@@ -1276,7 +1410,6 @@ export function App(): JSX.Element {
         onOpenChange={setCwdDialogOpen}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onModelsChanged={reloadModels} />
-      <PipelineGuideDialog open={pipelineGuideOpen} onOpenChange={setPipelineGuideOpen} />
       <SessionMetadataDialog
         open={metadataOpen}
         onOpenChange={setMetadataOpen}
@@ -1317,6 +1450,7 @@ export function App(): JSX.Element {
         workspaceId={workspaceInfoId ?? ''}
         executor={workspaceInfoExecutor}
         sessions={workspaceInfoSessions}
+        onRename={(name) => renameWorkspaceAt(workspaceInfoId ?? '', name)}
       />
       <CommandPalette
         open={commandPaletteOpen}
@@ -1341,6 +1475,32 @@ function isEditable(el: HTMLElement): boolean {
 
 function isResting(status: import('@agent-kernel/kernel').AgentState['status']): boolean {
   return status === 'idle' || status === 'done' || status === 'error'
+}
+
+function isCompactTerminalEvent(kind: string): boolean {
+  return kind === 'compact_replaced' || kind === 'compact_skipped' || kind === 'compact_rejected'
+}
+
+function compactFailureMessage(event: { kind: string; reason?: string; errorMessage?: string }): string {
+  if (event.kind === 'compact_skipped') return event.errorMessage ?? event.reason ?? 'compact skipped'
+  if (event.kind === 'compact_rejected') return event.reason ?? 'compact rejected'
+  return 'compact failed'
+}
+
+function sessionActivityStatus({
+  status,
+  streamingActive,
+  awaitingAck,
+  compactRunning,
+}: {
+  status: import('@agent-kernel/kernel').AgentState['status'] | undefined
+  streamingActive: boolean
+  awaitingAck: boolean
+  compactRunning: boolean
+}): SessionActivityStatus | undefined {
+  if (awaitingAck || streamingActive || compactRunning) return 'loading'
+  if (!status) return undefined
+  return status
 }
 
 export function sessionExists(
@@ -1414,129 +1574,6 @@ function NoSessionArea({
   )
 }
 
-function PipelineGuideDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean
-  onOpenChange(open: boolean): void
-}): JSX.Element {
-  const { t } = useTranslation()
-  const runtimeSteps = t('pipeline.steps', { returnObjects: true }) as Array<{
-    title: string
-    subtitle: string
-    detail: string
-    signal: string
-  }>
-  const benchmarkSteps = t('pipeline.benchmarkSteps', { returnObjects: true }) as Array<{
-    title: string
-    subtitle: string
-    detail: string
-    signal: string
-  }>
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl overflow-hidden p-0 gap-0" data-testid="pipeline-guide-dialog">
-        <DialogHeader className="border-b border-border/50 px-5 py-4">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-            {t('pipeline.title')}
-          </DialogTitle>
-          <DialogDescription>
-            {t('pipeline.description')}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[min(78dvh,46rem)] overflow-y-auto px-5 py-4 space-y-6">
-          <PipelineTrack
-            title={t('pipeline.tracks.runtime.title')}
-            description={t('pipeline.tracks.runtime.description')}
-            steps={runtimeSteps}
-            whereToLook={t('pipeline.whereToLook')}
-            ariaLabel={t('pipeline.overviewLabel')}
-            testid="pipeline-track-runtime"
-          />
-          <PipelineTrack
-            title={t('pipeline.tracks.benchmark.title')}
-            description={t('pipeline.tracks.benchmark.description')}
-            steps={benchmarkSteps}
-            whereToLook={t('pipeline.whereToLook')}
-            ariaLabel={t('pipeline.tracks.benchmark.title')}
-            testid="pipeline-track-benchmark"
-            accent="emerald"
-          />
-          <div className="grid gap-3 md:grid-cols-3">
-            <PipelinePrinciple title={t('pipeline.principles.coreBoundary.title')} body={t('pipeline.principles.coreBoundary.body')} />
-            <PipelinePrinciple title={t('pipeline.principles.replayFirst.title')} body={t('pipeline.principles.replayFirst.body')} />
-            <PipelinePrinciple title={t('pipeline.principles.teaching.title')} body={t('pipeline.principles.teaching.body')} />
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function PipelineTrack({
-  title,
-  description,
-  steps,
-  whereToLook,
-  ariaLabel,
-  testid,
-  accent = 'primary',
-}: {
-  title: string
-  description: string
-  steps: Array<{ title: string; subtitle: string; detail: string; signal: string }>
-  whereToLook: string
-  ariaLabel: string
-  testid: string
-  accent?: 'primary' | 'emerald'
-}): JSX.Element {
-  const badge = accent === 'emerald'
-    ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/25 dark:text-emerald-300'
-    : 'bg-primary/10 text-primary ring-primary/25'
-  return (
-    <section data-testid={testid}>
-      <header className="mb-2">
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{description}</p>
-      </header>
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3" aria-label={ariaLabel}>
-        {steps.map((step, index) => (
-          <article
-            key={step.title}
-            className="rounded-md border border-border/55 bg-card/70 p-3 shadow-sm"
-            data-testid="pipeline-step"
-          >
-            <div className="mb-2 flex items-start gap-2">
-              <span className={`flex h-6 w-6 flex-none items-center justify-center rounded-full font-mono text-[11px] font-semibold ring-1 ${badge}`}>
-                {index + 1}
-              </span>
-              <div className="min-w-0">
-                <h3 className="text-xs font-semibold text-foreground">{step.title}</h3>
-                <p className="text-[11px] text-muted-foreground">{step.subtitle}</p>
-              </div>
-            </div>
-            <p className="text-[11px] leading-5 text-muted-foreground">{step.detail}</p>
-            <div className="mt-2 rounded bg-background/65 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground ring-1 ring-border/25">
-              <span className="font-medium text-foreground">{whereToLook} </span>{step.signal}
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function PipelinePrinciple({ title, body }: { title: string; body: string }): JSX.Element {
-  return (
-    <section className="rounded-md border border-border/45 bg-background/70 p-3">
-      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-      <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{body}</p>
-    </section>
-  )
-}
-
 function ExplorerRail({ onExpand }: { onExpand(): void }): JSX.Element {
   const { t } = useTranslation()
   return (
@@ -1583,16 +1620,22 @@ function InspectorRail({ onExpand }: { onExpand(): void }): JSX.Element {
 
 function WorkbenchToolbar({
   sessionLabel,
+  sessionActivityStatus,
   cwd,
   onOpenExplorer,
   explorerAvailable,
+  onOpenInspector,
+  inspectorAvailable,
   onChangeCwd,
   sessionSelected,
 }: {
   sessionLabel: string
+  sessionActivityStatus?: SessionActivityStatus
   cwd: string
   onOpenExplorer(): void
   explorerAvailable: boolean
+  onOpenInspector(): void
+  inspectorAvailable: boolean
   onChangeCwd(): void
   sessionSelected: boolean
 }): JSX.Element {
@@ -1610,17 +1653,22 @@ function WorkbenchToolbar({
           title={t('app.openExplorer')}
           aria-label={t('app.openExplorer')}
           data-testid="explorer-toggle"
-          className="h-8 w-8 flex-none"
+          className="h-9 w-9 flex-none sm:h-8 sm:w-8"
         >
           <Menu className="h-4 w-4" />
         </Button>
       ) : null}
       <span
-        className="min-w-0 max-w-[38vw] truncate font-medium sm:max-w-none"
+        className="inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none"
         title={sessionSelected ? sessionLabel : t('app.noSessionSelected')}
-        data-testid="session-label"
+        data-testid="session-title"
       >
-        {sessionSelected ? sessionLabel : t('app.noSessionSelected')}
+        {sessionSelected ? (
+          <SessionStatusIndicator status={sessionActivityStatus} selected />
+        ) : null}
+        <span className="min-w-0 truncate font-medium" data-testid="session-label">
+          {sessionSelected ? sessionLabel : t('app.noSessionSelected')}
+        </span>
       </span>
       {sessionSelected ? (
       <Button
@@ -1639,6 +1687,19 @@ function WorkbenchToolbar({
       </Button>
       ) : null}
       <span className="min-w-0 flex-1" />
+      {inspectorAvailable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenInspector}
+          title={t('app.openInspector')}
+          aria-label={t('app.openInspector')}
+          data-testid="inspector-toggle"
+          className="h-9 w-9 flex-none sm:h-8 sm:w-8"
+        >
+          <PanelRight className="h-4 w-4" />
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -1673,6 +1734,13 @@ function statusDot(status: string): string {
   if (status === 'error' || status === 'disconnected') return 'bg-rose-500'
   if (status === 'connecting') return 'bg-amber-500 animate-pulse'
   return 'bg-muted'
+}
+
+function newPendingMessageId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function LineageBar({

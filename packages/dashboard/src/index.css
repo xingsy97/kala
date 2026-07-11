@@ -257,3 +257,39 @@ body {
     background: transparent;
   }
 }
+
+@layer utilities {
+  @keyframes ak-caret-blink {
+    0%, 45% { opacity: 1; }
+    55%, 100% { opacity: 0; }
+  }
+  .ak-caret {
+    display: inline-block;
+    width: 0.55em;
+    margin-left: 1px;
+    line-height: 1;
+    animation: ak-caret-blink 1s step-end infinite;
+  }
+
+  .ak-composer-simple[data-empty="true"]::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+
+  .ak-composer-token {
+    display: inline-block;
+    margin: 0 1px;
+    padding: 0 4px;
+    border: 1px solid hsl(var(--border));
+    border-radius: 4px;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
+    line-height: 1.25rem;
+    vertical-align: baseline;
+    user-select: all;
+    cursor: default;
+  }
+}

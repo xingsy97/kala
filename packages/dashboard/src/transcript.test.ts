@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from './session.js'
-import { visibleMessages, visibleTranscript } from './transcript.js'
+import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
 
 const system: Message = {
   role: 'system',
@@ -112,9 +112,103 @@ describe('visibleMessages', () => {
     expect(transcript).toEqual([])
   })
 
+  it('appends local sending and queued user messages to the transcript', () => {
+    const transcript = visibleTranscript(
+      [system],
+      [],
+      '',
+      [
+        {
+          id: 'local-1',
+          text: 'sent but not acked',
+          mode: 'steer',
+          createdAt: '2026-07-06T00:00:00.000Z',
+        },
+      ],
+      [
+        {
+          id: 'queue-1',
+          text: 'run next',
+          mode: 'queue',
+          createdAt: '2026-07-06T00:00:01.000Z',
+        },
+      ],
+    )
+
+    expect(transcript).toEqual([
+      expect.objectContaining({
+        kind: 'pending_user_message',
+        id: 'local-1',
+        status: 'sending',
+        text: 'sent but not acked',
+      }),
+      expect.objectContaining({
+        kind: 'pending_user_message',
+        id: 'queue-1',
+        status: 'queued',
+        position: 1,
+        text: 'run next',
+      }),
+    ])
+  })
+
   it('drops system messages from the tail-fallback dump', () => {
     const user: Message = { role: 'user', content: [{ type: 'text', text: 'hi' }] }
     const visible = visibleMessages([system, user], [], '')
     expect(visible.map((m) => m.role)).toEqual(['user'])
+  })
+
+  it('reconciles local pending messages with timeline and queue acknowledgements', () => {
+    const pending = [
+      { id: 'local-1', text: 'sent', mode: 'steer' as const, createdAt: '2026-07-06T00:00:00.000Z', afterSeq: 0 },
+      { id: 'local-2', text: 'queued', mode: 'queue' as const, createdAt: '2026-07-06T00:00:01.000Z', afterSeq: 0 },
+    ]
+    const timeline: TimelineEntry[] = [
+      { seq: 1, ts: '2026-07-06T00:00:02.000Z', event: { kind: 'user_message', text: 'sent' }, effects: [] },
+    ]
+
+    const next = reconcilePendingUserMessages(
+      pending,
+      timeline,
+      [{ id: 'queue-1', text: 'queued', mode: 'queue', createdAt: '2026-07-06T00:00:03.000Z' }],
+      'thinking',
+      '',
+    )
+
+    expect(next).toEqual([])
+  })
+
+  it('drops stale steer pending messages after the later LLM turn has completed', () => {
+    const pending = [
+      { id: 'local-1', text: 'Schema-first  -  types-first', mode: 'steer' as const, createdAt: '2026-07-06T00:00:00.000Z', afterSeq: 10 },
+      { id: 'queue-1', text: 'keep queued local preview', mode: 'queue' as const, createdAt: '2026-07-06T00:00:00.000Z', afterSeq: 10 },
+    ]
+    const timeline: TimelineEntry[] = [
+      {
+        seq: 11,
+        ts: '2026-07-06T00:00:01.000Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+        effects: [],
+      },
+    ]
+
+    const next = reconcilePendingUserMessages(pending, timeline, [], 'done', '')
+
+    expect(next).toEqual([pending[1]])
+  })
+
+  it('keeps local pending messages while the turn is still active or streaming', () => {
+    const pending = [{ id: 'local-1', text: 'still sending', mode: 'steer' as const, createdAt: '2026-07-06T00:00:00.000Z', afterSeq: 10 }]
+    const timeline: TimelineEntry[] = [
+      {
+        seq: 11,
+        ts: '2026-07-06T00:00:01.000Z',
+        event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+        effects: [],
+      },
+    ]
+
+    expect(reconcilePendingUserMessages(pending, timeline, [], 'thinking', '')).toEqual(pending)
+    expect(reconcilePendingUserMessages(pending, timeline, [], 'done', 'partial')).toEqual(pending)
   })
 })

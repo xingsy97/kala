@@ -1,6 +1,8 @@
 import '@testing-library/react'
 import { cleanup } from '@testing-library/react'
+import * as React from 'react'
 import { afterEach, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { i18n } from '../i18n/index.js'
 
@@ -39,6 +41,26 @@ if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {}
 }
 
+// @formkit/auto-animate calls Element.animate() via MutationObserver; JSDOM
+// doesn't implement it. Stub with a no-op Animation-like object so the
+// callback never throws.
+if (typeof Element !== 'undefined' && !Element.prototype.animate) {
+  Element.prototype.animate = function animate(): Animation {
+    return {
+      cancel() {},
+      finish() {},
+      play() {},
+      pause() {},
+      reverse() {},
+      addEventListener() {},
+      removeEventListener() {},
+      onfinish: null,
+      oncancel: null,
+      finished: Promise.resolve() as unknown as Promise<Animation>,
+    } as unknown as Animation
+  }
+}
+
 vi.mock('react-virtuoso', async () => {
   const React = await import('react')
   const Virtuoso = React.forwardRef<unknown, Record<string, unknown>>((props, ref) => {
@@ -69,6 +91,32 @@ vi.mock('react-virtuoso', async () => {
   return { Virtuoso }
 })
 
+let testQueryClient = createTestQueryClient()
+
+function createTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: Infinity, staleTime: 0 },
+      mutations: { retry: false },
+    },
+  })
+}
+
+vi.mock('@testing-library/react', async () => {
+  const actual = await vi.importActual<typeof import('@testing-library/react')>('@testing-library/react')
+  const wrappedRender = ((ui: Parameters<typeof actual.render>[0], options?: Parameters<typeof actual.render>[1]) => {
+    const ExistingWrapper = options?.wrapper
+    const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+      const inner = ExistingWrapper
+        ? React.createElement(ExistingWrapper, null, children)
+        : children
+      return React.createElement(QueryClientProvider, { client: testQueryClient }, inner)
+    }
+    return actual.render(ui, { ...options, wrapper: Wrapper })
+  }) as typeof actual.render
+  return { ...actual, render: wrappedRender }
+})
+
 afterEach(() => {
   cleanup()
   void i18n.changeLanguage('en')
@@ -76,4 +124,6 @@ afterEach(() => {
   virtuosoScrollToIndexMock.mockClear()
   virtuosoScrollToMock.mockClear()
   virtuosoScrollByMock.mockClear()
+  testQueryClient.clear()
+  testQueryClient = createTestQueryClient()
 })

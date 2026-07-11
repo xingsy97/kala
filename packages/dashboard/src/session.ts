@@ -515,9 +515,18 @@ export function renameSession(
   socket.emit('client:rename_session', { sessionId, label })
 }
 
+export function renameWorkspace(
+  socket: DashboardSocket,
+  workspaceId: string,
+  workspaceName: string,
+): void {
+  socket.emit('client:rename_workspace', { workspaceId, workspaceName })
+}
+
 export type ControlPlaneView = {
   executors: readonly AttachedExecutor[]
   sessions: readonly SessionSummary[]
+  executorsLoaded: boolean
   refreshSessions(): void
 }
 
@@ -537,11 +546,13 @@ export function useControlPlane(
 ): ControlPlaneView {
   const [executors, setExecutors] = useState<readonly AttachedExecutor[]>([])
   const [sessions, setSessions] = useState<readonly SessionSummary[]>([])
+  const [executorsLoaded, setExecutorsLoaded] = useState(false)
 
   useEffect(() => {
     if (!socket) {
       setExecutors([])
       setSessions([])
+      setExecutorsLoaded(false)
       return
     }
     let active = true
@@ -549,6 +560,7 @@ export function useControlPlane(
     const onExecutors = (p: { executors: readonly AttachedExecutor[] }): void => {
       if (!isActive()) return
       setExecutors(p.executors)
+      setExecutorsLoaded(true)
     }
     const onSessions = (p: { sessions: readonly SessionSummary[] }): void => {
       if (!isActive()) return
@@ -558,6 +570,7 @@ export function useControlPlane(
       change,
     ) => {
       if (!isActive()) return
+      setExecutorsLoaded(true)
       setExecutors((prev) => {
         if (change.change === 'detached') {
           return prev.filter((e) => e.executorId !== change.executorId)
@@ -603,7 +616,7 @@ export function useControlPlane(
     [socket],
   )
 
-  return { executors, sessions, refreshSessions }
+  return { executors, sessions, executorsLoaded, refreshSessions }
 }
 
 export function mergeBySeq(

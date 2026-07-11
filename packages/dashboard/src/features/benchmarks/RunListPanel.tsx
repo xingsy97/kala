@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { cn } from '../../lib/utils.js'
+import { Typewriter } from '../../components/Typewriter.js'
 import type { BenchmarkRunSummary } from './types.js'
 
 export function RunListPanel({
@@ -55,7 +56,7 @@ export function RunListPanel({
 
       {!loading && !error && runs.length === 0 ? (
         <div className="p-3 text-xs text-muted-foreground" data-testid="benchmarks-run-list-empty">
-          {t('benchmarks.page.emptyRuns')}
+          <Typewriter text={t('benchmarks.page.emptyRuns')} charMs={22} />
         </div>
       ) : null}
 

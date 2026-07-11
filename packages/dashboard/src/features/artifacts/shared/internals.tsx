@@ -545,8 +545,8 @@ export function EvalRunsView({
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px]">{row.summary?.experimentId ?? row.progress?.runId ?? row.key}</div>
                   </div>
-                  <div className="truncate">{row.summary?.dataset ?? row.progress?.dataset ?? 'unknown'}</div>
-                  <div className="truncate font-mono text-[11px] text-muted-foreground">{row.summary?.model ?? row.progress?.model ?? 'unknown'}</div>
+                  <div className="truncate">{row.summary?.dataset ?? row.progress?.dataset ?? t('artifacts.fallback.unknown')}</div>
+                  <div className="truncate font-mono text-[11px] text-muted-foreground">{row.summary?.model ?? row.progress?.model ?? t('artifacts.fallback.unknown')}</div>
                   <div className="font-mono text-[11px]">{row.summary?.trialCount ?? row.progress?.selectedCount ?? 0}</div>
                   <div className="font-mono text-[11px]">{row.summary?.resolved ?? 0}</div>
                   <div className="font-mono text-[11px]">{row.summary?.failed ?? row.progress?.failedCount ?? 0}</div>
@@ -1267,7 +1267,7 @@ function InstancesSourcePanel({
               className="h-8 rounded border border-border bg-background px-2 text-xs"
             >
               {(['lite', 'verified', 'full', 'custom'] as DatasetPreset[]).map((preset) => (
-                <option key={preset} value={preset}>{DATASET_PRESETS[preset].label}</option>
+                <option key={preset} value={preset}>{t(`artifacts.eval.wizard.datasetPresets.${preset}`)}</option>
               ))}
             </select>
           </label>
@@ -2631,7 +2631,7 @@ function EvalTrialDetail({
                       <div className="truncate font-mono text-[11px]">{trialInstanceId(row)}</div>
                       <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}</div>
                     </div>
-                    <div className="truncate font-mono text-[11px]">{row.trial.status ?? 'unknown'}</div>
+                    <div className="truncate font-mono text-[11px]">{row.trial.status ?? t('artifacts.fallback.unknown')}</div>
                     <ResultPill resolved={row.trial.resolved} />
                     <div className="truncate font-mono text-[11px] text-muted-foreground">{row.trial.failureLabel ?? '-'}</div>
                     <div className="font-mono text-[11px]">{formatDuration(row.trial.metrics?.durationMs)}</div>
@@ -2737,14 +2737,14 @@ function EvalProgressStrip({ run }: { run: EvalRunRow }): JSX.Element | null {
           <div className="font-medium">{t('artifacts.eval.details.progress')}</div>
         </div>
         <div className={cn('rounded border px-2 py-0.5 font-mono text-[11px]', progress.status === 'failed' ? 'border-rose-200 text-rose-700 dark:border-rose-900 dark:text-rose-300' : 'border-border text-muted-foreground')}>
-          {progress.status ?? 'unknown'}
+          {progress.status ?? t('artifacts.fallback.unknown')}
         </div>
       </div>
       <div className="grid grid-cols-4 gap-2 max-lg:grid-cols-2">
-        <Stat label="Selected" value={String(total)} />
-        <Stat label="Running" value={String(progress.runningCount ?? 0)} />
-        <Stat label="Skipped" value={String(progress.skippedCount ?? 0)} />
-        <Stat label="Workers" value={String(progress.maxWorkers ?? 1)} />
+        <Stat label={t('artifacts.stats.selected')} value={String(total)} />
+        <Stat label={t('artifacts.stats.running')} value={String(progress.runningCount ?? 0)} />
+        <Stat label={t('artifacts.stats.skipped')} value={String(progress.skippedCount ?? 0)} />
+        <Stat label={t('artifacts.stats.workers')} value={String(progress.maxWorkers ?? 1)} />
       </div>
       <ProgressBar
         total={total}
@@ -2998,12 +2998,12 @@ export function ProfilesView({
       <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
         <div className="grid gap-2 text-xs">
           <Stat label={t('artifacts.profiles.profiles')} value={String(rows.length)} />
-          <Stat label="LLM calls" value={String(totals.llmCalls)} />
-          <Stat label="Tool calls" value={String(totals.toolCalls)} />
-          <Stat label="Input tokens" value={formatInteger(totals.inputTokens)} />
-          <Stat label="Output tokens" value={formatInteger(totals.outputTokens)} />
-          <Stat label="Latency calls" value={String(totals.latencyCalls)} />
-          <Stat label="Artifacts" value={String(manifest?.summary?.entryCount ?? 0)} />
+          <Stat label={t('artifacts.stats.llmCalls')} value={String(totals.llmCalls)} />
+          <Stat label={t('artifacts.stats.toolCalls')} value={String(totals.toolCalls)} />
+          <Stat label={t('artifacts.stats.inputTokens')} value={formatInteger(totals.inputTokens)} />
+          <Stat label={t('artifacts.stats.outputTokens')} value={formatInteger(totals.outputTokens)} />
+          <Stat label={t('artifacts.stats.latencyCalls')} value={String(totals.latencyCalls)} />
+          <Stat label={t('artifacts.stats.artifacts')} value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
       <div className="min-h-0 p-3">
@@ -3033,7 +3033,7 @@ export function ProfilesView({
                 <div key={row.path} className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px] gap-3 px-3 py-2">
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px]">{row.profile.sessionId ?? row.path}</div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}  -  {(row.profile.models ?? []).join(', ') || 'unknown'}  -  missing {row.profile.llmTraceMissingCalls ?? 0}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{row.path}  -  {(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')}  -  {t('artifacts.fallback.missing')} {row.profile.llmTraceMissingCalls ?? 0}</div>
                   </div>
                   <div className="font-mono text-[11px]">{row.profile.llmCalls ?? 0}</div>
                   <div className="font-mono text-[11px]">{row.profile.toolCalls ?? 0}</div>
@@ -3082,15 +3082,15 @@ export function MemoryView({
     <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0 max-md:grid-cols-1">
       <aside className="min-h-0 border-r border-border bg-muted/25 p-3 max-md:border-b max-md:border-r-0">
         <div className="grid gap-2 text-xs">
-          <Stat label="Indexes" value={String(rows.length)} />
-          <Stat label="Active" value={String(totals.active)} />
-          <Stat label="Tombstoned" value={String(totals.tombstoned)} />
-          <Stat label="Workspace" value={String(totals.workspace)} />
-          <Stat label="Global" value={String(totals.global)} />
-          <Stat label="Warnings" value={String(warningCount)} />
-          <Stat label="Stale" value={String(staleCount)} />
-          <Stat label="Conflicts" value={String(conflictCount)} />
-          <Stat label="Artifacts" value={String(manifest?.summary?.entryCount ?? 0)} />
+          <Stat label={t('artifacts.stats.indexes')} value={String(rows.length)} />
+          <Stat label={t('artifacts.stats.active')} value={String(totals.active)} />
+          <Stat label={t('artifacts.stats.tombstoned')} value={String(totals.tombstoned)} />
+          <Stat label={t('artifacts.stats.workspace')} value={String(totals.workspace)} />
+          <Stat label={t('artifacts.stats.global')} value={String(totals.global)} />
+          <Stat label={t('artifacts.stats.warnings')} value={String(warningCount)} />
+          <Stat label={t('artifacts.stats.stale')} value={String(staleCount)} />
+          <Stat label={t('artifacts.stats.conflicts')} value={String(conflictCount)} />
+          <Stat label={t('artifacts.stats.artifacts')} value={String(manifest?.summary?.entryCount ?? 0)} />
         </div>
       </aside>
       <div className="min-h-0 p-3">
@@ -3116,20 +3116,20 @@ export function MemoryView({
               </div>
               {entries.map(({ row, entry }, index) => (
                 <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 px-3 py-2">
-                  <div className="font-mono text-[11px]">{entry.scope ?? 'unknown'}</div>
+                  <div className="font-mono text-[11px]">{entry.scope ?? t('artifacts.fallback.unknown')}</div>
                   <MemoryStatus status={entry.status} />
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px]" title={entry.key}>{entry.key ?? 'unknown'}</div>
+                    <div className="truncate font-mono text-[11px]" title={entry.key}>{entry.key ?? t('artifacts.fallback.unknown')}</div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={row.path}>{row.path}</div>
                   </div>
                   <div className="min-w-0">
                     <div className="truncate" title={entry.description ?? entry.name}>{entry.description ?? entry.name ?? '-'}</div>
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{entry.type ?? 'memory'}</div>
+                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{entry.type ?? t('artifacts.fallback.memory')}</div>
                   </div>
                   <div className="font-mono text-[11px]">{formatConfidence(entry.confidence)}</div>
                   <div className="truncate font-mono text-[11px] text-muted-foreground" title={entry.sessionId}>{entry.sessionId ?? '-'}</div>
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px]" title={entry.path}>{entry.status === 'tombstoned' ? entry.deletedAt ?? 'deleted' : entry.source ?? 'unknown'}</div>
+                    <div className="truncate font-mono text-[11px]" title={entry.path}>{entry.status === 'tombstoned' ? entry.deletedAt ?? t('artifacts.fallback.deleted') : entry.source ?? t('artifacts.fallback.unknown')}</div>
                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={entry.archivedPath ?? entry.path}>{entry.archivedPath ?? entry.path ?? '-'}</div>
                   </div>
                 </div>
