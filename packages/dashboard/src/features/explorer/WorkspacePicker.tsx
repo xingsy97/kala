@@ -155,7 +155,7 @@ export function NewSessionDialog({
               className="border-b border-border/50 px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground"
               htmlFor="new-session-cwd"
             >
-              Initial directory
+              {t('dialogs.newSessionInitialDirectory')}
             </label>
             <DirectoryPicker
               socket={socket}
@@ -178,14 +178,14 @@ export function NewSessionDialog({
         ) : null}
         <DialogFooter className="border-t border-border/50 px-4 py-3">
           <Button variant="outline" onClick={onCancel} data-testid="workspace-picker-cancel">
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={create}
             disabled={submitting || !selectedWorkspace || cwd.trim().length === 0}
             data-testid="new-session-create"
           >
-            {submitting ? 'Creating...' : 'Create session'}
+            {submitting ? t('dialogs.newSessionCreating') : t('dialogs.newSessionCreate')}
           </Button>
         </DialogFooter>
       </DialogContent>

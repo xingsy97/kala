@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Check, Clipboard, Monitor, Terminal } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -25,6 +26,7 @@ const OS_TABS: ReadonlyArray<{ value: OsTab; label: string; icon: typeof Termina
 ]
 
 export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<OsTab>(() => detectCurrentOs())
   const [copied, setCopied] = useState(false)
   const hostUrl = useMemo(() => hostUrlFromLocation(), [])
@@ -59,10 +61,10 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
         <DialogHeader className="border-b border-border/50 px-4 py-3">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Terminal className="h-4 w-4" aria-hidden="true" />
-            Connect workspace
+            {t('explorer.connectDialog.title')}
           </DialogTitle>
           <DialogDescription>
-            Run one command in the project directory on the machine that should execute tools.
+            {t('explorer.connectDialog.description')}
           </DialogDescription>
         </DialogHeader>
         <div className="px-4 py-4">
@@ -78,7 +80,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
             }}
           />
           <div className="mt-3 text-xs text-muted-foreground">
-            {error ? <span className="text-destructive">{error}</span> : invite ? `Invite expires at ${new Date(invite.expiresAt).toLocaleTimeString()}` : 'Preparing one-time invite...'}
+            {error ? <span className="text-destructive">{error}</span> : invite ? t('explorer.connectDialog.inviteExpires', { time: new Date(invite.expiresAt).toLocaleTimeString() }) : t('explorer.connectDialog.preparingInvite')}
           </div>
         </div>
       </DialogContent>
@@ -101,6 +103,7 @@ function TerminalCommand({
   onCopy(): void
   onTabChange(tab: OsTab): void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <section className="overflow-hidden rounded-md bg-[#101216] shadow-xl ring-1 ring-black/30 dark:ring-white/10" data-testid="executor-terminal-command">
       <div className="flex h-9 items-center gap-3 border-b border-white/10 bg-[#23252b] px-3">
@@ -142,7 +145,7 @@ function TerminalCommand({
           data-testid="copy-executor-command"
         >
           {copied ? <Check className="h-3 w-3" /> : <Clipboard className="h-3 w-3" />}
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? t('common.copied') : t('common.copy')}
         </Button>
       </div>
       <div className="bg-[#101216] px-4 py-4 font-mono text-[12px] leading-6 text-zinc-100">

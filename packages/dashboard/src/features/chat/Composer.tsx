@@ -426,7 +426,7 @@ export function Composer({
                   className="group relative h-16 w-16 overflow-hidden rounded-lg border border-border/50 bg-background"
                   data-testid={`pasted-image-${img.id}`}
                 >
-                  <img src={img.dataUrl} alt="pasted" className="h-full w-full object-cover" />
+                  <img src={img.dataUrl} alt={t('composer.pastedImage')} className="h-full w-full object-cover" />
                   <button
                     type="button"
                     onClick={() => removeImage(img.id)}
@@ -715,7 +715,7 @@ function SendButton({
         title={modeHint}
       >
         <ModeIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-        Send
+        {t('composer.send')}
       </Button>
       <button
         type="button"

@@ -713,7 +713,7 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
 
   async function submitPlan(): Promise<void> {
     if (!shared.runId.trim() || !shared.model.trim() || !shared.instancesJsonl.trim()) {
-      setError('Run ID, Model, and Instances JSONL are required.')
+      setError(t('artifacts.eval.wizard.errorRequiredFields'))
       markStep('plan', { status: 'error', message: 'missing required fields' })
       return
     }
