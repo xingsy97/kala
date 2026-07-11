@@ -159,10 +159,39 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
 
   const ready = new Promise<void>((resolve) => {
     socket.on('connect', () => {
+      process.stderr.write(`agent-kernel-executor: socket connected (id=${socket.id}), announcing workspace ${workspaceId} (${workspaceName})\n`)
       socket.emit('executor:announce', announcement)
       resolve()
     })
   })
+
+  socket.on('connect_error', (err) => {
+    const e = err as Error & { description?: unknown; context?: unknown; type?: string }
+    const detailParts: string[] = []
+    if (e.type) detailParts.push(`type=${e.type}`)
+    if (e.description) {
+      const d = e.description as { message?: string; code?: string | number } | number | string
+      if (typeof d === 'object' && d !== null) {
+        if (d.message) detailParts.push(`inner=${d.message}`)
+        if (d.code !== undefined) detailParts.push(`code=${d.code}`)
+      } else {
+        detailParts.push(`description=${d}`)
+      }
+    }
+    const detail = detailParts.length > 0 ? ` [${detailParts.join(', ')}]` : ''
+    process.stderr.write(`agent-kernel-executor: connect_error: ${e.message || String(err)}${detail}\n`)
+  })
+  socket.on('disconnect', (reason) => {
+    process.stderr.write(`agent-kernel-executor: disconnected (${reason})\n`)
+  })
+  socket.io.on('reconnect_attempt', (n) => {
+    process.stderr.write(`agent-kernel-executor: reconnect attempt #${n}\n`)
+  })
+  socket.io.on('reconnect_failed', () => {
+    process.stderr.write(`agent-kernel-executor: giving up — reconnection attempts exhausted\n`)
+  })
+
+  process.stderr.write(`agent-kernel-executor: dialing ${options.host}/executor (websocket, up to 30 retries with backoff)\n`)
 
   // Permanent-error latch. Any handler that discovers we cannot recover
   // resolves this once — the CLI awaits it to exit with a specific code.
@@ -189,6 +218,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
 
   socket.on('executor:welcome', (payload) => {
+    process.stderr.write(`agent-kernel-executor: welcome from host — token saved, ready for tool calls\n`)
     options.onToken?.(payload.token)
     socket.auth = {
       role: 'executor',
@@ -313,7 +343,7 @@ async function runOne(
       signal,
       ...(payload.cwd ? { cwd: payload.cwd } : {}),
     })
-    if (OVERFLOW_EXEMPT_TOOLS.has(payload.name)) {
+    if (OVERFLOW_EXEMPT_TOOLS.has(payload.name) || payload.name.startsWith('__')) {
       return { callId: payload.callId, ok: true, content }
     }
     const overflow = await maybeOverflow(content, {

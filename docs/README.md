@@ -18,6 +18,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [host/context-compaction.md](host/context-compaction.md) | Host-driven compaction: triggers, protocol invariants, thresholds, known gaps |
+| [host/session-log-context-persistence.md](host/session-log-context-persistence.md) | **Target design.** Breaking v2 session-log/context persistence rewrite; explains current JSONL growth root cause and reference-agent formats |
 | [host/background-shell-design.md](host/background-shell-design.md) | Long-running shell tasks: registry, output streaming, dashboard control plane |
 | [host/sub-agent-design.md](host/sub-agent-design.md) | `agent` builtin: envelope, control-plane, forced `allow_all` |
 | [host/memory-consolidation.md](host/memory-consolidation.md) | Memory extension: consolidation triggers, storage, tool exposure |
@@ -49,7 +50,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [protocol/wire-protocol.md](protocol/wire-protocol.md) | **Normative.** Every Socket.IO event between Dashboard, Host, and Executor |
-| [protocol/event-log.md](protocol/event-log.md) | **Normative.** JSONL event log format for persistence, replay, fork |
+| [protocol/event-log.md](protocol/event-log.md) | **Current implementation.** JSONL event log format for persistence, replay, fork; see the host session-log document for the breaking v2 target |
 
 ### Evals — benchmarks, RL, references
 

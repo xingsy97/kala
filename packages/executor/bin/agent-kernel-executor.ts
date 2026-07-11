@@ -13,7 +13,7 @@
  *     may be the root itself or any child directory. Empty = no jail
  *     (executor trusts the whole machine).
  *   EXECUTOR_TOKEN / --token    optional long-term executor token
- *   EXECUTOR_INVITE / --invite  optional one-time invite token from Dashboard
+ *   EXECUTOR_INVITE / --invite  optional invite token from Dashboard
  *   EXECUTOR_ID / --id          optional; defaults to a ULID
  *   AGENT_KERNEL_AUTO_UPDATE / --auto-update
  *     optional; update the release asset from the latest GitHub Release before connecting.
@@ -32,14 +32,18 @@ import process from 'node:process'
 
 import lockfile from 'proper-lockfile'
 
+import packageJson from '../package.json'
 import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
 import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
+const VERSION = packageJson.version
 
 type Args = {
+  help?: boolean
+  version?: boolean
   host?: string
   name?: string
   sandboxRoots: string[]
@@ -62,6 +66,14 @@ function parseArgs(argv: readonly string[]): Args {
     switch (key) {
       case '--auto-update':
         out.autoUpdate = true
+        break
+      case '-h':
+      case '--help':
+        out.help = true
+        break
+      case '-v':
+      case '--version':
+        out.version = true
         break
       case '--no-update-check':
         out.noUpdateCheck = true
@@ -89,6 +101,45 @@ function parseArgs(argv: readonly string[]): Args {
     }
   }
   return out
+}
+
+function printHelp(): void {
+  process.stdout.write(`agent-kernel-executor
+
+Usage:
+  agent-kernel-executor --host <url> [options]
+
+Options:
+  -h, --help                 Show this help and exit.
+  -v, --version              Print version and exit.
+  --host <url>               Host URL to connect to. Defaults to HOST_URL.
+  --name <workspace>         Workspace display name. Defaults to WORKSPACE_NAME or hostname.
+  --sandbox-root <path>      Allowed filesystem root. Repeatable. Defaults to SANDBOX_ROOTS.
+  --token <token>            Long-term executor token. Defaults to EXECUTOR_TOKEN.
+  --invite <token>           One-time invite token. Defaults to EXECUTOR_INVITE.
+  --id <id>                  Executor id. Defaults to EXECUTOR_ID or generated id.
+  --auto-update              Update release asset before connecting.
+  --no-update-check          Disable release update check.
+  --update-repo <owner/repo> GitHub release repo. Defaults to AGENT_KERNEL_UPDATE_REPO.
+
+Common environment:
+  HOST_URL                   Host URL used when --host is omitted.
+  WORKSPACE_NAME             Workspace display name.
+  SANDBOX_ROOTS              Colon-separated sandbox roots.
+  EXECUTOR_TOKEN             Long-term executor token.
+  EXECUTOR_INVITE            One-time invite token.
+  LOG_LEVEL                  trace, debug, info, warn, error. Default: info.
+  LOG_FORMAT                 pretty/human or json. Default: pretty.
+
+Examples:
+  agent-kernel-executor --host http://localhost:3000
+  HOST_URL=http://localhost:3000 agent-kernel-executor --sandbox-root /workspace
+  EXECUTOR_INVITE=ak_invite_... agent-kernel-executor --host http://host:3000
+`)
+}
+
+function printVersion(): void {
+  process.stdout.write(`agent-kernel-executor ${VERSION}\n`)
 }
 
 /**
@@ -143,6 +194,15 @@ async function acquireLocalLock(
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
+  if (args.help) {
+    printHelp()
+    return
+  }
+  if (args.version) {
+    printVersion()
+    return
+  }
+
   const host = args.host ?? process.env.HOST_URL
   const name = args.name ?? process.env.WORKSPACE_NAME
   const envRoots = process.env.SANDBOX_ROOTS
@@ -157,11 +217,18 @@ async function main(): Promise<void> {
   const updateRepo = args.updateRepo ?? process.env.AGENT_KERNEL_UPDATE_REPO
 
   if (!host) {
-    logger.error(
-      'usage: agent-kernel-executor --host <url> [--name <workspace>] [--sandbox-root <path>]...; or set HOST_URL env var',
+    process.stderr.write(
+      'agent-kernel-executor: missing --host (or HOST_URL env var)\n' +
+        '  example: HOST_URL=http://localhost:3000 EXECUTOR_INVITE=ak_invite_... node agent-kernel-executor.cjs\n',
     )
     process.exit(1)
   }
+
+  const authKind = invite ? 'invite' : token ? 'token' : 'none'
+  const rootsLabel = sandboxRoots.length > 0 ? sandboxRoots.join(':') : '<no jail>'
+  process.stderr.write(
+    `agent-kernel-executor: connecting to ${host} (auth=${authKind}, workspace=${name ?? '<hostname>'}, sandbox=${rootsLabel})\n`,
+  )
 
   // Local single-instance lock. A single machine may only run one executor
   // at a time — otherwise two processes would race for the same workspaceId
@@ -203,18 +270,19 @@ async function main(): Promise<void> {
   })
 
   handle.socket.on('connect', () => {
-    logger.info(
+    logger.info(`executor connected to ${host} (workspace ${handle.workspaceName ?? handle.workspaceId})`)
+    logger.debug(
       {
         executorId: handle.executorId,
         workspaceId: handle.workspaceId,
         workspaceName: handle.workspaceName,
         host,
       },
-      'executor connected',
+      'executor connection details',
     )
   })
   handle.socket.on('disconnect', (reason) => {
-    logger.info({ reason }, 'executor disconnected')
+    logger.info(`executor disconnected (${reason})`)
   })
 
   await handle.ready
