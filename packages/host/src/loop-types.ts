@@ -25,7 +25,7 @@ import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { HookConfig, HookRunner } from './extensions/hooks.js'
-import type { SkillRegistry } from './extensions/skills.js'
+import type { SkillManager, SkillRegistry } from './extensions/skills.js'
 import type { SessionStore } from './store/session.js'
 
 export type LoopBroadcast = {
@@ -105,7 +105,7 @@ export type HostLoopDeps = {
   models?: ModelResolver
   hooks?: readonly HookConfig[]
   hookRunner?: HookRunner
-  skills?: SkillRegistry
+  skills?: SkillRegistry | SkillManager
   artifactRootDir?: string
 }
 

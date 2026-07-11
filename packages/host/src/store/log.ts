@@ -23,7 +23,7 @@ import type {
   MetadataEntry,
   SnapshotEntry,
 } from '@agent-kernel/shared'
-import { LOG_FORMAT_VERSION } from '@agent-kernel/shared'
+import { LOG_FORMAT_VERSION, redactLlmTrace } from '@agent-kernel/shared'
 
 const KERNEL_VERSION = '@agent-kernel/kernel@0.0.0'
 
@@ -87,7 +87,7 @@ export async function appendEventEntry(
     event: params.event,
     effects: params.effects,
     ...(params.usage ? { usage: params.usage } : {}),
-    ...(params.llmTrace ? { llmTrace: params.llmTrace } : {}),
+    ...(params.llmTrace ? { llmTrace: redactLlmTrace(params.llmTrace) } : {}),
     ...(params.model ? { model: params.model } : {}),
   }
   await appendFile(params.path, JSON.stringify(entry) + '\n', 'utf8')

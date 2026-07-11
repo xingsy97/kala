@@ -78,10 +78,11 @@ Done.
 ## Open Work
 None.`
 
-function summaryReply(text: string = OK_SUMMARY) {
+function summaryReply(text: string = OK_SUMMARY, extra: Record<string, unknown> = {}) {
   return {
     message: { role: 'assistant' as const, content: [{ type: 'text' as const, text }] },
     usage: { inputTokens: 5, outputTokens: 5 },
+    ...extra,
   }
 }
 
@@ -222,6 +223,35 @@ describe('compaction extension', () => {
     await expect(loop.compact(sessionId)).rejects.toThrow(/nothing to compact/i)
   })
 
+  it('manual compact can re-compact a prior compact summary', async () => {
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'recompact-summary-mock',
+      async call() {
+        call += 1
+        if (call === 1) return turnReply()
+        if (call === 2) return summaryReply(`${OK_SUMMARY}\n\nFirst pass.`)
+        return summaryReply(`${OK_SUMMARY}\n\nSecond pass.`)
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    await loop.compact(sessionId)
+
+    let rec = store.get(sessionId)!
+    expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'system'])
+    expect(rec.state.messages[1]?.content).toEqual([{ type: 'text', text: `${OK_SUMMARY}\n\nFirst pass.` }])
+
+    await loop.compact(sessionId)
+
+    rec = store.get(sessionId)!
+    expect(rec.state.messages.map((m) => m.role)).toEqual(['system', 'system'])
+    expect(rec.state.messages[1]?.content).toEqual([{ type: 'text', text: `${OK_SUMMARY}\n\nSecond pass.` }])
+    const replaced = await readReplacedEvents(rec.logPath)
+    expect(replaced).toHaveLength(2)
+    expect(replaced[1]?.request?.messages.map((m) => m.role)).toEqual(['system', 'system'])
+  })
+
   it('compact_replaced carries a cmp_ attemptId', async () => {
     let call = 0
     const llm: LLMAdapter = {
@@ -240,6 +270,38 @@ describe('compaction extension', () => {
     const replaced = await readReplacedEvents(rec.logPath)
     expect(replaced).toHaveLength(1)
     expect(replaced[0]!.attemptId).toMatch(/^cmp_/)
+  })
+
+  it('compact_replaced persists the summarizer LLM trace and model', async () => {
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'trace-mock',
+      async call() {
+        call += 1
+        if (call === 1) return turnReply()
+        return summaryReply(OK_SUMMARY, {
+          trace: {
+            provider: 'openai',
+            model: 'gpt-compact-test',
+            request: {
+              url: 'https://api.openai.com/v1/chat/completions',
+              headers: { authorization: 'Bearer test' },
+              body: { model: 'gpt-compact-test', messages: [{ role: 'user', content: 'compact' }] },
+            },
+            response: { status: 200, metrics: { durationMs: 1234, timeToFirstChunkMs: 210 } },
+          },
+        })
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    await loop.compact(sessionId)
+
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    const compactEntry = parsed.events.find((e) => e.event.kind === 'compact_replaced')
+    expect(compactEntry?.llmTrace?.model).toBe('gpt-compact-test')
+    expect(compactEntry?.llmTrace?.response?.metrics?.durationMs).toBe(1234)
+    expect(compactEntry?.model).toBe('gpt-compact-test')
   })
 
   it('summarizer path passes thinkingBudget: 0 to disable extended thinking', async () => {

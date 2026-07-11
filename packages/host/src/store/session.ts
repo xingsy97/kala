@@ -157,6 +157,12 @@ export class SessionStore {
     return this.records.get(sessionId)
   }
 
+  updateConfig(sessionId: string, update: (config: AgentConfig) => AgentConfig): void {
+    const rec = this.records.get(sessionId)
+    if (!rec) return
+    ;(rec as { config: AgentConfig }).config = update(rec.config)
+  }
+
   async load(sessionId: string): Promise<SessionRecord> {
     const cached = this.records.get(sessionId)
     if (cached) return cached

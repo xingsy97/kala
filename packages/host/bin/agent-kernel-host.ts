@@ -26,6 +26,9 @@
  *   HOST_EXECUTOR_IDENTITIES  -  default ~/.agent-kernel/executor-identities.json
  *   HOST_AUDIT_DIR      -  default ~/.agent-kernel/audit
  *   HOST_MODEL          -  hard override for the default model
+ *   AGENT_KERNEL_RELEASE_BASE_URL  -  optional executor bootstrap asset base URL
+ *   AGENT_KERNEL_RELEASE_ASSETS_DIR  -  optional local release asset directory
+ *   AGENT_KERNEL_UPDATE_REPO / AGENT_KERNEL_RELEASE_TAG  -  GitHub Release source
  */
 
 import { homedir } from 'node:os'
@@ -117,6 +120,7 @@ async function main(): Promise<void> {
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
   const skills = await discoverSkills()
+  let release = releaseSettings(port)
 
   const manualModelsPath = join(homedir(), '.config', 'agent-kernel', 'models.json')
   const hookSummaries = hooks.map((h) => ({
@@ -147,6 +151,7 @@ async function main(): Promise<void> {
       supported: false,
       note: 'MCP runtime is not implemented yet  -  see docs/host/mcp.md for the planned design.',
     },
+    release,
   })
 
   const server = await startHostServer({
@@ -177,6 +182,7 @@ async function main(): Promise<void> {
     audit,
     ...(dashboard.kind === 'vite' ? { dashboardHandler: dashboard.handler } : {}),
     ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
+    ...(release.source === 'local' ? { releaseAssetsDir: releaseDir() } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
     skills,
@@ -187,6 +193,7 @@ async function main(): Promise<void> {
       lastDecision: 'lastDecision' in llm ? (llm as MutableRouter).lastDecision() : undefined,
     }),
   })
+  release = releaseSettings(server.port)
 
   logger.info(
     {
@@ -545,7 +552,49 @@ function currentModulePath(): string {
   return resolve(process.argv[1] ?? process.cwd())
 }
 
+function releaseSettings(port: number): NonNullable<ServerSettingsPayload['release']> {
+  const explicit = process.env.AGENT_KERNEL_RELEASE_BASE_URL?.trim()
+  if (explicit) {
+    return { bootstrapBaseUrl: trimTrailingSlash(explicit), source: explicit.includes('github.com/') ? 'github' : 'local' }
+  }
+  const repo = process.env.AGENT_KERNEL_UPDATE_REPO?.trim()
+  const tag = process.env.AGENT_KERNEL_RELEASE_TAG?.trim()
+  if (repo) {
+    const suffix = tag && tag !== 'latest' ? `releases/download/${tag}` : 'releases/latest/download'
+    return { bootstrapBaseUrl: `https://github.com/${repo}/${suffix}`, source: 'github' }
+  }
+  return { bootstrapBaseUrl: `http://localhost:${port}/release-assets`, source: 'local' }
+}
+
+function releaseDir(): string {
+  const explicit = process.env.AGENT_KERNEL_RELEASE_ASSETS_DIR?.trim()
+  if (explicit) return resolve(explicit)
+  const found = findReleaseDir([process.cwd(), dirname(currentModulePath())])
+  return found ?? resolve(process.cwd(), 'release')
+}
+
+function findReleaseDir(starts: readonly string[]): string | undefined {
+  for (const start of starts) {
+    let dir = resolve(start)
+    for (;;) {
+      const candidate = join(dir, 'release')
+      if (existsSync(join(candidate, 'run.sh'))) return candidate
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+  return undefined
+}
+
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '')
+}
+
 main().catch((err) => {
   logger.error({ err }, 'fatal error')
+  if (err instanceof Error) {
+    console.error(err.message)
+  }
   process.exit(1)
 })

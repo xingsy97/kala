@@ -123,28 +123,10 @@ describe('ExecutorRegistry', () => {
     expect(sock.emitted[0]!.event).toBe('tool:call')
     expect((sock.emitted[0]!.payload as ToolCallMessage).cwd).toBe('/tmp/work')
 
-    // Ack via the callback (host-side path used before executor:tool_result).
+    // Ack via the callback  -  this is the sole settle path now that the
+    // redundant executor:tool_result event has been removed.
     sock.emitted[0]!.ack!({ callId: 'c1', ok: true, content: 'hi\n' })
     await expect(p).resolves.toEqual({ ok: true, content: 'hi\n' })
-  })
-
-  it('resolves via executor:tool_result when the ack callback is skipped', async () => {
-    const reg = createExecutorRegistry(
-      fakeIo() as never,
-      makeResolver({ 'sess-2': 'ws-default' }),
-      5_000,
-    )
-    const sock = makeFakeSocket('s2')
-    reg.attach(sock as never, announceOf('e2'))
-
-    const p = reg.callTool('sess-2', callEffect('c1'))
-    reg.fulfill('sess-2', {
-      sessionId: 'sess-2',
-      callId: 'c1',
-      ok: true,
-      content: 'from tool_result',
-    })
-    await expect(p).resolves.toEqual({ ok: true, content: 'from tool_result' })
   })
 
   it('fails pending calls when the executor disconnects with no replacement', async () => {
@@ -152,6 +134,8 @@ describe('ExecutorRegistry', () => {
       fakeIo() as never,
       makeResolver({ 'sess-3': 'ws-default' }),
       5_000,
+      undefined,
+      0, // no grace window  -  assert instant-detach semantics
     )
     const sock = makeFakeSocket('s3')
     reg.attach(sock as never, announceOf('e3'))
@@ -217,6 +201,8 @@ describe('ExecutorRegistry', () => {
       fakeIo() as never,
       makeResolver({ 'sess-5': 'ws-default' }),
       5_000,
+      undefined,
+      0, // no grace window  -  assert instant-detach semantics
     )
     const oldSock = makeFakeSocket('old-2')
     reg.attach(oldSock as never, announceOf('e-drop'))
@@ -247,6 +233,71 @@ describe('ExecutorRegistry', () => {
     const redispatched = newSock.emitted[newSock.emitted.length - 1]!
     redispatched.ack!({ callId: 'c1', ok: true, content: 'ok' })
     await expect(p).resolves.toEqual({ ok: true, content: 'ok' })
+  })
+
+  it('detach grace window: a fresh executorId that reclaims the same workspaceId resurrects pending calls and emits "updated" (no detach flicker)', async () => {
+    const changes: ServerExecutorChangedPayload[] = []
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-grace': 'ws-restart' }),
+      5_000,
+      undefined,
+      500, // 500ms grace window
+    )
+    reg.onChange((c) => changes.push(c))
+
+    const oldSock = makeFakeSocket('grace-old')
+    reg.attach(oldSock as never, announceOf('e-old', 'ws-restart'))
+    const p = reg.callTool('sess-grace', callEffect('c1'))
+    expect(oldSock.emitted).toHaveLength(1)
+
+    // Executor process dies. Grace timer starts; no detach event yet.
+    reg.detach(oldSock as never)
+    expect(changes.find((c) => c.change === 'detached')).toBeUndefined()
+
+    // Process restarts with a fresh executorId but same workspaceId.
+    const newSock = makeFakeSocket('grace-new')
+    reg.attach(newSock as never, announceOf('e-new', 'ws-restart'))
+
+    // Pending call transferred and re-emitted to the new socket.
+    expect(newSock.emitted).toHaveLength(1)
+    const redispatched = newSock.emitted[0]!
+    expect((redispatched.payload as ToolCallMessage).callId).toBe('c1')
+
+    // Wire event is 'updated', not 'attached'  -  the dashboard sees a
+    // seamless swap instead of a flicker.
+    const lastChange = changes[changes.length - 1]
+    expect(lastChange?.change).toBe('updated')
+
+    redispatched.ack!({ callId: 'c1', ok: true, content: 'survived' })
+    await expect(p).resolves.toEqual({ ok: true, content: 'survived' })
+
+    // The detach event never fires after grace resolution.
+    await new Promise((r) => setTimeout(r, 600))
+    expect(changes.find((c) => c.change === 'detached')).toBeUndefined()
+  })
+
+  it('detach grace window: if nobody reconnects, pending calls fail and detached fans out when the timer fires', async () => {
+    const changes: ServerExecutorChangedPayload[] = []
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-grace-expire': 'ws-lonely' }),
+      5_000,
+      undefined,
+      50, // very short grace
+    )
+    reg.onChange((c) => changes.push(c))
+
+    const sock = makeFakeSocket('lonely')
+    reg.attach(sock as never, announceOf('e-lonely', 'ws-lonely'))
+    const p = reg.callTool('sess-grace-expire', callEffect('c1'))
+    reg.detach(sock as never)
+
+    await expect(p).resolves.toEqual({
+      ok: false,
+      content: 'executor disconnected',
+    })
+    expect(changes.at(-1)?.change).toBe('detached')
   })
 
   it('honours the tool-call timeout when nobody ever acks', async () => {
