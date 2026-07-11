@@ -40,7 +40,7 @@ const baseState: AgentState = {
     cacheReadTokens: 32000,
   },
   cursor: 128,
-  cwd: '/workspace/project',
+  cwd: '/path/to/agent-kernel',
   approvalMode: 'ask',
 }
 

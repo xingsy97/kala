@@ -4,6 +4,10 @@ Status: implementation-aligned design documents
 Created: 2026-07-09
 Last reviewed against implementation: 2026-07-09
 
+This folder collects production-oriented enhancement designs for `agent-kernel`.
+The files are ordered by expected user and product value, not by
+implementation difficulty.
+
 Each document now has an implementation alignment section. That section is the
 source of truth for what the repository actually does today versus what remains
 design work. This distinction matters because several enhancement areas already

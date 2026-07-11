@@ -49,7 +49,7 @@ describe('ConnectWorkspaceDialog', () => {
     expect(text).toContain('EXECUTOR_INVITE=')
     expect(text).toContain('ak_invite_test')
     expect(text).toContain('http://localhost:3000/release-assets')
-    expect(text).not.toContain('github.com/OWNER/REPO')
+    expect(text).not.toContain('github.com/')
     expect(text).toContain('Mac/Linux')
     expect(text).not.toContain('WORKSPACE_NAME')
     expect(text).not.toContain('agent-kernel-executor')

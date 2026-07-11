@@ -71,7 +71,7 @@ The `transitions` object **is** SPEC  - 3's legality table, expressed as code. I
 **Bad**:
 - No free visualization. If we want a state diagram, we draw it (or auto-generate one from the `transitions` object, which is easy  -  it's data).
 - No devtools. In practice, the JSONL event log + fold combinator already gives us "step-by-step time-travel debugging", which is what devtools would provide.
-- We give up "XState in external summaries" as a legibility signal. Trade: "hand-rolled a finite state machine that mirrors the spec" is a more advanced implementation signal than "used a state machine library."
+- We give up "used XState" as an ecosystem-familiarity signal. Trade: a hand-rolled FSM that mirrors the spec 1:1 stays legible without pulling in a runtime.
 
 ## Verification
 

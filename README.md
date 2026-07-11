@@ -77,8 +77,8 @@ Dashboard:
 ## Quick tour
 
 ```bash
-git clone https://github.com/OWNER/REPO
-cd hub-agent/agent-kernel
+git clone <repo-url>
+cd agent-kernel
 pnpm install
 pnpm -r build
 pnpm -r test        # kernel / host / executor / dashboard suites
