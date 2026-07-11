@@ -210,6 +210,10 @@ jobs:
           pattern: native-*
           path: release
           merge-multiple: true
+      - name: Restore executable bit on downloaded assets
+        run: |
+          find release -maxdepth 1 -type f \( -name 'agent-kernel-*' -o -name '*.cjs' -o -name '*.sh' \) -print0 \
+            | xargs -0 -r chmod +x
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --finalize-only
       - run: pnpm run verify:release-assets
       - name: Upload native assets and refreshed metadata
