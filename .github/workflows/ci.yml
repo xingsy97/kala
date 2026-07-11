@@ -6,8 +6,16 @@ on:
   pull_request:
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task:
+          - typecheck
+          - test
+          - swebench-smoke
+          - release-assets
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -19,8 +27,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run typecheck
-      - run: pnpm run test
-      - run: pnpm run verify:swebench-smoke
-      - run: pnpm run build:release-assets -- --no-native --repo ${{ github.repository }}
-      - run: pnpm run verify:release-assets
+      - name: Run ${{ matrix.task }}
+        run: |
+          case "${{ matrix.task }}" in
+            typecheck)
+              pnpm run typecheck
+              ;;
+            test)
+              pnpm run test
+              ;;
+            swebench-smoke)
+              pnpm run verify:swebench-smoke
+              ;;
+            release-assets)
+              pnpm run build:release-assets -- --no-native --repo ${{ github.repository }}
+              pnpm run verify:release-assets
+              ;;
+          esac
