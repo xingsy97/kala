@@ -24,6 +24,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [agentic-rl-integration.md](agentic-rl-integration.md) | Agentic RL rollout integration research note - adapter-first, not custom trajectory-first |
 | [skills.md](skills.md) | Skills design - OpenCode-style `skill({ name })` tool loading |
 | [llm-message-assembly-debugger.md](llm-message-assembly-debugger.md) | Dashboard design for explaining how LLM API messages are assembled |
+| [context-compaction.md](context-compaction.md) | Host-driven context compaction design, protocol invariants, thresholds, and known gaps |
 | [adr/](adr/) | Architecture Decision Records — one file per big call, with alternatives and consequences |
 
 ## Process
