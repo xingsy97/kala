@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createSandbox, SandboxError } from './sandbox.js'
 
 // The sandbox returns *canonical* absolute paths (symlinks resolved, and on
-// Windows 8.3 short names like `C:\Users\USER\ - ` expanded to their long
+// Windows 8.3 short names like `C:\Users\USERNAM~1\ - ` expanded to their long
 // form). `os.tmpdir()` can itself be an 8.3 path, so a raw `mkdtemp` result is
 // not necessarily canonical. Run every temp dir through the same
 // canonicalization the sandbox uses so assertions compare like with like on
