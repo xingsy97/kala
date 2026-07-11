@@ -218,7 +218,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
 
         {detailsOpen ? (
           <ScrollArea
-            className="max-h-56 rounded-md border border-amber-200/60 bg-white/70 dark:border-amber-500/20 dark:bg-black/20"
+            className="ak-expand-in max-h-56 rounded-md border border-amber-200/60 bg-white/70 dark:border-amber-500/20 dark:bg-black/20"
             data-testid="approval-details"
           >
             <div className="p-2">

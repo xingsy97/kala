@@ -8,7 +8,7 @@
  * sessions without a workspaceId (older logs) group under "Unassigned".
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefCallback } from 'react'
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
 import type { RowRendererProps } from 'react-arborist'
@@ -19,8 +19,10 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Circle,
   Clock3,
   Folder,
+  GripVertical,
   GitFork,
   Info,
   LoaderCircle,
@@ -49,7 +51,6 @@ import { cn } from '../../lib/utils.js'
 import { buildTree } from './tree-model.js'
 import type {
   SessionNode,
-  TimeBucketNode,
   TreeNode,
   WorkspaceChild,
   WorkspaceNode,
@@ -58,8 +59,9 @@ import type {
 type Props = {
   executors: readonly AttachedExecutor[]
   sessions: readonly SessionSummary[]
+  loading?: boolean
   selectedSessionId: string | null
-  activeSessionStatus?: SessionActivityStatus
+  sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
   onSelect(sessionId: string): void
   onNewSession(workspaceId?: string): void
   onConnectWorkspace(): void
@@ -73,15 +75,19 @@ type Props = {
 
 const SESSION_ROW_HEIGHT = 60
 const WORKSPACE_ROW_HEIGHT = 48
-const BUCKET_ROW_HEIGHT = 28
+const SESSION_ORDER_STORAGE_KEY = 'agent-kernel:explorer:session-order:v1'
+const WORKSPACE_OPEN_STORAGE_KEY = 'agent-kernel:explorer:workspace-open:v1'
+const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
+const EXPLORER_RAIL_CELL = 'flex h-5 w-4 flex-none items-center justify-center'
 
 export type SessionActivityStatus = SessionSummary['status'] | 'loading'
 
 export function Explorer({
   executors,
   sessions,
+  loading = false,
   selectedSessionId,
-  activeSessionStatus,
+  sessionStatuses,
   onSelect,
   onNewSession,
   onConnectWorkspace,
@@ -97,11 +103,25 @@ export function Explorer({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [workspaceOpenState, setWorkspaceOpenState] = useState<Record<string, boolean>>(() => readStoredWorkspaceOpenState())
   const [ref, bounds] = useMeasure({ debounce: 30 })
 
+  const [manualSessionOrder, setManualSessionOrder] = useState<readonly string[]>(() =>
+    syncSessionOrder(readStoredSessionOrder(), sessions),
+  )
+  useEffect(() => {
+    setManualSessionOrder((prev) => syncSessionOrder(prev, sessions))
+  }, [sessions])
+  useEffect(() => {
+    writeStoredSessionOrder(manualSessionOrder)
+  }, [manualSessionOrder])
+  const orderedSessions = useMemo(
+    () => applyManualSessionOrder(sessions, manualSessionOrder),
+    [sessions, manualSessionOrder],
+  )
   const data = useMemo(
-    () => buildTree(executors, sessions),
-    [executors, sessions],
+    () => buildTree(executors, orderedSessions),
+    [executors, orderedSessions],
   )
   const visibleData = useMemo(() => filterTree(data, query), [data, query])
 
@@ -113,6 +133,29 @@ export function Explorer({
     if (node.data.kind === 'session') onSelect(node.data.sessionId)
   }
 
+  const handleMove = useCallback((args: {
+    dragIds: string[]
+    dragNodes: NodeApi<TreeNode>[]
+    parentId: string | null
+    parentNode: NodeApi<TreeNode> | null
+    index: number
+  }) => {
+    const movedSessionIds = args.dragNodes
+      .map((node) => node.data)
+      .filter((node): node is SessionNode => node.kind === 'session')
+      .map((node) => node.sessionId)
+    if (movedSessionIds.length === 0) return
+    const parent = args.parentNode?.data
+    if (!parent || parent.kind !== 'workspace') return
+    const targetWorkspaceId = parent.workspaceId ?? undefined
+    const targetIds = parent.children
+      .filter((node) => node.kind === 'session' && node.parentSessionId === undefined && node.workspaceId === targetWorkspaceId)
+      .map((node) => node.sessionId)
+    const movableIds = movedSessionIds.filter((id) => targetIds.includes(id))
+    if (movableIds.length === 0) return
+    setManualSessionOrder((prev) => reorderSessionIds(prev, targetIds, movableIds, args.index))
+  }, [])
+
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/30">
       <Header query={query} onQueryChange={setQuery} onConnectWorkspace={onConnectWorkspace} onCollapse={onCollapse} />
@@ -122,7 +165,9 @@ export function Explorer({
         data-testid="explorer-column"
         data-scroll-owner="react-arborist"
       >
-        {empty ? (
+        {loading ? (
+          <ExplorerLoading />
+        ) : empty ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground">
             {t('explorer.noDaemons')}
           </div>
@@ -134,28 +179,46 @@ export function Explorer({
           <Tree<TreeNode>
             data={visibleData as unknown as TreeNode[]}
             childrenAccessor={(d) => {
-              if (d.kind === 'workspace' || d.kind === 'bucket') return d.children
+              if (d.kind === 'workspace') return d.children
               return d.children.length > 0 ? d.children : null
             }}
             idAccessor="id"
             openByDefault
-            disableDrag
-            disableDrop
+            initialOpenState={workspaceOpenState}
+            onToggle={(id) => {
+              if (!id.startsWith('ws:')) return
+              setWorkspaceOpenState((prev) => {
+                const next = { ...prev, [id]: !(prev[id] ?? true) }
+                writeStoredWorkspaceOpenState(next)
+                return next
+              })
+            }}
+            disableDrag={(d) => d.kind !== 'session'}
+            disableDrop={({ parentNode, dragNodes }) => {
+              if (parentNode.data.kind !== 'workspace') return true
+              const targetWorkspaceId = parentNode.data.workspaceId ?? undefined
+              return dragNodes.some((node) => {
+                const data = node.data
+                return data.kind !== 'session' || data.parentSessionId !== undefined || data.workspaceId !== targetWorkspaceId
+              })
+            }}
             disableEdit
             disableMultiSelection
             disableSelect={(d) => d.kind !== 'session'}
             selection={selection}
             onActivate={activate}
+            onMove={handleMove}
             renderRow={TreeRow}
             rowHeight={rowHeightFor}
             indent={12}
             width={bounds.width}
             height={bounds.height}
           >
-            {({ node, style }) => (
+            {({ node, style, dragHandle }) => (
               <Row
                 node={node}
                 style={style}
+                dragHandle={dragHandle}
                 editingSessionId={editingSessionId}
                 onDeleteRequest={(sess) => setPendingDelete(sess)}
                 onStartEdit={(sess) => setEditingSessionId(sess.sessionId)}
@@ -179,7 +242,7 @@ export function Explorer({
                 }}
                 onNewSession={onNewSession}
                 query={query}
-                activeSessionStatus={activeSessionStatus}
+                sessionStatuses={sessionStatuses}
               />
             )}
           </Tree>
@@ -236,9 +299,32 @@ function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>
   )
 }
 
+function ExplorerLoading(): JSX.Element {
+  return (
+    <div className="space-y-3 p-3" data-testid="explorer-loading">
+      <div className="flex items-center gap-2 rounded-lg bg-background/45 px-3 py-2 text-xs text-muted-foreground shadow-sm">
+        <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden />
+        <span>Loading workspaces and sessions</span>
+      </div>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div
+          key={i}
+          className="ak-explorer-loading-row overflow-hidden rounded-lg bg-background/35 px-3 py-2"
+          style={{ animationDelay: `${i * 70}ms` }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="h-7 w-7 rounded-md bg-muted/80" />
+            <span className="h-2.5 w-24 rounded-full bg-muted/80" />
+          </div>
+          <div className="ml-9 mt-2 h-2 w-32 rounded-full bg-muted/50" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function rowHeightFor(node: NodeApi<TreeNode>): number {
   if (node.data.kind === 'workspace') return WORKSPACE_ROW_HEIGHT
-  if (node.data.kind === 'bucket') return BUCKET_ROW_HEIGHT
   return SESSION_ROW_HEIGHT
 }
 
@@ -310,6 +396,7 @@ function Header({
 function Row({
   node,
   style,
+  dragHandle,
   editingSessionId,
   onDeleteRequest,
   onStartEdit,
@@ -323,10 +410,11 @@ function Row({
   onSubmitWorkspaceEdit,
   onNewSession,
   query,
-  activeSessionStatus,
+  sessionStatuses,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
+  dragHandle?: (el: HTMLDivElement | null) => void
   editingSessionId: string | null
   onDeleteRequest(sess: SessionNode): void
   onStartEdit(sess: SessionNode): void
@@ -340,7 +428,7 @@ function Row({
   onSubmitWorkspaceEdit(workspace: WorkspaceNode, label: string): void
   onNewSession(workspaceId?: string): void
   query: string
-  activeSessionStatus?: SessionActivityStatus
+  sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
@@ -357,13 +445,11 @@ function Row({
       />
     )
   }
-  if (node.data.kind === 'bucket') {
-    return <BucketRow node={node as NodeApi<TimeBucketNode>} style={style} query={query} />
-  }
   return (
     <SessionRow
       node={node as NodeApi<SessionNode>}
       style={style}
+      dragHandle={dragHandle}
       editing={editingSessionId === (node.data as SessionNode).sessionId}
       onDeleteRequest={onDeleteRequest}
       onStartEdit={onStartEdit}
@@ -371,7 +457,7 @@ function Row({
       onSubmitEdit={onSubmitEdit}
       onOpenSessionInfo={onOpenSessionInfo}
       query={query}
-      activeStatus={node.isSelected ? activeSessionStatus : undefined}
+      activeStatus={sessionStatuses?.get((node.data as SessionNode).sessionId)}
     />
   )
 }
@@ -420,44 +506,51 @@ function WorkspaceRow({
       onClick={() => {
         if (!editing) node.toggle()
       }}
-      className="group/ws flex min-w-0 cursor-pointer select-none flex-col justify-center px-3 hover:bg-accent/50"
+      className={cn(
+        'group/ws min-w-0 cursor-pointer select-none px-3 py-1.5 hover:bg-accent/50',
+        EXPLORER_ROW_GRID,
+      )}
     >
-      <div className="flex items-center gap-1.5">
+      <div className={EXPLORER_RAIL_CELL}>
         {node.isOpen ? (
           <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         ) : (
           <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
+      </div>
+      <div className={EXPLORER_RAIL_CELL}>
         <span className={cn('inline-block h-2 w-2 flex-none rounded-full', dotCls)} />
-        {editing ? (
-          <RenameInput
-            initial={w.name}
-            onSubmit={(next) => onSubmitEdit(w, next)}
-            onCancel={onCancelEdit}
-            testId="workspace-rename-input"
-            ariaLabel={t('explorer.renameWorkspace')}
-          />
-        ) : (
-          <span
-            className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground"
-            title={canRename ? t('explorer.doubleClickRename') : undefined}
-            onDoubleClick={(e) => {
-              if (!canRename) return
-              e.preventDefault()
-              e.stopPropagation()
-              onStartEdit(w)
-            }}
-          >
-            <HighlightText text={w.name} query={query} />
-          </span>
-        )}
+      </div>
+      {editing ? (
+        <RenameInput
+          initial={w.name}
+          onSubmit={(next) => onSubmitEdit(w, next)}
+          onCancel={onCancelEdit}
+          testId="workspace-rename-input"
+          ariaLabel={t('explorer.renameWorkspace')}
+        />
+      ) : (
+        <span
+          className="min-w-0 truncate text-[13px] font-semibold leading-5 text-foreground"
+          title={canRename ? t('explorer.doubleClickRename') : undefined}
+          onDoubleClick={(e) => {
+            if (!canRename) return
+            e.preventDefault()
+            e.stopPropagation()
+            onStartEdit(w)
+          }}
+        >
+          <HighlightText text={w.name} query={query} />
+        </span>
+      )}
+      <div className="flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:opacity-100">
         {canRename && !editing ? (
           <button
             type="button"
             data-testid={`workspace-rename-${w.workspaceId}`}
             title={t('explorer.renameWorkspace')}
             aria-label={t('explorer.renameWorkspaceAria', { workspaceId: w.workspaceId })}
-            className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/ws:opacity-100"
+            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation()
               onStartEdit(w)
@@ -473,7 +566,7 @@ function WorkspaceRow({
             title={w.online ? t('explorer.newSessionInWorkspace') : t('explorer.workspaceOffline')}
             aria-label={t('explorer.newSessionInWorkspace')}
             disabled={!w.online}
-            className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground group-hover/ws:opacity-100"
+            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             onClick={(e) => {
               e.stopPropagation()
               if (!w.online) return
@@ -489,7 +582,7 @@ function WorkspaceRow({
             data-testid={`workspace-info-${w.workspaceId}`}
             title={t('explorer.workspaceInfo')}
             aria-label={t('explorer.workspaceInfo')}
-            className="flex-none rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/ws:opacity-100"
+            className="flex-none rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation()
               if (w.workspaceId !== null) onWorkspaceInfo?.(w.workspaceId)
@@ -499,38 +592,9 @@ function WorkspaceRow({
           </button>
         ) : null}
       </div>
-      <div className="mt-0.5 truncate pl-6 text-[11px] text-muted-foreground">
+      <div className="col-start-3 min-w-0 truncate text-[11px] leading-4 text-muted-foreground">
         {meta}
       </div>
-    </div>
-  )
-}
-
-function BucketRow({
-  node,
-  style,
-  query,
-}: {
-  node: NodeApi<TimeBucketNode>
-  style: React.CSSProperties
-  query: string
-}): JSX.Element {
-  const b = node.data
-  return (
-    <div
-      style={style}
-      data-testid="bucket-row"
-      data-bucket={b.bucket}
-      onClick={() => node.toggle()}
-      className="flex min-w-0 cursor-pointer select-none items-center gap-1.5 px-3 pl-5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80 hover:text-foreground"
-    >
-      {node.isOpen ? (
-        <ChevronDown className="h-3 w-3 flex-none opacity-60" />
-      ) : (
-        <ChevronRight className="h-3 w-3 flex-none opacity-60" />
-      )}
-      <span className="truncate"><HighlightText text={b.label} query={query} /></span>
-      <span className="ml-1 tabular-nums opacity-60">{b.children.length}</span>
     </div>
   )
 }
@@ -538,6 +602,7 @@ function BucketRow({
 function SessionRow({
   node,
   style,
+  dragHandle,
   editing,
   onDeleteRequest,
   onStartEdit,
@@ -549,6 +614,7 @@ function SessionRow({
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
+  dragHandle?: (el: HTMLDivElement | null) => void
   editing: boolean
   onDeleteRequest(sess: SessionNode): void
   onStartEdit(sess: SessionNode): void
@@ -568,10 +634,10 @@ function SessionRow({
       data-testid="session-row"
       data-session-id={s.sessionId}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden transition-colors',
+        'group relative min-w-0 cursor-pointer overflow-hidden px-3 py-2 transition-colors',
         'hover:bg-accent',
-        selected &&
-          'bg-accent border-l-2 border-l-primary',
+        selected && 'bg-accent',
+        EXPLORER_ROW_GRID,
       )}
       onMouseDown={(e) => {
         // Suppress the second `click` in a native double-click sequence so it
@@ -585,54 +651,55 @@ function SessionRow({
         onStartEdit(s)
       }}
     >
-      <div className="min-w-0 cursor-pointer px-3 py-2 pl-6 pr-24">
-        <div className="flex min-w-0 items-center gap-2">
-          <SessionStatusIndicator status={status} selected={selected} />
-          {s.parentSessionId ? (
-            <GitFork
-              className="h-3 w-3 flex-none text-amber-600 dark:text-amber-400"
-              aria-label={t('explorer.forkedSession')}
-            />
-          ) : null}
-          {editing ? (
-            <RenameInput
-              initial={s.label}
-              onSubmit={(next) => onSubmitEdit(s, next)}
-              onCancel={onCancelEdit}
-            />
-          ) : (
-            <div
-              className={cn(
-                'min-w-0 flex-1 truncate text-[13px] font-medium',
-                selected ? 'text-foreground' : 'text-foreground/90',
-              )}
-              title={t('explorer.doubleClickRename')}
-            >
-              <HighlightText text={s.label} query={query} />
-            </div>
-          )}
-        </div>
-        <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-[11px] leading-4 text-muted-foreground">
-          {s.currentCwd ? (
-            <span
-              className="flex min-w-0 items-center gap-1.5 truncate font-mono"
-              title={s.currentCwd}
-              data-testid="session-row-cwd"
-            >
-              <Folder className="h-3 w-3 flex-none opacity-70" />
-              <span className="min-w-0 truncate"><HighlightText text={s.currentCwd} query={query} /></span>
-            </span>
-          ) : null}
-          <span className="ml-auto flex-none tabular-nums opacity-70">
-            <span className="inline-flex items-center gap-1">
-              <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
-              {formatWhen(s.lastActivityIso, t)}
-            </span>
-          </span>
-        </div>
+      {selected ? (
+        <span
+          className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full bg-primary"
+          data-testid="session-selected-marker"
+          aria-hidden="true"
+        />
+      ) : null}
+      <div className={EXPLORER_RAIL_CELL}>
+        {!s.parentSessionId ? (
+          <div
+            ref={dragHandle}
+            className="flex h-5 w-4 flex-none cursor-grab items-center justify-center text-muted-foreground/50 opacity-70 active:cursor-grabbing group-hover:text-muted-foreground"
+            title={t('explorer.dragSession')}
+            aria-label={t('explorer.dragSession')}
+            data-testid="session-drag-handle"
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+          </div>
+        ) : (
+          <GitFork
+            className="h-3 w-3 flex-none text-amber-600 dark:text-amber-400"
+            aria-label={t('explorer.forkedSession')}
+          />
+        )}
       </div>
+      <div className={EXPLORER_RAIL_CELL}>
+        <SessionStatusIndicator status={status} />
+      </div>
+      {editing ? (
+        <RenameInput
+          initial={s.label}
+          onSubmit={(next) => onSubmitEdit(s, next)}
+          onCancel={onCancelEdit}
+        />
+      ) : (
+        <div
+          className={cn(
+            'min-w-0 truncate text-[13px] font-medium leading-5',
+            selected ? 'text-foreground' : 'text-foreground/90',
+          )}
+          title={t('explorer.doubleClickRename')}
+        >
+          <HighlightText text={s.label} query={query} />
+        </div>
+      )}
       {editing ? null : (
-        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex min-w-0 items-start justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           <Button
             variant="ghost"
             size="icon"
@@ -682,16 +749,27 @@ function SessionRow({
           </Button>
         </div>
       )}
+      <div className="col-start-2 flex h-4 w-4 items-center justify-center text-muted-foreground">
+        {s.currentCwd ? <Folder className="h-3 w-3 opacity-70" aria-hidden="true" /> : null}
+      </div>
+      <div className="col-start-3 min-w-0 truncate font-mono text-[11px] leading-4 text-muted-foreground" title={s.currentCwd} data-testid="session-row-cwd">
+        {s.currentCwd ? <HighlightText text={s.currentCwd} query={query} /> : null}
+      </div>
+      <div className="col-start-4 row-start-2 flex min-w-0 justify-end text-[11px] leading-4 text-muted-foreground">
+        <span className="inline-flex flex-none items-center gap-1 tabular-nums opacity-70">
+          <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
+          {formatWhen(s.lastActivityIso, t)}
+        </span>
+      </div>
     </div>
   )
 }
 
 export function SessionStatusIndicator({
   status,
-  selected,
 }: {
   status: SessionActivityStatus | undefined
-  selected: boolean
+  selected?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const label = statusIndicatorLabel(status, t)
@@ -706,10 +784,7 @@ export function SessionStatusIndicator({
         title={label}
       >
         <LoaderCircle
-          className={cn(
-            'h-3 w-3 animate-spin',
-            selected ? 'text-sky-600 dark:text-sky-400' : 'text-sky-500 dark:text-sky-400/90',
-          )}
+          className="h-3 w-3 animate-spin text-sky-500 dark:text-sky-400"
           strokeWidth={2.4}
         />
       </span>
@@ -724,12 +799,7 @@ export function SessionStatusIndicator({
         aria-label={label}
         title={label}
       >
-        <span
-          className={cn(
-            'h-2 w-2 rounded-full animate-pulse',
-            selected ? 'bg-sky-500 dark:bg-sky-400' : 'bg-sky-500/80 dark:bg-sky-400/80',
-          )}
-        />
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-sky-500 dark:bg-sky-400" />
       </span>
     )
   }
@@ -743,10 +813,7 @@ export function SessionStatusIndicator({
         title={label}
       >
         <Wrench
-          className={cn(
-            'h-3 w-3 animate-[spin_2s_linear_infinite]',
-            selected ? 'text-violet-600 dark:text-violet-400' : 'text-violet-500 dark:text-violet-400/90',
-          )}
+          className="h-3 w-3 animate-[spin_2s_linear_infinite] text-violet-500 dark:text-violet-400"
           strokeWidth={2.4}
         />
       </span>
@@ -762,10 +829,7 @@ export function SessionStatusIndicator({
         title={label}
       >
         <TriangleAlert
-          className={cn(
-            'h-3 w-3',
-            selected ? 'text-amber-600 dark:text-amber-400' : 'text-amber-500 dark:text-amber-400/90',
-          )}
+          className="h-3 w-3 text-amber-500 dark:text-amber-400"
           strokeWidth={2.4}
         />
       </span>
@@ -781,33 +845,47 @@ export function SessionStatusIndicator({
         title={label}
       >
         <AlertCircle
-          className={cn(
-            'h-3 w-3',
-            selected ? 'text-rose-600 dark:text-rose-400' : 'text-rose-500 dark:text-rose-400/90',
-          )}
+          className="h-3 w-3 text-rose-500 dark:text-rose-400"
           strokeWidth={2.4}
         />
       </span>
     )
   }
-  // idle | done | undefined → static gray dot; done gets a slightly stronger tone
-  const dotTone =
-    status === 'done'
-      ? selected
-        ? 'bg-emerald-500 dark:bg-emerald-400'
-        : 'bg-emerald-500/70 dark:bg-emerald-400/70'
-      : selected
-        ? 'bg-muted-foreground'
-        : 'bg-muted-foreground/60'
+  if (status === 'done') {
+    return (
+      <span
+        className={base}
+        data-testid="session-status-indicator"
+        data-status={status}
+        aria-label={label}
+        title={label}
+      >
+        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
+      </span>
+    )
+  }
+  if (status === 'idle') {
+    return (
+      <span
+        className={base}
+        data-testid="session-status-indicator"
+        data-status={status}
+        aria-label={label}
+        title={label}
+      >
+        <Circle className="h-2.5 w-2.5 text-muted-foreground/80" strokeWidth={3} />
+      </span>
+    )
+  }
   return (
     <span
       className={base}
       data-testid="session-status-indicator"
-      data-status={status ?? 'unknown'}
+      data-status="unknown"
       aria-label={label}
       title={label}
     >
-      <span className={cn('h-2 w-2 rounded-full', dotTone)} />
+      <span className="h-2 w-2 rounded-full bg-muted-foreground/50" />
     </span>
   )
 }
@@ -891,6 +969,98 @@ function RenameInput({
   )
 }
 
+function readStoredWorkspaceOpenState(): Record<string, boolean> {
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_OPEN_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, boolean> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (key.startsWith('ws:') && typeof value === 'boolean') out[key] = value
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function writeStoredWorkspaceOpenState(state: Record<string, boolean>): void {
+  try {
+    window.localStorage.setItem(WORKSPACE_OPEN_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Storage can be unavailable in private mode or quota-exceeded states.
+  }
+}
+
+function readStoredSessionOrder(): readonly string[] {
+  try {
+    const raw = window.localStorage.getItem(SESSION_ORDER_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((value): value is string => typeof value === 'string' && value.length > 0)
+  } catch {
+    return []
+  }
+}
+
+function writeStoredSessionOrder(order: readonly string[]): void {
+  try {
+    window.localStorage.setItem(SESSION_ORDER_STORAGE_KEY, JSON.stringify(order))
+  } catch {
+    // Storage can be unavailable in private mode or quota-exceeded states.
+  }
+}
+
+function syncSessionOrder(
+  prev: readonly string[],
+  sessions: readonly SessionSummary[],
+): readonly string[] {
+  const ids = sessions.map((s) => s.sessionId)
+  const live = new Set(ids)
+  const next = prev.filter((id) => live.has(id))
+  const seen = new Set(next)
+  for (const id of ids) {
+    if (!seen.has(id)) next.push(id)
+  }
+  return next
+}
+
+function applyManualSessionOrder(
+  sessions: readonly SessionSummary[],
+  order: readonly string[],
+): readonly SessionSummary[] {
+  const rank = new Map(order.map((id, index) => [id, index]))
+  return [...sessions].sort((a, b) => {
+    const ar = rank.get(a.sessionId) ?? Number.MAX_SAFE_INTEGER
+    const br = rank.get(b.sessionId) ?? Number.MAX_SAFE_INTEGER
+    return ar - br
+  })
+}
+
+function reorderSessionIds(
+  order: readonly string[],
+  targetIds: readonly string[],
+  movedIds: readonly string[],
+  targetIndex: number,
+): readonly string[] {
+  const moved = new Set(movedIds)
+  const target = new Set(targetIds)
+  const targetWithoutMoved = targetIds.filter((id) => !moved.has(id))
+  const insertIndex = Math.max(0, Math.min(targetIndex, targetWithoutMoved.length))
+  const reorderedTarget = [
+    ...targetWithoutMoved.slice(0, insertIndex),
+    ...movedIds,
+    ...targetWithoutMoved.slice(insertIndex),
+  ]
+  let cursor = 0
+  return order.map((id) => {
+    if (!target.has(id)) return id
+    return reorderedTarget[cursor++] ?? id
+  })
+}
+
 function filterTree(nodes: readonly WorkspaceNode[], query: string): WorkspaceNode[] {
   const needle = query.trim().toLocaleLowerCase()
   if (!needle) return [...nodes]
@@ -903,14 +1073,8 @@ function filterTree(nodes: readonly WorkspaceNode[], query: string): WorkspaceNo
         const kept = filterSessionSubtree(child, needle, workspaceMatches)
         if (kept) children.push(kept)
       } else {
-        const sessions: SessionNode[] = []
-        for (const session of child.children) {
-          const kept = filterSessionSubtree(session, needle, workspaceMatches)
-          if (kept) sessions.push(kept)
-        }
-        if (sessions.length > 0 || child.label.toLocaleLowerCase().includes(needle)) {
-          children.push({ ...child, children: sessions })
-        }
+        const kept = filterSessionSubtree(child, needle, workspaceMatches)
+        if (kept) children.push(kept)
       }
     }
     if (workspaceMatches || children.length > 0) filtered.push({ ...workspace, children })

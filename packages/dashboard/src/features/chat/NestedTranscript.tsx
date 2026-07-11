@@ -230,8 +230,16 @@ function NestedGroupItem({
 
 function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
   const { t } = useTranslation()
-  const renderer = pickRenderer(group.toolName)
-  const rows = renderer({ calls: group.calls, results: group.results })
+  const rows = group.mixed
+    ? group.calls.map((call) => {
+        const renderer = pickRenderer(call.name)
+        const row = renderer({ calls: [call], results: group.results })[0]
+        return row ? { ...row, toolName: call.name } : null
+      }).filter((row): row is NonNullable<typeof row> => !!row)
+    : pickRenderer(group.toolName)({ calls: group.calls, results: group.results }).map((row) => ({
+        ...row,
+        toolName: group.toolName,
+      }))
   return (
     <div className="flex min-w-0 flex-col gap-0.5" data-testid={`nested-tool-group-${group.firstCallId}`}>
       {rows.map((row) => {
@@ -253,7 +261,7 @@ function NestedToolGroup({ group }: { group: ToolCallGroup }): JSX.Element {
                 ok ? 'text-muted-foreground' : 'text-rose-700 dark:text-rose-300',
               )}
             >
-              {group.toolName}
+              {row.toolName}
             </span>
             <span className="min-w-0 flex-1 truncate [overflow-wrap:anywhere]">
               {row.primary}
@@ -328,7 +336,7 @@ function NestedMarkdown({ text, compact }: { text: string; compact: boolean }): 
         '[&_li]:my-0.5 [&_li>p]:my-0.5',
         '[&_pre]:my-1 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/60 [&_pre]:p-2 [&_pre]:text-[10px]',
         '[&_hr]:my-2 [&_hr]:border-border/50',
-        '[&_table]:my-1 [&_table]:text-[10px] [&_table]:border [&_table]:border-border/50 [&_td]:border [&_td]:border-border/50 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-border/50 [&_th]:px-1.5 [&_th]:py-0.5',
+        '[&_table]:my-1 [&_table]:text-[10px] [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:px-1.5 [&_th]:py-0.5',
       )}
     >
       <ReactMarkdown

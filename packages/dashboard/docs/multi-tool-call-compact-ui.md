@@ -1,93 +1,236 @@
-# translated historical texttranslated historical texttranslated historical text tool call translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+# Multi-tool activity compact UI
 
-## translated historical texttranslated historical text
+## Problem
 
-translated historical texttranslated historical text assistant turn translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text N translated historical text tool_call translated historical text (translated historical texttranslated historical texttranslated historical texttranslated historical text 5 translated historical text `read`、10 translated historical text `grep`)，
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text + translated historical texttranslated historical texttranslated historical texttranslated historical text + translated historical texttranslated historical text JSON + translated historical texttranslated historical text JSON，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text timeline translated historical text"translated historical texttranslated historical texttranslated historical text k translated historical text tool_call"translated historical texttranslated historical texttranslated historical texttranslated historical text。
+Assistant turns often contain dense tool activity: reads, searches, edits, shell
+checks, and follow-up reads can arrive as a long uninterrupted sequence. Rendering
+each call as an equally large row creates three problems:
 
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text：
+1. The transcript becomes a wall of repeated tool chrome, especially after many
+   successful edits or searches.
+2. Important states such as failure, running, or approval requests lose visual
+   priority because they compete with routine success rows.
+3. Mixed tool runs are still noisy if grouping only handles "same tool repeated".
 
-1. translated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-2. translated historical texttranslated historical texttranslated historical text：timeline translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tool_call translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text）。
-3. translated historical texttranslated historical texttranslated historical text message ↔ timeline translated historical texttranslated historical texttranslated historical texttranslated historical text：`onJumpToMessage(index)` translated historical texttranslated historical text `#msg-{index}` translated historical texttranslated historical texttranslated historical texttranslated historical text
-   (`app.tsx:654`)，`highlightIndex` translated historical texttranslated historical texttranslated historical texttranslated historical text message (`ChatPanel.tsx:116`)。
+The dashboard must keep the protocol transcript intact while rendering contiguous
+tool work as compact, scannable activity.
 
-## references translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+## Design goals
 
-translated historical texttranslated historical text `references/claude-code-collection/original-source-code/src/utils/groupToolUses.ts`
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。`pi`、`opencode`、`codex`、`azure-code-agent-hub-pr879` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tool
-translated historical texttranslated historical text。
+- Preserve every underlying `tool_call` and `tool_result`; grouping is a render
+  view-model only.
+- Keep ordinary small runs readable without forcing extra clicks.
+- Collapse noisy long runs even when they contain different tool names.
+- Make failed, running, and approval states visible from the collapsed row.
+- Reuse tool-specific summary renderers for expanded details.
+- Avoid card-per-call layouts for dense successful activity.
 
-### claude-code-collection translated historical texttranslated historical texttranslated historical text
+## Source of truth
 
-Grouping translated historical text = `${messageId}:${toolName}`，translated historical text"translated historical texttranslated historical texttranslated historical text API translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text"。
-translated historical texttranslated historical text tool translated historical texttranslated historical text `renderGroupedToolUse` translated historical texttranslated historical texttranslated historical text group；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-Group translated historical texttranslated historical text 2 translated historical texttranslated historical texttranslated historical texttranslated historical text。
+The implementation lives in:
 
-```typescript
-// groupToolUses.ts:76
-const key = `${info.messageId}:${info.toolName}`
+- `packages/dashboard/src/features/chat/grouping.ts`
+- `packages/dashboard/src/features/chat/ChatPanel.tsx`
+- `packages/dashboard/src/features/chat/toolSummaries/*`
+- `packages/dashboard/src/features/chat/NestedTranscript.tsx`
+
+This document describes the intended behavior those files should maintain.
+
+## Activity detection
+
+The dashboard has two render-only grouping passes because tool calls can arrive
+in two shapes:
+
+1. A single assistant message can contain several consecutive `tool_call` content
+   blocks.
+2. The timeline can contain many small alternating items, usually
+   `llm_response(tool_call)` followed by `tool_result`, repeated for each tool
+   call.
+
+Both shapes must render with the same compact activity UI. The grouping pass must
+not merge protocol messages, rewrite the timeline, or change persisted state.
+
+### Transcript-level runs
+
+Before virtualization, `ChatPanel` scans visible transcript items and detects
+split tool activity across timeline item boundaries. This pass exists for real
+streaming runs where every tool call is emitted as its own `llm_response` event.
+
+A transcript-level run may include:
+
+- Assistant message items whose content is only `tool_call` blocks.
+- Immediately following tool result message items whose every `tool_result.callId`
+  belongs to a tool call already seen in the run.
+
+The run continues when the next transcript item is another pure tool-call
+assistant message, optionally followed by matching tool results.
+
+The run ends at any of these boundaries:
+
+- User message.
+- Pending local user message.
+- Compact boundary or compact feedback row.
+- Assistant text, thinking, image, or any assistant message that mixes tool calls
+  with non-tool content.
+- A tool result item for an unknown call id or with non-result content.
+
+Only mixed transcript-level runs with at least four calls collapse into one
+`Tool activity` row. Shorter runs fall back to the normal per-message rendering.
+Same-tool split runs also fall back to the normal compact call/result rows unless
+a future design explicitly adds a same-tool transcript-level rollup.
+
+### Message-level runs
+
+Inside one assistant message, a tool activity run is a contiguous sequence of
+`tool_call` content blocks. The run ends at the first non-tool content block,
+such as assistant text, thinking, or image content. Tool results are not part of
+the assistant message; they are looked up separately by `callId` and rendered
+inline with the corresponding call.
+
+Example:
+
+```text
+assistant text
+tool_call read
+tool_call grep
+tool_call edit
+tool_call bash
+assistant text
+tool_call read
 ```
 
-Group translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text message：
+This produces two message-level tool activity runs: the mixed four-call run,
+then the final single `read` run.
 
-```typescript
-// groupToolUses.ts:147
-const groupedMessage: GroupedToolUseMessage = {
-  type: 'grouped_tool_use',
-  toolName,
-  messages: group,       // translated historical texttranslated historical text assistant messages
-  results,               // translated historical texttranslated historical texttranslated historical text user tool_result messages
-  displayMessage: firstMsg,
-  uuid: `grouped-${firstMsg.uuid}`,
-  timestamp: firstMsg.timestamp,
-  messageId: info.messageId,
-}
+## Collapse threshold
+
+The dashboard uses two different behaviors:
+
+- Same-tool runs are grouped into a compact tool group at any length, including a
+  single call. This preserves the existing combined call/result row behavior.
+- Mixed-tool runs are collapsed into one `Tool activity` block only when the
+  contiguous run has at least four calls.
+- Mixed-tool runs shorter than four calls are split back into same-tool compact
+  rows. Two or three mixed calls usually contain enough useful intent that hiding
+  them behind one generic activity row is not worth the extra interaction.
+
+The threshold is intentionally UI-only. It must not affect timeline data,
+protocol messages, persistence, or replay.
+
+## Collapsed row
+
+A collapsed mixed activity row should answer four questions without expansion:
+
+```text
+Tool activity · read 2, grep 3, edit 4, bash 1 · 10 ops · 1 failed · 9 succeeded
 ```
 
-translated historical texttranslated historical text `GroupedToolUseContent` translated historical text group translated historical texttranslated historical text tool translated historical texttranslated historical texttranslated historical text `renderGroupedToolUse` translated historical texttranslated historical text
-(`GroupedToolUseContent.tsx:53`)。Agent tool translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text header (`Running N agents…`)
-+ translated historical text agent translated historical texttranslated historical text progress line (`UI.tsx:757`)，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text/translated historical texttranslated historical text。
+Required content:
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical text
+- Label: `Tool activity` for mixed groups; the tool name for same-tool groups.
+- Tool mix: ordered by first appearance in the run, formatted as `name count`.
+- Operation count: `N ops` for mixed groups, `x N` for same-tool groups.
+- Lifecycle badges: approval, running, failed, succeeded counts.
 
-Anchor translated historical texttranslated historical texttranslated historical text group translated historical text uuid。timeline translated historical texttranslated historical texttranslated historical text"translated historical text 3 translated historical text tool_call"translated historical texttranslated historical texttranslated historical texttranslated historical text group
-translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `(groupUUID, childIndex)` translated historical texttranslated historical text，translated historical texttranslated historical text
-tool translated historical text grouped renderer translated historical texttranslated historical texttranslated historical texttranslated historical text progress line translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+State badge priority is:
 
-## translated historical texttranslated historical text
+1. `Needs approval`
+2. `Running`
+3. `Failed`
+4. `Succeeded`
 
-translated historical text dashboard translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text pass，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text：
+Failures, approval, and running must remain visible while collapsed. Successful
+items can be lower contrast.
 
-- translated historical texttranslated historical text：`transcriptItems` (`ChatPanel.tsx:89`)
-- translated historical texttranslated historical texttranslated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical text message.content translated historical text，translated historical texttranslated historical text (translated historical texttranslated historical texttranslated historical texttranslated historical text) translated historical text tool_call + translated historical texttranslated historical texttranslated historical text
-  tool_result translated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text `tool_call.name` translated historical texttranslated historical text、translated historical texttranslated historical text ≥ 2 translated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text event kind，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text view model。kernel/timeline translated historical texttranslated historical texttranslated historical texttranslated historical text
-  translated historical texttranslated historical text，`#msg-{index}` translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Timeline `onJumpToMessage(index)` translated historical text index translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tool_call translated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
-  group，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `#msg-{index}-call-{callId}`。
+## Expanded details
 
-### translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+Expanded mixed activity is a dense list, not one large card per operation.
 
-**A. translated historical texttranslated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical text tool_call translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**
+Each row is rendered by the call's actual tool renderer and prefixed with the
+tool name:
 
-- translated historical texttranslated historical texttranslated historical text，header translated historical texttranslated historical text `read × 5`、`grep × 3`；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 5 translated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical text header translated historical texttranslated historical text。
-- Timeline translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text group translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text：ChatPanel.tsx translated historical texttranslated historical texttranslated historical texttranslated historical text `groupConsecutiveToolCalls(items)` translated historical texttranslated historical text + translated historical texttranslated historical text
-  `ToolCallGroupBlock` translated historical texttranslated historical text；MessageRow translated historical texttranslated historical texttranslated historical texttranslated historical text grouped translated historical texttranslated historical text。
+```text
+read · /repo/src/ChatPanel.tsx        240 lines
+grep · /tool_call/                   8 hits in /repo
+edit · /repo/src/ChatPanel.tsx       edited
+bash · pnpm test                     failed
+```
 
-**B. translated historical texttranslated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text grouped translated historical texttranslated historical text**
+Clicking a detail row expands the existing full `ToolCallBlock` and
+`ToolResultBlock` for that specific call. This keeps deep debugging available
+without making the default transcript heavy.
 
-- translated historical text claude-code-collection translated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical texttranslated historical text tool translated historical texttranslated historical texttranslated historical texttranslated historical text `renderGroup` translated historical texttranslated historical text，
-  translated historical texttranslated historical text `read × 5` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 5 translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，`grep × 3` translated historical text 3 translated historical text pattern。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text UI。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text + `packages/dashboard/src/features/chat/toolSummaries/*.tsx`
-  + translated historical texttranslated historical text registry。
+For same-tool groups, detail rows continue to use the existing tool-specific
+renderers without repeating the tool name in every primary label.
 
-## translated historical texttranslated historical text
+## Live tail reveal
 
-translated historical texttranslated historical text A。B translated historical texttranslated historical texttranslated historical texttranslated historical text grouped renderer translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text (bash/ls/read/write/edit/glob/grep)，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text header + translated historical texttranslated historical text
-translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。B translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+A collapsed mixed `Tool activity` can still be hard to follow while the agent is
+actively issuing more tool calls. During a live run, the dashboard automatically
+shows a sliding tail of the latest summary rows while keeping older rows hidden.
+
+The user-facing setting is named `Live tool activity tail` under Settings ->
+Interface. It is stored locally in `localStorage` as
+`ak-live-tool-activity-tail-count`.
+
+Rules:
+
+- Default value: `3`.
+- Allowed range: `0` to `10`.
+- `0` disables automatic live reveal; mixed activity stays fully collapsed until
+  the user opens it.
+- The setting only affects mixed `Tool activity` groups that still have at least
+  one running call, meaning a call without a result and without a pending
+  approval.
+- The UI reveals summary rows only, not full tool input/result bodies.
+- As the group grows, the visible window slides forward. With value `3`, calls
+  1-3 are hidden after calls 4-6 arrive; rows 4-6 remain visible.
+- Manual expansion takes precedence and shows all rows. Pending approvals also
+  remain visible even if they are outside the live tail.
+- The setting is render-only. It must not affect timeline data, persisted state,
+  replay, or compaction.
+
+## Result hiding
+
+When an assistant tool call is represented by a grouped row, the matching `tool`
+message result is hidden from the main transcript. The result remains available in
+the grouped detail and is matched by `callId`.
+
+This avoids blank tool-result rows and duplicate output while preserving the
+underlying message stream.
+
+For transcript-level groups, all consumed `tool_result` items are hidden from the
+virtualized transcript wrapper as well as from `MessageRow`. This matters because
+leaving empty tool result rows in the virtual list still creates visible vertical
+gaps even when the row component returns `null`.
+
+## Nested transcript behavior
+
+Nested sub-agent transcripts use the same grouping rules, but render them more
+densely. Mixed activity details must show the actual per-call tool label instead
+of the synthetic `Tool activity` label.
+
+## Non-goals
+
+- Do not introduce new protocol event kinds.
+- Do not merge, rewrite, or drop tool calls in kernel state.
+- Do not make timeline anchors depend on collapsed row text.
+- Do not add tool-specific renderers unless a tool needs a materially better
+  summary than the generic input preview.
+
+## Test expectations
+
+The dashboard tests should cover:
+
+- Single tool calls render as one combined compact call/result row.
+- Same-tool consecutive calls group together.
+- Mixed runs of four or more calls collapse to one `Tool activity` row.
+- Mixed runs split across repeated `llm_response(tool_call)` and `tool_result`
+  transcript items collapse to the same `Tool activity` row.
+- Short mixed runs remain separate compact rows.
+- Assistant text, compact boundaries, pending user messages, and unrelated tool
+  results break transcript-level grouping.
+- Collapsed mixed rows expose tool mix, operation count, failures, running state,
+  approvals, and success counts.
+- Expanded mixed rows use each call's actual tool renderer.
+- Matching tool results are hidden from standalone tool-result rows.

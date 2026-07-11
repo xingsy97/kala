@@ -7,12 +7,18 @@ import type {
 
 /**
  * View-model item emitted after grouping. A "group" represents one or more
- * consecutive tool_call blocks (same tool name) inside one assistant
- * message.content, and hides tool_result blocks that belong to grouped calls.
+ * consecutive tool_call blocks inside one assistant message.content, and hides
+ * tool_result blocks that belong to grouped calls.
+ *
+ * Short mixed runs stay as individual single-tool rows so the transcript keeps
+ * enough immediate context. Larger mixed runs become one activity block; the UI
+ * then summarizes lifecycle, tool mix, and per-call detail without changing the
+ * protocol transcript.
  */
 export type ToolCallGroup = {
   kind: 'tool_call_group'
   toolName: string
+  mixed: boolean
   calls: ToolCallContent[]
   results: Map<string, ToolResultContent>
   firstCallId: string
@@ -36,29 +42,46 @@ export function groupConsecutiveToolCalls(
       continue
     }
     let j = i + 1
-    while (
-      j < content.length &&
-      content[j]!.type === 'tool_call' &&
-      (content[j] as ToolCallContent).name === c.name
-    ) {
+    while (j < content.length && content[j]!.type === 'tool_call') {
       j += 1
     }
     const run = content.slice(i, j) as ToolCallContent[]
-    const results = new Map<string, ToolResultContent>()
-    for (const call of run) {
-      const r = resultsByCallId.get(call.callId)
-      if (r) results.set(call.callId, r)
+
+    const toolNames = new Set(run.map((call) => call.name))
+    if (run.length >= 4 && toolNames.size > 1) {
+      out.push(makeToolCallGroup(run, resultsByCallId, true))
+    } else {
+      let k = 0
+      while (k < run.length) {
+        let l = k + 1
+        while (l < run.length && run[l]!.name === run[k]!.name) l += 1
+        out.push(makeToolCallGroup(run.slice(k, l), resultsByCallId, false))
+        k = l
+      }
     }
-    out.push({
-      kind: 'tool_call_group',
-      toolName: c.name,
-      calls: run,
-      results,
-      firstCallId: run[0]!.callId,
-    })
     i = j
   }
   return out
+}
+
+export function makeToolCallGroup(
+  calls: ToolCallContent[],
+  resultsByCallId: ReadonlyMap<string, ToolResultContent>,
+  mixed: boolean,
+): ToolCallGroup {
+  const results = new Map<string, ToolResultContent>()
+  for (const call of calls) {
+    const r = resultsByCallId.get(call.callId)
+    if (r) results.set(call.callId, r)
+  }
+  return {
+    kind: 'tool_call_group',
+    toolName: mixed ? 'tool activity' : calls[0]!.name,
+    mixed,
+    calls,
+    results,
+    firstCallId: calls[0]!.callId,
+  }
 }
 
 export function collectAllToolResults(

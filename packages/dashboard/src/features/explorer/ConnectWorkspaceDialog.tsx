@@ -32,15 +32,18 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   const hostUrl = useMemo(() => hostUrlFromLocation(), [])
   const fallbackBootstrapBaseUrl = useMemo(() => `${hostUrl}/release-assets`, [hostUrl])
 
-  // Executor invites are single-use tokens minted by the host. We mint one
-  // per dialog session (keyed by `open`) so re-opening the dialog issues a
-  // fresh invite rather than showing a stale/consumed one.
+  // Executor invites are long-lived credentials managed by the host. This
+  // dialog creates a fresh one so the command can show plaintext once.
   const inviteQuery = useQuery({
     queryKey: ['executor-invite'],
-    queryFn: async (): Promise<{ inviteToken: string; expiresAt: string }> => {
-      const res = await fetch('/auth/executor-invites', { method: 'POST' })
+    queryFn: async (): Promise<{ inviteToken: string }> => {
+      const res = await fetch('/auth/executor-invites', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label: 'Connect Workspace' }),
+      })
       if (!res.ok) throw new Error(await res.text())
-      return (await res.json()) as { inviteToken: string; expiresAt: string }
+      return (await res.json()) as { inviteToken: string }
     },
     enabled: open,
     staleTime: 0,
@@ -92,7 +95,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
             }}
           />
           <div className="mt-3 text-xs text-muted-foreground">
-            {error ? <span className="text-destructive">{error}</span> : invite ? t('explorer.connectDialog.inviteExpires', { time: new Date(invite.expiresAt).toLocaleTimeString() }) : t('explorer.connectDialog.preparingInvite')}
+            {error ? <span className="text-destructive">{error}</span> : invite ? t('explorer.connectDialog.inviteReady') : t('explorer.connectDialog.preparingInvite')}
           </div>
         </div>
       </DialogContent>

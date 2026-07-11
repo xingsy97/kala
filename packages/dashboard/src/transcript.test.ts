@@ -112,7 +112,7 @@ describe('visibleMessages', () => {
     expect(transcript).toEqual([])
   })
 
-  it('appends local sending and queued user messages to the transcript', () => {
+  it('appends local sending messages but leaves server queued messages in the composer dock', () => {
     const transcript = visibleTranscript(
       [system],
       [],
@@ -141,13 +141,6 @@ describe('visibleMessages', () => {
         id: 'local-1',
         status: 'sending',
         text: 'sent but not acked',
-      }),
-      expect.objectContaining({
-        kind: 'pending_user_message',
-        id: 'queue-1',
-        status: 'queued',
-        position: 1,
-        text: 'run next',
       }),
     ])
   })

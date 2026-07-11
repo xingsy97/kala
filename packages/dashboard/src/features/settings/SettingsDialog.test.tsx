@@ -63,7 +63,7 @@ describe('SettingsDialog', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('fetches /settings on open and shows runtime paths by default', async () => {
+  it('fetches /settings on open and shows interface preferences by default', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
 
@@ -71,15 +71,14 @@ describe('SettingsDialog', () => {
       expect(fetchMock).toHaveBeenCalledWith('/settings', { cache: 'no-store' })
     })
 
-    await screen.findByText('<home>/.claude/settings.json')
-    expect(screen.getByText('<home>/.codex/config.toml')).toBeTruthy()
-    expect(screen.getByText('<home>/.agent-kernel/sessions')).toBeTruthy()
+    await screen.findByTestId('settings-theme-toggle')
+    expect(screen.getByTestId('settings-toggle-desktop-notifications')).toBeTruthy()
   })
 
   it('switches to Models tab and lists providers + default model', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-models'))
 
@@ -110,7 +109,7 @@ describe('SettingsDialog', () => {
     }
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(sourceLess), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-models'))
     const provider = await screen.findByTestId('settings-provider-legacy-provider')
@@ -135,7 +134,7 @@ describe('SettingsDialog', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(nextPayload), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} onModelsChanged={onModelsChanged} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-models'))
     fireEvent.change(screen.getByTestId('settings-model-provider-select'), { target: { value: 'openai-compat' } })
@@ -155,7 +154,7 @@ describe('SettingsDialog', () => {
   it('renders hooks table when hooks are configured', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-hooks'))
     await screen.findByText('/usr/local/bin/lint.sh')
@@ -167,7 +166,7 @@ describe('SettingsDialog', () => {
   it('flags MCP as not implemented', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-mcp'))
     await screen.findByText('Not implemented yet')
@@ -188,7 +187,7 @@ describe('SettingsDialog', () => {
     Object.assign(NotificationMock, { permission: 'default', requestPermission })
     vi.stubGlobal('Notification', NotificationMock)
     render(<SettingsDialog open onOpenChange={() => {}} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-interface'))
     expect(screen.getByTestId('desktop-notification-permission').textContent).toContain('not requested')
@@ -210,7 +209,7 @@ describe('SettingsDialog', () => {
     localStorage.setItem('ak-theme', 'dark')
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-interface'))
     expect(screen.getByTestId('settings-theme-system')).toBeTruthy()
@@ -224,13 +223,28 @@ describe('SettingsDialog', () => {
     expect(localStorage.getItem('ak-theme')).toBe('light')
   })
 
+  it('stores the live tool activity tail preference', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await screen.findByTestId('settings-theme-toggle')
+
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    const input = screen.getByTestId('settings-live-tool-activity-tail') as HTMLInputElement
+    expect(input.value).toBe('3')
+
+    fireEvent.change(input, { target: { value: '5' } })
+
+    expect(localStorage.getItem('ak-live-tool-activity-tail-count')).toBe('5')
+    expect(input.value).toBe('5')
+  })
+
   it('keeps desktop notifications disabled when browser permission is denied', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     const NotificationMock = vi.fn()
     Object.assign(NotificationMock, { permission: 'denied', requestPermission: vi.fn() })
     vi.stubGlobal('Notification', NotificationMock)
     render(<SettingsDialog open onOpenChange={() => {}} />)
-    await screen.findByText('<home>/.claude/settings.json')
+    await screen.findByTestId('settings-theme-toggle')
 
     fireEvent.click(screen.getByTestId('settings-tab-interface'))
     const toggle = screen.getByTestId('settings-toggle-desktop-notifications') as HTMLButtonElement

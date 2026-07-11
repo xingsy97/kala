@@ -122,6 +122,7 @@ describe('Explorer', () => {
     const wsRow = screen.getByTestId('workspace-row')
     expect(wsRow.getAttribute('data-workspace-id')).toBe('ws-1')
     expect(wsRow.getAttribute('data-online')).toBe('true')
+    expect(wsRow.className).toContain('grid-cols-[1rem_1rem_minmax(0,1fr)_auto]')
     expect(wsRow.textContent).toContain('my-mbp')
   })
 
@@ -166,6 +167,7 @@ describe('Explorer', () => {
     expect(sessionRow.getAttribute('data-session-id')).toBe(
       sessionSummary.sessionId,
     )
+    expect(sessionRow.className).toContain('grid-cols-[1rem_1rem_minmax(0,1fr)_auto]')
     expect(sessionRow.textContent).toContain('please write hello.txt')
     expect(sessionRow.textContent).not.toContain('done')
     expect(sessionRow.textContent).not.toContain('4 evt')
@@ -180,7 +182,7 @@ describe('Explorer', () => {
         executors={[executor]}
         sessions={[{ ...sessionSummary, status: 'done' }]}
         selectedSessionId={sessionSummary.sessionId}
-        activeSessionStatus="loading"
+        sessionStatuses={new Map([[sessionSummary.sessionId, 'loading']])}
         onSelect={() => {}}
         onNewSession={() => {}}
         onConnectWorkspace={() => {}}
@@ -194,13 +196,13 @@ describe('Explorer', () => {
     expect(indicator.getAttribute('title')).toBe('Working')
   })
 
-  it('keeps non-selected session rows on their summary status', () => {
+  it('shows per-session working status independently of selection', () => {
     render(
       <Explorer
         executors={[executor]}
         sessions={[{ ...sessionSummary, status: 'done' }]}
         selectedSessionId="different-session"
-        activeSessionStatus="loading"
+        sessionStatuses={new Map([[sessionSummary.sessionId, 'loading']])}
         onSelect={() => {}}
         onNewSession={() => {}}
         onConnectWorkspace={() => {}}
@@ -210,8 +212,8 @@ describe('Explorer', () => {
     )
 
     const indicator = screen.getByTestId('session-status-indicator')
-    expect(indicator.getAttribute('data-status')).toBe('done')
-    expect(indicator.getAttribute('title')).toBe('Done')
+    expect(indicator.getAttribute('data-status')).toBe('loading')
+    expect(indicator.getAttribute('title')).toBe('Working')
   })
 
   it('places sessions with no workspaceId under an Unassigned bucket', () => {
@@ -333,7 +335,7 @@ describe('Explorer', () => {
     )
   })
 
-  it('marks the selected session with the highlight class', () => {
+  it('marks the selected session without shifting the row grid', () => {
     render(
       <Explorer
         executors={[executor]}
@@ -347,7 +349,10 @@ describe('Explorer', () => {
       />,
     )
     const sessionRow = screen.getByTestId('session-row')
-    expect(sessionRow.className).toMatch(/border-l-primary/)
+    expect(sessionRow.className).toMatch(/bg-accent/)
+    expect(sessionRow.className).toContain('grid-cols-[1rem_1rem_minmax(0,1fr)_auto]')
+    expect(sessionRow.className).not.toMatch(/border-l-primary/)
+    expect(screen.getByTestId('session-selected-marker')).toBeTruthy()
   })
 
   it('filters sessions locally and highlights matched text', () => {

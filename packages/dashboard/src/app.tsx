@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, BarChart3, Boxes, ChevronLeft, ChevronRight, Eraser, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
+import { Archive, BarChart3, Boxes, ChevronDown, Eraser, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -13,6 +13,7 @@ import type {
   FileListResult,
   ModelInfo,
   OverflowContentsResult,
+  QueuedMessagePreview,
   ServerModelsPayload,
   SessionSummary,
 } from '@agent-kernel/shared'
@@ -83,6 +84,11 @@ import { cn } from './lib/utils.js'
 import { withViewTransition } from './lib/viewTransition.js'
 import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
+import {
+  DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  useNumberPref,
+} from './lib/prefs.js'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
 import { useTheme, type Theme } from './lib/theme.js'
 import {
@@ -143,6 +149,7 @@ export function App(): JSX.Element {
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const [explorerOpen, setExplorerOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [topbarOpen, setTopbarOpen] = useState(true)
   const [pendingWorkspacePick, setPendingWorkspacePick] = useState<
     { sessionId: string; workspaceId?: string } | null
   >(null)
@@ -160,10 +167,16 @@ export function App(): JSX.Element {
   const [awaitingAck, setAwaitingAck] = useState(false)
   const [forkingFromSeq, setForkingFromSeq] = useState<number | null>(null)
   const [pendingUserMessages, setPendingUserMessages] = useState<readonly PendingUserTranscriptMessage[]>([])
+  const [optimisticQueuedMessages, setOptimisticQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
   const inferredCompactSeq = useRef<number | null>(null)
   const [themePreference, toggleTheme, , effectiveTheme] = useTheme()
+  const [liveToolActivityTailCount] = useNumberPref(
+    PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+    DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+    { min: 0, max: 10 },
+  )
   const wideLayout = useMinWidth(1024)
   const isMobile = useIsMobile()
   const { models, defaultModel, reload: reloadModels } = useModels()
@@ -240,6 +253,7 @@ export function App(): JSX.Element {
     inferredCompactSeq.current = null
     setAwaitingAck(false)
     setPendingUserMessages([])
+    setOptimisticQueuedMessages([])
     setForkingFromSeq(null)
   }, [config.sessionId])
 
@@ -266,6 +280,10 @@ export function App(): JSX.Element {
       session.streamingText,
     ))
   }, [session.timeline, session.queuedMessages, session.state?.status, session.streamingText])
+
+  useEffect(() => {
+    setOptimisticQueuedMessages((prev) => reconcileOptimisticQueuedMessages(prev, session.queuedMessages))
+  }, [session.queuedMessages])
 
   const scheduleCompactIdle = (ms: number): void => {
     if (compactResetTimer.current !== null) {
@@ -325,6 +343,22 @@ export function App(): JSX.Element {
     }, COMPACT_WATCHDOG_MS)
     return () => window.clearTimeout(timer)
   }, [compactStatus])
+
+  // Hard-tier context pressure means the host will auto-compact before the
+  // next user turn runs. Surface that as a transcript row (queued state) so
+  // the UI shows *something is about to happen* rather than a static banner.
+  // Live transitions: hard + resting → queued; hard clears / turn starts /
+  // compact runs → back to idle (or whatever the running-observer set).
+  useEffect(() => {
+    const level = session.state?.contextPressureLevel
+    const status = session.state?.status
+    const resting = status === 'idle' || status === 'done' || status === 'error'
+    if (level === 'hard' && resting) {
+      if (compactStatus.kind === 'idle') setCompactStatus({ kind: 'queued' })
+      return
+    }
+    if (compactStatus.kind === 'queued') setCompactStatus({ kind: 'idle' })
+  }, [session.state?.contextPressureLevel, session.state?.status, compactStatus.kind])
 
   // If the host already has a per-session model on record, that's the truth
   // (persists across reloads because host keeps it in memory). Only push the
@@ -528,6 +562,7 @@ export function App(): JSX.Element {
     (s) => s.sessionId === config.sessionId,
   )
   const hasSelectedSession = currentSession !== undefined
+  const sessionListLoading = !control.executorsLoaded || !control.sessionsLoaded
   const currentWorkspaceExecutor = useMemo(() => {
     if (!currentSession?.workspaceId) return undefined
     return control.executors.find(
@@ -590,12 +625,16 @@ export function App(): JSX.Element {
     session.timeline,
     session.streamingText,
   )
+  const visibleQueuedMessages = useMemo(
+    () => mergeOptimisticQueuedMessages(session.queuedMessages, optimisticQueuedMessages),
+    [session.queuedMessages, optimisticQueuedMessages],
+  )
   const chatItems = visibleTranscript(
     session.state?.messages ?? [],
     session.timeline,
     session.streamingText,
     pendingUserMessages,
-    session.queuedMessages,
+    visibleQueuedMessages,
   )
   const backgroundTasks = backgroundTerminalTasks(session.timeline)
   const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
@@ -605,6 +644,16 @@ export function App(): JSX.Element {
     awaitingAck,
     compactRunning: compactStatus.kind === 'running',
   })
+  const sessionStatuses = useMemo(() => {
+    const statuses = new Map<string, SessionActivityStatus>()
+    for (const summary of control.sessions) {
+      if (summary.status) statuses.set(summary.sessionId, summary.status)
+    }
+    if (hasSelectedSession && activeSessionStatus) {
+      statuses.set(config.sessionId, activeSessionStatus)
+    }
+    return statuses
+  }, [control.sessions, hasSelectedSession, config.sessionId, activeSessionStatus])
 
   const pendingApprovalsCount = session.pendingApprovals.length
   // Pinned-to-bottom is owned by ChatPanel/VirtualTranscript now; we mirror
@@ -841,10 +890,13 @@ export function App(): JSX.Element {
         id: 'view.open-explorer',
         group: t('commandPalette.groups.view'),
         label: t('commandPalette.commands.openExplorer'),
-        hint: wideLayout ? t('commandPalette.commands.explorerAlreadyVisible') : t('commandPalette.commands.openExplorerHint'),
+        hint: wideLayout ? t('commandPalette.commands.showExplorerHint') : t('commandPalette.commands.openExplorerHint'),
         icon: Menu,
         keywords: ['sidebar', 'drawer'],
-        run: () => setExplorerDrawerOpen(true),
+        run: () => {
+          if (wideLayout) setExplorerOpen(true)
+          else setExplorerDrawerOpen(true)
+        },
       },
     )
 
@@ -1011,7 +1063,23 @@ export function App(): JSX.Element {
         onSelect={handleSectionSelect}
         onOpenSettings={() => setSettingsOpen(true)}
         connectionStatus={hasSelectedSession ? <ConnectionStatus status={session.status} /> : null}
+        collapsed={!topbarOpen}
+        onCollapse={() => setTopbarOpen(false)}
+        onExpand={() => setTopbarOpen(true)}
       />
+      {!topbarOpen ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setTopbarOpen(true)}
+          title={t('app.expandTopbar')}
+          aria-label={t('app.expandTopbar')}
+          data-testid="topbar-floating-toggle"
+          className="fixed right-2 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 h-8 w-8 border border-border/60 bg-background/70 text-muted-foreground opacity-55 shadow-sm backdrop-blur transition hover:bg-background/95 hover:text-foreground hover:opacity-100 focus-visible:opacity-100 sm:h-7 sm:w-7"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+      ) : null}
       <div className="flex-1 min-h-0">
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'benchmarks' ? (
@@ -1051,8 +1119,9 @@ export function App(): JSX.Element {
                     <Explorer
                       executors={control.executors}
                       sessions={control.sessions}
+                      loading={!control.executorsLoaded || !control.sessionsLoaded}
                       selectedSessionId={config.sessionId}
-                      activeSessionStatus={activeSessionStatus}
+                      sessionStatuses={sessionStatuses}
                       onSelect={selectSession}
                       onNewSession={newSession}
                       onConnectWorkspace={() => setConnectWorkspaceOpen(true)}
@@ -1070,22 +1139,12 @@ export function App(): JSX.Element {
                 </ResizablePanel>
                 <ResizableHandle withHandle />
               </>
-            ) : (
-              <ResizablePanel
-                defaultSize={2}
-                minSize={2}
-                maxSize={2}
-                className="max-w-9 min-w-9 bg-sidebar text-sidebar-foreground"
-                data-testid="explorer-rail"
-              >
-                <ExplorerRail onExpand={() => setExplorerOpen(true)} />
-              </ResizablePanel>
-            )}
+            ) : null}
           </>
         ) : null}
         <ResizablePanel
-          defaultSize={wideLayout ? 80 : 100}
-          minSize={wideLayout ? 78 : 100}
+          defaultSize={wideLayout && explorerOpen ? 80 : 100}
+          minSize={wideLayout && explorerOpen ? 78 : 100}
           className="bg-background"
           data-testid="workbench-panel"
         >
@@ -1094,14 +1153,25 @@ export function App(): JSX.Element {
               sessionLabel={sessionLabel}
               sessionActivityStatus={activeSessionStatus}
               cwd={currentCwd}
-              onOpenExplorer={() => setExplorerDrawerOpen(true)}
-              explorerAvailable={!wideLayout}
-              onOpenInspector={() => setInspectorDrawerOpen(true)}
-              inspectorAvailable={!wideLayout && hasSelectedSession}
+              onOpenTopbar={() => setTopbarOpen(true)}
+              topbarAvailable={!topbarOpen}
+              onOpenExplorer={() => {
+                if (wideLayout) setExplorerOpen(true)
+                else setExplorerDrawerOpen(true)
+              }}
+              explorerAvailable={!wideLayout || !explorerOpen}
+              onOpenInspector={() => {
+                if (wideLayout) setInspectorOpen(true)
+                else setInspectorDrawerOpen(true)
+              }}
+              inspectorAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
               onChangeCwd={openCwdDialog}
               sessionSelected={hasSelectedSession}
+              sessionLoading={sessionListLoading && !hasSelectedSession}
             />
-            {!hasSelectedSession ? (
+            {sessionListLoading && !hasSelectedSession ? (
+              <SessionLoadingArea />
+            ) : !hasSelectedSession ? (
               <NoSessionArea
                 onNewSession={newSession}
                 hasSessions={control.sessions.length > 0}
@@ -1140,6 +1210,7 @@ export function App(): JSX.Element {
                         onPinnedChange={setChatPinnedToBottom}
                         scrollToBottomToken={chatScrollToBottomToken}
                         compactStatus={compactStatus}
+                        liveToolActivityTailCount={liveToolActivityTailCount}
                         onDismissCompactStatus={() => setCompactStatus({ kind: 'idle' })}
                         pendingApprovals={session.pendingApprovals}
                         onReadOverflow={readOverflow}
@@ -1242,7 +1313,8 @@ export function App(): JSX.Element {
                           onApprovalModeChange={onApprovalModeChange}
                           state={session.state}
                           config={session.config}
-                          queuedMessages={session.queuedMessages}
+                          queuedMessages={visibleQueuedMessages}
+                          timeline={session.timeline}
                           onQueuedReorder={(id, beforeId) => {
                             if (session.socket) reorderQueuedMessage(session.socket, config.sessionId, id, beforeId)
                           }}
@@ -1286,17 +1358,25 @@ export function App(): JSX.Element {
                                   ...imageBlocks,
                                 ] satisfies readonly MessageContent[]
                               : undefined
-                            setPendingUserMessages((prev) => [
-                              ...prev,
-                              {
-                                id: newPendingMessageId(),
-                                text,
-                                mode,
-                                ...(content ? { content } : {}),
-                                createdAt: new Date().toISOString(),
-                                afterSeq: session.timeline.at(-1)?.seq ?? 0,
-                              },
-                            ])
+                            const createdAt = new Date().toISOString()
+                            if (mode === 'queue') {
+                              setOptimisticQueuedMessages((prev) => [
+                                ...prev,
+                                { id: `optimistic-${newPendingMessageId()}`, text, mode, createdAt },
+                              ])
+                            } else {
+                              setPendingUserMessages((prev) => [
+                                ...prev,
+                                {
+                                  id: newPendingMessageId(),
+                                  text,
+                                  mode,
+                                  ...(content ? { content } : {}),
+                                  createdAt,
+                                  afterSeq: session.timeline.at(-1)?.seq ?? 0,
+                                },
+                              ])
+                            }
                             session.socket?.emit('client:user_message', {
                               sessionId: config.sessionId,
                               text,
@@ -1371,13 +1451,6 @@ export function App(): JSX.Element {
                     </div>
                   </ResizablePanel>
                 </>
-              ) : wideLayout && hasSelectedSession ? (
-                <>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={2} minSize={2} maxSize={2} className="max-w-9 min-w-9 bg-card text-card-foreground" data-testid="inspector-rail">
-                    <InspectorRail onExpand={() => setInspectorOpen(true)} />
-                  </ResizablePanel>
-                </>
               ) : null}
             </ResizablePanelGroup>
             )}
@@ -1398,7 +1471,7 @@ export function App(): JSX.Element {
             executors={control.executors}
             sessions={control.sessions}
             selectedSessionId={config.sessionId}
-            activeSessionStatus={activeSessionStatus}
+            sessionStatuses={sessionStatuses}
             onSelect={(sid) => {
               selectSession(sid)
               setExplorerDrawerOpen(false)
@@ -1567,6 +1640,32 @@ function sessionActivityStatus({
   return status
 }
 
+function mergeOptimisticQueuedMessages(
+  serverMessages: readonly QueuedMessagePreview[],
+  optimisticMessages: readonly QueuedMessagePreview[],
+): readonly QueuedMessagePreview[] {
+  if (optimisticMessages.length === 0) return serverMessages
+  const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
+  return [
+    ...serverMessages,
+    ...optimisticMessages.filter((item) => !serverKeys.has(queuedMessageKey(item))),
+  ]
+}
+
+function reconcileOptimisticQueuedMessages(
+  optimisticMessages: readonly QueuedMessagePreview[],
+  serverMessages: readonly QueuedMessagePreview[],
+): readonly QueuedMessagePreview[] {
+  if (optimisticMessages.length === 0) return optimisticMessages
+  const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
+  const next = optimisticMessages.filter((item) => !serverKeys.has(queuedMessageKey(item)))
+  return next.length === optimisticMessages.length ? optimisticMessages : next
+}
+
+function queuedMessageKey(item: QueuedMessagePreview): string {
+  return `${item.mode}\u0000${item.text}`
+}
+
 export function sessionExists(
   sessions: readonly SessionSummary[],
   sessionId: string | null | undefined,
@@ -1644,77 +1743,68 @@ function NoSessionArea({
   )
 }
 
-function ExplorerRail({ onExpand }: { onExpand(): void }): JSX.Element {
+function SessionLoadingArea(): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div className="flex h-full w-9 flex-col items-center border-r border-border/60 bg-sidebar px-1 py-2 text-sidebar-foreground" data-testid="explorer-rail-content">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onExpand}
-        title={t('explorer.expandPanel')}
-        aria-label={t('explorer.expandPanel')}
-        data-testid="explorer-expand-button"
-        className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
-      >
-        <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-      </Button>
-      <div className="mt-2 flex flex-1 items-center justify-center text-[9px] font-semibold uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
-        {t('explorer.title')}
+    <div
+      className="flex-1 min-h-0 flex items-center justify-center bg-background text-sm text-muted-foreground"
+      data-testid="session-loading-placeholder"
+    >
+      <div className="inline-flex items-center gap-2">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        <span>{t('common.loading')}</span>
       </div>
     </div>
   )
 }
 
-function InspectorRail({ onExpand }: { onExpand(): void }): JSX.Element {
-  const { t } = useTranslation()
-  return (
-    <div className="flex h-full w-9 flex-col items-center border-l border-border/60 bg-card px-1 py-2 text-card-foreground" data-testid="inspector-rail-content">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onExpand}
-        title={t('inspector.expandPanel')}
-        aria-label={t('inspector.expandPanel')}
-        data-testid="inspector-expand-button"
-        className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
-      </Button>
-      <div className="mt-2 flex flex-1 items-center justify-center text-[9px] font-semibold uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
-        {t('app.debugger')}
-      </div>
-    </div>
-  )
-}
-
-function WorkbenchToolbar({
+export function WorkbenchToolbar({
   sessionLabel,
   sessionActivityStatus,
   cwd,
+  onOpenTopbar,
+  topbarAvailable,
   onOpenExplorer,
   explorerAvailable,
   onOpenInspector,
   inspectorAvailable,
   onChangeCwd,
   sessionSelected,
+  sessionLoading = false,
 }: {
   sessionLabel: string
   sessionActivityStatus?: SessionActivityStatus
   cwd: string
+  onOpenTopbar(): void
+  topbarAvailable: boolean
   onOpenExplorer(): void
   explorerAvailable: boolean
   onOpenInspector(): void
   inspectorAvailable: boolean
   onChangeCwd(): void
   sessionSelected: boolean
+  sessionLoading?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
+  const displayLabel = sessionSelected ? sessionLabel : sessionLoading ? t('common.loading') : t('app.noSessionSelected')
   return (
     <div
       className="flex min-h-9 flex-none items-center gap-1.5 bg-card px-2 py-1 text-sm text-card-foreground backdrop-blur-md sm:gap-2 sm:px-3"
       data-testid="workbench-toolbar"
     >
+      {topbarAvailable ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenTopbar}
+          title={t('app.expandTopbar')}
+          aria-label={t('app.expandTopbar')}
+          data-testid="topbar-toggle"
+          className="h-9 w-9 flex-none sm:h-8 sm:w-8"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+      ) : null}
       {explorerAvailable ? (
         <Button
           variant="ghost"
@@ -1730,14 +1820,17 @@ function WorkbenchToolbar({
       ) : null}
       <span
         className="inline-flex min-w-0 max-w-[55vw] items-center gap-1.5 sm:max-w-none"
-        title={sessionSelected ? sessionLabel : t('app.noSessionSelected')}
+        title={displayLabel}
         data-testid="session-title"
+        data-loading={sessionLoading ? 'true' : undefined}
       >
         {sessionSelected ? (
           <SessionStatusIndicator status={sessionActivityStatus} selected />
+        ) : sessionLoading ? (
+          <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-muted-foreground" aria-hidden="true" />
         ) : null}
         <span className="min-w-0 truncate font-medium" data-testid="session-label">
-          {sessionSelected ? sessionLabel : t('app.noSessionSelected')}
+          {displayLabel}
         </span>
       </span>
       {sessionSelected ? (
@@ -1779,13 +1872,13 @@ function ConnectionStatus({ status }: { status: string }): JSX.Element {
   const label = hostStatusLabel(status, t)
   return (
     <div
-      className="inline-flex h-8 flex-none items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+      className="inline-flex h-8 flex-none items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-accent/60 hover:text-foreground hover:scale-[1.02] motion-reduce:transition-none motion-reduce:hover:scale-100"
       data-testid="connection-status"
       data-status={status}
       title={label}
       aria-label={label}
     >
-      <span className={cn('h-2 w-2 flex-none rounded-full', statusDot(status))} />
+      <span className={cn('h-2 w-2 flex-none rounded-full transition-colors duration-300', statusDot(status))} />
       <span>{label}</span>
     </div>
   )
@@ -1802,7 +1895,7 @@ function hostStatusLabel(status: string, t: ReturnType<typeof useTranslation>['t
 function statusDot(status: string): string {
   if (status === 'ready') return 'bg-emerald-500'
   if (status === 'error' || status === 'disconnected') return 'bg-rose-500'
-  if (status === 'connecting') return 'bg-amber-500 animate-pulse'
+  if (status === 'connecting') return 'bg-amber-500 ak-status-pulse'
   return 'bg-muted'
 }
 

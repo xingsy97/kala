@@ -1,4 +1,4 @@
-import { AlertTriangle, Zap } from 'lucide-react'
+import { Zap } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 
@@ -7,13 +7,15 @@ import type { AgentState } from '@agent-kernel/kernel'
 import { Button } from '../../components/ui/button.js'
 
 /**
- * Banner shown above the composer when the session is close to hitting the
- * context window. Two tiers, matching the kernel's `contextPressureLevel`:
- *   - soft (>= config.softThreshold): amber, offers a manual "Compact now".
- *   - hard (>= config.hardThreshold): rose, waits for the auto-compact tool
- *     call already being enqueued by the host. Uses a low-amplitude opacity
- *     breathing loop to draw the eye without overwhelming.
- * Idle sessions render nothing.
+ * Banner shown above the composer when the session is close to the context
+ * window and there's still a user action to take. Soft tier (>= softThreshold)
+ * offers a manual "Compact now" button.
+ *
+ * Hard-tier auto-compact used to also render here, but that made an in-progress
+ * background action look like a static warning. It now surfaces as a
+ * queued/running CompactFeedbackRow inside the transcript instead — same
+ * component tool-call cards use, so the "something is happening" affordance
+ * matches user expectations.
  */
 type Props = {
   state: AgentState | null
@@ -31,36 +33,8 @@ export function ContextPressureBanner({
   const { t } = useTranslation()
   if (suppressed) return null
   const level = state?.contextPressureLevel ?? 'none'
-  if (level === 'none') return null
+  if (level !== 'soft') return null
   if (isActiveTurn(state?.status)) return null
-
-  if (level === 'hard') {
-    return (
-      <motion.div
-        className="flex items-center gap-2 border-t border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
-        data-testid="context-pressure-banner"
-        data-level="hard"
-        role="status"
-        initial={{ opacity: 0, y: -4 }}
-        animate={{
-          opacity: [1, 0.78, 1],
-          y: 0,
-        }}
-        transition={{
-          opacity: { duration: 2.4, repeat: Infinity, ease: 'easeInOut' },
-          y: { duration: 0.25, ease: 'easeOut' },
-        }}
-      >
-        <AlertTriangle className="h-3.5 w-3.5 flex-none" />
-        <span className="font-medium">{t('contextPressure.full')}</span>
-        <span className="truncate text-rose-700/80 dark:text-rose-200/70">
-          {compactRunning
-            ? t('contextPressure.fullRunning')
-            : t('contextPressure.fullQueued')}
-        </span>
-      </motion.div>
-    )
-  }
 
   return (
     <motion.div

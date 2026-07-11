@@ -12,6 +12,7 @@ import {
 } from 'react'
 import {
   Archive,
+  Ban,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -20,6 +21,7 @@ import {
   FileText,
   GripVertical,
   Lightbulb,
+  Maximize2,
   Pencil,
   Sparkles,
   Terminal,
@@ -30,7 +32,6 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
-import { useAutoAnimate } from '@formkit/auto-animate/react'
 
 import type {
   Message,
@@ -54,6 +55,7 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
 import { formatTokens } from '../../lib/format.js'
+import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT } from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview } from './DiffPreview.js'
@@ -64,9 +66,10 @@ import {
   type ToolCallGroup,
   collectAllToolResults,
   groupConsecutiveToolCalls,
+  makeToolCallGroup,
 } from './grouping.js'
 import { SubAgentCard } from './SubAgentCard.js'
-import { GroupSummaryRow, firstLine, pickRenderer, truncate } from './toolSummaries/index.js'
+import { GroupSummaryRow, firstLine, pickRenderer, truncate, type SummaryRow } from './toolSummaries/index.js'
 import type { DashboardSocket } from '../../session.js'
 import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 
@@ -101,12 +104,21 @@ type Props = {
   scrollToBottomToken?: number
   /** UI-level compaction operation status rendered inline at transcript tail. */
   compactStatus?: CompactStatus
+  liveToolActivityTailCount?: number
   onDismissCompactStatus?: () => void
+  loading?: boolean
 }
 
 type RenderTranscriptItem = TranscriptItem | {
   kind: 'compact_feedback'
   status: Exclude<CompactStatus, { kind: 'idle' }>
+} | {
+  kind: 'tool_activity'
+  group: ToolCallGroup
+  firstMessageIndex: number
+  lastMessageIndex: number
+  seq?: number
+  ts?: string
 }
 
 type OverflowReader = (callId: string) => Promise<{ content?: string; error?: string }>
@@ -155,7 +167,9 @@ export function ChatPanel({
   onPinnedChange,
   scrollToBottomToken,
   compactStatus,
+  liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   onDismissCompactStatus,
+  loading = false,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const fallbackItems: TranscriptItem[] = (messages ?? [])
@@ -177,13 +191,13 @@ export function ChatPanel({
     .filter((it): it is Extract<TranscriptItem, { kind: 'message' }> => it.kind === 'message')
     .map((it) => it.message)
   const resultsByCallId = collectAllToolResults(allMessages)
-  const groupedCallIds = new Set<string>()
+  const intraMessageGroupedCallIds = new Set<string>()
   for (const m of allMessages) {
     if (m.role !== 'assistant') continue
     const grouped = groupConsecutiveToolCalls(m.content, resultsByCallId)
     for (const g of grouped) {
       if (g.kind === 'tool_call_group') {
-        for (const c of g.calls) groupedCallIds.add(c.callId)
+        for (const c of g.calls) intraMessageGroupedCallIds.add(c.callId)
       }
     }
   }
@@ -198,21 +212,46 @@ export function ChatPanel({
   // messageIndex (used for msg-* anchors + highlight) must still count against
   // the ORIGINAL sequence so callers that pass a highlight seq still land on
   // the right row.
-  const { transcriptItems, messageIndexByItem, hideHeaderByItem } = useMemo(() => {
+  const { transcriptItems, messageIndexByItem, hideHeaderByItem, groupedCallIds } = useMemo(() => {
     const kept: RenderTranscriptItem[] = []
     const mapping: number[] = []
     const hideHeader: boolean[] = []
+    const groupedIds = new Set(intraMessageGroupedCallIds)
     let mi = -1
     let prevRole: 'user' | 'assistant' | 'tool' | null = null
-    for (const it of rawItems) {
+    let i = 0
+    while (i < rawItems.length) {
+      const transcriptGroup = collectTranscriptToolActivity(rawItems, i, mi, resultsByCallId)
+      if (transcriptGroup) {
+        kept.push({
+          kind: 'tool_activity',
+          group: transcriptGroup.group,
+          firstMessageIndex: transcriptGroup.firstMessageIndex,
+          lastMessageIndex: transcriptGroup.lastMessageIndex,
+          seq: transcriptGroup.seq,
+          ts: transcriptGroup.ts,
+        })
+        mapping.push(transcriptGroup.firstMessageIndex)
+        hideHeader.push(prevRole === 'assistant')
+        for (const call of transcriptGroup.group.calls) groupedIds.add(call.callId)
+        mi = transcriptGroup.lastMessageIndex
+        prevRole = 'assistant'
+        i = transcriptGroup.nextIndex
+        continue
+      }
+
+      const it = rawItems[i]!
       if (it.kind === 'message') {
         mi += 1
         const m = it.message
         if (m.role === 'tool') {
           const hasVisible = m.content.some(
-            (c) => c.type !== 'tool_result' || !groupedCallIds.has(c.callId),
+            (c) => c.type !== 'tool_result' || !groupedIds.has(c.callId),
           )
-          if (!hasVisible) continue
+          if (!hasVisible) {
+            i += 1
+            continue
+          }
         }
         kept.push(it)
         mapping.push(mi)
@@ -229,14 +268,15 @@ export function ChatPanel({
         hideHeader.push(false)
         prevRole = null
       }
+      i += 1
     }
     if (compactStatus && compactStatus.kind !== 'idle') {
       kept.push({ kind: 'compact_feedback', status: compactStatus })
       mapping.push(-1)
       hideHeader.push(false)
     }
-    return { transcriptItems: kept, messageIndexByItem: mapping, hideHeaderByItem: hideHeader }
-  }, [rawItems, groupedCallIds, compactStatus])
+    return { transcriptItems: kept, messageIndexByItem: mapping, hideHeaderByItem: hideHeader, groupedCallIds: groupedIds }
+  }, [rawItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus])
 
   // Translate message-index highlight into item-index so VirtualTranscript
   // can scroll to the right row. -1 means "no highlight" or unresolved.
@@ -244,9 +284,17 @@ export function ChatPanel({
     if (highlightIndex == null || highlightIndex < 0) return null
     for (let i = 0; i < messageIndexByItem.length; i += 1) {
       if (messageIndexByItem[i] === highlightIndex) return i
+      const item = transcriptItems[i]
+      if (
+        item?.kind === 'tool_activity' &&
+        highlightIndex >= item.firstMessageIndex &&
+        highlightIndex <= item.lastMessageIndex
+      ) {
+        return i
+      }
     }
     return null
-  }, [highlightIndex, messageIndexByItem])
+  }, [highlightIndex, messageIndexByItem, transcriptItems])
 
   const isEmpty = transcriptItems.length === 0
 
@@ -259,6 +307,22 @@ export function ChatPanel({
         return <CompactFeedbackTranscriptRow status={item.status} onDismiss={onDismissCompactStatus} />
       }
       const hideHeader = hideHeaderByItem[itemIndex] ?? false
+      if (item.kind === 'tool_activity') {
+        return (
+          <ToolActivityTranscriptRow
+            item={item}
+            highlighted={
+              highlightIndex != null &&
+              highlightIndex >= item.firstMessageIndex &&
+              highlightIndex <= item.lastMessageIndex
+            }
+            hideHeader={hideHeader}
+            approvalByCallId={approvalByCallId}
+            onApprovalDecision={onApprovalDecision}
+            liveToolActivityTailCount={liveToolActivityTailCount}
+          />
+        )
+      }
       if (item.kind === 'pending_user_message') {
         return <PendingUserMessageRow item={item} />
       }
@@ -279,6 +343,7 @@ export function ChatPanel({
           onEditAndRerun={onEditAndRerun}
           parentSessionId={parentSessionId}
           socket={socket ?? null}
+          liveToolActivityTailCount={liveToolActivityTailCount}
         />
       )
     },
@@ -295,6 +360,7 @@ export function ChatPanel({
       parentSessionId,
       socket,
       onDismissCompactStatus,
+      liveToolActivityTailCount,
     ],
   )
 
@@ -304,6 +370,8 @@ export function ChatPanel({
         ? `compact-${item.seq}`
         : item.kind === 'compact_feedback'
           ? `compact-feedback-${item.status.kind}`
+        : item.kind === 'tool_activity'
+          ? `tool-activity-${item.group.firstCallId}`
         : item.kind === 'pending_user_message'
           ? `pending-${item.id}`
           : `message-${itemIndex}`,
@@ -328,7 +396,9 @@ export function ChatPanel({
   return (
     <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
       <div className="relative flex h-full w-full min-w-0 flex-1 flex-col">
-        {isEmpty ? (
+        {loading ? (
+          <TranscriptLoadingState />
+        ) : isEmpty ? (
           <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
             <EmptyState onSuggest={onSuggest} />
             {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
@@ -350,7 +420,7 @@ export function ChatPanel({
                 <div className="pl-0 pt-4 sm:pl-10">{footerSlot}</div>
               ) : null
             }
-            itemClassName="mx-auto w-full max-w-[68rem] px-3 py-2 sm:px-6 sm:py-3 lg:px-8"
+            itemClassName="ak-chat-item mx-auto w-full max-w-[68rem] px-3 py-2 sm:px-6 sm:py-3 lg:px-8"
             defaultItemHeight={80}
             dataTestId="virtual-transcript"
           />
@@ -361,7 +431,7 @@ export function ChatPanel({
             size="icon"
             variant="outline"
             onClick={scrollToBottom}
-            className="absolute bottom-4 right-4 z-20 h-9 w-9 rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-lg backdrop-blur hover:text-foreground sm:bottom-5 sm:right-6"
+            className="absolute bottom-4 right-4 z-20 h-9 w-9 rounded-full bg-background/95 text-muted-foreground shadow-lg ring-1 ring-border/70 backdrop-blur hover:text-foreground sm:bottom-5 sm:right-6"
             aria-label={t('chat.transcript.scrollToBottom')}
             title={t('chat.transcript.scrollToBottom')}
             data-testid="scroll-to-bottom"
@@ -388,7 +458,7 @@ function CompactFeedbackTranscriptRow({
         message={status.kind === 'empty' || status.kind === 'error' ? status.message : undefined}
         startedAt={status.kind === 'running' ? status.startedAt : undefined}
         tokensBefore={status.kind === 'running' ? status.tokensBefore : undefined}
-        onDismiss={status.kind === 'running' ? undefined : onDismiss}
+        onDismiss={status.kind === 'running' || status.kind === 'queued' ? undefined : onDismiss}
       />
     </div>
   )
@@ -401,23 +471,14 @@ function PendingUserMessageRow({
 }): JSX.Element {
   const { t } = useTranslation()
   const content = item.content ?? [{ type: 'text' as const, text: item.text }]
-  const isQueued = item.status === 'queued'
-  const bubbleTone = isQueued
-    ? 'bg-primary/80 text-primary-foreground shadow-sm'
-    : 'bg-primary text-primary-foreground shadow-sm'
-  const headerLabel = isQueued
-    ? t('chat.transcript.queuedMessage', { position: item.position ?? 1 })
-    : t('chat.transcript.sendingMessage')
+  const statusLabel = t('chat.transcript.sendingMessage')
   return (
-    <div className="group relative flex justify-end" data-testid={`pending-user-message-${item.id}`}>
-      <div className={cn('relative max-w-[92%] rounded-2xl rounded-br-md px-4 py-2.5 sm:max-w-[85%]', bubbleTone)}>
+    <div className="group relative flex justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
+      <div className="relative max-w-[92%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
         <InlineTimestamp
           ts={item.createdAt}
           className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
         />
-        <div className="mb-1 flex items-center justify-end gap-1.5 text-[10px] font-medium uppercase tracking-wide text-primary-foreground/70">
-          <span>{headerLabel}</span>
-        </div>
         <div className="flex min-w-0 flex-col gap-2">
           {content.map((c, i) => (
             <ContentBlock
@@ -429,6 +490,149 @@ function PendingUserMessageRow({
             />
           ))}
         </div>
+        <span
+          className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-primary-foreground ring-2 ring-primary motion-safe:animate-pulse"
+          title={statusLabel}
+          aria-label={statusLabel}
+          data-testid={`pending-user-message-status-${item.id}`}
+        />
+      </div>
+    </div>
+  )
+}
+
+type TranscriptToolActivity = {
+  group: ToolCallGroup
+  firstMessageIndex: number
+  lastMessageIndex: number
+  nextIndex: number
+  seq?: number
+  ts?: string
+}
+
+function collectTranscriptToolActivity(
+  items: readonly TranscriptItem[],
+  startIndex: number,
+  previousMessageIndex: number,
+  resultsByCallId: ReadonlyMap<string, ToolResultContent>,
+): TranscriptToolActivity | null {
+  const start = items[startIndex]
+  if (!isPureToolCallAssistantItem(start)) return null
+
+  const calls: ToolCallContent[] = []
+  let i = startIndex
+  let messageIndex = previousMessageIndex
+  let firstMessageIndex: number | null = null
+  let lastMessageIndex = previousMessageIndex
+  let firstSeq: number | undefined
+  let firstTs: string | undefined
+  const knownCallIds = new Set<string>()
+
+  while (i < items.length) {
+    const assistantItem = items[i]
+    if (!isPureToolCallAssistantItem(assistantItem)) break
+    messageIndex += 1
+    if (firstMessageIndex === null) firstMessageIndex = messageIndex
+    lastMessageIndex = messageIndex
+    if (firstSeq === undefined) firstSeq = assistantItem.seq
+    if (firstTs === undefined) firstTs = assistantItem.ts
+
+    for (const content of assistantItem.message.content) {
+      if (content.type !== 'tool_call') continue
+      calls.push(content)
+      knownCallIds.add(content.callId)
+    }
+    i += 1
+
+    while (i < items.length && isToolResultItemForKnownCalls(items[i], knownCallIds)) {
+      messageIndex += 1
+      lastMessageIndex = messageIndex
+      i += 1
+    }
+  }
+
+  const toolNames = new Set(calls.map((call) => call.name))
+  if (calls.length < 4 || toolNames.size <= 1 || firstMessageIndex === null) return null
+
+  return {
+    group: makeToolCallGroup(calls, resultsByCallId, true),
+    firstMessageIndex,
+    lastMessageIndex,
+    nextIndex: i,
+    ...(firstSeq !== undefined ? { seq: firstSeq } : {}),
+    ...(firstTs !== undefined ? { ts: firstTs } : {}),
+  }
+}
+
+function isPureToolCallAssistantItem(
+  item: TranscriptItem | undefined,
+): item is Extract<TranscriptItem, { kind: 'message' }> {
+  if (!item || item.kind !== 'message' || item.message.role !== 'assistant') return false
+  if (item.message.content.length === 0) return false
+  return item.message.content.every((content) => content.type === 'tool_call')
+}
+
+function isToolResultItemForKnownCalls(
+  item: TranscriptItem | undefined,
+  knownCallIds: ReadonlySet<string>,
+): item is Extract<TranscriptItem, { kind: 'message' }> {
+  if (!item || item.kind !== 'message' || item.message.role !== 'tool') return false
+  if (item.message.content.length === 0) return false
+  return item.message.content.every(
+    (content) => content.type === 'tool_result' && knownCallIds.has(content.callId),
+  )
+}
+
+function ToolActivityTranscriptRow({
+  item,
+  highlighted,
+  hideHeader,
+  approvalByCallId,
+  onApprovalDecision,
+  liveToolActivityTailCount,
+}: {
+  item: Extract<RenderTranscriptItem, { kind: 'tool_activity' }>
+  highlighted: boolean
+  hideHeader: boolean
+  approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
+  liveToolActivityTailCount: number
+}): JSX.Element {
+  return (
+    <div
+      id={`msg-${item.firstMessageIndex}`}
+      data-message-index={item.firstMessageIndex}
+      className={cn(
+        'group relative flex min-w-0 gap-3',
+        highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
+      )}
+    >
+      <div className="flex w-7 flex-none items-start justify-center pt-0.5">
+        {hideHeader ? (
+          <GripHandle />
+        ) : (
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
+            aria-label="Assistant"
+          >
+            AK
+          </div>
+        )}
+      </div>
+      <div className="relative min-w-0 flex-1">
+        {hideHeader ? null : (
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Assistant
+          </div>
+        )}
+        <InlineTimestamp ts={item.ts} className="absolute right-0 top-0 text-muted-foreground" />
+        <ToolCallGroupBlock
+          group={item.group}
+          messageIndex={item.firstMessageIndex}
+          approvalByCallId={approvalByCallId}
+          onApprovalDecision={onApprovalDecision}
+          liveToolActivityTailCount={liveToolActivityTailCount}
+        />
       </div>
     </div>
   )
@@ -494,22 +698,42 @@ function useVirtualTranscriptScrollToken(
     const handle = ref.current
     if (!handle) return
     handle.scrollToBottom()
-    // Virtuoso measures row heights lazily; a single scroll on session open
-    // lands short before later rows expand. Re-issue on the next two frames
-    // and a short timeout to catch height changes from images / markdown.
+    // Virtuoso measures row/footer heights lazily. When a user sends a message,
+    // the pending bubble and footer status can mount across several React/layout
+    // turns, so repeat the explicit bottom jump longer than a single frame.
     let raf2 = 0
     const raf1 = requestAnimationFrame(() => {
       handle.scrollToBottom()
       raf2 = requestAnimationFrame(() => handle.scrollToBottom())
     })
-    const to = window.setTimeout(() => handle.scrollToBottom(), 120)
+    const timeouts = [
+      window.setTimeout(() => handle.scrollToBottom(), 60),
+      window.setTimeout(() => handle.scrollToBottom(), 180),
+      window.setTimeout(() => handle.scrollToBottom(), 360),
+    ]
     return () => {
       cancelAnimationFrame(raf1)
       cancelAnimationFrame(raf2)
-      window.clearTimeout(to)
+      for (const timeout of timeouts) window.clearTimeout(timeout)
     }
   }, [itemCount, scrollToBottomToken])
   return ref
+}
+
+function TranscriptLoadingState(): JSX.Element {
+  return (
+    <div className="mx-auto flex w-full max-w-[68rem] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6 lg:px-8" data-testid="transcript-loading-state">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div key={index} className="flex min-w-0 gap-3">
+          <div className="h-7 w-7 flex-none rounded-full bg-muted" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-3 w-20 rounded bg-muted" />
+            <div className="h-16 rounded-lg bg-muted/50" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function EmptyState({
@@ -637,6 +861,7 @@ function MessageRow({
   onEditAndRerun,
   parentSessionId,
   socket,
+  liveToolActivityTailCount,
 }: {
   index: number
   message: Message
@@ -652,6 +877,7 @@ function MessageRow({
   onEditAndRerun?: (seq: number, text: string) => void
   parentSessionId?: string
   socket?: DashboardSocket | null
+  liveToolActivityTailCount: number
 }): JSX.Element | null {
   const { t } = useTranslation()
   const editable =
@@ -847,6 +1073,7 @@ function MessageRow({
                   messageIndex={index}
                   approvalByCallId={approvalByCallId}
                   onApprovalDecision={onApprovalDecision}
+                  liveToolActivityTailCount={liveToolActivityTailCount}
                 />
               )
             }
@@ -881,7 +1108,11 @@ function ContentBlock({
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
 }): JSX.Element {
   if (content.type === 'text') {
-    if (role === 'assistant') return <AssistantMarkdown text={content.text} />
+    if (role === 'assistant') {
+      const cancelled = splitCancelledSuffix(content.text)
+      if (cancelled) return <CancelledAssistantMessage text={cancelled.text} />
+      return <AssistantMarkdown text={content.text} />
+    }
     if (role === 'user') {
       return (
         <div className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
@@ -916,21 +1147,75 @@ function ContentBlock({
   return <ImageBlock content={content} />
 }
 
+function splitCancelledSuffix(text: string): { text: string } | null {
+  const match = text.match(/(?:\n\n)?\[cancelled\]\s*$/i)
+  if (!match) return null
+  return { text: text.slice(0, match.index).trimEnd() }
+}
+
+function CancelledAssistantMessage({ text }: { text: string }): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="min-w-0 space-y-3">
+      {text.length > 0 ? <AssistantMarkdown text={text} /> : null}
+      <div
+        className="inline-flex max-w-full items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-300"
+        data-testid="assistant-message-cancelled"
+      >
+        <Ban className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+        <span className="truncate">{t('chat.transcript.cancelledMessage')}</span>
+      </div>
+    </div>
+  )
+}
+
 function ImageBlock({
   content,
 }: {
   content: import('@agent-kernel/kernel').ImageContent
 }): JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
   const src =
     content.source.kind === 'base64'
       ? `data:${content.source.mediaType};base64,${content.source.data}`
       : content.source.path
+  const label = t('chat.transcript.openImagePreview')
   return (
-    <img
-      src={src}
-      alt=""
-      className="h-auto max-h-64 max-w-full rounded-lg border border-border/50 object-contain sm:max-w-xs"
-    />
+    <>
+      <button
+        type="button"
+        className="group/image relative block h-28 w-40 max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-background/20 p-0.5 text-left shadow-sm transition-colors hover:bg-background/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50 sm:h-32 sm:w-48"
+        onClick={() => setOpen(true)}
+        aria-label={label}
+        data-testid="message-image-preview-trigger"
+      >
+        <img
+          src={src}
+          alt=""
+          className="h-full w-full rounded-md object-contain"
+        />
+        <span className="pointer-events-none absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md bg-black/45 text-white opacity-0 shadow-lg transition-opacity group-hover/image:opacity-100 group-focus-visible/image:opacity-100">
+          <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-[min(96vw,72rem)] gap-0 overflow-hidden p-0" data-testid="message-image-preview-dialog">
+          <DialogHeader className="bg-card px-4 py-3">
+            <DialogTitle className="text-base">{t('chat.transcript.imagePreview')}</DialogTitle>
+            <DialogDescription>{t('chat.transcript.imagePreviewDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 items-center justify-center bg-background p-3 sm:p-4">
+            <img
+              src={src}
+              alt=""
+              className="max-h-[calc(100dvh-8rem)] max-w-full rounded-md object-contain shadow-lg"
+              data-testid="message-image-preview-full"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -957,7 +1242,7 @@ function ThinkingBlock({
         )}
       </button>
       {open ? (
-        <div className="mt-2 rounded-lg bg-muted/30">
+        <div className="ak-expand-in mt-2 rounded-lg bg-muted/30">
           <ScrollArea>
             <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
               {content.text}
@@ -983,14 +1268,14 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
         '[&_h4]:mb-1.5 [&_h4]:mt-4 [&_h4]:text-sm [&_h4]:font-semibold',
         '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
         '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground',
-        '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-border/50 sm:[&_img]:max-w-xs',
+        '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg sm:[&_img]:max-w-xs',
         '[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5',
         '[&_li]:my-1 [&_li>p]:my-1',
         '[&_li_ul]:my-1 [&_li_ol]:my-1',
         '[&_pre]:my-3 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0',
         '[&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:text-foreground',
         '[&_hr]:my-4 [&_hr]:border-border/50',
-        '[&_table]:my-3 [&_table]:border [&_table]:border-border/50 [&_td]:border [&_td]:border-border/50 [&_td]:px-2 [&_th]:border [&_th]:border-border/50 [&_th]:px-2',
+        '[&_table]:my-3 [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-2 [&_th]:px-2',
       )}
     >
       <ReactMarkdown
@@ -1055,7 +1340,7 @@ function ToolCallBlock({
       className={cn(
         'min-w-0 max-w-full overflow-hidden rounded-lg transition-colors',
         isPendingApproval
-          ? 'border border-amber-400/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20'
+          ? 'bg-amber-50/60 ring-1 ring-amber-400/60 dark:bg-amber-950/20 dark:ring-amber-500/40'
           : 'bg-muted/40',
       )}
       data-testid={
@@ -1105,7 +1390,7 @@ function ToolCallBlock({
         )}
       </button>
       {open ? (
-        <div className="flex min-w-0 flex-col gap-2 px-3 pb-2">
+        <div className="ak-expand-in flex min-w-0 flex-col gap-2 px-3 pb-2">
           {isPendingApproval && hasDiffPreview ? (
             <DiffPreview toolName={call.name} input={approval.input} />
           ) : (
@@ -1202,7 +1487,7 @@ function ToolResultBlock({
         )}
       </button>
       {open ? (
-        <div className="mt-2 overflow-hidden rounded-lg bg-muted/60">
+        <div className="ak-expand-in mt-2 overflow-hidden rounded-lg bg-muted/60">
           {isOverflowed && fullOutput.state !== 'loaded' && overflowReader ? (
             <div className="flex items-center justify-between border-b border-border/40 px-3 py-1.5 text-[11px]">
               <span className="text-muted-foreground">
@@ -1249,18 +1534,17 @@ function ToolCallGroupBlock({
   messageIndex,
   approvalByCallId,
   onApprovalDecision,
+  liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
 }: {
   group: ToolCallGroup
   messageIndex: number
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
+  liveToolActivityTailCount?: number
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
-  const [groupRowsRef] = useAutoAnimate<HTMLDivElement>()
-  const renderer = pickRenderer(group.toolName)
-  const rows = renderer({ calls: group.calls, results: group.results })
-  const failedCount = rows.filter((r) => !r.ok).length
+  const rows = summarizeToolActivityRows(group)
   const anyPending = group.calls.some((c) => approvalByCallId.has(c.callId))
   const singleCall = group.calls.length === 1 ? group.calls[0]! : null
   const singleRow = singleCall ? rows.find((r) => r.callId === singleCall.callId) : null
@@ -1276,7 +1560,19 @@ function ToolCallGroupBlock({
         ? toolLifecycleBadge('running')
         : null
   const groupLifecycle = summarizeToolGroupLifecycle(group, approvalByCallId)
-  const showRows = open || anyPending
+  const toolMix = summarizeToolMix(group.calls)
+  const primaryTargets = summarizePrimaryTargets(rows, group.mixed ? 2 : 1)
+  const groupTitle = group.mixed ? 'Tool activity' : group.toolName
+  const liveTailCount = Math.max(0, Math.round(liveToolActivityTailCount))
+  const unresolvedTailCallIds = liveTailCount > 0
+    ? group.calls
+        .slice(-liveTailCount)
+        .filter((call) => !group.results.has(call.callId) && !approvalByCallId.has(call.callId))
+        .map((call) => call.callId)
+    : []
+  const autoRevealTail = group.mixed && unresolvedTailCallIds.length > 0
+  const visibleTailCallIds = autoRevealTail ? new Set(unresolvedTailCallIds) : null
+  const showRows = open || anyPending || autoRevealTail
 
   const toggleOpen = (): void => {
     setOpen((v) => {
@@ -1292,7 +1588,7 @@ function ToolCallGroupBlock({
       className={cn(
         'min-w-0 max-w-full overflow-hidden rounded-lg transition-colors',
         anyPending
-          ? 'border border-amber-400/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20'
+          ? 'bg-amber-50/60 ring-1 ring-amber-400/60 dark:bg-amber-950/20 dark:ring-amber-500/40'
           : 'bg-muted/40',
       )}
       data-testid={`tool-call-group-${group.firstCallId}`}
@@ -1321,11 +1617,19 @@ function ToolCallGroupBlock({
           )}
         />
         <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
-          {group.toolName}
+          {groupTitle}
         </span>
         {singleRow?.primary ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
             {singleRow.primary}
+          </span>
+        ) : group.mixed ? (
+          <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground sm:inline" title={toolMix}>
+            {toolMix}
+          </span>
+        ) : primaryTargets ? (
+          <span className="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground sm:inline" title={primaryTargets}>
+            {primaryTargets}
           </span>
         ) : null}
         {singleResult ? (
@@ -1334,8 +1638,15 @@ function ToolCallGroupBlock({
           </span>
         ) : null}
         {group.calls.length > 1 ? (
-          <span className="flex-none rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            × {group.calls.length}
+          <span
+            className={cn(
+              'flex-none rounded px-1.5 py-0.5 font-mono text-[11px]',
+              group.mixed
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-background/80 text-muted-foreground',
+            )}
+          >
+            {group.mixed ? `${group.calls.length} ops` : `× ${group.calls.length}`}
           </span>
         ) : null}
         {!singleCall ? <ToolLifecycleSummaryBadges summary={groupLifecycle} /> : null}
@@ -1349,11 +1660,6 @@ function ToolCallGroupBlock({
             {singleStatus.label}
           </span>
         ) : null}
-        {failedCount > 0 ? (
-          <span className="flex-none rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-            {failedCount} failed
-          </span>
-        ) : null}
         {singleCall ? null : <span className="flex-1" />}
         {open ? (
           <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
@@ -1363,8 +1669,7 @@ function ToolCallGroupBlock({
       </button>
       {showRows ? (
         <div
-          ref={groupRowsRef}
-          className="flex min-w-0 flex-col gap-0.5 border-t border-border/40 px-3 pb-2 pt-1"
+          className="ak-expand-in flex min-w-0 flex-col gap-0.5 border-t border-border/40 px-3 pb-2 pt-1"
           data-testid={`tool-call-group-details-${group.firstCallId}`}
         >
           {rows.map((row) => {
@@ -1386,16 +1691,17 @@ function ToolCallGroupBlock({
                     onApprovalDecision={onApprovalDecision}
                   />
                   {result ? (
-                    <ToolResultBlock
-                      result={result}
-                      toolName={group.toolName}
-                      defaultOpen
-                    />
-                  ) : null}
+                  <ToolResultBlock
+                    result={result}
+                    toolName={call.name}
+                    defaultOpen
+                  />
+                ) : null}
                 </div>
               )
             }
-            if (!open && !pending) return null
+            const tailVisible = visibleTailCallIds?.has(row.callId) ?? false
+            if (!open && !pending && !tailVisible) return null
             return (
               <div
                 key={row.callId}
@@ -1409,14 +1715,14 @@ function ToolCallGroupBlock({
                   }
                 />
                 {expanded || pending ? (
-                  <div className="mt-1 flex min-w-0 flex-col gap-2 pl-5">
+                  <div className="ak-expand-in mt-1 flex min-w-0 flex-col gap-2 pl-5">
                     <ToolCallBlock
                       call={call}
                       approval={pending}
                       onApprovalDecision={onApprovalDecision}
                     />
                     {result ? (
-                      <ToolResultBlock result={result} toolName={group.toolName} />
+                      <ToolResultBlock result={result} toolName={call.name} />
                     ) : null}
                   </div>
                 ) : null}
@@ -1427,6 +1733,40 @@ function ToolCallGroupBlock({
       ) : null}
     </div>
   )
+}
+
+function summarizeToolActivityRows(group: ToolCallGroup): SummaryRow[] {
+  if (!group.mixed) {
+    return pickRenderer(group.toolName)({ calls: group.calls, results: group.results })
+  }
+
+  const rowsByCallId = new Map<string, SummaryRow>()
+  for (const call of group.calls) {
+    const renderer = pickRenderer(call.name)
+    const row = renderer({ calls: [call], results: group.results })[0]
+    if (!row) continue
+    rowsByCallId.set(call.callId, {
+      ...row,
+      primary: `${call.name} · ${row.primary}`,
+    })
+  }
+  return group.calls.map((call) => rowsByCallId.get(call.callId)).filter((row): row is SummaryRow => !!row)
+}
+
+function summarizeToolMix(calls: readonly ToolCallContent[]): string {
+  const counts = new Map<string, number>()
+  for (const call of calls) counts.set(call.name, (counts.get(call.name) ?? 0) + 1)
+  return [...counts.entries()].map(([name, count]) => `${name} ${count}`).join(', ')
+}
+
+function summarizePrimaryTargets(rows: readonly SummaryRow[], limit: number): string {
+  const targets: string[] = []
+  for (const row of rows) {
+    if (!row.primary || targets.includes(row.primary)) continue
+    targets.push(row.primary)
+    if (targets.length >= limit) break
+  }
+  return targets.join(', ')
 }
 
 type ToolLifecycleKind = 'approval' | 'running' | 'succeeded' | 'failed' | 'orphaned'
@@ -1476,7 +1816,7 @@ function ToolLifecycleSummaryBadges({ summary }: { summary: Partial<Record<ToolL
         const badge = toolLifecycleBadge(kind)
         return (
           <span key={kind} className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider', badge.className)}>
-            {count > 1 ? `${count} ` : ''}{badge.label}
+            {count} {badge.label}
           </span>
         )
       })}
