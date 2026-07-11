@@ -45,6 +45,7 @@ export type BackgroundTaskStatus = 'running' | 'exited' | 'killed' | 'signaled'
 
 export type BackgroundTaskSummary = {
   taskId: string
+  sessionId: string
   command: string
   cwd: string
   pid?: number
@@ -65,10 +66,11 @@ export type BgTaskChange =
       delta: { fromOffset: number; content: string }
     }
   | { kind: 'ended'; task: BackgroundTaskSummary }
-  | { kind: 'evicted'; taskId: string }
+  | { kind: 'evicted'; sessionId: string; taskId: string }
 
 type Task = {
   taskId: string
+  sessionId: string
   command: string
   cwd: string
   logPath: string
@@ -101,8 +103,9 @@ export function subscribeBackgroundTasks(
   }
 }
 
-export function listBackgroundTasks(): readonly BackgroundTaskSummary[] {
+export function listBackgroundTasks(sessionId: string): readonly BackgroundTaskSummary[] {
   return [...tasks.values()]
+    .filter((task) => task.sessionId === sessionId)
     .sort((a, b) => a.startedAt - b.startedAt)
     .map(summaryOf)
 }
@@ -115,6 +118,7 @@ export function getBackgroundTask(
 }
 
 export async function startBackgroundShell(params: {
+  sessionId: string
   command: string
   cwd: string
 }): Promise<BackgroundTaskSummary> {
@@ -132,6 +136,7 @@ export async function startBackgroundShell(params: {
 
   const task: Task = {
     taskId,
+    sessionId: params.sessionId,
     command: params.command,
     cwd: params.cwd,
     logPath,
@@ -186,6 +191,7 @@ export async function startBackgroundShell(params: {
 
 export async function readBackgroundShell(params: {
   taskId: string
+  sessionId: string
   offset?: number
   block?: boolean
   timeoutMs?: number
@@ -197,7 +203,7 @@ export async function readBackgroundShell(params: {
   bytesTruncated: number
 }> {
   const task = tasks.get(params.taskId)
-  if (!task) throw new Error(`unknown background task: ${params.taskId}`)
+  if (!task || task.sessionId !== params.sessionId) throw new Error(`unknown background task: ${params.taskId}`)
   if (params.block && task.status === 'running') {
     await waitForExit(task, params.timeoutMs ?? 30_000)
   }
@@ -216,9 +222,9 @@ export async function readBackgroundShell(params: {
   }
 }
 
-export async function killBackgroundShell(taskId: string): Promise<boolean> {
+export async function killBackgroundShell(taskId: string, sessionId: string): Promise<boolean> {
   const task = tasks.get(taskId)
-  if (!task) throw new Error(`unknown background task: ${taskId}`)
+  if (!task || task.sessionId !== sessionId) throw new Error(`unknown background task: ${taskId}`)
   if (task.status !== 'running') return false
   return task.child.kill('SIGTERM')
 }
@@ -301,7 +307,7 @@ async function evict(taskId: string): Promise<void> {
   } catch {
     // Best-effort.
   }
-  emitChange({ kind: 'evicted', taskId })
+  emitChange({ kind: 'evicted', sessionId: task.sessionId, taskId })
 }
 
 async function waitForExit(task: Task, timeoutMs: number): Promise<void> {
@@ -335,6 +341,7 @@ function emitChange(change: BgTaskChange): void {
 function summaryOf(task: Task): BackgroundTaskSummary {
   return {
     taskId: task.taskId,
+    sessionId: task.sessionId,
     command: task.command,
     cwd: task.cwd,
     ...(typeof task.child.pid === 'number' ? { pid: task.child.pid } : {}),

@@ -75,7 +75,7 @@ export const bashTool: Tool = {
     }
 
     if (runInBackground) {
-      const task = await startBackgroundShell({ command, cwd: resolvedCwd })
+      const task = await startBackgroundShell({ sessionId: ctx.sessionId, command, cwd: resolvedCwd })
       return JSON.stringify({
         taskId: task.taskId,
         note: 'started',
