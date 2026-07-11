@@ -196,9 +196,9 @@ export function App(): JSX.Element {
       }
       return
     }
-    const params = new URLSearchParams({ sessionId: config.sessionId })
-    if (config.token) params.set('token', config.token)
-    const next = `?${params.toString()}`
+    // Only sessionId belongs in the URL. The bootstrap token stays in
+    // memory (see readInitialConfig) so it can't leak via history/referrer.
+    const next = `?${new URLSearchParams({ sessionId: config.sessionId }).toString()}`
     if (window.location.search !== next) {
       window.history.replaceState(null, '', next)
     }
@@ -1209,6 +1209,7 @@ export function App(): JSX.Element {
                               <BackgroundShellsButton
                                 socket={session.socket}
                                 workspaceId={currentSession?.workspaceId}
+                                sessionId={config.sessionId}
                                 fallbackTasks={backgroundTasks}
                               />
                               <TasksButton todos={taskItems} />
@@ -1538,6 +1539,12 @@ function readInitialConfig(): Config {
   const sessionId = fromUrl ?? crypto.randomUUID()
   const explicit = fromUrl !== null
   const token = url.searchParams.get('token') ?? undefined
+  if (token !== undefined) {
+    // Strip the bootstrap token from the address bar so it doesn't leak
+    // into browser history, referrer headers, screenshots, or bookmarks.
+    url.searchParams.delete('token')
+    window.history.replaceState(null, '', url.toString())
+  }
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
