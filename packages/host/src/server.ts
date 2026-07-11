@@ -10,6 +10,7 @@
  */
 
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
+import { join } from 'node:path'
 
 import type {
   ModelInfo,
@@ -31,6 +32,7 @@ import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
 import { selectHooks } from './extensions/hooks.js'
 import type { SkillRegistry } from './extensions/skills.js'
 import { SessionStore, type SessionRecord } from './store/session.js'
+import { WorkspaceAliasStore } from './store/workspace-alias.js'
 import {
   createExecutorRegistry,
   DEFAULT_TOOL_TIMEOUT_MS,
@@ -47,6 +49,9 @@ import {
   type ExecutorNs,
 } from './connection/executor-ns.js'
 import { attachJsonRoutes, attachRequestHandler, attachStaticHandler } from './http/routes.js'
+import type { AuthConfig } from './auth-control.js'
+import type { AuditLogger } from './audit-log.js'
+import { noopAuditLogger } from './audit-log.js'
 
 export type HostServerOptions = {
   port: number
@@ -55,6 +60,8 @@ export type HostServerOptions = {
   defaultConfig: AgentConfig
   toolTimeoutMs?: number
   authToken?: string
+  auth?: AuthConfig
+  audit?: AuditLogger
   httpServer?: HttpServer
   staticDir?: string
   dashboardHandler?: (req: IncomingMessage, res: ServerResponse) => void
@@ -99,17 +106,22 @@ export type HostServer = {
 export async function startHostServer(
   options: HostServerOptions,
 ): Promise<HostServer> {
+  const auth: AuthConfig | undefined = options.auth ?? (options.authToken ? { sharedToken: options.authToken } : undefined)
+  const audit = options.audit ?? noopAuditLogger
   const http = options.httpServer ?? createServer()
   const io = new IOServer(http, {
     cors: { origin: '*' },
   })
 
   const store = new SessionStore(options.sessionsDir)
+  const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
+  await workspaceAliases.load()
 
   const executors = createExecutorRegistry(
     io,
     { workspaceIdFor: (sid) => store.get(sid)?.workspaceId },
     options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+    audit,
   )
 
   attachJsonRoutes(http, {
@@ -120,8 +132,10 @@ export async function startHostServer(
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
     ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
+    ...(auth ? { auth } : {}),
+    audit,
     sessions: store,
-    executorsSnapshot: () => executors.snapshot(),
+    executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
   })
 
   if (options.dashboardHandler) {
@@ -360,11 +374,19 @@ export async function startHostServer(
     loopDeps,
     executors,
     defaultConfig: options.defaultConfig,
-    ...(options.authToken !== undefined ? { authToken: options.authToken } : {}),
+    ...(auth ? { auth } : {}),
+    audit,
     broadcastError,
     selectedModels,
     dashboardNs,
     messageQueues,
+    executorSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
+    renameWorkspace: async (workspaceId, workspaceName) => {
+      const applied = await workspaceAliases.rename(workspaceId, workspaceName)
+      await store.renameWorkspace(workspaceId, applied)
+      executors.renameWorkspace(workspaceId, applied)
+      return applied
+    },
     onSessionCreated: (record) => fireLifecycleHook('session_start', record),
     onSessionDeleted: (record) => fireLifecycleHook('session_end', record),
   })
@@ -372,7 +394,8 @@ export async function startHostServer(
     store,
     executors,
     defaultConfig: options.defaultConfig,
-    authToken: options.authToken,
+    ...(auth ? { auth } : {}),
+    audit,
     broadcastError,
     dashboardNs,
   })
@@ -381,10 +404,13 @@ export async function startHostServer(
   // dashboard socket (not scoped to a session room) — the Workspaces column
   // shows all daemons, not just the one for the currently-selected session.
   executors.onChange((change) => {
-    dashboardNs.emit('server:executor_changed', change)
+    const effectiveChange = 'executor' in change
+      ? { ...change, executor: workspaceAliases.apply(change.executor) }
+      : change
+    dashboardNs.emit('server:executor_changed', effectiveChange)
     dashboardNs.emit('server:control_update', {
       kind: 'executor_changed',
-      ...change,
+      ...effectiveChange,
     })
   })
 

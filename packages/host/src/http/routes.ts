@@ -22,6 +22,8 @@ import type {
   AttachedExecutor,
   ClientAddManualModel,
   ClientDeleteManualModel,
+  ServerExecutorIdentitiesPayload,
+  ServerExecutorIdentityRevokedPayload,
   ModelInfo,
   ServerModelsPayload,
   ServerSettingsPayload,
@@ -78,6 +80,16 @@ import { retrieveMemory } from '../memory-retrieval.js'
 import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
 import { evaluateReliabilityGate, type ReliabilityGatePolicy } from '../reliability-gate.js'
 import { classifyReliability } from '../reliability-classify.js'
+import type { AuthConfig } from '../auth-control.js'
+import {
+  authenticateDashboardHandshake,
+  buildGithubStart,
+  clearGithubSessionCookie,
+  finishGithubOAuth,
+  setGithubSessionCookie,
+  readGithubSession,
+} from '../auth-control.js'
+import type { AuditActor, AuditLogger } from '../audit-log.js'
 import { diffToolCatalogs } from '../tool-catalog-diff.js'
 import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
 import type { SessionStore } from '../store/session.js'
@@ -282,6 +294,8 @@ export function attachJsonRoutes(
     sessions?: SessionStore
     routerHealth?: () => unknown
     executorsSnapshot?: () => readonly AttachedExecutor[]
+    auth?: AuthConfig
+    audit?: AuditLogger
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -289,11 +303,118 @@ export function attachJsonRoutes(
     if (url.startsWith('/socket.io/')) return
     // Strip query string / fragment before matching, so `/models?ts=…`
     // (cache-buster) still hits.
-    const path = url.split('?')[0]!.split('#')[0]
+    const path = url.split('?')[0]?.split('#')[0] ?? ''
+    if (path === '/auth/github/start' && req.method === 'GET' && payloads.auth?.github) {
+      claimRoute(req)
+      try {
+        const location = buildGithubStart(payloads.auth.github, res)
+        res.statusCode = 302
+        res.setHeader('location', location)
+        res.end()
+      } catch (err) {
+        sendError(res, 500, err instanceof Error ? err.message : String(err))
+      }
+      return
+    }
+    if (path === '/auth/github/callback' && req.method === 'GET' && payloads.auth?.github) {
+      claimRoute(req)
+      void finishGithubOAuth(req, payloads.auth.github)
+        .then((result) => {
+          if (!result.ok) {
+            payloads.audit?.log({ action: 'auth.github_callback', actor: { kind: 'anonymous' }, outcome: 'denied', error: result.reason })
+            sendError(res, 403, result.reason)
+            return
+          }
+          setGithubSessionCookie(res, payloads.auth!.github!, result.session)
+          payloads.audit?.log({ action: 'auth.github_login', actor: { kind: 'github_user', login: result.session.login, ...(result.session.id !== undefined ? { id: result.session.id } : {}) }, outcome: 'ok' })
+          res.statusCode = 302
+          res.setHeader('location', '/')
+          res.end()
+        })
+        .catch((err: unknown) => sendError(res, 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/auth/logout' && req.method === 'POST') {
+      claimRoute(req)
+      clearGithubSessionCookie(res)
+      sendJson(req, res, { ok: true })
+      return
+    }
+    if (path === '/auth/executor-invites' && req.method === 'POST') {
+      claimRoute(req)
+      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      if (!auth.ok) {
+        payloads.audit?.log({ action: 'executor_invite.create', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
+        sendError(res, 401, auth.reason)
+        return
+      }
+      const invite = payloads.auth?.executorIdentityStore?.createInvite()
+      if (!invite) {
+        sendError(res, 500, 'executor identity store is not configured')
+        return
+      }
+      payloads.audit?.log({ action: 'executor_invite.create', actor: httpActor(req, payloads.auth), outcome: 'ok', metadata: { expiresAt: invite.expiresAt } })
+      sendJson(req, res, invite)
+      return
+    }
+    if (path === '/auth/executor-identities' && req.method === 'GET') {
+      claimRoute(req)
+      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      if (!auth.ok) {
+        payloads.audit?.log({ action: 'executor_identity.list', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
+        sendError(res, 401, auth.reason)
+        return
+      }
+      const identities = payloads.auth?.executorIdentityStore?.snapshot() ?? []
+      const body: ServerExecutorIdentitiesPayload = {
+        identities: identities.map((entry) => ({
+          workspaceId: entry.workspaceId,
+          ...(entry.label ? { label: entry.label } : {}),
+          createdAt: entry.createdAt,
+          ...(entry.lastSeenAt ? { lastSeenAt: entry.lastSeenAt } : {}),
+        })),
+      }
+      sendJson(req, res, body)
+      return
+    }
+    if (path === '/auth/executor-identities' && req.method === 'DELETE') {
+      claimRoute(req)
+      const auth = payloads.auth?.github?.required ? authenticateDashboardHandshake(undefined, req, payloads.auth) : { ok: true as const }
+      if (!auth.ok) {
+        payloads.audit?.log({ action: 'executor_identity.revoke', actor: { kind: 'anonymous' }, outcome: 'denied', error: auth.reason })
+        sendError(res, 401, auth.reason)
+        return
+      }
+      const parsed = new URL(url, 'http://x')
+      const workspaceId = parsed.searchParams.get('workspaceId')?.trim() ?? ''
+      if (!workspaceId) {
+        sendError(res, 400, 'workspaceId is required')
+        return
+      }
+      const revoked = payloads.auth?.executorIdentityStore?.revokeWorkspace(workspaceId) ?? false
+      payloads.audit?.log({ action: 'executor_identity.revoke', actor: httpActor(req, payloads.auth), target: { workspaceId }, outcome: revoked ? 'ok' : 'denied', ...(revoked ? {} : { error: 'identity_not_found' }) })
+      const body: ServerExecutorIdentityRevokedPayload = { ok: true, workspaceId, revoked }
+      sendJson(req, res, body)
+      return
+    }
+    if (payloads.auth?.github?.required && isProtectedJsonRoute(path)) {
+      const auth = authenticateDashboardHandshake(undefined, req, payloads.auth)
+      if (!auth.ok) {
+        payloads.audit?.log({ action: 'http.auth_reject', actor: { kind: 'anonymous' }, target: { path, method: req.method }, outcome: 'denied', error: auth.reason })
+        claimRoute(req)
+        sendError(res, 401, auth.reason)
+        return
+      }
+    }
     if (path === '/settings/models' && req.method === 'POST' && payloads.addManualModel) {
       claimRoute(req)
       void readJson(req)
-        .then((body) => sendJson(req, res, payloads.addManualModel!(body as ClientAddManualModel)))
+        .then((body) => {
+          const input = body as ClientAddManualModel
+          const result = payloads.addManualModel!(input)
+          payloads.audit?.log({ action: 'settings.model_add', actor: httpActor(req, payloads.auth), target: { providerId: input.providerId, model: input.id }, outcome: 'ok' })
+          sendJson(req, res, result)
+        })
         .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
       return
     }
@@ -301,14 +422,13 @@ export function attachJsonRoutes(
       claimRoute(req)
       const parsed = new URL(url, 'http://x')
       try {
-        sendJson(
-          req,
-          res,
-          payloads.deleteManualModel({
-            providerId: parsed.searchParams.get('providerId') ?? '',
-            id: parsed.searchParams.get('id') ?? '',
-          }),
-        )
+        const input = {
+          providerId: parsed.searchParams.get('providerId') ?? '',
+          id: parsed.searchParams.get('id') ?? '',
+        }
+        const result = payloads.deleteManualModel(input)
+        payloads.audit?.log({ action: 'settings.model_delete', actor: httpActor(req, payloads.auth), target: { providerId: input.providerId, model: input.id }, outcome: 'ok' })
+        sendJson(req, res, result)
       } catch (err: unknown) {
         sendError(res, 400, err instanceof Error ? err.message : String(err))
       }
@@ -326,7 +446,10 @@ export function attachJsonRoutes(
       claimRoute(req)
       void readJson(req)
         .then((body) => runEnhancementAction(body as EnhancementActionRequest, payloads))
-        .then((result) => sendJson(req, res, result))
+        .then((result) => {
+          payloads.audit?.log({ action: 'http.enhancement_action', actor: httpActor(req, payloads.auth), target: { action: (result as { action?: unknown }).action }, outcome: 'ok' })
+          sendJson(req, res, result)
+        })
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 400, err instanceof Error ? err.message : String(err)))
       return
     }
@@ -387,6 +510,28 @@ export function attachJsonRoutes(
       return
     }
   })
+}
+
+function isProtectedJsonRoute(path: string): boolean {
+  return path === '/models' ||
+    path === '/settings' ||
+    path === '/settings/models' ||
+    path === '/auth/executor-invites' ||
+    path === '/auth/executor-identities' ||
+    path.startsWith('/eval/') ||
+    path.startsWith('/enhancement/') ||
+    path.startsWith('/artifacts/') ||
+    path.startsWith('/docs/') ||
+    path.startsWith('/router/')
+}
+
+function httpActor(req: IncomingMessage, auth: AuthConfig | undefined): AuditActor {
+  if (auth?.github?.required) {
+    const session = readGithubSession(req, auth.github)
+    if (session) return { kind: 'github_user', login: session.login, ...(session.id !== undefined ? { id: session.id } : {}) }
+  }
+  if (auth?.sharedToken) return { kind: 'token' }
+  return { kind: 'anonymous' }
 }
 
 async function runEnhancementAction(

@@ -18,6 +18,13 @@
  *   HOST_PORT          — default 3000
  *   SESSIONS_DIR       — default ~/.agent-kernel/sessions
  *   HOST_AUTH_TOKEN    — optional; when set, clients must supply it in auth
+ *   HOST_GITHUB_OAUTH_REQUIRED — set to 1 to require GitHub OAuth for dashboard/HTTP
+ *   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / GITHUB_OAUTH_CALLBACK_URL
+ *   GITHUB_USERNAME_WHITELIST — optional comma-separated GitHub login allowlist
+ *   HOST_AUTH_SESSION_SECRET — HMAC secret for dashboard login cookies
+ *   EXECUTOR_TOKENS    — optional JSON array of {token, workspaceId?, label?}
+ *   HOST_EXECUTOR_IDENTITIES — default ~/.agent-kernel/executor-identities.json
+ *   HOST_AUDIT_DIR     — default ~/.agent-kernel/audit
  *   HOST_MODEL         — hard override for the default model
  */
 
@@ -50,6 +57,9 @@ import {
   writeManualModels,
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
+import { authSettings, type AuthConfig } from '../src/auth-control.js'
+import { createAuditLogger } from '../src/audit-log.js'
+import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench-cli.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
@@ -87,6 +97,13 @@ async function main(): Promise<void> {
   const artifactRootDir = process.env.AGENT_KERNEL_ARTIFACTS_DIR === '0'
     ? false
     : process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(dirname(sessionsDir), 'artifacts')
+  const auth = loadAuthConfig()
+  const auditDir = process.env.HOST_AUDIT_DIR ?? join(dirname(sessionsDir), 'audit')
+  const audit = createAuditLogger(auditDir)
+  const executorIdentityPath = process.env.HOST_EXECUTOR_IDENTITIES ?? join(dirname(sessionsDir), 'executor-identities.json')
+  const executorIdentityStore = new ExecutorIdentityStore(executorIdentityPath)
+  executorIdentityStore.load()
+  const effectiveAuth: AuthConfig = { ...(auth ?? {}), executorIdentityStore }
   const healthRegistry = createProviderHealthRegistry()
   const registry = createModelRegistry(runtime.providers, runtime.manualModels, {
     fallbackDefault: runtime.defaultModel,
@@ -118,6 +135,7 @@ async function main(): Promise<void> {
     })),
     defaultModel,
     hooks: hookSummaries,
+    auth: authSettings(effectiveAuth),
     paths: {
       claudeSettings: join(homedir(), '.claude', 'settings.json'),
       codexConfig: join(homedir(), '.codex', 'config.toml'),
@@ -155,9 +173,8 @@ async function main(): Promise<void> {
       writeManualModels(manualModelsPath, registry.manualModels)
       return makeSettings()
     },
-    ...(process.env.HOST_AUTH_TOKEN
-      ? { authToken: process.env.HOST_AUTH_TOKEN }
-      : {}),
+    auth: effectiveAuth,
+    audit,
     ...(dashboard.kind === 'vite' ? { dashboardHandler: dashboard.handler } : {}),
     ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
@@ -183,6 +200,8 @@ async function main(): Promise<void> {
       hooks: hooks.length,
       skills: skills.skills.length,
       artifactRootDir,
+      auditDir,
+      executorIdentityPath,
     },
     'host listening',
   )
@@ -337,6 +356,52 @@ function buildSingleAdapter(provider: ProviderSpec, model: string): LLMAdapter {
     model,
     ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
   })
+}
+
+function loadAuthConfig(): AuthConfig | undefined {
+  const githubRequired = process.env.HOST_GITHUB_OAUTH_REQUIRED === '1'
+  const executorTokens = parseExecutorTokens(process.env.EXECUTOR_TOKENS)
+  const sharedToken = process.env.HOST_AUTH_TOKEN
+  const github = githubRequired
+    ? {
+        required: true,
+        ...(process.env.GITHUB_CLIENT_ID ? { clientId: process.env.GITHUB_CLIENT_ID } : {}),
+        ...(process.env.GITHUB_CLIENT_SECRET ? { clientSecret: process.env.GITHUB_CLIENT_SECRET } : {}),
+        ...(process.env.GITHUB_OAUTH_CALLBACK_URL ? { callbackUrl: process.env.GITHUB_OAUTH_CALLBACK_URL } : {}),
+        ...(process.env.HOST_AUTH_SESSION_SECRET ? { sessionSecret: process.env.HOST_AUTH_SESSION_SECRET } : {}),
+        usernameWhitelist: (process.env.GITHUB_USERNAME_WHITELIST ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      }
+    : undefined
+  if (!sharedToken && !github && executorTokens.length === 0) return undefined
+  return {
+    ...(sharedToken ? { sharedToken } : {}),
+    ...(github ? { github } : {}),
+    ...(executorTokens.length > 0 ? { executorTokens } : {}),
+  }
+}
+
+function parseExecutorTokens(raw: string | undefined): NonNullable<AuthConfig['executorTokens']> {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) throw new Error('EXECUTOR_TOKENS must be a JSON array')
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const rec = item as Record<string, unknown>
+      if (typeof rec.token !== 'string' || rec.token.length === 0) return []
+      return [{
+        token: rec.token,
+        ...(typeof rec.workspaceId === 'string' && rec.workspaceId.length > 0 ? { workspaceId: rec.workspaceId } : {}),
+        ...(typeof rec.label === 'string' && rec.label.length > 0 ? { label: rec.label } : {}),
+      }]
+    })
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'invalid EXECUTOR_TOKENS; ignoring scoped executor tokens')
+    return []
+  }
 }
 
 /**

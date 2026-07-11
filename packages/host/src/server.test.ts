@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { AddressInfo } from 'node:net'
@@ -34,6 +34,7 @@ import { io as clientIO, type Socket as ClientSocket } from 'socket.io-client'
 import type { LLMAdapter } from './llm/adapter.js'
 import { startHostServer, type HostServer } from './server.js'
 import { readSessionLog } from './store/log.js'
+import { ExecutorIdentityStore } from './store/executor-identity.js'
 
 const WRITE = {
   name: 'write',
@@ -109,12 +110,11 @@ function attachDirListHandler(
   existingDirs: readonly string[],
 ): void {
   const known = new Set(existingDirs.map((p) => resolve(p)))
-  // Direct-mode tool calls (host-initiated fs / bg / overflow RPCs) arrive
-  // as `tool:call` with `dispatchMode: 'direct'`. The stub executor here
-  // pretends to be the `__fs_list_dirs` built-in and returns a JSON string
-  // matching DirListResult.
+  // Host-internal fs / bg / overflow RPCs arrive as ordinary `tool:call`
+  // messages. The stub executor pretends to be the `__fs_list_dirs` built-in
+  // and returns a JSON string matching DirListResult.
   executor.on('tool:call', (payload, ack: (result: ToolResultAck) => void) => {
-    if (payload.dispatchMode !== 'direct' || payload.name !== '__fs_list_dirs') return
+    if (payload.name !== '__fs_list_dirs') return
     const input = payload.input as { requestId: string; workspaceId: string; path?: string }
     const requested = resolve(input.path ?? roots[0] ?? process.cwd())
     const result: DirListResult = known.has(requested)
@@ -237,6 +237,200 @@ describe('wire protocol', () => {
     })
     expect(err.message).toBe('version_incompatible')
     bad.close()
+  })
+
+  it('rejects executor announce when token scope does not match workspaceId', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: {
+        executorTokens: [{ token: 'exec-token', workspaceId: 'ws-allowed', label: 'allowed executor' }],
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: 'exec-token' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    const reject = new Promise<{ code: string; message: string }>((resolve) => {
+      executor.on('executor:host_reject', resolve)
+    })
+    executor.emit('executor:announce', {
+      executorId: 'exec-1',
+      workspaceId: 'ws-other',
+      workspaceName: 'other',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+    await expect(reject).resolves.toMatchObject({ code: 'workspace_identity_mismatch' })
+    executor.close()
+  })
+
+  it('accepts executor announce when token scope matches workspaceId', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: {
+        executorTokens: [{ token: 'exec-token', workspaceId: 'ws-allowed' }],
+      },
+    })
+    url = `http://localhost:${server.port}`
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: 'exec-token' },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    executor.emit('executor:announce', {
+      executorId: 'exec-1',
+      workspaceId: 'ws-allowed',
+      workspaceName: 'allowed',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+    const dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId: 'dash', role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    await waitForWorkspace(dashboard, 'ws-allowed')
+    dashboard.close()
+    executor.close()
+  })
+
+  it('creates one-time executor invites and binds the first announced workspace', async () => {
+    await server.close()
+    const identityPath = join(dir, 'executor-identities.json')
+    const identityStore = new ExecutorIdentityStore(identityPath)
+    identityStore.load()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: { executorIdentityStore: identityStore },
+    })
+    url = `http://localhost:${server.port}`
+
+    const inviteRes = await fetch(`${url}/auth/executor-invites`, { method: 'POST' })
+    expect(inviteRes.ok).toBe(true)
+    const invite = await inviteRes.json() as { inviteToken: string; expiresAt: string }
+    expect(invite.inviteToken).toMatch(/^ak_invite_/)
+    expect(readFileSync(identityPath, 'utf8')).not.toContain(invite.inviteToken)
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, invite: invite.inviteToken },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    const welcome = new Promise<{ token: string; workspaceId: string }>((resolve) => executor.on('executor:welcome', resolve))
+    executor.emit('executor:announce', {
+      executorId: 'exec-invite',
+      workspaceId: 'ws-invite',
+      workspaceName: 'invited',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+    const payload = await welcome
+    expect(payload.workspaceId).toBe('ws-invite')
+    expect(payload.token).toMatch(/^ak_exec_/)
+    expect(readFileSync(identityPath, 'utf8')).toContain('ws-invite')
+    expect(readFileSync(identityPath, 'utf8')).not.toContain(payload.token)
+
+    const listRes = await fetch(`${url}/auth/executor-identities`)
+    expect(listRes.ok).toBe(true)
+    const listBody = await listRes.json() as { identities: Array<{ workspaceId: string; token?: string; tokenHash?: string }> }
+    expect(listBody.identities).toEqual([expect.objectContaining({ workspaceId: 'ws-invite' })])
+    expect(JSON.stringify(listBody)).not.toContain(payload.token)
+    expect(JSON.stringify(listBody)).not.toContain('tokenHash')
+
+    const revokeRes = await fetch(`${url}/auth/executor-identities?workspaceId=ws-invite`, { method: 'DELETE' })
+    expect(revokeRes.ok).toBe(true)
+    expect(await revokeRes.json()).toEqual({ ok: true, workspaceId: 'ws-invite', revoked: true })
+    const afterRevoke = await fetch(`${url}/auth/executor-identities`).then((res) => res.json()) as { identities: unknown[] }
+    expect(afterRevoke.identities).toEqual([])
+    executor.close()
+  })
+
+  it('keeps one-time executor invites valid across host restarts without storing plaintext invites', async () => {
+    await server.close()
+    const identityPath = join(dir, 'executor-identities.json')
+    const identityStore = new ExecutorIdentityStore(identityPath)
+    identityStore.load()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      auth: { executorIdentityStore: identityStore },
+    })
+    url = `http://localhost:${server.port}`
+
+    const invite = await fetch(`${url}/auth/executor-invites`, { method: 'POST' }).then((res) => res.json()) as { inviteToken: string }
+    expect(readFileSync(identityPath, 'utf8')).not.toContain(invite.inviteToken)
+
+    await server.close()
+    const restartedStore = new ExecutorIdentityStore(identityPath)
+    restartedStore.load()
+    const restartedHttp = createServer()
+    await new Promise<void>((resolve) => restartedHttp.listen(0, resolve))
+    server = await startHostServer({
+      port: (restartedHttp.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: restartedHttp,
+      auth: { executorIdentityStore: restartedStore },
+    })
+    url = `http://localhost:${server.port}`
+
+    const executor: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, invite: invite.inviteToken },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', resolve))
+    const welcome = new Promise<{ token: string; workspaceId: string }>((resolve) => executor.on('executor:welcome', resolve))
+    executor.emit('executor:announce', {
+      executorId: 'exec-restarted-invite',
+      workspaceId: 'ws-restarted-invite',
+      workspaceName: 'restarted',
+      tools: ['bash'],
+      runtime: 'node',
+      runtimeVersion: 'test',
+    })
+    await expect(welcome).resolves.toMatchObject({ workspaceId: 'ws-restarted-invite' })
+    executor.close()
   })
 
   it('answers first-paint dashboard requests sent before session:ready', async () => {
@@ -1638,6 +1832,77 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('client:rename_workspace updates executor snapshots and session summaries', async () => {
+    const sessionId = 'wire-rename-workspace'
+    const dashboard: ClientSocket<
+      DashboardServerToClientEvents,
+      DashboardClientToServerEvents
+    > = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) =>
+      dashboard.on('session:ready', resolve),
+    )
+
+    const executor: ClientSocket<
+      ExecutorServerToClientEvents,
+      ExecutorClientToServerEvents
+    > = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', {
+      executorId: 'ex-rename-workspace',
+      workspaceId: 'ws-rename',
+      workspaceName: 'old-name',
+      tools: ['write'],
+      runtime: 'node',
+      runtimeVersion: '22',
+    })
+    await waitForWorkspace(dashboard, 'ws-rename')
+
+    dashboard.emit('client:create_session', {
+      sessionId,
+      workspaceId: 'ws-rename',
+      workspaceName: 'old-name',
+    })
+    await new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.on('server:sessions', (payload) => {
+        if (payload.sessions.some((s) => s.sessionId === sessionId)) resolve(payload)
+      })
+    })
+
+    const renamed = new Promise<void>((resolve) => {
+      dashboard.on('workspace:renamed', (payload) => {
+        if (payload.workspaceId === 'ws-rename' && payload.workspaceName === 'new-name') resolve()
+      })
+    })
+    dashboard.emit('client:rename_workspace', {
+      workspaceId: 'ws-rename',
+      workspaceName: ' new-name ',
+    })
+    await renamed
+
+    const executors = await new Promise<ServerExecutorsPayload>((resolve) => {
+      dashboard.on('server:executors', resolve)
+      dashboard.emit('client:list_executors', {})
+    })
+    expect(executors.executors.find((e) => e.workspaceId === 'ws-rename')?.workspaceName).toBe('new-name')
+
+    const sessions = await new Promise<ServerSessionsPayload>((resolve) => {
+      dashboard.on('server:sessions', resolve)
+      dashboard.emit('client:list_sessions', {})
+    })
+    expect(sessions.sessions.find((s) => s.sessionId === sessionId)?.workspaceName).toBe('new-name')
+
+    dashboard.close()
+    executor.close()
+  })
+
   it('client:create_session validates and writes the initial cwd', async () => {
     const sessionId = 'wire-create-session-cwd'
     const root = resolve(dir, 'workspace-root')
@@ -1817,7 +2082,7 @@ describe('wire protocol', () => {
     })
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
     executor.on('tool:call', (payload, ack) => {
-      if (payload.dispatchMode !== 'direct' || payload.name !== '__fs_list_dirs') return
+      if (payload.name !== '__fs_list_dirs') return
       const input = payload.input as { requestId: string; workspaceId: string }
       const result: DirListResult = {
         requestId: input.requestId,
