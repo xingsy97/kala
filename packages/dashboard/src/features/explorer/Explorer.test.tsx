@@ -125,6 +125,30 @@ describe('Explorer', () => {
     expect(wsRow.textContent).toContain('my-mbp')
   })
 
+  it('renames a workspace from the workspace row action', () => {
+    const onRenameWorkspace = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+        onRenameWorkspace={onRenameWorkspace}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('workspace-rename-ws-1'))
+    const input = screen.getByTestId('workspace-rename-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'renamed workspace' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onRenameWorkspace).toHaveBeenCalledWith('ws-1', 'renamed workspace')
+  })
+
   it('renders session rows grouped under their workspace', () => {
     render(
       <Explorer
@@ -148,6 +172,46 @@ describe('Explorer', () => {
     expect(screen.getByTestId('session-status-indicator').getAttribute('title')).toBe('Done')
     expect(screen.getByTestId('session-row-cwd').textContent).toContain('/tmp')
     expect(screen.getByTestId('session-row-cwd').textContent).not.toContain('cwd')
+  })
+
+  it('overrides the selected session row with the live working status', () => {
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[{ ...sessionSummary, status: 'done' }]}
+        selectedSessionId={sessionSummary.sessionId}
+        activeSessionStatus="loading"
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const indicator = screen.getByTestId('session-status-indicator')
+    expect(indicator.getAttribute('data-status')).toBe('loading')
+    expect(indicator.getAttribute('title')).toBe('Working')
+  })
+
+  it('keeps non-selected session rows on their summary status', () => {
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[{ ...sessionSummary, status: 'done' }]}
+        selectedSessionId="different-session"
+        activeSessionStatus="loading"
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const indicator = screen.getByTestId('session-status-indicator')
+    expect(indicator.getAttribute('data-status')).toBe('done')
+    expect(indicator.getAttribute('title')).toBe('Done')
   })
 
   it('places sessions with no workspaceId under an Unassigned bucket', () => {

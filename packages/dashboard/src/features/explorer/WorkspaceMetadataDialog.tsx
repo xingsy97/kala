@@ -1,12 +1,8 @@
-/**
- * Read-only "workspace info" modal opened from the Explorer.
- *
- * All fields are derived from the executor's announce payload plus a count
- * of sessions bound to this workspace. No user-editable fields  -  workspace
- * identity is set once at executor launch and never renamed here.
- */
+import { useEffect, useState, type FormEvent } from 'react'
+import { Pencil, ShieldCheck, ShieldOff } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
-import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
+import type { AttachedExecutor, ExecutorIdentitySummary, ServerExecutorIdentitiesPayload, SessionSummary } from '@agent-kernel/shared'
 
 import {
   Dialog,
@@ -15,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog.js'
+import { Button } from '../../components/ui/button.js'
 
 type Props = {
   open: boolean
@@ -23,6 +20,7 @@ type Props = {
   workspaceName?: string
   executor?: AttachedExecutor
   sessions: readonly SessionSummary[]
+  onRename?(workspaceName: string): void
 }
 
 export function WorkspaceMetadataDialog({
@@ -32,27 +30,78 @@ export function WorkspaceMetadataDialog({
   workspaceName,
   executor,
   sessions,
+  onRename,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
+  const displayName = workspaceName ?? executor?.workspaceName ?? ''
+  const [draft, setDraft] = useState(displayName)
+  const [identity, setIdentity] = useState<ExecutorIdentitySummary | null>(null)
+  const [identityError, setIdentityError] = useState<string | null>(null)
+  const [revoking, setRevoking] = useState(false)
+  useEffect(() => {
+    if (open) setDraft(displayName)
+  }, [displayName, open])
+  useEffect(() => {
+    if (!open || workspaceId.length === 0) return
+    let cancelled = false
+    setIdentity(null)
+    setIdentityError(null)
+    void fetch('/auth/executor-identities', { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await res.text())
+        return res.json() as Promise<ServerExecutorIdentitiesPayload>
+      })
+      .then((body) => {
+        if (cancelled) return
+        setIdentity(body.identities.find((entry) => entry.workspaceId === workspaceId) ?? null)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setIdentityError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, workspaceId])
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    const trimmed = draft.trim()
+    if (trimmed.length === 0 || trimmed === displayName) return
+    onRename?.(trimmed)
+  }
+  const revokeIdentity = async (): Promise<void> => {
+    if (workspaceId.length === 0) return
+    setRevoking(true)
+    setIdentityError(null)
+    try {
+      const params = new URLSearchParams({ workspaceId })
+      const res = await fetch(`/auth/executor-identities?${params.toString()}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await res.text())
+      setIdentity(null)
+    } catch (err: unknown) {
+      setIdentityError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRevoking(false)
+    }
+  }
   const rows: Array<[string, string]> = [
-    ['Workspace id', workspaceId],
-    ['Workspace name', workspaceName ?? executor?.workspaceName ?? ' - '],
-    ['Runtime', executor ? `${executor.runtime} ${executor.runtimeVersion}` : ' - '],
-    ['OS', executor?.os ?? ' - '],
-    ['Hostname', executor?.hostname ?? ' - '],
-    ['Working dir', executor?.workingDir ?? ' - '],
+    [t('workspaceMetadata.workspaceId'), workspaceId],
+    [t('workspaceMetadata.runtime'), executor ? `${executor.runtime} ${executor.runtimeVersion}` : ' - '],
+    [t('workspaceMetadata.os'), executor?.os ?? ' - '],
+    [t('workspaceMetadata.hostname'), executor?.hostname ?? ' - '],
+    [t('workspaceMetadata.workingDir'), executor?.workingDir ?? ' - '],
     [
-      'Sandbox roots',
+      t('workspaceMetadata.sandboxRoots'),
       executor?.sandboxRoots && executor.sandboxRoots.length > 0
         ? executor.sandboxRoots.join(', ')
-        : 'trusts whole machine',
+        : t('workspaceMetadata.trustsWholeMachine'),
     ],
-    ['Executor id', executor?.executorId ?? 'not attached'],
+    [t('workspaceMetadata.executorId'), executor?.executorId ?? t('workspaceMetadata.notAttached')],
     [
-      'Started at',
+      t('workspaceMetadata.startedAt'),
       executor?.startedAt ? new Date(executor.startedAt).toLocaleString() : ' - ',
     ],
-    ['PID', executor?.pid ? String(executor.pid) : ' - '],
-    ['Sessions in workspace', String(sessions.length)],
+    [t('workspaceMetadata.pid'), executor?.pid ? String(executor.pid) : ' - '],
+    [t('workspaceMetadata.sessionsInWorkspace'), String(sessions.length)],
   ]
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -61,12 +110,57 @@ export function WorkspaceMetadataDialog({
         data-testid="workspace-metadata-dialog"
       >
         <DialogHeader className="border-b border-border/50 px-5 py-4">
-          <DialogTitle>{workspaceName ?? executor?.workspaceName ?? 'Workspace'}</DialogTitle>
+          <DialogTitle>{displayName || t('workspaceMetadata.workspace')}</DialogTitle>
           <DialogDescription>
-            Identity announced by the executor. Read-only  -  restart the executor to change these values.
+            {t('workspaceMetadata.description')}
           </DialogDescription>
         </DialogHeader>
-        <div className="px-5 py-4">
+        <div className="space-y-4 px-5 py-4">
+          <form onSubmit={submit} className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-metadata-rename-form">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="workspace-display-name">
+              {t('workspaceMetadata.displayName')}
+            </label>
+            <div className="mt-2 flex gap-2">
+              <input
+                id="workspace-display-name"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                data-testid="workspace-metadata-name-input"
+              />
+              <Button type="submit" size="sm" disabled={draft.trim().length === 0 || draft.trim() === displayName} data-testid="workspace-metadata-rename-button">
+                <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                {t('workspaceMetadata.rename')}
+              </Button>
+            </div>
+          </form>
+          <section className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-identity-card">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  {identity ? <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden /> : <ShieldOff className="h-4 w-4 text-muted-foreground" aria-hidden />}
+                  {t('workspaceMetadata.executorIdentity')}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {identity
+                    ? t('workspaceMetadata.identityBound', { lastSeen: identity.lastSeenAt ? new Date(identity.lastSeenAt).toLocaleString() : t('workspaceMetadata.neverSeen') })
+                    : t('workspaceMetadata.identityNotBound')}
+                </p>
+                {identityError ? <p className="mt-2 text-xs text-destructive">{identityError}</p> : null}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!identity || revoking}
+                onClick={() => void revokeIdentity()}
+                data-testid="workspace-revoke-identity-button"
+              >
+                <ShieldOff className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                {revoking ? t('workspaceMetadata.revokingIdentity') : t('workspaceMetadata.revokeIdentity')}
+              </Button>
+            </div>
+          </section>
           <div className="overflow-hidden rounded-md border border-border/50">
             <table className="w-full text-sm">
               <tbody>
