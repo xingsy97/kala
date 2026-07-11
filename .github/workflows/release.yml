@@ -90,6 +90,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
