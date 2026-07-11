@@ -101,8 +101,12 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       await next
     },
     async compact(sessionId, trigger = 'manual') {
-      await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts)
-      if (trigger !== 'tool_result') {
+      const replaced = await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts)
+      // Arm the post-compact loop guard ONLY on successful replacement. A
+      // skipped/rejected attempt did not change messages, so there is nothing
+      // for the model to loop back on. tool_result compaction is mid-batch;
+      // guarding there would starve the batch of legitimate follow-up calls.
+      if (replaced && trigger !== 'tool_result') {
         loopGuard.set(sessionId, {
           remainingCalls: POST_COMPACTION_GUARD_CALLS,
           seen: new Map(),
@@ -571,8 +575,40 @@ async function messagesForLlmCall(
   runtime?: LoopRuntime,
 ): Promise<readonly import('@agent-kernel/kernel').Message[]> {
   if (!runtime || !shouldPreflightCompact(config, messages)) return messages
-  await runtime.handle.compact(sessionId, 'preflight')
+  try {
+    await runtime.handle.compact(sessionId, 'preflight')
+  } catch {
+    // Compaction failed (circuit breaker open, summarizer down, etc). Do NOT
+    // send the original oversized messages  -  provider will reject with PTL and
+    // the failure surfaces to the user as a broken turn. Emergency truncate to
+    // the preflight budget by dropping whole assistant-groups from the head.
+    const after = deps.store.get(sessionId)?.state.messages ?? messages
+    if (!shouldPreflightCompact(config, after)) return after
+    return emergencyTruncate(after, config)
+  }
   return deps.store.get(sessionId)?.state.messages ?? messages
+}
+
+function emergencyTruncate(
+  messages: readonly import('@agent-kernel/kernel').Message[],
+  config: AgentConfig,
+): readonly import('@agent-kernel/kernel').Message[] {
+  const leadingSystem = messages[0]?.role === 'system' ? [messages[0]] : []
+  const rest = messages.slice(leadingSystem.length)
+  const groups: (typeof messages[number])[][] = []
+  for (const m of rest) {
+    if (m.role === 'assistant' || groups.length === 0) groups.push([m])
+    else groups[groups.length - 1]!.push(m)
+  }
+  let dropped = 0
+  while (groups.length > 1) {
+    const candidate = [...leadingSystem, ...groups.flat()]
+    if (!shouldPreflightCompact(config, candidate)) return candidate
+    groups.shift()
+    dropped += 1
+    if (dropped > 100) break
+  }
+  return [...leadingSystem, ...groups.flat()]
 }
 
 function shouldPreflightCompact(
@@ -581,13 +617,18 @@ function shouldPreflightCompact(
 ): boolean {
   if (!config.contextLimit || config.contextLimit <= 0) return false
   if (!messages.some((m) => m.role !== 'system')) return false
-  const reserve = Math.min(
+  const baseReserve = Math.min(
     Math.max(
       PREFLIGHT_RESERVE_FLOOR_TOKENS,
       Math.round(config.contextLimit * PREFLIGHT_RESERVE_RATIO),
     ),
     Math.floor(config.contextLimit * 0.25),
   )
+  // Extended-thinking budget is spent on THIS turn's reasoning tokens, before
+  // the summary response the reserve already accounts for. Add it so a big
+  // thinking budget doesn't quietly eat the compaction headroom.
+  const thinking = config.thinkingBudget && config.thinkingBudget > 0 ? config.thinkingBudget : 0
+  const reserve = Math.min(baseReserve + thinking, Math.floor(config.contextLimit * 0.5))
   const limit = Math.max(0, config.contextLimit - reserve)
   return estimateMessageTokens(messages) >= limit
 }

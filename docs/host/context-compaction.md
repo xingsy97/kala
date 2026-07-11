@@ -1,6 +1,8 @@
 # Context Compaction
 
-**Status**: implemented with remaining quality gaps.
+**Status**: implemented; this document is the source of truth for the intended
+behavior. Where implementation and this document disagree, this document wins
+and the implementation is a bug to fix.
 
 Agent-kernel uses host-driven context compaction. The host decides when and how
 to summarize old context; the kernel only records and applies the resulting
@@ -10,13 +12,19 @@ visible in the JSONL ledger and dashboard debugger.
 
 ## Problem Statement
 
-Long-running coding-agent sessions fail in two different ways:
+Long-running coding-agent sessions fail in three ways, and a robust compaction
+system must handle all three without human intervention:
 
-1. **Cumulative pressure**: old chat, tool results, file excerpts, memory, and
+1. **Cumulative pressure**. Old chat, tool results, file excerpts, memory, and
    tool schemas gradually fill the model context window.
-2. **Single-turn blowups**: one shell/search/test result can be large enough to
+2. **Single-turn blowups**. One shell/search/test result can be large enough to
    make the next LLM request or even the compaction request itself exceed the
    model window.
+3. **Sustained summarizer failure**. The summarizer LLM call may itself fail
+   repeatedly (provider outage, authentication error, malformed model output,
+   or an input that keeps hitting `prompt_too_long` even after trimming). A
+   compaction system that retries forever will burn quota; one that gives up
+   silently will let the session poison itself.
 
 The dangerous case is a multi-tool-call batch. If an assistant emits four tool
 calls and the first tool result is huge, waiting for all four results before
@@ -39,6 +47,11 @@ boundaries.
 - **Compaction has its own budget**. The summarizer prompt and summary response
   need reserved headroom; compaction must not wait until the transcript is too
   large to summarize.
+- **Compaction failure is observable, bounded, and recoverable**. Every
+  compaction attempt succeeds, is skipped with a reason, or fails with a reason
+  code. Repeated failure engages a circuit breaker rather than silently
+  looping. A skipped compaction never leaves the session claiming compaction
+  ran.
 
 ## Reference Implementations: End-To-End Mechanics
 
@@ -60,16 +73,16 @@ The four serious local references all implement the same high-level shape:
 
 The important differences are where each project draws the cut point, how it
 protects tool-call protocol ordering, and how it recovers when the summarizer
-request itself is too large.
+request itself is too large or keeps failing.
 
 ### Codex
 
 Primary source files:
 
-- `references/codex/codex-rs/core/src/tasks/compact.rs`
-- `references/codex/codex-rs/core/src/compact.rs`
-- `references/codex/codex-rs/core/src/state/auto_compact_window.rs`
-- `references/codex/codex-rs/prompts/templates/compact/prompt.md`
+- `tasks/compact.rs` [1]
+- `compact.rs` [2]
+- `auto_compact_window.rs` [3]
+- `compact/prompt.md` [4]
 
 Codex treats compaction as a session task. It is not just a CLI command that
 mutates an array of messages.
@@ -118,12 +131,13 @@ Inside `run_compact_task_inner_impl`, the state transition is:
 ```
 
 The retry behavior is concrete and important. If the compaction model call fails
-with `ContextWindowExceeded`, Codex does not give up immediately. It removes the
-oldest prompt item from the cloned compaction input and tries again. Retryable
-stream errors use backoff. User interruption, turn abort, or session budget
-exhaustion are surfaced as terminal failures.
+with a **typed** `ApiError::ContextWindowExceeded`, Codex does not give up
+immediately. It calls `history.remove_first_item()` and tries again in a loop
+(no bounded attempts; loop until it fits or a different error surfaces).
+Retryable stream errors use backoff. User interruption, turn abort, or session
+budget exhaustion are surfaced as terminal failures.
 
-Codex also tracks compaction windows. `AutoCompactWindow` keeps:
+Codex tracks compaction windows in `AutoCompactWindow`:
 
 - a stable first window ID,
 - the previous window ID,
@@ -132,32 +146,24 @@ Codex also tracks compaction windows. `AutoCompactWindow` keeps:
 - whether a token-budget reminder was delivered,
 - whether a new context window was explicitly requested.
 
-The resulting mental model is:
-
-```text
-Before:
-  history = [setup, old user/assistant/tool traffic, recent user work]
-
-Compaction request:
-  model sees [setup, old user/assistant/tool traffic, recent user work, compact prompt]
-
-After:
-  history = [setup, compacted summary, selected user messages, optional reinjected context]
-```
+Codex reasoning models: the compaction stream passes `turn_context.reasoning_effort` and
+`reasoning_summary` from the turn context, so reasoning tokens are respected but
+the caller must decide whether to spend them on a summary.
 
 Codex's useful lesson is lifecycle rigor: compaction has task identity, hooks,
-analytics, retries, window identity, and explicit replacement history.
+analytics, retries, window identity, typed errors, and explicit replacement
+history.
 
 ### Claude Code
 
 Primary source files:
 
-- `references/claude-code-collection/claude-code-source-code/src/services/compact/autoCompact.ts`
-- `references/claude-code-collection/claude-code-source-code/src/services/compact/compact.ts`
-- `references/claude-code-collection/claude-code-source-code/src/commands/compact/compact.ts`
-- `references/claude-code-collection/claude-code-source-code/src/services/compact/microCompact.ts`
-- `references/claude-code-collection/claude-code-source-code/src/services/compact/sessionMemoryCompact.ts`
-- `references/claude-code-collection/claude-code-source-code/src/services/compact/postCompactCleanup.ts`
+- `autoCompact.ts` [5]
+- `compact.ts` [6]
+- `commands/compact.ts` [7]
+- `microCompact.ts` [8]
+- `sessionMemoryCompact.ts` [9]
+- `postCompactCleanup.ts` [10]
 
 Claude Code has several compaction paths. The important point is that `/compact`
 and auto-compact do not directly mean "summarize everything now". They first try
@@ -170,24 +176,24 @@ shouldAutoCompact(messages, model, querySource, snipTokensFreed)
   -> reject recursive/incompatible sources
        querySource == session_memory -> false
        querySource == compact        -> false
-       reactive-only/context-collapse modes can also suppress auto compact
+       reactive-only / context-collapse modes can also suppress auto compact
   -> tokenCount = tokenCountWithEstimation(messages) - snipTokensFreed
-  -> effectiveWindow = contextWindow(model) - reservedSummaryOutputTokens
-  -> threshold = effectiveWindow - 13_000
+  -> effectiveWindow = contextWindow(model) - min(maxOutputTokens, MAX_OUTPUT_TOKENS_FOR_SUMMARY=20_000)
+  -> threshold = effectiveWindow - AUTOCOMPACT_BUFFER_TOKENS(13_000)
   -> return tokenCount >= threshold
 ```
 
-The output reserve is explicit. Claude Code reserves up to `20_000` output tokens
-for the summary itself. That means a 200k context model is not treated as "safe
-until 200k input tokens". It is treated as "safe only while there is still room
-for the compact prompt and summary response".
+The output reserve is explicit. Claude Code reserves up to 20,000 output tokens
+for the summary itself. A 200k context model is not treated as "safe until 200k
+input tokens"; it is treated as "safe only while there is still room for the
+compact prompt and summary response".
 
 If auto-trigger says yes:
 
 ```text
 autoCompactIfNeeded
   -> if DISABLE_COMPACT, do nothing
-  -> if consecutiveFailures >= 3, do nothing
+  -> if consecutiveFailures >= 3, do nothing         <-- circuit breaker
   -> trySessionMemoryCompaction(messages, agentId, autoCompactThreshold)
        success -> reset summarized-message pointer
                -> runPostCompactCleanup
@@ -196,8 +202,8 @@ autoCompactIfNeeded
   -> compactConversation(... isAutoCompact=true, suppressUserQuestions=true)
        success -> reset summarized-message pointer
                -> runPostCompactCleanup
-               -> reset consecutiveFailures to 0
-       failure -> increment consecutiveFailures
+               -> reset consecutiveFailures to 0     <-- circuit breaker reset
+       failure -> increment consecutiveFailures      <-- circuit breaker step
                -> after 3 failures, stop automatic retry attempts this session
 ```
 
@@ -206,7 +212,6 @@ Manual `/compact` path:
 ```text
 /compact [optional custom instructions]
   -> getMessagesAfterCompactBoundary(messages)
-       removes already-snipped UI scrollback from the model-visible compact input
   -> if no custom instructions, trySessionMemoryCompaction first
   -> if reactive-only mode, run reactive prompt-too-long compaction path
   -> otherwise run microcompactMessages(messages, context)
@@ -233,34 +238,31 @@ several safety passes:
 10. Clear read-file state, loaded nested memory paths, warnings, and cache baselines.
 ```
 
-The concrete before/after is:
+`truncateHeadForPTLRetry` groups messages by API round (assistant + its
+tool_results form one group). Each retry drops the oldest whole group so
+tool-call/tool-result pairing is preserved. Bounded at 3 attempts. If gap
+parsing fails, drops 20% of groups as fallback. Prepends a synthetic marker
+when the leading message would be an assistant.
 
-```text
-Before:
-  messages = [old work, compact boundary, newer work, huge tool output, current task]
+Post-compact cleanup clears: microcompact state, context-collapse state, user
+context memoization, memory-files cache, system prompt sections, classifier
+approvals, speculative checks, beta tracing state, session messages cache.
+Deliberately preserves `sentSkillNames` (already installed skills shouldn't be
+re-announced). Skipped for subagent compactions to protect main-thread state.
 
-Manual projection:
-  compact input starts after latest compact boundary
-
-Microcompact/session-memory pass:
-  may reduce memory or tool payloads without full conversation replacement
-
-Full compact result:
-  messages = [summary message, restored file/context attachments, preserved recent work]
-```
-
-Claude Code's useful lesson is that compaction is a ladder of interventions:
-session-memory compaction, microcompact, full compact, partial compact, and
-prompt-too-long retry are separate tools with different cost and blast radius.
+Claude Code's useful lessons: (1) compaction is a ladder of interventions
+(session-memory, microcompact, full compact, partial compact, PTL-retry) with
+different cost and blast radius; (2) both `consecutiveFailures` and
+`postCompactCleanup` are correctness features, not observability niceties.
 
 ### opencode
 
 Primary source files:
 
-- `references/opencode/packages/opencode/src/session/overflow.ts`
-- `references/opencode/packages/opencode/src/session/compaction.ts`
-- `references/opencode/packages/opencode/src/tool/truncate.ts`
-- `references/opencode/packages/opencode/src/session/message-v2.ts`
+- `overflow.ts` [11]
+- `compaction.ts` [12]
+- `truncate.ts` [13]
+- `message-v2.ts` [14]
 
 opencode models compaction as a session service. It stores compaction as normal
 session messages and parts, then lets the compaction agent produce a summary.
@@ -270,8 +272,10 @@ Overflow decision:
 ```text
 isOverflow({ cfg, tokens, model, outputTokenMax })
   -> if cfg.compaction.auto === false, return false
-  -> if model has no context limit, return false
+  -> if model has no context limit, return false     <-- unknown-window fallback: never fires
   -> usable = model input/context limit minus reserved output or compaction buffer
+       reserved = cfg.compaction?.reserved
+                ?? min(COMPACTION_BUFFER=20_000, ProviderTransform.maxOutputTokens())
   -> count = tokens.total or input + output + cache.read + cache.write
   -> return count >= usable
 ```
@@ -290,7 +294,7 @@ prune({ sessionID })
   -> if older prunable output exceeds PRUNE_MINIMUM, mark those parts compacted
 ```
 
-Selecting what to summarize:
+Selecting what to summarize and mid-turn cut:
 
 ```text
 select({ messages, cfg, model })
@@ -298,77 +302,33 @@ select({ messages, cfg, model })
   -> choose recent turns from the end
   -> estimate each recent turn after conversion to model messages
   -> preserve as many recent turns as fit in preserveRecentBudget
+       preserveRecentBudget scaled to 25% of usable window,
+       bounded between MIN_PRESERVE_RECENT_TOKENS (2k) and MAX_PRESERVE_RECENT_TOKENS (8k)
   -> if a full turn does not fit, split that turn if possible
   -> return { head: messages_to_summarize, tail_start_id }
 ```
 
-Main compaction process:
-
-```text
-process({ parentID, messages, sessionID, auto, overflow })
-  -> require parentID to refer to a user message
-  -> if overflow, maybe choose a previous real user message to replay later
-  -> find prior completed compactions
-  -> hide prior compaction user/assistant pairs from summarizer input
-  -> carry previousSummary into the new compaction prompt
-  -> run plugin hook experimental.session.compacting
-       hook may inject context or replace prompt
-  -> run message transform hook
-  -> convert selected head to model messages with stripMedia=true
-  -> cap tool output passed to summarizer at 2000 characters
-  -> create assistant message with mode=compaction, agent=compaction, summary=true
-  -> run SessionProcessor with no tools and a final user compaction prompt
-```
-
-What happens after the compaction model returns:
-
-```text
-If processor returns "compact":
-  -> compaction itself overflowed
-  -> write ContextOverflowError to compaction assistant message
-  -> stop
-
-If processor returns "continue" and this was auto compaction:
-  -> if replay was selected, create a new user message copying the replayed user parts
-  -> otherwise optionally create a synthetic internal continue message
-  -> publish Event.Compacted
-
-If processor message has an error:
-  -> stop without pretending compaction succeeded
-```
-
-The concrete session shape is:
-
-```text
-Before:
-  user U1, assistant A1, tool T1, user U2, assistant A2, user U3(parent)
-
-Compaction user part:
-  user U3 contains part { type: "compaction", auto, overflow }
-
-Compaction assistant summary:
-  assistant C1 { mode: "compaction", agent: "compaction", summary: true }
-
-Resume after auto compaction:
-  either replay copied user message, or synthetic "continue" user message
-```
+Main compaction process runs a `SessionProcessor` with no tools and a final
+user compaction prompt. Tool outputs sent to the summarizer are capped at
+`TOOL_OUTPUT_MAX_CHARS = 2000`. If the processor returns `"compact"`
+(compaction itself overflowed), the assistant compaction message is written
+with a `ContextOverflowError` and processing stops  -  no silent success.
 
 opencode's useful lesson is that compaction should be represented in the same
-session object model as other work. That gives the debugger a real parent,
-assistant summary, error state, and resume message instead of a hidden mutation.
+session object model as other work, and that failure to compact must be
+recorded as a first-class error state, not swallowed.
 
 ### pi
 
 Primary source files:
 
-- `references/pi/packages/coding-agent/src/core/compaction/compaction.ts`
-- `references/pi/packages/coding-agent/src/core/compaction/utils.ts`
-- `references/pi/packages/coding-agent/src/core/compaction/branch-summarization.ts`
-- `references/pi/packages/coding-agent/test/compaction.test.ts`
+- `compaction.ts` [15]
+- `utils.ts` [16]
+- `branch-summarization.ts` [17]
+- `compaction.test.ts` [18]
 
 pi's implementation is the easiest to read as an algorithm because it splits
-pure preparation from IO. The session manager decides when to call compaction;
-the compaction module decides what to summarize.
+pure preparation from IO.
 
 Trigger and settings:
 
@@ -384,102 +344,49 @@ shouldCompact(contextTokens, contextWindow, settings)
   -> return contextTokens > contextWindow - settings.reserveTokens
 ```
 
-Preparation path:
+Preparation path chooses a `cutPoint`. Valid cut points are user, assistant,
+custom, bash, branch-summary, and prior-compaction-summary entries  -  **never a
+tool result**. Walks backward from newest messages accumulating estimated
+tokens; when `keepRecentTokens` is reached, chooses the closest valid cut
+point. Reports whether the cut splits a turn.
 
-```text
-prepareCompaction(pathEntries, settings)
-  -> if newest entry is already a compaction entry, return undefined
-  -> find previous compaction entry by walking backward
-  -> previousSummary = previous compaction summary, if any
-  -> boundaryStart = first entry kept by previous compaction, if known
-  -> tokensBefore = estimateContextTokens(buildSessionContext(pathEntries))
-  -> cutPoint = findCutPoint(pathEntries, boundaryStart, end, keepRecentTokens)
-  -> firstKeptEntryId = pathEntries[cutPoint.firstKeptEntryIndex].id
-  -> messagesToSummarize = entries from boundaryStart to historyEnd
-  -> if cut splits a turn, turnPrefixMessages = start of that turn up to cut
-  -> collect file operations from previous compaction details and tool calls
-  -> return CompactionPreparation
-```
+If the cut splits a turn, pi produces a `turnPrefixSummary` for the mid-turn
+part and merges it with the main summary under a `Turn Context` separator.
+Summarizer input is not sent as a normal chat continuation  -  `utils.ts`
+serializes it into `[User]: ...`, `[Assistant tool calls]: ...`, `[Tool
+result]: ...` text lines. Tool results in the serialized summary are truncated
+to 2,000 characters.
 
-The cut-point rule is explicit:
+pi's boundary tracking uses `firstKeptEntryId`. On the next compaction it
+locates the previous compaction entry to thread its summary forward and to
+find the previous boundary. If the entry with that id no longer exists (e.g.
+because the timeline was edited), pi falls back to `prevCompactionIndex + 1`.
 
-```text
-findCutPoint
-  -> valid cut points are user, assistant, custom, bash, branch summary,
-     and compaction summary entries
-  -> never cut at a tool result
-  -> walk backward from newest messages and accumulate estimated tokens
-  -> when keepRecentTokens is reached, choose the closest valid cut point
-  -> include adjacent non-message entries before the cut if needed
-  -> report whether this cut splits a turn
-```
-
-Summary generation path:
-
-```text
-compact(preparation, model, apiKey, customInstructions, ...)
-  -> if cut split a turn:
-       generateSummary(messagesToSummarize, previousSummary, customInstructions)
-       generateTurnPrefixSummary(turnPrefixMessages)
-       merge the two summaries with a "Turn Context" separator
-     else:
-       generateSummary(messagesToSummarize, previousSummary, customInstructions)
-  -> compute readFiles and modifiedFiles from tracked file operations
-  -> append <read-files> and <modified-files> blocks to the summary
-  -> return { summary, firstKeptEntryId, tokensBefore, details }
-```
-
-The summarizer input is not sent as a normal chat continuation. `utils.ts`
-serializes it into text like:
-
-```text
-[User]: please fix auth
-
-[Assistant tool calls]: read(path="src/auth.ts")
-
-[Tool result]: export function login(...) { ... truncated ... }
-```
-
-Tool results are truncated to `2_000` characters in this serialized summary
-input. The system prompt explicitly says to summarize the conversation and not
-continue it.
-
-The concrete state shape is:
-
-```text
-Before path entries:
-  header, old messages, previous compaction?, current turn prefix, recent suffix
-
-Preparation result:
-  summary input        = old messages after previous boundary
-  optional turn prefix = beginning of current turn if the cut is mid-turn
-  preserved tail       = entries starting at firstKeptEntryId
-
-After session manager saves result:
-  compaction entry { summary, firstKeptEntryId, tokensBefore, details }
-  plus all entries from firstKeptEntryId onward
-```
-
-pi's useful lesson is that the hard parts can be tested as pure functions:
-token estimation, valid cut points, previous-boundary handling, split-turn
-prefix handling, and file-operation extraction do not need a live model call.
+pi's useful lessons: (1) the hard parts (token estimation, valid cut points,
+previous-boundary handling, split-turn prefix, file-operation extraction) can
+be tested as pure functions without a live model call; (2) boundary IDs must
+degrade gracefully if the referenced entry is gone.
 
 ### Design Takeaways For Agent-Kernel
 
-The references suggest these concrete requirements for agent-kernel:
+The references converge on these concrete requirements:
 
 - Compaction must reserve room for the summary response, not only shrink input.
-- The summarizer request needs its own retry strategy when it is too large.
+- The summarizer request needs a bounded retry strategy when it is too large,
+  and the trim step must preserve tool_call/tool_result pairing.
 - Tool outputs should be bounded before summarization and, ideally, before they
   ever enter normal model-visible history.
 - The preserved tail must respect provider tool-call/tool-result pairing.
 - Previous summaries should be threaded forward, but previous compaction turns
   should not be repeatedly summarized as ordinary chat.
-- Post-compaction cleanup is correctness work: prompt cache baselines, file-read
-  caches, warning state, message IDs, and context-injection state may all become
-  stale after replacement.
+- Post-compaction cleanup is correctness work: prompt cache baselines,
+  file-read caches, warning state, message IDs, and context-injection state
+  may all become stale after replacement.
 - The reducer should remain policy-light, but cut-point selection and summary
   preparation should be small, testable policy functions.
+- Compaction failure is a first-class outcome. A consecutive-failure circuit
+  breaker and a typed skip/failure surface are correctness requirements, not
+  observability niceties.
 
 ## Current Agent-Kernel Mechanism
 
@@ -498,22 +405,26 @@ calls an LLM or decides thresholds.
 
 Compaction flow:
 
-1. Host chooses a safe `preserveFrom` pivot.
+1. Host chooses a safe `preserveFrom` pivot (see **Cut-Point Selection**).
 2. Messages before the pivot are copied into the summarizer request after old
    oversized tool results are reduced to head/tail excerpts.
 3. Messages from the pivot onward are preserved verbatim.
-4. The summarizer receives a structured engineering-handoff prompt with required
-   sections: user intent and constraints, repository/runtime state, decisions
-   and rationale, work completed, and open work.
-5. If the summarizer fails with a context-window style error, host retries with
-   a more aggressive tool-result limit.
-6. Host validates the summary shape and writes a validation artifact when
-   artifact capture is enabled.
-7. Host dispatches `compact_replaced` with `trigger`, `preserveFrom`, summarizer
-   request metadata, optional response usage, summary text, and estimated
-   before/after token counts.
+4. The summarizer receives a structured engineering-handoff prompt with
+   required sections: user intent and constraints, repository/runtime state,
+   decisions and rationale, work completed, and open work.
+5. Summarizer retry ladder (see **Summarizer Retry Ladder**) handles
+   context-window failures with bounded head-trim + increasingly aggressive
+   tool-result caps.
+6. Host validates the summary shape. Empty summaries or summaries that fail
+   validation with a fatal reason code (see **Summary Validation**) are
+   rejected  -  the compaction is treated as a failed attempt.
+7. Host dispatches either `compact_replaced` (success) or a `compact_skipped`
+   event (bounded failure / circuit-breaker / no-op) with a reason code.
 8. The reducer keeps the leading system prompt, inserts the synthetic compacted
-   summary as a system message, and appends the preserved tail.
+   summary as a system message, and appends the preserved tail. If the
+   proposed `preserveFrom` would orphan a pending tool_result, the reducer
+   rejects the event (returns a `compact_rejected` step) and the host records
+   the rejection reason.
 
 ## Protocol Invariants
 
@@ -525,13 +436,18 @@ The reducer invariant is:
 - preserve the leading system prompt,
 - insert exactly one synthetic compact summary message,
 - preserve messages at or after `preserveFrom`,
-- reject or ignore compact replacements that would violate pending tool-call
-  pairing.
+- **reject** compact replacements that would violate pending tool-call pairing,
+  and surface the rejection as `compact_rejected` (not a silent no-op).
 
 When the session is `executing_tools`, a `compact_replaced` event is valid only
-if every pending tool call still has its originating assistant `tool_call` in the
-preserved tail. This protects OpenAI/Anthropic-style tool-call/tool-result
+if every pending tool call still has its originating assistant `tool_call` in
+the preserved tail. This protects OpenAI/Anthropic-style tool-call/tool-result
 ordering.
+
+`compact_skipped` records a compaction attempt that the host declined to make
+(or that failed at the LLM boundary). It carries a reason code and never
+mutates messages. This closes the observability gap where a summarizer failure
+would previously leave the ledger silent.
 
 ## Multi-Tool Batch Safety
 
@@ -564,41 +480,189 @@ tool_result c1 head/tail preview
 The active assistant message survives, so `c2`, `c3`, and `c4` can still return
 valid tool results.
 
+If mid-batch compaction fails or is rejected by the reducer, the host records
+`compact_skipped` and lets the batch continue. The next preflight check may
+try again, but the same-batch back-off (see **Back-Off Discipline**) prevents
+tight looping.
+
+## Cut-Point Selection
+
+The pivot must satisfy all of:
+
+1. It is a `user` message index (not a `tool_result`, not an assistant with a
+   pending call).
+2. All messages `[0, preserveFrom)` contain compactable content
+   (i.e. there is something worth summarizing).
+3. If the session is `executing_tools`, every pending tool call's originating
+   assistant `tool_call` message is inside `[preserveFrom, len)`.
+4. The tail `[preserveFrom, len)` fits inside `recentTailTargetTokens`,
+   with a fallback that keeps at least the active tool batch's parent user
+   message when the tail is naturally larger than the target.
+
+`recentTailTargetTokens`:
+
+- no known context limit: 12,000 estimated tokens,
+- known context limit: 15% of the context window,
+- bounded between 4,000 and 24,000 estimated tokens.
+
+## Summarizer Retry Ladder
+
+The summarizer is a normal LLM call with `tools: []` and (when the adapter
+supports it) reasoning disabled  -  a summary should not spend reasoning tokens
+that will not be replayed. Each attempt is one of:
+
+| Attempt | Tool-result cap per old message | Head-drop groups |
+| --- | --- | --- |
+| 1 | 8,000 chars | 0 |
+| 2 | 2,000 chars | 0 |
+| 3 | 2,000 chars | 1 oldest group |
+| 4 | 2,000 chars | 2 oldest groups |
+
+A "group" is defined as one assistant message plus its subsequent tool_result
+messages, so head-dropping preserves tool_call/tool_result pairing. Group
+detection walks the prepared summarizer input from the start; adjacent
+tool_results without a preceding assistant are dropped as a fifth-column
+prefix along with the group.
+
+Failure classification uses **both** a typed error kind (when the adapter
+raises one) and a heuristic regex on the message text as fallback. The regex
+matches `context|window|token|too large|maximum input|input exceeds|prompt is
+too long`. Non-context errors do not consume retry attempts; they bubble up as
+compaction failures.
+
+Attempts stop when:
+
+- an attempt succeeds and returns a non-empty summary that passes fatal-check
+  validation, or
+- the retry ladder is exhausted, or
+- a non-context error propagates.
+
+Successful compaction resets the per-session consecutive-failure counter.
+
+## Consecutive-Failure Circuit Breaker
+
+The host maintains `consecutiveCompactFailures` per session. Rules:
+
+- Every failed compaction attempt (LLM error, exhausted ladder, empty summary,
+  fatal validation reason) increments the counter.
+- Every successful compaction resets the counter to 0.
+- When the counter reaches `MAX_CONSECUTIVE_COMPACT_FAILURES = 3`, all
+  `auto`, `preflight`, and `tool_result` triggers become no-ops for the rest
+  of the session and dispatch `compact_skipped` with reason
+  `circuit_breaker_open`.
+- `manual` compaction (`/compact`) always attempts, regardless of breaker
+  state  -  a human explicitly asked. A successful manual compaction closes the
+  breaker.
+
+This mirrors Claude Code's `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES` but adds an
+explicit manual escape hatch.
+
+## Back-Off Discipline
+
+Within a single tool batch, a failed `tool_result` compaction sets a
+per-session `mutedUntilBatchId` marker. Further `tool_result` triggers in the
+same batch are skipped with reason `back_off_same_batch`, preventing tight
+loop of retries on every subsequent tool result.
+
+## Unknown Context Window Fallback
+
+Provider metadata is not always complete. When `config.contextLimit` is
+undefined:
+
+- `state.contextPressureLevel` remains `'none'` (auto never fires).
+- Preflight uses a synthetic fallback limit of `128_000` tokens and reserves
+  the higher of 16k or 12% of that. Sessions on tiny models will therefore
+  overshoot before triggering  -  this is acceptable because the LLM adapter
+  will surface the real error; preflight is a best-effort brake, not a
+  guarantee.
+- `tool_result` compaction uses the same fallback for its estimate.
+- Manual `/compact` always works because it does not depend on the limit.
+
+When the adapter first reports a context window (via provider usage metadata
+or a `context_window_exceeded` error whose message contains a limit), the host
+updates the session's derived limit for future triggers. This is a
+best-effort inference; it does not overwrite explicit configuration.
+
+## Small-Context Model Behavior
+
+For context limits below `16_000` tokens, the fixed floors above (4k tail
+minimum, 8k preflight reserve, 16k tool-result cap) are recomputed as ratios:
+
+- recent tail: 40% of context, minimum 1,500 tokens,
+- preflight reserve: 25% of context,
+- tool-result inline cap: 40% of context, minimum 1,000 tokens.
+
+This prevents "the constants sum to more than the window" pathologies on
+small-context models. The bounds are chosen to still fit a system prompt +
+one user turn + a summary on a 4k model, degrading to "compaction disabled in
+practice" below ~2k where no summary would fit.
+
+## Reasoning-Model Behavior
+
+If the current session model supports reasoning (Anthropic extended thinking,
+OpenAI o1 family):
+
+- The summarizer request explicitly disables reasoning
+  (`extendedThinkingTokens: 0` or the provider equivalent). A summary should
+  not burn 4k reasoning tokens that will not be replayed.
+- The reasoning budget is subtracted from the preflight reserve for regular
+  turns. A 200k model with a 16k reasoning budget effectively has 184k for
+  input + output.
+
+## Post-Compact Cleanup
+
+After a successful `compact_replaced`, the host arms a **post-compaction loop
+guard** (`POST_COMPACTION_GUARD_CALLS = 6`). The next few tool calls the model
+emits are inspected against a small recent-call fingerprint set; a repeat
+within the guard window is treated as a suspected compaction-induced loop and
+suppressed. This is the one cleanup step that is a correctness feature, not
+observability. Arming is skipped when the trigger is `tool_result` (mid-batch
+guarding would starve legitimate follow-up calls) and skipped when the attempt
+was rejected/skipped (there is nothing to loop back on).
+
+The following cleanup categories are called out because reference
+implementations depend on them, but agent-kernel does not yet maintain the
+underlying caches:
+
+- **Prompt cache marker**: agent-kernel does not currently persist a cache
+  breakpoint across turns  -  the Anthropic adapter places cache markers
+  dynamically per request, so there is nothing to invalidate. If a persistent
+  breakpoint is ever added, it MUST be cleared here.
+- **File-read cache**: not implemented. If added later, entries whose source
+  message is inside the summarized prefix must be dropped.
+- **Warning state**: derived from `state.contextPressureLevel`, which the
+  reducer recomputes on the next `usage` update, so it is self-healing today.
+- **Skills-installed set**: also not persisted server-side yet; when it is,
+  it must be preserved across compaction (already-installed skills should not
+  re-announce themselves).
+
+Cleanup does **not** run on `compact_rejected` or `compact_skipped`; there is
+nothing to clean up because nothing was replaced.
+
 ## Tool Result Bounding
 
 Agent-kernel has two complementary layers:
 
-- **Executor overflow** stores large complete outputs outside the transcript and
-  returns a preview plus a pointer. See `docs/host/tool-output-overflow.md`.
+- **Executor overflow** stores large complete outputs outside the transcript
+  and returns a preview plus a pointer. See `docs/host/tool-output-overflow.md`.
 - **Host compaction input trimming** reduces old oversized `tool_result` blocks
   before the summarizer sees them.
 
-The executor overflow layer is the preferred place to keep raw output. The host
-compaction layer is a circuit breaker that prevents stale log dumps from making
-the summarizer impossible to call.
-
-Implemented summarizer input limits:
-
-- normal compaction input keeps at most 8,000 characters per old tool result,
-- retry after context-window failure keeps at most 2,000 characters per old tool
-  result.
-
-Design target for model-visible tool-result bounding remains model-aware:
+Model-visible tool-result bounding target:
 
 - target: 10% of the context window,
 - minimum: about 2,000 estimated tokens,
 - maximum: about 16,000 estimated tokens,
 - head/tail split: 60% / 40%.
 
+Summarizer input tool-result caps (see **Summarizer Retry Ladder**):
+
+- attempts 1: 8,000 characters,
+- attempts 2+: 2,000 characters.
+
 ## Threshold Policy
 
-Recent-tail preservation is model-aware:
-
-- no known context limit: 12,000 estimated tokens,
-- known context limit: 15% of the context window,
-- bounded between 4,000 and 24,000 estimated tokens.
-
-Reserve budgeting should account for:
+Reserve budgeting accounts for:
 
 - the next assistant answer,
 - provider tool schemas,
@@ -606,10 +670,16 @@ Reserve budgeting should account for:
 - pending sibling tool results,
 - the compaction prompt and summary response.
 
-Budget partition observability exists in message assembly artifacts, but budget
-partitions are not yet hard gates for every provider request.
+Preflight reserve = `min(max(8000, 0.12 * contextLimit), 0.25 * contextLimit)`.
 
-## Summary Quality
+Hard pressure threshold defaults to 0.92, soft to 0.75. These are configurable
+via `AgentConfig.hardThreshold` / `softThreshold`.
+
+Budget partition observability lives in message assembly artifacts; partitions
+are not yet enforced as hard gates for every provider request (tracked in
+**Known Gaps**).
+
+## Summary Validation
 
 The summarizer prompt requires this Markdown shape:
 
@@ -622,19 +692,61 @@ The summarizer prompt requires this Markdown shape:
 ## Open Work
 ```
 
-The host validates the generated summary with
-`validateCompactionSummary` from `@agent-kernel/shared/enhancement` and writes a
-`compaction-summaries/<session_id>/<seq>.json` artifact when artifact capture is
-enabled. The report uses low-cardinality reason codes such as `empty_summary`,
-`missing_sections`, `empty_sections`, and `schema_ok`.
+`validateCompactionSummary` from `@agent-kernel/shared/enhancement` returns a
+reason code:
 
-Current behavior labels bad summaries for observability. It does not yet reject,
-retry with a schema hint, or block ledger insertion when the summary is
-incomplete.
+- `schema_ok`  -  apply the summary.
+- `missing_sections`  -  apply but flag; this is a soft signal (older sessions
+  used shorter summaries).
+- `empty_sections`  -  apply but flag.
+- `empty_summary`  -  **fatal**; reject the summary and treat as a compaction
+  failure (feeds circuit breaker).
+
+Rejected summaries are logged to
+`compaction-summaries/<session_id>/<seq>.json` with the reason and the raw
+text so operators can debug.
+
+## Concurrency and Reentrancy
+
+- The host maintains an in-process `Set<sessionId>` of in-flight compactions.
+  While a session is compacting, subsequent `runCompact` calls return without
+  starting a second.
+- A new `client:user_message` that arrives during compaction is queued as a
+  normal event; the reducer will accept it at whichever step order matches
+  the ledger.
+- Tool results streaming in during compaction: `maybeCompactAfterToolResult`
+  checks the in-flight set and skips.
+- Host restart during compaction: the ledger contains no `compact_replaced`
+  for the incomplete attempt (host writes the event only after summarizer
+  success and reducer acceptance). Replay reconstructs the pre-compaction
+  state; the next pressure check will re-trigger compaction naturally.
+
+## Event Schema
+
+- `compact_replaced` (existing): applied when compaction succeeded and the
+  reducer accepted the pivot. Carries `trigger`, `preserveFrom`, summarizer
+  `request`, optional `responseUsage`, `summary`, `replacedCount`,
+  `tokensBefore`, `tokensAfter`, and (new) optional `attemptId` for
+  cross-referencing telemetry.
+- `compact_skipped` (new): applied for every compaction attempt that was
+  declined or failed at the host before dispatch. Fields: `trigger`,
+  `reason` (one of `circuit_breaker_open`, `back_off_same_batch`,
+  `summarizer_failed`, `empty_summary`, `no_compactable_content`,
+  `session_busy`), `attemptId`, optional
+  `errorMessage`. Never mutates messages.
+- `compact_rejected` (new): applied only by the reducer when a
+  `compact_replaced` would violate pending tool-call pairing or leading
+  system-prompt invariants. Fields: `attemptId`, `reason`
+  (`pending_call_orphaned` or `invalid_preserve_from`). The host reads this
+  reduced state to know the reducer refused, then records the failure in the
+  circuit-breaker counter.
+
+All three events are protocol-adjacent and appear in the JSONL ledger. Only
+`compact_replaced` changes `state.messages`.
 
 ## Testing Matrix
 
-Required and implemented coverage should include:
+Required coverage:
 
 - manual compaction from a resting session,
 - automatic compaction at hard context pressure,
@@ -642,30 +754,77 @@ Required and implemented coverage should include:
 - multi-tool batch where the first result is huge and pending sibling calls
   remain,
 - mid-batch compaction preserving the active assistant tool-call message,
-- reducer protection against orphan pending calls,
-- summarizer context-overflow retry with more aggressive trimming,
+- reducer protection against orphan pending calls (emits `compact_rejected`),
+- summarizer context-overflow retry ladder: cap tightening + head-drop,
+- consecutive-failure circuit breaker opens after 3 failed auto attempts,
+- circuit breaker closes on successful manual compaction,
+- back-off within a single tool batch after one failed attempt,
 - summary validation artifact generation,
-- small-context model thresholds that do not preserve an oversized fixed tail.
+- fatal `empty_summary` rejection increments the failure counter,
+- small-context-model thresholds do not preserve an oversized fixed tail,
+- unknown-context-limit path uses fallback in preflight and disables auto,
+- reasoning-model summarizer request has reasoning disabled.
 
 ## Known Gaps
 
-- **Focused manual compaction** such as `/compact focus on auth bug` is not wired
-  through the protocol yet.
+- **Focused manual compaction** such as `/compact focus on auth bug` is not
+  wired through the protocol yet.
 - **Startup context re-injection** is limited to the leading system prompt.
   Future skill bodies, root instructions, memory, and path-scoped rules should
   declare whether they survive compaction or must be reloaded later.
-- **Summary validation is observational**. Bad summaries are labeled but not yet
-  rejected or retried with a schema-specific hint.
 - **Budget partitions are not enforced gates**. They are visible in message
-  assembly artifacts, but host policy does not yet use every partition reason to
-  downshift, compact, or reject a request.
-- **Token estimation is approximate**. It is sufficient for headroom decisions,
-  but it is not a replacement for provider-reported usage.
+  assembly artifacts, but host policy does not yet use every partition reason
+  to downshift, compact, or reject a request.
+- **Token estimation is approximate**. It is sufficient for headroom
+  decisions, but it is not a replacement for provider-reported usage. Reserve
+  math should be recomputed against actual usage after every real turn.
+- **Cross-session boundary IDs**: the ledger records `compact_replaced` but
+  does not yet carry a compaction-window ID that survives replay. This makes
+  it harder to attribute post-compaction behavior to a specific compaction.
 
 ## Related Documents
 
 - `docs/host/tool-output-overflow.md` covers executor-side large-output spillover.
-- `docs/planning/enhancement/05-context-engineering-engine.md` covers the broader context
-  assembly and budget observability roadmap.
-- `docs/protocol/event-log.md` and `docs/protocol/wire-protocol.md` define the
-  ledger and dashboard protocol surfaces for `compact_replaced`.
+- `docs/planning/enhancement/05-context-engineering-engine.md` covers the
+  broader context assembly and budget observability roadmap.
+- `docs/protocol/event-log.md` and `docs/protocol/wire-protocol.md` define
+  the ledger and dashboard protocol surfaces for `compact_replaced`,
+  `compact_skipped`, and `compact_rejected`.
+
+## References
+
+[1] https://github.com/openai/codex/blob/98d28aab54ed86714901b6619400598598876dd0/codex-rs/core/src/tasks/compact.rs
+
+[2] https://github.com/openai/codex/blob/98d28aab54ed86714901b6619400598598876dd0/codex-rs/core/src/compact.rs
+
+[3] https://github.com/openai/codex/blob/98d28aab54ed86714901b6619400598598876dd0/codex-rs/core/src/state/auto_compact_window.rs
+
+[4] https://github.com/openai/codex/blob/98d28aab54ed86714901b6619400598598876dd0/codex-rs/prompts/templates/compact/prompt.md
+
+[5] https://github.com/chauncygu/collection-claude-code-source-code/blob/b934603b2800374b315b25061bbeffb40ab6ab26/claude-code-source-code/src/services/compact/autoCompact.ts
+
+[6] https://github.com/chauncygu/collection-claude-code-source-code/blob/b934603b2800374b315b25061bbeffb40ab6ab26/claude-code-source-code/src/services/compact/compact.ts
+
+[7] https://github.com/chauncygu/collection-claude-code-source-code/blob/b934603b2800374b315b25061bbeffb40ab6ab26/claude-code-source-code/src/commands/compact/compact.ts
+
+[8] https://github.com/chauncygu/collection-claude-code-source-code/blob/b934603b2800374b315b25061bbeffb40ab6ab26/claude-code-source-code/src/services/compact/microCompact.ts
+
+[9] https://github.com/chauncygu/collection-claude-code-source-code/blob/b934603b2800374b315b25061bbeffb40ab6ab26/claude-code-source-code/src/services/compact/sessionMemoryCompact.ts
+
+[10] https://github.com/chauncygu/collection-claude-code-source-code/blob/b934603b2800374b315b25061bbeffb40ab6ab26/claude-code-source-code/src/services/compact/postCompactCleanup.ts
+
+[11] https://github.com/sst/opencode/blob/7a8e7c88f495acf5af3e7584e8ec1dbab2fe04ec/packages/opencode/src/session/overflow.ts
+
+[12] https://github.com/sst/opencode/blob/7a8e7c88f495acf5af3e7584e8ec1dbab2fe04ec/packages/opencode/src/session/compaction.ts
+
+[13] https://github.com/sst/opencode/blob/7a8e7c88f495acf5af3e7584e8ec1dbab2fe04ec/packages/opencode/src/tool/truncate.ts
+
+[14] https://github.com/sst/opencode/blob/7a8e7c88f495acf5af3e7584e8ec1dbab2fe04ec/packages/opencode/src/session/message-v2.ts
+
+[15] https://github.com/earendil-works/pi/blob/ee24a9ec54a9602d55dc7ac767c270cec806c291/packages/coding-agent/src/core/compaction/compaction.ts
+
+[16] https://github.com/earendil-works/pi/blob/ee24a9ec54a9602d55dc7ac767c270cec806c291/packages/coding-agent/src/core/compaction/utils.ts
+
+[17] https://github.com/earendil-works/pi/blob/ee24a9ec54a9602d55dc7ac767c270cec806c291/packages/coding-agent/src/core/compaction/branch-summarization.ts
+
+[18] https://github.com/earendil-works/pi/blob/ee24a9ec54a9602d55dc7ac767c270cec806c291/packages/coding-agent/test/compaction.test.ts

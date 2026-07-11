@@ -208,6 +208,37 @@ describe('InspectorPanel', () => {
     expect(document.body.textContent ?? '').toContain('request_approval')
   })
 
+  it('keeps reducer trace rows constrained when summaries and effects are long', () => {
+    const longTrace: TimelineEntry[] = [
+      {
+        seq: 1,
+        ts: '2026-07-06T06:00:00Z',
+        event: {
+          kind: 'tool_result',
+          callId: 'toolu_long',
+          ok: true,
+          content: JSON.stringify({ name: 'agent-kernel', version: '0.0.0', payload: 'x'.repeat(400) }),
+        },
+        effects: [
+          {
+            kind: 'call_tool',
+            callId: 'toolu_long',
+            name: 'very_long_tool_name_that_should_not_expand_the_trace_card_width',
+            input: { payload: 'x'.repeat(400) },
+          },
+        ],
+      },
+    ]
+
+    render(<InspectorPanel state={baseState} timeline={longTrace} visibleMessagesCount={1} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+    expect(screen.getByTestId('timeline-row').className).toContain('overflow-hidden')
+    expect(screen.getByTestId('timeline-row-header').className).toContain('overflow-hidden')
+    expect(screen.getByTestId('timeline-row-summary').className).toContain('truncate')
+    expect(screen.getByTestId('timeline-minimap')).toBeTruthy()
+  })
+
   it('keeps trace minimap, state diff, and reducer rows on the same active event', () => {
     const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView')
     render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
@@ -227,12 +258,17 @@ describe('InspectorPanel', () => {
     expect(rows[0]?.getAttribute('data-selected')).toBe('true')
     expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#120')
     expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' })
+    expect(screen.queryByTestId('timeline-row-details')).toBeNull()
 
     fireEvent.click(rows[2]!.querySelector('[data-testid="timeline-row-header"]')!)
 
     expect(minimapItems[2]?.getAttribute('aria-current')).toBe('true')
     expect(rows[2]?.getAttribute('data-selected')).toBe('true')
     expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('#122')
+    expect(screen.queryByTestId('timeline-row-details')).toBeNull()
+
+    fireEvent.click(rows[2]!.querySelector('[data-testid="timeline-row-inspect-json"]')!)
+    expect(screen.getByTestId('timeline-row-details')).toBeTruthy()
   })
 
   it('scrolls the reducer trace list when the replay scrubber changes selection', () => {
@@ -254,6 +290,8 @@ describe('InspectorPanel', () => {
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     expect(screen.getByTestId('state-diff-view')).toBeTruthy()
+    expect(screen.getByTestId('state-diff-summary-messages').textContent ?? '').toContain('+ tool message')
+    expect(screen.queryByTestId('state-raw-diff-view')).toBeNull()
 
     const toggle = screen.getByTestId('state-diff-toggle')
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
@@ -263,6 +301,20 @@ describe('InspectorPanel', () => {
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByTestId('state-diff-view')).toBeTruthy()
+  })
+
+  it('keeps raw state diff available behind an explicit toggle', () => {
+    render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
+
+    fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
+    fireEvent.change(screen.getByTestId('replay-scrubber'), { target: { value: '1' } })
+
+    expect(screen.getByTestId('state-diff-summary-messages').textContent ?? '').toContain('+ assistant message #2')
+    expect(screen.getByTestId('state-diff-summary-usage').textContent ?? '').toContain('42,180')
+    expect(screen.queryByTestId('state-raw-diff-view')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('state-raw-diff-toggle'))
+    expect(screen.getByTestId('state-raw-diff-view').textContent ?? '').toContain('messages.length')
   })
 
   it('supports trace query, teaching mode, protocol flow, and fork compare loading state', () => {
@@ -281,6 +333,8 @@ describe('InspectorPanel', () => {
     expect(screen.getByTestId('protocol-flow-view').textContent ?? '').toContain('Input Event')
     expect(screen.getByTestId('protocol-flow-view').textContent ?? '').toContain('State Machine')
     expect(screen.getByTestId('protocol-flow-view').textContent ?? '').toContain('Output Actions')
+    fireEvent.click(screen.getByTestId('protocol-flow-row'))
+    expect(screen.queryByTestId('timeline-row-details')).toBeNull()
 
     fireEvent.click(screen.getByTestId('trace-mode-switch-compare'))
     expect(document.body.textContent ?? '').toContain('Loading parent session history')
@@ -711,7 +765,7 @@ describe('InspectorPanel', () => {
     )
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    fireEvent.click(screen.getAllByTestId('timeline-row-header')[2]!)
+    fireEvent.click(screen.getAllByTestId('timeline-row')[2]!.querySelector('[data-testid="timeline-row-inspect-json"]')!)
     const details = screen.getByTestId('timeline-row-details')
     expect(details.textContent ?? '').toContain('Compaction Request')
     expect(details.textContent ?? '').toContain('compact prompt')
