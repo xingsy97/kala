@@ -55,11 +55,13 @@ Current assets:
 
 | Asset                                  | Description                                      |
 | -------------------------------------- | ------------------------------------------------ |
-| `agent-kernel-host.cjs`                | Single-file Node 22 executable for the host CLI. |
-| `agent-kernel-executor.cjs`            | Single-file Node 22 executable for the executor. |
+| `agent-kernel-host-<os>-<arch>`        | OS-native host binary. Current release workflow builds Linux x64, macOS x64, and Windows x64. |
+| `agent-kernel-executor-<os>-<arch>`    | OS-native executor binary. Current release workflow builds Linux x64, macOS x64, and Windows x64. |
+| `agent-kernel-host.cjs`                | Node.js 22 fallback asset for the host CLI.      |
+| `agent-kernel-executor.cjs`            | Node.js 22 fallback asset for the executor.      |
 | `agent-kernel-dashboard-dist.tar.gz`   | Static dashboard bundle served by the host.      |
-| `run.sh`                               | Wget-only bash bootstrap that downloads, verifies, and runs the selected component. |
-| `RELEASE_NOTES.md`                     | Generated GitHub Release body with one-line startup commands. |
+| `run.sh`                               | Wget-only bash bootstrap that downloads checksums, uses compact `.cjs` assets when Node.js 22+ is available, and falls back to native binaries otherwise. |
+| `RELEASE_NOTES.md`                     | Generated GitHub Release body with quick-start commands, port configuration, runtime selection, checksum verification, and asset list. |
 | `manifest.json`                        | Asset manifest and runtime notes.                |
 | `SHA256SUMS`                           | Checksums for release verification.              |
 
@@ -72,34 +74,67 @@ Tag behavior:
 | `executor-v*`     | Executor, unified bootstrap defaulting to executor, release notes, manifest, sums. |
 | `dashboard-v*`    | Dashboard tarball, release notes, manifest, sums.    |
 
-These are single-file Node executables, not native binaries. They require
-Node.js 22 or newer. The recommended release entrypoint is the bash bootstrap,
-not piping a Node.js file directly into `node`. The bootstrap downloads the
-matching `.cjs` asset plus `SHA256SUMS`, verifies checksums, and then starts the
-component.
+Host and executor releases use automatic runtime selection. The default path is
+the compact `.cjs` asset when Node.js 22+ is already installed; the native binary
+is the zero-prerequisite fallback when Node is missing or too old. The workflow
+is two-phase for speed. The `cjs-release` job builds, verifies, and publishes the
+Node.js fallback assets plus dashboard bundle as soon as the normal build / test
+gate passes. In parallel, the `native-assets` matrix builds native Node SEA
+binaries on matching platform runners. Node SEA assets are not cross-compiled:
+the build script rejects a requested native target that does not match the
+current runner platform / architecture, so the release cannot accidentally
+publish a mislabeled binary. After both phases are available, `native-release`
+merges the current fallback artifact and current native artifacts, regenerates
+the manifest / release notes / checksums, and uploads the refreshed release
+assets. This makes the release usable before the slow native matrix has finished
+while still ending in one coherent GitHub Release.
+
+The `.cjs` files remain as fallback assets for unsupported platforms or manual
+debugging; they require Node.js 22 or newer.
+
+The recommended release entrypoint is the bash bootstrap, not piping an asset
+directly into `node`. The bootstrap downloads `SHA256SUMS`, detects the current
+OS / architecture, and selects a runtime:
+
+- `AGENT_KERNEL_RUNTIME=auto` (default): use `.cjs` when Node.js 22+ is present;
+  otherwise use a matching native binary when available.
+- `AGENT_KERNEL_RUNTIME=cjs`: require the compact `.cjs` asset and Node.js 22+.
+- `AGENT_KERNEL_RUNTIME=native`: require the matching native binary.
 
 Example one-line commands for a full release tag:
 
 ```bash
-wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run.sh | COMPONENT=host bash
-wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 bash
+wget -qO- https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh | COMPONENT=host bash
+wget -qO- https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 bash
 ```
+
+The host also accepts `--port <port>` directly when launching an unpacked or
+downloaded host asset. If the selected port is already occupied, startup fails
+with a clear message telling the operator to stop the existing process or choose
+a free port with `HOST_PORT=<free-port>` or `--port <free-port>`.
 
 Verify downloaded assets before manual execution:
 
 ```bash
-wget -q https://github.com/OWNER/REPO/releases/download/v0.2.0/SHA256SUMS
-wget -q https://github.com/OWNER/REPO/releases/download/v0.2.0/agent-kernel-executor.cjs
+wget -q https://github.com/<owner>/<repo>/releases/download/v0.2.0/SHA256SUMS
+wget -q https://github.com/<owner>/<repo>/releases/download/v0.2.0/agent-kernel-executor-linux-x64
 sha256sum -c SHA256SUMS --ignore-missing
 ```
+
+The dashboard's Connect Workspace dialog does not hard-code a GitHub repository.
+It reads `release.bootstrapBaseUrl` from `GET /settings`. Released hosts get a
+GitHub Release URL from `AGENT_KERNEL_RELEASE_BASE_URL` or
+`AGENT_KERNEL_UPDATE_REPO` / `AGENT_KERNEL_RELEASE_TAG`; local development falls
+back to `http://localhost:<HOST_PORT>/release-assets`, served from the local
+`release/` directory.
 
 To serve the dashboard manually with the host asset, unpack the dashboard
 tarball and set `DASHBOARD_DIR`:
 
 ```bash
 tar -xzf agent-kernel-dashboard-dist.tar.gz -C /tmp/agent-kernel-dashboard
-DASHBOARD_DIR=/tmp/agent-kernel-dashboard node agent-kernel-host.cjs
-HOST_URL=http://localhost:3000 node agent-kernel-executor.cjs
+DASHBOARD_DIR=/tmp/agent-kernel-dashboard ./agent-kernel-host-linux-x64
+HOST_URL=http://localhost:3000 ./agent-kernel-executor-linux-x64
 ```
 
 Executors launched from `run.sh` receive `AGENT_KERNEL_RELEASE_TAG` and
@@ -108,10 +143,10 @@ startup and logs a reminder when a newer release is available. Automatic update
 is opt-in:
 
 ```bash
-wget -qO- https://github.com/OWNER/REPO/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 AGENT_KERNEL_AUTO_UPDATE=1 bash
+wget -qO- https://github.com/<owner>/<repo>/releases/download/v0.2.0/run.sh | COMPONENT=executor HOST_URL=http://localhost:3000 AGENT_KERNEL_AUTO_UPDATE=1 bash
 ```
 
-`--auto-update` is equivalent when launching `agent-kernel-executor.cjs`
+`--auto-update` is equivalent when launching a downloaded executor asset
 directly. `--no-update-check` or `AGENT_KERNEL_NO_UPDATE_CHECK=1` disables the
 startup reminder.
 
@@ -124,6 +159,8 @@ Local dry run:
 ```bash
 pnpm run build:release-assets
 pnpm run verify:release-assets
+pnpm run build:release-assets -- --component all --no-native
+pnpm run build:release-assets -- --component executor --native-only --native-target linux-x64
 pnpm run build:release-assets -- --component host
 pnpm run verify:release-assets
 ls -lh release/

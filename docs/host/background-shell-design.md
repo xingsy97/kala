@@ -54,7 +54,7 @@ We're taking the same split.
 
 ## 3. Goals
 
-1. **Operator-first observability.** The dashboard shows every background task the moment the executor spawns it, whether or not the agent has called `bash_output` yet, and tails output live.
+1. **Session-scoped observability.** The dashboard shows every background task owned by the active session the moment the executor spawns it, whether or not the agent has called `bash_output` yet, and tails output live. Tasks from sibling sessions in the same workspace are not visible or controllable by default.
 2. **One-click kill and copy.** No prompt-writing to interrupt a stuck task.
 3. **Agent contract is unchanged.** The three-tool API (`bash{run_in_background}`, `bash_output`, `kill_shell`) and their JSON shapes stay identical  -  existing sessions, tests, and LLM prompts keep working.
 4. **Fail-safe on replays.** When a session is opened from disk (executor dead), we still render whatever the timeline captured, degraded but correct.
@@ -92,6 +92,7 @@ export type BackgroundTaskStatus = 'running' | 'exited' | 'killed' | 'signaled'
 
 export type BackgroundTaskSummary = {
   taskId: string
+  sessionId: string
   command: string
   cwd: string
   startedAt: string       // ISO
@@ -103,10 +104,10 @@ export type BackgroundTaskSummary = {
   bytesTruncated: number  // bytes dropped when ring buffer wrapped
 }
 
-export function listBackgroundTasks(): readonly BackgroundTaskSummary[]
+export function listBackgroundTasks(sessionId: string): readonly BackgroundTaskSummary[]
 export function getBackgroundTask(taskId: string): BackgroundTaskSummary | null
 export function readBackgroundShell(...): Promise<...>           // unchanged shape
-export function killBackgroundShell(taskId: string): Promise<boolean>
+export function killBackgroundShell(taskId: string, sessionId: string): Promise<boolean>
 export function subscribeBackgroundTasks(cb: (change: BgTaskChange) => void): () => void
 ```
 
@@ -114,7 +115,7 @@ export function subscribeBackgroundTasks(cb: (change: BgTaskChange) => void): ()
 - Log file gets a ring-buffer wrapper: writes past the 4 MiB high-water-mark rewrite from offset 0, and the summary tracks `bytesTruncated` so consumers know they're seeing a tail. Existing callers of `readBackgroundShell` continue to work  -  output is always the current buffer contents plus a `truncated` boolean.
 - Task cleanup: 15 min after `endedAt`, drop from the map and unlink the log. The invariant: any `taskId` that ever appeared in a `tool_result` remains resolvable for at least 15 min after exit; older ones return `unknown`.
 
-Because `bashTool` already calls `startBackgroundShell`, the tool changes reduce to swapping the return shape from `{taskId, note}` to `{taskId, note, startedAt}`  -  additive, tolerated by every existing consumer.
+Because `bashTool` already calls `startBackgroundShell`, the tool changes reduce to passing the per-call `sessionId` from `ToolContext` and swapping the return shape from `{taskId, note}` to `{taskId, note, startedAt}`  -  additive, tolerated by every existing consumer.
 
 ### 4.2 Wire protocol additions
 
@@ -122,10 +123,11 @@ Added to `packages/shared/src/protocol.ts`. Style matches the existing `fs:list_
 
 ```ts
 // dashboard  -  host  -  executor (RPC, ack)
-export type ClientListBgTasks = { requestId: string; workspaceId: string }
+export type ClientListBgTasks = { requestId: string; workspaceId: string; sessionId: string }
 export type BgListResult = {
   requestId: string
   workspaceId: string
+  sessionId: string
   tasks: readonly BackgroundTaskSummary[]
   error?: string
 }
@@ -133,6 +135,7 @@ export type BgListResult = {
 export type ClientReadBgOutput = {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   offset?: number         // byte offset in the current buffer
   maxBytes?: number       // cap on returned slice, default 64 KiB
@@ -140,6 +143,7 @@ export type ClientReadBgOutput = {
 export type BgOutputResult = {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   content: string
   nextOffset: number
@@ -149,10 +153,11 @@ export type BgOutputResult = {
   error?: string
 }
 
-export type ClientKillBgTask = { requestId: string; workspaceId: string; taskId: string }
+export type ClientKillBgTask = { requestId: string; workspaceId: string; sessionId: string; taskId: string }
 export type BgKillResult = {
   requestId: string
   workspaceId: string
+  sessionId: string
   taskId: string
   killed: boolean
   error?: string
@@ -161,6 +166,7 @@ export type BgKillResult = {
 // executor  -  host  -  dashboard (push)
 export type ServerBgTaskUpdated = {
   workspaceId: string
+  sessionId: string
   task: BackgroundTaskSummary
   // included when a chunk of new output caused the update; empty otherwise
   delta?: { fromOffset: number; content: string }
@@ -171,9 +177,9 @@ Socket.IO event names:
 
 - Dashboard emits `bg:list`, `bg:output`, `bg:kill` (all with ack).
 - Executor emits `bg:task_updated` (push, no ack).
-- Host relays the RPCs like it already does for `fs:*`, and rebroadcasts `bg:task_updated` to every dashboard subscribed to the executor's workspace.
+- Host relays the RPCs like it already does for `fs:*`, but validates that the requested `sessionId` is in the target `workspaceId`. Push events are rebroadcast to the owning `session:<sessionId>` room.
 
-Rationale for routing by `workspaceId`, not `sessionId`: a background task lives in the executor, not the session that spawned it, and multiple sessions on the same workspace could all want to observe the same task. Same-workspace fan-out matches Claude Code's mental model of "tasks belong to the machine."
+Rationale for carrying both `workspaceId` and `sessionId`: the process physically lives in the executor for a workspace, but ownership belongs to the session that spawned it. This lets multiple sessions share one executor without leaking task output or kill rights across sessions. Workspace-wide operator views can be added later as an explicit admin surface, not as the default session dashboard.
 
 ### 4.3 Host changes
 
@@ -194,8 +200,8 @@ Push side: the executor namespace (`executor-ns.ts`) subscribes to the local reg
 
 New hook `packages/dashboard/src/features/chat/useBackgroundTasks.ts`:
 
-- On mount: emit `bg:list` for the current workspace.
-- Listen for `bg:task_updated` and reduce into an in-memory `Map<taskId, BackgroundTaskSummary + tail>` keyed by taskId.
+- On mount: emit `bg:list` for the current workspace and session.
+- Listen for session-scoped `bg:task_updated` pushes and reduce into an in-memory `Map<taskId, BackgroundTaskSummary + tail>` keyed by taskId.
 - Poll `bg:output` every 1.5 s for the *selected* task's tail  -  even when there's no push, that's the visible "tail" behavior. Push events short-circuit the wait (server told us there's new content, fetch immediately).
 - Fall back to the existing `backgroundTerminalTasks(timeline)` derivation when there's no live executor (offline replay).
 
