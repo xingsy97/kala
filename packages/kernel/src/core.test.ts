@@ -732,6 +732,89 @@ describe('step: compact_replaced', () => {
     expect(next.pendingCalls).toEqual(s0.pendingCalls)
   })
 
+  it('allows executing_tools compaction when the pending tool-call group is preserved', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'executing_tools',
+      pendingCalls: [
+        { callId: 'c2', name: 'read', input: {}, status: 'dispatched' },
+      ],
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'x' }] },
+        { role: 'user', content: [{ type: 'text', text: 'old task' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+        { role: 'user', content: [{ type: 'text', text: 'current task' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_call', callId: 'c1', name: 'read', input: {} },
+            { type: 'tool_call', callId: 'c2', name: 'read', input: {} },
+          ],
+        },
+        { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'done' }] },
+      ],
+      usage: { inputTokens: 95, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'compact_replaced',
+        trigger: 'tool_result',
+        preserveFrom: 3,
+        summary: 'old context summary',
+        replacedCount: 3,
+        tokensBefore: 95,
+        tokensAfter: 20,
+      },
+      c,
+    )
+
+    expect(next.status).toBe('executing_tools')
+    expect(next.pendingCalls).toEqual(s0.pendingCalls)
+    expect(next.messages.map((m) => m.role)).toEqual(['system', 'system', 'user', 'assistant', 'tool'])
+    expect(next.messages[3]).toEqual(s0.messages[4])
+  })
+
+  it('rejects executing_tools compaction that would orphan a pending tool result', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'executing_tools',
+      pendingCalls: [
+        { callId: 'c2', name: 'read', input: {}, status: 'dispatched' },
+      ],
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'x' }] },
+        { role: 'user', content: [{ type: 'text', text: 'current task' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_call', callId: 'c1', name: 'read', input: {} },
+            { type: 'tool_call', callId: 'c2', name: 'read', input: {} },
+          ],
+        },
+        { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 'done' }] },
+      ],
+      usage: { inputTokens: 95, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+    }
+    const { next } = step(
+      s0,
+      {
+        kind: 'compact_replaced',
+        trigger: 'tool_result',
+        preserveFrom: s0.messages.length,
+        summary: 'unsafe summary',
+        replacedCount: 4,
+        tokensBefore: 95,
+        tokensAfter: 5,
+      },
+      c,
+    )
+
+    expect(next.messages).toEqual(s0.messages)
+    expect(next.pendingCalls).toEqual(s0.pendingCalls)
+    expect(next.usage.inputTokens).toBe(95)
+  })
+
   it('is legal from error state (post-mortem recovery)', () => {
     const s0: AgentState = {
       ...initial(),
@@ -1017,4 +1100,3 @@ describe('step: cwd', () => {
 // ============================================================================
 // Session-scoped memory (memory with operation=write/delete and scope=session)
 // ============================================================================
-

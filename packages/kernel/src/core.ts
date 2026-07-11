@@ -89,6 +89,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
+    compact_replaced: (s, e) => onCompactReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   done: {
