@@ -30,7 +30,7 @@ export const resources = {
           benchmarks: 'Benchmarks',
           operations: 'Operations',
           artifacts: 'Artifacts',
-          settings: 'Settings',
+          pipeline: 'Pipeline',
         },
       },
       benchmarks: {
@@ -311,6 +311,12 @@ export const resources = {
         },
         interface: {
           subtitle: 'Dashboard UI toggles. Stored per-browser in localStorage - no host restart required.',
+          theme: {
+            label: 'Theme',
+            desc: 'Switch between dark and light color schemes.',
+            dark: 'Dark',
+            light: 'Light',
+          },
           showToolCallTab: 'Show Tool Call tab in Inspector',
           showToolCallTabDesc: 'Adds a dedicated "Tool Call" tab beside Trace / LLM API / Status. When off, tool calls still appear inside the Trace view - use the Trace filter chips to isolate them.',
           desktopNotifications: 'Desktop notifications',
@@ -1190,7 +1196,7 @@ export const resources = {
           benchmarks: 'Benchmarks',
           operations: '运维',
           artifacts: '产物',
-          settings: '设置',
+          pipeline: '流程',
         },
       },
       benchmarks: {
@@ -1471,6 +1477,12 @@ export const resources = {
         },
         interface: {
           subtitle: 'Dashboard UI 开关。按浏览器存储在 localStorage 中 - 不需要重启 host。',
+          theme: {
+            label: '主题',
+            desc: '在深色与浅色配色间切换。',
+            dark: '深色',
+            light: '浅色',
+          },
           showToolCallTab: '在 Inspector 中显示 Tool Call tab',
           showToolCallTabDesc: '在 Trace / LLM API / Status 旁边添加独立的 Tool Call tab。关闭后，tool call 仍会出现在 Trace view，可用 Trace filter chips 过滤。',
           desktopNotifications: '桌面通知',

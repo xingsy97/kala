@@ -143,7 +143,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const explorer = document.querySelector('[data-testid="explorer-panel"]')
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
-    const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
+    const inspectorToggle = document.querySelector('[data-testid="app-shell-nav-inspector-icon"]')
     const selectedSession = document.querySelector('[data-testid="session-row"]')
     const sessionCwd = selectedSession?.querySelector('[data-testid="session-row-cwd"]')
     const rectFor = (el) => {
@@ -383,7 +383,7 @@ async function verifyNavigationSurface(page, viewportWidth) {
   const metrics = await page.evaluate(() => {
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
     const explorerToggle = document.querySelector('[data-testid="explorer-toggle"]')
-    const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
+    const inspectorToggle = document.querySelector('[data-testid="app-shell-nav-inspector-icon"]')
     const rect = toolbar?.getBoundingClientRect()
     return {
       text: toolbar?.textContent || '',
@@ -421,7 +421,7 @@ async function verifyModalSizing(page, viewportWidth) {
     page,
     viewportWidth,
     'settings modal',
-    '[data-testid="settings-button"]',
+    '[data-testid="app-shell-nav-settings-icon"]',
     '[data-testid="settings-dialog"]',
     maxWideModalWidth,
   )

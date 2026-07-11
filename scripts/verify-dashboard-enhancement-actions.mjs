@@ -548,15 +548,23 @@ async function verifyNewParityActions(fixture) {
 }
 
 async function openArtifactMode(mode) {
-  const button = mode === 'eval'
-    ? '[data-testid="eval-dashboard-button"]'
-    : mode === 'ops'
-      ? '[data-testid="ops-artifacts-button"]'
-      : '[data-testid="artifacts-button"]'
   const modeButton = `[data-testid="artifact-mode-${mode}"]`
   if (!await visible(modeButton)) {
-    await waitForVisible(button)
-    await clickVisible(button)
+    if (mode === 'eval') {
+      // Eval artifacts now live behind the Benchmarks tab. Click the tab, then
+      // use the launcher's "open eval artifacts" button to open the dialog.
+      await waitForVisible('[data-testid="app-shell-nav-benchmarks"]')
+      await clickVisible('[data-testid="app-shell-nav-benchmarks"]')
+      await waitForVisible('[data-testid="benchmarks-launcher-open"]')
+      await clickVisible('[data-testid="benchmarks-launcher-open"]')
+    } else {
+      // ops / artifacts tabs open the ArtifactExplorer dialog directly.
+      const tab = mode === 'ops'
+        ? '[data-testid="app-shell-nav-operations"]'
+        : '[data-testid="app-shell-nav-artifacts"]'
+      await waitForVisible(tab)
+      await clickVisible(tab)
+    }
     await waitForVisible('[data-testid="artifact-dialog"]')
   }
   await waitForVisible(modeButton)
