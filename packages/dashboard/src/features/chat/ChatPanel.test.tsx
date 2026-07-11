@@ -353,6 +353,54 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/Manual compact/)).toBeTruthy()
   })
 
+  it('opens a markdown summary modal from compact boundaries', () => {
+    render(
+      <ChatPanel
+        items={[
+          {
+            kind: 'compact_boundary',
+            seq: 7,
+            trigger: 'manual',
+            replacedCount: 2,
+            tokensBefore: 1200,
+            tokensAfter: 80,
+            summary: '# Compacted Context\n\n## Open Work\n\n- Finish compact inspector wiring',
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('compact-boundary-open'))
+    const modal = screen.getByTestId('compact-summary-modal')
+    expect(modal.textContent ?? '').toContain('Compacted Context')
+    expect(modal.textContent ?? '').toContain('Open Work')
+    expect(modal.textContent ?? '').toContain('Finish compact inspector wiring')
+  })
+
+  it('renders compact operation feedback as a transcript tail item', () => {
+    render(
+      <ChatPanel
+        items={[{ kind: 'message', message: { role: 'user', content: [{ type: 'text', text: 'before compact' }] } }]}
+        compactStatus={{ kind: 'running', startedAt: Date.now(), tokensBefore: 1200 }}
+      />,
+    )
+
+    expect(screen.getByTestId('compact-feedback-transcript-row')).toBeTruthy()
+    expect(screen.getByTestId('inline-compact-running')).toBeTruthy()
+  })
+
+  it('renders compact empty feedback as a transcript tail item', () => {
+    render(
+      <ChatPanel
+        items={[{ kind: 'message', message: { role: 'user', content: [{ type: 'text', text: 'before compact' }] } }]}
+        compactStatus={{ kind: 'empty', message: 'send a message before compacting context' }}
+      />,
+    )
+
+    expect(screen.getByTestId('compact-feedback-transcript-row')).toBeTruthy()
+    expect(screen.getByTestId('inline-compact-empty').textContent ?? '').toContain('send a message')
+  })
+
   it('renders sending and queued user messages inline with the transcript', () => {
     render(
       <ChatPanel

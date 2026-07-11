@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, BarChart3, Boxes, ChevronLeft, ChevronRight, Eraser, FolderOpen, Info, ListChecks, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
+import { Archive, BarChart3, Boxes, ChevronLeft, ChevronRight, Eraser, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -92,6 +92,7 @@ import {
 
 const MODEL_STORAGE_KEY = 'ak-model'
 const COMPACT_WATCHDOG_MS = 75_000
+const SIMPLE_CHAT_TOOLS: readonly string[] = ['todowrite', 'agent', 'websearch', 'memory']
 
 /**
  * Fetch the host's advertised models on mount. The host reads them from
@@ -156,6 +157,7 @@ export function App(): JSX.Element {
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
   const [awaitingAck, setAwaitingAck] = useState(false)
+  const [forkingFromSeq, setForkingFromSeq] = useState<number | null>(null)
   const [pendingUserMessages, setPendingUserMessages] = useState<readonly PendingUserTranscriptMessage[]>([])
   const compactResetTimer = useRef<number | null>(null)
   const compactStartSeq = useRef<number | null>(null)
@@ -215,6 +217,7 @@ export function App(): JSX.Element {
     sessionId: config.sessionId,
     ...(config.token !== undefined ? { token: config.token } : {}),
     onForked: (p) => {
+      setForkingFromSeq(null)
       setConfig((prev) => ({ ...prev, sessionId: p.sessionId, explicit: true }))
     },
   })
@@ -225,7 +228,14 @@ export function App(): JSX.Element {
     inferredCompactSeq.current = null
     setAwaitingAck(false)
     setPendingUserMessages([])
+    setForkingFromSeq(null)
   }, [config.sessionId])
+
+  useEffect(() => {
+    if (forkingFromSeq === null) return
+    const t = window.setTimeout(() => setForkingFromSeq(null), 8000)
+    return () => window.clearTimeout(t)
+  }, [forkingFromSeq])
 
   useEffect(() => {
     if (!awaitingAck) return
@@ -433,7 +443,36 @@ export function App(): JSX.Element {
     setWorkspacePickSubmitting(true)
     setWorkspacePickError(null)
     try {
-      await createSessionWithAck(session.socket, sessionId, workspaceId, workspaceName, cwd)
+      await createSessionWithAck(session.socket, {
+        sessionId,
+        workspaceId,
+        ...(workspaceName !== undefined ? { workspaceName } : {}),
+        cwd,
+      })
+      selectSession(sessionId)
+      setPendingWorkspacePick(null)
+    } catch (err) {
+      setWorkspacePickError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setWorkspacePickSubmitting(false)
+    }
+  }
+  const startSimpleChat = async (): Promise<void> => {
+    if (!pendingWorkspacePick) return
+    const { sessionId } = pendingWorkspacePick
+    if (!session.socket) {
+      setWorkspacePickError(t('app.socketNotConnected'))
+      return
+    }
+    setWorkspacePickSubmitting(true)
+    setWorkspacePickError(null)
+    try {
+      const cwd = `/tmp/agent-kernel-chat-${crypto.randomUUID()}`
+      await createSessionWithAck(session.socket, {
+        sessionId,
+        cwd,
+        tools: SIMPLE_CHAT_TOOLS,
+      })
       selectSession(sessionId)
       setPendingWorkspacePick(null)
     } catch (err) {
@@ -1088,6 +1127,8 @@ export function App(): JSX.Element {
                         pinnedToBottom={chatPinnedToBottom}
                         onPinnedChange={setChatPinnedToBottom}
                         scrollToBottomToken={chatScrollToBottomToken}
+                        compactStatus={compactStatus}
+                        onDismissCompactStatus={() => setCompactStatus({ kind: 'idle' })}
                         pendingApprovals={session.pendingApprovals}
                         onReadOverflow={readOverflow}
                         parentSessionId={config.sessionId}
@@ -1098,6 +1139,7 @@ export function App(): JSX.Element {
                         }}
                         onEditAndRerun={(seq, text) => {
                           if (!session.socket) return
+                          setForkingFromSeq(seq)
                           session.socket.emit('client:fork', {
                             sourceSessionId: config.sessionId,
                             cursor: seq - 1,
@@ -1124,26 +1166,14 @@ export function App(): JSX.Element {
                                 cancelSession(session.socket, config.sessionId)
                               }}
                             />
-                            {compactStatus.kind !== 'idle' ? (
-                              <CompactFeedbackRow
-                                kind={compactStatus.kind}
-                                message={
-                                  compactStatus.kind === 'empty' || compactStatus.kind === 'error'
-                                    ? compactStatus.message
-                                    : undefined
-                                }
-                                startedAt={
-                                  compactStatus.kind === 'running' ? compactStatus.startedAt : undefined
-                                }
-                                tokensBefore={
-                                  compactStatus.kind === 'running' ? compactStatus.tokensBefore : undefined
-                                }
-                                onDismiss={
-                                  compactStatus.kind === 'running'
-                                    ? undefined
-                                    : () => setCompactStatus({ kind: 'idle' })
-                                }
-                              />
+                            {forkingFromSeq !== null ? (
+                              <div
+                                className="flex items-center gap-2 rounded-md bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
+                                data-testid="rerun-pending"
+                              >
+                                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                <span>{t('chat.transcript.rerunPending', { seq: forkingFromSeq })}</span>
+                              </div>
                             ) : null}
                           </>
                         }
@@ -1453,6 +1483,7 @@ export function App(): JSX.Element {
         onCreate={({ workspaceId, workspaceName, cwd }) =>
           void pickWorkspaceForNew(workspaceId, workspaceName, cwd)
         }
+        onCreateSimpleChat={() => void startSimpleChat()}
         onCancel={() => {
           setPendingWorkspacePick(null)
           setWorkspacePickError(null)
@@ -1485,7 +1516,7 @@ export function App(): JSX.Element {
 }
 
 function hasCompactableContent(state: import('@agent-kernel/kernel').AgentState | null): boolean {
-  return state?.messages.some((m) => m.role !== 'system') ?? false
+  return state?.messages.some((m, index) => !(index === 0 && m.role === 'system')) ?? false
 }
 
 function isEditable(el: HTMLElement): boolean {

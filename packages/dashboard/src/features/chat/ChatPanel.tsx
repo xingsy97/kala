@@ -18,6 +18,7 @@ import {
   ChevronsDown,
   Code2,
   FileText,
+  GripVertical,
   Lightbulb,
   Pencil,
   Sparkles,
@@ -40,6 +41,15 @@ import type {
 import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
@@ -48,6 +58,7 @@ import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview } from './DiffPreview.js'
 import { CodeBlock } from './CodeBlock.js'
+import { CompactFeedbackRow, type CompactStatus } from './InlineStatusRow.js'
 import {
   type GroupedContentItem,
   type ToolCallGroup,
@@ -88,6 +99,14 @@ type Props = {
   onPinnedChange?: (pinned: boolean) => void
   /** Bump this to make ChatPanel scroll to the current bottom. */
   scrollToBottomToken?: number
+  /** UI-level compaction operation status rendered inline at transcript tail. */
+  compactStatus?: CompactStatus
+  onDismissCompactStatus?: () => void
+}
+
+type RenderTranscriptItem = TranscriptItem | {
+  kind: 'compact_feedback'
+  status: Exclude<CompactStatus, { kind: 'idle' }>
 }
 
 type OverflowReader = (callId: string) => Promise<{ content?: string; error?: string }>
@@ -135,6 +154,8 @@ export function ChatPanel({
   pinnedToBottom,
   onPinnedChange,
   scrollToBottomToken,
+  compactStatus,
+  onDismissCompactStatus,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const fallbackItems: TranscriptItem[] = (messages ?? [])
@@ -177,10 +198,12 @@ export function ChatPanel({
   // messageIndex (used for msg-* anchors + highlight) must still count against
   // the ORIGINAL sequence so callers that pass a highlight seq still land on
   // the right row.
-  const { transcriptItems, messageIndexByItem } = useMemo(() => {
-    const kept: TranscriptItem[] = []
+  const { transcriptItems, messageIndexByItem, hideHeaderByItem } = useMemo(() => {
+    const kept: RenderTranscriptItem[] = []
     const mapping: number[] = []
+    const hideHeader: boolean[] = []
     let mi = -1
+    let prevRole: 'user' | 'assistant' | 'tool' | null = null
     for (const it of rawItems) {
       if (it.kind === 'message') {
         mi += 1
@@ -193,13 +216,27 @@ export function ChatPanel({
         }
         kept.push(it)
         mapping.push(mi)
+        hideHeader.push(prevRole === m.role)
+        prevRole = m.role as 'user' | 'assistant' | 'tool'
+      } else if (it.kind === 'pending_user_message') {
+        kept.push(it)
+        mapping.push(-1)
+        hideHeader.push(prevRole === 'user')
+        prevRole = 'user'
       } else {
         kept.push(it)
         mapping.push(-1)
+        hideHeader.push(false)
+        prevRole = null
       }
     }
-    return { transcriptItems: kept, messageIndexByItem: mapping }
-  }, [rawItems, groupedCallIds])
+    if (compactStatus && compactStatus.kind !== 'idle') {
+      kept.push({ kind: 'compact_feedback', status: compactStatus })
+      mapping.push(-1)
+      hideHeader.push(false)
+    }
+    return { transcriptItems: kept, messageIndexByItem: mapping, hideHeaderByItem: hideHeader }
+  }, [rawItems, groupedCallIds, compactStatus])
 
   // Translate message-index highlight into item-index so VirtualTranscript
   // can scroll to the right row. -1 means "no highlight" or unresolved.
@@ -214,10 +251,14 @@ export function ChatPanel({
   const isEmpty = transcriptItems.length === 0
 
   const renderItem = useCallback(
-    (item: TranscriptItem, itemIndex: number): JSX.Element => {
+    (item: RenderTranscriptItem, itemIndex: number): JSX.Element => {
       if (item.kind === 'compact_boundary') {
         return <CompactBoundaryRow boundary={item} />
       }
+      if (item.kind === 'compact_feedback') {
+        return <CompactFeedbackTranscriptRow status={item.status} onDismiss={onDismissCompactStatus} />
+      }
+      const hideHeader = hideHeaderByItem[itemIndex] ?? false
       if (item.kind === 'pending_user_message') {
         return <PendingUserMessageRow item={item} />
       }
@@ -233,6 +274,8 @@ export function ChatPanel({
           resultsByCallId={resultsByCallId}
           groupedCallIds={groupedCallIds}
           seq={item.seq}
+          ts={item.ts}
+          hideHeader={hideHeader}
           onEditAndRerun={onEditAndRerun}
           parentSessionId={parentSessionId}
           socket={socket ?? null}
@@ -241,6 +284,7 @@ export function ChatPanel({
     },
     [
       messageIndexByItem,
+      hideHeaderByItem,
       highlightIndex,
       toolNameByCallId,
       approvalByCallId,
@@ -250,13 +294,16 @@ export function ChatPanel({
       onEditAndRerun,
       parentSessionId,
       socket,
+      onDismissCompactStatus,
     ],
   )
 
   const keyFor = useCallback(
-    (item: TranscriptItem, itemIndex: number): string =>
+    (item: RenderTranscriptItem, itemIndex: number): string =>
       item.kind === 'compact_boundary'
         ? `compact-${item.seq}`
+        : item.kind === 'compact_feedback'
+          ? `compact-feedback-${item.status.kind}`
         : item.kind === 'pending_user_message'
           ? `pending-${item.id}`
           : `message-${itemIndex}`,
@@ -287,7 +334,7 @@ export function ChatPanel({
             {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
           </div>
         ) : (
-          <VirtualTranscript<TranscriptItem>
+          <VirtualTranscript<RenderTranscriptItem>
             ref={transcriptRef}
             items={transcriptItems}
             renderItem={renderItem}
@@ -327,6 +374,26 @@ export function ChatPanel({
   )
 }
 
+function CompactFeedbackTranscriptRow({
+  status,
+  onDismiss,
+}: {
+  status: Exclude<CompactStatus, { kind: 'idle' }>
+  onDismiss?: () => void
+}): JSX.Element {
+  return (
+    <div className="pl-0 sm:pl-10" data-testid="compact-feedback-transcript-row">
+      <CompactFeedbackRow
+        kind={status.kind}
+        message={status.kind === 'empty' || status.kind === 'error' ? status.message : undefined}
+        startedAt={status.kind === 'running' ? status.startedAt : undefined}
+        tokensBefore={status.kind === 'running' ? status.tokensBefore : undefined}
+        onDismiss={status.kind === 'running' ? undefined : onDismiss}
+      />
+    </div>
+  )
+}
+
 function PendingUserMessageRow({
   item,
 }: {
@@ -334,19 +401,24 @@ function PendingUserMessageRow({
 }): JSX.Element {
   const { t } = useTranslation()
   const content = item.content ?? [{ type: 'text' as const, text: item.text }]
-  const label = item.status === 'queued'
+  const isQueued = item.status === 'queued'
+  const bubbleTone = isQueued
+    ? 'bg-primary/80 text-primary-foreground shadow-sm'
+    : 'bg-primary text-primary-foreground shadow-sm'
+  const headerLabel = isQueued
     ? t('chat.transcript.queuedMessage', { position: item.position ?? 1 })
     : t('chat.transcript.sendingMessage')
-  const mode = item.mode === 'queue' ? t('composer.queueFollowUp') : t('composer.steerActiveTurn')
   return (
     <div className="group relative flex justify-end" data-testid={`pending-user-message-${item.id}`}>
-      <div className="relative max-w-[92%] rounded-2xl rounded-br-md border border-primary/30 bg-primary/10 px-4 py-2.5 text-foreground shadow-sm sm:max-w-[85%]">
-        <div className="mb-2 flex items-center justify-end gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          <span>{mode}</span>
-          <span aria-hidden="true">/</span>
-          <span>{label}</span>
+      <div className={cn('relative max-w-[92%] rounded-2xl rounded-br-md px-4 py-2.5 sm:max-w-[85%]', bubbleTone)}>
+        <InlineTimestamp
+          ts={item.createdAt}
+          className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
+        />
+        <div className="mb-1 flex items-center justify-end gap-1.5 text-[10px] font-medium uppercase tracking-wide text-primary-foreground/70">
+          <span>{headerLabel}</span>
         </div>
-        <div className="flex min-w-0 flex-col gap-2 opacity-85">
+        <div className="flex min-w-0 flex-col gap-2">
           {content.map((c, i) => (
             <ContentBlock
               key={i}
@@ -359,6 +431,43 @@ function PendingUserMessageRow({
         </div>
       </div>
     </div>
+  )
+}
+
+function GripHandle(): JSX.Element {
+  return (
+    <div
+      className="pointer-events-none flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+      aria-hidden="true"
+    >
+      <GripVertical className="h-3.5 w-3.5 text-muted-foreground/70" />
+    </div>
+  )
+}
+
+function InlineTimestamp({
+  ts,
+  className,
+}: {
+  ts: string | undefined
+  className?: string
+}): JSX.Element | null {
+  if (!ts) return null
+  const parsed = Date.parse(ts)
+  if (!Number.isFinite(parsed)) return null
+  const date = new Date(parsed)
+  const label = date.toLocaleString()
+  const short = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return (
+    <span
+      className={cn(
+        'pointer-events-none select-none whitespace-nowrap font-mono text-[10px] leading-none opacity-0 transition-opacity group-hover:opacity-70',
+        className,
+      )}
+      title={label}
+    >
+      {short}
+    </span>
   )
 }
 
@@ -464,13 +573,19 @@ function CompactBoundaryRow({
   boundary: Extract<TranscriptItem, { kind: 'compact_boundary' }>
 }): JSX.Element {
   const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
   const trigger = boundary.trigger === 'auto' ? t('chat.transcript.automaticCompact') : t('chat.transcript.manualCompact')
   const shortTrigger = boundary.trigger === 'auto' ? t('chat.transcript.automaticCompactShort') : t('chat.transcript.manualCompactShort')
   return (
     <div className="flex items-center gap-3 py-2" data-testid="compact-boundary">
       <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
-      <div className="flex min-w-0 items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground">
-        <Archive className="h-3 w-3 flex-none" />
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex min-w-0 items-center gap-2 rounded-full bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="compact-boundary-open"
+      >
+        <Archive className="h-3 w-3 flex-none" aria-hidden="true" />
         <span className="font-medium text-foreground">{t('chat.transcript.contextCompacted')}</span>
         <span className="hidden truncate sm:inline">
            -  {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter), count: boundary.replacedCount })}
@@ -478,7 +593,30 @@ function CompactBoundaryRow({
         <span className="truncate sm:hidden">
           {t('chat.transcript.compactSummaryShort', { trigger: shortTrigger, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter) })}
         </span>
-      </div>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="grid h-[82vh] max-w-3xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 gap-0">
+          <DialogHeader className="bg-card px-4 py-3">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Archive className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              {t('chat.transcript.contextCompacted')}
+            </DialogTitle>
+            <DialogDescription>
+              {t('chat.transcript.compactSummary', { trigger, seq: boundary.seq, before: formatTokens(boundary.tokensBefore), after: formatTokens(boundary.tokensAfter), count: boundary.replacedCount })}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="min-h-0 bg-background">
+            <div className="px-5 py-4" data-testid="compact-summary-modal">
+              <AssistantMarkdown text={boundary.summary} />
+            </div>
+          </ScrollArea>
+          <DialogFooter className="bg-card px-4 py-3">
+            <DialogClose asChild>
+              <Button variant="outline" className="mt-0">{t('common.close')}</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <div className="h-px flex-1 bg-border/60" aria-hidden="true" />
     </div>
   )
@@ -494,6 +632,8 @@ function MessageRow({
   resultsByCallId,
   groupedCallIds,
   seq,
+  ts,
+  hideHeader,
   onEditAndRerun,
   parentSessionId,
   socket,
@@ -507,6 +647,8 @@ function MessageRow({
   resultsByCallId: ReadonlyMap<string, ToolResultContent>
   groupedCallIds: ReadonlySet<string>
   seq?: number
+  ts?: string
+  hideHeader: boolean
   onEditAndRerun?: (seq: number, text: string) => void
   parentSessionId?: string
   socket?: DashboardSocket | null
@@ -580,11 +722,15 @@ function MessageRow({
         id={`msg-${index}`}
         data-message-index={index}
         className={cn(
-          'group relative flex justify-end',
+          'group relative flex justify-end gap-2',
           highlighted ? 'rounded-2xl bg-amber-50/60 p-1 dark:bg-amber-950/20' : '',
         )}
       >
         <div className="relative max-w-[92%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
+          <InlineTimestamp
+            ts={ts}
+            className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
+          />
           <div className="flex min-w-0 flex-col gap-2">
             {message.content.map((c, i) => (
               <ContentBlock
@@ -598,6 +744,11 @@ function MessageRow({
             ))}
           </div>
         </div>
+        {hideHeader ? (
+          <div className="flex w-4 flex-none items-center">
+            <GripHandle />
+          </div>
+        ) : null}
         {editable ? (
           <button
             type="button"
@@ -646,28 +797,35 @@ function MessageRow({
         highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
       )}
     >
-      <div className="flex-none pt-0.5">
-        <div
-          className={cn(
-            'flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold uppercase tracking-wider',
-            message.role === 'assistant'
-              ? 'bg-muted text-foreground'
-              : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
-          )}
-          aria-label={label}
-        >
-          {message.role === 'assistant' ? 'AK' : <Wrench className="h-3 w-3" aria-hidden="true" />}
-        </div>
+      <div className="flex w-7 flex-none items-start justify-center pt-0.5">
+        {hideHeader ? (
+          <GripHandle />
+        ) : (
+          <div
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold uppercase tracking-wider',
+              message.role === 'assistant'
+                ? 'bg-muted text-foreground'
+                : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+            )}
+            aria-label={label}
+          >
+            {message.role === 'assistant' ? 'AK' : <Wrench className="h-3 w-3" aria-hidden="true" />}
+          </div>
+        )}
       </div>
-      <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            'mb-1 text-[11px] font-medium uppercase tracking-wider',
-            roleTextColor,
-          )}
-        >
-          {label}
-        </div>
+      <div className="relative min-w-0 flex-1">
+        {hideHeader ? null : (
+          <div
+            className={cn(
+              'mb-1 text-[11px] font-medium uppercase tracking-wider',
+              roleTextColor,
+            )}
+          >
+            {label}
+          </div>
+        )}
+        <InlineTimestamp ts={ts} className="absolute right-0 top-0 text-muted-foreground" />
         <div className="flex min-w-0 flex-col gap-3">
           {groupedItems.map((item, i) => {
             if (item.kind === 'tool_call_group') {

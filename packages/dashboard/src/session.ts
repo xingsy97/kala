@@ -414,25 +414,32 @@ export function clearSession(
  */
 export function createSession(
   socket: DashboardSocket,
-  sessionId: string,
-  workspaceId: string,
-  workspaceName: string | undefined,
-  cwd?: string,
+  input: {
+    sessionId: string
+    workspaceId?: string
+    workspaceName?: string
+    cwd?: string
+    tools?: readonly string[]
+  },
 ): void {
   socket.emit('client:create_session', {
-    sessionId,
-    workspaceId,
-    ...(workspaceName !== undefined ? { workspaceName } : {}),
-    ...(cwd !== undefined && cwd.length > 0 ? { cwd } : {}),
+    sessionId: input.sessionId,
+    ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+    ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
+    ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
+    ...(input.tools !== undefined ? { tools: input.tools } : {}),
   })
 }
 
 export function createSessionWithAck(
   socket: DashboardSocket,
-  sessionId: string,
-  workspaceId: string,
-  workspaceName: string | undefined,
-  cwd: string | undefined,
+  input: {
+    sessionId: string
+    workspaceId?: string
+    workspaceName?: string
+    cwd?: string
+    tools?: readonly string[]
+  },
   timeoutMs = 10_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -442,12 +449,12 @@ export function createSessionWithAck(
       socket.off('session:error', onError)
     }
     const onReady = (payload: SessionReadyEvent): void => {
-      if (payload.sessionId !== sessionId) return
+      if (payload.sessionId !== input.sessionId) return
       cleanup()
       resolve()
     }
     const onError = (payload: SessionErrorEvent): void => {
-      if (payload.sessionId !== sessionId) return
+      if (payload.sessionId !== input.sessionId) return
       cleanup()
       reject(new Error(payload.message))
     }
@@ -457,7 +464,7 @@ export function createSessionWithAck(
     }, timeoutMs)
     socket.on('session:ready', onReady)
     socket.on('session:error', onError)
-    createSession(socket, sessionId, workspaceId, workspaceName, cwd)
+    createSession(socket, input)
   })
 }
 
@@ -573,9 +580,21 @@ export function useControlPlane(
       setExecutorsLoaded(true)
       setExecutors((prev) => {
         if (change.change === 'detached') {
+          // Host now debounces detach with a grace window, so by the time
+          // this event lands the workspace is really gone. Drop by both
+          // executorId AND workspaceId  -  a restarted process reattaches
+          // with a fresh executorId but same workspaceId, and we don't
+          // want a lingering stale row.
           return prev.filter((e) => e.executorId !== change.executorId)
         }
-        const next = prev.filter((e) => e.executorId !== change.executorId)
+        // attached/updated: dedupe by workspaceId so an executor process
+        // restart (fresh executorId, same workspaceId) replaces the old
+        // row in place instead of showing two entries for one machine.
+        const next = prev.filter(
+          (e) =>
+            e.executorId !== change.executorId &&
+            e.workspaceId !== change.executor.workspaceId,
+        )
         next.push(change.executor)
         return next
       })
