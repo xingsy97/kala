@@ -1110,6 +1110,92 @@ describe('host loop', () => {
     expect(compact).toMatchObject({ kind: 'compact_replaced', trigger: 'preflight' })
   })
 
+  it('compacts between sibling tool results when the first result exhausts context headroom', async () => {
+    const tightConfig = createConfig({
+      tools: [READ],
+      systemPrompt: 'sys',
+      contextLimit: 30_000,
+      softThreshold: 0.8,
+      hardThreshold: 0.99,
+    })
+    const rec = await store.create({ config: tightConfig, sessionId: 'sess-mid-tool-compact' })
+    const sid = rec.sessionId
+    const calls: Array<{ kind: 'normal' | 'compact'; messages: import('@agent-kernel/kernel').Message[] }> = []
+    let normalCalls = 0
+    const llm: LLMAdapter = {
+      name: 'mid-tool-compact-mock',
+      async call(p) {
+        if (p.systemPrompt?.includes('compacting an agent-kernel coding-agent session')) {
+          calls.push({ kind: 'compact', messages: [...p.messages] })
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: 'old context summarized' }] },
+            usage: { inputTokens: 4_000, outputTokens: 100 },
+          }
+        }
+        normalCalls += 1
+        calls.push({ kind: 'normal', messages: [...p.messages] })
+        if (normalCalls === 1) {
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: 'old answer retained until compaction' }] },
+            usage: { inputTokens: 10_000, outputTokens: 50 },
+          }
+        }
+        if (normalCalls === 2) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'tool_call', callId: 'c1', name: 'read', input: { path: '/tmp/huge.log' } },
+                { type: 'tool_call', callId: 'c2', name: 'read', input: { path: '/tmp/small.log' } },
+              ],
+            },
+            usage: { inputTokens: 10_000, outputTokens: 50 },
+          }
+        }
+        return {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'finished after tools' }] },
+          usage: { inputTokens: 6_000, outputTokens: 50 },
+        }
+      },
+    }
+    const toolOutputs: Record<string, string> = {
+      c1: `${'A'.repeat(60_000)}TAIL-OF-HUGE-RESULT`,
+      c2: 'small result',
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools({ callTool: async (_sessionId, eff) => ({ ok: true, content: toolOutputs[eff.callId] ?? 'missing' }) }),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sid, { kind: 'user_message', text: 'old context '.repeat(7_000) })
+    calls.length = 0
+
+    await loop.dispatch(sid, { kind: 'user_message', text: 'read both files' })
+
+    expect(calls[0]?.kind).toBe('normal')
+    expect(calls.some((call) => call.kind === 'compact')).toBe(true)
+    expect(calls.at(-1)?.kind).toBe('normal')
+    const compactCall = calls.find((call) => call.kind === 'compact')
+    expect(compactCall?.messages.some((m) => m.content.some((c) => c.type === 'tool_call'))).toBe(false)
+    const finalNormal = calls.at(-1)!
+    expect(finalNormal.messages.some((m) => m.role === 'system' && JSON.stringify(m).includes('old context summarized'))).toBe(true)
+    const activeAssistant = finalNormal.messages.find((m) => m.role === 'assistant' && m.content.some((c) => c.type === 'tool_call'))
+    expect(activeAssistant).toBeDefined()
+    const toolResults = finalNormal.messages.flatMap((m) => m.content).filter((c) => c.type === 'tool_result')
+    expect(toolResults).toHaveLength(2)
+    expect(JSON.stringify(toolResults[0])).toContain('omitted from tool result before entering LLM context')
+    expect(JSON.stringify(toolResults[0])).toContain('TAIL-OF-HUGE-RESULT')
+
+    const parsed = await readSessionLog(store.get(sid)!.logPath)
+    const compacts = parsed.events
+      .map((e) => e.event)
+      .filter((event): event is Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> => event.kind === 'compact_replaced')
+    expect(compacts.some((compact) => compact.trigger === 'tool_result')).toBe(true)
+    expect(store.get(sid)!.state.status).toBe('done')
+  })
+
   it('blocks a third identical tool call immediately after compaction', async () => {
     const toolConfig = createConfig({ tools: [READ], systemPrompt: 'sys' })
     const rec = await store.create({ config: toolConfig, sessionId: 'sess-loop-guard' })
