@@ -28,7 +28,7 @@ import type {
   MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
-import type { LLMTrace, ServerHistoryPayload } from '@agent-kernel/shared'
+import { redactLlmTrace, type LLMTrace, type ServerHistoryPayload } from '@agent-kernel/shared'
 import { useTranslation } from 'react-i18next'
 
 import type { DashboardSocket, TimelineEntry } from '../../session.js'
@@ -110,11 +110,13 @@ type PriorCallLlm = { seq: number; effect: CallLlmEffect }
 
 type LlmCall = {
   id: string
+  source: 'turn' | 'compact'
   requestSeq: number
   responseSeq?: number
   effect: CallLlmEffect
   response?: Extract<AgentEvent, { kind: 'llm_response' }>
   error?: Extract<AgentEvent, { kind: 'llm_error' }>
+  compact?: Extract<AgentEvent, { kind: 'compact_replaced' }>
   trace?: LLMTrace
   model?: string
 }
@@ -351,6 +353,7 @@ export function InspectorPanel({
       <DetailDialog
         selection={selected}
         timeline={timeline}
+        onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
         onOpenChange={(open) => {
           if (!open) setSelected(null)
         }}
@@ -864,6 +867,7 @@ function LlmCallsView({
           const isSelected = selected?.kind === 'llm' && selected.call.id === call.id
           const usage = call.response?.usage
           const status = call.error ? 'error' : call.response ? String(call.trace?.response?.status ?? 'ok') : 'pending'
+          const responseLabel = call.source === 'compact' && !call.error ? String(call.trace?.response?.status ?? 'compact') : status
           const provider = llmCallProvider(call)
           const model = llmCallModel(call)
           return (
@@ -871,19 +875,19 @@ function LlmCallsView({
               key={call.id}
               type="button"
               onClick={() => onSelect({ kind: 'llm', call })}
-              className={cn(traceListItemClass, 'w-full text-left', isSelected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
+              className={cn(traceListItemClass, 'w-full max-w-full text-left', isSelected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
               data-testid="llm-call-row"
             >
               {isSelected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="w-[4.75rem] flex-none font-mono text-[10px] text-muted-foreground">#{call.requestSeq} → {call.responseSeq ? `#${call.responseSeq}` : 'pending'}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-violet-600 dark:text-violet-300">{provider} / {model}</span>
-                <span className={cn('flex-none font-mono text-[10px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{status}</span>
+                <span className={cn('flex-none font-mono text-[10px]', call.error ? 'text-rose-600 dark:text-rose-300' : 'text-muted-foreground')}>{responseLabel}</span>
               </div>
-              <div className="mt-0.5 truncate pl-[4.75rem] text-[10px] text-muted-foreground">
-                {t('inspector.llm.requestSummary', { messages: call.effect.messages.length, tools: call.effect.tools.length, response: llmResponseSummary(call) })}
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate pl-[4.75rem] text-[10px] text-muted-foreground" title={llmResponseSummary(call)}>
+                {t('inspector.llm.requestSummary', { messages: call.effect.messages.length, tools: call.effect.tools.length, response: llmResponseCardSummary(call) })}
               </div>
-              <div className="mt-0.5 truncate pl-[4.75rem] font-mono text-[10px] text-muted-foreground">
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate pl-[4.75rem] font-mono text-[10px] text-muted-foreground">
                 {t('inspector.llm.usageSummary', { usage: usage ? `${usage.inputTokens}/${usage.outputTokens}` : t('inspector.llm.notReported'), trace: call.trace ? t('inspector.llm.captured') : t('inspector.llm.notCaptured') })}
               </div>
             </button>
@@ -915,7 +919,7 @@ function ToolCallsView({
               key={call.callId}
               type="button"
               onClick={() => onSelect({ kind: 'tool', call })}
-              className={cn(traceListItemClass, 'w-full text-left', isSelected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
+              className={cn(traceListItemClass, 'w-full max-w-full text-left', isSelected ? 'border-primary/50 bg-card ring-1 ring-primary/20' : 'hover:border-border hover:bg-card/80')}
               data-testid="tool-call-row"
             >
               {isSelected ? <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded bg-primary" /> : null}
@@ -926,10 +930,10 @@ function ToolCallsView({
                   {toolResultLabel(call)}
                 </span>
               </div>
-              <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate text-[10px] text-muted-foreground">
                 {toolLifecycleSummary(call)}
               </div>
-              <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+              <div className="mt-0.5 min-w-0 overflow-hidden truncate font-mono text-[10px] text-muted-foreground">
                 {toolInputSummary(call.input)}
               </div>
             </button>
@@ -1426,10 +1430,12 @@ function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Ele
 function DetailDialog({
   selection,
   timeline,
+  onForkRequest,
   onOpenChange,
 }: {
   selection: DetailSelection
   timeline: readonly TimelineEntry[]
+  onForkRequest?(cursor: number): void
   onOpenChange(open: boolean): void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -1438,17 +1444,17 @@ function DetailDialog({
   return (
     <Dialog open={selection !== null} onOpenChange={onOpenChange}>
       <DialogContent className="h-[94vh] w-[96vw] max-w-[96vw] overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]">
-        <DialogHeader className="bg-card px-4 py-3">
-          <DialogTitle className="flex items-center gap-2 text-base">
+        <DialogHeader className="bg-card px-5 py-4">
+          <DialogTitle className="flex items-center gap-2 text-lg">
             <SearchCode className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             {title}
           </DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription className="text-sm leading-6">{description}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 bg-background p-4">
+        <div className="min-h-0 bg-background p-5">
           {selection ? (
             selection.kind === 'llm' ? (
-              <LlmDetail call={selection.call} />
+              <LlmDetail call={selection.call} onForkRequest={onForkRequest} />
             ) : selection.kind === 'tool' ? (
               <ToolDetail call={selection.call} />
             ) : selection.entry.event.kind === 'compact_replaced' ? (
@@ -1471,6 +1477,7 @@ function DetailDialog({
 function detailTitle(selection: DetailSelection): string {
   if (!selection) return 'Selected Detail'
   if (selection.kind === 'llm') {
+    if (selection.call.source === 'compact') return `Compaction LLM #${selection.call.requestSeq}`
     return `LLM Call #${selection.call.requestSeq} → ${selection.call.responseSeq ? `#${selection.call.responseSeq}` : 'pending'}`
   }
   if (selection.kind === 'tool') return `Tool Call · ${selection.call.name}`
@@ -1508,23 +1515,18 @@ function EventDetail({ selection }: { selection: Extract<DetailSelection, { kind
   )
 }
 
-function LlmDetail({ call }: { call: LlmCall }): JSX.Element {
+function LlmDetail({ call, onForkRequest }: { call: LlmCall; onForkRequest?(cursor: number): void }): JSX.Element {
   const [view, setView] = useState<LlmDetailView>('assembler')
   const provider = llmCallProvider(call)
   const model = llmCallModel(call)
   const kernelEffect = call.effect
-  const parsedResponse = call.response
-    ? { responseSeq: call.responseSeq, event: call.response }
-    : call.error
-      ? { responseSeq: call.responseSeq, event: call.error }
-      : { status: 'pending' }
   return (
     <div className="flex h-full min-h-0 flex-col gap-3" data-testid="llm-detail">
       <PrimaryDetailTabs value={view} onChange={setView} />
       {view === 'assembler' ? (
-        <MessageAssemblerView call={call} provider={provider} model={model} />
+        <MessageAssemblerView call={call} provider={provider} model={model} onForkRequest={onForkRequest} />
       ) : (
-        <ApiCallView call={call} kernelEffect={kernelEffect} parsedResponse={parsedResponse} />
+        <ApiCallView call={call} kernelEffect={kernelEffect} />
       )}
     </div>
   )
@@ -1558,7 +1560,17 @@ function PrimaryDetailTabs({ value, onChange }: { value: LlmDetailView; onChange
   )
 }
 
-function MessageAssemblerView({ call, provider, model }: { call: LlmCall; provider: string; model: string }): JSX.Element {
+function MessageAssemblerView({
+  call,
+  provider,
+  model,
+  onForkRequest,
+}: {
+  call: LlmCall
+  provider: string
+  model: string
+  onForkRequest?(cursor: number): void
+}): JSX.Element {
   const { t } = useTranslation()
   const [selectedContextKind, setSelectedContextKind] = useState<ContextProportionKind | null>(null)
   return (
@@ -1577,6 +1589,8 @@ function MessageAssemblerView({ call, provider, model }: { call: LlmCall; provid
           messages={call.effect.messages}
           tools={call.effect.tools}
           selectedContextKind={selectedContextKind}
+          forkCursor={call.requestSeq}
+          onForkRequest={onForkRequest}
         />
       </DetailPane>
     </div>
@@ -1586,11 +1600,11 @@ function MessageAssemblerView({ call, provider, model }: { call: LlmCall; provid
 function DetailPane({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }): JSX.Element {
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded bg-card ring-1 ring-border/70">
-      <div className="flex-none border-b border-border/60 bg-muted/35 px-3 py-2">
-        <div className="text-xs font-semibold text-foreground">{title}</div>
-        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{subtitle}</div>
+      <div className="flex-none border-b border-border/60 bg-muted/35 px-4 py-3">
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <div className="mt-1 truncate text-xs text-muted-foreground">{subtitle}</div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col p-3">
+      <div className="flex min-h-0 flex-1 flex-col p-4">
         {children}
       </div>
     </section>
@@ -1628,7 +1642,7 @@ function LlmAssemblyView({
           ]}
         />
         {!call.trace ? (
-          <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
+          <div className="rounded bg-amber-500/10 px-3 py-2 text-sm leading-6 text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
             {t('inspector.llm.missingTrace')}
           </div>
         ) : null}
@@ -1670,10 +1684,10 @@ function ContextProportionBar({
   const { t } = useTranslation()
   const nonZero = items.filter((item) => item.bytes > 0)
   return (
-    <div className="rounded bg-background/70 p-3 text-xs ring-1 ring-border/30" data-testid="context-proportion-bar">
+    <div className="rounded bg-background/70 p-3 text-sm ring-1 ring-border/30" data-testid="context-proportion-bar">
       <div className="flex items-center justify-between gap-2">
         <div className="font-medium text-foreground">{t('inspector.llm.contextComposition')}</div>
-        <div className="font-mono text-[10px] text-muted-foreground">{t('inspector.llm.approxSerialized')}</div>
+        <div className="font-mono text-xs text-muted-foreground">{t('inspector.llm.approxSerialized')}</div>
       </div>
       <div className="mt-2 flex h-3 overflow-hidden rounded bg-muted">
         {nonZero.length > 0 ? nonZero.map((item) => (
@@ -1714,9 +1728,9 @@ function ContextProportionBar({
 
 function AssemblyStep({ index, title, result }: { index: string; title: string; result: string }): JSX.Element {
   return (
-    <div className="rounded bg-background/70 p-3 text-xs ring-1 ring-border/30">
+    <div className="rounded bg-background/70 p-3 text-sm ring-1 ring-border/30">
       <div className="flex items-center gap-2">
-        <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 font-mono text-[10px] text-primary">{index}</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 font-mono text-xs text-primary">{index}</span>
         <span className="font-medium text-foreground">{title}</span>
       </div>
       <div className="mt-2 min-w-0 break-words font-mono text-foreground">{result}</div>
@@ -1726,11 +1740,11 @@ function AssemblyStep({ index, title, result }: { index: string; title: string; 
 
 function CompactMetricGrid({ rows }: { rows: readonly (readonly [string, string])[] }): JSX.Element {
   return (
-    <div className="grid grid-cols-2 gap-1.5 text-xs">
+    <div className="grid grid-cols-2 gap-2 text-sm">
       {rows.map(([label, value]) => (
-        <div key={label} className="flex min-w-0 items-center gap-2 rounded bg-background/70 px-2 py-1 text-xs ring-1 ring-border/30">
-          <span className="flex-none text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
-          <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground" title={value}>{value}</span>
+        <div key={label} className="flex min-w-0 items-center gap-2 rounded bg-background/70 px-3 py-2 text-sm ring-1 ring-border/30">
+          <span className="flex-none text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+          <span className="min-w-0 flex-1 truncate text-right font-mono text-sm text-foreground" title={value}>{value}</span>
         </div>
       ))}
     </div>
@@ -1741,10 +1755,14 @@ function LlmContextView({
   messages,
   tools,
   selectedContextKind,
+  forkCursor,
+  onForkRequest,
 }: {
   messages: readonly Message[]
   tools: readonly ToolSchema[]
   selectedContextKind: ContextProportionKind | null
+  forkCursor?: number
+  onForkRequest?(cursor: number): void
 }): JSX.Element {
   const { t } = useTranslation()
   const [kind, setKind] = useState<'messages' | 'tools'>(selectedContextKind === 'tools' ? 'tools' : 'messages')
@@ -1755,7 +1773,7 @@ function LlmContextView({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-2" data-testid="llm-context-view">
       <div className="flex flex-none items-center gap-2">
-        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+        <div className="min-w-0 flex-1 text-sm leading-6 text-muted-foreground">
           {t('inspector.llm.contextDescription')}
         </div>
         <Segmented<'messages' | 'tools'>
@@ -1769,7 +1787,7 @@ function LlmContextView({
         />
       </div>
       {kind === 'messages' ? (
-        <KernelMessagesView messages={messages} selectedContextKind={selectedContextKind} />
+        <KernelMessagesView messages={messages} selectedContextKind={selectedContextKind} forkCursor={forkCursor} onForkRequest={onForkRequest} />
       ) : (
         <ToolRegistryContextView tools={tools} selectedContextKind={selectedContextKind} />
       )}
@@ -1780,9 +1798,13 @@ function LlmContextView({
 function KernelMessagesView({
   messages,
   selectedContextKind,
+  forkCursor,
+  onForkRequest,
 }: {
   messages: readonly Message[]
   selectedContextKind: ContextProportionKind | null
+  forkCursor?: number
+  onForkRequest?(cursor: number): void
 }): JSX.Element {
   const { t } = useTranslation()
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -1794,32 +1816,46 @@ function KernelMessagesView({
           {messages.map((message, index) => {
             const highlighted = selectedContextKind !== null && messageContextKind(message) === selectedContextKind
             return (
-            <button
+            <div
               key={index}
-              type="button"
-              onClick={() => setSelectedIndex(index)}
               className={cn(
-                'flex w-full min-w-0 items-start gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/70',
+                'flex w-full min-w-0 items-start gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-muted/70',
                 selectedIndex === index ? 'bg-muted' : '',
                 highlighted ? 'ring-1 ring-primary/45 bg-primary/5' : '',
               )}
               data-testid="kernel-message-row"
               data-highlighted={highlighted ? 'true' : 'false'}
             >
-              <span className="w-7 flex-none font-mono text-[10px] text-muted-foreground">#{index}</span>
-              <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className={cn('w-16 flex-none font-mono text-[10px]', messageRoleTone(message.role))}>{message.role}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">{message.content.map((block) => block.type).join(', ') || t('inspector.llm.emptyBlocks')}</span>
+              <button
+                type="button"
+                onClick={() => setSelectedIndex(index)}
+                className="flex min-w-0 flex-1 items-start gap-2 text-left"
+              >
+                <span className="w-8 flex-none font-mono text-xs text-muted-foreground">#{index}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className={cn('w-20 flex-none font-mono text-xs', messageRoleTone(message.role))}>{message.role}</span>
+                    <span className="truncate text-xs text-muted-foreground">{message.content.map((block) => block.type).join(', ') || t('inspector.llm.emptyBlocks')}</span>
+                  </span>
+                  <span className="mt-1 block truncate text-sm text-foreground">{summarizeContent(message.content)}</span>
                 </span>
-                <span className="mt-0.5 block truncate text-[11px] text-foreground">{summarizeContent(message.content)}</span>
-              </span>
-            </button>
+              </button>
+              {onForkRequest && forkCursor !== undefined ? (
+                <MiniAction
+                  onClick={() => onForkRequest(forkCursor)}
+                  title={t('inspector.actions.forkTitle', { cursor: forkCursor })}
+                  ariaLabel={t('inspector.actions.forkAria', { cursor: forkCursor })}
+                  testId={`kernel-message-fork-${index}`}
+                >
+                  <GitBranch className="h-3 w-3" aria-hidden="true" /> {t('inspector.actions.fork')}
+                </MiniAction>
+              ) : null}
+            </div>
           )})}
         </div>
       </ScrollArea>
       <ScrollArea className="h-full min-h-0 rounded bg-background/70 ring-1 ring-border/30">
-        <div className="space-y-2 p-2 text-xs">
+        <div className="space-y-3 p-3 text-sm">
           {selected ? (
             <>
               <KeyValueTable
@@ -1863,7 +1899,7 @@ function ToolRegistryContextView({
               type="button"
               onClick={() => setSelectedName(tool.name)}
               className={cn(
-                'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/70',
+                'flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-muted/70',
                 selected?.name === tool.name ? 'bg-muted' : '',
                 highlighted ? 'ring-1 ring-primary/45 bg-primary/5' : '',
               )}
@@ -1871,8 +1907,8 @@ function ToolRegistryContextView({
               data-highlighted={highlighted ? 'true' : 'false'}
             >
               <span className="min-w-0 flex-1 truncate font-mono">{tool.name}</span>
-              {isSkillTool(tool) ? <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span> : null}
-              <span className={cn('flex-none text-[10px]', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
+              {isSkillTool(tool) ? <span className="flex-none rounded bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-700 dark:text-sky-300">{t('inspector.runtime.skill')}</span> : null}
+              <span className={cn('flex-none text-xs', tool.requiresApproval ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>
                 {tool.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')}
               </span>
             </button>
@@ -1880,7 +1916,7 @@ function ToolRegistryContextView({
         </div>
       </ScrollArea>
       <ScrollArea className="h-full min-h-0 rounded bg-background/70 ring-1 ring-border/30">
-        <div className="space-y-2 p-2 text-xs">
+        <div className="space-y-3 p-3 text-sm">
           {selected ? (
             <>
               <KeyValueTable
@@ -1900,7 +1936,7 @@ function ToolRegistryContextView({
   )
 }
 
-function ApiCallView({ call, kernelEffect, parsedResponse }: { call: LlmCall; kernelEffect: CallLlmEffect; parsedResponse: unknown }): JSX.Element {
+function ApiCallView({ call, kernelEffect }: { call: LlmCall; kernelEffect: CallLlmEffect }): JSX.Element {
   const { t } = useTranslation()
   const request = call.trace ? redactedApiRequest(call.trace) : null
   const body = call.trace?.request.body
@@ -1931,7 +1967,7 @@ function ApiCallView({ call, kernelEffect, parsedResponse }: { call: LlmCall; ke
               </>
             ) : (
               <>
-                <div className="rounded bg-amber-500/10 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
+                <div className="rounded bg-amber-500/10 px-3 py-2 text-sm leading-6 text-amber-800 ring-1 ring-amber-500/20 dark:text-amber-200">
                   {t('inspector.llm.missingRequest')}
                 </div>
                 <JsonBlock label={`Kernel call_llm Effect @ #${call.requestSeq}`} value={kernelEffect} collapsed={1} />
@@ -1946,11 +1982,10 @@ function ApiCallView({ call, kernelEffect, parsedResponse }: { call: LlmCall; ke
             {call.trace ? (
               <JsonBlock label={t('inspector.llm.capturedApiResponse')} value={call.trace.response ?? null} collapsed={2} />
             ) : (
-              <div className="rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <div className="rounded bg-muted/40 px-3 py-2 text-sm leading-6 text-muted-foreground">
                 {t('inspector.llm.oldTraceOnly')}
               </div>
             )}
-            <JsonBlock label={t('inspector.llm.parsedKernelResponse')} value={parsedResponse} collapsed={2} />
           </div>
         </ScrollArea>
       </DetailPane>
@@ -1968,15 +2003,17 @@ function ApiSummaryStrip({ call }: { call: LlmCall }): JSX.Element {
     ['model', llmCallModel(call)],
     ['request keys', bodyKeys || 'empty body'],
     ['response', trace?.response ? String(trace.response.status) : call.error ? 'kernel error' : 'not captured'],
+    ['duration', formatTraceDuration(trace?.response?.metrics?.durationMs)],
+    ['TTFT', formatTraceDuration(trace?.response?.metrics?.timeToFirstChunkMs)],
     ['stream events', String(trace?.response?.streamEventTypes?.length ?? 0)],
     ['HTTP trace', trace ? 'captured' : 'missing'],
   ]
   return (
-    <div className="grid flex-none gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-3" data-testid="api-summary-strip">
+    <div className="grid flex-none gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4" data-testid="api-summary-strip">
       {rows.map(([label, value]) => (
-        <div key={label} className="flex min-w-0 items-center gap-2 rounded bg-card px-2 py-1 ring-1 ring-border/40">
-          <span className="flex-none text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
-          <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground" title={value}>{value}</span>
+        <div key={label} className="flex min-w-0 items-center gap-2 rounded bg-card px-3 py-2 ring-1 ring-border/40">
+          <span className="flex-none text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+          <span className="min-w-0 flex-1 truncate text-right font-mono text-sm text-foreground" title={value}>{value}</span>
         </div>
       ))}
     </div>
@@ -2081,9 +2118,9 @@ function EmptyBlock({ label }: { label: string }): JSX.Element {
 
 function KeyValueTable({ rows, compact = false }: { rows: readonly (readonly [string, string])[]; compact?: boolean }): JSX.Element {
   return (
-    <div className={cn('overflow-hidden text-xs', compact ? '' : 'rounded bg-background/70 ring-1 ring-border/30')}>
+    <div className={cn('overflow-hidden', compact ? 'text-xs' : 'rounded bg-background/70 text-sm ring-1 ring-border/30')}>
       {rows.map(([k, v]) => (
-        <div key={k} className={cn('grid gap-2 px-2 odd:bg-muted/50', compact ? 'grid-cols-[6.5rem_minmax(0,1fr)] py-1' : 'grid-cols-[8rem_minmax(0,1fr)] py-1.5')}>
+        <div key={k} className={cn('grid gap-2 odd:bg-muted/50', compact ? 'grid-cols-[6.5rem_minmax(0,1fr)] px-2 py-1' : 'grid-cols-[9rem_minmax(0,1fr)] px-3 py-2')}>
           <div className="truncate text-muted-foreground">{k}</div>
           <div className="min-w-0 truncate font-mono text-foreground" title={v}>{v}</div>
         </div>
@@ -2096,10 +2133,27 @@ function buildLlmCalls(timeline: readonly TimelineEntry[]): readonly LlmCall[] {
   const calls: LlmCall[] = []
   for (let i = 0; i < timeline.length; i++) {
     const entry = timeline[i]!
+    if (entry.event.kind === 'compact_replaced' && entry.event.request) {
+      calls.push({
+        id: `compact-llm-${entry.seq}`,
+        source: 'compact',
+        requestSeq: entry.seq,
+        responseSeq: entry.seq,
+        effect: {
+          kind: 'call_llm',
+          messages: entry.event.request.messages,
+          tools: entry.event.request.tools ?? [],
+        },
+        compact: entry.event,
+        ...(entry.llmTrace ? { trace: entry.llmTrace } : {}),
+        ...(entry.model ?? entry.event.request.model ? { model: entry.model ?? entry.event.request.model } : {}),
+      })
+    }
     for (const effect of entry.effects) {
       if (effect.kind !== 'call_llm') continue
       const call: LlmCall = {
         id: `llm-${entry.seq}-${calls.length}`,
+        source: 'turn',
         requestSeq: entry.seq,
         effect,
       }
@@ -2544,11 +2598,11 @@ function TimelineMinimap({ entries, selectedSeq, onSelect }: { entries: readonly
 function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | null): string {
   switch (event.kind) {
     case 'user_message':
-      return event.text ?? summarizeContent(event.content ?? [])
+      return event.text ? summarizeTextForCard(event.text) : summarizeContentForCard(event.content ?? [])
     case 'llm_response':
-      return `${summarizeContent(event.message.content)}${priorCallLlm ? ` · response to call_llm #${priorCallLlm.seq}` : ''}`
+      return `${summarizeContentForCard(event.message.content)}${priorCallLlm ? ` · response to call_llm #${priorCallLlm.seq}` : ''}`
     case 'tool_result':
-      return `${event.ok ? 'ok' : 'error'} · ${event.content.slice(0, 100)}`
+      return `${event.ok ? 'ok' : 'error'} · ${event.content.length} chars`
     case 'user_approve':
       return `approved ${event.callId}`
     case 'user_reject':
@@ -2582,6 +2636,49 @@ function summarizeContent(content: readonly MessageContent[]): string {
     if (c.type === 'thinking') return 'thinking block'
     return 'content'
   }).join(' · ')
+}
+
+function summarizeContentForCard(content: readonly MessageContent[]): string {
+  if (content.length === 0) return 'empty message'
+  const textChars = content
+    .filter((c): c is Extract<MessageContent, { type: 'text' }> => c.type === 'text')
+    .reduce((sum, c) => sum + c.text.replace(/\s+/g, ' ').trim().length, 0)
+  const toolCalls = content.filter((c): c is Extract<MessageContent, { type: 'tool_call' }> => c.type === 'tool_call')
+  const toolResults = content.filter((c): c is Extract<MessageContent, { type: 'tool_result' }> => c.type === 'tool_result')
+  const images = content.filter((c) => c.type === 'image').length
+  const thinking = content.filter((c) => c.type === 'thinking').length
+
+  const parts: string[] = []
+  if (textChars > 0) parts.push(`text ${textChars} chars`)
+  if (toolCalls.length > 0) parts.push(`tool calls ${toolCalls.length}: ${compactNameCounts(toolCalls.map((c) => c.name), 2)}`)
+  if (toolResults.length > 0) {
+    const ok = toolResults.filter((c) => c.ok).length
+    const err = toolResults.length - ok
+    parts.push(`tool results ${toolResults.length}${err > 0 ? ` (${err} error)` : ''}`)
+  }
+  if (images > 0) parts.push(`images ${images}`)
+  if (thinking > 0) parts.push(`thinking ${thinking}`)
+  return compactCardSummary(parts.join(' · ') || `${content.length} content blocks`)
+}
+
+function summarizeTextForCard(text: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  if (!compact) return 'empty text'
+  return compact.length > 48 ? `text ${compact.length} chars` : compactCardSummary(compact)
+}
+
+function compactNameCounts(names: readonly string[], limit: number): string {
+  const counts = new Map<string, number>()
+  for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1)
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  const shown = entries.slice(0, limit).map(([name, count]) => count > 1 ? `${name} x${count}` : name)
+  const remaining = entries.length - shown.length
+  return remaining > 0 ? `${shown.join(', ')} +${remaining}` : shown.join(', ')
+}
+
+function compactCardSummary(value: string): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  return compact.length > 72 ? `${compact.slice(0, 69)}...` : compact
 }
 
 function messageRoleTone(role: Message['role']): string {
@@ -2738,19 +2835,7 @@ function apiAdapterLabel(provider: string): string {
 }
 
 function redactedApiRequest(trace: LLMTrace): LLMTrace['request'] {
-  return {
-    ...trace.request,
-    url: redactApiUrl(trace.request.url),
-  }
-}
-
-function redactApiUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    return `${parsed.protocol}//<redacted>${parsed.pathname}`
-  } catch {
-    return '<redacted>'
-  }
+  return redactLlmTrace(trace).request
 }
 
 function providerBodyHasKey(body: unknown, key: string): boolean {
@@ -2765,8 +2850,25 @@ function providerArrayLength(body: unknown, key: string): string {
 
 function llmResponseSummary(call: LlmCall): string {
   if (call.error) return call.error.error
+  if (call.compact) return `compact summary · ${call.compact.summary.length} chars`
   if (!call.response) return 'pending'
   return summarizeContent(call.response.message.content)
+}
+
+function llmResponseCardSummary(call: LlmCall): string {
+  if (call.error) return `error ${call.error.error.length} chars`
+  if (call.compact) return `compact summary ${call.compact.summary.length} chars`
+  if (!call.response) return 'pending'
+  return summarizeContentForCard(call.response.message.content)
+}
+
+function formatTraceDuration(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'not captured'
+  if (value < 1000) return `${Math.round(value)}ms`
+  if (value < 60_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}s`
+  const minutes = Math.floor(value / 60_000)
+  const seconds = Math.round((value % 60_000) / 1000)
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
 function toolResultLabel(call: ToolCallLifecycle): string {
