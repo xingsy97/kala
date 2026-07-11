@@ -48,6 +48,7 @@ import { SettingsDialog } from './features/settings/SettingsDialog.js'
 import { ArtifactExplorerDialog } from './features/artifacts/ArtifactExplorerDialog.js'
 import { AppShellNav } from './app-shell/AppShellNav.js'
 import { useAppSection, type AppSection } from './app-shell/section.js'
+import { BenchmarksPage } from './features/benchmarks/BenchmarksPage.js'
 import { LanguageSwitcher } from './features/i18n/LanguageSwitcher.js'
 import {
   cancelSession,
@@ -568,8 +569,8 @@ export function App(): JSX.Element {
   const [section, setSection] = useAppSection()
   const handleSectionSelect = (next: AppSection): void => {
     setSection(next)
-    if (next === 'benchmarks') openArtifacts('eval')
-    else if (next === 'operations') openArtifacts('ops')
+    // Benchmarks is now a real page  -  rendered inline below, not a modal.
+    if (next === 'operations') openArtifacts('ops')
     else if (next === 'artifacts') openArtifacts('artifacts')
     else if (next === 'settings') setSettingsOpen(true)
   }
@@ -901,6 +902,9 @@ export function App(): JSX.Element {
       <AppShellNav section={section} onSelect={handleSectionSelect} />
       <div className="flex-1 min-h-0">
       <div className="hidden" data-testid="login-column-hidden" />
+      {section === 'benchmarks' ? (
+        <BenchmarksPage onLaunchSwebench={() => openArtifacts('eval')} />
+      ) : (
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
         {wideLayout ? (
           <>
@@ -1213,6 +1217,7 @@ export function App(): JSX.Element {
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
+      )}
       <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
           className="left-0 top-0 h-dvh w-[min(22rem,100vw)] max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 sm:rounded-none"
