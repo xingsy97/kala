@@ -2554,6 +2554,64 @@ describe('bad-case HTTP actions', () => {
     expect(rlRow.reward).toBe(0)
     expect(rlRow.reason).toBe('verifier-failure')
   })
+
+  it('rollout-export returns verl and slime JSONL with per-trial reward and no paths', async () => {
+    const artifactRootDir = await boot()
+    await mkdir(join(artifactRootDir, 'r-rollout', 'trials'), { recursive: true })
+    await writeFile(
+      join(artifactRootDir, 'r-rollout', 'trials', 'inst-ok.json'),
+      JSON.stringify({
+        trialId: 'r-rollout:inst-ok',
+        experimentId: 'r-rollout',
+        instanceId: 'inst-ok',
+        status: 'completed',
+        resolved: true,
+        artifacts: [],
+        metrics: {},
+      }),
+      'utf8',
+    )
+    await writeFile(
+      join(artifactRootDir, 'r-rollout', 'trials', 'inst-bad.json'),
+      JSON.stringify({
+        trialId: 'r-rollout:inst-bad',
+        experimentId: 'r-rollout',
+        instanceId: 'inst-bad',
+        status: 'failed',
+        resolved: false,
+        artifacts: [],
+        metrics: {},
+      }),
+      'utf8',
+    )
+
+    const verl = await postEnhancementAction(url, {
+      action: 'rollout-export',
+      runId: 'r-rollout',
+      target: 'verl',
+    }) as { target: string; rolloutCount: number; content: string }
+    expect(verl.target).toBe('verl')
+    expect(verl.rolloutCount).toBe(2)
+    const verlRows = verl.content.trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>)
+    const rewards = new Map(verlRows.map((r) => [r.taskId as string, r.reward as number]))
+    expect(rewards.get('inst-ok')).toBe(1)
+    expect(rewards.get('inst-bad')).toBe(0)
+    const envelope = JSON.stringify(verl)
+    expect(envelope).not.toContain(artifactRootDir)
+    expect(envelope).not.toContain('.jsonl')
+
+    const slime = await postEnhancementAction(url, {
+      action: 'rollout-export',
+      runId: 'r-rollout',
+      target: 'slime',
+      includeStatuses: ['completed'],
+    }) as { rolloutCount: number; content: string }
+    expect(slime.rolloutCount).toBe(1)
+    const slimeRow = JSON.parse(slime.content.trim()) as Record<string, unknown>
+    expect(slimeRow.frameworkTarget).toBe('slime')
+    expect(slimeRow.entrypoint).toBe('custom_rollout_manifest')
+    expect(slimeRow.reward).toBe(1)
+  })
 })
 
 describe('protocol doc drift', () => {

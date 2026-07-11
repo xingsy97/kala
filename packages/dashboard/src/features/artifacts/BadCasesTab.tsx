@@ -56,6 +56,12 @@ type ExportResponse = {
   content: string
 }
 
+type RolloutExportResponse = {
+  target: 'verl' | 'slime'
+  rolloutCount: number
+  content: string
+}
+
 export type BadCasesTabProps = {
   initialRunId?: string
 }
@@ -70,6 +76,11 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
   const [format, setFormat] = useState<'sft' | 'rl'>('sft')
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({})
   const [savedFlash, setSavedFlash] = useState<Record<string, string>>({})
+  const [rolloutTarget, setRolloutTarget] = useState<'verl' | 'slime'>('verl')
+  const [rolloutStatusFilter, setRolloutStatusFilter] = useState('')
+  const [rolloutExporting, setRolloutExporting] = useState(false)
+  const [rolloutDone, setRolloutDone] = useState<number | null>(null)
+  const [rolloutError, setRolloutError] = useState<string | null>(null)
 
   const grouped = useMemo(() => {
     const map = new Map<FailureCategory, BadCase[]>()
@@ -180,6 +191,46 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
     URL.revokeObjectURL(url)
   }, [data, selected, format])
 
+  const exportRollouts = useCallback(async () => {
+    const activeRunId = data?.runId ?? runId.trim()
+    if (!activeRunId) return
+    setRolloutExporting(true)
+    setRolloutError(null)
+    setRolloutDone(null)
+    try {
+      const includeStatuses = rolloutStatusFilter
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+      const res = await fetch('/enhancement/action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'rollout-export',
+          runId: activeRunId,
+          target: rolloutTarget,
+          ...(includeStatuses.length > 0 ? { includeStatuses } : {}),
+        }),
+      })
+      const body = await res.json().catch(() => null) as RolloutExportResponse | { error?: string } | null
+      if (!res.ok) throw new Error((body as { error?: string } | null)?.error ?? `status ${res.status}`)
+      const payload = body as RolloutExportResponse
+      const blob = new Blob([payload.content], { type: 'application/x-ndjson' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `rollouts-${activeRunId}-${rolloutTarget}.jsonl`
+      link.rel = 'noopener'
+      link.click()
+      URL.revokeObjectURL(url)
+      setRolloutDone(payload.rolloutCount)
+    } catch (err) {
+      setRolloutError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRolloutExporting(false)
+    }
+  }, [data, runId, rolloutTarget, rolloutStatusFilter])
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4" data-testid="badcases-tab">
       <div className="flex items-end gap-2">
@@ -233,6 +284,62 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
           {t('artifacts.badcases.error', { message: error })}
         </div>
       ) : null}
+
+      <section
+        className="rounded border border-border p-2 text-xs"
+        data-testid="rollouts-export-section"
+      >
+        <header className="mb-1 flex items-center gap-2">
+          <span className="text-sm font-medium">{t('artifacts.rollouts.title')}</span>
+          <span className="text-muted-foreground">{t('artifacts.rollouts.description')}</span>
+        </header>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground">{t('artifacts.rollouts.targetLabel')}</span>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-sm"
+              value={rolloutTarget}
+              onChange={(e) => setRolloutTarget(e.target.value === 'slime' ? 'slime' : 'verl')}
+              data-testid="rollouts-target"
+            >
+              <option value="verl">{t('artifacts.rollouts.targets.verl')}</option>
+              <option value="slime">{t('artifacts.rollouts.targets.slime')}</option>
+            </select>
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className="text-muted-foreground">{t('artifacts.rollouts.statusFilterLabel')}</span>
+            <input
+              type="text"
+              className="rounded border border-border bg-background px-2 py-1 text-sm"
+              placeholder={t('artifacts.rollouts.statusFilterPlaceholder')}
+              value={rolloutStatusFilter}
+              onChange={(e) => setRolloutStatusFilter(e.target.value)}
+              data-testid="rollouts-status-filter"
+            />
+          </label>
+          <button
+            type="button"
+            className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground disabled:opacity-50"
+            onClick={() => { void exportRollouts() }}
+            disabled={rolloutExporting || !runId.trim()}
+            data-testid="rollouts-export-button"
+          >
+            {rolloutExporting ? t('artifacts.rollouts.exporting') : t('artifacts.rollouts.exportButton')}
+          </button>
+        </div>
+        {rolloutDone !== null ? (
+          <div className="mt-1 text-muted-foreground" data-testid="rollouts-export-done">
+            {rolloutDone === 0
+              ? t('artifacts.rollouts.empty')
+              : t('artifacts.rollouts.done', { count: rolloutDone })}
+          </div>
+        ) : null}
+        {rolloutError ? (
+          <div className="mt-1 text-destructive" data-testid="rollouts-export-error">
+            {t('artifacts.rollouts.error', { message: rolloutError })}
+          </div>
+        ) : null}
+      </section>
 
       {data && data.cases.length === 0 && !loading ? (
         <div className="text-sm text-muted-foreground" data-testid="badcases-empty">

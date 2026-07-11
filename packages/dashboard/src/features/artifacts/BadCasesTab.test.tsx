@@ -101,4 +101,29 @@ describe('BadCasesTab', () => {
       expect(screen.getByTestId('badcases-error')).toBeTruthy()
     })
   })
+
+  it('exports rollouts via blob download with target and status filter', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      target: 'verl', rolloutCount: 3, content: '{"rolloutId":"a"}\n{"rolloutId":"b"}\n{"rolloutId":"c"}\n',
+    }), { status: 200 }))
+    const createObjectURL = vi.fn(() => 'blob:mock')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL })
+    render(<BadCasesTab initialRunId="run-9" />)
+    fireEvent.change(screen.getByTestId('rollouts-status-filter'), { target: { value: 'completed, resolved' } })
+    fireEvent.click(screen.getByTestId('rollouts-export-button'))
+    await waitFor(() => {
+      expect(createObjectURL).toHaveBeenCalled()
+      expect(screen.getByTestId('rollouts-export-done')).toBeTruthy()
+    })
+    const call = fetchMock.mock.calls[0]!
+    expect(call[0]).toBe('/enhancement/action')
+    const body = JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>
+    expect(body).toMatchObject({
+      action: 'rollout-export',
+      runId: 'run-9',
+      target: 'verl',
+      includeStatuses: ['completed', 'resolved'],
+    })
+  })
 })
