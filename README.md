@@ -1,19 +1,25 @@
 # agent-kernel
 
-**Status**: Kernel + Host + Executor + Dashboard + Replay/Fork all shipped end-to-end. See [ROADMAP](docs/planning/roadmap.md) for the current feature ledger and [FEATURE-GAPS](docs/planning/feature-gaps.md) for the comparison vs. reference agents.
+> An open-source, model-agnostic coding agent reference implementation.
+> The **kernel** is a pure function. Every tool call, every state transition, every LLM turn
+> is an inspectable event you can **pause, rewind, and fork** from a dashboard.
+
+**Status**: Kernel + Host + Executor + Dashboard + Replay/Fork all shipped end-to-end. See [ROADMAP](docs/planning/roadmap.md) for the current feature ledger and [FEATURE-GAPS](docs/planning/feature-gaps.md) for the comparison with other agents.
 
 ---
 
 ## Why does this exist?
 
-Existing coding agents fall into one of two camps, and neither gives you a clean substrate to *learn from* or *reason about*:
+Existing coding agents fall into two camps, and neither is a clean substrate to learn from or reason about:
 
-- **Closed source**  -  Claude Code, Codex CLI ship as binaries. You can read the source-collection dumps some people have published, but there's no supported way to fork, hack, or replay a session.
-- **Open source but not built to be read**  -  [opencode](https://github.com/sst/opencode) and [pi](https://github.com/earendil-works/pi) are both MIT-licensed and inspectable, but their agent loops are 3k+ LOC files interleaved with UI, provider quirks, planning, memory, and compaction. To learn from them you first have to *un-mix* the ideas from the product.
+- **Closed source**  -  Claude Code and Codex CLI ship as binaries. Third-party source dumps exist, but there is no supported way to fork, hack, or replay a session.
+- **Open source but not built to be read**  -  [opencode](https://github.com/sst/opencode) and [pi](https://github.com/earendil-works/pi) are both MIT-licensed and inspectable, but the agent loops are 3k+ LOC files interleaved with UI, provider quirks, planning, memory, and compaction. To learn from them you first have to unpick the ideas from the product.
 
-1. **Readable.** The core of it all is a pure function in [`packages/kernel/src/core.ts`](packages/kernel/src/core.ts)  -  ~350 lines  -  with types in [`types.ts`](packages/kernel/src/types.ts). If you know Redux, you know this.
-2. **Model-agnostic.** The kernel doesn't know if it's talking to Anthropic, OpenAI, or DeepSeek. Provider adapters live outside.
-3. **Transparent + replayable.** Every session is an append-only event log. `fold(events, initialState)` reconstructs any historical state. `fork(events, cursor, newEvents)` branches. The dashboard exposes both as first-class UI.
+`agent-kernel` takes the other approach: strip the agent loop down to a pure function readable in one sitting, and push everything else outside the kernel. Three properties, in priority order:
+
+1. **Readable.** The core is a pure function in [`packages/kernel/src/core.ts`](packages/kernel/src/core.ts)  -  around 350 lines  -  with types in [`types.ts`](packages/kernel/src/types.ts). If you know Redux, you know this.
+2. **Model-agnostic.** The kernel does not know whether it is talking to Anthropic, OpenAI, or DeepSeek. Provider adapters live outside.
+3. **Transparent and replayable.** Every session is an append-only event log. `fold(events, initialState)` reconstructs any historical state; `fork(events, cursor, newEvents)` branches. The dashboard exposes both as first-class UI.
 
 ## What makes it structurally different?
 
