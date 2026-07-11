@@ -171,12 +171,13 @@ export function githubUserAllowed(login: string, config: GithubOAuthConfig): boo
 export function authSettings(config: AuthConfig | undefined): {
   dashboardAuthRequired: boolean
   githubOAuth: { required: boolean; configured: boolean; usernameWhitelistEnabled: boolean; usernameWhitelist: readonly string[] }
-  executorIdentity: { tokenScoped: boolean; tokenCount: number }
+  executorIdentity: { tokenScoped: boolean; tokenCount: number; inviteCount: number }
 } {
   const github = config?.github
   const whitelist = github?.usernameWhitelist ?? []
   const tokens = config?.executorTokens ?? []
   const persisted = config?.executorIdentityStore?.snapshot() ?? []
+  const invites = config?.executorIdentityStore?.inviteSnapshot() ?? []
   return {
     dashboardAuthRequired: dashboardAuthRequired(config),
     githubOAuth: {
@@ -188,6 +189,7 @@ export function authSettings(config: AuthConfig | undefined): {
     executorIdentity: {
       tokenScoped: tokens.some((t) => t.workspaceId !== undefined) || persisted.length > 0,
       tokenCount: tokens.length + persisted.length,
+      inviteCount: invites.filter((invite) => !invite.revoked).length,
     },
   }
 }

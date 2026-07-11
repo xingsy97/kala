@@ -887,8 +887,9 @@ describe('host loop', () => {
     // Summarizer call carried the fixed compaction prompt.
     expect(llmCalls[1]!.sys).toMatch(/compacting an agent-kernel coding-agent session/i)
     expect(llmCalls[1]!.model).toBe('compact-model')
-    // usage.inputTokens is reset to the compacted-message estimate.
-    expect(rec.state.usage.inputTokens).toBeLessThan(10)
+    // Cumulative usage is preserved; current-window context is compacted.
+    expect(rec.state.usage.inputTokens).toBe(10)
+    expect(rec.state.contextTokens).toBeLessThan(100)
     const parsed = await readSessionLog(rec.logPath)
     const compact = parsed.events.find((e) => e.event.kind === 'compact_replaced')
       ?.event as Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> | undefined
@@ -1045,15 +1046,13 @@ describe('host loop', () => {
       name: 'pressure-mock',
       async call(p) {
         llmCalls.push({ sys: p.systemPrompt })
-        // Turn 1: assistant text reply. Reports 95 input tokens = 95% of
-        // the 100-token limit → hard tier.
         if (llmCalls.length === 1) {
           return {
             message: {
               role: 'assistant',
-              content: [{ type: 'text', text: 'done' }],
+              content: [{ type: 'text', text: 'done '.repeat(100) }],
             },
-            usage: { inputTokens: 95, outputTokens: 5 },
+            usage: { inputTokens: 5, outputTokens: 5 },
           }
         }
         // Turn 2 = the auto-compact's summarizer call.
@@ -1072,7 +1071,7 @@ describe('host loop', () => {
       broadcast: silentBroadcast(),
     })
 
-    await loop.dispatch(sid, { kind: 'user_message', text: 'x' })
+    await loop.dispatch(sid, { kind: 'user_message', text: 'x'.repeat(120) })
 
     // Two LLM calls: the turn itself, then the auto-compact summarizer.
     expect(llmCalls).toHaveLength(2)
@@ -1119,10 +1118,10 @@ describe('host loop', () => {
         return {
           message: {
             role: 'assistant',
-            content: [{ type: 'text', text: `answer ${callCount}` }],
+            content: [{ type: 'text', text: normalCallCount === 2 ? `answer ${callCount} ${'x'.repeat(400)}` : `answer ${callCount}` }],
           },
           usage: normalCallCount === 2
-            ? { inputTokens: 95, outputTokens: 5 }
+            ? { inputTokens: 5, outputTokens: 5 }
             : { inputTokens: 20, outputTokens: 5 },
         }
       },
@@ -1152,7 +1151,8 @@ describe('host loop', () => {
       text: '# Compacted Context\nold work summarized',
     })
     expect(after.state.messages[2]!.content[0]).toEqual({ type: 'text', text: 'latest task' })
-    expect(after.state.messages[3]!.content[0]).toEqual({ type: 'text', text: 'answer 2' })
+    expect(after.state.messages[3]!.content[0]).toMatchObject({ type: 'text' })
+    expect(JSON.stringify(after.state.messages[3]!.content[0])).toContain('answer 2')
   })
 
   it('preflight compacts before an oversized follow-up LLM request', async () => {

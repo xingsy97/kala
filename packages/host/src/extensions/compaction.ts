@@ -36,6 +36,7 @@ import type {
   Message,
   MessageContent,
 } from '@agent-kernel/kernel'
+import { estimateMessageTokens } from '@agent-kernel/kernel'
 import type { LLMTrace } from '@agent-kernel/shared'
 import {
   createArtifactStore,
@@ -197,7 +198,7 @@ export async function runCompact(
   inFlight.add(sessionId)
   try {
     const contextLimit = record.config.contextLimit
-    const tokensBefore = record.state.usage.inputTokens
+    const tokensBefore = record.state.contextTokens
     const replacedCount = record.state.messages.length
     const preserveFrom = choosePreserveFrom(record.state, trigger, contextLimit)
     const preservedTail = record.state.messages.slice(preserveFrom)
@@ -229,10 +230,12 @@ export async function runCompact(
       return false
     }
 
-    const tokensAfter = Math.max(
-      0,
-      Math.round(compact.summary.length / 4) + estimateTokens(preservedTail),
-    )
+    const leadingSystem = record.state.messages[0]?.role === 'system' ? [record.state.messages[0]!] : []
+    const tokensAfter = estimateMessageTokens([
+      ...leadingSystem,
+      { role: 'system' as const, content: [{ type: 'text' as const, text: compact.summary }] },
+      ...preservedTail,
+    ])
 
     const messagesBefore = deps.store.get(sessionId)?.state.messages.length ?? 0
     await dispatchOne(
@@ -573,7 +576,7 @@ function chooseRecentUserPreserveFrom(messages: readonly Message[], contextLimit
     foundUserPivot = true
     candidate = i
     const tail = messages.slice(i)
-    if (estimateTokens(tail) <= targetRecentTailTokens) return i
+    if (estimateMessageTokens(tail) <= targetRecentTailTokens) return i
   }
   // Summary-only compaction: after one or more successful compactions, the
   // remaining old context may be stored only as synthetic system summaries.
@@ -595,7 +598,7 @@ function choosePendingSafePreserveFrom(state: AgentState, contextLimit: number |
     // Prefer tails inside the budget, but the closest user message to the
     // active batch is always safe: it keeps the parent user turn + the
     // assistant tool_call + all pending tool_results together.
-    if (estimateTokens(tail) <= recentTailTargetTokens(contextLimit) || i === activeAssistant - 1) {
+    if (estimateMessageTokens(tail) <= recentTailTargetTokens(contextLimit) || i === activeAssistant - 1) {
       return i
     }
   }
@@ -631,25 +634,4 @@ function recentTailTargetTokens(contextLimit: number | undefined): number {
     MAX_RECENT_TAIL_TOKENS,
     Math.max(MIN_RECENT_TAIL_TOKENS, Math.round(effective * TARGET_RECENT_TAIL_RATIO)),
   )
-}
-
-function estimateTokens(messages: readonly Message[]): number {
-  let chars = 0
-  for (const message of messages) {
-    chars += message.role.length + 8
-    for (const content of message.content) {
-      if (content.type === 'text' || content.type === 'thinking') {
-        chars += content.text.length
-      } else if (content.type === 'tool_call') {
-        chars += content.name.length + content.callId.length + JSON.stringify(content.input).length
-      } else if (content.type === 'tool_result') {
-        chars += content.callId.length + content.content.length + 16
-      } else {
-        chars += content.source.kind === 'file_ref'
-          ? content.source.path.length + 64
-          : Math.round(content.source.data.length / 4)
-      }
-    }
-  }
-  return Math.ceil(chars / 4)
 }

@@ -119,7 +119,7 @@ export type AgentConfig = {
   readonly systemPrompt?: string
   /**
    * Model's total context window in tokens. When set, the reducer derives
-   * `state.contextPressureLevel` from `usage.inputTokens / contextLimit`.
+   * `state.contextPressureLevel` from `contextTokens / contextLimit`.
    * Undefined = pressure never trips.
    */
   readonly contextLimit?: number
@@ -215,10 +215,15 @@ export type AgentState = {
   readonly pendingCalls: readonly PendingToolCall[]
   readonly status: AgentStatus
   readonly usage: UsageTotal
+  /**
+   * Estimated model-visible input tokens for the current message state. This
+   * is a current-window estimate, not cumulative provider usage.
+   */
+  readonly contextTokens: number
   readonly cursor: number // monotonic event counter, for replay positioning
   readonly cwd?: string
   /**
-   * Derived on every step from `usage.inputTokens / config.contextLimit`.
+   * Derived on every step from `contextTokens / config.contextLimit`.
    * `'none'` when contextLimit is unset or well below soft threshold. The
    * host uses `'hard'` as the trigger for auto-compact.
    */

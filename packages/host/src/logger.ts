@@ -1,6 +1,7 @@
 import process from 'node:process'
 
 import pino, { type Logger, type LoggerOptions } from 'pino'
+import pinoPretty from 'pino-pretty'
 
 const REDACT_PATHS = [
   'apiKey',
@@ -22,6 +23,7 @@ const REDACT_PATHS = [
 ]
 
 export function createRuntimeLogger(name: string): Logger {
+  const format = (process.env.LOG_FORMAT ?? 'pretty').toLowerCase()
   const options: LoggerOptions = {
     name,
     level: process.env.LOG_LEVEL ?? 'info',
@@ -34,19 +36,22 @@ export function createRuntimeLogger(name: string): Logger {
     },
   }
 
-  if (process.env.LOG_FORMAT === 'pretty') {
-    return pino({
-      ...options,
-      transport: {
-        target: 'pino-pretty',
-        options: {
-          colorize: process.stderr.isTTY,
-          ignore: 'pid,hostname',
-          translateTime: 'SYS:standard',
-        },
-      },
-    })
+  if (format === 'json') {
+    return pino(options, pino.destination({ fd: 2, sync: true }))
   }
 
-  return pino(options)
+  if (format !== 'pretty' && format !== 'human') {
+    process.stderr.write(`[${name}] unknown LOG_FORMAT=${process.env.LOG_FORMAT}; using pretty logs\n`)
+  }
+
+  return pino(
+    options,
+    pinoPretty({
+      colorize: process.stderr.isTTY,
+      destination: 2,
+      ignore: 'pid,hostname',
+      singleLine: true,
+      translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
+    }),
+  )
 }

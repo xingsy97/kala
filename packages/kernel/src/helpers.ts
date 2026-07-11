@@ -78,9 +78,10 @@ export function afterPendingSettled(
 }
 
 export function withPressure(state: AgentState, config: AgentConfig): AgentState {
-  const level = derivePressure(state.usage.inputTokens, config)
-  if (level === state.contextPressureLevel) return state
-  return { ...state, contextPressureLevel: level }
+  const contextTokens = estimateMessageTokens(state.messages)
+  const level = derivePressure(contextTokens, config)
+  if (level === state.contextPressureLevel && contextTokens === state.contextTokens) return state
+  return { ...state, contextTokens, contextPressureLevel: level }
 }
 
 function derivePressure(
@@ -94,4 +95,32 @@ function derivePressure(
   if (ratio >= hard) return 'hard'
   if (ratio >= soft) return 'soft'
   return 'none'
+}
+
+export function estimateMessageTokens(messages: readonly Message[]): number {
+  let chars = 0
+  for (const message of messages) {
+    chars += message.role.length + 8
+    for (const content of message.content) {
+      if (content.type === 'text' || content.type === 'thinking') {
+        chars += content.text.length
+      } else if (content.type === 'tool_call') {
+        const legacy = content as typeof content & { id?: unknown; arguments?: unknown }
+        const callId = typeof content.callId === 'string'
+          ? content.callId
+          : typeof legacy.id === 'string'
+            ? legacy.id
+            : ''
+        const input = content.input ?? legacy.arguments ?? {}
+        chars += content.name.length + callId.length + JSON.stringify(input).length
+      } else if (content.type === 'tool_result') {
+        chars += (content.callId ?? '').length + content.content.length + 16
+      } else {
+        chars += content.source.kind === 'file_ref'
+          ? content.source.path.length + 64
+          : Math.round(content.source.data.length / 4)
+      }
+    }
+  }
+  return Math.ceil(chars / 4)
 }

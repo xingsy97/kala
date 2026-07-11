@@ -28,6 +28,7 @@ import type {
   EventAppendedEvent,
   ExecutorChange,
   ExecutorIdentitySummary,
+  ExecutorInviteSummary,
   FileContentsResult,
   FileListEntry,
   FileListResult,
@@ -41,6 +42,9 @@ import type {
   ServerExecutorChangedPayload,
   ServerExecutorIdentitiesPayload,
   ServerExecutorIdentityRevokedPayload,
+  ServerExecutorInvitePayload,
+  ServerExecutorInviteRevokedPayload,
+  ServerExecutorInvitesPayload,
   ServerExecutorsPayload,
   ServerHistoryPayload,
   ServerMessageQueueEvent,
@@ -553,6 +557,7 @@ export const ServerSettingsPayloadSchema = z.object({
       executorIdentity: z.object({
         tokenScoped: z.boolean(),
         tokenCount: z.number().int().nonnegative(),
+        inviteCount: z.number().int().nonnegative().optional(),
       }),
     })
     .optional(),
@@ -596,6 +601,35 @@ export const ServerExecutorIdentityRevokedPayloadSchema = z.object({
   workspaceId: z.string(),
   revoked: z.boolean(),
 }) satisfies z.ZodType<ServerExecutorIdentityRevokedPayload>
+
+export const ExecutorInviteSummarySchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  workspaceId: z.string().optional(),
+  createdAt: z.string(),
+  lastUsedAt: z.string().optional(),
+  revoked: z.boolean(),
+}) satisfies z.ZodType<ExecutorInviteSummary>
+
+export const ServerExecutorInvitesPayloadSchema = z.object({
+  invites: z.array(ExecutorInviteSummarySchema),
+}) satisfies z.ZodType<ServerExecutorInvitesPayload>
+
+export const ServerExecutorInvitePayloadSchema = z.object({
+  id: z.string(),
+  inviteToken: z.string(),
+  label: z.string().optional(),
+  workspaceId: z.string().optional(),
+  createdAt: z.string(),
+  lastUsedAt: z.string().optional(),
+  revoked: z.boolean().optional(),
+}) satisfies z.ZodType<ServerExecutorInvitePayload>
+
+export const ServerExecutorInviteRevokedPayloadSchema = z.object({
+  ok: z.literal(true),
+  id: z.string(),
+  revoked: z.boolean(),
+}) satisfies z.ZodType<ServerExecutorInviteRevokedPayload>
 
 // Silence unused import warnings for types that are only used as annotations.
 export type { ManualModelInput }

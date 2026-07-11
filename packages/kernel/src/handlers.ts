@@ -333,15 +333,11 @@ export function onCompactReplaced(
     role: 'system',
     content: [{ type: 'text', text: event.summary }],
   }
-  const usage = {
-    ...state.usage,
-    inputTokens: event.tokensAfter,
-  }
   return {
     next: {
       ...state,
       messages: [...preserved, summaryMsg, ...tail],
-      usage,
+      contextTokens: event.tokensAfter,
     },
     effects: [],
   }

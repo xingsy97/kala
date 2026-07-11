@@ -965,6 +965,7 @@ export type ServerSettingsPayload = {
     executorIdentity: {
       tokenScoped: boolean
       tokenCount: number
+      inviteCount?: number
     }
   }
   paths: {
@@ -999,6 +1000,30 @@ export type ServerExecutorIdentitiesPayload = {
 export type ServerExecutorIdentityRevokedPayload = {
   ok: true
   workspaceId: string
+  revoked: boolean
+}
+
+export type ExecutorInviteSummary = {
+  id: string
+  label?: string
+  workspaceId?: string
+  createdAt: string
+  lastUsedAt?: string
+  revoked: boolean
+}
+
+export type ServerExecutorInvitesPayload = {
+  invites: readonly ExecutorInviteSummary[]
+}
+
+export type ServerExecutorInvitePayload = Omit<ExecutorInviteSummary, 'revoked'> & {
+  inviteToken: string
+  revoked?: boolean
+}
+
+export type ServerExecutorInviteRevokedPayload = {
+  ok: true
+  id: string
   revoked: boolean
 }
 
@@ -1156,8 +1181,11 @@ export type ExecutorServerToClientEvents = {
 }
 
 export type ExecutorInviteCreated = {
+  id: string
   inviteToken: string
-  expiresAt: string
+  label?: string
+  workspaceId?: string
+  createdAt: string
 }
 
 // ============================================================================

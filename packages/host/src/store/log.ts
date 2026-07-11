@@ -39,7 +39,7 @@ export type WriteHeaderParams = {
   initialCwd?: string
 }
 
-export async function writeHeader(params: WriteHeaderParams): Promise<void> {
+export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntry> {
   await mkdir(dirname(params.path), { recursive: true })
   const entry: HeaderEntry = {
     kind: 'header',
@@ -65,6 +65,7 @@ export async function writeHeader(params: WriteHeaderParams): Promise<void> {
     ...(params.initialCwd !== undefined ? { initialCwd: params.initialCwd } : {}),
   }
   await writeFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
+  return entry
 }
 
 export type AppendEventParams = {

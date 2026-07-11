@@ -210,6 +210,66 @@ describe('SessionStore.rename', () => {
   })
 })
 
+describe('SessionStore.listSummaries', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-summary-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('uses loaded records for summaries and preserves current state fields', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({
+      sessionId: 'sess-loaded-summary',
+      defaultConfig: config,
+      workspaceId: 'ws-1',
+      workspaceName: 'workstation',
+      initialCwd: '/repo',
+    })
+
+    const [summary] = await store.listSummaries()
+
+    expect(summary).toMatchObject({
+      sessionId: record.sessionId,
+      createdAt: record.createdAt,
+      eventCount: record.state.cursor,
+      workspaceId: 'ws-1',
+      workspaceName: 'workstation',
+      currentCwd: '/repo',
+      status: record.state.status,
+    })
+    expect(summary?.lastEventAt).toBeUndefined()
+  })
+
+  it('reuses cached disk summaries until a log changes', async () => {
+    const store = new SessionStore(dir)
+    const sessionId = 'sess-disk-summary'
+    const path = join(dir, `2026-07-05T00-00-00.000Z_${sessionId}.jsonl`)
+    await writeHeader({
+      path,
+      sessionId,
+      config,
+      initialState: createInitialState({ sessionId, systemPrompt: 'sys' }),
+    })
+
+    const [first] = await store.listSummaries()
+    const [second] = await store.listSummaries()
+
+    expect(second).toBe(first)
+
+    await appendEventEntry({
+      path,
+      seq: 1,
+      event: { kind: 'user_message', text: 'fresh task' },
+      effects: [],
+    })
+
+    const [third] = await store.listSummaries()
+    expect(third).not.toBe(first)
+    expect(third?.firstUserMessage).toBe('fresh task')
+  })
+})
+
 describe('SessionStore crash recovery', () => {
   let dir: string
   beforeEach(() => {

@@ -63,6 +63,7 @@ describe('auth-control', () => {
       executorIdentity: {
         tokenScoped: true,
         tokenCount: 1,
+        inviteCount: 0,
       },
     })
   })
