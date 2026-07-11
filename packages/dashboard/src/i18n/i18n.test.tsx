@@ -57,6 +57,24 @@ describe('dashboard i18n', () => {
     expect({ onlyEn, onlyZh }).toEqual({ onlyEn: [], onlyZh: [] })
   })
 
+  it('resolves recently added dashboard UI keys instead of rendering raw key paths', async () => {
+    const keys = [
+      'benchmarks.terminalWizard.description',
+      'artifacts.eval.artifactCategories.patch',
+      'artifacts.eval.details.session',
+      'artifacts.ops.stats.reliabilityIssues',
+      'inspector.llm.messagesTab',
+      'inspector.llm.descriptionBytesLabel',
+    ]
+
+    for (const lang of ['en', 'zh'] as const) {
+      await i18n.changeLanguage(lang)
+      for (const key of keys) {
+        expect(i18n.t(key), `${lang}.${key}`).not.toBe(key)
+      }
+    }
+  })
+
   it('never claims resolved status at the Run Agent stage (principle A3)', () => {
     // `inferDescription` covers the Run Agent step  -  before official grading.
     // It may reference `resolved` only to say the status is *unknown* until
@@ -71,4 +89,3 @@ describe('dashboard i18n', () => {
     }
   })
 })
-

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Check, Copy, ExternalLink, Moon, Plus, Sun, Trash2 } from 'lucide-react'
+import { Check, Copy, ExternalLink, Monitor, Moon, Plus, Sun, Trash2 } from 'lucide-react'
 import { Trans, useTranslation } from 'react-i18next'
 import type { ServerSettingsPayload } from '@agent-kernel/shared'
 
@@ -515,7 +515,7 @@ command = "/usr/local/bin/lint-shell.sh"`}
 function InterfaceSection(): JSX.Element {
   const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
-  const [theme, toggleTheme] = useTheme()
+  const [theme, , setTheme] = useTheme()
   return (
     <div>
       <SectionHeader
@@ -539,13 +539,27 @@ function InterfaceSection(): JSX.Element {
             <button
               type="button"
               role="radio"
-              aria-checked={theme === 'dark'}
-              onClick={() => {
-                if (theme !== 'dark') toggleTheme()
-              }}
-              data-testid="settings-theme-dark"
+              aria-checked={theme === 'system'}
+              onClick={() => setTheme('system')}
+              data-testid="settings-theme-system"
               className={cn(
                 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs',
+                theme === 'system'
+                  ? 'bg-primary/10 text-primary'
+                  : 'bg-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Monitor className="h-3.5 w-3.5" aria-hidden />
+              <span>{t('settings.interface.theme.system')}</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={theme === 'dark'}
+              onClick={() => setTheme('dark')}
+              data-testid="settings-theme-dark"
+              className={cn(
+                'inline-flex items-center gap-1.5 border-l border-border px-3 py-1.5 text-xs',
                 theme === 'dark'
                   ? 'bg-primary/10 text-primary'
                   : 'bg-transparent text-muted-foreground hover:text-foreground',
@@ -558,9 +572,7 @@ function InterfaceSection(): JSX.Element {
               type="button"
               role="radio"
               aria-checked={theme === 'light'}
-              onClick={() => {
-                if (theme !== 'light') toggleTheme()
-              }}
+              onClick={() => setTheme('light')}
               data-testid="settings-theme-light"
               className={cn(
                 'inline-flex items-center gap-1.5 border-l border-border px-3 py-1.5 text-xs',

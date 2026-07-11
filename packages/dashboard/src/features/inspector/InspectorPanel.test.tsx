@@ -162,6 +162,13 @@ describe('InspectorPanel', () => {
     expect(screen.getByText('No reducer events yet.')).toBeTruthy()
   })
 
+  it('collapses from the debugger tab bar when provided', () => {
+    const onCollapse = vi.fn()
+    render(<InspectorPanel state={baseState} timeline={[]} onCollapse={onCollapse} />)
+    fireEvent.click(screen.getByTestId('inspector-collapse-button'))
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+  })
+
   it('shows compact AgentState groups and opens full JSON on demand', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} />)
 

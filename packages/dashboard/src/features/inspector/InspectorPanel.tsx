@@ -80,6 +80,7 @@ type Props = {
   parentCursor?: number | null
   onFork?(cursor: number): void
   onJumpToMessage?(messageIndex: number): void
+  onCollapse?(): void
 }
 
 type RuntimeView = 'state' | 'tools' | 'memory'
@@ -215,6 +216,7 @@ export function InspectorPanel({
   parentCursor,
   onFork,
   onJumpToMessage,
+  onCollapse,
 }: Props): JSX.Element {
   const [inspectorView, setInspectorView] = useState<InspectorView>('trace')
   const [runtimeView, setRuntimeView] = useState<RuntimeView>('state')
@@ -290,6 +292,7 @@ export function InspectorPanel({
         value={inspectorView}
         onChange={(next) => withViewTransition(() => setInspectorView(next))}
         showToolCallTab={showToolCallTab}
+        onCollapse={onCollapse}
       />
 
       {inspectorView === 'status' ? (
@@ -379,10 +382,12 @@ function InspectorTabs({
   value,
   onChange,
   showToolCallTab,
+  onCollapse,
 }: {
   value: InspectorView
   onChange(view: InspectorView): void
   showToolCallTab: boolean
+  onCollapse?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const options: Array<[InspectorView, string, typeof Activity]> = [
@@ -394,23 +399,37 @@ function InspectorTabs({
   const cols = options.length
   return (
     <div className="flex-none bg-card px-3 pb-3" data-testid="inspector-sidebar-tabs">
-      <div
-        className="grid rounded bg-sidebar p-0.5 text-xs"
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-      >
-        {options.map(([view, label, Icon]) => (
+      <div className="flex items-center gap-1 rounded bg-sidebar p-0.5 text-xs">
+        <div
+          className="grid min-w-0 flex-1"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {options.map(([view, label, Icon]) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => onChange(view)}
+              className={cn('inline-flex min-w-0 items-center justify-center gap-1 rounded px-1 py-1.5 font-medium transition-colors sm:px-1.5', value === view ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
+              data-testid={`inspector-sidebar-tab-${view}`}
+              aria-pressed={value === view}
+            >
+              <Icon className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+              <span className="hidden min-w-0 truncate min-[360px]:inline">{label}</span>
+            </button>
+          ))}
+        </div>
+        {onCollapse ? (
           <button
-            key={view}
             type="button"
-            onClick={() => onChange(view)}
-            className={cn('inline-flex min-w-0 items-center justify-center gap-1 rounded px-1 py-1.5 font-medium transition-colors sm:px-1.5', value === view ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground')}
-            data-testid={`inspector-sidebar-tab-${view}`}
-            aria-pressed={value === view}
+            onClick={onCollapse}
+            className="inline-flex h-7 w-7 flex-none items-center justify-center rounded text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            data-testid="inspector-collapse-button"
+            title={t('inspector.collapsePanel')}
+            aria-label={t('inspector.collapsePanel')}
           >
-            <Icon className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-            <span className="hidden min-w-0 truncate min-[360px]:inline">{label}</span>
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
-        ))}
+        ) : null}
       </div>
     </div>
   )
@@ -1731,8 +1750,8 @@ function LlmContextView({
           value={kind}
           onChange={setKind}
           options={[
-            ['messages', 'Messages'],
-            ['tools', 'Tools'],
+            ['messages', t('inspector.llm.messagesTab')],
+            ['tools', t('inspector.llm.toolsTab')],
           ]}
           testId="llm-context-view-switch"
         />
@@ -1779,7 +1798,7 @@ function KernelMessagesView({
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className={cn('w-16 flex-none font-mono text-[10px]', messageRoleTone(message.role))}>{message.role}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">{message.content.map((block) => block.type).join(', ') || 'empty'}</span>
+                  <span className="truncate text-[10px] text-muted-foreground">{message.content.map((block) => block.type).join(', ') || t('inspector.llm.emptyBlocks')}</span>
                 </span>
                 <span className="mt-0.5 block truncate text-[11px] text-foreground">{summarizeContent(message.content)}</span>
               </span>
@@ -1793,9 +1812,9 @@ function KernelMessagesView({
             <>
               <KeyValueTable
                 rows={[
-                  ['message', `#${selectedIndex}`],
-                  ['role', selected.role],
-                  ['blocks', selected.content.map((block) => block.type).join(', ') || 'empty'],
+                  [t('inspector.llm.messageLabel'), `#${selectedIndex}`],
+                  [t('inspector.llm.roleLabel'), selected.role],
+                  [t('inspector.llm.blocksLabel'), selected.content.map((block) => block.type).join(', ') || t('inspector.llm.emptyBlocks')],
                 ]}
               />
               <JsonBlock label={`Kernel Message #${selectedIndex}`} value={selected} collapsed={2} />
@@ -1854,9 +1873,9 @@ function ToolRegistryContextView({
             <>
               <KeyValueTable
                 rows={[
-                  ['tool', selected.name],
-                  ['approval', selected.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')],
-                  ['description bytes', String(selected.description.length)],
+                  [t('inspector.llm.toolLabel'), selected.name],
+                  [t('inspector.llm.approvalLabel'), selected.requiresApproval ? t('inspector.runtime.gated') : t('inspector.runtime.auto')],
+                  [t('inspector.llm.descriptionBytesLabel'), String(selected.description.length)],
                 ]}
               />
               <p className="rounded bg-muted/50 px-2 py-1.5 text-muted-foreground">{selected.description || t('inspector.runtime.noDescription')}</p>
