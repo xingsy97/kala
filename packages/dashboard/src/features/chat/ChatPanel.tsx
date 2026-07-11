@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronsDown,
   Code2,
   FileText,
   Lightbulb,
@@ -28,6 +29,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
+import { useAutoAnimate } from '@formkit/auto-animate/react'
 
 import type {
   Message,
@@ -40,6 +42,7 @@ import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
 import { Button } from '../../components/ui/button.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { Textarea } from '../../components/ui/textarea.js'
+import { Typewriter } from '../../components/Typewriter.js'
 import { formatTokens } from '../../lib/format.js'
 import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
@@ -133,6 +136,7 @@ export function ChatPanel({
   onPinnedChange,
   scrollToBottomToken,
 }: Props): JSX.Element {
+  const { t } = useTranslation()
   const fallbackItems: TranscriptItem[] = (messages ?? [])
     .filter((message) => message.role !== 'system')
     .map((message) => ({
@@ -214,6 +218,9 @@ export function ChatPanel({
       if (item.kind === 'compact_boundary') {
         return <CompactBoundaryRow boundary={item} />
       }
+      if (item.kind === 'pending_user_message') {
+        return <PendingUserMessageRow item={item} />
+      }
       const currentMessageIndex = messageIndexByItem[itemIndex] ?? 0
       return (
         <MessageRow
@@ -248,21 +255,32 @@ export function ChatPanel({
 
   const keyFor = useCallback(
     (item: TranscriptItem, itemIndex: number): string =>
-      item.kind === 'compact_boundary' ? `compact-${item.seq}` : `message-${itemIndex}`,
+      item.kind === 'compact_boundary'
+        ? `compact-${item.seq}`
+        : item.kind === 'pending_user_message'
+          ? `pending-${item.id}`
+          : `message-${itemIndex}`,
     [],
   )
 
-  const transcriptRef = useVirtualTranscriptScrollToken(scrollToBottomToken)
+  const transcriptRef = useVirtualTranscriptScrollToken(
+    scrollToBottomToken,
+    transcriptItems.length,
+  )
 
   // Uncontrolled fallback so tests / callers that don't wire the pin state
   // still work. When both props are absent we own the state locally.
   const [localPinned, setLocalPinned] = useState(true)
   const effectivePinned = pinnedToBottom ?? localPinned
   const effectiveOnPinnedChange = onPinnedChange ?? setLocalPinned
+  const scrollToBottom = useCallback(() => {
+    transcriptRef.current?.scrollToBottom()
+    effectiveOnPinnedChange(true)
+  }, [effectiveOnPinnedChange, transcriptRef])
 
   return (
     <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
-      <div className="flex h-full w-full min-w-0 flex-1 flex-col">
+      <div className="relative flex h-full w-full min-w-0 flex-1 flex-col">
         {isEmpty ? (
           <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
             <EmptyState onSuggest={onSuggest} />
@@ -290,25 +308,98 @@ export function ChatPanel({
             dataTestId="virtual-transcript"
           />
         )}
+        {!isEmpty && !effectivePinned ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            onClick={scrollToBottom}
+            className="absolute bottom-4 right-4 z-20 h-9 w-9 rounded-full border border-border/70 bg-background/95 text-muted-foreground shadow-lg backdrop-blur hover:text-foreground sm:bottom-5 sm:right-6"
+            aria-label={t('chat.transcript.scrollToBottom')}
+            title={t('chat.transcript.scrollToBottom')}
+            data-testid="scroll-to-bottom"
+          >
+            <ChevronsDown className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        ) : null}
       </div>
     </OverflowReaderContext.Provider>
   )
 }
 
+function PendingUserMessageRow({
+  item,
+}: {
+  item: Extract<TranscriptItem, { kind: 'pending_user_message' }>
+}): JSX.Element {
+  const { t } = useTranslation()
+  const content = item.content ?? [{ type: 'text' as const, text: item.text }]
+  const label = item.status === 'queued'
+    ? t('chat.transcript.queuedMessage', { position: item.position ?? 1 })
+    : t('chat.transcript.sendingMessage')
+  const mode = item.mode === 'queue' ? t('composer.queueFollowUp') : t('composer.steerActiveTurn')
+  return (
+    <div className="group relative flex justify-end" data-testid={`pending-user-message-${item.id}`}>
+      <div className="relative max-w-[92%] rounded-2xl rounded-br-md border border-primary/30 bg-primary/10 px-4 py-2.5 text-foreground shadow-sm sm:max-w-[85%]">
+        <div className="mb-2 flex items-center justify-end gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span>{mode}</span>
+          <span aria-hidden="true">/</span>
+          <span>{label}</span>
+        </div>
+        <div className="flex min-w-0 flex-col gap-2 opacity-85">
+          {content.map((c, i) => (
+            <ContentBlock
+              key={i}
+              content={c}
+              role="user"
+              toolNameByCallId={new Map()}
+              approvalByCallId={new Map()}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /**
- * Bumping `scrollToBottomToken` forces the transcript to jump to the
- * bottom (e.g. after a session switch). Ignored on first mount.
+ * Bumping `scrollToBottomToken` forces the transcript to jump to the bottom
+ * (e.g. after a session switch). The first non-empty mount also jumps so an
+ * opened historical session starts at the latest message, not at row 0.
+ * Multi-frame retries are limited to those explicit jumps because ordinary
+ * appends are handled by Virtuoso's pinned followOutput path.
  */
 function useVirtualTranscriptScrollToken(
   scrollToBottomToken: number | undefined,
+  itemCount: number,
 ): React.RefObject<VirtualTranscriptHandle> {
   const ref = useRef<VirtualTranscriptHandle>(null)
   const lastToken = useRef<number | undefined>(scrollToBottomToken)
+  const didInitialScroll = useRef(false)
   useEffect(() => {
-    if (scrollToBottomToken === lastToken.current) return
-    lastToken.current = scrollToBottomToken
-    ref.current?.scrollToBottom()
-  }, [scrollToBottomToken])
+    if (itemCount === 0) return
+    const tokenChanged = scrollToBottomToken !== lastToken.current
+    if (!tokenChanged && didInitialScroll.current) return
+    didInitialScroll.current = true
+    if (tokenChanged) lastToken.current = scrollToBottomToken
+    const handle = ref.current
+    if (!handle) return
+    handle.scrollToBottom()
+    // Virtuoso measures row heights lazily; a single scroll on session open
+    // lands short before later rows expand. Re-issue on the next two frames
+    // and a short timeout to catch height changes from images / markdown.
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      handle.scrollToBottom()
+      raf2 = requestAnimationFrame(() => handle.scrollToBottom())
+    })
+    const to = window.setTimeout(() => handle.scrollToBottom(), 120)
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+      window.clearTimeout(to)
+    }
+  }, [itemCount, scrollToBottomToken])
   return ref
 }
 
@@ -325,7 +416,7 @@ function EmptyState({
           <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
-          {t('chat.transcript.emptyTitle')}
+          <Typewriter text={t('chat.transcript.emptyTitle')} charMs={38} startDelayMs={120} />
         </h1>
         <p className="max-w-md text-sm text-muted-foreground">
           {t('chat.transcript.emptyDescription')}
@@ -493,7 +584,7 @@ function MessageRow({
           highlighted ? 'rounded-2xl bg-amber-50/60 p-1 dark:bg-amber-950/20' : '',
         )}
       >
-        <div className="relative max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+        <div className="relative max-w-[92%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
           <div className="flex min-w-0 flex-col gap-2">
             {message.content.map((c, i) => (
               <ContentBlock
@@ -724,17 +815,24 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
   return (
     <div
       className={cn(
-        'prose prose-sm dark:prose-invert min-w-0 max-w-full break-words leading-relaxed [overflow-wrap:anywhere]',
-        'prose-p:text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground',
+        'min-w-0 max-w-full break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]',
+        '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
-        '[&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground [&_code]:before:content-[""] [&_code]:after:content-[""]',
-        '[&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm',
+        '[&_p]:my-3',
+        '[&_h1]:mb-2 [&_h1]:mt-5 [&_h1]:text-base [&_h1]:font-semibold',
+        '[&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-sm [&_h2]:font-semibold',
+        '[&_h3]:mb-1.5 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:font-semibold',
+        '[&_h4]:mb-1.5 [&_h4]:mt-4 [&_h4]:text-sm [&_h4]:font-semibold',
+        '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
+        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground',
         '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-border/50 sm:[&_img]:max-w-xs',
-        '[&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5',
-        '[&_pre]:m-0 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0',
+        '[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5',
+        '[&_li]:my-1 [&_li>p]:my-1',
+        '[&_li_ul]:my-1 [&_li_ol]:my-1',
+        '[&_pre]:my-3 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0',
         '[&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:text-foreground',
-        '[&_table]:border [&_table]:border-border/50 [&_td]:border [&_td]:border-border/50 [&_td]:px-2 [&_th]:border [&_th]:border-border/50 [&_th]:px-2',
+        '[&_hr]:my-4 [&_hr]:border-border/50',
+        '[&_table]:my-3 [&_table]:border [&_table]:border-border/50 [&_td]:border [&_td]:border-border/50 [&_td]:px-2 [&_th]:border [&_th]:border-border/50 [&_th]:px-2',
       )}
     >
       <ReactMarkdown
@@ -1001,6 +1099,7 @@ function ToolCallGroupBlock({
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
+  const [groupRowsRef] = useAutoAnimate<HTMLDivElement>()
   const renderer = pickRenderer(group.toolName)
   const rows = renderer({ calls: group.calls, results: group.results })
   const failedCount = rows.filter((r) => !r.ok).length
@@ -1019,6 +1118,7 @@ function ToolCallGroupBlock({
         ? toolLifecycleBadge('running')
         : null
   const groupLifecycle = summarizeToolGroupLifecycle(group, approvalByCallId)
+  const showRows = open || anyPending
 
   const toggleOpen = (): void => {
     setOpen((v) => {
@@ -1103,64 +1203,70 @@ function ToolCallGroupBlock({
           <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
         )}
       </button>
-      <div className="flex min-w-0 flex-col gap-0.5 border-t border-border/40 px-3 pb-2 pt-1">
-        {rows.map((row) => {
-          const call = group.calls.find((c) => c.callId === row.callId)!
-          const result = group.results.get(row.callId)
-          const expanded = expandedCallId === row.callId
-          const pending = approvalByCallId.get(row.callId) ?? null
-          if (singleCall && row.callId === singleCall.callId) {
-            if (!expanded && !pending) return null
-            return (
-              <div
-                key={row.callId}
-                id={`msg-${messageIndex}-call-${row.callId}`}
-                className="mt-1 flex min-w-0 flex-col gap-2 pl-1"
-              >
-                <ToolCallBlock
-                  call={call}
-                  approval={pending}
-                  onApprovalDecision={onApprovalDecision}
-                />
-                {result ? (
-                  <ToolResultBlock
-                    result={result}
-                    toolName={group.toolName}
-                    defaultOpen
-                  />
-                ) : null}
-              </div>
-            )
-          }
-          if (!open && !pending) return null
-          return (
-            <div
-              key={row.callId}
-              id={`msg-${messageIndex}-call-${row.callId}`}
-              className="min-w-0"
-            >
-              <GroupSummaryRow
-                row={row}
-                onClick={() =>
-                  setExpandedCallId((cur) => (cur === row.callId ? null : row.callId))
-                }
-              />
-              {expanded || pending ? (
-                <div className="mt-1 flex min-w-0 flex-col gap-2 pl-5">
+      {showRows ? (
+        <div
+          ref={groupRowsRef}
+          className="flex min-w-0 flex-col gap-0.5 border-t border-border/40 px-3 pb-2 pt-1"
+          data-testid={`tool-call-group-details-${group.firstCallId}`}
+        >
+          {rows.map((row) => {
+            const call = group.calls.find((c) => c.callId === row.callId)!
+            const result = group.results.get(row.callId)
+            const expanded = expandedCallId === row.callId
+            const pending = approvalByCallId.get(row.callId) ?? null
+            if (singleCall && row.callId === singleCall.callId) {
+              if (!expanded && !pending) return null
+              return (
+                <div
+                  key={row.callId}
+                  id={`msg-${messageIndex}-call-${row.callId}`}
+                  className="mt-1 flex min-w-0 flex-col gap-2 pl-1"
+                >
                   <ToolCallBlock
                     call={call}
                     approval={pending}
                     onApprovalDecision={onApprovalDecision}
                   />
                   {result ? (
-                    <ToolResultBlock result={result} toolName={group.toolName} />
+                    <ToolResultBlock
+                      result={result}
+                      toolName={group.toolName}
+                      defaultOpen
+                    />
                   ) : null}
                 </div>
-              ) : null}
-            </div>
-          )
-        })}
-      </div>
+              )
+            }
+            if (!open && !pending) return null
+            return (
+              <div
+                key={row.callId}
+                id={`msg-${messageIndex}-call-${row.callId}`}
+                className="min-w-0"
+              >
+                <GroupSummaryRow
+                  row={row}
+                  onClick={() =>
+                    setExpandedCallId((cur) => (cur === row.callId ? null : row.callId))
+                  }
+                />
+                {expanded || pending ? (
+                  <div className="mt-1 flex min-w-0 flex-col gap-2 pl-5">
+                    <ToolCallBlock
+                      call={call}
+                      approval={pending}
+                      onApprovalDecision={onApprovalDecision}
+                    />
+                    {result ? (
+                      <ToolResultBlock result={result} toolName={group.toolName} />
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }

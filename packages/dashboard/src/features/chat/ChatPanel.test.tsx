@@ -100,7 +100,7 @@ describe('ChatPanel', () => {
     expect(contentWrapper?.className).toContain('mx-auto')
   })
 
-  it('does not imperatively jump when messages append without a scroll token change', () => {
+  it('jumps to the bottom on first non-empty mount but not on ordinary appends', () => {
     const scrollToIndex = (globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
     }).__virtuosoScrollToIndexMock
@@ -115,7 +115,13 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(scrollToIndex).not.toHaveBeenCalled()
+    expect(scrollToIndex).toHaveBeenCalledWith({
+      index: 0,
+      align: 'end',
+      behavior: 'auto',
+    })
+
+    scrollToIndex?.mockClear()
 
     rerender(
       <ChatPanel
@@ -129,7 +135,11 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(scrollToIndex).not.toHaveBeenCalled()
+    expect(scrollToIndex).not.toHaveBeenCalledWith({
+      index: 1,
+      align: 'end',
+      behavior: 'auto',
+    })
   })
 
   it('imperatively jumps only when scrollToBottomToken changes', () => {
@@ -147,6 +157,8 @@ describe('ChatPanel', () => {
       />,
     )
 
+    scrollToIndex?.mockClear()
+
     rerender(
       <ChatPanel
         messages={[{ role: 'user', content: [{ type: 'text', text: 'one' }] }]}
@@ -156,12 +168,79 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(scrollToIndex).toHaveBeenCalledTimes(1)
     expect(scrollToIndex).toHaveBeenCalledWith({
       index: 0,
       align: 'end',
       behavior: 'auto',
     })
+  })
+
+  it('jumps to the bottom when an initially empty session finishes loading messages', () => {
+    const scrollToIndex = (globalThis as typeof globalThis & {
+      __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
+    }).__virtuosoScrollToIndexMock
+    scrollToIndex?.mockClear()
+
+    const { rerender } = render(
+      <ChatPanel
+        messages={[]}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+        scrollToBottomToken={1}
+      />,
+    )
+    expect(scrollToIndex).not.toHaveBeenCalled()
+
+    rerender(
+      <ChatPanel
+        messages={[
+          { role: 'user', content: [{ type: 'text', text: 'one' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'two' }] },
+        ]}
+        pinnedToBottom
+        onPinnedChange={() => {}}
+        scrollToBottomToken={1}
+      />,
+    )
+
+    expect(scrollToIndex).toHaveBeenCalledWith({
+      index: 1,
+      align: 'end',
+      behavior: 'auto',
+    })
+  })
+
+  it('shows a floating scroll-to-bottom button only when unpinned', () => {
+    const scrollToIndex = (globalThis as typeof globalThis & {
+      __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
+    }).__virtuosoScrollToIndexMock
+    scrollToIndex?.mockClear()
+    const onPinnedChange = vi.fn()
+
+    const { rerender } = render(
+      <ChatPanel
+        messages={[{ role: 'user', content: [{ type: 'text', text: 'one' }] }]}
+        pinnedToBottom
+        onPinnedChange={onPinnedChange}
+      />,
+    )
+    expect(screen.queryByTestId('scroll-to-bottom')).toBeNull()
+
+    rerender(
+      <ChatPanel
+        messages={[{ role: 'user', content: [{ type: 'text', text: 'one' }] }]}
+        pinnedToBottom={false}
+        onPinnedChange={onPinnedChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('scroll-to-bottom'))
+    expect(scrollToIndex).toHaveBeenCalledWith({
+      index: 0,
+      align: 'end',
+      behavior: 'auto',
+    })
+    expect(onPinnedChange).toHaveBeenCalledWith(true)
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
@@ -274,6 +353,37 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/Manual compact/)).toBeTruthy()
   })
 
+  it('renders sending and queued user messages inline with the transcript', () => {
+    render(
+      <ChatPanel
+        items={[
+          {
+            kind: 'pending_user_message',
+            id: 'local-1',
+            text: 'sending now',
+            mode: 'steer',
+            status: 'sending',
+            createdAt: '2026-07-06T00:00:00.000Z',
+          },
+          {
+            kind: 'pending_user_message',
+            id: 'queue-1',
+            text: 'after this turn',
+            mode: 'queue',
+            status: 'queued',
+            createdAt: '2026-07-06T00:00:01.000Z',
+            position: 1,
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('pending-user-message-local-1').textContent ?? '').toContain('Sending')
+    expect(screen.getByTestId('pending-user-message-local-1').textContent ?? '').toContain('sending now')
+    expect(screen.getByTestId('pending-user-message-queue-1').textContent ?? '').toContain('Queued #1')
+    expect(screen.getByTestId('pending-user-message-queue-1').textContent ?? '').toContain('after this turn')
+  })
+
   it('fires onEditAndRerun with the correct seq when a user message is edited', () => {
     const onEditAndRerun = vi.fn()
     render(
@@ -356,7 +466,11 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('tool-call-pending-c10')).toBeNull()
     expect(screen.queryByTestId('approval-approve')).toBeNull()
     expect(screen.getByTestId('tool-call-group-c10')).toBeTruthy()
+    expect(screen.queryByTestId('tool-call-group-details-c10')).toBeNull()
     expect(screen.getByText('Running')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('grouped-tool-row-c10'))
+    expect(screen.getByTestId('tool-call-group-details-c10')).toBeTruthy()
   })
 
   it('summarizes mixed grouped tool lifecycle statuses without extra protocol data', () => {
