@@ -57,7 +57,7 @@ import type {
   SessionReadyEvent,
   SubAgentSummary,
 } from '@agent-kernel/shared'
-import { isCompatibleVersion } from '@agent-kernel/shared'
+import { isCompatibleVersion, schema } from '@agent-kernel/shared'
 import type {
   AgentConfig,
   AgentEvent,
@@ -79,6 +79,7 @@ import { resolve as resolvePath, sep } from 'node:path'
 import type { AuthConfig } from '../auth-control.js'
 import { authenticateDashboardHandshake } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
+import { parseWire, type WireValidationContext } from '../wire-validation.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -163,20 +164,40 @@ export function configureDashboardNamespace(
     // Middleware guarantees auth.sessionId is present for the dashboard role.
     const sessionId = auth.sessionId!
 
+    // Local `vparse`  -  closes over `socket.id` + the connected sessionId so
+    // handlers can call `vparse(schema.X, raw, 'client:x')` in one line.
+    const vparse = <T>(
+      s: import('zod').ZodType<T>,
+      raw: unknown,
+      channel: string,
+      overrideSessionId?: string,
+    ): T | undefined => {
+      const ctx: WireValidationContext = {
+        channel,
+        peer: socket.id,
+        sessionId: overrideSessionId ?? sessionId,
+      }
+      return parseWire(s, raw, ctx)
+    }
+
     // Register first-paint request handlers before any awaited session load.
     // The dashboard emits these immediately after the websocket connects or
     // after `session:ready`; if we install handlers later, those one-shot
     // requests can be lost and the UI stays on "no session selected".
-    socket.on('client:list_executors', (_p: ClientListExecutors) => {
+    socket.on('client:list_executors', (raw: ClientListExecutors) => {
+      if (!vparse(schema.ClientListExecutorsSchema, raw, 'client:list_executors')) return
       socket.emit('server:executors', { executors: executorSnapshotFor(deps) })
     })
 
-    socket.on('client:list_sessions', async (_p: ClientListSessions) => {
+    socket.on('client:list_sessions', async (raw: ClientListSessions) => {
+      if (!vparse(schema.ClientListSessionsSchema, raw, 'client:list_sessions')) return
       const sessions = await deps.store.listSummaries()
       socket.emit('server:sessions', { sessions })
     })
 
-    socket.on('client:load_history', async (p: ClientLoadHistory) => {
+    socket.on('client:load_history', async (raw: ClientLoadHistory) => {
+      const p = vparse(schema.ClientLoadHistorySchema, raw, 'client:load_history', (raw as ClientLoadHistory | undefined)?.sessionId)
+      if (!p) return
       try {
         let target: SessionRecord | undefined = deps.store.get(p.sessionId)
         if (!target) {
@@ -245,7 +266,10 @@ export function configureDashboardNamespace(
     socket.emit('session:ready', ready)
     socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
 
-    socket.on('subscribe', async ({ sessionId }: ClientSubscribe) => {
+    socket.on('subscribe', async (raw: ClientSubscribe) => {
+      const p = vparse(schema.ClientSubscribeSchema, raw, 'subscribe', (raw as ClientSubscribe | undefined)?.sessionId)
+      if (!p) return
+      const { sessionId } = p
       let target = deps.store.get(sessionId)
       if (!target) {
         try {
@@ -266,16 +290,22 @@ export function configureDashboardNamespace(
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
     })
 
-    socket.on('client:user_message', async (p: ClientUserMessage) => {
+    socket.on('client:user_message', async (raw: ClientUserMessage) => {
+      const p = vparse(schema.ClientUserMessageSchema, raw, 'client:user_message', (raw as ClientUserMessage | undefined)?.sessionId)
+      if (!p) return
       deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
       await handleUserMessage(deps, p)
     })
-    socket.on('client:user_approve', async (p: ClientUserApprove) => {
+    socket.on('client:user_approve', async (raw: ClientUserApprove) => {
+      const p = vparse(schema.ClientUserApproveSchema, raw, 'client:user_approve', (raw as ClientUserApprove | undefined)?.sessionId)
+      if (!p) return
       deps.audit?.log({ action: 'dashboard.user_approve', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok' })
       const evt: AgentEvent = { kind: 'user_approve', callId: p.callId }
       await safeDispatch(deps, p.sessionId, evt)
     })
-    socket.on('client:user_reject', async (p: ClientUserReject) => {
+    socket.on('client:user_reject', async (raw: ClientUserReject) => {
+      const p = vparse(schema.ClientUserRejectSchema, raw, 'client:user_reject', (raw as ClientUserReject | undefined)?.sessionId)
+      if (!p) return
       deps.audit?.log({ action: 'dashboard.user_reject', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok', metadata: { reasonBytes: p.reason ? Buffer.byteLength(p.reason, 'utf8') : 0 } })
       const evt: AgentEvent = {
         kind: 'user_reject',
@@ -284,11 +314,15 @@ export function configureDashboardNamespace(
       }
       await safeDispatch(deps, p.sessionId, evt)
     })
-    socket.on('client:cancel', async (p: ClientCancel) => {
+    socket.on('client:cancel', async (raw: ClientCancel) => {
+      const p = vparse(schema.ClientCancelSchema, raw, 'client:cancel', (raw as ClientCancel | undefined)?.sessionId)
+      if (!p) return
       const evt: AgentEvent = { kind: 'cancel' }
       await safeDispatch(deps, p.sessionId, evt)
     })
-    socket.on('client:interrupt_sub_agent', async (p: ClientInterruptSubAgent) => {
+    socket.on('client:interrupt_sub_agent', async (raw: ClientInterruptSubAgent) => {
+      const p = vparse(schema.ClientInterruptSubAgentSchema, raw, 'client:interrupt_sub_agent')
+      if (!p) return
       try {
         const result = markSubAgentInterrupted(p.parentSessionId, p.parentCallId, p.childSessionId)
         if (!result.ok) {
@@ -304,14 +338,18 @@ export function configureDashboardNamespace(
         )
       }
     })
-    socket.on('client:clear', async (p: ClientClear) => {
+    socket.on('client:clear', async (raw: ClientClear) => {
+      const p = vparse(schema.ClientClearSchema, raw, 'client:clear', (raw as ClientClear | undefined)?.sessionId)
+      if (!p) return
       deps.audit?.log({ action: 'dashboard.session_clear', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok' })
       deps.loopDeps.tools.cancelPending(p.sessionId)
       deps.loop.cancelStream(p.sessionId)
       const evt: AgentEvent = { kind: 'clear' }
       await safeDispatch(deps, p.sessionId, evt)
     })
-    socket.on('client:compact', async (p: ClientCompact) => {
+    socket.on('client:compact', async (raw: ClientCompact) => {
+      const p = vparse(schema.ClientCompactSchema, raw, 'client:compact', (raw as ClientCompact | undefined)?.sessionId)
+      if (!p) return
       try {
         let record: SessionRecord | undefined = deps.store.get(p.sessionId)
         if (!record) {
@@ -338,13 +376,17 @@ export function configureDashboardNamespace(
         )
       }
     })
-    socket.on('client:cancel_stream', (p: ClientCancelStream) => {
+    socket.on('client:cancel_stream', (raw: ClientCancelStream) => {
+      const p = vparse(schema.ClientCancelStreamSchema, raw, 'client:cancel_stream', (raw as ClientCancelStream | undefined)?.sessionId)
+      if (!p) return
       // No error path  -  cancelStream is a no-op when nothing is streaming.
       // The loop turns the abort into a normal llm_response, so the FSM
       // and log stay coherent without any special-case wiring here.
       deps.loop.cancelStream(p.sessionId)
     })
-    socket.on('client:set_approval_mode', async (p: ClientSetApprovalMode) => {
+    socket.on('client:set_approval_mode', async (raw: ClientSetApprovalMode) => {
+      const p = vparse(schema.ClientSetApprovalModeSchema, raw, 'client:set_approval_mode', (raw as ClientSetApprovalMode | undefined)?.sessionId)
+      if (!p) return
       // Guard rail: `allow_all` may only be set when the operator opted in
       // via env flag on the host. Prevents a compromised dashboard from
       // silently disabling every approval prompt on an unattended session.
@@ -364,7 +406,9 @@ export function configureDashboardNamespace(
       })
       deps.audit?.log({ action: 'dashboard.approval_mode_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { mode: p.mode } })
     })
-    socket.on('client:set_cwd', async (p: ClientSetCwd) => {
+    socket.on('client:set_cwd', async (raw: ClientSetCwd) => {
+      const p = vparse(schema.ClientSetCwdSchema, raw, 'client:set_cwd', (raw as ClientSetCwd | undefined)?.sessionId)
+      if (!p) return
       const record = await loadRecordForDashboard(deps, p.sessionId)
       if (!record) {
         deps.broadcastError(p.sessionId, 'host', 'unknown session')
@@ -391,16 +435,24 @@ export function configureDashboardNamespace(
       deps.audit?.log({ action: 'dashboard.cwd_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { cwd: validation.cwd } })
       await broadcastSessionList(deps)
     })
-    socket.on('client:reorder_queued_message', (p: ClientReorderQueuedMessage) => {
+    socket.on('client:reorder_queued_message', (raw: ClientReorderQueuedMessage) => {
+      const p = vparse(schema.ClientReorderQueuedMessageSchema, raw, 'client:reorder_queued_message', (raw as ClientReorderQueuedMessage | undefined)?.sessionId)
+      if (!p) return
       deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId)
     })
-    socket.on('client:update_queued_message', (p: ClientUpdateQueuedMessage) => {
+    socket.on('client:update_queued_message', (raw: ClientUpdateQueuedMessage) => {
+      const p = vparse(schema.ClientUpdateQueuedMessageSchema, raw, 'client:update_queued_message', (raw as ClientUpdateQueuedMessage | undefined)?.sessionId)
+      if (!p) return
       deps.messageQueues.update(p.sessionId, p.id, p.text)
     })
-    socket.on('client:delete_queued_message', (p: ClientDeleteQueuedMessage) => {
+    socket.on('client:delete_queued_message', (raw: ClientDeleteQueuedMessage) => {
+      const p = vparse(schema.ClientDeleteQueuedMessageSchema, raw, 'client:delete_queued_message', (raw as ClientDeleteQueuedMessage | undefined)?.sessionId)
+      if (!p) return
       deps.messageQueues.delete(p.sessionId, p.id)
     })
-    socket.on('client:rename_session', async (p: ClientRenameSession) => {
+    socket.on('client:rename_session', async (raw: ClientRenameSession) => {
+      const p = vparse(schema.ClientRenameSessionSchema, raw, 'client:rename_session', (raw as ClientRenameSession | undefined)?.sessionId)
+      if (!p) return
       try {
         const applied = await deps.store.rename(p.sessionId, p.label)
         deps.dashboardNs.emit('session:renamed', {
@@ -421,7 +473,9 @@ export function configureDashboardNamespace(
         )
       }
     })
-    socket.on('client:rename_workspace', async (p: ClientRenameWorkspace) => {
+    socket.on('client:rename_workspace', async (raw: ClientRenameWorkspace) => {
+      const p = vparse(schema.ClientRenameWorkspaceSchema, raw, 'client:rename_workspace')
+      if (!p) return
       try {
         const applied = deps.renameWorkspace
           ? await deps.renameWorkspace(p.workspaceId, p.workspaceName)
@@ -445,21 +499,29 @@ export function configureDashboardNamespace(
         )
       }
     })
-    socket.on('client:list_dirs', async (p: ClientListDirs) => {
+    socket.on('client:list_dirs', async (raw: ClientListDirs) => {
+      const p = vparse(schema.ClientListDirsSchema, raw, 'client:list_dirs')
+      if (!p) return
       deps.audit?.log({ action: 'internal_tool.list_dirs', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.listDirs(p.workspaceId, p.path, p.requestId)
       socket.emit('server:dir_list', result)
     })
-    socket.on('client:list_files', async (p: ClientListFiles) => {
+    socket.on('client:list_files', async (raw: ClientListFiles) => {
+      const p = vparse(schema.ClientListFilesSchema, raw, 'client:list_files')
+      if (!p) return
       const result = await deps.executors.listFiles(p)
       socket.emit('server:file_list', result)
     })
-    socket.on('client:read_file', async (p: ClientReadFile) => {
+    socket.on('client:read_file', async (raw: ClientReadFile) => {
+      const p = vparse(schema.ClientReadFileSchema, raw, 'client:read_file')
+      if (!p) return
       deps.audit?.log({ action: 'internal_tool.read_file', actor: auditActor(socket), target: { workspaceId: p.workspaceId }, outcome: 'ok', metadata: { path: p.path } })
       const result = await deps.executors.readFile(p)
       socket.emit('server:file_contents', result)
     })
-    socket.on('client:read_overflow', async (p: ClientReadOverflow) => {
+    socket.on('client:read_overflow', async (raw: ClientReadOverflow) => {
+      const p = vparse(schema.ClientReadOverflowSchema, raw, 'client:read_overflow', (raw as ClientReadOverflow | undefined)?.sessionId)
+      if (!p) return
       deps.audit?.log({ action: 'internal_tool.read_overflow', actor: auditActor(socket), target: { sessionId: p.sessionId, callId: p.callId }, outcome: 'ok' })
       const record = deps.store.get(p.sessionId) ?? (await deps.store.load(p.sessionId).catch(() => undefined))
       const workspaceId = record?.workspaceId
@@ -475,20 +537,28 @@ export function configureDashboardNamespace(
       const result = await deps.executors.readOverflow(p, workspaceId)
       socket.emit('server:overflow_contents', result)
     })
-    socket.on('bg:list', async (p: ClientListBgTasks, ack) => {
+    socket.on('bg:list', async (raw: ClientListBgTasks, ack) => {
+      const p = vparse(schema.ClientListBgTasksSchema, raw, 'bg:list')
+      if (!p) return
       await socket.join(`workspace:${p.workspaceId}`)
       const result = await deps.executors.listBg(p)
       ack(result)
     })
-    socket.on('bg:output', async (p: ClientReadBgOutput, ack) => {
+    socket.on('bg:output', async (raw: ClientReadBgOutput, ack) => {
+      const p = vparse(schema.ClientReadBgOutputSchema, raw, 'bg:output')
+      if (!p) return
       const result = await deps.executors.readBg(p)
       ack(result)
     })
-    socket.on('bg:kill', async (p: ClientKillBgTask, ack) => {
+    socket.on('bg:kill', async (raw: ClientKillBgTask, ack) => {
+      const p = vparse(schema.ClientKillBgTaskSchema, raw, 'bg:kill')
+      if (!p) return
       const result = await deps.executors.killBg(p)
       ack(result)
     })
-    socket.on('sub_agent:list', (p: ClientListSubAgents, ack) => {
+    socket.on('sub_agent:list', (raw: ClientListSubAgents, ack) => {
+      const p = vparse(schema.ClientListSubAgentsSchema, raw, 'sub_agent:list')
+      if (!p) return
       // Cheap scan  -  we don't expect many thousands of sessions in memory,
       // and each row is a plain object. An index by parentSessionId is a
       // follow-up if this shows up in a profile.
@@ -513,13 +583,17 @@ export function configureDashboardNamespace(
       }
       ack({ requestId: p.requestId, parentSessionId: p.parentSessionId, children })
     })
-    socket.on('agent_types:list', (p: ClientListAgentTypes, ack) => {
+    socket.on('agent_types:list', (raw: ClientListAgentTypes, ack) => {
+      const p = vparse(schema.ClientListAgentTypesSchema, raw, 'agent_types:list')
+      if (!p) return
       // Registry loader lives behind a follow-up (docs/host/sub-agent-design.md  - 6).
       // Return an empty list so dashboards that call this on mount don't crash;
       // the Composer '@agent-name' menu shows an empty state until the loader ships.
       ack({ requestId: p.requestId, types: [] })
     })
-    socket.on('client:consolidate_memory', async (p: ClientConsolidateMemory) => {
+    socket.on('client:consolidate_memory', async (raw: ClientConsolidateMemory) => {
+      const p = vparse(schema.ClientConsolidateMemorySchema, raw, 'client:consolidate_memory', (raw as ClientConsolidateMemory | undefined)?.sessionId)
+      if (!p) return
       const outcome = await consolidateMemory(deps.loopDeps, p.sessionId).catch(
         (err: unknown): ConsolidationOutcome => ({
           saved: [],
@@ -537,7 +611,10 @@ export function configureDashboardNamespace(
       }
       socket.emit('server:memory_consolidated', payload)
     })
-    socket.on('client:create_session', async (p: ClientCreateSession) => {
+    socket.on('client:create_session', async (raw: ClientCreateSession) => {
+      const parsed = vparse(schema.ClientCreateSessionSchema, raw, 'client:create_session', (raw as ClientCreateSession | undefined)?.sessionId)
+      if (!parsed) return
+      let p: ClientCreateSession = parsed
       try {
         const cwd = p.cwd?.trim()
         if (cwd && cwd.length > 0) {
@@ -591,7 +668,9 @@ export function configureDashboardNamespace(
       }
     })
 
-    socket.on('client:fork', async (p: ClientFork) => {
+    socket.on('client:fork', async (raw: ClientFork) => {
+      const p = vparse(schema.ClientForkSchema, raw, 'client:fork', (raw as ClientFork | undefined)?.sourceSessionId)
+      if (!p) return
       try {
         const source = await deps.store.load(p.sourceSessionId)
         const parsed = await readSessionLog(source.logPath)
@@ -660,7 +739,9 @@ export function configureDashboardNamespace(
       }
     })
 
-    socket.on('client:delete_session', async (p: ClientDeleteSession) => {
+    socket.on('client:delete_session', async (raw: ClientDeleteSession) => {
+      const p = vparse(schema.ClientDeleteSessionSchema, raw, 'client:delete_session', (raw as ClientDeleteSession | undefined)?.sessionId)
+      if (!p) return
       try {
         const record = deps.store.get(p.sessionId)
         if (record && deps.onSessionDeleted) {
@@ -687,12 +768,16 @@ export function configureDashboardNamespace(
       }
     })
 
-    socket.on('client:set_model', (p: ClientSetModel) => {
+    socket.on('client:set_model', (raw: ClientSetModel) => {
+      const p = vparse(schema.ClientSetModelSchema, raw, 'client:set_model', (raw as ClientSetModel | undefined)?.sessionId)
+      if (!p) return
       const trimmed = p.model.trim()
       deps.audit?.log({ action: 'dashboard.model_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { model: trimmed } })
       applyPreferencesUpdate(deps, p.sessionId, { selectedModel: trimmed })
     })
-    socket.on('client:update_preferences', (p) => {
+    socket.on('client:update_preferences', (raw) => {
+      const p = vparse(schema.ClientUpdatePreferencesSchema, raw, 'client:update_preferences', (raw as { sessionId?: string } | undefined)?.sessionId)
+      if (!p) return
       applyPreferencesUpdate(deps, p.sessionId, p.preferences)
     })
   })

@@ -1057,6 +1057,8 @@ describe('wire protocol', () => {
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
     executor.emit('executor:announce', {
       executorId: 'ex-1',
+      workspaceId: 'ws-ex-1',
+      workspaceName: 'ex-1',
       tools: ['write'],
       runtime: 'node',
       runtimeVersion: '22',
@@ -1129,6 +1131,8 @@ describe('wire protocol', () => {
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
     executor.emit('executor:announce', {
       executorId: 'ex-fork',
+      workspaceId: 'ws-ex-fork',
+      workspaceName: 'ex-fork',
       tools: ['write'],
       runtime: 'node',
       runtimeVersion: '22',
@@ -1216,6 +1220,8 @@ describe('wire protocol', () => {
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
     executor.emit('executor:announce', {
       executorId: 'ex-cancel',
+      workspaceId: 'ws-ex-cancel',
+      workspaceName: 'ex-cancel',
       tools: ['write'],
       runtime: 'node',
       runtimeVersion: '22',
@@ -1581,6 +1587,8 @@ describe('wire protocol', () => {
     )
     executor.emit('executor:announce', {
       executorId: 'ex-shared',
+      workspaceId: 'ws-ex-shared',
+      workspaceName: 'ex-shared',
       tools: ['write'],
       runtime: 'node',
       runtimeVersion: '22',
@@ -1652,6 +1660,8 @@ describe('wire protocol', () => {
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
     executor.emit('executor:announce', {
       executorId: 'ex-list',
+      workspaceId: 'ws-ex-list',
+      workspaceName: 'ex-list',
       tools: ['write'],
       runtime: 'node',
       runtimeVersion: '22',
@@ -1728,6 +1738,8 @@ describe('wire protocol', () => {
     await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
     executor.emit('executor:announce', {
       executorId: 'ex-hist',
+      workspaceId: 'ws-ex-hist',
+      workspaceName: 'ex-hist',
       tools: ['write'],
       runtime: 'node',
       runtimeVersion: '22',
