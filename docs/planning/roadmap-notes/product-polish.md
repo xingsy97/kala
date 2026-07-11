@@ -1,80 +1,82 @@
-# Roadmap · Part D · translated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical texttranslated historical text，4 translated historical texttranslated historical texttranslated historical texttranslated historical text）
+# Roadmap · Part D · Product polish (parallel, 4-week phased)
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical text**：Benchmark UI translated historical text CLI translated historical texttranslated historical texttranslated historical text domain knowledge translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text benchmark translated historical texttranslated historical texttranslated historical text SWE-bench translated historical texttranslated historical text。SWE-bench translated historical text `resolved` translated historical texttranslated historical text official harness；Terminal-Bench translated historical text `is_resolved` translated historical texttranslated historical text test parser；WebArena translated historical texttranslated historical text evaluator score；τ-bench translated historical texttranslated historical text reward basis translated historical texttranslated historical texttranslated historical text。**UI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text pipeline，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text benchmark kind translated historical texttranslated historical text。**
+Product polish is the 100 → 120 delta. **Required, and must be done in Phase order — do not skip.**
+
+**Semantic baseline**: Benchmark UI and CLI must follow domain knowledge, not force every benchmark into SWE-bench vocabulary. `resolved` in SWE-bench comes from the official harness; `is_resolved` in Terminal-Bench comes from the test parser; WebArena reports evaluator score; τ-bench reports a product of reward basis components. **The pipeline can be unified, but scoring explanations must remain benchmark-specific.**
 
 ---
 
-## D.0 Phase 0：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text）
+## D.0 Phase 0: page-level design constraints (before starting)
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical text benchmark modal translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。Benchmark / Operations / Artifacts translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical text、translated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical text page workspace，translated historical texttranslated historical text modal。
+**Why first**: the earlier benchmark modal was hard to use not because a button was misplaced, but because a page-level workflow was crammed into a short-action popup. Benchmark / Operations / Artifacts all require dwelling, comparing, revisiting, deep-linking, and post-mortems — page workspaces, not modals.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text route shape**：
+**Route shape (required)**:
 
-| translated historical texttranslated historical text | URL hash translated historical texttranslated historical text | translated historical texttranslated historical text |
+| Page | URL hash example | Purpose |
 |---|---|---|
-| Agent | `#/agent/session/:sessionId` | translated historical texttranslated historical texttranslated historical texttranslated historical text、trace、debugger |
-| Benchmarks | `#/benchmarks/runs/:runId?task=:taskId&tab=review` | translated historical texttranslated historical text run、translated historical texttranslated historical texttranslated historical texttranslated historical text、bad-case review |
-| Operations | `#/operations/executors/:executorId` | host/executor/job/release translated historical texttranslated historical text |
-| Artifacts | `#/artifacts/:artifactId` | JSON/diff/text/log translated historical texttranslated historical texttranslated historical texttranslated historical text |
-| Settings | `#/settings/models` | provider/model/notification/theme translated historical texttranslated historical text |
+| Agent | `#/agent/session/:sessionId` | Current session, trace, debugger |
+| Benchmarks | `#/benchmarks/runs/:runId?task=:taskId&tab=review` | Eval run, task detail, bad-case review |
+| Operations | `#/operations/executors/:executorId` | Host/executor/job/release status |
+| Artifacts | `#/artifacts/:artifactId` | Full-page JSON/diff/text/log view |
+| Settings | `#/settings/models` | Provider/model/notification/theme config |
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**：
+**Shared data boundaries**:
 
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `useBenchmarkRuns`、`useBenchmarkRun`、`useArtifacts`、`useOperationsStatus` hook。
-- translated historical texttranslated historical texttranslated historical text Benchmarks / Operations / Artifacts translated historical texttranslated historical texttranslated historical texttranslated historical text fetch / parse / polling translated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text job/status translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Add or consolidate `useBenchmarkRuns`, `useBenchmarkRun`, `useArtifacts`, `useOperationsStatus` hooks.
+- Benchmarks / Operations / Artifacts must not each duplicate fetch / parse / polling logic.
+- Long-running tasks go through the unified job/status model; pages just subscribe to state.
 
-**MVP translated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text 5 tab + Benchmark run translated historical texttranslated historical text + Selected Run + Inspector + Artifact deep-link + SWE-bench translated historical texttranslated historical texttranslated historical texttranslated historical text；Terminal-Bench / WebArena / τ-bench translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text adapter-ready translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical text mock translated historical texttranslated historical texttranslated historical text。
+**MVP boundary**: v1 requires only 5 tabs + Benchmark run list + Selected Run + Inspector + Artifact deep-link + SWE-bench actually runnable; Terminal-Bench / WebArena / τ-bench may show adapter-ready empty states and environment checklists, but the empty state must explain exactly what input is needed next — no mock data.
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**：
+**Accessibility and responsiveness acceptance**:
 
-- translated historical texttranslated historical text icon-only action translated historical texttranslated historical texttranslated historical text tooltip translated historical text aria-label；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text icon translated historical texttranslated historical texttranslated historical text。
-- ≥1024px translated historical texttranslated historical text；768-1023 translated historical texttranslated historical text；<768 Inspector translated historical text drawer。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text scrollbar translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text native scrollbar。
-- Playwright translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text desktop translated historical text mobile translated historical texttranslated historical text viewport。
+- Every icon-only action needs a tooltip or aria-label; the main nav must have both icon and text.
+- ≥1024px three-column; 768-1023 two-column; <768 Inspector becomes drawer.
+- All scroll regions use the project's unified scrollbar style — no bare native scrollbar.
+- Playwright screenshots cover at least desktop and mobile viewports.
 
 ---
 
-## D.1 Phase 1：translated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical text 1 translated historical text）
+## D.1 Phase 1: top-level navigation (Week 1)
 
-**translated historical texttranslated historical text**：translated historical text「Agent + translated historical texttranslated historical texttranslated historical text Artifacts translated historical texttranslated historical texttranslated historical text 5 translated historical texttranslated historical texttranslated historical text」translated historical texttranslated historical text 5 translated historical texttranslated historical texttranslated historical text tab：
+**Goal**: move from "Agent + one big Artifacts dialog stuffing 5 features" to 5 top-level tabs:
 
 ```
 Agent | Benchmarks | Operations | Artifacts | Settings
 ```
 
-**translated historical texttranslated historical texttranslated historical text**：
+**What to do**:
 
-- translated historical texttranslated historical text `packages/dashboard/src/app-shell/` translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical text nav + translated historical texttranslated historical text。
-- URL hash translated historical texttranslated historical text；deep-link translated historical texttranslated historical text；session translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Command Palette translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（`Open eval dashboard` → `Open Benchmarks`；`Open ops artifacts` → `Open Operations`）。
-- translated historical text ArtifactExplorerDialog translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text tab translated historical text「Advanced / Raw actions」translated historical texttranslated historical texttranslated historical text。
+- Add `packages/dashboard/src/app-shell/` directory for top nav + routing.
+- URL hash routing; deep-link recovery; session state preserved.
+- Command Palette labels updated (`Open eval dashboard` → `Open Benchmarks`; `Open ops artifacts` → `Open Operations`).
+- The old ArtifactExplorerDialog is kept but demoted from the main entry point — reachable under each tab's "Advanced / Raw actions" submenu.
 
-**translated historical texttranslated historical text**：translated historical texttranslated historical text 5 tab；translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；Command Palette translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；translated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Acceptance**: 5 top tabs, switching preserves state, Command Palette copy updated, screenshot evidence.
 
 ---
 
-## D.2 Phase 2：Benchmarks translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical text 2 translated historical text）
+## D.2 Phase 2: Benchmarks as a standalone page (Week 2)
 
-**translated historical texttranslated historical texttranslated historical text**：
+**What to do**:
 
-- `packages/dashboard/src/pages/BenchmarksPage.tsx`：translated historical texttranslated historical text（Runs list / Selected Run / Inspector）。
-- Runs list translated historical texttranslated historical text `run-registry` translated historical texttranslated historical text API。
-- Selected Run translated historical texttranslated historical text **benchmark-aware** pipeline；translated historical texttranslated historical text step translated historical text Details translated historical texttranslated historical text。
-- Inspector：artifacts translated historical texttranslated historical text + JSON viewer。
-- 「New benchmark run」translated historical texttranslated historical texttranslated historical text wizard。
-- Bad Cases tab translated historical text Selected Run translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text tab。
+- `packages/dashboard/src/pages/BenchmarksPage.tsx`: three-column (Runs list / Selected Run / Inspector).
+- Runs list reuses the `run-registry` list API.
+- Selected Run shows a **benchmark-aware** pipeline; each step has a Details fold.
+- Inspector: artifact index + JSON viewer.
+- "New benchmark run" opens the wizard.
+- Bad Cases tab appears under Selected Run as a secondary tab.
 
-**Benchmark picker translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**：
+**Benchmark picker organized by capability axis**:
 
-| Label | Benchmark kind | translated historical texttranslated historical texttranslated historical texttranslated historical text |
+| Label | Benchmark kind | First-screen description |
 |---|---|---|
 | Software Engineering | SWE-bench | Fix real GitHub issues; score with official Docker harness. |
 | Terminal Tasks | Terminal-Bench | Complete real shell tasks; score with task test script and parser. |
 | Web Navigation | WebArena | Operate self-hosted websites; score with string/url/html evaluators. |
 | Tool/User Interaction | τ-bench | Serve simulated users with domain tools; score with reward basis. |
 
-**translated historical texttranslated historical text benchmark translated historical text pipeline label**：
+**Pipeline labels per benchmark**:
 
 | Benchmark | Pipeline |
 |---|---|
@@ -83,15 +85,15 @@ Agent | Benchmarks | Operations | Artifacts | Settings
 | WebArena | Choose Tasks → Prepare Environment → Run Agent → Run Evaluator → Review |
 | τ-bench | Choose Tasks → Configure Roles → Run Simulation → Compute Reward → Review |
 
-**translated historical texttranslated historical texttranslated historical text**：
+**Glossary**:
 
-| translated historical texttranslated historical texttranslated historical texttranslated historical text | translated historical texttranslated historical texttranslated historical texttranslated historical text | translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text |
+| User-facing | Technical meaning | Must not misspell as |
 |---|---|---|
-| Task | SWE-bench instance | instance（translated historical texttranslated historical texttranslated historical texttranslated historical text）、case |
-| Prediction ready | translated historical texttranslated historical texttranslated historical text `model_patch` | resolved、passed |
-| Patch applied | harness translated historical texttranslated historical texttranslated historical texttranslated historical text `model_patch` | tests passed |
-| Official tests ran | `eval.sh` translated historical texttranslated historical texttranslated historical texttranslated historical text | resolved |
-| Resolved | translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `resolved=true` | agent done |
+| Task | SWE-bench instance | instance (default view), case |
+| Prediction ready | `model_patch` generated | resolved, passed |
+| Patch applied | harness applied `model_patch` successfully | tests passed |
+| Official tests ran | `eval.sh` completed | resolved |
+| Resolved | official report has `resolved=true` | agent done |
 | Regression check | `PASS_TO_PASS` | unrelated tests |
 | Terminal verifier | Terminal-Bench `run-tests.sh` + parser | official score |
 | Web score | WebArena evaluator result | resolved |
@@ -100,69 +102,69 @@ Agent | Benchmarks | Operations | Artifacts | Settings
 
 ---
 
-## D.3 Phase 3：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical text 3 translated historical texttranslated historical text）
+## D.3 Phase 3: copy and state model rewrite (early Week 3)
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**：
+**Renames (strict)**:
 
-| translated historical text（translated historical texttranslated historical texttranslated historical texttranslated historical text） | translated historical text（translated historical texttranslated historical texttranslated historical text） |
+| Old (internal term) | New (user-facing) |
 |---|---|
 | Plan | Choose Tasks |
 | Predictions / Infer | Run Agent |
 | Grade | Official Score |
 | Ingest | Import Results |
 | Review | Review |
-| instances / instance_id | tasks / task_id（translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text） |
-| patchesDir / predictionsPath / resultsDir | translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical text「Show technical details」translated historical text |
+| instances / instance_id | tasks / task_id (technical detail keeps original) |
+| patchesDir / predictionsPath / resultsDir | Hidden from default view, only under "Show technical details" |
 
-**translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**（translated historical texttranslated historical text lint / translated historical texttranslated historical text）：
+**Semantic rules (enforced via lint / tests)**:
 
-- **`resolved` translated historical texttranslated historical texttranslated historical text Import Results translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text UI translated historical texttranslated historical texttranslated historical text**。Run Agent translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text「predictions ready / N completed / M agent-failure」，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text resolved。
-- **`model_patch` translated historical text `test_patch` translated historical texttranslated historical texttranslated historical texttranslated historical text**。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text「Agent patch」translated historical text「Official test patch」；raw JSON translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- **translated historical texttranslated historical text benchmark translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text**。SWE-bench translated historical texttranslated historical texttranslated historical text `resolved`；Terminal-Bench translated historical texttranslated historical texttranslated historical text `resolved/unresolved` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text parser；WebArena translated historical texttranslated historical texttranslated historical text `score`；τ-bench translated historical texttranslated historical texttranslated historical text `reward`。
-- **τ-bench translated historical text `actions` translated historical texttranslated historical texttranslated historical text Reference trajectory**，translated historical texttranslated historical texttranslated historical text Required actions（translated historical texttranslated historical text `ACTION` translated historical text `reward_basis`）。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `Input / Action / Output` translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `<details>` translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text。
+- **`resolved` only appears in UI after Import Results completes**. After Run Agent completes, the wording is "predictions ready / N completed / M agent-failure" — never `resolved`.
+- **`model_patch` and `test_patch` do not mix**. Default view: "Agent patch" and "Official test patch"; raw JSON keeps the original field names.
+- **Different benchmarks' result vocabulary do not mix**. SWE-bench may say `resolved`; Terminal-Bench may say `resolved/unresolved` but must annotate the parser source; WebArena defaults to `score`; τ-bench defaults to `reward`.
+- **τ-bench's `actions` defaults to Reference trajectory**, not Required actions (except when `ACTION` is in `reward_basis`).
+- Each step's output panel must be an `Input / Action / Output` three-section layout.
+- Each step's technical details go into a `<details>` fold, collapsed by default.
 
-**translated historical texttranslated historical texttranslated historical text**：
+**What to do**:
 
-- `packages/dashboard/src/i18n/resources.ts` translated historical texttranslated historical texttranslated historical texttranslated historical text（en + zh translated historical texttranslated historical text）。
-- translated historical texttranslated historical text `packages/dashboard/src/features/benchmarks/StepCard.tsx` translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text `BenchmarksPage.test.tsx` translated historical texttranslated historical text：`Run Agent completed` translated historical text DOM translated historical texttranslated historical text `resolved`。
-- translated historical texttranslated historical text copy snapshot translated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `predictionsPath` / `patchesDir` / `resultsDir` / translated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text benchmark copy matrix translated historical texttranslated historical text：Terminal-Bench translated historical texttranslated historical texttranslated historical text `Official Score`；WebArena translated historical texttranslated historical text score translated historical texttranslated historical text resolved；τ-bench translated historical texttranslated historical text reference trajectory translated historical texttranslated historical text required actions。
-
----
-
-## D.4 Phase 4：Operations translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical text 3 translated historical texttranslated historical text）
-
-**translated historical texttranslated historical texttranslated historical text**：
-
-- `packages/dashboard/src/pages/OperationsPage.tsx`：translated historical texttranslated historical text sections（Host / Executors / Jobs / Reliability / Releases / Notifications），translated historical texttranslated historical text selected section content，translated historical texttranslated historical text Inspector（Logs / Artifacts / Raw JSON / Actions）。
-- Host section translated historical texttranslated historical text `artifact-manifest` + `executor-capabilities`。
-- Executors section translated historical text executor translated historical texttranslated historical texttranslated historical texttranslated historical text，`[Copy connect command] [View logs] [Disconnect]`。
-- Jobs section translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- Reliability section translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text `reliability-supervisor` translated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text JSON。
-
-**translated historical texttranslated historical text**：translated historical texttranslated historical text Operations tab，translated historical texttranslated historical texttranslated historical texttranslated historical text host translated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical text executor translated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- `packages/dashboard/src/i18n/resources.ts` full rewrite (en + zh).
+- Add `packages/dashboard/src/features/benchmarks/StepCard.tsx` enforcing the three-section layout.
+- Add `BenchmarksPage.test.tsx` assertion: when `Run Agent completed`, DOM does not contain `resolved`.
+- Add copy snapshot test: default view does not show `predictionsPath` / `patchesDir` / `resultsDir` / absolute paths.
+- Add benchmark copy matrix test: Terminal-Bench does not show `Official Score`; WebArena does not spell score as resolved; τ-bench does not spell reference trajectory as required actions.
 
 ---
 
-## D.5 Phase 5：Artifacts translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical text 4 translated historical text）
+## D.4 Phase 4: Operations as a standalone page (late Week 3)
 
-**translated historical texttranslated historical texttranslated historical text**：
+**What to do**:
 
-- `packages/dashboard/src/pages/ArtifactsPage.tsx`：translated historical texttranslated historical text browser，translated historical texttranslated historical text filters（kind / run / session / time），translated historical texttranslated historical text viewer（JSON / diff / text）。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text artifact translated historical texttranslated historical texttranslated historical texttranslated historical text「translated historical text Artifacts translated historical texttranslated historical texttranslated historical text」translated historical texttranslated historical texttranslated historical text「translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text」。
-- translated historical texttranslated historical text ArtifactExplorerDialog translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text inline link translated historical texttranslated historical text。
-- Artifact URL translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- `packages/dashboard/src/pages/OperationsPage.tsx`: left-side sections (Host / Executors / Jobs / Reliability / Releases / Notifications), center is selected section content, right is Inspector (Logs / Artifacts / Raw JSON / Actions).
+- Host section reuses `artifact-manifest` + `executor-capabilities`.
+- Executors section: one card per executor, `[Copy connect command] [View logs] [Disconnect]`.
+- Jobs section shows background long tasks.
+- Reliability section presents `reliability-supervisor` output in product language, not raw JSON.
 
-**translated historical texttranslated historical text**：Artifacts tab translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text；Benchmarks translated historical texttranslated historical texttranslated historical text artifact translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text Artifacts tab translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Acceptance**: opening Operations tab shows host health, connected executors, and active tasks at a glance.
 
 ---
 
-## D.6 Phase 6：translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（translated historical text 4 translated historical texttranslated historical text）
+## D.5 Phase 5: Artifacts as a supporting full page (Week 4)
 
-- translated historical texttranslated historical texttranslated historical texttranslated historical text：translated historical texttranslated historical texttranslated historical text card-in-card、translated historical texttranslated historical texttranslated historical text native scrollbar、translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- translated historical texttranslated historical text sticky header。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text：`packages/dashboard/scripts/verify-visual-pages.mjs` translated historical text tab translated historical texttranslated historical texttranslated historical texttranslated historical text/AI translated historical texttranslated historical text。
-- translated historical texttranslated historical texttranslated historical texttranslated historical text：Benchmark run list translated historical texttranslated historical text、minimap/translated historical texttranslated historical texttranslated historical texttranslated historical text、Inspector artifact deep-link、mobile drawer translated historical texttranslated historical texttranslated historical texttranslated historical text。
+**What to do**:
+
+- `packages/dashboard/src/pages/ArtifactsPage.tsx`: full-page browser, left filters (kind / run / session / time), right viewer (JSON / diff / text).
+- Artifact links from other pages now open in the Artifacts page rather than a dialog.
+- ArtifactExplorerDialog stays as a quick preview but only from inline links on other pages.
+- Artifact URLs must be copyable and refreshable.
+
+**Acceptance**: Artifacts tab is a full-page browsing experience; clicking an artifact link on Benchmarks jumps to Artifacts and focuses that file.
+
+---
+
+## D.6 Phase 6: visual consistency cleanup (end of Week 4)
+
+- Global audit: no card-in-card, no native scrollbar, no long explanatory prose inside workflow bodies.
+- Every page has a sticky header.
+- Visual tests: `packages/dashboard/scripts/verify-visual-pages.mjs` captures per-tab screenshots for human/AI comparison.
+- Interaction tests: Benchmark run list selection, minimap/list sync, Inspector artifact deep-link, mobile drawer are all covered.

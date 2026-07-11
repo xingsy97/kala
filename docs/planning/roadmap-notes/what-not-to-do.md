@@ -1,3 +1,3 @@
 # Roadmap · What NOT to do
 
-translated historical texttranslated historical texttranslated historical texttranslated historical text**translated historical texttranslated historical texttranslated historical texttranslated historical text**，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text「translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text」。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text [../principles.md](../../meta/principles.md) translated historical text F translated historical texttranslated historical texttranslated historical texttranslated historical text。
+The following items are **explicitly out of scope**, even if they look easy. This list aligns with section F of [../principles.md](../../meta/principles.md).

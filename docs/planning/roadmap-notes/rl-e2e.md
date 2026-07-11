@@ -1,31 +1,35 @@
-# Roadmap · Part B · RL translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text（2 translated historical texttranslated historical texttranslated historical texttranslated historical text）
+# Roadmap · Part B · RL end-to-end pass (2-week delivery)
 
-## B.1 translated historical text rl-export translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+## B.1 Make rl-export actually consumed once
 
-**translated historical texttranslated historical text**：translated historical texttranslated historical text Task #9（Agentic RL Rollout Export）。translated historical texttranslated historical texttranslated historical texttranslated historical text contract fixture，translated historical texttranslated historical texttranslated historical texttranslated historical text rollout translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。translated historical texttranslated historical text：SWE-bench Lite run translated historical text trace → rl-export translated historical texttranslated historical text rollout → verl dry-run translated historical texttranslated historical text → reward-weighted trace translated historical texttranslated historical text registry → dashboard translated historical texttranslated historical text reward translated historical texttranslated historical text。
+**Goal**: complete Task #9 (Agentic RL Rollout Export). Today there is only a contract fixture — no rollout has been consumed by an external trainer. Target: SWE-bench Lite run trace → rl-export produces a rollout → verl dry-run consumes it → reward-weighted trace stored back in the registry → dashboard shows reward distribution.
 
-**translated historical texttranslated historical texttranslated historical text**：
+**Why it matters**: the RL story has to move from "fixture" to "actually round-tripped through a trainer". Without that round trip, everything downstream (verifier design, reward shaping, cross-run comparison) is speculative.
 
-- translated historical text **verl translated historical text dry-run** translated historical texttranslated historical text（translated historical text slime translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical texttranslated historical texttranslated historical text）。
-- translated historical texttranslated historical text `packages/host/src/rl/verl-adapter.ts`：registry translated historical text trace → translated historical text verl rollout schema translated historical texttranslated historical texttranslated historical text → translated historical text verl verification-only entrypoint → translated historical texttranslated historical text reward。
-- translated historical texttranslated historical text `packages/host/src/rl/rollout-consumer.ts`：translated historical text verl translated historical texttranslated historical texttranslated historical text reward-weighted trace translated historical texttranslated historical text registry（translated historical text artifact kind `rl-rollout-graded`）。
-- Benchmark run translated historical texttranslated historical texttranslated historical texttranslated historical text **RL Rollouts** tab（translated historical texttranslated historical text rl-graded artifact translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text）：
-  - translated historical texttranslated historical text trace translated historical texttranslated historical text，reward translated historical text + translated historical texttranslated historical text
-  - translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text verl / slime translated historical texttranslated historical text native format
-- translated historical text `docs/rl-rollout-pipeline.md`：translated historical texttranslated historical text agent-kernel → verl → registry translated historical texttranslated historical texttranslated historical text + translated historical texttranslated historical text schema。
+**What to do**:
 
-**translated historical texttranslated historical text**：5 translated historical text SWE-bench → translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text verl-adapter → dashboard translated historical text RL Rollouts tab translated historical texttranslated historical text 5 translated historical text、reward translated historical texttranslated historical texttranslated historical texttranslated historical text。
+- Pick the **verl dry-run** path (lighter dependency than slime, runnable locally).
+- Add `packages/host/src/rl/verl-adapter.ts`: pull traces from the registry → serialize per verl rollout schema → call the verl verification-only entrypoint → get rewards back.
+- Add `packages/host/src/rl/rollout-consumer.ts`: store the returned reward-weighted trace back into the registry (new artifact kind `rl-rollout-graded`).
+- Benchmark run detail page gains an **RL Rollouts** tab (shown only when a rl-graded artifact exists):
+  - One row per trace, reward column + visualization
+  - Export to verl / slime native formats
+- Add `docs/rl-rollout-pipeline.md`: diagram of agent-kernel → verl → registry data flow, with per-layer schema.
+
+**Acceptance**: 5 SWE-bench tasks → CLI triggers verl-adapter → dashboard RL Rollouts tab shows 5 rows with visible reward distribution.
 
 ---
 
-## B.2 Reward translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text
+## B.2 Reward modeling with a real story
 
-**translated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical text pass/fail translated historical texttranslated historical text reward。translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text verifier chain。
+**Goal**: move beyond binary pass/fail reward. Add a composable verifier chain layer.
 
-**translated historical texttranslated historical texttranslated historical text**：
+**What to do**:
 
-- `packages/host/src/rl/verifier-chain.ts`：translated historical texttranslated historical texttranslated historical text reward translated historical texttranslated historical text——`patch-applies (0.2)` + `tests-pass (0.5)` + `no-regression (0.2)` + `trace-brevity-bonus (0.1)`。
-- translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text、translated historical texttranslated historical texttranslated historical text。
-- RL Rollouts tab translated historical texttranslated historical text reward translated historical texttranslated historical text——translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+- `packages/host/src/rl/verifier-chain.ts`: composable reward components — `patch-applies (0.2)` + `tests-pass (0.5)` + `no-regression (0.2)` + `trace-brevity-bonus (0.1)`.
+- Each component independently testable and toggleable.
+- RL Rollouts tab displays reward breakdown — which component earned how much.
 
-**translated historical texttranslated historical text**：translated historical texttranslated historical texttranslated historical text badcase translated historical texttranslated historical text verifier chain，dashboard translated historical texttranslated historical texttranslated historical text 4 translated historical text reward translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
+**Design rationale**: outcome-only reward causes credit-assignment problems on long-horizon tasks. Process reward as a composable chain gives per-step signal and makes reward shaping legible in the UI.
+
+**Acceptance**: run bad-cases with verifier chain enabled; dashboard shows independent scores for all 4 reward components.
