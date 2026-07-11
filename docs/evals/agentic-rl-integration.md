@@ -1,6 +1,6 @@
 # Agentic RL Integration Research Note
 
-Status: research note / proposed direction  
+Status: research note / proposed direction
 Date: 2026-07-06
 
 This document records the current direction for making `agent-kernel` useful as an

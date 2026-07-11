@@ -101,7 +101,7 @@ Lives close to the files it needs to touch. Dials **out** to Host via Socket.IO.
 **Two forms**:
 
 1. **Local Node daemon**: user runs `agent-kernel-executor --host wss://host.example.com`. Has access to a whitelisted working directory. Runs `bash`, `read`, `write`, etc. against the real filesystem. Also runs background shell tasks (see below).
-2. **Browser WebContainer**: dashboard hosts an in-page executor via [WebContainer API](https://webcontainers.io/). Same tool implementations, but the filesystem is an in-memory vfs. Enables the "demo with just a URL" experience.
+2. **Browser WebContainer**: dashboard hosts an in-page executor via WebContainer API [1]. Same tool implementations, but the filesystem is an in-memory vfs. Enables the "demo with just a URL" experience.
 
 **Responsibilities**:
 - On connect, `announce` its capabilities: `workspaceId`, `workspaceName`, `os`, `runtime`, `runtimeVersion`, `hostname`, `sandboxRoots`, and the list of tool names implemented
@@ -342,3 +342,7 @@ Every non-obvious topology choice above has an ADR:
 | FSM dispatch table shape | [ADR 0010](../meta/adr/0010-fsm-dispatch-table.md) |
 | Naming: Host + Kernel (was Server + Core) | [ADR 0011](../meta/adr/0011-rename-host-and-core.md) |
 | Dashboard Finder-style layout + control-plane events | [ADR 0013](../meta/adr/0013-dashboard-finder-layout.md) |
+
+## References
+
+[1] https://webcontainers.io/

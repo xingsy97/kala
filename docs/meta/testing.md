@@ -1,7 +1,7 @@
 # Testing Strategy
 
 **Status**: Normative for what testing looks like at each layer.
-**Tooling**: [Vitest](https://vitest.dev/) throughout (both packages that ship JS and ones that ship a service).
+**Tooling**: Vitest [1] throughout (both packages that ship JS and ones that ship a service).
 
 The testing strategy tracks the architecture: pure-function kernel  -  integration-tested Host  -  contract-tested Executor  -  e2e for the full system. The rule of thumb: **push tests as low as possible.** A bug caught by a unit test is orders of magnitude cheaper than one caught by e2e.
 
@@ -290,3 +290,7 @@ Some tests are tempting but low-value:
 - Kernel tests are pure  -  if they fail, run one in isolation with `pnpm test -- -t "test name"` and inspect the state / effect diff
 - Host integration tests: use `DEBUG=socket.io*` env var for wire visibility; use `--reporter=verbose` for step-by-step logs
 - Browser verification: rerun the relevant Puppeteer script with `CHROME_PATH` / `DASHBOARD_URL` / `HOST_URL` pointed at the failing environment; do not stare at CI-only output
+
+## References
+
+[1] https://vitest.dev/

@@ -1,6 +1,6 @@
 # Skills Design
 
-Status: proposed / first implementation target  
+Status: proposed / first implementation target
 Date: 2026-07-06
 
 `agent-kernel` should implement skills with the OpenCode-style runtime model: a

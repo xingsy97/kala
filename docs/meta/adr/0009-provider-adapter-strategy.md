@@ -9,7 +9,7 @@
 
 There were three plausible shapes for this "something":
 
-1. **Depend on a single third-party unification SDK** (e.g. [Vercel AI SDK](https://sdk.vercel.ai/), LangChain, LiteLLM). All Host code talks to the SDK; the SDK talks to providers.
+1. **Depend on a single third-party unification SDK** (e.g. Vercel AI SDK [1], LangChain, LiteLLM). All Host code talks to the SDK; the SDK talks to providers.
 2. **Depend directly on each provider's official SDK** (`@anthropic-ai/sdk`, `openai`, etc.). Host imports whichever provider it needs.
 3. **Define our own thin `LLMAdapter` interface** inside `@agent-kernel/host`. Each provider gets an adapter file. The adapter is free to use the provider's official SDK, raw `fetch`, or any unification lib underneath.
 
@@ -65,3 +65,7 @@ An adapter is still free to use Vercel AI SDK internally if that's the cleanest 
 - The interface lives in `packages/host/src/llm/types.ts`.
 - Host ships two adapters: `anthropic.ts` (Messages API) and `openai.ts` (Chat Completions, also handles Codex-compatible endpoints). Both stream SSE.
 - Host is imported by other packages only through `@agent-kernel/host`; provider-specific types must not appear in that public surface. If they do, the adapter is leaking and needs to be tightened.
+
+## References
+
+[1] https://sdk.vercel.ai/

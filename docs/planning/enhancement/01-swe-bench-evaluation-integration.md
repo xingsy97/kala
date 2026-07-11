@@ -16,9 +16,9 @@ agent quality. It also creates training and debugging artifacts for agentic RL.
 
 ## Production References
 
-- Official SWE-bench repo: `https://github.com/SWE-bench/SWE-bench`
-- Official docs: `https://www.swebench.com/SWE-bench/`
-- Official evaluation guide: `https://www.swebench.com/SWE-bench/guides/evaluation/`
+- Official SWE-bench repo [1].
+- Official docs [2].
+- Official evaluation guide [3].
 - Official harness entry point: `python -m swebench.harness.run_evaluation`
 - Official prediction format:
 
@@ -607,3 +607,11 @@ This feature reaches production level when:
    already gives dashboard replay from any well-behaved agent command).
 2. Add a real-world e2e that exercises the full browser wizard through dry-run
    grading and result ingestion.
+
+## References
+
+[1] https://github.com/SWE-bench/SWE-bench
+
+[2] https://www.swebench.com/SWE-bench/
+
+[3] https://www.swebench.com/SWE-bench/guides/evaluation/

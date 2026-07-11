@@ -1,6 +1,6 @@
 # Reference Projects Comparison: Agent Kernel Design Analysis
 
-**Date**: July 4, 2026  
+**Date**: July 4, 2026
 **Projects Analyzed**: pi (67k stars), opencode (production-grade Go+TS), codex (OpenAI CLI), clawspring (Claude Code reimplementation)
 
 ---
