@@ -13,10 +13,10 @@
  * `index.html` for unknown paths and would otherwise mask a missing endpoint.
  */
 
-import { createReadStream } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { createReadStream, existsSync } from 'node:fs'
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
-import { extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
+import { dirname, extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
 import type {
   AttachedExecutor,
@@ -114,6 +114,7 @@ function defaultSweBenchAgentCommand(): string {
   return 'true'
 }
 const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
+const MAX_DOC_CONTENT_BYTES = 1024 * 1024
 
 type CreateSweBenchPlanRequest = {
   rootDir?: string
@@ -348,6 +349,20 @@ export function attachJsonRoutes(
         return
       }
       void readArtifactContent(url, payloads.artifactRootDir)
+        .then((content) => sendJson(req, res, content))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/docs/index') {
+      claimRoute(req)
+      void listDocsIndex()
+        .then((result) => sendJson(req, res, result))
+        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
+      return
+    }
+    if (path === '/docs/content') {
+      claimRoute(req)
+      void readDocContent(url)
         .then((content) => sendJson(req, res, content))
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
@@ -1420,6 +1435,97 @@ async function readArtifactContent(url: string, rootDir: string): Promise<{ path
     return { path: rel.split(sep).join('/'), mediaType, body: JSON.parse(raw) as unknown }
   }
   return { path: rel.split(sep).join('/'), mediaType, body: raw }
+}
+
+type DocsIndexEntry = {
+  path: string
+  title: string
+  size: number
+  updatedAt: string
+}
+
+async function listDocsIndex(): Promise<{ root: 'docs'; docs: DocsIndexEntry[] }> {
+  const root = docsRoot()
+  const docs: DocsIndexEntry[] = []
+  await collectDocs(root, '', docs)
+  docs.sort((a, b) => a.path.localeCompare(b.path))
+  return { root: 'docs', docs }
+}
+
+async function collectDocs(root: string, relativeDir: string, out: DocsIndexEntry[]): Promise<void> {
+  const dir = relativeDir ? join(root, relativeDir) : root
+  const entries = await readdir(dir, { withFileTypes: true }).catch((err: unknown) => {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new HttpRouteError(404, 'docs directory not found')
+    throw err
+  })
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+    const rel = relativeDir ? join(relativeDir, entry.name) : entry.name
+    if (entry.isDirectory()) {
+      await collectDocs(root, rel, out)
+      continue
+    }
+    if (!entry.isFile() || extname(entry.name).toLowerCase() !== '.md') continue
+    const abs = join(root, rel)
+    const info = await stat(abs)
+    out.push({
+      path: rel.split(sep).join('/'),
+      title: titleFromDocPath(rel),
+      size: info.size,
+      updatedAt: info.mtime.toISOString(),
+    })
+  }
+}
+
+async function readDocContent(url: string): Promise<{ path: string; title: string; body: string; updatedAt: string }> {
+  const parsed = new URL(url, 'http://x')
+  const requested = parsed.searchParams.get('path') ?? ''
+  if (!requested || requested.includes('\0')) throw new HttpRouteError(400, 'missing doc path')
+  if (extname(requested).toLowerCase() !== '.md') throw new HttpRouteError(400, 'doc path must be a markdown file')
+  const root = docsRoot()
+  const rel = normalize(requested).replace(/^[/\\]+/, '')
+  const abs = join(root, rel)
+  if (!abs.startsWith(root + sep) && abs !== root) throw new HttpRouteError(403, 'doc path escapes docs root')
+  const info = await stat(abs).catch((err: unknown) => {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new HttpRouteError(404, 'doc not found')
+    throw err
+  })
+  if (!info.isFile()) throw new HttpRouteError(400, 'doc path is not a file')
+  if (info.size > MAX_DOC_CONTENT_BYTES) throw new HttpRouteError(413, 'doc is too large to read inline')
+  const body = await readFile(abs, 'utf8')
+  return {
+    path: rel.split(sep).join('/'),
+    title: titleFromMarkdown(body) ?? titleFromDocPath(rel),
+    body,
+    updatedAt: info.mtime.toISOString(),
+  }
+}
+
+function docsRoot(): string {
+  let cursor = resolvePath(process.cwd())
+  for (let i = 0; i < 8; i++) {
+    const candidate = join(cursor, 'docs')
+    if (existsSync(candidate)) return candidate
+    const parent = dirname(cursor)
+    if (parent === cursor) break
+    cursor = parent
+  }
+  return resolvePath(process.cwd(), 'docs')
+}
+
+function titleFromMarkdown(body: string): string | undefined {
+  const line = body.split(/\r?\n/u).find((candidate) => candidate.startsWith('# '))
+  return line?.replace(/^#\s+/, '').trim() || undefined
+}
+
+function titleFromDocPath(path: string): string {
+  const name = path.split(/[\\/]/u).pop() ?? path
+  return name
+    .replace(/\.md$/iu, '')
+    .split(/[-_]/u)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
