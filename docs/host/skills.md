@@ -1,43 +1,250 @@
-# Skills Design
+# Skills
 
-Status: proposed / first implementation target
-Date: 2026-07-06
+**Status**: implemented baseline; this document is the source of truth for the
+intended behavior. Where implementation and this document disagree, this
+document wins and the implementation is a bug to fix unless the mismatch is
+listed under explicit future work.
 
-`agent-kernel` should implement skills with the OpenCode-style runtime model: a
-skill is loaded through an explicit `skill({ name })` tool call. This keeps skill
-selection observable, replayable, and permissionable instead of relying on a
-hidden runtime loader.
+Agent-kernel implements skills as a host extension. A skill is a local
+instruction package rooted at `SKILL.md`; the model sees a compact index first
+and must load the full skill through an explicit `skill({ name })` tool call.
+The pure kernel has no skill-specific state. It only sees ordinary tool calls,
+tool results, and events.
 
-## Goals
+## Problem Statement
 
-- Support reusable agent workflows without adding policy to the pure kernel.
-- Make skill loading visible as a normal tool call in transcripts and JSONL.
-- Keep context usage low by exposing only skill names and descriptions until a
-  skill is selected.
-- Use the existing tool-call lifecycle, approval machinery, dashboard timeline,
-  and executor-independent host builtin pattern.
-- Stay compatible with the common Agent Skills layout: `.agents/skills/<name>/SKILL.md`.
+Coding agents need reusable task knowledge without making every session prompt
+large, opaque, or product-specific. A skill system must solve five problems:
 
-## Non-goals
+1. **Reusable procedure**. Review checklists, release workflows, debugging
+   playbooks, benchmark protocols, and domain conventions should live in files,
+   not be copied into every prompt.
+2. **Context pressure**. Loading every workflow body at startup wastes model
+   context and increases the chance that unrelated instructions conflict.
+3. **Selection observability**. If a model follows a skill, the transcript and
+   JSONL log must show which skill was selected and when.
+4. **Permission and audit surface**. A selected skill is privileged context. The
+   system must be able to gate, deny, trace, and replay selection.
+5. **Kernel neutrality**. Skills are host policy. The reducer should not learn
+   skill discovery rules, path precedence, UI metadata, plugin distribution, or
+   model-routing heuristics.
 
-- No plugin marketplace in the first implementation.
-- No dynamic shell interpolation inside `SKILL.md` in the first implementation.
-- No automatic execution of scripts from a skill. Scripts are just files the
-  model may inspect or execute through existing tools after the skill explains
-  them.
-- No kernel-level skill state. The kernel sees ordinary tool calls and tool
-  results only.
+The dangerous design is hidden prompt mutation: the host silently injects large
+skill bodies because natural language looked relevant. That is hard to debug,
+hard to replay, and unsuitable for RL traces. Agent-kernel therefore treats
+skill loading as an explicit model action.
 
-## Skill Format
+## Design Principles
 
-The first implementation supports directory skills:
+- **Progressive disclosure**. Startup exposes only `name` and `description`.
+  The full `SKILL.md` body is loaded only after selection.
+- **Tool-call selection**. Loading a skill is a normal `skill` tool call, so it
+  is visible in transcripts, debugger timelines, hook traces, JSONL replay, and
+  training data.
+- **Host-owned implementation**. Discovery, validation, loading, size limits,
+  permissions, and future plugin integration belong in the host extension layer.
+- **Directory-relative resources**. A skill may refer to sibling files such as
+  `references/`, `scripts/`, templates, or assets. Those files are not loaded
+  automatically; the tool result tells the model how to resolve relative paths.
+- **Bounded privileged context**. A skill body has an explicit byte limit before
+  it can enter model-visible context.
+- **Strict first contract, extensible later**. The baseline requires only
+  `name` and `description`. Unknown frontmatter fields are ignored so richer
+  Agent Skills content can coexist without changing this host immediately.
+
+## Reference Implementations: End-To-End Mechanics
+
+This section is based on local reference source under `references/`, not on
+marketing docs. The goal is to identify stable implementation patterns and the
+tradeoffs that should shape agent-kernel.
+
+### Shared Pattern
+
+The serious references converge on the same architecture:
+
+```text
+1. Discover local or packaged skill sources.
+2. Parse markdown frontmatter for routing metadata.
+3. Validate at least name and description.
+4. Put only compact metadata in startup/system context.
+5. Select a skill explicitly or implicitly.
+6. Load the full skill body on demand.
+7. Resolve supporting files relative to the skill directory.
+8. Record the load through ordinary runtime telemetry or tool history.
+```
+
+The important difference is the selection mechanism. Codex supports explicit
+`$skill` mentions and implicit invocation. OpenCode exposes a real `skill` tool.
+Pi tells the model to use `read` on a selected skill file. Claude Code can run a
+skill inline or in a forked agent. Agent-kernel follows OpenCode's tool-call
+shape because it is the most compatible with our kernel/event architecture.
+
+### Codex Reference
+
+Primary local files:
+
+- `references/codex/codex-rs/core-skills/src/model.rs`
+- `references/codex/codex-rs/core-skills/src/root_loader.rs`
+- `references/codex/codex-rs/core-skills/src/injection.rs`
+- `references/codex/codex-rs/config/src/skills_config.rs`
+
+Codex models skills as host-owned metadata plus file-system mappings. The
+`SkillMetadata` structure contains `name`, `description`, optional UI/interface
+metadata, optional dependencies, optional policy, the path to the declaring
+`SKILL.md`, scope, and plugin id. `SkillLoadOutcome` stores loaded skills,
+errors, disabled paths, roots, and a map from skill path to the file system that
+can read it. That last map matters for multi-environment hosts: the runtime
+must not assume all skills are readable from the same local file system.
+
+Codex root loading merges snapshots from repo, user, system, admin, and plugin
+roots. It sorts by scope and path, deduplicates by `SKILL.md` path, and keeps
+errors alongside successful metadata instead of failing all discovery. Plugin
+skill roots can be cached as parsed snapshots during plugin load, so skill
+discovery is integrated with distribution but still produces the same metadata
+shape.
+
+Codex selection has two paths. Explicit user selections and `$skill` mentions
+are resolved by path/name in `injection.rs`; disabled paths and ambiguous names
+are filtered. When selected, Codex reads the skill body through the stored file
+system, emits injection telemetry, and returns a structured skill injection with
+`name`, `path`, and `contents`. Codex also tracks policy such as
+`allow_implicit_invocation` and product restrictions.
+
+Lesson for agent-kernel: preserve the separation between skill metadata,
+selection, and file-system authority. A skill snapshot can be host-owned and
+still be replayable if the actual load is an explicit event.
+
+### OpenCode Reference
+
+Primary local files:
+
+- `references/opencode/packages/core/src/skill.ts`
+- `references/opencode/packages/core/src/skill/discovery.ts`
+- `references/opencode/packages/core/src/tool/skill.ts`
+- `references/opencode/packages/core/test/tool-skill.test.ts`
+
+OpenCode is the closest reference to agent-kernel's baseline. Its skill service
+maintains a list of sources, loads embedded/directory/URL sources, parses
+frontmatter, caches loaded metadata, and exposes available skills after applying
+permission filtering. The loader supports `SKILL.md` and flat markdown files,
+keeps parsed content separate from frontmatter, and uses the description for
+routing.
+
+The OpenCode `skill` tool has a small input schema: `{ name: string }`. At
+execution time it lists current skills, finds the selected name, asserts a
+`skill` permission for the session and agent, samples sibling files, and returns
+model-facing XML-like content:
+
+```text
+<skill_content name="...">
+# Skill: ...
+...
+Base directory for this skill: ...
+Relative paths in this skill ... are relative to this base directory.
+<skill_files>...</skill_files>
+</skill_content>
+```
+
+The test proves the end-to-end contract: the tool is registered as `skill`, a
+selected skill produces model-facing content, permission assertions are made,
+missing skills fail, denied permissions fail, and flat markdown skills can also
+load.
+
+Lesson for agent-kernel: a `skill` tool is a clean extension point. It gives us
+normal tool authorization and output handling without teaching the kernel about
+skills.
+
+### Pi Reference
+
+Primary local files:
+
+- `references/pi/packages/coding-agent/src/core/skills.ts`
+- `references/pi/packages/coding-agent/test/skills.test.ts`
+- `references/pi/packages/coding-agent/test/suite/regressions/2781-skill-collision-precedence.test.ts`
+
+Pi implements a broad Agent Skills loader. It scans directories recursively,
+honors ignore files, follows valid symlinks, stops recursion when a directory
+itself contains `SKILL.md`, and supports explicit skill paths. Frontmatter
+supports `name`, `description`, and `disable-model-invocation`; unknown fields
+are tolerated. Name and description validation produce diagnostics, but Pi
+still loads many imperfect skills as long as description exists.
+
+Pi formats available skills into system prompt XML with `name`, `description`,
+and `location`. Skills marked `disable-model-invocation` are excluded from that
+prompt and can only be invoked explicitly. The model is instructed to use the
+ordinary `read` tool to load the selected skill file.
+
+Pi also records collision diagnostics and keeps the first skill by configured
+source order. This makes precedence visible rather than surprising.
+
+Lesson for agent-kernel: diagnostics and collision reporting are product
+quality features, but model-facing loading through a generic file read is less
+auditable than a dedicated `skill` tool.
+
+### Claude Code Reference
+
+Primary local files:
+
+- `references/claude-code-collection/claude-code-source-code/src/tools/SkillTool/SkillTool.ts`
+- `references/claude-code-collection/claude-code-source-code/src/tools/SkillTool/prompt.ts`
+- `references/claude-code-collection/claude-code-source-code/src/skills/loadSkillsDir.ts`
+- `references/claude-code-collection/claude-code-source-code/src/components/permissions/SkillPermissionRequest/SkillPermissionRequest.tsx`
+
+Claude Code's skill tool is more product-rich. It can combine local and MCP
+skills, records detailed telemetry, distinguishes built-in/bundled/plugin
+skills, and can execute a skill in a forked sub-agent context with its own
+agent id and token budget. The runtime tags nested tool-use progress so the UI
+can show work done inside the skill. It also has permission UI and skill usage
+tracking.
+
+This is more than a markdown loader: skills become a command surface, telemetry
+surface, permission surface, plugin surface, and sub-agent execution surface.
+
+Lesson for agent-kernel: forked execution and rich UI are valid later layers,
+but the first host contract should remain a small loader. Forked skill execution
+would overlap with our existing `agent` builtin and needs a separate design.
+
+### OpenClaw Reference
+
+Primary local areas:
+
+- `references/openclaw/src/skills/loading/*`
+- `references/openclaw/src/skills/runtime/*`
+- `references/openclaw/src/skills/security/*`
+- `references/openclaw/src/agents/embedded-agent-runner/sandbox-skills.ts`
+
+OpenClaw is a production-heavy reference. It separates loading, runtime
+refresh, session snapshots, embedded run entries, security scanning, workspace
+auditing, plugin/bundled skill sources, and sandbox bridges. It treats skill
+state as something that may change over time and that must be snapshotted per
+session/run.
+
+Lesson for agent-kernel: once multiple sessions and executors share a host,
+skill visibility must be derived from the session/workspace boundary, not from a
+single global mutable list. The current agent-kernel baseline uses a host-wide
+startup registry, so this is an explicit future hardening area.
+
+### Minimal Agent References
+
+The clawspring-style references contain simple tool dispatch and sub-agent
+patterns, but they are not skill systems. They lack frontmatter discovery,
+progressive disclosure, skill-specific permission, supporting-file resolution,
+and package distribution. They are useful as a lower bound: a tool table is not
+enough to claim skill support.
+
+## Agent-Kernel Design
+
+### Skill Package Contract
+
+The baseline package format is:
 
 ```text
 .agents/skills/<name>/SKILL.md
 ~/.agents/skills/<name>/SKILL.md
 ```
 
-`SKILL.md` starts with YAML-like frontmatter and then markdown instructions:
+`SKILL.md` must start with YAML-like frontmatter followed by markdown
+instructions:
 
 ```markdown
 ---
@@ -50,34 +257,44 @@ description: Use when reviewing a diff or pull request for bugs, regressions, mi
 Review the current diff. Findings first, ordered by severity.
 ```
 
-The initial field set is intentionally small:
+The normative field set is intentionally small:
 
 | Field | Required | Rule |
 |---|---:|---|
 | `name` | yes | Must match `^[a-z0-9]+(-[a-z0-9]+)*$` and match the containing directory name. |
-| `description` | yes | 1 to 1024 characters. Used as the model's routing signal. |
+| `description` | yes | After trimming, must be 1 to 1024 characters. Used as the model's routing signal. |
 
-Unknown frontmatter fields are ignored for now so existing Agent Skills content
-can still load if it has valid `name` and `description`.
+Unknown fields are ignored by the baseline host. Future fields must not change
+the meaning of `name` or `description`.
 
-## Discovery
+### Discovery Contract
 
-At host startup, the host scans:
+For each session, the host discovers skills from roots derived from the
+session's current working directory:
 
-1. Project root: `<workspace>/.agents/skills/*/SKILL.md` when a workspace root
-   can be inferred from the host process CWD.
-2. User global: `~/.agents/skills/*/SKILL.md`.
+1. Project-local: `<session cwd>/.agents/skills/*/SKILL.md`.
+2. User-global: `~/.agents/skills/*/SKILL.md`.
 
-Later versions can expand this to parent-directory walking, admin paths, plugin
-bundles, live watching, and per-workspace executor roots.
+Discovery scans only direct child directories of each root. Invalid skills are
+skipped. Duplicate names keep the first discovered skill according to root
+priority and lexicographic directory order. The public registry is sorted by
+skill name for stable tool-schema rendering.
 
-Invalid skills are skipped. Duplicate names keep the first discovered skill and
-skip later duplicates.
+The host maintains a refreshable session/workspace-scoped skill manager. It
+refreshes the session's skill registry and rewrites the `skill` tool schema
+before an LLM call, and refreshes again immediately before executing a `skill`
+tool call. This makes the self-authoring loop work: if the agent writes a new
+`<session cwd>/.agents/skills/<name>/SKILL.md`, the same session can load it via
+`skill({ name })` without restarting the host.
 
-## Agent-Side Runtime
+This is narrower than Codex, Pi, and OpenClaw. Parent-directory walking,
+admin/system roots, plugin roots, recursive discovery, file watching, and
+explicit skill paths are future work, not part of the implemented baseline.
 
-The host declares a `skill` builtin tool to the model. The tool description
-contains the compact available-skill index:
+### Runtime Exposure Contract
+
+The host declares a builtin `skill` tool before executor tools. Its description
+contains a compact XML index:
 
 ```xml
 <available_skills>
@@ -88,7 +305,7 @@ contains the compact available-skill index:
 </available_skills>
 ```
 
-The model selects a skill by emitting an ordinary tool call:
+The model selects a skill by emitting:
 
 ```json
 {
@@ -99,57 +316,119 @@ The model selects a skill by emitting an ordinary tool call:
 }
 ```
 
-The host handles `skill` like the existing host-side `agent` builtin:
+The host handles that tool call without dispatching to the executor:
 
-1. Validate `input.name`.
-2. Look up the discovered skill by name.
-3. Read the full `SKILL.md` from disk.
-4. Reject oversized files above 256 KiB instead of injecting an unbounded body
-   into the next LLM request.
-5. Return the markdown content as the tool result.
-6. Let the ordinary kernel flow call the LLM again with that tool result in
-   context.
+```text
+1. Validate input.name against the skill-name regex.
+2. Look up the name in the host registry.
+3. Read the full SKILL.md from disk.
+4. Reject the load if the UTF-8 body is larger than 256 KiB.
+5. Return a tool result containing the skill name, absolute SKILL.md path,
+   directory-relative path guidance, and full markdown body.
+6. Continue the normal kernel loop so the next LLM request sees the tool result.
+```
 
-This means skill usage is visible in the same places as any other tool call:
-transcript, pending tool state, timeline effects, JSONL replay, and dashboard
-tool history.
+The tool requires no approval in the baseline. That is acceptable only because
+the current roots are local, explicit, and bounded. Per-skill `allow` / `ask` /
+`deny` policy is required before accepting remote/plugin skill sources.
 
-## Frontend Design
+### Security And Isolation Contract
 
-The dashboard should make `skill` visibly different from executor tools.
+The baseline security contract is limited but explicit:
 
-In the Inspector Tools tab:
+- Skills are instructions and references, not executable plugins.
+- The skill loader never executes scripts mentioned by a skill.
+- Supporting files are not injected automatically.
+- Tool-result size is capped at 256 KiB per loaded `SKILL.md`.
+- Skill names cannot contain path separators, `.` segments, uppercase letters,
+  or arbitrary punctuation.
+- The kernel does not store skill registries or hidden skill state.
 
-- The registry row for `skill` shows a `skill` badge.
-- The detail panel labels it as `Skill loader`.
-- Its approval status remains visible separately (`auto` or `gated`).
-- Recent calls work like any other tool and show successful or failed skill
-  loads.
+Session registries are scoped by session cwd, so two sessions in different
+workspaces do not see each other's project-local skills. User-global skills are
+intentionally shared through `~/.agents/skills`. This is still a local-host
+trust model; remote/plugin skill sources require per-skill permission before
+they can be enabled safely.
 
-The transcript can keep rendering `skill` through the generic tool renderer for
-the first implementation. A later renderer can summarize `Loaded skill:
-<name>` from the tool input.
+## Implementation Mapping
 
-## Why OpenCode-Style
+| Design requirement | Implementation | Tests | Status |
+|---|---|---|---|
+| Session-level discovery from cwd and user `.agents/skills` roots | `packages/host/src/extensions/skills.ts` `skillRootsForCwd()`, `discoverSkills()`, `createSkillManager()` | `packages/host/src/extensions/skills.test.ts` | Implemented baseline |
+| Required `name` and `description` frontmatter | `parseSkillHeader()` / `extractFrontmatter()` | invalid/missing tests in `skills.test.ts` | Implemented baseline |
+| Strict name pattern and directory/name match | `SKILL_NAME_PATTERN`, `basename(dirName)` check | invalid/name mismatch test | Implemented baseline |
+| Description trim and 1024 character cap | `MAX_DESCRIPTION_LENGTH` | invalid/missing test covers missing; cap is code-covered but not directly asserted | Partial test gap |
+| Duplicate names keep first root priority | `byName.has(info.name)` skip | duplicate root-priority test | Implemented baseline |
+| Compact available-skills index in tool schema | `skillToolSchema()` / `renderAvailableSkills()` | XML rendering and budget tests | Implemented baseline |
+| XML escaping for model-facing index | `escapeXml()` | XML escaping test | Implemented baseline |
+| Explicit `skill({ name })` load | `runSkillTool()` and `loop.ts` `SKILL_TOOL_NAME` branch | host loop skill test | Implemented baseline |
+| Skill load bypasses executor dispatch | `performCallTool()` handles `SKILL_TOOL_NAME` before `deps.tools.callTool()` | executor call-count test in `loop.test.ts` | Implemented baseline |
+| Oversized skill refusal | `MAX_SKILL_BYTES = 256 * 1024` | oversized file test | Implemented baseline |
+| Builtin tool list includes skill first | `createBuiltinTools()` prepends `skillToolSchema()` | indirectly covered by runtime tests | Implemented baseline |
+| Same-session skill authoring and loading | `createSkillManager()` refreshes before LLM calls and `skill` calls | session refresh test in `skills.test.ts` | Implemented baseline |
+| Workspace-scoped project skills | `createSkillManager()` derives roots from `record.state.cwd` | workspace isolation test in `skills.test.ts` | Implemented baseline |
+| Diagnostics for skipped roots/skills/collisions | `SkillRegistry.diagnostics`; `/settings.skills` summary | diagnostics tests and schema typecheck | Implemented baseline |
+| Host CLI delegates skill discovery to session manager | `agent-kernel-host.ts` uses `createBuiltinTools()` with empty initial index; `server.ts` installs manager | indirectly covered | Implemented with test gap |
+| Per-skill approval/permission | none | none | Future work |
+| Parent walking, admin/system/plugin roots, explicit paths | none | none | Future work |
+| Supporting-file list/sampling | only path guidance is returned | none | Future work |
 
-OpenCode's `skill({ name })` model is the right fit for `agent-kernel` because
-it uses a normal tool call as the control signal. That gives us:
+## Conformance Audit
 
-- Deterministic runtime behavior. The host never guesses from natural language.
-- Compatibility with any model/provider that supports tool calls.
-- Replay and audit from the existing JSONL event log.
-- Clear future permission rules such as `allow`, `ask`, and `deny` per skill.
-- Clean RL traces where loading a skill is an explicit model action.
+### Satisfied
 
-Codex and Claude Code also support automatic skill use, but their public product
-surface hides more of the loader. For this project, hidden loaders are the wrong
-first step because they are harder to debug and harder to replay.
+The implementation satisfies the core baseline design:
 
-## Future Work
+- `SKILL.md` directory packages are discovered from project and user roots.
+- `name` and `description` are required and validated.
+- Startup context receives only compact routing metadata through the `skill`
+  tool description.
+- The compact skill index has an aggregate character budget and reports omitted
+  entries when the budget is exceeded.
+- Full skill bodies load only after an explicit model tool call.
+- The host handles skill loading without executor dispatch.
+- A session can author a new project-local skill and load it in the same
+  session without host restart.
+- Project-local skill visibility is scoped by session cwd; user-global skills
+  remain shared by design.
+- The kernel remains skill-neutral.
+- Skill loads are represented as ordinary tool calls and tool results.
+- Full bodies are bounded by a 256 KiB limit.
+- XML escaping protects the available-skills index from malformed descriptions.
+- Discovery diagnostics are available through the registry and `/settings`.
 
-- `permission.skill` rules with `allow`, `ask`, and `deny`.
-- Parent-directory walking up to git root.
-- Workspace-root discovery from attached executors instead of only host CWD.
-- `disable-model-invocation`, `allowed-tools`, `paths`, and other frontmatter.
-- Live reload of changed `SKILL.md` files.
-- Plugin bundles that package skills with MCP config, hooks, or custom tools.
+### Partial Or Risky
+
+- The `/settings.skills` summary is host/default-root oriented. Session-specific
+  diagnostics exist in the skill manager but are not yet exposed through a
+  dedicated dashboard socket event.
+- The parser is only YAML-like. It supports simple `key: value` fields and
+  simple quotes, not full YAML. This is acceptable for the baseline but should
+  be documented in user-facing skill authoring docs.
+- The host CLI/server path is not directly covered by an integration test. The
+  extension tests cover discovery/refresh and the loop tests cover runtime
+  dispatch.
+
+### Explicit Future Work
+
+- Per-skill permission rules with `allow`, `ask`, and `deny`.
+- Parent-directory walking to the repository root.
+- Admin/system/plugin skill roots.
+- Explicit skill paths and remote skill sources.
+- File watching. Current refresh is on LLM/tool-call boundaries, not continuous.
+- Session-specific diagnostics surfaced in the debugger UI.
+- Optional metadata such as `disable-model-invocation`, `allowed-tools`,
+  `license`, `compatibility`, `metadata`, UI fields, and dependency declarations.
+- Sidecar file listing or sampled file manifests in the `skill` tool result.
+- Forked skill execution. This should be designed with the existing `agent`
+  builtin rather than added to the loader implicitly.
+
+## Non-Goals For The Baseline
+
+- Skills do not execute code by themselves.
+- Skills do not register new tools.
+- Skills do not mutate the kernel reducer.
+- Skills do not automatically read `references/`, `scripts/`, templates, or
+  assets.
+- Skills do not provide a plugin marketplace or remote installer.
+- Skills do not silently inject full bodies based on natural-language matching.
