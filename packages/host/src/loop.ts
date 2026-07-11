@@ -29,7 +29,7 @@ import type {
 import { step } from '@agent-kernel/kernel'
 
 import type { LLMAdapter } from './llm/adapter.js'
-import type { LLMTrace } from '@agent-kernel/shared'
+import { redactLlmTrace, type LLMTrace } from '@agent-kernel/shared'
 import {
   createArtifactStore,
   createMessageAssemblyArtifact,
@@ -41,7 +41,7 @@ import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
 import { AGENT_TOOL_NAME, interruptSubAgentsForParent, runAgentTool } from './extensions/agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
-import { runSkillTool, SKILL_TOOL_NAME } from './extensions/skills.js'
+import { isSkillManager, runSkillTool, SKILL_TOOL_NAME } from './extensions/skills.js'
 import type {
   HostLoopDeps,
   LoopHandle,
@@ -133,8 +133,13 @@ export async function dispatchOne(
   const record = deps.store.get(sessionId)
   if (!record) throw new Error(`Unknown session: ${sessionId}`)
 
+  if (event.kind !== 'cancel' && isSkillManager(deps.skills)) {
+    await deps.skills.refreshConfig(record)
+  }
+
   const prior = record.state
   const { next, effects } = step(prior, event, record.config)
+  const safeLlmTrace = llmTrace ? redactLlmTrace(llmTrace) : undefined
 
   const usageChanged =
     next.usage.inputTokens !== prior.usage.inputTokens ||
@@ -148,12 +153,12 @@ export async function dispatchOne(
     effects,
     next,
     usageChanged ? next.usage : undefined,
-    llmTrace,
+    safeLlmTrace,
     model,
   )
 
   safeBroadcast(() =>
-    deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, llmTrace, model),
+    deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, safeLlmTrace, model),
   )
 
   // Cancellation of in-flight IO is the host's job (SPEC §Non-goals:
@@ -490,7 +495,12 @@ async function performCallTool(
       ? await runAgentTool(deps, sessionId, effect, aborts)
       : effect.name === SKILL_TOOL_NAME
         ? deps.skills
-          ? await runSkillTool(deps.skills, effect.input)
+          ? await runSkillTool(
+              isSkillManager(deps.skills)
+                ? await deps.skills.refreshSession(deps.store.get(sessionId)!)
+                : deps.skills,
+              effect.input,
+            )
           : { ok: false, content: 'skills are not configured on this host' }
         : await deps.tools.callTool(sessionId, effect)
     await runPostToolHooks(deps, sessionId, effect, res)
