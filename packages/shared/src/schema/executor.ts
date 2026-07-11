@@ -16,7 +16,6 @@ import type {
   ExecutorAnnounce,
   ExecutorOs,
   ExecutorRuntime,
-  ExecutorToolResult,
   ServerBgTaskEvicted,
   ServerBgTaskUpdated,
   ToolCallMessage,
@@ -76,13 +75,6 @@ export const ExecutorAnnounceSchema = z.object({
   startedAt: z.string().optional(),
 }) satisfies z.ZodType<ExecutorAnnounce>
 
-export const ExecutorToolResultSchema = z.object({
-  sessionId: z.string(),
-  callId: z.string(),
-  ok: z.boolean(),
-  content: z.string(),
-}) satisfies z.ZodType<ExecutorToolResult>
-
 export const ToolProgressPayloadSchema = z.object({
   sessionId: z.string(),
   callId: z.string(),
@@ -98,6 +90,7 @@ const BackgroundTaskStatusSchema = z.enum([
 
 export const BackgroundTaskSummarySchema = z.object({
   taskId: z.string(),
+  sessionId: z.string(),
   command: z.string(),
   cwd: z.string(),
   pid: z.number().int().optional(),
@@ -112,6 +105,7 @@ export const BackgroundTaskSummarySchema = z.object({
 
 export const ServerBgTaskUpdatedSchema = z.object({
   workspaceId: z.string(),
+  sessionId: z.string(),
   task: BackgroundTaskSummarySchema,
   delta: z
     .object({
@@ -123,6 +117,7 @@ export const ServerBgTaskUpdatedSchema = z.object({
 
 export const ServerBgTaskEvictedSchema = z.object({
   workspaceId: z.string(),
+  sessionId: z.string(),
   taskId: z.string(),
 }) satisfies z.ZodType<ServerBgTaskEvicted>
 
