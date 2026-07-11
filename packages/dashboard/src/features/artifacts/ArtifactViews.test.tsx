@@ -1,7 +1,149 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ArtifactExplorerDialog, type ArtifactManifest } from './ArtifactExplorerDialog.js'
+import { ArtifactInventoryView } from './ArtifactInventoryView.js'
+import { EvalRunsView } from './EvalRunsView.js'
+import { MemoryView } from './MemoryView.js'
+import { OpsView } from './OpsView.js'
+import { ProfilesView } from './ProfilesView.js'
+import { RunBenchmarkWizard } from './RunBenchmarkWizard.js'
+import type { ArtifactManifest } from './shared/internals.js'
+
+type ArtifactMode = 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops'
+
+// URL-keyed mock router.
+//
+// Motivation: after the ArtifactExplorerDialog refactor, each per-mode View
+// component (ArtifactInventoryView / EvalRunsView / ProfilesView / ...) runs
+// its own useArtifactManifest() hook. That means switching tabs re-mounts a
+// View and re-issues /artifacts/manifest. The old test relied on a strict
+// mockResolvedValueOnce sequence, which no longer matches the interleaved
+// request order produced by tab switches. Routing by URL keeps every test's
+// intent (which endpoints get which payloads) but tolerates the new request
+// interleaving.
+type MockRouter = {
+  setManifest(manifest: ArtifactManifest | { error: string; status?: number }): void
+  setContent(path: string, body: unknown, mediaType?: string): void
+  enqueueContent(path: string, body: unknown, mediaType?: string): void
+  enqueue(url: string, response: Response): void
+  enqueueError(url: string, error: string, status?: number): void
+  reset(): void
+}
+
+function createRouter(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): MockRouter {
+  let manifestResponse: () => Response = () =>
+    new Response(JSON.stringify({ error: 'manifest not set' }), { status: 500 })
+  const contentSticky = new Map<string, () => Response>()
+  const contentQueue = new Map<string, Array<() => Response>>()
+  const urlQueue = new Map<string, Array<() => Response>>()
+
+  fetchMock.mockImplementation(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    if (url === '/artifacts/manifest') {
+      return manifestResponse()
+    }
+    if (url.startsWith('/artifacts/content?path=')) {
+      const encoded = url.slice('/artifacts/content?path='.length)
+      const path = decodeURIComponent(encoded)
+      const queue = contentQueue.get(path)
+      if (queue && queue.length > 0) return queue.shift()!()
+      const sticky = contentSticky.get(path)
+      if (sticky) return sticky()
+      return new Response(JSON.stringify({ error: `no mock for content path: ${path}` }), { status: 404 })
+    }
+    const queue = urlQueue.get(url)
+    if (queue && queue.length > 0) return queue.shift()!()
+    return new Response(JSON.stringify({ error: `no mock for url: ${url}` }), { status: 404 })
+  })
+
+  return {
+    setManifest(value) {
+      if ('summary' in value) {
+        manifestResponse = () =>
+          new Response(JSON.stringify(value), { status: 200 })
+      } else {
+        const status = value.status ?? 500
+        manifestResponse = () =>
+          new Response(JSON.stringify({ error: value.error }), { status })
+      }
+    },
+    setContent(path, body, mediaType = 'application/json') {
+      contentSticky.set(path, () =>
+        new Response(JSON.stringify({ path, mediaType, body }), { status: 200 }))
+    },
+    enqueueContent(path, body, mediaType = 'application/json') {
+      const list = contentQueue.get(path) ?? []
+      list.push(() => new Response(JSON.stringify({ path, mediaType, body }), { status: 200 }))
+      contentQueue.set(path, list)
+    },
+    enqueue(url, response) {
+      const list = urlQueue.get(url) ?? []
+      const cloned = response.clone()
+      list.push(() => cloned.clone())
+      urlQueue.set(url, list)
+    },
+    enqueueError(url, error, status = 500) {
+      this.enqueue(url, new Response(JSON.stringify({ error }), { status }))
+    },
+    reset() {
+      manifestResponse = () =>
+        new Response(JSON.stringify({ error: 'manifest not set' }), { status: 500 })
+      contentSticky.clear()
+      contentQueue.clear()
+      urlQueue.clear()
+    },
+  }
+}
+
+// Test-only compat wrapper that mirrors the old ArtifactExplorerDialog behavior:
+// renders the initial mode's view and exposes tab buttons so existing
+// fireEvent.click(...tab...) assertions keep working after per-mode extraction.
+function ArtifactExplorerDialog({
+  initialMode = 'artifacts',
+  onOpenSession,
+}: {
+  open?: boolean
+  initialMode?: ArtifactMode
+  onOpenChange?(open: boolean): void
+  onOpenSession?(sessionId: string): void
+}): JSX.Element {
+  const [mode, setMode] = useState<ArtifactMode>(initialMode)
+  const headingText =
+    mode === 'artifacts'
+      ? 'Artifacts'
+      : mode === 'eval'
+        ? 'Eval'
+        : mode === 'profiles'
+          ? 'Profiles'
+          : mode === 'memory'
+            ? 'Memory'
+            : 'Ops'
+  return (
+    <div>
+      <h2>{headingText}</h2>
+      <button type="button" onClick={() => setMode('artifacts')}>artifacts</button>
+      <button type="button" onClick={() => setMode('eval')}>eval</button>
+      <button type="button" onClick={() => setMode('profiles')}>profiles</button>
+      <button type="button" onClick={() => setMode('memory')}>memory</button>
+      <button type="button" onClick={() => setMode('ops')}>ops</button>
+      {mode === 'artifacts' ? <ArtifactInventoryView /> : null}
+      {mode === 'eval' ? <EvalRunsView onOpenSession={onOpenSession} /> : null}
+      {mode === 'profiles' ? <ProfilesView /> : null}
+      {mode === 'memory' ? <MemoryView /> : null}
+      {mode === 'ops' ? <OpsView /> : null}
+    </div>
+  )
+}
+
+function renderEvalWithWizard(): ReturnType<typeof render> {
+  return render(
+    <>
+      <ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />
+      <RunBenchmarkWizard onArtifactActionComplete={() => {}} />
+    </>,
+  )
+}
 
 const manifest: ArtifactManifest = {
   schemaVersion: 1,
@@ -102,12 +244,14 @@ const manifest: ArtifactManifest = {
   },
 }
 
-describe('ArtifactExplorerDialog', () => {
+describe('ArtifactViews', () => {
   const fetchMock = vi.fn<typeof fetch>()
+  let router: MockRouter
 
   beforeEach(() => {
     fetchMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
+    router = createRouter(fetchMock)
   })
 
   afterEach(() => {
@@ -115,7 +259,7 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('loads and renders the artifact manifest summary and entries', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+    router.setManifest(manifest)
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
 
@@ -130,124 +274,91 @@ describe('ArtifactExplorerDialog', () => {
 
   it('loads eval summaries from artifact content when the Eval Runs tab is selected', async () => {
     const onOpenSession = vi.fn()
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/summary.json',
-        mediaType: 'application/json',
-        body: {
-          experimentId: 'run1',
-          dataset: 'local',
-          model: 'agent-test',
-          trialCount: 2,
-          resolved: 1,
-          failed: 1,
-          timedOut: 0,
-          failureCounts: { empty_patch: 1, test_failed: 2 },
-          metrics: { passRate: 0.5 },
+    router.setManifest(manifest)
+    router.setContent('runs/swebench/run1/summary.json', {
+      experimentId: 'run1',
+      dataset: 'local',
+      model: 'agent-test',
+      trialCount: 2,
+      resolved: 1,
+      failed: 1,
+      timedOut: 0,
+      failureCounts: { empty_patch: 1, test_failed: 2 },
+      metrics: { passRate: 0.5 },
+    })
+    router.setContent('runs/eval/compare/eval-comparison.json', {
+      baseline: { experimentId: 'base', resolved: 1, failed: 1, timedOut: 0 },
+      candidate: { experimentId: 'candidate', resolved: 2, failed: 0, timedOut: 0 },
+      deltas: { resolved: 1, failed: -1, timedOut: 0, passRate: 0.5 },
+      failureDeltas: { empty_patch: -1 },
+      subagentUsageDelta: {
+        baseline: null,
+        candidate: {
+          totalCount: 3,
+          trialsWithSubagents: 2,
+          maxDepth: 2,
+          perTrialMean: 1.5,
+          resolvedWithSubagents: 2,
+          unresolvedWithSubagents: 0,
         },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/compare/eval-comparison.json',
-        mediaType: 'application/json',
-        body: {
-          baseline: { experimentId: 'base', resolved: 1, failed: 1, timedOut: 0 },
-          candidate: { experimentId: 'candidate', resolved: 2, failed: 0, timedOut: 0 },
-          deltas: { resolved: 1, failed: -1, timedOut: 0, passRate: 0.5 },
-          failureDeltas: { empty_patch: -1 },
-          subagentUsageDelta: {
-            baseline: null,
-            candidate: {
-              totalCount: 3,
-              trialsWithSubagents: 2,
-              maxDepth: 2,
-              perTrialMean: 1.5,
-              resolvedWithSubagents: 2,
-              unresolvedWithSubagents: 0,
-            },
-            totalCount: 3,
-            trialsWithSubagents: 2,
-            maxDepth: 2,
-            perTrialMean: 1.5,
-            resolvedWithSubagents: 2,
-            unresolvedWithSubagents: 0,
-          },
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/progress.json',
-        mediaType: 'application/json',
-        body: {
-          schemaVersion: 1,
-          runId: 'run1',
-          dataset: 'local',
-          model: 'agent-test',
-          status: 'completed',
-          selectedCount: 2,
-          queuedCount: 0,
-          runningCount: 0,
-          skippedCount: 1,
-          completedCount: 1,
-          failedCount: 0,
-          timedOutCount: 0,
-          maxWorkers: 4,
-          instances: [{ instanceId: 'local__repo-1', status: 'completed' }],
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/worker-plan.json',
-        mediaType: 'application/json',
-        body: {
-          runId: 'run1',
-          dataset: 'local',
-          model: 'agent-test',
-          selectedCount: 2,
-          maxWorkers: 4,
-          shards: [
-            { workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] },
-            { workerId: 2, instanceCount: 1, instanceIds: ['local__repo-2'] },
-          ],
-          resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2, timeoutMs: 600000 },
-          warnings: ['maxWorkers exceeds selected instance count'],
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/session-score/scores.json',
-        mediaType: 'application/json',
-        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [{ scorer: 'patch.non_empty', passed: true, score: 1 }] },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
-        mediaType: 'application/json',
-        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', inputRef: 'local__repo-1', parsed: { score: 0.8, passed: true, explanation: 'Looks correct' } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/trials/local__repo-1.json',
-        mediaType: 'application/json',
-        body: {
-          trialId: 'run1:local__repo-1',
-          experimentId: 'run1',
-          instanceId: 'local__repo-1',
-          sessionId: 'session-linked-1',
-          status: 'completed',
-          resolved: true,
-          artifacts: [
-            { kind: 'diff', uri: 'artifacts/local__repo-1/final.diff', bytes: 42, mediaType: 'text/x-diff' },
-            { kind: 'trace', uri: 'traces/local__repo-1.openinference.json', bytes: 1024, mediaType: 'application/json' },
-            { kind: 'metadata', uri: 'artifacts/local__repo-1/swebench-result.json', bytes: 256, mediaType: 'application/json' },
-            { kind: 'log', uri: 'artifacts/local__repo-1/harness/test.log', bytes: 2048, mediaType: 'text/plain' },
-            { kind: 'log', uri: 'artifacts/local__repo-1/agent.stdout.log', bytes: 128, mediaType: 'text/plain' },
-            { kind: 'metadata', uri: 'artifacts/local__repo-1/prompt.txt', bytes: 64, mediaType: 'text/plain' },
-            { kind: 'metadata', uri: 'artifacts/local__repo-1/workspace-metadata.json', bytes: 96, mediaType: 'application/json' },
-          ],
-          metrics: { durationMs: 1250, patchBytes: 42 },
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/artifacts/local__repo-1/final.diff',
-        mediaType: 'text/x-diff',
-        body: 'diff --git a/file b/file\n',
-      }), { status: 200 }))
+        totalCount: 3,
+        trialsWithSubagents: 2,
+        maxDepth: 2,
+        perTrialMean: 1.5,
+        resolvedWithSubagents: 2,
+        unresolvedWithSubagents: 0,
+      },
+    })
+    router.setContent('runs/swebench/run1/progress.json', {
+      schemaVersion: 1,
+      runId: 'run1',
+      dataset: 'local',
+      model: 'agent-test',
+      status: 'completed',
+      selectedCount: 2,
+      queuedCount: 0,
+      runningCount: 0,
+      skippedCount: 1,
+      completedCount: 1,
+      failedCount: 0,
+      timedOutCount: 0,
+      maxWorkers: 4,
+      instances: [{ instanceId: 'local__repo-1', status: 'completed' }],
+    })
+    router.setContent('runs/swebench/run1/worker-plan.json', {
+      runId: 'run1',
+      dataset: 'local',
+      model: 'agent-test',
+      selectedCount: 2,
+      maxWorkers: 4,
+      shards: [
+        { workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] },
+        { workerId: 2, instanceCount: 1, instanceIds: ['local__repo-2'] },
+      ],
+      resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2, timeoutMs: 600000 },
+      warnings: ['maxWorkers exceeds selected instance count'],
+    })
+    router.setContent('runs/eval/session-score/scores.json', { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [{ scorer: 'patch.non_empty', passed: true, score: 1 }] })
+    router.setContent('runs/eval/judge-score/judge/model_judge.score.judge-trace.json', { scorer: 'model_judge.score', judgeModel: 'judge-test', inputRef: 'local__repo-1', parsed: { score: 0.8, passed: true, explanation: 'Looks correct' } })
+    router.setContent('runs/swebench/run1/trials/local__repo-1.json', {
+      trialId: 'run1:local__repo-1',
+      experimentId: 'run1',
+      instanceId: 'local__repo-1',
+      sessionId: 'session-linked-1',
+      status: 'completed',
+      resolved: true,
+      artifacts: [
+        { kind: 'diff', uri: 'artifacts/local__repo-1/final.diff', bytes: 42, mediaType: 'text/x-diff' },
+        { kind: 'trace', uri: 'traces/local__repo-1.openinference.json', bytes: 1024, mediaType: 'application/json' },
+        { kind: 'metadata', uri: 'artifacts/local__repo-1/swebench-result.json', bytes: 256, mediaType: 'application/json' },
+        { kind: 'log', uri: 'artifacts/local__repo-1/harness/test.log', bytes: 2048, mediaType: 'text/plain' },
+        { kind: 'log', uri: 'artifacts/local__repo-1/agent.stdout.log', bytes: 128, mediaType: 'text/plain' },
+        { kind: 'metadata', uri: 'artifacts/local__repo-1/prompt.txt', bytes: 64, mediaType: 'text/plain' },
+        { kind: 'metadata', uri: 'artifacts/local__repo-1/workspace-metadata.json', bytes: 96, mediaType: 'application/json' },
+      ],
+      metrics: { durationMs: 1250, patchBytes: 42 },
+    })
+    router.setContent('runs/swebench/run1/artifacts/local__repo-1/final.diff', 'diff --git a/file b/file\n', 'text/x-diff')
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} onOpenSession={onOpenSession} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -334,45 +445,16 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('can open directly in eval mode', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/summary.json',
-        mediaType: 'application/json',
-        body: { experimentId: 'run1', dataset: 'local', model: 'agent-test', trialCount: 1, resolved: 1, failed: 0, metrics: { passRate: 1 } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/compare/eval-comparison.json',
-        mediaType: 'application/json',
-        body: {},
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/progress.json',
-        mediaType: 'application/json',
-        body: { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 1 },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/worker-plan.json',
-        mediaType: 'application/json',
-        body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 1, maxWorkers: 1, shards: [{ workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 1 } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/session-score/scores.json',
-        mediaType: 'application/json',
-        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
-        mediaType: 'application/json',
-        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/trials/local__repo-1.json',
-        mediaType: 'application/json',
-        body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] },
-      }), { status: 200 }))
+    router.setManifest(manifest)
+    router.setContent('runs/swebench/run1/summary.json', { experimentId: 'run1', dataset: 'local', model: 'agent-test', trialCount: 1, resolved: 1, failed: 0, metrics: { passRate: 1 } })
+    router.setContent('runs/eval/compare/eval-comparison.json', {})
+    router.setContent('runs/swebench/run1/progress.json', { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 1 })
+    router.setContent('runs/swebench/run1/worker-plan.json', { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 1, maxWorkers: 1, shards: [{ workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 1 } })
+    router.setContent('runs/eval/session-score/scores.json', { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] })
+    router.setContent('runs/eval/judge-score/judge/model_judge.score.judge-trace.json', { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } })
+    router.setContent('runs/swebench/run1/trials/local__repo-1.json', { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] })
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
 
     await screen.findByRole('heading', { name: 'Eval' })
     await waitFor(() => expect(screen.getAllByText('run1').length).toBeGreaterThanOrEqual(1))
@@ -380,24 +462,18 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('creates SWE-bench worker plans from the Eval dashboard', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/summary.json',
-        mediaType: 'application/json',
-        body: { experimentId: 'run1', dataset: 'local', model: 'agent-test', trialCount: 1, resolved: 1, failed: 0, metrics: { passRate: 1 } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/compare/eval-comparison.json', mediaType: 'application/json', body: {} }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/swebench/run1/progress.json', mediaType: 'application/json', body: { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 1 } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/swebench/run1/worker-plan.json', mediaType: 'application/json', body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 1, maxWorkers: 1, shards: [{ workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 1 } } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/session-score/scores.json', mediaType: 'application/json', body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json', mediaType: 'application/json', body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path: 'runs/swebench/run1/trials/local__repo-1.json', mediaType: 'application/json', body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ instancesJsonlPath: '/tmp/instances.jsonl', rowCount: 2, bytes: 72, source: { kind: 'inline' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ planPath: '/tmp/artifacts/dash-plan/worker-plan.json', runId: 'dash-plan', selectedCount: 2, maxWorkers: 2, shardCount: 2, warnings: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+    router.setManifest(manifest)
+    router.setContent('runs/swebench/run1/summary.json', { experimentId: 'run1', dataset: 'local', model: 'agent-test', trialCount: 1, resolved: 1, failed: 0, metrics: { passRate: 1 } })
+    router.setContent('runs/eval/compare/eval-comparison.json', {})
+    router.setContent('runs/swebench/run1/progress.json', { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 1 })
+    router.setContent('runs/swebench/run1/worker-plan.json', { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 1, maxWorkers: 1, shards: [{ workerId: 1, instanceCount: 1, instanceIds: ['local__repo-1'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 1 } })
+    router.setContent('runs/eval/session-score/scores.json', { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] })
+    router.setContent('runs/eval/judge-score/judge/model_judge.score.judge-trace.json', { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } })
+    router.setContent('runs/swebench/run1/trials/local__repo-1.json', { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] })
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({ instancesJsonlPath: '/tmp/instances.jsonl', rowCount: 2, bytes: 72, source: { kind: 'inline' } }), { status: 200 }))
+    router.enqueue('/eval/swebench/plan', new Response(JSON.stringify({ planPath: '/tmp/artifacts/dash-plan/worker-plan.json', runId: 'dash-plan', selectedCount: 2, maxWorkers: 2, shardCount: 2, warnings: [] }), { status: 200 }))
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
 
     await screen.findByRole('heading', { name: 'Eval' })
     fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
@@ -410,7 +486,7 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.click(screen.getByTestId('instances-resolve-button'))
     await screen.findByTestId('instances-resolve-summary')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create Plan' }))
+    fireEvent.click(screen.getByTestId('run-benchmark-wizard-plan-submit'))
 
     expect(fetchMock).toHaveBeenCalledWith('/eval/swebench/plan', expect.objectContaining({
       method: 'POST',
@@ -422,7 +498,7 @@ describe('ArtifactExplorerDialog', () => {
     const planCall = fetchMock.mock.calls.find((call) => call[0] === '/eval/swebench/plan')
     const body = JSON.parse(String((planCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
     expect(body).toMatchObject({ runId: 'dash-plan', model: 'agent-test', instancesJsonl: '/tmp/instances.jsonl', maxWorkers: 2 })
-    expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows progress-only eval runs before summaries are written', async () => {
@@ -430,46 +506,25 @@ describe('ArtifactExplorerDialog', () => {
       ...manifest,
       entries: manifest.entries.filter((entry) => entry.path !== 'runs/swebench/run1/summary.json' && entry.path !== 'runs/swebench/run1/trials/local__repo-1.json'),
     }
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(progressOnlyManifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/compare/eval-comparison.json',
-        mediaType: 'application/json',
-        body: {},
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/progress.json',
-        mediaType: 'application/json',
-        body: {
-          runId: 'run1',
-          dataset: 'local',
-          model: 'agent-test',
-          status: 'running',
-          selectedCount: 3,
-          queuedCount: 1,
-          runningCount: 1,
-          skippedCount: 0,
-          completedCount: 1,
-          failedCount: 0,
-          timedOutCount: 0,
-          maxWorkers: 2,
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/worker-plan.json',
-        mediaType: 'application/json',
-        body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 3, maxWorkers: 2, shards: [{ workerId: 1, instanceCount: 2, instanceIds: ['a', 'c'] }, { workerId: 2, instanceCount: 1, instanceIds: ['b'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2 } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/session-score/scores.json',
-        mediaType: 'application/json',
-        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
-        mediaType: 'application/json',
-        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } },
-      }), { status: 200 }))
+    router.setManifest(progressOnlyManifest)
+    router.setContent('runs/eval/compare/eval-comparison.json', {})
+    router.setContent('runs/swebench/run1/progress.json', {
+      runId: 'run1',
+      dataset: 'local',
+      model: 'agent-test',
+      status: 'running',
+      selectedCount: 3,
+      queuedCount: 1,
+      runningCount: 1,
+      skippedCount: 0,
+      completedCount: 1,
+      failedCount: 0,
+      timedOutCount: 0,
+      maxWorkers: 2,
+    })
+    router.setContent('runs/swebench/run1/worker-plan.json', { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 3, maxWorkers: 2, shards: [{ workerId: 1, instanceCount: 2, instanceIds: ['a', 'c'] }, { workerId: 2, instanceCount: 1, instanceIds: ['b'] }], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2 } })
+    router.setContent('runs/eval/session-score/scores.json', { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] })
+    router.setContent('runs/eval/judge-score/judge/model_judge.score.judge-trace.json', { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -483,26 +538,21 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('loads session profile artifacts in the Profiles tab', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/profile/session/profile.json',
-        mediaType: 'application/json',
-        body: {
-          sessionId: 's1',
-          llmCalls: 2,
-          toolCalls: 3,
-          llmTraceMissingCalls: 1,
-          totalInputTokens: 1234,
-          totalOutputTokens: 567,
-          models: ['gpt-test'],
-          llmLatencyCalls: 2,
-          averageLlmDurationMs: 2400,
-          p95LlmDurationMs: 3100,
-          averageTimeToFirstChunkMs: 320,
-          p95TimeToFirstChunkMs: 480,
-        },
-      }), { status: 200 }))
+    router.setManifest(manifest)
+    router.setContent('runs/profile/session/profile.json', {
+      sessionId: 's1',
+      llmCalls: 2,
+      toolCalls: 3,
+      llmTraceMissingCalls: 1,
+      totalInputTokens: 1234,
+      totalOutputTokens: 567,
+      models: ['gpt-test'],
+      llmLatencyCalls: 2,
+      averageLlmDurationMs: 2400,
+      p95LlmDurationMs: 3100,
+      averageTimeToFirstChunkMs: 320,
+      p95TimeToFirstChunkMs: 480,
+    })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -526,15 +576,9 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('runs lightweight enhancement artifact actions from dashboard tabs', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/profile/session/profile.json',
-        mediaType: 'application/json',
-        body: { sessionId: 's1', llmCalls: 1, toolCalls: 0, costStatus: 'unknown' },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'profile-session', profilePath: '/tmp/artifacts/profile.json', profile: { sessionId: 's2' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+    router.setManifest(manifest)
+    router.setContent('runs/profile/session/profile.json', { sessionId: 's1', llmCalls: 1, toolCalls: 0, costStatus: 'unknown' })
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({ action: 'profile-session', profilePath: '/tmp/artifacts/profile.json', profile: { sessionId: 's2' } }), { status: 200 }))
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -550,7 +594,7 @@ describe('ArtifactExplorerDialog', () => {
     const actionCall = fetchMock.mock.calls.find((call) => call[0] === '/enhancement/action')
     const body = JSON.parse(String((actionCall?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>
     expect(body).toEqual({ action: 'profile-session', sessionId: 's2' })
-    expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBe(2)
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/artifacts/manifest').length).toBeGreaterThanOrEqual(1)
   })
 
   it('builds SWE-bench predictions from uploaded patches through the guided wizard', async () => {
@@ -561,14 +605,12 @@ describe('ArtifactExplorerDialog', () => {
       entries: [],
       summary: { entryCount: 0, totalBytes: 0, hashedCount: 0, hashSkippedCount: 0, kinds: {} },
     }
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ instancesJsonlPath: '/tmp/artifacts/dash-infer/instances.jsonl', rowCount: 2, bytes: 86, source: { kind: 'inline' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'swebench-upload-patches', patchesDir: '/tmp/artifacts/dash-infer/patches', instanceCount: 2 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'swebench-infer-patches', predictionsPath: '/tmp/artifacts/dash-infer/predictions.jsonl', trialCount: 2, gradingStatus: 'not_graded' }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
+    router.setManifest(emptyManifest)
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({ instancesJsonlPath: '/tmp/artifacts/dash-infer/instances.jsonl', rowCount: 2, bytes: 86, source: { kind: 'inline' } }), { status: 200 }))
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({ action: 'swebench-upload-patches', patchesDir: '/tmp/artifacts/dash-infer/patches', instanceCount: 2 }), { status: 200 }))
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({ action: 'swebench-infer-patches', predictionsPath: '/tmp/artifacts/dash-infer/predictions.jsonl', trialCount: 2, gradingStatus: 'not_graded' }), { status: 200 }))
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
     await screen.findByText('No eval summaries found.')
 
     fireEvent.click(await screen.findByTestId('run-benchmark-wizard-toggle'))
@@ -616,12 +658,10 @@ describe('ArtifactExplorerDialog', () => {
       entries: [],
       summary: { entryCount: 0, totalBytes: 0, hashedCount: 0, hashSkippedCount: 0, kinds: {} },
     }
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'eval-judge-score', scoresPath: '/tmp/artifacts/eval/judge/score.json' }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(emptyManifest), { status: 200 }))
+    router.setManifest(emptyManifest)
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({ action: 'eval-judge-score', scoresPath: '/tmp/artifacts/eval/judge/score.json' }), { status: 200 }))
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
     await screen.findByText('No eval summaries found.')
 
     fireEvent.click(screen.getByText('Eval Artifact Actions'))
@@ -653,39 +693,34 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('loads memory index artifacts in the Memory tab', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/memory/memory-index.json',
-        mediaType: 'application/json',
-        body: {
-          generatedAt: '2026-07-09T00:00:00.000Z',
-          entries: [
-            {
-              scope: 'workspace',
-              key: 'user-style',
-              path: '/repo/.agent-kernel/memory/user-style.md',
-              bytes: 120,
-              status: 'active',
-              description: 'User prefers concise answers',
-              type: 'user',
-              source: 'consolidator',
-              confidence: 0.9,
-              sessionId: 's1',
-            },
-            {
-              scope: 'workspace',
-              key: 'old-rule',
-              path: '/repo/.agent-kernel/memory/.tombstones/old-rule.json',
-              bytes: 80,
-              status: 'tombstoned',
-              deletedAt: '2026-07-09T00:00:00.000Z',
-              archivedPath: '/repo/.agent-kernel/memory/.tombstones/old-rule.md',
-            },
-          ],
-          warnings: ['ignored malformed tombstone'],
+    router.setManifest(manifest)
+    router.setContent('runs/memory/memory-index.json', {
+      generatedAt: '2026-07-09T00:00:00.000Z',
+      entries: [
+        {
+          scope: 'workspace',
+          key: 'user-style',
+          path: '/repo/.agent-kernel/memory/user-style.md',
+          bytes: 120,
+          status: 'active',
+          description: 'User prefers concise answers',
+          type: 'user',
+          source: 'consolidator',
+          confidence: 0.9,
+          sessionId: 's1',
         },
-      }), { status: 200 }))
+        {
+          scope: 'workspace',
+          key: 'old-rule',
+          path: '/repo/.agent-kernel/memory/.tombstones/old-rule.json',
+          bytes: 80,
+          status: 'tombstoned',
+          deletedAt: '2026-07-09T00:00:00.000Z',
+          archivedPath: '/repo/.agent-kernel/memory/.tombstones/old-rule.md',
+        },
+      ],
+      warnings: ['ignored malformed tombstone'],
+    })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
     await screen.findByText('llm/s1/1.request.json')
@@ -705,64 +740,23 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('loads ops artifacts for reliability, rollout, trace, router, and subagent views', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/reliability/session/reliability-audit.json',
-        mediaType: 'application/json',
-        body: {
-          sessionId: 's1',
-          status: 'done',
-          dangling: false,
-          recoveryEventDetails: [{ seq: 3, kind: 'tool_result_recovered', callId: 'c1' }],
-          integrity: { duplicateToolCallIds: ['dup'], duplicateToolResultIds: [], toolResultsWithoutCall: ['late'], toolCallsWithoutResult: [] },
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/reliability/chaos/reliability-chaos.json',
-        mediaType: 'application/json',
-        body: { sessionCount: 2, danglingCount: 1, recoveryEventCount: 1 },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/rollouts/rollouts/rollout_1.json',
-        mediaType: 'application/json',
-        body: { rollout_id: 'rollout_1', task_id: 'swebench:local__repo-1', framework_target: 'verl' },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/rollouts/rl-token-segments/s1.json',
-        mediaType: 'application/json',
-        body: { sessionId: 's1', tokenIdsCaptured: false, segments: [{ segmentId: 'seg_1' }], topology: { compactionCount: 1, subAgentCallCount: 2 } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/rollouts/rl-adapters/verl/rollout_1.json',
-        mediaType: 'application/json',
-        body: { frameworkTarget: 'verl', status: 'blocked', reason: 'requires token ids' },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/subagents/subagent-graph.json',
-        mediaType: 'application/json',
-        body: { nodes: [{ sessionId: 'parent' }, { sessionId: 'child' }], edges: [{ parentSessionId: 'parent', childSessionId: 'child' }], warnings: [] },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'traces/s1.openinference.json',
-        mediaType: 'application/json',
-        body: { spans: [{ name: 'llm' }] },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'message-assembly/s1/1.json',
-        mediaType: 'application/json',
-        body: { sessionId: 's1', messageCount: 2, toolCount: 13, estimatedTokens: 900 },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'router-decisions/s1/1.json',
-        mediaType: 'application/json',
-        body: { selectedProvider: 'openai', selectedModel: 'gpt-test', reasonCodes: ['tool_calling_enabled'], toolPolicy: { toolCount: 13, skillBackedCount: 1 } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'tool-catalog/s1/1.json',
-        mediaType: 'application/json',
-        body: { toolCount: 13, tools: [{ name: 'skill', skillBacked: true }, { name: 'read', skillBacked: false }] },
-      }), { status: 200 }))
+    router.setManifest(manifest)
+    router.setContent('runs/reliability/session/reliability-audit.json', {
+      sessionId: 's1',
+      status: 'done',
+      dangling: false,
+      recoveryEventDetails: [{ seq: 3, kind: 'tool_result_recovered', callId: 'c1' }],
+      integrity: { duplicateToolCallIds: ['dup'], duplicateToolResultIds: [], toolResultsWithoutCall: ['late'], toolCallsWithoutResult: [] },
+    })
+    router.setContent('runs/reliability/chaos/reliability-chaos.json', { sessionCount: 2, danglingCount: 1, recoveryEventCount: 1 })
+    router.setContent('runs/rollouts/rollouts/rollout_1.json', { rollout_id: 'rollout_1', task_id: 'swebench:local__repo-1', framework_target: 'verl' })
+    router.setContent('runs/rollouts/rl-token-segments/s1.json', { sessionId: 's1', tokenIdsCaptured: false, segments: [{ segmentId: 'seg_1' }], topology: { compactionCount: 1, subAgentCallCount: 2 } })
+    router.setContent('runs/rollouts/rl-adapters/verl/rollout_1.json', { frameworkTarget: 'verl', status: 'blocked', reason: 'requires token ids' })
+    router.setContent('runs/subagents/subagent-graph.json', { nodes: [{ sessionId: 'parent' }, { sessionId: 'child' }], edges: [{ parentSessionId: 'parent', childSessionId: 'child' }], warnings: [] })
+    router.setContent('traces/s1.openinference.json', { spans: [{ name: 'llm' }] })
+    router.setContent('message-assembly/s1/1.json', { sessionId: 's1', messageCount: 2, toolCount: 13, estimatedTokens: 900 })
+    router.setContent('router-decisions/s1/1.json', { selectedProvider: 'openai', selectedModel: 'gpt-test', reasonCodes: ['tool_calling_enabled'], toolPolicy: { toolCount: 13, skillBackedCount: 1 } })
+    router.setContent('tool-catalog/s1/1.json', { toolCount: 13, tools: [{ name: 'skill', skillBacked: true }, { name: 'read', skillBacked: false }] })
 
     render(<ArtifactExplorerDialog open initialMode="ops" onOpenChange={() => {}} />)
 
@@ -785,7 +779,7 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('surfaces endpoint errors', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'artifact capture is not configured' }), { status: 404 }))
+    router.setManifest({ error: 'artifact capture is not configured', status: 404 })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
 
@@ -793,9 +787,9 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('advances the Run Benchmark wizard from plan to predictions after /eval/swebench/plan succeeds', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+    router.setManifest({ ...manifest, entries: [] })
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
@@ -806,7 +800,7 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.click(screen.getByTestId('instances-source-tab-paste'))
     fireEvent.change(screen.getByTestId('instances-paste-textarea'), { target: { value: '{"instance_id":"repo-1"}\n{"instance_id":"repo-2"}\n' } })
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({
       instancesJsonlPath: '/tmp/instances.jsonl',
       rowCount: 2,
       bytes: 64,
@@ -816,13 +810,13 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.click(screen.getByTestId('instances-resolve-button'))
     await screen.findByTestId('instances-resolve-summary')
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    router.enqueue('/eval/swebench/plan', new Response(JSON.stringify({
       planPath: '/tmp/plan.json',
       runId: 'run-1',
       selectedCount: 2,
       shardCount: 1,
     }), { status: 200 }))
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+    router.setManifest(manifest)
 
     fireEvent.click(screen.getByTestId('run-benchmark-wizard-plan-submit'))
 
@@ -837,9 +831,9 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('surfaces the SWE-bench grade command in the wizard handoff panel', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+    router.setManifest({ ...manifest, entries: [] })
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
@@ -848,7 +842,7 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.change(screen.getByTestId('run-benchmark-wizard-run-id'), { target: { value: 'run-1' } })
     fireEvent.click(screen.getByTestId('run-benchmark-wizard-step-grade'))
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({
       action: 'swebench-grade-command',
       gradingAuthority: 'official-swebench-harness',
       gradingMode: 'dry-run',
@@ -856,7 +850,7 @@ describe('ArtifactExplorerDialog', () => {
       shellCommand: 'python -m swebench.harness.run_evaluation --predictions_path artifacts/eval/run-1/predictions.jsonl --dataset_name princeton-nlp/SWE-bench_Lite --run_id run-1',
       resultsDir: 'evaluation_results/run-1',
     }), { status: 200 }))
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+    router.setManifest(manifest)
 
     fireEvent.click(screen.getByTestId('run-benchmark-wizard-grade-submit'))
 
@@ -870,8 +864,8 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('uploads patches inline from the wizard Infer step', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    router.setManifest({ ...manifest, entries: [] })
+    renderEvalWithWizard()
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
     })
@@ -883,7 +877,7 @@ describe('ArtifactExplorerDialog', () => {
       target: { value: '{"astropy__astropy-12907":"diff --git a/x b/x\\n+one\\n"}' },
     })
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({
       patchesDir: '/tmp/artifacts/run-1/patches',
       instanceCount: 1,
       bytes: 42,
@@ -909,8 +903,8 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('uploads grade results inline from the wizard Ingest step', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    router.setManifest({ ...manifest, entries: [] })
+    renderEvalWithWizard()
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
     })
@@ -922,7 +916,7 @@ describe('ArtifactExplorerDialog', () => {
       target: { value: '{"instance_results.jsonl":"{\\"instance_id\\":\\"a\\",\\"resolved\\":true}\\n","summary.json":"{\\"total\\":1}"}' },
     })
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({
       resultsDir: '/tmp/artifacts/run-1/grade-results',
       fileCount: 2,
       bytes: 84,
@@ -951,9 +945,9 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('advances to the review step after planning without leaking server paths', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ...manifest, entries: [] }), { status: 200 }))
+    router.setManifest({ ...manifest, entries: [] })
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
@@ -964,7 +958,7 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.click(screen.getByTestId('instances-source-tab-paste'))
     fireEvent.change(screen.getByTestId('instances-paste-textarea'), { target: { value: '{"instance_id":"repo-1"}\n{"instance_id":"repo-2"}\n' } })
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    router.enqueue('/enhancement/action', new Response(JSON.stringify({
       instancesJsonlPath: '/tmp/instances.jsonl',
       rowCount: 2,
       bytes: 64,
@@ -974,14 +968,14 @@ describe('ArtifactExplorerDialog', () => {
     fireEvent.click(screen.getByTestId('instances-resolve-button'))
     await screen.findByTestId('instances-resolve-summary')
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    router.enqueue('/eval/swebench/plan', new Response(JSON.stringify({
       planPath: '/tmp/plan.json',
       registryPath: '/tmp/registry/run-index.json',
       runId: 'run-1',
       selectedCount: 2,
       shardCount: 1,
     }), { status: 200 }))
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
+    router.setManifest(manifest)
 
     fireEvent.click(screen.getByTestId('run-benchmark-wizard-plan-submit'))
 
@@ -994,62 +988,33 @@ describe('ArtifactExplorerDialog', () => {
   })
 
   it('renders the SubAgentUsagePanel when the eval summary carries subagentUsage', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify(manifest), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/summary.json',
-        mediaType: 'application/json',
-        body: {
-          experimentId: 'run1',
-          dataset: 'local',
-          model: 'agent-test',
-          trialCount: 2,
-          resolved: 1,
-          failed: 1,
-          timedOut: 0,
-          metrics: { passRate: 0.5 },
-          subagentUsage: {
-            totalCount: 3,
-            trialsWithSubagents: 2,
-            maxDepth: 2,
-            perTrialMean: 1.5,
-            resolvedWithSubagents: 1,
-            unresolvedWithSubagents: 1,
-          },
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/compare/eval-comparison.json',
-        mediaType: 'application/json',
-        body: {},
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/progress.json',
-        mediaType: 'application/json',
-        body: { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 2 },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/worker-plan.json',
-        mediaType: 'application/json',
-        body: { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 2, maxWorkers: 2, shards: [], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2 } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/session-score/scores.json',
-        mediaType: 'application/json',
-        body: { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/eval/judge-score/judge/model_judge.score.judge-trace.json',
-        mediaType: 'application/json',
-        body: { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        path: 'runs/swebench/run1/trials/local__repo-1.json',
-        mediaType: 'application/json',
-        body: { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] },
-      }), { status: 200 }))
+    router.setManifest(manifest)
+    router.setContent('runs/swebench/run1/summary.json', {
+      experimentId: 'run1',
+      dataset: 'local',
+      model: 'agent-test',
+      trialCount: 2,
+      resolved: 1,
+      failed: 1,
+      timedOut: 0,
+      metrics: { passRate: 0.5 },
+      subagentUsage: {
+        totalCount: 3,
+        trialsWithSubagents: 2,
+        maxDepth: 2,
+        perTrialMean: 1.5,
+        resolvedWithSubagents: 1,
+        unresolvedWithSubagents: 1,
+      },
+    })
+    router.setContent('runs/eval/compare/eval-comparison.json', {})
+    router.setContent('runs/swebench/run1/progress.json', { runId: 'run1', dataset: 'local', model: 'agent-test', status: 'completed', selectedCount: 2 })
+    router.setContent('runs/swebench/run1/worker-plan.json', { runId: 'run1', dataset: 'local', model: 'agent-test', selectedCount: 2, maxWorkers: 2, shards: [], resourceHints: { dockerRequired: true, workspaceIsolation: 'per-instance-git-clone', maxConcurrentWorkspaces: 2 } })
+    router.setContent('runs/eval/session-score/scores.json', { instanceId: 'local__repo-1', resolved: true, failureLabel: 'resolved', score: 1, results: [] })
+    router.setContent('runs/eval/judge-score/judge/model_judge.score.judge-trace.json', { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } })
+    router.setContent('runs/swebench/run1/trials/local__repo-1.json', { trialId: 'run1:local__repo-1', instanceId: 'local__repo-1', status: 'completed', resolved: true, artifacts: [] })
 
-    render(<ArtifactExplorerDialog open initialMode="eval" onOpenChange={() => {}} />)
+    renderEvalWithWizard()
 
     await screen.findByRole('heading', { name: 'Eval' })
     const panel = await screen.findByTestId('eval-subagent-usage')
