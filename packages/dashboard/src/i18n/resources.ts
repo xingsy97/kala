@@ -314,6 +314,7 @@ export const resources = {
         sectionsLabel: 'Settings sections',
         sections: {
           runtime: { label: 'Runtime', hint: 'Host paths and sessions' },
+          connection: { label: 'Connection', hint: 'Host endpoint override' },
           models: { label: 'Models', hint: 'Providers and default' },
           security: { label: 'Security', hint: 'Login and executors' },
           approvals: { label: 'Approvals', hint: 'Per-session, not global' },
@@ -1786,6 +1787,7 @@ export const resources = {
         sectionsLabel: ' - ',
         sections: {
           runtime: { label: ' - ', hint: 'Host  - ' },
+          connection: { label: ' - ', hint: 'Host endpoint  - ' },
           models: { label: ' - ', hint: 'Provider  - ' },
           security: { label: ' - ', hint: ' -  executor' },
           approvals: { label: ' - ', hint: ' - ï - ' },

@@ -109,6 +109,51 @@ Open `http://localhost:3000`, click **New** to create a session, pick a workspac
 
 For a walkthrough of how a single turn flows through the system, see [ARCHITECTURE](docs/architecture/overview.md#turn-lifecycle).
 
+## Deploy from a release
+
+Every tag under [Releases](https://github.com/OWNER/REPO/releases) publishes:
+
+- `agent-kernel-host-<os>-<arch>[.exe]`  -  self-contained binary (bundled Node.js runtime)
+- `agent-kernel-host.cjs`, `agent-kernel-executor.cjs`  -  fallback for Node.js 22+
+- `agent-kernel-dashboard-dist.tar.gz`  -  the frontend bundle
+- `run.sh`  -  a `wget`-only bootstrap that downloads, verifies (SHA256), and runs a component
+
+Set `COMPONENT` to pick what to run on this machine:
+
+| `COMPONENT` | What runs here |
+|---|---|
+| `host-frontend` (default) | Host process + serves the dashboard bundle. Open a browser at `http://<this-host>:3000/`. |
+| `host` | Headless host only. Deploy the frontend somewhere else. |
+| `frontend` | Downloads and extracts the frontend bundle to a directory, prints its path, exits. |
+| `executor` | Executor that dials into a running host. Requires `HOST_URL`. |
+
+Typical VM deploy:
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+export HOST=0.0.0.0                  # bind on all interfaces
+wget -qO- https://github.com/OWNER/REPO/releases/latest/download/run.sh \
+  | COMPONENT=host-frontend bash
+```
+
+Executor on the machine that holds the files:
+
+```bash
+wget -qO- https://github.com/OWNER/REPO/releases/latest/download/run.sh \
+  | COMPONENT=executor HOST_URL=http://<vm-ip>:3000 bash -s -- \
+  --workspace $(pwd)/my-project
+```
+
+Environment variables the bootstrap and host understand:
+
+- `HOST` / `PORT`  -  bind interface and port (default `127.0.0.1:3000`)
+- `AGENT_KERNEL_FRONTEND_DIR`  -  where the frontend bundle is extracted (default: temp)
+- `AGENT_KERNEL_ALLOWED_ORIGINS`  -  comma-separated origins allowed for cross-origin dashboards (unset = same-origin only)
+- `AGENT_KERNEL_RUNTIME=auto|cjs|native`  -  pick runtime family
+- `AGENT_KERNEL_RUN_DIR`  -  persistent scratch dir (default: fresh mktemp cleaned on exit)
+
+The dashboard resolves its host endpoint from (in priority order): `?host=` URL param  -  Settings dialog override  -  build-time `VITE_AGENT_KERNEL_HOST`  -  same origin as the served bundle. Change it at runtime under **Settings  -  Connection**.
+
 ## Repository layout
 
 ```

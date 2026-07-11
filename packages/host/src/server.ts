@@ -117,8 +117,9 @@ export async function startHostServer(
   const auth: AuthConfig | undefined = options.auth ?? (options.authToken ? { sharedToken: options.authToken } : undefined)
   const audit = options.audit ?? noopAuditLogger
   const http = options.httpServer ?? createServer()
+  const allowedOrigins = parseAllowedOrigins(process.env.AGENT_KERNEL_ALLOWED_ORIGINS)
   const io = new IOServer(http, {
-    cors: { origin: '*' },
+    cors: allowedOrigins === null ? { origin: '*' } : { origin: allowedOrigins, credentials: true },
   })
 
   const store = new SessionStore(options.sessionsDir)
@@ -495,4 +496,15 @@ export async function startHostServer(
       })
     },
   }
+}
+
+/**
+ * Parse AGENT_KERNEL_ALLOWED_ORIGINS ("http://a.com,http://b.com").
+ * Returns null when unset/empty (means "keep permissive default"),
+ * a string[] otherwise.
+ */
+function parseAllowedOrigins(raw: string | undefined): string[] | null {
+  if (!raw) return null
+  const list = raw.split(',').map((s) => s.trim()).filter(Boolean)
+  return list.length > 0 ? list : null
 }

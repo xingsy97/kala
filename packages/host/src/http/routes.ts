@@ -284,6 +284,24 @@ type EnhancementActionRequest = {
   includeStatuses?: readonly string[] | string
 }
 
+function parseAllowedOriginsFromEnv(): string[] | null {
+  const raw = process.env.AGENT_KERNEL_ALLOWED_ORIGINS
+  if (!raw) return null
+  const list = raw.split(',').map((s) => s.trim()).filter(Boolean)
+  return list.length > 0 ? list : null
+}
+
+function applyCorsHeaders(req: IncomingMessage, headers: Record<string, string>): void {
+  const allowed = parseAllowedOriginsFromEnv()
+  if (allowed === null) return
+  const origin = req.headers.origin
+  if (typeof origin === 'string' && allowed.includes(origin)) {
+    headers['access-control-allow-origin'] = origin
+    headers['vary'] = 'Origin'
+    headers['access-control-allow-credentials'] = 'true'
+  }
+}
+
 export function attachJsonRoutes(
   server: HttpServer,
   payloads: {
@@ -306,6 +324,20 @@ export function attachJsonRoutes(
     // Strip query string / fragment before matching, so `/models?ts= - `
     // (cache-buster) still hits.
     const path = url.split('?')[0]?.split('#')[0] ?? ''
+    if (req.method === 'OPTIONS') {
+      const headers: Record<string, string> = {
+        'access-control-allow-methods': 'GET, HEAD, POST, DELETE, OPTIONS',
+        'access-control-allow-headers': req.headers['access-control-request-headers'] ?? 'content-type, authorization',
+        'access-control-max-age': '600',
+      }
+      applyCorsHeaders(req, headers)
+      if (headers['access-control-allow-origin']) {
+        claimRoute(req)
+        res.writeHead(204, headers)
+        res.end()
+        return
+      }
+    }
     if (path === '/auth/github/start' && req.method === 'GET' && payloads.auth?.github) {
       claimRoute(req)
       try {
@@ -1695,11 +1727,13 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 function sendJson(req: IncomingMessage, res: ServerResponse, body: unknown): void {
   const json = JSON.stringify(body)
-  res.writeHead(200, {
+  const headers: Record<string, string> = {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(json).toString(),
-  })
+  }
+  applyCorsHeaders(req, headers)
+  res.writeHead(200, headers)
   if (req.method === 'HEAD') {
     res.end()
     return
