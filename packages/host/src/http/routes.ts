@@ -28,6 +28,8 @@ import type {
   ServerModelsPayload,
   ServerSettingsPayload,
 } from '@agent-kernel/shared'
+import { schema } from '@agent-kernel/shared'
+import { parseWire } from '../wire-validation.js'
 
 import { buildArtifactManifest, pruneArtifacts } from '../artifact-manifest.js'
 import {
@@ -410,7 +412,11 @@ export function attachJsonRoutes(
       claimRoute(req)
       void readJson(req)
         .then((body) => {
-          const input = body as ClientAddManualModel
+          const input = parseWire(schema.ClientAddManualModelSchema, body, { channel: 'POST /settings/models' })
+          if (!input) {
+            sendError(res, 400, 'invalid manual model input')
+            return
+          }
           const result = payloads.addManualModel!(input)
           payloads.audit?.log({ action: 'settings.model_add', actor: httpActor(req, payloads.auth), target: { providerId: input.providerId, model: input.id }, outcome: 'ok' })
           sendJson(req, res, result)
@@ -422,9 +428,13 @@ export function attachJsonRoutes(
       claimRoute(req)
       const parsed = new URL(url, 'http://x')
       try {
-        const input = {
+        const input = parseWire(schema.ClientDeleteManualModelSchema, {
           providerId: parsed.searchParams.get('providerId') ?? '',
           id: parsed.searchParams.get('id') ?? '',
+        }, { channel: 'DELETE /settings/models' })
+        if (!input) {
+          sendError(res, 400, 'invalid manual model delete input')
+          return
         }
         const result = payloads.deleteManualModel(input)
         payloads.audit?.log({ action: 'settings.model_delete', actor: httpActor(req, payloads.auth), target: { providerId: input.providerId, model: input.id }, outcome: 'ok' })

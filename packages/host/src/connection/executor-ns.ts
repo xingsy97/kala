@@ -17,7 +17,7 @@ import type {
   ServerBgTaskUpdated,
   SessionErrorScope,
 } from '@agent-kernel/shared'
-import { isCompatibleVersion } from '@agent-kernel/shared'
+import { isCompatibleVersion, schema } from '@agent-kernel/shared'
 import type { AgentConfig } from '@agent-kernel/kernel'
 import type { Namespace } from 'socket.io'
 
@@ -27,6 +27,7 @@ import type { DashboardNs } from './dashboard-ns.js'
 import type { AuthConfig, ExecutorIdentity } from '../auth-control.js'
 import { authenticateExecutorToken, validateExecutorAnnouncement } from '../auth-control.js'
 import type { AuditLogger } from '../audit-log.js'
+import { parseWire } from '../wire-validation.js'
 
 export type ExecutorNs = Namespace<
   ExecutorClientToServerEvents,
@@ -82,7 +83,12 @@ export function configureExecutorNamespace(
     const auth = socket.handshake.auth as HandshakeAuth
     // An executor is a daemon: no session binding at connect time. Host
     // routes each `tool:call` to it by sessionId when needed.
-    socket.on('executor:announce', (payload: ExecutorAnnounce) => {
+    socket.on('executor:announce', (rawPayload: ExecutorAnnounce) => {
+      const payload = parseWire(schema.ExecutorAnnounceSchema, rawPayload, {
+        channel: 'executor:announce',
+        peer: socket.id,
+      })
+      if (!payload) return
       const identity = socket.data.executorIdentity as ExecutorIdentity | undefined
       const valid = validateExecutorAnnouncement(identity ?? { accepted: true }, payload.workspaceId)
       if (!valid.ok) {
@@ -114,10 +120,21 @@ export function configureExecutorNamespace(
       deps.audit?.log({ action: 'executor.announce_accept', actor: { kind: 'executor', executorId: payload.executorId, workspaceId: payload.workspaceId, ...(identity?.label ? { label: identity.label } : {}) }, target: { workspaceId: payload.workspaceId }, outcome: 'ok', metadata: { workspaceName: payload.workspaceName } })
       deps.executors.attach(socket, payload, auth.clientVersion)
     })
-    socket.on('executor:tool_result', (payload: ExecutorToolResult) => {
+    socket.on('executor:tool_result', (rawPayload: ExecutorToolResult) => {
+      const payload = parseWire(schema.ExecutorToolResultSchema, rawPayload, {
+        channel: 'executor:tool_result',
+        peer: socket.id,
+        sessionId: (rawPayload as { sessionId?: string } | undefined)?.sessionId,
+      })
+      if (!payload) return
       deps.executors.fulfill(payload.sessionId, payload)
     })
-    socket.on('executor:bg_task_updated', (payload: ServerBgTaskUpdated) => {
+    socket.on('executor:bg_task_updated', (rawPayload: ServerBgTaskUpdated) => {
+      const payload = parseWire(schema.ServerBgTaskUpdatedSchema, rawPayload, {
+        channel: 'executor:bg_task_updated',
+        peer: socket.id,
+      })
+      if (!payload) return
       const room = `workspace:${payload.workspaceId}`
       deps.dashboardNs.to(room).emit('server:bg_task_updated', payload)
       deps.dashboardNs.to(room).emit('server:control_update', {
@@ -125,8 +142,12 @@ export function configureExecutorNamespace(
         ...payload,
       })
     })
-    socket.on('executor:tool_progress', (payload) => {
-      // Fan out to any dashboard subscribed to this session's room.
+    socket.on('executor:tool_progress', (rawPayload) => {
+      const payload = parseWire(schema.ToolProgressPayloadSchema, rawPayload, {
+        channel: 'executor:tool_progress',
+        peer: socket.id,
+      })
+      if (!payload) return
       deps.dashboardNs
         .to(`session:${payload.sessionId}`)
         .emit('server:control_update', {
@@ -134,7 +155,12 @@ export function configureExecutorNamespace(
           ...payload,
         })
     })
-    socket.on('executor:bg_task_evicted', (payload: ServerBgTaskEvicted) => {
+    socket.on('executor:bg_task_evicted', (rawPayload: ServerBgTaskEvicted) => {
+      const payload = parseWire(schema.ServerBgTaskEvictedSchema, rawPayload, {
+        channel: 'executor:bg_task_evicted',
+        peer: socket.id,
+      })
+      if (!payload) return
       const room = `workspace:${payload.workspaceId}`
       deps.dashboardNs.to(room).emit('server:bg_task_evicted', payload)
       deps.dashboardNs.to(room).emit('server:control_update', {

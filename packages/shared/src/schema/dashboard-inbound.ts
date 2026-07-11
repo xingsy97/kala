@@ -142,9 +142,17 @@ export const ClientDeleteSessionSchema = z.object({
   sessionId: z.string(),
 }) satisfies z.ZodType<ClientDeleteSession>
 
-export const ClientListSessionsSchema = z.record(z.string(), z.never()) as unknown as z.ZodType<ClientListSessions>
+// The wire form of a `Record<string, never>` payload is `undefined` or `{}` —
+// socket.io emits `undefined` when the client calls `socket.emit(evt)` with no
+// arg, and `{}` when it passes an explicit empty object. Accept both, coerce
+// to `{}` so downstream code has a stable shape.
+const EmptyRecordSchema = z
+  .union([z.undefined(), z.record(z.string(), z.never())])
+  .transform(() => ({}) as Record<string, never>)
 
-export const ClientListExecutorsSchema = z.record(z.string(), z.never()) as unknown as z.ZodType<ClientListExecutors>
+export const ClientListSessionsSchema = EmptyRecordSchema as unknown as z.ZodType<ClientListSessions>
+
+export const ClientListExecutorsSchema = EmptyRecordSchema as unknown as z.ZodType<ClientListExecutors>
 
 // ============================================================================
 // Model / preferences / cwd
