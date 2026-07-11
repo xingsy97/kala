@@ -102,10 +102,12 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
     },
     async compact(sessionId, trigger = 'manual') {
       await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts)
-      loopGuard.set(sessionId, {
-        remainingCalls: POST_COMPACTION_GUARD_CALLS,
-        seen: new Map(),
-      })
+      if (trigger !== 'tool_result') {
+        loopGuard.set(sessionId, {
+          remainingCalls: POST_COMPACTION_GUARD_CALLS,
+          seen: new Map(),
+        })
+      }
     },
     cancelStream(sessionId) {
       const ctrl = inFlightAborts.get(sessionId)
@@ -443,54 +445,39 @@ async function performCallTool(
   try {
     const blockedByLoop = guardPostCompactionLoop(sessionId, effect, runtime?.loopGuard)
     if (blockedByLoop) {
-      await dispatchOne(
+      await dispatchToolResult(
         deps,
         sessionId,
-        {
-          kind: 'tool_result',
-          callId: effect.callId,
-          ok: false,
-          content: blockedByLoop,
-        },
+        effect.callId,
+        false,
+        blockedByLoop,
         aborts,
-        undefined,
-        undefined,
         runtime,
       )
       return
     }
     const memoryPolicyBlock = guardMemoryPolicy(deps, sessionId, effect)
     if (memoryPolicyBlock) {
-      await dispatchOne(
+      await dispatchToolResult(
         deps,
         sessionId,
-        {
-          kind: 'tool_result',
-          callId: effect.callId,
-          ok: false,
-          content: memoryPolicyBlock,
-        },
+        effect.callId,
+        false,
+        memoryPolicyBlock,
         aborts,
-        undefined,
-        undefined,
         runtime,
       )
       return
     }
     const blocked = await runPreToolHooks(deps, sessionId, effect)
     if (blocked) {
-      await dispatchOne(
+      await dispatchToolResult(
         deps,
         sessionId,
-        {
-          kind: 'tool_result',
-          callId: effect.callId,
-          ok: false,
-          content: blocked,
-        },
+        effect.callId,
+        false,
+        blocked,
         aborts,
-        undefined,
-        undefined,
         runtime,
       )
       return
@@ -503,41 +490,76 @@ async function performCallTool(
           : { ok: false, content: 'skills are not configured on this host' }
         : await deps.tools.callTool(sessionId, effect)
     await runPostToolHooks(deps, sessionId, effect, res)
-    await dispatchOne(
+    await dispatchToolResult(
       deps,
       sessionId,
-      {
-        kind: 'tool_result',
-        callId: effect.callId,
-        ok: res.ok,
-        content: res.content,
-      },
+      effect.callId,
+      res.ok,
+      res.content,
       aborts,
-      undefined,
-      undefined,
       runtime,
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    await dispatchOne(
+    await dispatchToolResult(
       deps,
       sessionId,
-      {
-        kind: 'tool_result',
-        callId: effect.callId,
-        ok: false,
-        content: message,
-      },
+      effect.callId,
+      false,
+      message,
       aborts,
-      undefined,
-      undefined,
       runtime,
     )
   }
 }
 
+async function dispatchToolResult(
+  deps: HostLoopDeps,
+  sessionId: string,
+  callId: string,
+  ok: boolean,
+  content: string,
+  aborts: Map<string, AbortController>,
+  runtime?: LoopRuntime,
+): Promise<void> {
+  const record = deps.store.get(sessionId)
+  const capped = capToolResultForContext(content, record?.config.contextLimit)
+  await dispatchOne(
+    deps,
+    sessionId,
+    {
+      kind: 'tool_result',
+      callId,
+      ok,
+      content: capped,
+    },
+    aborts,
+    undefined,
+    undefined,
+    runtime,
+  )
+  await maybeCompactAfterToolResult(deps, sessionId, runtime)
+}
+
+async function maybeCompactAfterToolResult(
+  deps: HostLoopDeps,
+  sessionId: string,
+  runtime?: LoopRuntime,
+): Promise<void> {
+  if (!runtime) return
+  const record = deps.store.get(sessionId)
+  if (!record) return
+  if (record.state.status !== 'executing_tools') return
+  if (record.state.pendingCalls.length === 0) return
+  if (!shouldPreflightCompact(record.config, record.state.messages)) return
+  await runtime.handle.compact(sessionId, 'tool_result')
+}
+
 const PREFLIGHT_RESERVE_FLOOR_TOKENS = 8_000
 const PREFLIGHT_RESERVE_RATIO = 0.12
+const TOOL_RESULT_INLINE_CONTEXT_RATIO = 0.10
+const TOOL_RESULT_INLINE_MIN_TOKENS = 2_000
+const TOOL_RESULT_INLINE_MAX_TOKENS = 16_000
 const POST_COMPACTION_GUARD_CALLS = 6
 const POST_COMPACTION_REPEAT_LIMIT = 2
 
@@ -584,6 +606,29 @@ function estimateMessageTokens(messages: readonly import('@agent-kernel/kernel')
     }
   }
   return Math.ceil(chars / 4)
+}
+
+function capToolResultForContext(content: string, contextLimit: number | undefined): string {
+  const maxTokens = toolResultInlineTokenBudget(contextLimit)
+  const maxChars = maxTokens * 4
+  if (content.length <= maxChars) return content
+  const headChars = Math.floor(maxChars * 0.6)
+  const tailChars = Math.max(0, maxChars - headChars)
+  const omitted = content.length - headChars - tailChars
+  if (omitted <= 0) return content
+  return [
+    content.slice(0, headChars).trimEnd(),
+    `[... ${omitted} chars omitted from tool result before entering LLM context; kept ${maxChars} of ${content.length} chars ...]`,
+    content.slice(-tailChars).trimStart(),
+  ].join('\n')
+}
+
+function toolResultInlineTokenBudget(contextLimit: number | undefined): number {
+  if (!contextLimit || contextLimit <= 0) return TOOL_RESULT_INLINE_MAX_TOKENS
+  return Math.min(
+    TOOL_RESULT_INLINE_MAX_TOKENS,
+    Math.max(TOOL_RESULT_INLINE_MIN_TOKENS, Math.floor(contextLimit * TOOL_RESULT_INLINE_CONTEXT_RATIO)),
+  )
 }
 
 function guardPostCompactionLoop(
