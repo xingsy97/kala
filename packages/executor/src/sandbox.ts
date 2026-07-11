@@ -82,10 +82,10 @@ async function canonicalizeMaybeMissing(p: string): Promise<string> {
  * Roots MUST be canonicalized the same way inputs are, and here that means
  * `realpathSync.native` — NOT the plain `realpathSync`. On Windows the two
  * sync variants disagree with the async `realpath` used for inputs: given a
- * path carrying an 8.3 short name (`C:\Users\USER\…`, as `os.tmpdir()`
+ * path carrying an 8.3 short name (`C:\Users\USERNAM~1\…`, as `os.tmpdir()`
  * can yield), plain `realpathSync` leaves the alias intact while both
  * `realpathSync.native` and the async `realpath` expand it to the long name
- * (`C:\Users\user\…`). If the root stayed short while inputs came back
+ * (`C:\Users\username\…`). If the root stayed short while inputs came back
  * long, `canonical.startsWith(root + sep)` would be false for paths genuinely
  * inside the root — a false EACCES (and, conversely, a short-form root would
  * never match its own realpath'd contents). Using `.native` keeps both sides
