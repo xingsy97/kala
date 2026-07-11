@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Pencil, ShieldCheck, ShieldOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AttachedExecutor, ExecutorIdentitySummary, ServerExecutorIdentitiesPayload, SessionSummary } from '@agent-kernel/shared'
 
@@ -33,55 +34,55 @@ export function WorkspaceMetadataDialog({
   onRename,
 }: Props): JSX.Element {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const displayName = workspaceName ?? executor?.workspaceName ?? ''
   const [draft, setDraft] = useState(displayName)
-  const [identity, setIdentity] = useState<ExecutorIdentitySummary | null>(null)
-  const [identityError, setIdentityError] = useState<string | null>(null)
-  const [revoking, setRevoking] = useState(false)
   useEffect(() => {
     if (open) setDraft(displayName)
   }, [displayName, open])
-  useEffect(() => {
-    if (!open || workspaceId.length === 0) return
-    let cancelled = false
-    setIdentity(null)
-    setIdentityError(null)
-    void fetch('/auth/executor-identities', { cache: 'no-store' })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(await res.text())
-        return res.json() as Promise<ServerExecutorIdentitiesPayload>
+
+  const identitiesQuery = useQuery({
+    queryKey: ['executor-identities'],
+    queryFn: async (): Promise<ServerExecutorIdentitiesPayload> => {
+      const res = await fetch('/auth/executor-identities', { cache: 'no-store' })
+      if (!res.ok) throw new Error(await res.text())
+      return (await res.json()) as ServerExecutorIdentitiesPayload
+    },
+    enabled: open && workspaceId.length > 0,
+    staleTime: 15_000,
+  })
+  const identity: ExecutorIdentitySummary | null =
+    identitiesQuery.data?.identities.find((entry) => entry.workspaceId === workspaceId) ?? null
+
+  const revokeMutation = useMutation({
+    mutationFn: async (): Promise<void> => {
+      const params = new URLSearchParams({ workspaceId })
+      const res = await fetch(`/auth/executor-identities?${params.toString()}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await res.text())
+    },
+    onSuccess: () => {
+      queryClient.setQueryData<ServerExecutorIdentitiesPayload>(['executor-identities'], (prev) => {
+        if (!prev) return prev
+        return { ...prev, identities: prev.identities.filter((entry) => entry.workspaceId !== workspaceId) }
       })
-      .then((body) => {
-        if (cancelled) return
-        setIdentity(body.identities.find((entry) => entry.workspaceId === workspaceId) ?? null)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setIdentityError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, workspaceId])
+    },
+  })
+  const revoking = revokeMutation.isPending
+  const identityError =
+    (revokeMutation.error as Error | undefined)?.message ??
+    (identitiesQuery.error as Error | undefined)?.message ??
+    null
+
   const submit = (event: FormEvent): void => {
     event.preventDefault()
     const trimmed = draft.trim()
     if (trimmed.length === 0 || trimmed === displayName) return
     onRename?.(trimmed)
   }
-  const revokeIdentity = async (): Promise<void> => {
+  const revokeIdentity = (): void => {
     if (workspaceId.length === 0) return
-    setRevoking(true)
-    setIdentityError(null)
-    try {
-      const params = new URLSearchParams({ workspaceId })
-      const res = await fetch(`/auth/executor-identities?${params.toString()}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error(await res.text())
-      setIdentity(null)
-    } catch (err: unknown) {
-      setIdentityError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setRevoking(false)
-    }
+    console.error('[debug] revokeIdentity called', { hasIdentity: !!identity })
+    revokeMutation.mutate()
   }
   const rows: Array<[string, string]> = [
     [t('workspaceMetadata.workspaceId'), workspaceId],
@@ -153,7 +154,7 @@ export function WorkspaceMetadataDialog({
                 variant="outline"
                 size="sm"
                 disabled={!identity || revoking}
-                onClick={() => void revokeIdentity()}
+                onClick={() => revokeIdentity()}
                 data-testid="workspace-revoke-identity-button"
               >
                 <ShieldOff className="mr-1.5 h-3.5 w-3.5" aria-hidden />

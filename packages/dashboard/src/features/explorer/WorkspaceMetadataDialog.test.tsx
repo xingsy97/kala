@@ -72,12 +72,14 @@ describe('WorkspaceMetadataDialog', () => {
       />,
     )
 
-    await screen.findByText(/saved reconnect identity/i)
+    await screen.findByText(/This workspace has a saved reconnect identity/i)
     fireEvent.click(screen.getByTestId('workspace-revoke-identity-button'))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/auth/executor-identities?workspaceId=ws-1', { method: 'DELETE' })
     })
-    expect(screen.getByText(/No saved reconnect identity/i)).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByText(/No saved reconnect identity/i)).toBeTruthy()
+    })
   })
 })

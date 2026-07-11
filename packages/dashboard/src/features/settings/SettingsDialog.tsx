@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy, ExternalLink, Monitor, Moon, Plus, Sun, Trash2 } from 'lucide-react'
 import { Trans, useTranslation } from 'react-i18next'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ServerSettingsPayload } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -43,31 +44,25 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
 
 export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): JSX.Element {
   const { t } = useTranslation()
-  const [payload, setPayload] = useState<ServerSettingsPayload | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [section, setSection] = useState<SectionKey>('runtime')
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setLoadError(null)
-    void fetch('/settings', { cache: 'no-store' })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json() as Promise<ServerSettingsPayload>
-      })
-      .then((body) => {
-        if (cancelled) return
-        setPayload(body)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setLoadError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open])
+  const settingsQuery = useQuery({
+    queryKey: ['settings'],
+    queryFn: async (): Promise<ServerSettingsPayload> => {
+      const r = await fetch('/settings', { cache: 'no-store' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      return (await r.json()) as ServerSettingsPayload
+    },
+    enabled: open,
+    staleTime: 30_000,
+  })
+  const payload = settingsQuery.data ?? null
+  const loadError = settingsQuery.error ? (settingsQuery.error as Error).message : null
+
+  const applyPayload = (next: ServerSettingsPayload): void => {
+    queryClient.setQueryData(['settings'], next)
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -102,7 +97,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged }: Props): 
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
               ) : section === 'models' ? (
-                <ModelsSection payload={payload} onPayloadChange={setPayload} onModelsChanged={onModelsChanged} />
+                <ModelsSection payload={payload} onPayloadChange={applyPayload} onModelsChanged={onModelsChanged} />
               ) : section === 'security' ? (
                 <SecuritySection payload={payload} />
               ) : section === 'approvals' ? (
@@ -273,7 +268,6 @@ function ModelsSection({
   const [modelId, setModelId] = useState('')
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!payload.providers.some((p) => p.id === providerId)) {
@@ -281,44 +275,57 @@ function ModelsSection({
     }
   }, [payload.providers, providerId])
 
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault()
-    setError(null)
-    setBusy(true)
-    try {
+  const addModel = useMutation({
+    mutationFn: async (input: { providerId: string; id: string; label?: string }): Promise<ServerSettingsPayload> => {
       const res = await fetch('/settings/models', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ providerId, id: modelId.trim(), label: label.trim() || undefined }),
+        body: JSON.stringify(input),
       })
       const body = await res.json() as ServerSettingsPayload | { error?: string }
       if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
-      onPayloadChange(body as ServerSettingsPayload)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      onPayloadChange(next)
       onModelsChanged?.()
       setModelId('')
       setLabel('')
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
 
-  const deleteManual = async (deleteProviderId: string, id: string): Promise<void> => {
-    setError(null)
-    setBusy(true)
-    try {
-      const params = new URLSearchParams({ providerId: deleteProviderId, id })
+  const deleteModel = useMutation({
+    mutationFn: async (input: { providerId: string; id: string }): Promise<ServerSettingsPayload> => {
+      const params = new URLSearchParams({ providerId: input.providerId, id: input.id })
       const res = await fetch(`/settings/models?${params.toString()}`, { method: 'DELETE' })
       const body = await res.json() as ServerSettingsPayload | { error?: string }
       if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
-      onPayloadChange(body as ServerSettingsPayload)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      onPayloadChange(next)
       onModelsChanged?.()
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+
+  const busy = addModel.isPending || deleteModel.isPending
+
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    setError(null)
+    const trimmedLabel = label.trim()
+    addModel.mutate({
+      providerId,
+      id: modelId.trim(),
+      ...(trimmedLabel ? { label: trimmedLabel } : {}),
+    })
+  }
+
+  const deleteManual = (deleteProviderId: string, id: string): void => {
+    setError(null)
+    deleteModel.mutate({ providerId: deleteProviderId, id })
   }
 
   return (
@@ -327,7 +334,7 @@ function ModelsSection({
         title={t('settings.sections.models.label')}
         subtitle={t('settings.models.subtitle')}
       />
-      <form onSubmit={(event) => { void submit(event) }} className="mb-4 rounded-md border border-border bg-muted/30 p-3">
+      <form onSubmit={submit} className="mb-4 rounded-md border border-border bg-muted/30 p-3">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
           <label className="text-xs font-medium text-muted-foreground">
             {t('settings.models.provider')}
@@ -428,7 +435,7 @@ function ModelsSection({
                         {m.source === 'manual' ? (
                           <button
                             type="button"
-                            onClick={() => { void deleteManual(p.id, m.id) }}
+                            onClick={() => { deleteManual(p.id, m.id) }}
                             className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                             aria-label={t('settings.models.deleteModel', { model: m.id })}
                             disabled={busy}

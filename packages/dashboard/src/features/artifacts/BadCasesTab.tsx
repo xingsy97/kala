@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useMutation } from '@tanstack/react-query'
 
 type FailureCategory =
   | 'patch-apply-failure'
@@ -69,7 +70,6 @@ export type BadCasesTabProps = {
 export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Element {
   const { t } = useTranslation()
   const [runId, setRunId] = useState(initialRunId)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<BadCaseListResponse | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -78,7 +78,6 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
   const [savedFlash, setSavedFlash] = useState<Record<string, string>>({})
   const [rolloutTarget, setRolloutTarget] = useState<'verl' | 'slime'>('verl')
   const [rolloutStatusFilter, setRolloutStatusFilter] = useState('')
-  const [rolloutExporting, setRolloutExporting] = useState(false)
   const [rolloutDone, setRolloutDone] = useState<number | null>(null)
   const [rolloutError, setRolloutError] = useState<string | null>(null)
 
@@ -93,27 +92,32 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
     return map
   }, [data])
 
-  const load = useCallback(async () => {
-    if (!runId.trim()) return
-    setLoading(true)
-    setError(null)
-    try {
+  const loadMutation = useMutation({
+    mutationFn: async (id: string): Promise<BadCaseListResponse> => {
       const res = await fetch('/enhancement/action', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'badcase-list', runId: runId.trim() }),
+        body: JSON.stringify({ action: 'badcase-list', runId: id }),
       })
       const payload = await res.json() as BadCaseListResponse | { error?: string }
       if (!res.ok) throw new Error((payload as { error?: string }).error ?? `status ${res.status}`)
-      setData(payload as BadCaseListResponse)
+      return payload as BadCaseListResponse
+    },
+    onSuccess: (payload) => {
+      setData(payload)
       setSelected(new Set())
-    } catch (err) {
+      setError(null)
+    },
+    onError: (err) => {
       setError(err instanceof Error ? err.message : String(err))
       setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [runId])
+    },
+  })
+  const loading = loadMutation.isPending
+  const load = useCallback((): void => {
+    if (!runId.trim()) return
+    loadMutation.mutate(runId.trim())
+  }, [runId, loadMutation])
 
   const toggle = useCallback((id: string) => {
     setSelected((prev) => {
@@ -132,18 +136,17 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
     })
   }, [data])
 
-  const annotate = useCallback(async (instanceId: string, label: BadCaseLabel) => {
-    if (!data) return
-    try {
+  const annotateMutation = useMutation({
+    mutationFn: async (vars: { runId: string; instanceId: string; label: BadCaseLabel; note?: string }): Promise<{ updatedAt: string; instanceId: string; label: BadCaseLabel; note?: string }> => {
       const res = await fetch('/enhancement/action', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           action: 'badcase-annotate',
-          runId: data.runId,
-          instanceId,
-          label,
-          ...(noteDraft[instanceId] ? { note: noteDraft[instanceId] } : {}),
+          runId: vars.runId,
+          instanceId: vars.instanceId,
+          label: vars.label,
+          ...(vars.note ? { note: vars.note } : {}),
         }),
       })
       if (!res.ok) {
@@ -151,85 +154,96 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
         throw new Error(body?.error ?? `status ${res.status}`)
       }
       const payload = await res.json() as { updatedAt: string }
+      return { ...payload, instanceId: vars.instanceId, label: vars.label, note: vars.note }
+    },
+    onSuccess: (result) => {
       setData((current) => current ? {
         ...current,
-        cases: current.cases.map((c) => c.instanceId === instanceId
-          ? { ...c, annotation: { label, ...(noteDraft[instanceId] ? { note: noteDraft[instanceId] } : {}), updatedAt: payload.updatedAt } }
+        cases: current.cases.map((c) => c.instanceId === result.instanceId
+          ? { ...c, annotation: { label: result.label, ...(result.note ? { note: result.note } : {}), updatedAt: result.updatedAt } }
           : c),
       } : current)
-      setSavedFlash((prev) => ({ ...prev, [instanceId]: payload.updatedAt }))
-    } catch (err) {
+      setSavedFlash((prev) => ({ ...prev, [result.instanceId]: result.updatedAt }))
+    },
+    onError: (err) => {
       setError(err instanceof Error ? err.message : String(err))
-    }
-  }, [data, noteDraft])
+    },
+  })
+  const annotate = useCallback((instanceId: string, label: BadCaseLabel): void => {
+    if (!data) return
+    annotateMutation.mutate({ runId: data.runId, instanceId, label, note: noteDraft[instanceId] })
+  }, [data, noteDraft, annotateMutation])
 
-  const exportSelected = useCallback(async () => {
+  const exportMutation = useMutation({
+    mutationFn: async (vars: { runId: string; instanceIds: string[]; format: 'sft' | 'rl' }): Promise<ExportResponse & { runId: string; format: 'sft' | 'rl' }> => {
+      const res = await fetch('/enhancement/action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'badcase-export',
+          runId: vars.runId,
+          instanceIds: vars.instanceIds,
+          format: vars.format,
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null
+        throw new Error(body?.error ?? `status ${res.status}`)
+      }
+      const payload = await res.json() as ExportResponse
+      return { ...payload, runId: vars.runId, format: vars.format }
+    },
+    onSuccess: (payload) => {
+      downloadBlob(new Blob([payload.content], { type: 'application/x-ndjson' }), `badcases-${payload.runId}-${payload.format}.jsonl`)
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : String(err))
+    },
+  })
+  const exportSelected = useCallback((): void => {
     if (!data || selected.size === 0) return
-    const res = await fetch('/enhancement/action', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        action: 'badcase-export',
-        runId: data.runId,
-        instanceIds: [...selected],
-        format,
-      }),
-    })
-    if (!res.ok) {
-      const body = await res.json().catch(() => null) as { error?: string } | null
-      setError(body?.error ?? `status ${res.status}`)
-      return
-    }
-    const payload = await res.json() as ExportResponse
-    const blob = new Blob([payload.content], { type: 'application/x-ndjson' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `badcases-${data.runId}-${format}.jsonl`
-    link.rel = 'noopener'
-    link.click()
-    URL.revokeObjectURL(url)
-  }, [data, selected, format])
+    exportMutation.mutate({ runId: data.runId, instanceIds: [...selected], format })
+  }, [data, selected, format, exportMutation])
 
-  const exportRollouts = useCallback(async () => {
-    const activeRunId = data?.runId ?? runId.trim()
-    if (!activeRunId) return
-    setRolloutExporting(true)
-    setRolloutError(null)
-    setRolloutDone(null)
-    try {
-      const includeStatuses = rolloutStatusFilter
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0)
+  const rolloutMutation = useMutation({
+    mutationFn: async (vars: { runId: string; target: 'verl' | 'slime'; includeStatuses: string[] }): Promise<RolloutExportResponse & { runId: string; target: 'verl' | 'slime' }> => {
       const res = await fetch('/enhancement/action', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           action: 'rollout-export',
-          runId: activeRunId,
-          target: rolloutTarget,
-          ...(includeStatuses.length > 0 ? { includeStatuses } : {}),
+          runId: vars.runId,
+          target: vars.target,
+          ...(vars.includeStatuses.length > 0 ? { includeStatuses: vars.includeStatuses } : {}),
         }),
       })
       const body = await res.json().catch(() => null) as RolloutExportResponse | { error?: string } | null
       if (!res.ok) throw new Error((body as { error?: string } | null)?.error ?? `status ${res.status}`)
       const payload = body as RolloutExportResponse
-      const blob = new Blob([payload.content], { type: 'application/x-ndjson' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `rollouts-${activeRunId}-${rolloutTarget}.jsonl`
-      link.rel = 'noopener'
-      link.click()
-      URL.revokeObjectURL(url)
+      return { ...payload, runId: vars.runId, target: vars.target }
+    },
+    onMutate: () => {
+      setRolloutError(null)
+      setRolloutDone(null)
+    },
+    onSuccess: (payload) => {
+      downloadBlob(new Blob([payload.content], { type: 'application/x-ndjson' }), `rollouts-${payload.runId}-${payload.target}.jsonl`)
       setRolloutDone(payload.rolloutCount)
-    } catch (err) {
+    },
+    onError: (err) => {
       setRolloutError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setRolloutExporting(false)
-    }
-  }, [data, runId, rolloutTarget, rolloutStatusFilter])
+    },
+  })
+  const rolloutExporting = rolloutMutation.isPending
+  const exportRollouts = useCallback((): void => {
+    const activeRunId = data?.runId ?? runId.trim()
+    if (!activeRunId) return
+    const includeStatuses = rolloutStatusFilter
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    rolloutMutation.mutate({ runId: activeRunId, target: rolloutTarget, includeStatuses })
+  }, [data, runId, rolloutTarget, rolloutStatusFilter, rolloutMutation])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4" data-testid="badcases-tab">
@@ -248,7 +262,7 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
         <button
           type="button"
           className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground disabled:opacity-50"
-          onClick={() => { void load() }}
+          onClick={() => { load() }}
           disabled={loading || !runId.trim()}
           data-testid="badcases-load"
         >
@@ -270,7 +284,7 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
           <button
             type="button"
             className="rounded border border-border px-3 py-1 text-sm disabled:opacity-50"
-            onClick={() => { void exportSelected() }}
+            onClick={() => { exportSelected() }}
             disabled={!data || selected.size === 0}
             data-testid="badcases-export"
           >
@@ -320,7 +334,7 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
           <button
             type="button"
             className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground disabled:opacity-50"
-            onClick={() => { void exportRollouts() }}
+            onClick={() => { exportRollouts() }}
             disabled={rolloutExporting || !runId.trim()}
             data-testid="rollouts-export-button"
           >
@@ -417,7 +431,7 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
                           onChange={(e) => {
                             const raw = e.target.value
                             if (LABELS.includes(raw as BadCaseLabel)) {
-                              void annotate(c.instanceId, raw as BadCaseLabel)
+                              annotate(c.instanceId, raw as BadCaseLabel)
                             }
                           }}
                           data-testid={`badcases-label-${c.instanceId}`}
@@ -448,4 +462,14 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
       </div>
     </div>
   )
+}
+
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.rel = 'noopener'
+  link.click()
+  URL.revokeObjectURL(url)
 }

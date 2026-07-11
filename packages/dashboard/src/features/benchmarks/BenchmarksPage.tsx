@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { BadCasesView } from '../artifacts/BadCasesView.js'
 import { RunListPanel } from './RunListPanel.js'
@@ -16,17 +17,14 @@ export function BenchmarksPage({
   onOpenSession?(sessionId: string): void
 }): JSX.Element {
   const { t } = useTranslation()
-  const [runs, setRuns] = useState<readonly BenchmarkRunSummary[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [terminalWizardOpen, setTerminalWizardOpen] = useState(false)
   const [wizardModalOpen, setWizardModalOpen] = useState(false)
 
-  const loadRuns = useCallback(async (): Promise<void> => {
-    setLoading(true)
-    setError(null)
-    try {
+  const runsQuery = useQuery({
+    queryKey: ['benchmark-runs'],
+    queryFn: async (): Promise<readonly BenchmarkRunSummary[]> => {
       const res = await fetch('/enhancement/action', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -36,17 +34,17 @@ export function BenchmarksPage({
         | { runs?: BenchmarkRunSummary[]; error?: string }
         | null
       if (!res.ok) throw new Error(body?.error ?? `status ${res.status}`)
-      setRuns(body?.runs ?? [])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+      return body?.runs ?? []
+    },
+    staleTime: 15_000,
+  })
+  const runs = runsQuery.data ?? []
+  const loading = runsQuery.isFetching
+  const error = runsQuery.error ? (runsQuery.error as Error).message : null
 
-  useEffect(() => {
-    void loadRuns()
-  }, [loadRuns])
+  const loadRuns = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: ['benchmark-runs'] })
+  }, [queryClient])
 
   const selectedRun = runs.find((r) => r.runId === selectedRunId) ?? null
 
@@ -71,7 +69,7 @@ export function BenchmarksPage({
               error={error}
               selectedRunId={selectedRunId}
               onSelect={setSelectedRunId}
-              onRefresh={() => { void loadRuns() }}
+              onRefresh={() => { loadRuns() }}
             />
           </div>
           <div className="min-h-0">
@@ -102,13 +100,13 @@ export function BenchmarksPage({
         onOpenChange={setTerminalWizardOpen}
         onRunRegistered={(runId) => {
           setSelectedRunId(runId)
-          void loadRuns()
+          loadRuns()
         }}
       />
       <RunBenchmarkWizardModal
         open={wizardModalOpen}
         onOpenChange={setWizardModalOpen}
-        onCompleted={() => { void loadRuns() }}
+        onCompleted={() => { loadRuns() }}
       />
     </div>
   )
