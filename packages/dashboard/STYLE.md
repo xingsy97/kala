@@ -110,3 +110,5 @@ rg -n "\bborder-[tblr]\b" packages/dashboard/src
 # naked overflow scroll containers  -  replace with ScrollArea unless content-level fallback
 rg -n "overflow-(auto|scroll|x-auto|y-auto|x-scroll|y-scroll)" packages/dashboard/src
 ```
+
+CI runs these as a ratchet via `pnpm --filter @agent-kernel/dashboard lint:style` (script in `scripts/lint-style.mjs`, baseline in `scripts/lint-style.baseline.json`). Counts may not increase; ratchet the baseline down as you clean up hits with `pnpm --filter @agent-kernel/dashboard lint:style -- --write`.
