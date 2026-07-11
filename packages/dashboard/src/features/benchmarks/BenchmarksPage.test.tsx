@@ -38,7 +38,21 @@ describe('BenchmarksPage', () => {
 
   beforeEach(() => {
     fetchMock.mockReset()
+    // Default: return runs list, then fallback empty manifest for any other calls
+    fetchMock.mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.includes('/enhancement/action')) {
+        return new Response(JSON.stringify(runsResponse), { status: 200 })
+      }
+      if (url.includes('/artifacts/manifest')) {
+        return new Response(JSON.stringify({ schemaVersion: 1, generatedAt: '', rootDir: '', entries: [], summary: { entryCount: 0, totalBytes: 0, hashedCount: 0, hashSkippedCount: 0, kinds: {} } }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    })
     vi.stubGlobal('fetch', fetchMock)
+    if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+      Element.prototype.scrollIntoView = () => {}
+    }
   })
 
   afterEach(() => {
@@ -46,8 +60,7 @@ describe('BenchmarksPage', () => {
   })
 
   it('loads runs and renders three columns', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(runsResponse), { status: 200 }))
-    render(<BenchmarksPage onLaunchSwebench={() => {}} />)
+    render(<BenchmarksPage />)
     await waitFor(() => {
       expect(screen.getByTestId('benchmarks-run-row-run-tb-1')).toBeTruthy()
     })
@@ -61,8 +74,7 @@ describe('BenchmarksPage', () => {
   })
 
   it('selecting a run updates the detail panel with score', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(runsResponse), { status: 200 }))
-    render(<BenchmarksPage onLaunchSwebench={() => {}} />)
+    render(<BenchmarksPage />)
     await waitFor(() => {
       expect(screen.getByTestId('benchmarks-run-row-run-tb-1')).toBeTruthy()
     })
@@ -72,20 +84,27 @@ describe('BenchmarksPage', () => {
     expect(screen.getByTestId('benchmarks-detail-accuracy').textContent).toContain('66.7')
   })
 
-  it('launcher triggers swebench callback and opens terminal-bench wizard', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(runsResponse), { status: 200 }))
-    const onLaunchSwebench = vi.fn()
-    render(<BenchmarksPage onLaunchSwebench={onLaunchSwebench} />)
+  it('launcher swebench opens wizard-only modal and terminal-bench opens its wizard', async () => {
+    render(<BenchmarksPage />)
     await waitFor(() => expect(screen.getByTestId('benchmarks-launcher')).toBeTruthy())
     fireEvent.click(screen.getByTestId('benchmarks-launcher-swebench'))
-    expect(onLaunchSwebench).toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByTestId('run-benchmark-wizard-modal')).toBeTruthy())
+    // Modal should contain the wizard (via toggle) but NOT the full eval inline panel
+    expect(screen.getByTestId('run-benchmark-wizard-modal').querySelector('[data-testid="run-benchmark-wizard-toggle"]')).toBeTruthy()
+    expect(screen.getByTestId('run-benchmark-wizard-modal').querySelector('[data-testid="eval-inline-panel"]')).toBeNull()
     fireEvent.click(screen.getByTestId('benchmarks-launcher-terminal-bench'))
     await waitFor(() => expect(screen.getByTestId('terminalbench-wizard')).toBeTruthy())
   })
 
+  it('renders inline eval workspace and badcases sub-view', async () => {
+    render(<BenchmarksPage />)
+    await waitFor(() => expect(screen.getByTestId('eval-workspace-section')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('eval-inline-panel')).toBeTruthy())
+    expect(screen.getByTestId('benchmarks-badcases-panel')).toBeTruthy()
+  })
+
   it('does not leak absolute paths into the DOM', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(runsResponse), { status: 200 }))
-    const { container } = render(<BenchmarksPage onLaunchSwebench={() => {}} />)
+    const { container } = render(<BenchmarksPage />)
     await waitFor(() => expect(screen.getByTestId('benchmarks-run-row-run-tb-1')).toBeTruthy())
     const html = container.innerHTML
     expect(html).not.toMatch(/\/home\//)
