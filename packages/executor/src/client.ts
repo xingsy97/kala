@@ -225,17 +225,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     // Idempotency: two paths can send us the same callId  -  the normal LLM
     // path via kernel `call_tool`, and `redispatchPending` on the host
     // side when the socket reconnects. If we already ran this call, don't
-    // run it again; return the cached result and re-emit tool_result so
-    // the host reliably marks the pending as settled.
+    // run it again; ack with the cached result.
     const cached = completedCalls.get(payload.callId)
     if (cached) {
       ack(cached)
-      socket.emit('executor:tool_result', {
-        sessionId: payload.sessionId,
-        callId: payload.callId,
-        ok: cached.ok,
-        content: cached.content,
-      })
       return
     }
     // Already running: the original promise chain will ack when done.
@@ -248,12 +241,6 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     inFlight.delete(payload.callId)
     rememberCompleted(payload.callId, result)
     ack(result)
-    socket.emit('executor:tool_result', {
-      sessionId: payload.sessionId,
-      callId: payload.callId,
-      ok: result.ok,
-      content: result.content,
-    })
   })
 
   socket.on('tool:cancel', (payload: ToolCancelMessage) => {
@@ -269,12 +256,14 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     if (change.kind === 'evicted') {
       socket.emit('executor:bg_task_evicted', {
         workspaceId,
+        sessionId: change.sessionId,
         taskId: change.taskId,
       })
       return
     }
     socket.emit('executor:bg_task_updated', {
       workspaceId,
+      sessionId: change.task.sessionId,
       task: change.task,
       ...(change.kind === 'output' ? { delta: change.delta } : {}),
     })
@@ -319,6 +308,7 @@ async function runOne(
   }
   try {
     const content = await tool.run(payload.input, {
+      sessionId: payload.sessionId,
       sandbox,
       signal,
       ...(payload.cwd ? { cwd: payload.cwd } : {}),

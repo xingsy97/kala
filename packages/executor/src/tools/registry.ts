@@ -9,6 +9,7 @@
 import type { Sandbox } from '../sandbox.js'
 
 export type ToolContext = {
+  readonly sessionId: string
   readonly sandbox: Sandbox
   readonly signal: AbortSignal
   /**

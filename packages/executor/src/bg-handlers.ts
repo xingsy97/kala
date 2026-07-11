@@ -36,7 +36,8 @@ export async function handleBgList(
   return {
     requestId: payload.requestId,
     workspaceId: payload.workspaceId,
-    tasks: listBackgroundTasks(),
+    sessionId: payload.sessionId,
+    tasks: listBackgroundTasks(payload.sessionId),
   }
 }
 
@@ -46,10 +47,11 @@ export async function handleBgOutput(
   const base = {
     requestId: payload.requestId,
     workspaceId: payload.workspaceId,
+    sessionId: payload.sessionId,
     taskId: payload.taskId,
   }
   const summary = getBackgroundTask(payload.taskId)
-  if (!summary) {
+  if (!summary || summary.sessionId !== payload.sessionId) {
     return {
       ...base,
       content: '',
@@ -67,6 +69,7 @@ export async function handleBgOutput(
   try {
     const raw = await readBackgroundShell({
       taskId: payload.taskId,
+      sessionId: payload.sessionId,
       ...(payload.offset !== undefined ? { offset: payload.offset } : {}),
       block: false,
     })
@@ -101,10 +104,11 @@ export async function handleBgKill(
   const base = {
     requestId: payload.requestId,
     workspaceId: payload.workspaceId,
+    sessionId: payload.sessionId,
     taskId: payload.taskId,
   }
   try {
-    const killed = await killBackgroundShell(payload.taskId)
+    const killed = await killBackgroundShell(payload.taskId, payload.sessionId)
     return { ...base, killed }
   } catch (err) {
     return {
