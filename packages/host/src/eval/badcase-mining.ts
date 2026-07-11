@@ -6,7 +6,7 @@
 //
 // The response is intentionally free of absolute filesystem paths; only
 // per-instance identifiers and short in-line trace excerpts leave this
-// module. See docs/principles.md §A1 and docs/badcase-mining.md.
+// module. See docs/meta/principles.md §A1 and docs/evals/badcase-mining.md.
 
 import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'

@@ -14,11 +14,11 @@ The **visualization layer**. A React SPA that subscribes to a Host session over 
 - **socket.io-client** for wire
 - **Vitest** + **@testing-library/react** for component tests
 
-Not Next.js (see [ADR 0008](../../docs/adr/0008-dashboard-vite-react.md)). This is a static SPA — no SSR, no server components. Ships as a `dist/` you can host anywhere (Cloudflare Pages, Vercel static, GitHub Pages, or the Host process serving `/`).
+Not Next.js (see [ADR 0008](../../docs/meta/adr/0008-dashboard-vite-react.md)). This is a static SPA — no SSR, no server components. Ships as a `dist/` you can host anywhere (Cloudflare Pages, Vercel static, GitHub Pages, or the Host process serving `/`).
 
 ## Layout
 
-Five-column Finder-style shell (see [ADR 0013](../../docs/adr/0013-dashboard-finder-layout.md)): Login (hidden) → Workspaces (daemons) → Agents → Sessions → Chat, with the Inspector as a right-side resizable drawer.
+Five-column Finder-style shell (see [ADR 0013](../../docs/meta/adr/0013-dashboard-finder-layout.md)): Login (hidden) → Workspaces (daemons) → Agents → Sessions → Chat, with the Inspector as a right-side resizable drawer.
 
 ## Feature areas
 
@@ -45,11 +45,11 @@ Five-column Finder-style shell (see [ADR 0013](../../docs/adr/0013-dashboard-fin
 ## References
 
 - Wire protocol: [`docs/protocol/wire-protocol.md`](../../docs/protocol/wire-protocol.md) §3.2
-- Architecture: [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md)
+- Architecture: [`docs/architecture/overview.md`](../../docs/architecture/overview.md)
 - **Visual style rules**: [`STYLE.md`](STYLE.md) — surface/border conventions, dark-mode do's-and-don'ts. **Read this before adding any `border-*` class.**
 
 ## Test coverage
 
-Component tests use `@testing-library/react` with a mocked Socket.IO client, asserting user-visible behavior. Target per [`docs/testing.md`](../../docs/testing.md) §5.
+Component tests use `@testing-library/react` with a mocked Socket.IO client, asserting user-visible behavior. Target per [`docs/meta/testing.md`](../../docs/meta/testing.md) §5.
 
 **Caveat**: mocked-socket tests do **not** prove the app connects, renders, or accepts input against a real Host. For any UI-shipping change that touches the initial connection, first paint, or theming, verify against a real browser (headless is fine) hitting the Host-served bundle — see the "verify frontend with real browser" convention.

@@ -15,10 +15,10 @@ Benchmark translated historical texttranslated historical texttranslated histori
 
 **translated historical texttranslated historical texttranslated historical texttranslated historical text**：translated historical texttranslated historical text benchmark translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text domain doc translated historical texttranslated historical texttranslated historical text：
 
-- [SWE-bench Evaluation](../domain-knowledge/swe-bench-evaluation.md)
-- [Terminal-Bench Evaluation](../domain-knowledge/terminal-bench-evaluation.md)
-- [WebArena Evaluation](../domain-knowledge/webarena-evaluation.md)
-- [Tau-Bench / Tau3-Bench Evaluation](../domain-knowledge/tau-bench-evaluation.md)
+- [SWE-bench Evaluation](../../evals/domain-knowledge/swe-bench-evaluation.md)
+- [Terminal-Bench Evaluation](../../evals/domain-knowledge/terminal-bench-evaluation.md)
+- [WebArena Evaluation](../../evals/domain-knowledge/webarena-evaluation.md)
+- [Tau-Bench / Tau3-Bench Evaluation](../../evals/domain-knowledge/tau-bench-evaluation.md)
 
 ---
 
@@ -105,7 +105,7 @@ interface BenchmarkAdapter {
   - translated historical texttranslated historical texttranslated historical texttranslated historical text：`[not-a-bug / needs-more-context / model-limitation / infra-flake / worth-retraining]`
   - 「translated historical texttranslated historical texttranslated historical texttranslated historical text case translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text」translated historical texttranslated historical text → JSONL translated historical texttranslated historical text
 - translated historical texttranslated historical texttranslated historical texttranslated historical text `run-registry`，translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
-- `docs/badcase-mining.md` translated historical texttranslated historical text category translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text case。
+- `docs/evals/badcase-mining.md` translated historical texttranslated historical text category translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text case。
 
 **translated historical texttranslated historical text**：SWE-bench Lite 5 translated historical text → Bad Cases → translated historical texttranslated historical text → translated historical text 3 translated historical text → translated historical texttranslated historical text JSONL → translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text。
 

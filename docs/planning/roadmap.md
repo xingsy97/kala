@@ -2,7 +2,7 @@
 
 Feature ledger for `agent-kernel`: what ships today, what's deferred, and what's out of scope.
 
-For the current comparison against reference agents (pi / opencode / codex / Claude Code), see [FEATURE-GAPS.md](FEATURE-GAPS.md).
+For the current comparison against reference agents (pi / opencode / codex / Claude Code), see [FEATURE-GAPS.md](feature-gaps.md).
 
 ---
 
@@ -13,11 +13,11 @@ For the current comparison against reference agents (pi / opencode / codex / Cla
 Pure-function FSM. Zero runtime dependencies. Production code ~350 LOC.
 
 - Types: `types.ts` — `Message` / `Event` / `State` / `Effect` / `Config`
-- FSM step: `core.ts` — `step(state, event, config)` via a dispatch table (see [ADR 0010](adr/0010-fsm-dispatch-table.md))
+- FSM step: `core.ts` — `step(state, event, config)` via a dispatch table (see [ADR 0010](../meta/adr/0010-fsm-dispatch-table.md))
 - State factory: `state.ts` — `createInitialState()`, `createConfig()`
 - Fold / fork: `fold.ts` — `fold`, `foldWithTrace`, `fork`
 
-Every invariant in [SPEC.md](SPEC.md) §5 is tested.
+Every invariant in [SPEC.md](../kernel/spec.md) §5 is tested.
 
 ### Host — `packages/host/`
 
@@ -39,9 +39,9 @@ Plus `packages/shared/src/protocol.ts` — wire protocol types shared across hos
 
 ### Executor — `packages/executor/`
 
-Node daemon that dials out to Host. No inbound port required (see [ADR 0002](adr/0002-reverse-websocket.md)).
+Node daemon that dials out to Host. No inbound port required (see [ADR 0002](../meta/adr/0002-reverse-websocket.md)).
 
-- `src/tools/` — one file per tool from [tools.md](tools.md): `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash`, `todowrite`, `memory`, `web_search`, `bash_output`, `kill_shell`.
+- `src/tools/` — one file per tool from [tools.md](../executor/tools.md): `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash`, `todowrite`, `memory`, `web_search`, `bash_output`, `kill_shell`.
 - `src/tools/index.ts` — tool registry + input-schema validation (ajv).
 - `src/sandbox.ts` — workspace whitelist enforcement (symlink-aware).
 - `src/client.ts` — Socket.IO client to Host; announces `workspaceId` / `workspaceName` / `os` / `runtime` / `sandboxRoots` / tool names; handles `tool:call` / `fs:list_dirs` / cancel.
@@ -54,7 +54,7 @@ The `agent` builtin is host-side, not executor-side; it does not appear in the e
 
 React SPA served by Host from `packages/dashboard/dist/`. Vite + React + Tailwind + shadcn semantic tokens. Light / dark themes.
 
-Five-column Finder-style layout (see [ADR 0013](adr/0013-dashboard-finder-layout.md)):
+Five-column Finder-style layout (see [ADR 0013](../meta/adr/0013-dashboard-finder-layout.md)):
 
 - `src/features/explorer/` — two-level tree of workspaces + sessions with time-bucket grouping, cwd surfacing, rename-in-place, Info dialogs for workspace and session metadata.
 - `src/features/chat/` — chat panel (text + image blocks, streaming render, compact boundary marker, user message edit + fork, image paste), Composer (model picker, context pressure ring, approval mode picker, `/compact` slash command, context pressure banner).
@@ -69,7 +69,7 @@ Five-column Finder-style layout (see [ADR 0013](adr/0013-dashboard-finder-layout
 
 The differentiating capability.
 
-- Host: `client:fork` handler creates a new JSONL with a fork header (see [event-log.md](protocol/event-log.md) §5). Fork header inlines the folded state so parent logs can be archived without breaking the child.
+- Host: `client:fork` handler creates a new JSONL with a fork header (see [event-log.md](../protocol/event-log.md) §5). Fork header inlines the folded state so parent logs can be archived without breaking the child.
 - Dashboard: session list from the JSONL directory (`server:sessions`), timeline scrubber, Fork button on any event.
 - Snapshot writing (optional performance hack): every N events or on turn-end, write a `snapshot` entry. Deleting snapshots is always safe.
 
@@ -85,11 +85,11 @@ The wire protocol and Socket.IO client contract already permit a browser-side ex
 
 ### Larger deferred items
 
-See [FEATURE-GAPS.md](FEATURE-GAPS.md) §3 for the concrete short list and §2 for the "never" list. The larger-scope items that are not simple to slot in:
+See [FEATURE-GAPS.md](feature-gaps.md) §3 for the concrete short list and §2 for the "never" list. The larger-scope items that are not simple to slot in:
 
 - **Additional LLM adapters**: local llama.cpp / ollama; anything with a non-OpenAI-compat wire format.
 - **MCP runtime**: expose the executor as an MCP server; consume third-party MCP tools at runtime. Currently a config-only stub.
-- **Multi-executor per session**: routing different tool names to different workspaces within one turn. Intentionally not designed for (see [ARCHITECTURE.md](ARCHITECTURE.md) §4.3).
+- **Multi-executor per session**: routing different tool names to different workspaces within one turn. Intentionally not designed for (see [ARCHITECTURE.md](../architecture/overview.md) §4.3).
 - **Kernel port to Rust**: same spec, different impl language, for embedding in non-JS environments.
 - **Extension API**: a documented way to add planning / memory / subagent orchestration around the kernel, without patching it.
 - **Session sharing**: publish a session (JSONL) as a public URL, viewable but not forkable. Doubles as a bug-repro tool.
@@ -98,7 +98,7 @@ See [FEATURE-GAPS.md](FEATURE-GAPS.md) §3 for the concrete short list and §2 f
 
 ## Cross-cutting
 
-- **Test coverage**: kernel 100%, host ≥80%, executor tools ≥90%, dashboard component + puppeteer computedStyle cross-check for theme / layout changes (see [testing.md](testing.md) §5.3).
+- **Test coverage**: kernel 100%, host ≥80%, executor tools ≥90%, dashboard component + puppeteer computedStyle cross-check for theme / layout changes (see [testing.md](../meta/testing.md) §5.3).
 - **Docs currency**: any protocol / spec change requires the corresponding doc PR in the same commit.
 - **CI**: GitHub Actions running `pnpm typecheck && pnpm test && pnpm build` on PRs.
 - **Examples**: `examples/` walkthroughs double as regression checks.
@@ -108,5 +108,5 @@ See [FEATURE-GAPS.md](FEATURE-GAPS.md) §3 for the concrete short list and §2 f
 ## Non-goals
 
 - **Not a Claude Code / Codex competitor.** Reference implementation and teaching artifact, not a product with a paid tier.
-- **Not an orchestration framework.** Kernel doesn't do orchestration (see [ADR 0005](adr/0005-kernel-boundary.md)). We don't chase LangGraph / crewai's feature set.
+- **Not an orchestration framework.** Kernel doesn't do orchestration (see [ADR 0005](../meta/adr/0005-kernel-boundary.md)). We don't chase LangGraph / crewai's feature set.
 - **Not a UI framework.** Dashboard is one artifact of one deployment. If someone wants a TUI, VS Code extension, or CLI-only front-end, they can build on top of the kernel and protocol.

@@ -1,6 +1,6 @@
 # agent-kernel
 
-**Status**: Kernel + Host + Executor + Dashboard + Replay/Fork all shipped end-to-end. See [ROADMAP](docs/ROADMAP.md) for the current feature ledger and [FEATURE-GAPS](docs/FEATURE-GAPS.md) for the comparison vs. reference agents.
+**Status**: Kernel + Host + Executor + Dashboard + Replay/Fork all shipped end-to-end. See [ROADMAP](docs/planning/roadmap.md) for the current feature ledger and [FEATURE-GAPS](docs/planning/feature-gaps.md) for the comparison vs. reference agents.
 
 ---
 
@@ -52,11 +52,11 @@ This is not just an architectural cute — it means:
 
 Kernel / Host / Executor:
 
-- Pure-function FSM with dispatch-table `step` ([ADR 0010](docs/adr/0010-fsm-dispatch-table.md))
+- Pure-function FSM with dispatch-table `step` ([ADR 0010](docs/meta/adr/0010-fsm-dispatch-table.md))
 - JSONL event log with header + snapshots + fork lineage; deterministic `fold` replay; crash-recovery synthetic events on load
 - Anthropic Messages API + OpenAI-compat (incl. Codex endpoints) adapters, both streaming SSE
 - Provider auto-import from `~/.codex/config.toml` and `~/.claude/settings.json`, merged with `~/.agent-kernel/config.json`
-- Approval modes `auto` / `ask` / `deny` / `allow_all` (with `AK_ALLOW_ALL_OK=1` host env-gate for `allow_all`); sub-agents run headless with forced `allow_all` (see [ADR 0014](docs/adr/0014-subagent-approval-mode.md))
+- Approval modes `auto` / `ask` / `deny` / `allow_all` (with `AK_ALLOW_ALL_OK=1` host env-gate for `allow_all`); sub-agents run headless with forced `allow_all` (see [ADR 0014](docs/meta/adr/0014-subagent-approval-mode.md))
 - Context pressure levels (`ok` / `soft` / `hard`) with manual `/compact` slash command and auto-compact on hard pressure
 - Host-side `agent` builtin: child JSONL session under the same workspace, `maxAgentDepth` recursion guard
 - Executor tool set: `read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash` (with `run_in_background` → `bash_output` / `kill_shell`), `todowrite`, `web_search` (built-in DuckDuckGo HTML endpoint — no paid API key)
@@ -101,7 +101,7 @@ Prefer an OpenAI-compatible endpoint (self-hosted gateway, `newapi`, LiteLLM, ol
 
 Open `http://localhost:3000`, click **New** to create a session, pick a workspace + cwd + provider/model, and start chatting. You can pause any tool call for approval, scrub the timeline, and **fork** from any cursor to explore a different path — the host writes a JSONL log per session so replay/fork is deterministic.
 
-For a walkthrough of how a single turn flows through the system, see [ARCHITECTURE](docs/ARCHITECTURE.md#turn-lifecycle).
+For a walkthrough of how a single turn flows through the system, see [ARCHITECTURE](docs/architecture/overview.md#turn-lifecycle).
 
 ## Repository layout
 
@@ -124,21 +124,21 @@ The docs are layered by intent — pick your entry point:
 
 **Just want to understand the idea?** (~15 min)
 1. This README
-2. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — three processes and one full turn end-to-end
+2. [docs/architecture/overview.md](docs/architecture/overview.md) — three processes and one full turn end-to-end
 
 **Want to implement something on top of the kernel?** (~1 hour)
-1. [docs/SPEC.md](docs/SPEC.md) — the *only* normative kernel contract. Types, state machine, invariants.
+1. [docs/kernel/spec.md](docs/kernel/spec.md) — the *only* normative kernel contract. Types, state machine, invariants.
 2. [docs/protocol/wire-protocol.md](docs/protocol/wire-protocol.md) — every Socket.IO event between Dashboard, Host, and Executor
 3. [docs/protocol/event-log.md](docs/protocol/event-log.md) — the JSONL format that makes replay/fork work
-4. [docs/tools.md](docs/tools.md) — the executor tool set
+4. [docs/executor/tools.md](docs/executor/tools.md) — the executor tool set
 
 **Want to see where the project stands vs. reference agents?**
-1. [docs/FEATURE-GAPS.md](docs/FEATURE-GAPS.md) — shipped features, deliberately-out items, and comparison table (pi / opencode / codex / claude-code)
-2. [docs/ROADMAP.md](docs/ROADMAP.md) — shipped feature ledger + deferred items
-3. [docs/testing.md](docs/testing.md) — test strategy at each layer, including the real-browser cross-check rule
+1. [docs/planning/feature-gaps.md](docs/planning/feature-gaps.md) — shipped features, deliberately-out items, and comparison table (pi / opencode / codex / claude-code)
+2. [docs/planning/roadmap.md](docs/planning/roadmap.md) — shipped feature ledger + deferred items
+3. [docs/meta/testing.md](docs/meta/testing.md) — test strategy at each layer, including the real-browser cross-check rule
 
 **Curious *why* a decision was made?**
-- [docs/adr/](docs/adr/) — one file per big decision: pure FSM, reverse-WS, Socket.IO, no relay, config/state split, kernel boundary, MCP tools, dashboard stack, provider adapters, FSM dispatch table, host/core naming, Finder layout
+- [docs/meta/adr/](docs/meta/adr/) — one file per big decision: pure FSM, reverse-WS, Socket.IO, no relay, config/state split, kernel boundary, MCP tools, dashboard stack, provider adapters, FSM dispatch table, host/core naming, Finder layout
 
 Per-package details live next to the code:
 

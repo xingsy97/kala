@@ -2,7 +2,7 @@
 
 **Status**: Design note. Planned runtime option, not current implementation.
 
-This document evaluates a local teaching mode where the agent core runs in the browser and talks directly to a local tool executor. It does not replace the v1 Host topology described in [ARCHITECTURE.md](ARCHITECTURE.md). The goal is to make the reducer, state transitions, LLM message assembly, approval gates, and tool lifecycle easier to inspect while preserving a clean security boundary for workspace effects.
+This document evaluates a local teaching mode where the agent core runs in the browser and talks directly to a local tool executor. It does not replace the v1 Host topology described in [ARCHITECTURE.md](../architecture/overview.md). The goal is to make the reducer, state transitions, LLM message assembly, approval gates, and tool lifecycle easier to inspect while preserving a clean security boundary for workspace effects.
 
 ---
 

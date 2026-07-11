@@ -6,7 +6,7 @@
  * auto-fire — only invoked from the `/consolidate-memory` slash command.
  *
  * Pattern reference: `references/claude-code-collection/memory/consolidator.py`.
- * Design: `docs/memory-consolidation.md`.
+ * Design: `docs/host/memory-consolidation.md`.
  */
 
 import { ulid } from 'ulid'

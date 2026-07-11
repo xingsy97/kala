@@ -569,7 +569,7 @@ valid tool results.
 Agent-kernel has two complementary layers:
 
 - **Executor overflow** stores large complete outputs outside the transcript and
-  returns a preview plus a pointer. See `docs/tool-output-overflow.md`.
+  returns a preview plus a pointer. See `docs/host/tool-output-overflow.md`.
 - **Host compaction input trimming** reduces old oversized `tool_result` blocks
   before the summarizer sees them.
 
@@ -664,8 +664,8 @@ Required and implemented coverage should include:
 
 ## Related Documents
 
-- `docs/tool-output-overflow.md` covers executor-side large-output spillover.
-- `docs/enhancement/05-context-engineering-engine.md` covers the broader context
+- `docs/host/tool-output-overflow.md` covers executor-side large-output spillover.
+- `docs/planning/enhancement/05-context-engineering-engine.md` covers the broader context
   assembly and budget observability roadmap.
 - `docs/protocol/event-log.md` and `docs/protocol/wire-protocol.md` define the
   ledger and dashboard protocol surfaces for `compact_replaced`.

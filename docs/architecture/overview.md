@@ -1,6 +1,6 @@
 # Architecture
 
-**Status**: Normative for topology & responsibilities. Wire-level details live in [protocol/wire-protocol.md](protocol/wire-protocol.md); kernel-level details in [SPEC.md](SPEC.md).
+**Status**: Normative for topology & responsibilities. Wire-level details live in [protocol/wire-protocol.md](../protocol/wire-protocol.md); kernel-level details in [SPEC.md](../kernel/spec.md).
 
 ---
 
@@ -69,7 +69,7 @@
 
 ### 2.1 Kernel (library, not a process)
 
-Lives inside Host as `@agent-kernel/kernel`. Pure function `step(state, event, config) → { next, effects }`. See [SPEC.md](SPEC.md).
+Lives inside Host as `@agent-kernel/kernel`. Pure function `step(state, event, config) → { next, effects }`. See [SPEC.md](../kernel/spec.md).
 
 **Not a process.** Do not deploy the kernel separately. It is a ~300 LOC pure-function library that Host imports.
 
@@ -81,7 +81,7 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 - Own the kernel's `AgentState` for each active session (in-memory Map keyed by `sessionId`)
 - Drive the FSM: pull events off an input queue, call `step`, dispatch resulting effects, feed responses back as events
 - Talk to LLM providers via the LLM Adapter (translate `call_llm` effect → provider request → `llm_response` / `llm_error` event). Stream token deltas to the dashboard as `session:token_delta`; the JSONL log only records the final `llm_response`.
-- Persist events to a JSONL log (append per `step` result). Recover on restart by folding the log and appending synthetic events for stuck pending tool calls / interrupted streams (see [event-log.md](protocol/event-log.md) §4.3).
+- Persist events to a JSONL log (append per `step` result). Recover on restart by folding the log and appending synthetic events for stuck pending tool calls / interrupted streams (see [event-log.md](../protocol/event-log.md) §4.3).
 - Broadcast state and events to subscribed dashboards; dispatch `call_tool` effects to the executor announcing the session's `workspaceId` (i.e. the machine the session is bound to)
 - Serve two Socket.IO namespaces: `/dashboard` and `/executor`, rooms `session:<id>`, and serve the pre-built Dashboard bundle from `packages/dashboard/dist/`
 - Drive context compaction (both auto via `contextPressureLevel === 'hard'` and manual via `client:compact` / the `/compact` slash command). The summarizer is invoked with the LLM adapter; the resulting `compact_replaced` event carries the summarizer `request`, `trigger`, and `responseUsage` for the timeline.
@@ -182,7 +182,7 @@ Dashboard          Host (loop + kernel)               LLM               Executor
 
 ### 3.2 Event log after this turn
 
-The event log (see [event-log.md](protocol/event-log.md)) records every `step` input. For the above turn:
+The event log (see [event-log.md](../protocol/event-log.md)) records every `step` input. For the above turn:
 
 ```jsonl
 {"seq":1,"ts":"...","event":{"kind":"user_message","text":"Read /tmp/notes.md and tell me what's in it."}}
@@ -269,7 +269,7 @@ This principle is a review gate. When a feature adds state, first ask whether it
 | Tool execution throws | Executor | Reply with `tool_result(ok=false, content=<error>)`. Kernel treats as normal tool result |
 | Executor disconnects mid-call | Socket.IO ACK timeout | Host synthesizes `tool_result(ok=false, content="executor disconnected")` |
 | Dashboard disconnects | Socket.IO reconnect | On reconnect, Host sends the full current state + a stream of events since last-seen `cursor` |
-| Host crashes mid-turn | External (systemd / process manager) | Restart. Load rebuilds state from JSONL, then appends synthetic `user_approve` + failed `tool_result` for pending tool calls, or an `[interrupted]` `llm_response` for stuck LLM streams — see [event-log.md](protocol/event-log.md) §4.3 |
+| Host crashes mid-turn | External (systemd / process manager) | Restart. Load rebuilds state from JSONL, then appends synthetic `user_approve` + failed `tool_result` for pending tool calls, or an `[interrupted]` `llm_response` for stuck LLM streams — see [event-log.md](../protocol/event-log.md) §4.3 |
 | Kernel bug | Would surface as an invariant violation in tests | Fix, ship, replay is safe because event log is unchanged |
 
 **Guarantee**: as long as the event log survives, the session survives. Nothing else is authoritative.
@@ -330,15 +330,15 @@ Every non-obvious topology choice above has an ADR:
 
 | Choice | ADR |
 |---|---|
-| Kernel as pure reducer | [ADR 0001](adr/0001-pure-reducer.md) |
-| Executor dials out to Host (reverse-WS) | [ADR 0002](adr/0002-reverse-websocket.md) |
-| Socket.IO over raw WS / gRPC / SSE | [ADR 0003](adr/0003-socket-io.md) |
-| Config separated from state | [ADR 0004](adr/0004-config-state-separation.md) |
-| Planning / memory / subagents outside kernel | [ADR 0005](adr/0005-kernel-boundary.md) |
-| No independent relay process in v1 | [ADR 0006](adr/0006-no-relay-process.md) |
-| MCP-compatible tool schemas | [ADR 0007](adr/0007-mcp-compatible-tools.md) |
-| Dashboard: Vite + React SPA | [ADR 0008](adr/0008-dashboard-vite-react.md) |
-| Provider adapter strategy (Anthropic / OpenAI compat) | [ADR 0009](adr/0009-provider-adapter-strategy.md) |
-| FSM dispatch table shape | [ADR 0010](adr/0010-fsm-dispatch-table.md) |
-| Naming: Host + Kernel (was Server + Core) | [ADR 0011](adr/0011-rename-host-and-core.md) |
-| Dashboard Finder-style layout + control-plane events | [ADR 0013](adr/0013-dashboard-finder-layout.md) |
+| Kernel as pure reducer | [ADR 0001](../meta/adr/0001-pure-reducer.md) |
+| Executor dials out to Host (reverse-WS) | [ADR 0002](../meta/adr/0002-reverse-websocket.md) |
+| Socket.IO over raw WS / gRPC / SSE | [ADR 0003](../meta/adr/0003-socket-io.md) |
+| Config separated from state | [ADR 0004](../meta/adr/0004-config-state-separation.md) |
+| Planning / memory / subagents outside kernel | [ADR 0005](../meta/adr/0005-kernel-boundary.md) |
+| No independent relay process in v1 | [ADR 0006](../meta/adr/0006-no-relay-process.md) |
+| MCP-compatible tool schemas | [ADR 0007](../meta/adr/0007-mcp-compatible-tools.md) |
+| Dashboard: Vite + React SPA | [ADR 0008](../meta/adr/0008-dashboard-vite-react.md) |
+| Provider adapter strategy (Anthropic / OpenAI compat) | [ADR 0009](../meta/adr/0009-provider-adapter-strategy.md) |
+| FSM dispatch table shape | [ADR 0010](../meta/adr/0010-fsm-dispatch-table.md) |
+| Naming: Host + Kernel (was Server + Core) | [ADR 0011](../meta/adr/0011-rename-host-and-core.md) |
+| Dashboard Finder-style layout + control-plane events | [ADR 0013](../meta/adr/0013-dashboard-finder-layout.md) |

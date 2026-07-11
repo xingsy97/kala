@@ -372,7 +372,7 @@ export const resources = {
         mcp: {
           subtitle: 'Model Context Protocol integration for external tool servers.',
           notImplemented: 'Not implemented yet',
-          body: "The design is fixed (executor-side spawning, <server>__<tool> naming, approvals inherit the session's mode). Implementation is deferred - the ecosystem overlap with the builtin tool set is small. See docs/mcp.md in the repo for the full spec.",
+          body: "The design is fixed (executor-side spawning, <server>__<tool> naming, approvals inherit the session's mode). Implementation is deferred - the ecosystem overlap with the builtin tool set is small. See docs/host/mcp.md in the repo for the full spec.",
         },
         copy: {
           copied: 'copied',
@@ -1653,7 +1653,7 @@ export const resources = {
         mcp: {
           subtitle: '外部工具服务器的 Model Context Protocol 集成。',
           notImplemented: '尚未实现',
-          body: '设计已经固定（executor 侧启动、<server>__<tool> 命名、审批继承会话模式）。实现暂缓 - 生态与内置工具集重叠较少。完整 spec 见仓库中的 docs/mcp.md。',
+          body: '设计已经固定（executor 侧启动、<server>__<tool> 命名、审批继承会话模式）。实现暂缓 - 生态与内置工具集重叠较少。完整 spec 见仓库中的 docs/host/mcp.md。',
         },
         copy: {
           copied: '已复制',

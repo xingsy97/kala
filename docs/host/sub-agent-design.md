@@ -2,14 +2,14 @@
 
 Status: live inline observability implemented; interruption implemented; agent-type registry still planned
 Owner: host + dashboard
-Related: [tools.md](./tools.md), [protocol/wire-protocol.md](./protocol/wire-protocol.md), [ARCHITECTURE.md](./ARCHITECTURE.md), [adr/0014-subagent-approval-mode.md](./adr/0014-subagent-approval-mode.md)
+Related: [tools.md](../executor/tools.md), [protocol/wire-protocol.md](../protocol/wire-protocol.md), [ARCHITECTURE.md](../architecture/overview.md), [adr/0014-subagent-approval-mode.md](../meta/adr/0014-subagent-approval-mode.md)
 
 ## 1. What we already have
 
 A minimum-viable sub-agent stack has been in-tree for a while:
 
 - **Tool schema** — `agent` tool in `packages/executor/src/tools/agent.ts`. Fields: `prompt` (required), `model`, `tools` (allowlist).
-- **Host-side handler** — `packages/host/src/extensions/agent-tool.ts`. Creates a *child JSONL session* via `SessionStore.create()` with `parentSessionId` + `parentCursor` set, inherits `workspaceId`/`workspaceName`/`cwd`, forces `initialApprovalMode: 'allow_all'` (see [ADR 0014](./adr/0014-subagent-approval-mode.md)), then drives the child through the host loop and returns an enveloped result.
+- **Host-side handler** — `packages/host/src/extensions/agent-tool.ts`. Creates a *child JSONL session* via `SessionStore.create()` with `parentSessionId` + `parentCursor` set, inherits `workspaceId`/`workspaceName`/`cwd`, forces `initialApprovalMode: 'allow_all'` (see [ADR 0014](../meta/adr/0014-subagent-approval-mode.md)), then drives the child through the host loop and returns an enveloped result.
 - **Depth limit** — `AgentConfig.maxAgentDepth` (default 3) counted by walking `parentSessionId` links.
 - **Loop dispatch** — `packages/host/src/loop.ts:317` special-cases `AGENT_TOOL_NAME`, so a `call_tool` effect for `agent` invokes `runAgentTool()` instead of the executor bridge.
 - **Store parent-child links** — `SessionRecord` carries `parentSessionId` + `parentCursor` (`packages/host/src/store/session.ts`). `SessionReadyEvent` in `packages/shared/src/protocol.ts` propagates them to clients.
@@ -77,7 +77,7 @@ packages/shared/src/protocol.ts                   NEW event types: server:sub_ag
 packages/dashboard/src/features/chat/SubAgentCard.tsx  NEW — inline collapsible sub-agent renderer
 packages/dashboard/src/features/chat/useSubAgentSession.ts NEW — hook that subscribes to a child session by id
 packages/dashboard/src/features/chat/ChatPanel.tsx map agent tool_call → SubAgentCard instead of generic ToolCallGroupBlock
-docs/sub-agent-design.md                          this doc
+docs/host/sub-agent-design.md                          this doc
 ```
 
 ## 5. Protocol
