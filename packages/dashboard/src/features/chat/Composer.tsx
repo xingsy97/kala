@@ -62,6 +62,7 @@ type Props = {
 
 export type SendMode = 'steer' | 'queue'
 const SEND_MODE_STORAGE_PREFIX = 'agent-kernel:composer:send-mode:'
+const QUEUED_MESSAGES_VISIBLE_LIMIT = 3
 
 type PastedImage = {
   id: string
@@ -878,7 +879,10 @@ function QueuedMessagesDock({
           {t('composer.queued.sendsAfterActiveTurn')}
         </span>
       </div>
-      <ScrollArea className="h-40 max-h-40" data-testid="queued-messages-scrollarea">
+      <ScrollArea
+        className={cn(items.length > QUEUED_MESSAGES_VISIBLE_LIMIT && 'h-40 max-h-40')}
+        data-testid="queued-messages-scrollarea"
+      >
         <div className="space-y-1 pr-3">
           {items.map((item, index) => (
             <div

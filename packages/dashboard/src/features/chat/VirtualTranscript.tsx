@@ -29,6 +29,20 @@ export type VirtualTranscriptHandle = {
   scrollToBottom: () => void
 }
 
+function scrollVirtuosoToBottom(handle: VirtuosoHandle | null, itemCount: number): void {
+  if (!handle) return
+  handle.scrollToIndex({
+    index: Math.max(itemCount - 1, 0),
+    align: 'end',
+    behavior: 'auto',
+  })
+  // The live status row ("Assistant is thinking", approvals, etc.) is a
+  // Virtuoso Footer, not part of totalCount. scrollToIndex lands on the last
+  // transcript item, so explicitly jump to the scroll container end as well;
+  // otherwise footer-only changes can remain partially hidden.
+  handle.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+}
+
 type Props<Item> = {
   items: readonly Item[]
   renderItem: (item: Item, index: number) => JSX.Element
@@ -82,18 +96,7 @@ function VirtualTranscriptInner<Item>(
         })
       },
       scrollToBottom: () => {
-        const handle = virtuoso.current
-        if (!handle) return
-        handle.scrollToIndex({
-          index: Math.max(items.length - 1, 0),
-          align: 'end',
-          behavior: 'auto',
-        })
-        // The live status row ("Assistant is thinking", approvals, etc.) is a
-        // Virtuoso Footer, not part of totalCount. scrollToIndex lands on the
-        // last transcript item, so explicitly jump to the scroll container end
-        // as well; otherwise the footer can remain partially hidden.
-        handle.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+        scrollVirtuosoToBottom(virtuoso.current, items.length)
       },
     }),
     [items.length],
@@ -130,6 +133,25 @@ function VirtualTranscriptInner<Item>(
       behavior: 'smooth',
     })
   }, [highlightIndex, items.length])
+
+  useEffect(() => {
+    if (!footerSlot || !pinnedToBottom) return
+    scrollVirtuosoToBottom(virtuoso.current, items.length)
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      scrollVirtuosoToBottom(virtuoso.current, items.length)
+      raf2 = requestAnimationFrame(() => scrollVirtuosoToBottom(virtuoso.current, items.length))
+    })
+    const timeouts = [
+      window.setTimeout(() => scrollVirtuosoToBottom(virtuoso.current, items.length), 60),
+      window.setTimeout(() => scrollVirtuosoToBottom(virtuoso.current, items.length), 180),
+    ]
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+      for (const timeout of timeouts) window.clearTimeout(timeout)
+    }
+  }, [footerSlot, items.length, pinnedToBottom])
 
   const totalCount = items.length
   const itemContent = useCallback(

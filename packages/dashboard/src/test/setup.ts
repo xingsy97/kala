@@ -34,6 +34,9 @@ const virtuosoScrollByMock = vi.fn()
 ;(globalThis as typeof globalThis & {
   __virtuosoScrollToIndexMock?: typeof virtuosoScrollToIndexMock
 }).__virtuosoScrollToIndexMock = virtuosoScrollToIndexMock
+;(globalThis as typeof globalThis & {
+  __virtuosoScrollToMock?: typeof virtuosoScrollToMock
+}).__virtuosoScrollToMock = virtuosoScrollToMock
 
 // cmdk calls Element.scrollIntoView on the highlighted item; JSDOM does not
 // implement it. A no-op keeps command-palette tests from crashing at layout.

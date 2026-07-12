@@ -118,4 +118,7 @@ export function useNumberPref(
 
 export const PREF_SHOW_TOOL_CALL_TAB = 'ak-show-tool-call-tab'
 export const PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT = 'ak-live-tool-activity-tail-count'
+export const PREF_EXPLORER_OPEN = 'ak-explorer-open'
+export const PREF_INSPECTOR_OPEN = 'ak-inspector-open'
+export const PREF_TOPBAR_OPEN = 'ak-topbar-open'
 export const DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT = 3
