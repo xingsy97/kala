@@ -21,9 +21,11 @@ export const resources = {
         model: 'model',
         noModels: 'no models',
         ops: 'Ops',
+        no: 'No',
         reload: 'Reload',
         search: 'search',
         settings: 'Settings',
+        yes: 'Yes',
       },
       appShell: {
         nav: {
@@ -78,6 +80,26 @@ export const resources = {
         },
         badcasesTitle: 'Bad cases',
         badcasesSubtitle: 'Mine, annotate, and export failing cases from benchmark runs.',
+        rlReadiness: {
+          title: 'Agentic RL readiness',
+          subtitle: 'Live rollout artifacts, verifier reward, and slime sample readiness.',
+          refresh: 'Refresh',
+          loading: 'Loading RL artifacts...',
+          empty: 'No Agentic RL rollout artifacts found yet.',
+          unknownTask: 'unknown task',
+          metrics: {
+            rollouts: 'Rollouts',
+            ready: 'Ready',
+            blocked: 'Blocked',
+            tokenCaptured: 'Token captured',
+          },
+          fields: {
+            status: 'status',
+            tokens: 'tokens',
+            reward: 'reward',
+            sample: 'sample',
+          },
+        },
         wizardModal: {
           title: 'Run benchmark wizard',
           description: 'Plan, run, grade, and ingest a benchmark end-to-end.',
@@ -1530,9 +1552,11 @@ export const resources = {
         model: '模型',
         noModels: '无模型',
         ops: '运维',
+        no: '否',
         reload: '重新加载',
         search: '搜索',
         settings: '设置',
+        yes: '是',
       },
       appShell: {
         nav: {
@@ -1587,6 +1611,26 @@ export const resources = {
         },
         badcasesTitle: 'Bad case 归档',
         badcasesSubtitle: '从评测运行中挖掘、标注并导出失败样本。',
+        rlReadiness: {
+          title: 'Agentic RL readiness',
+          subtitle: '查看 live rollout artifacts、verifier reward 和 slime sample readiness。',
+          refresh: '刷新',
+          loading: '正在加载 RL artifacts...',
+          empty: '尚未发现 Agentic RL rollout artifacts。',
+          unknownTask: '未知任务',
+          metrics: {
+            rollouts: 'Rollouts',
+            ready: 'Ready',
+            blocked: 'Blocked',
+            tokenCaptured: 'Token captured',
+          },
+          fields: {
+            status: 'status',
+            tokens: 'tokens',
+            reward: 'reward',
+            sample: 'sample',
+          },
+        },
         wizardModal: {
           title: '运行评测向导',
           description: '端到端地完成 plan / infer / grade / ingest。',

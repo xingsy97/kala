@@ -17,6 +17,7 @@ async function fetchArtifactManifest(): Promise<ArtifactManifest | null> {
   const res = await fetch('/artifacts/manifest', { cache: 'no-store' })
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null
+    if (isMissingArtifactDirectory(res.status, body?.error)) return emptyManifest()
     throw new Error(body?.error ?? `artifact manifest request failed: ${res.status}`)
   }
   const next = (await res.json()) as ArtifactManifest
@@ -24,6 +25,28 @@ async function fetchArtifactManifest(): Promise<ArtifactManifest | null> {
     return null
   }
   return next
+}
+
+function isMissingArtifactDirectory(status: number, message: string | undefined): boolean {
+  if (status === 404 && message?.includes('artifact not found')) return true
+  if (!message) return false
+  return message.includes('ENOENT') && message.includes('scandir')
+}
+
+function emptyManifest(): ArtifactManifest {
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date(0).toISOString(),
+    rootDir: '',
+    entries: [],
+    summary: {
+      entryCount: 0,
+      totalBytes: 0,
+      hashedCount: 0,
+      hashSkippedCount: 0,
+      kinds: {},
+    },
+  }
 }
 
 export function useArtifactManifest(): ManifestState {

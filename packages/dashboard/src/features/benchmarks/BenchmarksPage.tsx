@@ -9,6 +9,7 @@ import { RunLauncherPanel } from './RunLauncherPanel.js'
 import { RunTerminalBenchWizard } from './RunTerminalBenchWizard.js'
 import { RunBenchmarkWizardModal } from './RunBenchmarkWizardModal.js'
 import { EvalWorkspacePanel } from './EvalWorkspacePanel.js'
+import { RlReadinessPanel } from './RlReadinessPanel.js'
 import type { BenchmarkRunSummary } from './types.js'
 
 export function BenchmarksPage({
@@ -85,6 +86,7 @@ export function BenchmarksPage({
         <section className="border-t border-border/60 min-h-[600px]" data-testid="eval-workspace-section">
           <EvalWorkspacePanel onOpenSession={onOpenSession} />
         </section>
+        <RlReadinessPanel />
         <section className="border-t border-border/60 min-h-[420px]" data-testid="benchmarks-badcases-panel">
           <div className="border-b border-border/60 px-4 py-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

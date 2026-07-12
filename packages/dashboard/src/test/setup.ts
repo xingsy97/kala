@@ -72,7 +72,8 @@ vi.mock('react-virtuoso', async () => {
     const totalCount = typeof props.totalCount === 'number' ? props.totalCount : 0
     const itemContent = props.itemContent as ((index: number) => React.ReactNode) | undefined
     const computeItemKey = props.computeItemKey as ((index: number) => React.Key) | undefined
-    const components = props.components as { Footer?: React.ComponentType } | undefined
+    const components = props.components as { Footer?: React.ComponentType<{ context?: unknown }> } | undefined
+    const context = props.context
     const children: React.ReactNode[] = Array.from({ length: totalCount }, (_, index) =>
       React.createElement(
         'div',
@@ -80,7 +81,7 @@ vi.mock('react-virtuoso', async () => {
         itemContent?.(index),
       ),
     )
-    if (components?.Footer) children.push(React.createElement(components.Footer, { key: 'footer' }))
+    if (components?.Footer) children.push(React.createElement(components.Footer, { key: 'footer', context }))
     return React.createElement(
       'div',
       { 'data-testid': 'virtuoso-scroller', 'data-virtuoso-scroller': 'true' },
