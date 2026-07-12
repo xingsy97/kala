@@ -24,7 +24,12 @@ export type ArtifactKind =
   | 'diff'
   | 'log'
   | 'rl_token_segments'
+  | 'rl_task_pool'
+  | 'rl_token_capture'
+  | 'rl_trajectory'
   | 'rl_reward'
+  | 'rl_sample_validation'
+  | 'rl_rollout_result'
   | 'subagent_policy'
   | 'metadata'
 

@@ -54,6 +54,13 @@ import { writeExecutorCapabilitySnapshot } from './executor-capabilities.js'
 import { buildMemoryIndex, type BuildMemoryIndexInput } from './memory-index.js'
 import { retrieveMemory, type MemoryRetrievalInput } from './memory-retrieval.js'
 import { exportSubAgentGraph, type ExportSubAgentGraphInput } from './subagent-graph.js'
+import { loadTaskPoolFile, type TaskPoolValidation } from './rl/task-pool.js'
+import { writeTokenCaptureArtifact, type TokenCaptureValidation } from './rl/token-capture.js'
+import { buildTrajectory, validateSlimeSampleReadiness } from './rl/trajectory-builder.js'
+import { runRlRollout } from './rl/rollout-runner.js'
+import { policyGatewayAdapter } from './llm/policy-gateway.js'
+import type { LLMAdapter } from './llm/adapter.js'
+import { readFile } from 'node:fs/promises'
 
 export type EnhancementCliCommand =
   | { kind: 'none' }
@@ -81,11 +88,18 @@ export type EnhancementCliCommand =
   | ({ kind: 'rollout-export-segments' } & ExportSessionTraceInput)
   | ({ kind: 'rollout-export-adapter' } & ExportRolloutAdapterInput)
   | ({ kind: 'rollout-verify-reward' } & VerifyRewardInput)
+  | { kind: 'rl-validate-task-pool'; taskFile: string; trainingMode: boolean; workspaceRoot?: string }
+  | { kind: 'rl-write-token-capture-fixture'; rootDir: string; rolloutId: string; sessionId: string; callId: string; taskId?: string; model: string; requireLogprobs: boolean }
+  | { kind: 'rl-build-trajectory'; rootDir: string; rolloutId: string; taskId: string; sessionId: string; tokenCaptures: readonly string[]; rewardPath?: string }
+  | { kind: 'rl-validate-slime-sample'; rootDir: string; trajectoryPath: string; rewardPath: string; requireLogprobs: boolean }
+  | { kind: 'rl-run-rollout-smoke'; rootDir: string; taskFile: string; taskId?: string; rolloutId?: string; policyBaseUrl?: string; model: string; tokenizerPath?: string; requireLogprobs: boolean; timeoutMs?: number; maxNewTokens?: number; fixturePolicy: boolean }
+  | { kind: 'rl-inspect-rollout'; rootDir: string; rolloutPath: string }
 
 export function parseEnhancementCli(argv: readonly string[]): EnhancementCliCommand {
-  if (argv[0] !== 'enhancement') return { kind: 'none' }
-  if (argv[1] === 'trace' && argv[2] === 'export-session') {
-    const rest = argv.slice(3)
+  const commandArgv = argv[0] === 'rl' ? ['enhancement', ...argv] : argv
+  if (commandArgv[0] !== 'enhancement') return { kind: 'none' }
+  if (commandArgv[1] === 'trace' && commandArgv[2] === 'export-session') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'trace-export-session',
       rootDir: value(rest, '--root-dir') ?? 'runs/enhancement',
@@ -95,8 +109,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       workspaceRoot: value(rest, '--workspace-root'),
     }
   }
-  if (argv[1] === 'trace' && argv[2] === 'export-otlp') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'trace' && commandArgv[2] === 'export-otlp') {
+    const rest = commandArgv.slice(3)
     const headers = parseHeaderArgs(rest)
     const retries = numberValue(rest, '--retries')
     const retryDelayMs = numberValue(rest, '--retry-delay-ms')
@@ -119,8 +133,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       hostVersion: value(rest, '--host-version'),
     }
   }
-  if (argv[1] === 'eval' && argv[2] === 'score-session') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'eval' && commandArgv[2] === 'score-session') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'eval-score-session',
       rootDir: value(rest, '--root-dir') ?? 'runs/eval/session-score',
@@ -131,8 +145,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       workspaceRoot: value(rest, '--workspace-root'),
     }
   }
-  if (argv[1] === 'eval' && argv[2] === 'compare-runs') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'eval' && commandArgv[2] === 'compare-runs') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'eval-compare-runs',
       rootDir: value(rest, '--root-dir') ?? 'runs/eval/compare',
@@ -140,8 +154,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       candidateSummaryPath: required(rest, '--candidate-summary'),
     }
   }
-  if (argv[1] === 'eval' && argv[2] === 'regression-gate') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'eval' && commandArgv[2] === 'regression-gate') {
+    const rest = commandArgv.slice(3)
     const failureLabelCaps = parseFailureCapArgs(rest)
     const minPassRate = numberValue(rest, '--min-pass-rate')
     const maxPassRateDrop = numberValue(rest, '--max-pass-rate-drop')
@@ -165,8 +179,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       policy,
     }
   }
-  if (argv[1] === 'eval' && argv[2] === 'judge-score') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'eval' && commandArgv[2] === 'judge-score') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'eval-judge-score',
       rootDir: value(rest, '--root-dir') ?? 'runs/eval/judge-score',
@@ -180,8 +194,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       workspaceRoot: value(rest, '--workspace-root'),
     }
   }
-  if (argv[1] === 'profile' && argv[2] === 'session') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'profile' && commandArgv[2] === 'session') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'profile-session',
       rootDir: value(rest, '--root-dir') ?? 'runs/profile/session',
@@ -189,8 +203,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       pricingPath: value(rest, '--pricing'),
     }
   }
-  if (argv[1] === 'profile' && argv[2] === 'aggregate') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'profile' && commandArgv[2] === 'aggregate') {
+    const rest = commandArgv.slice(3)
     const summaryPath = value(rest, '--summary')
     const output = value(rest, '--output')
     return {
@@ -200,8 +214,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(output ? { outputFilename: output } : {}),
     }
   }
-  if (argv[1] === 'profile' && argv[2] === 'budget') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'profile' && commandArgv[2] === 'budget') {
+    const rest = commandArgv.slice(3)
     const output = value(rest, '--output')
     const parsed = parseThresholdArgs(rest) ?? {}
     return {
@@ -212,24 +226,24 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(output ? { outputFilename: output } : {}),
     }
   }
-  if (argv[1] === 'reliability' && argv[2] === 'audit-session') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'reliability' && commandArgv[2] === 'audit-session') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'reliability-audit-session',
       rootDir: value(rest, '--root-dir') ?? 'runs/reliability/session',
       sessionLogPath: required(rest, '--session-log'),
     }
   }
-  if (argv[1] === 'reliability' && argv[2] === 'chaos-replay') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'reliability' && commandArgv[2] === 'chaos-replay') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'reliability-chaos-replay',
       rootDir: value(rest, '--root-dir') ?? 'runs/reliability/chaos',
       sessionLogPaths: listValue(rest, '--session-logs'),
     }
   }
-  if (argv[1] === 'reliability' && argv[2] === 'gate') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'reliability' && commandArgv[2] === 'gate') {
+    const rest = commandArgv.slice(3)
     const policy: ReliabilityGatePolicy = {}
     const maxDanglingCount = numberValue(rest, '--max-dangling')
     const minRecoverableRatio = numberValue(rest, '--min-recoverable-ratio')
@@ -254,8 +268,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(output ? { outputFilename: output } : {}),
     }
   }
-  if (argv[1] === 'reliability' && argv[2] === 'classify') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'reliability' && commandArgv[2] === 'classify') {
+    const rest = commandArgv.slice(3)
     const wedgedThresholdMs = numberValue(rest, '--wedged-threshold-ms')
     return {
       kind: 'reliability-classify',
@@ -265,8 +279,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(wedgedThresholdMs !== undefined ? { wedgedThresholdMs } : {}),
     }
   }
-  if (argv[1] === 'tool-catalog' && argv[2] === 'diff') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'tool-catalog' && commandArgv[2] === 'diff') {
+    const rest = commandArgv.slice(3)
     const output = value(rest, '--output')
     return {
       kind: 'tool-catalog-diff',
@@ -276,8 +290,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(output ? { outputFilename: output } : {}),
     }
   }
-  if (argv[1] === 'executor-capabilities' && argv[2] === 'snapshot') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'executor-capabilities' && commandArgv[2] === 'snapshot') {
+    const rest = commandArgv.slice(3)
     const output = value(rest, '--output')
     const executorsPath = value(rest, '--executors')
     return {
@@ -287,8 +301,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(executorsPath ? { executorsPath } : {}),
     }
   }
-  if (argv[1] === 'memory' && argv[2] === 'index') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'memory' && commandArgv[2] === 'index') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'memory-index',
       rootDir: value(rest, '--root-dir') ?? 'runs/memory',
@@ -296,8 +310,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       includeGlobal: flag(rest, '--include-global'),
     }
   }
-  if (argv[1] === 'memory' && argv[2] === 'retrieve') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'memory' && commandArgv[2] === 'retrieve') {
+    const rest = commandArgv.slice(3)
     const maxTokens = numberValue(rest, '--max-tokens')
     const maxHits = numberValue(rest, '--max-hits')
     const workspaceRoot = value(rest, '--workspace-root')
@@ -313,16 +327,16 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(output ? { outputFilename: output } : {}),
     }
   }
-  if (argv[1] === 'subagents' && argv[2] === 'graph') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'subagents' && commandArgv[2] === 'graph') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'subagents-graph',
       rootDir: value(rest, '--root-dir') ?? 'runs/subagents',
       sessionsDir: required(rest, '--sessions-dir'),
     }
   }
-  if (argv[1] === 'rollout' && argv[2] === 'export-session') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'rollout' && commandArgv[2] === 'export-session') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'rollout-export-session',
       rootDir: value(rest, '--root-dir') ?? 'runs/rollouts',
@@ -338,8 +352,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       tokenSegmentsPath: value(rest, '--token-segments'),
     }
   }
-  if (argv[1] === 'rollout' && argv[2] === 'export-segments') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'rollout' && commandArgv[2] === 'export-segments') {
+    const rest = commandArgv.slice(3)
     return {
       kind: 'rollout-export-segments',
       rootDir: value(rest, '--root-dir') ?? 'runs/rollouts',
@@ -349,8 +363,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       workspaceRoot: value(rest, '--workspace-root'),
     }
   }
-  if (argv[1] === 'rollout' && argv[2] === 'export-adapter') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'rollout' && commandArgv[2] === 'export-adapter') {
+    const rest = commandArgv.slice(3)
     const framework = value(rest, '--framework')
     return {
       kind: 'rollout-export-adapter',
@@ -359,8 +373,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(framework ? { frameworkTarget: frameworkTarget(framework) } : {}),
     }
   }
-  if (argv[1] === 'rollout' && argv[2] === 'verify-reward') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'rollout' && commandArgv[2] === 'verify-reward') {
+    const rest = commandArgv.slice(3)
     const trialPath = value(rest, '--trial')
     const scorePath = value(rest, '--score')
     if (!trialPath && !scorePath) throw new Error('missing required --trial or --score')
@@ -374,8 +388,79 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(value(rest, '--workspace-root') ? { workspaceRoot: value(rest, '--workspace-root')! } : {}),
     }
   }
-  if (argv[1] === 'artifacts' && argv[2] === 'manifest') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'rl' && commandArgv[2] === 'validate-task-pool') {
+    const rest = commandArgv.slice(3)
+    return {
+      kind: 'rl-validate-task-pool',
+      taskFile: required(rest, '--task-file'),
+      trainingMode: flag(rest, '--training-mode'),
+      workspaceRoot: value(rest, '--workspace-root'),
+    }
+  }
+  if (commandArgv[1] === 'rl' && commandArgv[2] === 'write-token-capture-fixture') {
+    const rest = commandArgv.slice(3)
+    return {
+      kind: 'rl-write-token-capture-fixture',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rl-smoke',
+      rolloutId: required(rest, '--rollout-id'),
+      sessionId: required(rest, '--session-id'),
+      callId: required(rest, '--call-id'),
+      taskId: value(rest, '--task-id'),
+      model: value(rest, '--model') ?? 'fake-policy',
+      requireLogprobs: flag(rest, '--require-logprobs'),
+    }
+  }
+  if (commandArgv[1] === 'rl' && commandArgv[2] === 'build-trajectory') {
+    const rest = commandArgv.slice(3)
+    return {
+      kind: 'rl-build-trajectory',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rl-smoke',
+      rolloutId: required(rest, '--rollout-id'),
+      taskId: required(rest, '--task-id'),
+      sessionId: required(rest, '--session-id'),
+      tokenCaptures: listValue(rest, '--token-captures'),
+      rewardPath: value(rest, '--reward'),
+    }
+  }
+  if (commandArgv[1] === 'rl' && commandArgv[2] === 'validate-slime-sample') {
+    const rest = commandArgv.slice(3)
+    return {
+      kind: 'rl-validate-slime-sample',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rl-smoke',
+      trajectoryPath: required(rest, '--trajectory'),
+      rewardPath: required(rest, '--reward'),
+      requireLogprobs: flag(rest, '--require-logprobs'),
+    }
+  }
+  if (commandArgv[1] === 'rl' && commandArgv[2] === 'run-rollout-smoke') {
+    const rest = commandArgv.slice(3)
+    const timeoutMs = numberValue(rest, '--timeout-ms')
+    const maxNewTokens = numberValue(rest, '--max-new-tokens')
+    return {
+      kind: 'rl-run-rollout-smoke',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rl-smoke',
+      taskFile: required(rest, '--task-file'),
+      taskId: value(rest, '--task-id'),
+      rolloutId: value(rest, '--rollout-id'),
+      policyBaseUrl: value(rest, '--policy-base-url') ?? process.env.AGENT_KERNEL_POLICY_BASE_URL,
+      model: value(rest, '--model') ?? process.env.AGENT_KERNEL_POLICY_MODEL ?? 'policy-model-unspecified',
+      tokenizerPath: value(rest, '--tokenizer') ?? process.env.AGENT_KERNEL_POLICY_TOKENIZER,
+      requireLogprobs: flag(rest, '--require-logprobs'),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(maxNewTokens !== undefined ? { maxNewTokens } : {}),
+      fixturePolicy: flag(rest, '--fixture-policy'),
+    }
+  }
+  if (commandArgv[1] === 'rl' && commandArgv[2] === 'inspect-rollout') {
+    const rest = commandArgv.slice(3)
+    return {
+      kind: 'rl-inspect-rollout',
+      rootDir: value(rest, '--root-dir') ?? 'runs/rl-smoke',
+      rolloutPath: required(rest, '--rollout'),
+    }
+  }
+  if (commandArgv[1] === 'artifacts' && commandArgv[2] === 'manifest') {
+    const rest = commandArgv.slice(3)
     const maxHashBytes = numberValue(rest, '--max-hash-bytes')
     return {
       kind: 'artifacts-manifest',
@@ -384,8 +469,8 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(maxHashBytes === undefined ? {} : { maxHashBytes }),
     }
   }
-  if (argv[1] === 'artifacts' && argv[2] === 'prune') {
-    const rest = argv.slice(3)
+  if (commandArgv[1] === 'artifacts' && commandArgv[2] === 'prune') {
+    const rest = commandArgv.slice(3)
     const olderThanDays = numberValue(rest, '--older-than-days')
     const maxTotalBytes = numberValue(rest, '--max-total-bytes')
     const kindsArg = value(rest, '--kinds')
@@ -402,7 +487,7 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       ...(value(rest, '--output') ? { outputPath: value(rest, '--output')! } : {}),
     }
   }
-  throw new Error(`unknown enhancement command: ${argv.slice(1).join(' ') || '<missing>'}`)
+  throw new Error(`unknown enhancement command: ${commandArgv.slice(1).join(' ') || '<missing>'}`)
 }
 
 export async function runEnhancementCli(command: EnhancementCliCommand): Promise<boolean> {
@@ -587,6 +672,91 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
     }, null, 2))
     return true
   }
+  if (command.kind === 'rl-validate-task-pool') {
+    const result: TaskPoolValidation = await loadTaskPoolFile(command.taskFile, {
+      trainingMode: command.trainingMode,
+      ...(command.workspaceRoot ? { workspaceRoot: command.workspaceRoot } : {}),
+    })
+    console.log(JSON.stringify({ taskCount: result.taskCount, trainingAllowedCount: result.trainingAllowedCount, blockedCount: result.blockedCount, warnings: result.warnings }, null, 2))
+    return true
+  }
+  if (command.kind === 'rl-write-token-capture-fixture') {
+    const result = await writeTokenCaptureArtifact({
+      rootDir: command.rootDir,
+      requireLogprobs: command.requireLogprobs,
+      capture: {
+        rolloutId: command.rolloutId,
+        sessionId: command.sessionId,
+        callId: command.callId,
+        provider: 'policy-gateway',
+        backend: 'sglang',
+        model: command.model,
+        tokenizer: { nameOrPath: command.model, chatTemplate: 'fake-chat-template-v1' },
+        promptIds: [151644, 872, 198],
+        outputIds: [40, 686, 11273, 13],
+        outputLogProbs: [-0.1, -0.2, -0.3, -0.4],
+        responseMask: [1, 1, 1, 1],
+        finishReason: 'stop',
+        usage: { promptTokens: 3, completionTokens: 4 },
+      },
+    })
+    const validation: TokenCaptureValidation = result.validation
+    console.log(JSON.stringify({ artifact: result.artifact, validation }, null, 2))
+    return true
+  }
+  if (command.kind === 'rl-build-trajectory') {
+    const result = await buildTrajectory({
+      rootDir: command.rootDir,
+      rolloutId: command.rolloutId,
+      taskId: command.taskId,
+      sessionId: command.sessionId,
+      tokenCapturePaths: command.tokenCaptures,
+      ...(command.rewardPath ? { rewardPath: command.rewardPath } : {}),
+    })
+    console.log(JSON.stringify({ artifact: result.artifact, readiness: result.trajectory.readiness, turns: result.trajectory.turns.length }, null, 2))
+    return true
+  }
+  if (command.kind === 'rl-validate-slime-sample') {
+    const result = await validateSlimeSampleReadiness(command)
+    console.log(JSON.stringify({ artifact: result.artifact, validation: result.validation }, null, 2))
+    if (result.validation.status !== 'ready') process.exitCode = 2
+    return true
+  }
+  if (command.kind === 'rl-run-rollout-smoke') {
+    const pool = await loadTaskPoolFile(command.taskFile, { trainingMode: true, workspaceRoot: command.rootDir })
+    const task = command.taskId
+      ? pool.tasks.find((candidate) => candidate.taskId === command.taskId)
+      : pool.tasks[0]
+    if (!task) throw new Error(command.taskId ? `task not found: ${command.taskId}` : 'task pool has no tasks')
+    const rolloutId = command.rolloutId ?? `rollout-cli-${Date.now()}`
+    const llm = command.fixturePolicy
+      ? fixturePolicyAdapter({ rootDir: command.rootDir, rolloutId, model: command.model, requireLogprobs: command.requireLogprobs })
+      : policyGatewayFromCli(command, rolloutId)
+    const result = await runRlRollout({
+      rootDir: command.rootDir,
+      task,
+      llm,
+      rolloutId,
+      requireLogprobs: command.requireLogprobs,
+      ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),
+    })
+    console.log(JSON.stringify({ artifact: result.artifact, result: result.result }, null, 2))
+    if (result.result.status !== 'completed' && result.result.readiness !== 'slime-sample-ready') process.exitCode = 2
+    return true
+  }
+  if (command.kind === 'rl-inspect-rollout') {
+    const result = JSON.parse(await readFile(command.rolloutPath, 'utf8')) as { readiness?: string; status?: string; blockedReason?: string; tokenCaptureRefs?: unknown[]; rewardRef?: unknown; trajectoryRef?: unknown; sampleValidationRef?: unknown }
+    console.log(JSON.stringify({
+      status: result.status ?? 'unknown',
+      readiness: result.readiness ?? 'unknown',
+      blockedReason: result.blockedReason,
+      tokenCaptureCount: Array.isArray(result.tokenCaptureRefs) ? result.tokenCaptureRefs.length : 0,
+      rewardPresent: Boolean(result.rewardRef),
+      trajectoryPresent: Boolean(result.trajectoryRef),
+      sampleValidationPresent: Boolean(result.sampleValidationRef),
+    }, null, 2))
+    return true
+  }
   const result = await exportRolloutSidecar(command)
   console.log(JSON.stringify({
     rolloutId: result.sidecar.rollout_id,
@@ -594,6 +764,52 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
     traceArtifact: result.traceArtifact,
   }, null, 2))
   return true
+}
+
+function policyGatewayFromCli(command: Extract<EnhancementCliCommand, { kind: 'rl-run-rollout-smoke' }>, rolloutId: string): LLMAdapter {
+  if (!command.policyBaseUrl) throw new Error('rl run-rollout-smoke requires --policy-base-url or AGENT_KERNEL_POLICY_BASE_URL unless --fixture-policy is used')
+  return policyGatewayAdapter({
+    baseUrl: command.policyBaseUrl,
+    artifactRoot: command.rootDir,
+    model: command.model,
+    ...(command.tokenizerPath ? { tokenizerPath: command.tokenizerPath } : {}),
+    rolloutId,
+    routeKey: rolloutId,
+    requireLogprobs: command.requireLogprobs,
+    ...(command.maxNewTokens !== undefined ? { maxNewTokens: command.maxNewTokens } : {}),
+  })
+}
+
+function fixturePolicyAdapter(input: { rootDir: string; rolloutId: string; model: string; requireLogprobs: boolean }): LLMAdapter {
+  return {
+    name: 'fixture-policy:test-only',
+    async call(params) {
+      const { writeTokenCaptureArtifact } = await import('./rl/token-capture.js')
+      const text = 'fixture policy response'
+      await writeTokenCaptureArtifact({
+        rootDir: input.rootDir,
+        requireLogprobs: input.requireLogprobs,
+        capture: {
+          rolloutId: input.rolloutId,
+          sessionId: 'fixture-session',
+          callId: `fixture-${Date.now()}`,
+          provider: 'policy-gateway',
+          backend: 'sglang',
+          model: input.model,
+          tokenizer: { nameOrPath: input.model, chatTemplate: 'fixture-test-only' },
+          promptIds: [1, 2, 3],
+          outputIds: [4, 5, 6],
+          outputLogProbs: [-0.1, -0.2, -0.3],
+          responseMask: [1, 1, 1],
+        },
+      })
+      return {
+        message: { role: 'assistant', content: [{ type: 'text', text }] },
+        usage: { inputTokens: 3, outputTokens: 3 },
+        trace: { provider: 'unknown', model: params.model ?? input.model, request: { url: 'fixture://policy', headers: {}, body: { fixture: true } }, response: { status: 200, body: { fixture: true } } },
+      }
+    },
+  }
 }
 
 function value(argv: readonly string[], name: string): string | undefined {

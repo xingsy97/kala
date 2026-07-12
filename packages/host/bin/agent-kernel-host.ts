@@ -42,6 +42,7 @@ import type { ManualModelInput, ModelInfo, ServerSettingsPayload } from '@agent-
 import packageJson from '../package.json'
 import { anthropicAdapter } from '../src/llm/anthropic.js'
 import { openaiAdapter } from '../src/llm/openai.js'
+import { policyGatewayAdapter } from '../src/llm/policy-gateway.js'
 import {
   createProviderHealthRegistry,
   writeFallbackArtifact,
@@ -479,10 +480,28 @@ function joinPath(base: string, tail: string): string {
  * Backwards-compatibility path: if neither `~/.claude/settings.json` nor
  * `~/.codex/config.toml` produced a working provider, fall back to the classic
  * `LLM_PROVIDER=anthropic|openai` env vars so existing container deployments
- * keep working.
+ * keep working. `AGENT_KERNEL_PROVIDER=policy-gateway` is the training-mode
+ * path for SGLang-backed live rollouts.
  */
 function legacyEnvAdapter(models: ModelInfo[]): LLMAdapter {
-  const provider = (process.env.LLM_PROVIDER ?? 'anthropic').toLowerCase()
+  const provider = (process.env.AGENT_KERNEL_PROVIDER ?? process.env.LLM_PROVIDER ?? 'anthropic').toLowerCase()
+  if (provider === 'policy-gateway') {
+    const baseUrl = process.env.AGENT_KERNEL_POLICY_BASE_URL
+    const model = process.env.AGENT_KERNEL_POLICY_MODEL ?? process.env.HOST_MODEL
+    if (!baseUrl || !model) {
+      fail('AGENT_KERNEL_PROVIDER=policy-gateway requires AGENT_KERNEL_POLICY_BASE_URL and AGENT_KERNEL_POLICY_MODEL')
+    }
+    models.push(modelInfo(model, 'policy-gateway (SGLang)', { providerId: 'policy-gateway', source: 'env' }))
+    return policyGatewayAdapter({
+      baseUrl,
+      artifactRoot: process.env.AGENT_KERNEL_ARTIFACTS_DIR ?? join(homedir(), '.agent-kernel', 'artifacts'),
+      model,
+      ...(process.env.AGENT_KERNEL_POLICY_TOKENIZER ? { tokenizerPath: process.env.AGENT_KERNEL_POLICY_TOKENIZER } : {}),
+      ...(process.env.AGENT_KERNEL_POLICY_ROUTE_KEY ? { routeKey: process.env.AGENT_KERNEL_POLICY_ROUTE_KEY } : {}),
+      ...(process.env.AGENT_KERNEL_POLICY_WEIGHT_VERSION ? { weightVersion: process.env.AGENT_KERNEL_POLICY_WEIGHT_VERSION } : {}),
+      requireLogprobs: process.env.AGENT_KERNEL_POLICY_REQUIRE_LOGPROBS === '1',
+    })
+  }
   const anthropicKey = process.env.ANTHROPIC_API_KEY
   const openaiKey = process.env.OPENAI_API_KEY
   if (provider === 'openai' && openaiKey) {
