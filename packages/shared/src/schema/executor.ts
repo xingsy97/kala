@@ -61,6 +61,7 @@ const ExecutorOsSchema = z.enum([
 
 export const ExecutorAnnounceSchema = z.object({
   executorId: z.string(),
+  executorVersion: z.string().optional(),
   workspaceId: z.string(),
   workspaceName: z.string(),
   tools: z.array(z.string()),
