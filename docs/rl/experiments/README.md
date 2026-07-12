@@ -46,12 +46,10 @@ Typical contents inside a run folder:
   assessment.
 - `evidence-notes.md` (optional) — private narrative notes
   based on the run. Personal, not shared.
-
-Shared across runs at the top level:
-
 - `artifacts/` — tarballs of the on-host artifact tree (event logs,
   token captures, reward records, training trajectory), scp'd back from
-  the rented host.
+  the rented host. Each run keeps its own `artifacts/` next to its
+  reports so tarballs from different runs cannot collide.
 
 ## How this connects to the rest of docs/rl
 
