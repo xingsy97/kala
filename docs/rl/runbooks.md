@@ -3,7 +3,7 @@
 Status: reference runbooks for the four Agentic RL smoke tiers plus the rented GPU host
 overnight paid runbook. This document is committed; the operator log with
 concrete instance ids, timings, and error transcripts lives in
-`experiments/rollout-run-log.md`, which is `.gitignore`d.
+`experiments/<date>-run-<n>/raw-log.md`, which is `.gitignore`d.
 
 For design context see `system-design.md`. For the implementation gate see
 `implementation.md`. For methodology/budget/stop conditions see
@@ -217,7 +217,7 @@ Expected result:
 - slime completes at least one train step or a configured rollout-then-train
   debug step.
 - Debug rollout data contains the agent-kernel artifact refs in metadata.
-- The run updates `docs/rl/experiments/slime-agent-kernel-e2e-training-report.md`
+- The run updates `docs/rl/experiments/<date>-run-<n>/final-report.md`
   with environment, commands, artifacts, sample validation, trainer logs, and
   conclusions.
 

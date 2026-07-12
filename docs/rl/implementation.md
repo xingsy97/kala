@@ -736,7 +736,7 @@ produce a human-readable E2E report with direct evidence that a real slime
 rollout/training path executed. The report path is:
 
 ```text
-docs/rl/experiments/slime-agent-kernel-e2e-training-report.md
+docs/rl/experiments/<date>-run-<n>/final-report.md
 ```
 
 The report must include:

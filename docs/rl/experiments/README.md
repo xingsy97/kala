@@ -28,23 +28,30 @@ Everything under this directory is ignored by `.gitignore` except:
 - `README.md` (this file)
 - `.gitignore` itself
 
-## What lives here
+## Layout
 
-Typical contents after an experiment:
+Each experiment lives in its own date-indexed folder named
+`YYYY-MM-DD-run-N`, where `N` starts at `1` and increments if there is
+more than one run on the same day. The suffix is required even for the
+first run of the day, so folder names sort predictably.
 
-- `rollout-run-log.md` — chronological record of setup, retries, blocker
-  investigation, and recovery decisions across paid runs.
-- `slime-agent-kernel-e2e-training-report.md` — full E2E evidence report
-  for the current attempt: environment, commands, versions, artifacts,
-  cleanup.
-- `e2e-<date>-experiment-addendum.md` — post-run addendum written after a
-  successful (or near-successful) run: verdict, root causes, honest
-  evidence assessment.
-- `e2e-<date>-evidence-notes.md` — private narrative notes based
-  on the run. Personal, not shared.
-- `artifacts/` — tarballs of the on-host artifact tree (event logs, token
-  captures, reward records, training trajectory), scp'd back from the
-  rented host.
+Typical contents inside a run folder:
+
+- `raw-log.md` — chronological operator log: setup, retries, blocker
+  investigation, and recovery decisions across paid attempts.
+- `final-report.md` — full E2E evidence report for the run:
+  environment, commands, versions, artifacts, cleanup.
+- `addendum.md` — post-run addendum written after a successful (or
+  near-successful) run: verdict, root causes, honest evidence
+  assessment.
+- `evidence-notes.md` (optional) — private narrative notes
+  based on the run. Personal, not shared.
+
+Shared across runs at the top level:
+
+- `artifacts/` — tarballs of the on-host artifact tree (event logs,
+  token captures, reward records, training trajectory), scp'd back from
+  the rented host.
 
 ## How this connects to the rest of docs/rl
 
