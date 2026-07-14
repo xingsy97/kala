@@ -513,7 +513,7 @@ pnpm --filter @agent-kernel/dashboard exec vitest run
 python3 -m pytest \
   tests/python/test_slime_agent_kernel_adapter.py \
   tests/python/test_slime_trainer_preflight.py -q
-node scripts/verify-agentic-rl-dashboard.mjs
+node scripts/eval/verify-agentic-rl-dashboard.mjs
 vastai show instances --raw
 ```
 
@@ -784,7 +784,7 @@ Source-side implementation:
   `integrations/slime_agent_kernel/preflight.py`.
 - Dashboard RL readiness panel under
   `packages/dashboard/src/features/benchmarks/RlReadinessPanel.tsx`.
-- Headless browser dashboard check in `scripts/verify-agentic-rl-dashboard.mjs`.
+- Headless browser dashboard check in `scripts/eval/verify-agentic-rl-dashboard.mjs`.
 
 Test coverage per module:
 
@@ -799,7 +799,7 @@ Test coverage per module:
   and synthetic slime `Sample` construction.
 - `tests/python/test_slime_trainer_preflight.py` — preflight schema and
   strict-mode exit codes.
-- `scripts/verify-agentic-rl-dashboard.mjs` — real Chromium E2E covering
+- `scripts/eval/verify-agentic-rl-dashboard.mjs` — real Chromium E2E covering
   missing artifact root, ready rollout rendering, token/reward/sample
   evidence, and detail expansion.
 

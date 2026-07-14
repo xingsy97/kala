@@ -290,7 +290,7 @@ The `EnhancementActionPanel` renders each field via a switch on `kind`:
 
 ### E2E
 
-`scripts/verify-dashboard-enhancement-actions.mjs` (EDIT):
+`scripts/dashboard/verify-dashboard-enhancement-actions.mjs` (EDIT):
 
 - Existing `verifyRunBenchmarkWizard` extended:
   - After Plan step, upload a two-instance patches zip (build in-memory

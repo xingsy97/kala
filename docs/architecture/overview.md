@@ -100,7 +100,7 @@ Lives close to the files it needs to touch. Dials **out** to Host via Socket.IO.
 
 **Two forms**:
 
-1. **Local Node daemon**: user runs `agent-kernel-executor --host wss://host.example.com`. Has access to a whitelisted working directory. Runs `bash`, `read`, `write`, etc. against the real filesystem. Also runs background shell tasks (see below).
+1. **Local Node daemon**: user runs `node agent-kernel-executor.cjs --host wss://host.example.com`. Has access to a whitelisted working directory. Runs `bash`, `read`, `write`, etc. against the real filesystem. Also runs background shell tasks (see below).
 2. **Browser WebContainer**: dashboard hosts an in-page executor via WebContainer API [1]. Same tool implementations, but the filesystem is an in-memory vfs. Enables the "demo with just a URL" experience.
 
 **Responsibilities**:
@@ -313,7 +313,7 @@ The topology is the same. What changes is **who has the public IP**.
 
 **Cloud + local executor** (the differentiating deployment):
 - Host deployed to Fly.io / Railway, reachable at `wss://host.example.com`
-- Executor runs on your laptop, dials out: `agent-kernel-executor --host wss://host.example.com --session <id>`
+- Executor runs on your laptop, dials out: `node agent-kernel-executor.cjs --host wss://host.example.com --sandbox-root /repo`
 - Dashboard hosted static (Vercel), served at `https://app.example.com`, connects to `wss://host.example.com/dashboard`
 - The laptop needs **no inbound port**. It creates the outbound WS. This is the NAT/firewall workaround baked in.
 

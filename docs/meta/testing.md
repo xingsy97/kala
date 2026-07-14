@@ -166,7 +166,7 @@ Not a tool per se, but the workspace whitelist enforcement:
 
 ## 5. Dashboard — component + e2e
 
-**Location**: `packages/dashboard/src/**/*.test.tsx` / `*.test.ts` (component and pure view-model tests), `scripts/verify-dashboard-*.mjs` (Puppeteer real-browser checks)
+**Location**: `packages/dashboard/src/**/*.test.tsx` / `*.test.ts` (component and pure view-model tests), `scripts/dashboard/verify-dashboard-*.mjs` (Puppeteer real-browser checks)
 **Runner**: `pnpm --filter @agent-kernel/dashboard test` for component/unit tests; root `verify:*` scripts for targeted browser checks.
 
 ### 5.1 Component tests

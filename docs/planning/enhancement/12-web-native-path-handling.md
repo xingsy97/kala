@@ -238,7 +238,7 @@ New optional fields (`source`, `zipBase64`, `patches`, `sessionLogContent`,
   size limit, path-traversal attempt, missing runId.
 - Wizard component tests assert the removed path inputs are gone and the
   new upload widgets fire the correct actions.
-- E2E extension (`scripts/verify-dashboard-enhancement-actions.mjs`) drives
+- E2E extension (`scripts/dashboard/verify-dashboard-enhancement-actions.mjs`) drives
   the full 5-step wizard using only browser-native actions: paste
   instances → upload patches (zip) → generate grade command → upload
   results (zip) → view review. No filesystem paths typed anywhere.

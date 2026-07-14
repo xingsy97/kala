@@ -53,7 +53,7 @@ translated historical texttranslated historical texttranslated historical texttr
 MCP server translated historical texttranslated historical texttranslated historical texttranslated historical text executor translated historical text sandbox roots translated historical texttranslated historical texttranslated historical text，translated historical texttranslated historical text CLI translated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical texttranslated historical text：
 
 ```bash
-agent-kernel-executor \
+node agent-kernel-executor.cjs \
   --host http://localhost:3000 \
   --mcp filesystem='npx -y @modelcontextprotocol/server-filesystem /tmp/work' \
   --mcp git='npx -y @modelcontextprotocol/server-git --repository /tmp/work'

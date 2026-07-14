@@ -26,7 +26,7 @@ RPCs are separated inside the host only.
 An executor can be started with one or more workspace roots:
 
 ```bash
-agent-kernel-executor --host https://host.example.com --sandbox-root /repo
+node agent-kernel-executor.cjs --host https://host.example.com --sandbox-root /repo
 ```
 
 `--sandbox-root` is repeatable. `SANDBOX_ROOTS` provides the same values as a

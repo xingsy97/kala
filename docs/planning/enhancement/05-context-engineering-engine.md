@@ -144,7 +144,7 @@ and `Compaction Summary`.
   artifacts.
 - Implemented tests for the named assembly pipeline stages, including tool
   registry token contribution and provider adapter boundary metadata.
-- Implemented headless browser coverage in `scripts/verify-dashboard-debugger.mjs`
+- Implemented headless browser coverage in `scripts/dashboard/verify-dashboard-debugger.mjs`
   for Message Assembler contribution proportions, context segment selection,
   tool-registry visibility, API Call request/response separation, API body
   redaction, and the absence of duplicated API body rendering in the assembler.

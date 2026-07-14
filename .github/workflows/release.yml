@@ -170,6 +170,7 @@ jobs:
             gh release edit "$TAG" --notes-file release/RELEASE_NOTES.md
             gh release delete-asset "$TAG" run-host.sh --yes || true
             gh release delete-asset "$TAG" run-executor.sh --yes || true
+            gh release delete-asset "$TAG" agent-kernel-host.cjs --yes || true
             for asset in \
               agent-kernel-host-linux-x64 agent-kernel-host-linux-arm64 agent-kernel-host-darwin-x64 agent-kernel-host-darwin-arm64 agent-kernel-host-win32-x64.exe agent-kernel-host-win32-arm64.exe \
               agent-kernel-executor-linux-x64 agent-kernel-executor-linux-arm64 agent-kernel-executor-darwin-x64 agent-kernel-executor-darwin-arm64 agent-kernel-executor-win32-x64.exe agent-kernel-executor-win32-arm64.exe; do
