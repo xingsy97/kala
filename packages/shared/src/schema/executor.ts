@@ -26,6 +26,7 @@ import type {
   BackgroundTaskSummary,
   HandshakeAuth,
   ClientRole,
+  ExecutorCapabilities,
 } from '../protocol.js'
 
 // ============================================================================
@@ -59,9 +60,30 @@ const ExecutorOsSchema = z.enum([
   'other',
 ]) satisfies z.ZodType<ExecutorOs>
 
+export const BuildMetadataSchema = z.object({
+  releaseTag: z.string(),
+  gitCommit: z.string(),
+  builtAt: z.string(),
+  artifactKind: z.enum(['source', 'cjs', 'native']),
+  dashboardMode: z.enum(['vite', 'static', 'embedded', 'none']),
+  embeddedDashboardFiles: z.number().int().nonnegative().optional(),
+})
+
+export const ExecutorCapabilitiesSchema = z.object({
+  schemaVersion: z.literal(1),
+  features: z.object({
+    backgroundShell: z.boolean(),
+    filePicker: z.boolean(),
+    overflowFiles: z.boolean(),
+    workspaceSandbox: z.boolean(),
+  }),
+}) satisfies z.ZodType<ExecutorCapabilities>
+
 export const ExecutorAnnounceSchema = z.object({
   executorId: z.string(),
   executorVersion: z.string().optional(),
+  build: BuildMetadataSchema.optional(),
+  capabilities: ExecutorCapabilitiesSchema.optional(),
   workspaceId: z.string(),
   workspaceName: z.string(),
   tools: z.array(z.string()),

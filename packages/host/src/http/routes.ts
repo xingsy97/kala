@@ -1842,6 +1842,27 @@ export function attachStaticHandler(server: HttpServer, staticDir: string): void
   })
 }
 
+export type EmbeddedStaticAsset = {
+  readonly path: string
+  readonly contentBase64: string
+}
+
+export function attachEmbeddedStaticHandler(server: HttpServer, assets: readonly EmbeddedStaticAsset[]): void {
+  const byPath = new Map<string, EmbeddedStaticAsset>()
+  for (const asset of assets) {
+    const normalized = normalizeStaticAssetPath(asset.path)
+    byPath.set(normalized, { ...asset, path: normalized })
+  }
+  server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const url = req.url ?? '/'
+    if (url.startsWith('/socket.io/')) return
+    if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (routeClaimed(req) || res.headersSent || res.writableEnded) return
+
+    serveEmbeddedStatic(byPath, req, res)
+  })
+}
+
 export function attachReleaseAssetsHandler(server: HttpServer, releaseDir: string): void {
   const root = resolvePath(releaseDir)
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -1902,6 +1923,56 @@ async function serveStatic(
     return
   }
   createReadStream(filePath).pipe(res)
+}
+
+function serveEmbeddedStatic(
+  assets: ReadonlyMap<string, EmbeddedStaticAsset>,
+  req: IncomingMessage,
+  res: ServerResponse,
+): void {
+  const url = new URL(req.url ?? '/', 'http://x')
+  const requested = normalizeStaticAssetPath(decodeURIComponent(url.pathname))
+  const asset = pickEmbeddedAsset(assets, requested)
+  if (!asset) {
+    res.writeHead(404).end('not found')
+    return
+  }
+  const body = Buffer.from(asset.contentBase64, 'base64')
+  const mime = MIME[extname(asset.path).toLowerCase()] ?? 'application/octet-stream'
+  const headers: Record<string, string> = {
+    'content-type': mime,
+    'content-length': String(body.byteLength),
+  }
+  if (/^assets\/[^/]+\.[0-9a-f]{6,}\./i.test(asset.path)) {
+    headers['cache-control'] = 'public, max-age=31536000, immutable'
+  } else {
+    headers['cache-control'] = 'no-cache, must-revalidate'
+  }
+  res.writeHead(200, headers)
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  res.end(body)
+}
+
+function pickEmbeddedAsset(
+  assets: ReadonlyMap<string, EmbeddedStaticAsset>,
+  requested: string,
+): EmbeddedStaticAsset | null {
+  if (requested === '__forbidden__') return null
+  const direct = assets.get(requested)
+  if (direct) return direct
+  const index = assets.get(`${requested.replace(/\/+$/u, '')}/index.html`)
+  if (index) return index
+  return assets.get('index.html') ?? null
+}
+
+function normalizeStaticAssetPath(path: string): string {
+  const rel = normalize(path).replace(/^[/\\]+/, '')
+  if (!rel || rel === '.') return 'index.html'
+  if (rel.startsWith('..') || rel.includes(`..${sep}`)) return '__forbidden__'
+  return rel.replace(/\\/g, '/')
 }
 
 async function serveReleaseAsset(

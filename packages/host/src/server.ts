@@ -48,7 +48,7 @@ import {
   configureExecutorNamespace,
   type ExecutorNs,
 } from './connection/executor-ns.js'
-import { attachJsonRoutes, attachReleaseAssetsHandler, attachRequestHandler, attachStaticHandler } from './http/routes.js'
+import { attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset } from './http/routes.js'
 import type { AuthConfig } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
 import { noopAuditLogger } from './audit-log.js'
@@ -71,6 +71,7 @@ export type HostServerOptions = {
   audit?: AuditLogger
   httpServer?: HttpServer
   staticDir?: string
+  embeddedStaticAssets?: readonly EmbeddedStaticAsset[]
   dashboardHandler?: (req: IncomingMessage, res: ServerResponse) => void
   releaseAssetsDir?: string
   /**
@@ -170,6 +171,9 @@ export async function startHostServer(
   } else if (options.staticDir) {
     if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir)
     attachStaticHandler(http, options.staticDir)
+  } else if (options.embeddedStaticAssets && options.embeddedStaticAssets.length > 0) {
+    if (options.releaseAssetsDir) attachReleaseAssetsHandler(http, options.releaseAssetsDir)
+    attachEmbeddedStaticHandler(http, options.embeddedStaticAssets)
   } else if (options.releaseAssetsDir) {
     attachReleaseAssetsHandler(http, options.releaseAssetsDir)
   }

@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 import type {
+  BuildMetadata,
   ExecutorAnnounce,
   ExecutorClientToServerEvents,
   ExecutorServerToClientEvents,
@@ -148,6 +149,8 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   const announcement: ExecutorAnnounce = {
     executorId,
     executorVersion: EXECUTOR_VERSION,
+    build: executorBuildInfo(),
+    capabilities: executorCapabilities(tools, sandboxRoots),
     workspaceId,
     workspaceName,
     tools: [...tools.keys()],
@@ -316,6 +319,48 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
       inFlight.clear()
       socket.disconnect()
     },
+  }
+}
+
+function executorCapabilities(tools: ReadonlyMap<string, Tool>, sandboxRoots: readonly string[]): ExecutorAnnounce['capabilities'] {
+  return {
+    schemaVersion: 1,
+    features: {
+      backgroundShell: tools.has('bash_output') && tools.has('kill_shell'),
+      filePicker: tools.has('__fs_list_dirs') && tools.has('__fs_list_files') && tools.has('__fs_read_file'),
+      overflowFiles: tools.has('__fs_read_overflow'),
+      workspaceSandbox: sandboxRoots.length > 0,
+    },
+  }
+}
+
+function executorBuildInfo(): BuildMetadata {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_BUILD_INFO__?: unknown
+  }).__AGENT_KERNEL_BUILD_INFO__
+  return parseBuildInfo(globalValue) ?? {
+    releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
+    builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
+    artifactKind: 'source',
+    dashboardMode: 'none',
+  }
+}
+
+function parseBuildInfo(value: unknown): BuildMetadata | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const artifactKind = record.artifactKind
+  const dashboardMode = record.dashboardMode
+  if (artifactKind !== 'source' && artifactKind !== 'cjs' && artifactKind !== 'native') return null
+  if (dashboardMode !== 'vite' && dashboardMode !== 'static' && dashboardMode !== 'embedded' && dashboardMode !== 'none') return null
+  return {
+    releaseTag: typeof record.releaseTag === 'string' ? record.releaseTag : 'unknown',
+    gitCommit: typeof record.gitCommit === 'string' ? record.gitCommit : 'unknown',
+    builtAt: typeof record.builtAt === 'string' ? record.builtAt : 'unknown',
+    artifactKind,
+    dashboardMode,
+    ...(typeof record.embeddedDashboardFiles === 'number' ? { embeddedDashboardFiles: record.embeddedDashboardFiles } : {}),
   }
 }
 

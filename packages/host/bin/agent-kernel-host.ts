@@ -63,6 +63,7 @@ import {
   writeManualModels,
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
+import type { EmbeddedStaticAsset } from '../src/http/routes.js'
 import { authSettings, type AuthConfig } from '../src/auth-control.js'
 import { createAuditLogger } from '../src/audit-log.js'
 import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
@@ -72,6 +73,14 @@ import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
 const VERSION = packageJson.version
+
+type BuildInfo = {
+  releaseTag: string
+  gitCommit: string
+  builtAt: string
+  artifactKind: 'source' | 'cjs' | 'native'
+  dashboardMode: 'vite' | 'static' | 'embedded' | 'none'
+}
 
 function argValue(argv: readonly string[], name: string): string | undefined {
   for (let i = 0; i < argv.length; i++) {
@@ -88,12 +97,12 @@ function hasFlag(argv: readonly string[], ...names: readonly string[]): boolean 
 }
 
 function printHelp(): void {
-  process.stdout.write(`agent-kernel-host
+  process.stdout.write(`Agent RunLab Runtime
 
 Usage:
-  agent-kernel-host [options]
-  agent-kernel-host eval swebench <command> [options]
-  agent-kernel-host enhancement <area> <command> [options]
+  bundle-dashboard-with-runtime.cjs [options]
+  bundle-dashboard-with-runtime.cjs eval swebench <command> [options]
+  bundle-dashboard-with-runtime.cjs enhancement <area> <command> [options]
 
 Options:
   -h, --help                 Show this help and exit.
@@ -104,7 +113,7 @@ Common environment:
   HOST_PORT                  Port used when --port is omitted.
   SESSIONS_DIR               Session JSONL directory. Default: ~/.agent-kernel/sessions.
   AGENT_KERNEL_ARTIFACTS_DIR Artifact root. Set to 0 to disable artifact writes.
-  DASHBOARD_DIR              Static dashboard directory to serve.
+  DASHBOARD_DIR              Static dashboard directory override.
   HOST_AUTH_TOKEN            Optional shared token required by clients.
   EXECUTOR_TOKENS            Optional JSON array of executor tokens.
   HOST_MODEL                 Override the default model.
@@ -112,16 +121,16 @@ Common environment:
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
-  agent-kernel-host --port 3000
-  HOST_PORT=3001 DASHBOARD_DIR=/opt/agent-kernel/dashboard agent-kernel-host
-  LOG_FORMAT=json agent-kernel-host --port 3000
-  agent-kernel-host eval swebench --help
-  agent-kernel-host enhancement --help
+  node bundle-dashboard-with-runtime.cjs --port 3000
+  HOST_PORT=3001 node bundle-dashboard-with-runtime.cjs
+  LOG_FORMAT=json node bundle-dashboard-with-runtime.cjs --port 3000
+  node bundle-dashboard-with-runtime.cjs eval swebench --help
+  node bundle-dashboard-with-runtime.cjs enhancement --help
 `)
 }
 
 function printVersion(): void {
-  process.stdout.write(`agent-kernel-host ${VERSION}\n`)
+  process.stdout.write(`Agent RunLab Runtime ${VERSION}\n`)
 }
 
 async function main(): Promise<void> {
@@ -171,6 +180,7 @@ async function main(): Promise<void> {
   const { llm, defaultModel } = registry
 
   const dashboard = await createDashboardServing()
+  const buildInfo = runtimeBuildInfo(dashboard)
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
   const skills = await discoverSkills()
@@ -196,6 +206,7 @@ async function main(): Promise<void> {
     versions: {
       host: VERSION,
       protocol: PROTOCOL_VERSION,
+      build: buildInfo,
     },
     auth: authSettings(effectiveAuth),
     paths: {
@@ -240,6 +251,7 @@ async function main(): Promise<void> {
     audit,
     ...(dashboard.kind === 'vite' ? { dashboardHandler: dashboard.handler } : {}),
     ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
+    ...(dashboard.kind === 'embedded' ? { embeddedStaticAssets: dashboard.assets } : {}),
     ...(release.source === 'local' ? { releaseAssetsDir: releaseDir() } : {}),
     ...(hooks.length > 0 ? { hooks } : {}),
     ...(hookRunner ? { hookRunner } : {}),
@@ -261,6 +273,7 @@ async function main(): Promise<void> {
     defaultModel,
     dashboard: dashboard.kind,
     ...(dashboard.kind === 'static' ? { staticDir: dashboard.staticDir } : {}),
+    ...(dashboard.kind === 'embedded' ? { embeddedAssets: dashboard.assets.length } : {}),
     hooks: hooks.length,
     skills: skills.skills.length,
     artifactRootDir,
@@ -545,6 +558,7 @@ function fail(msg: string): never {
 type DashboardServing =
   | { kind: 'vite'; handler: (req: IncomingMessage, res: ServerResponse) => void }
   | { kind: 'static'; staticDir: string }
+  | { kind: 'embedded'; assets: readonly EmbeddedStaticAsset[] }
   | { kind: 'none' }
 
 async function createDashboardServing(): Promise<DashboardServing> {
@@ -566,8 +580,61 @@ async function createDashboardServing(): Promise<DashboardServing> {
     if (handler) return { kind: 'vite', handler }
   }
 
+  const embedded = embeddedDashboardAssets()
+  if (embedded.length > 0) return { kind: 'embedded', assets: embedded }
+
   const staticDir = resolveDashboardDir()
   return staticDir ? { kind: 'static', staticDir } : { kind: 'none' }
+}
+
+function embeddedDashboardAssets(): readonly EmbeddedStaticAsset[] {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_EMBEDDED_DASHBOARD__?: unknown
+  }).__AGENT_KERNEL_EMBEDDED_DASHBOARD__
+  if (!Array.isArray(globalValue)) return []
+  const assets: EmbeddedStaticAsset[] = []
+  for (const item of globalValue) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    if (typeof record.path !== 'string') continue
+    if (typeof record.contentBase64 !== 'string') continue
+    assets.push({ path: record.path, contentBase64: record.contentBase64 })
+  }
+  return assets
+}
+
+function runtimeBuildInfo(dashboard: DashboardServing): BuildInfo & { embeddedDashboardFiles?: number } {
+  const globalValue = (globalThis as typeof globalThis & {
+    __AGENT_KERNEL_BUILD_INFO__?: unknown
+  }).__AGENT_KERNEL_BUILD_INFO__
+  const base = parseBuildInfo(globalValue) ?? {
+    releaseTag: process.env.AGENT_KERNEL_RELEASE_TAG ?? 'local',
+    gitCommit: process.env.AGENT_KERNEL_GIT_COMMIT ?? 'unknown',
+    builtAt: process.env.AGENT_KERNEL_BUILT_AT ?? 'unknown',
+    artifactKind: 'source' as const,
+    dashboardMode: dashboard.kind,
+  }
+  return {
+    ...base,
+    dashboardMode: dashboard.kind,
+    ...(dashboard.kind === 'embedded' ? { embeddedDashboardFiles: dashboard.assets.length } : {}),
+  }
+}
+
+function parseBuildInfo(value: unknown): BuildInfo | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const artifactKind = record.artifactKind
+  const dashboardMode = record.dashboardMode
+  if (artifactKind !== 'source' && artifactKind !== 'cjs' && artifactKind !== 'native') return null
+  if (dashboardMode !== 'vite' && dashboardMode !== 'static' && dashboardMode !== 'embedded' && dashboardMode !== 'none') return null
+  return {
+    releaseTag: typeof record.releaseTag === 'string' ? record.releaseTag : 'unknown',
+    gitCommit: typeof record.gitCommit === 'string' ? record.gitCommit : 'unknown',
+    builtAt: typeof record.builtAt === 'string' ? record.builtAt : 'unknown',
+    artifactKind,
+    dashboardMode,
+  }
 }
 
 async function createViteDashboardHandler(): Promise<

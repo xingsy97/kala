@@ -84,6 +84,7 @@ import {
   UsageTotalSchema,
 } from './kernel.js'
 import {
+  BuildMetadataSchema,
   ExecutorAnnounceSchema,
   ServerBgTaskEvictedSchema,
   ServerBgTaskUpdatedSchema,
@@ -549,6 +550,7 @@ export const ServerSettingsPayloadSchema = z.object({
     .object({
       host: z.string(),
       protocol: z.string(),
+      build: BuildMetadataSchema.optional(),
     })
     .optional(),
   auth: z

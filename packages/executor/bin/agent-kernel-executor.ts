@@ -104,10 +104,10 @@ function parseArgs(argv: readonly string[]): Args {
 }
 
 function printHelp(): void {
-  process.stdout.write(`agent-kernel-executor
+  process.stdout.write(`Agent RunLab Executor
 
 Usage:
-  agent-kernel-executor --host <url> [options]
+  agent-kernel-executor.cjs --host <url> [options]
 
 Options:
   -h, --help                 Show this help and exit.
@@ -132,14 +132,14 @@ Common environment:
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
-  agent-kernel-executor --host http://localhost:3000
-  HOST_URL=http://localhost:3000 agent-kernel-executor --sandbox-root /workspace
-  EXECUTOR_INVITE=ak_invite_... agent-kernel-executor --host http://host:3000
+  node agent-kernel-executor.cjs --host http://localhost:3000
+  HOST_URL=http://localhost:3000 node agent-kernel-executor.cjs --sandbox-root /workspace
+  EXECUTOR_INVITE=ak_invite_... node agent-kernel-executor.cjs --host http://host:3000
 `)
 }
 
 function printVersion(): void {
-  process.stdout.write(`agent-kernel-executor ${VERSION}\n`)
+  process.stdout.write(`Agent RunLab Executor ${VERSION}\n`)
 }
 
 /**

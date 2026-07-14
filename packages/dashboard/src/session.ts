@@ -168,7 +168,6 @@ export function useSession({
     }
 
     const socket = io(`${host}/dashboard`, {
-      transports: ['websocket'],
       auth: {
         sessionId,
         role: 'dashboard',

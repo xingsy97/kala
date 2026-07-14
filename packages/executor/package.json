@@ -26,7 +26,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch bin/agent-kernel-executor.ts",
-    "dev:restart": "node ../../scripts/restart-every.mjs --interval-ms 180000 -- tsx bin/agent-kernel-executor.ts",
+    "dev:restart": "node ../../scripts/dev/restart-every.mjs --interval-ms 180000 -- tsx bin/agent-kernel-executor.ts",
     "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
   "dependencies": {

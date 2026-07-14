@@ -388,10 +388,31 @@ export type ExecutorRuntime = 'node' | 'browser-webcontainer' | 'other'
 
 export type ExecutorOs = 'linux' | 'darwin' | 'win32' | 'other'
 
+export type BuildMetadata = {
+  releaseTag: string
+  gitCommit: string
+  builtAt: string
+  artifactKind: 'source' | 'cjs' | 'native'
+  dashboardMode: 'vite' | 'static' | 'embedded' | 'none'
+  embeddedDashboardFiles?: number
+}
+
+export type ExecutorCapabilities = {
+  schemaVersion: 1
+  features: {
+    backgroundShell: boolean
+    filePicker: boolean
+    overflowFiles: boolean
+    workspaceSandbox: boolean
+  }
+}
+
 export type ExecutorAnnounce = {
   executorId: string
   /** agent-kernel executor package version. */
   executorVersion?: string
+  build?: BuildMetadata
+  capabilities?: ExecutorCapabilities
   /**
    * Stable machine identity. A ULID minted on the executor's first launch
    * and persisted (see packages/executor/src/workspace-id.ts). Sessions
@@ -959,6 +980,7 @@ export type ServerSettingsPayload = {
   versions?: {
     host: string
     protocol: string
+    build?: BuildMetadata
   }
   auth?: {
     dashboardAuthRequired: boolean
