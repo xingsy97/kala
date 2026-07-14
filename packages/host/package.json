@@ -30,6 +30,7 @@
     "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
   "dependencies": {
+    "@agent-kernel/executor": "workspace:*",
     "@agent-kernel/kernel": "workspace:*",
     "@agent-kernel/shared": "workspace:*",
     "pino": "^10.3.1",

@@ -214,6 +214,9 @@ importers:
 
   packages/host:
     dependencies:
+      '@agent-kernel/executor':
+        specifier: workspace:*
+        version: link:../executor
       '@agent-kernel/kernel':
         specifier: workspace:*
         version: link:../kernel
