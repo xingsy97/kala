@@ -16,11 +16,11 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import puppeteer from 'puppeteer-core'
 
-const requireFromHost = createRequire(new URL('../packages/host/package.json', import.meta.url))
+const requireFromHost = createRequire(new URL('../../packages/host/package.json', import.meta.url))
 const { io } = requireFromHost('socket.io-client')
 const { PROTOCOL_VERSION } = await import('../packages/shared/dist/index.js')
 
-const REPO_ROOT = new URL('..', import.meta.url).pathname
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_SUBAGENT_SCROLL_PORT ?? 3176)
 const HOST_URL = `http://localhost:${PORT}`
 const PARENT_SESSION_ID = `subagent-scroll-parent-${Date.now()}`

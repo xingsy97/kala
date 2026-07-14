@@ -28,7 +28,7 @@ const MODEL = process.env.VERIFY_MODEL ?? 'gpt-5.5'
 const stamp = Date.now().toString(36).toUpperCase().padStart(11, '0').slice(-11)
 const SESSION_ID = `01JVTD${stamp}TODO`.padEnd(26, 'X').slice(0, 26)
 const WORKSPACE = process.env.VERIFY_WORKSPACE ?? join(tmpdir(), `verify-tasks-${SESSION_ID}`)
-const REPO_ROOT = new URL('..', import.meta.url).pathname
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
 
 mkdirSync(WORKSPACE, { recursive: true })
 

@@ -24,7 +24,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import puppeteer from 'puppeteer-core'
 
-const REPO_ROOT = new URL('..', import.meta.url).pathname
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_DASHBOARD_PORT ?? 3173)
 const HOST_URL = `http://localhost:${PORT}`
 const DASHBOARD_URL = process.env.DASHBOARD_URL ?? HOST_URL

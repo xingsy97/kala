@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Install-time smoke for the pre-built release/ artifacts. Simulates a user who
-// downloads the assets into a clean directory, runs `agent-kernel-host.cjs` with
-// only environment configuration (no repo source tree), and checks that the
-// server actually boots and exposes `/artifacts/manifest`.
+// downloads the embedded host asset into a clean directory, runs
+// `bundle-dashboard-with-runtime.cjs` with only environment configuration (no repo source
+// tree and no DASHBOARD_DIR), and checks that the server boots and serves the
+// embedded dashboard.
 //
 // Reads release/manifest.json to know which assets to install; fails if any
 // required asset is missing. Never mutates the checked-in `release/` directory.
@@ -13,7 +14,7 @@ import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
 
-const repoRoot = fileURLToPath(new URL('..', import.meta.url))
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(repoRoot, 'release')
 const manifestPath = join(releaseDir, 'manifest.json')
 
@@ -21,16 +22,14 @@ if (!existsSync(manifestPath)) fail('missing release/manifest.json — run build
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 if (!Array.isArray(manifest.assets)) fail('release manifest missing assets array')
 
-const requiredAssets = ['agent-kernel-host.cjs', 'agent-kernel-dashboard-dist.tar.gz']
+const requiredAssets = ['bundle-dashboard-with-runtime.cjs']
 for (const asset of requiredAssets) {
   if (!existsSync(join(releaseDir, asset))) fail(`missing required asset: ${asset}`)
 }
 
 const installDir = mkdtempSync(join(tmpdir(), 'agent-kernel-install-'))
-const dashboardDir = join(installDir, 'dashboard')
 const sessionsDir = join(installDir, 'sessions')
 const artifactsDir = join(installDir, 'artifacts')
-mkdirSync(dashboardDir, { recursive: true })
 mkdirSync(sessionsDir, { recursive: true })
 mkdirSync(artifactsDir, { recursive: true })
 
@@ -38,22 +37,20 @@ for (const asset of requiredAssets) {
   copyFileSync(join(releaseDir, asset), join(installDir, asset))
 }
 
-await run('tar', ['-xzf', join(installDir, 'agent-kernel-dashboard-dist.tar.gz'), '-C', dashboardDir])
-
 const port = await findFreePort()
-const hostCjs = join(installDir, 'agent-kernel-host.cjs')
+const hostCjs = join(installDir, 'bundle-dashboard-with-runtime.cjs')
 
 const env = {
   ...process.env,
   HOST_PORT: String(port),
   SESSIONS_DIR: sessionsDir,
   AGENT_KERNEL_ARTIFACTS_DIR: artifactsDir,
-  DASHBOARD_DIR: dashboardDir,
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? 'smoke-key-not-used',
   AK_ALLOW_ALL_OK: '0',
 }
 delete env.HOME_INSTANCE
 delete env.HOST_AUTH_TOKEN
+delete env.DASHBOARD_DIR
 
 const child = spawn('node', [hostCjs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
 let stdout = ''
@@ -136,16 +133,6 @@ function findFreePort() {
       }
     })
     srv.on('error', reject)
-  })
-}
-
-function run(cmd, args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, { stdio: 'inherit' })
-    proc.on('exit', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`${cmd} ${args.join(' ')} exited with ${code}`))
-    })
   })
 }
 

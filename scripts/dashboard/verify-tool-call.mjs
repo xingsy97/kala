@@ -31,7 +31,7 @@ const SESSIONS_DIR = process.env.SESSIONS_DIR ?? '/tmp/agent-kernel-e2e-sessions
 const MODEL = process.env.VERIFY_MODEL ?? 'gpt-5.5'
 const SESSION_ID = process.env.VERIFY_SESSION_ID ?? '01JVERIFYTOOLCALLREAD00'
 const WORKSPACE = process.env.VERIFY_WORKSPACE ?? join(tmpdir(), `verify-tool-${SESSION_ID}`)
-const REPO_ROOT = new URL('..', import.meta.url).pathname
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
 
 mkdirSync(WORKSPACE, { recursive: true })
 

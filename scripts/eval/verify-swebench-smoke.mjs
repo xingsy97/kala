@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const root = fileURLToPath(new URL('..', import.meta.url))
+const root = fileURLToPath(new URL('../..', import.meta.url))
 const keep = process.argv.includes('--keep')
 const dir = mkdtempSync(join(tmpdir(), 'ak-swebench-smoke-'))
 const bin = join(root, 'packages/host/dist/bin/agent-kernel-host.js')

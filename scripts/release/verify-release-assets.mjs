@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
-const root = fileURLToPath(new URL('..', import.meta.url))
+const root = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(root, 'release')
 const manifestPath = join(releaseDir, 'manifest.json')
 
@@ -48,7 +48,7 @@ for (const asset of manifest.assets) {
     if (!text.includes('[ "$runtime" = "auto" ] && has_node22')) {
       fail(`${asset} must prefer compact .cjs assets when Node.js 22+ is available`)
     }
-    if (!text.includes('agent-kernel bootstrap | %s')) {
+    if (!text.includes('Agent RunLab bootstrap | %s')) {
       fail(`${asset} must use the compact bootstrap log prefix`)
     }
     if (!text.includes('wget -q --tries=3 --timeout=30 --retry-connrefused')) {
@@ -127,7 +127,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   })
   if (executorHelp.status !== 0) fail('executor --help smoke test should exit 0')
   const helpOutput = `${executorHelp.stdout}\n${executorHelp.stderr}`
-  if (!helpOutput.includes('Usage:') || !helpOutput.includes('agent-kernel-executor --host <url>') || !helpOutput.includes('--sandbox-root <path>')) {
+  if (!helpOutput.includes('Agent RunLab Executor') || !helpOutput.includes('Usage:') || !helpOutput.includes('agent-kernel-executor.cjs --host <url>') || !helpOutput.includes('--sandbox-root <path>')) {
     fail('executor --help smoke test did not print CLI usage')
   }
   if (helpOutput.includes('connecting to')) {
@@ -139,7 +139,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
     encoding: 'utf8',
   })
   if (executorVersion.status !== 0) fail('executor --version smoke test should exit 0')
-  if (!/^agent-kernel-executor \d+\.\d+\.\d+/m.test(executorVersion.stdout)) {
+  if (!/^Agent RunLab Executor \d+\.\d+\.\d+/m.test(executorVersion.stdout)) {
     fail('executor --version smoke test did not print version')
   }
 
@@ -154,26 +154,26 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   }
 }
 
-if (manifest.assets.includes('agent-kernel-host.cjs')) {
-  const hostHelp = spawnSync('node', ['agent-kernel-host.cjs', '--help'], {
+if (manifest.assets.includes('bundle-dashboard-with-runtime.cjs')) {
+  const hostHelp = spawnSync('node', ['bundle-dashboard-with-runtime.cjs', '--help'], {
     cwd: releaseDir,
     encoding: 'utf8',
   })
   if (hostHelp.status !== 0) fail('host --help smoke test should exit 0')
   const output = `${hostHelp.stdout}\n${hostHelp.stderr}`
-  if (!output.includes('Usage:') || !output.includes('agent-kernel-host [options]') || !output.includes('--port <port>')) {
+  if (!output.includes('Agent RunLab Runtime') || !output.includes('Usage:') || !output.includes('bundle-dashboard-with-runtime.cjs [options]') || !output.includes('--port <port>')) {
     fail('host --help smoke test did not print CLI usage')
   }
   if (output.includes('host listening')) {
     fail('host --help must not start the server')
   }
 
-  const hostVersion = spawnSync('node', ['agent-kernel-host.cjs', '-v'], {
+  const hostVersion = spawnSync('node', ['bundle-dashboard-with-runtime.cjs', '-v'], {
     cwd: releaseDir,
     encoding: 'utf8',
   })
   if (hostVersion.status !== 0) fail('host -v smoke test should exit 0')
-  if (!/^agent-kernel-host \d+\.\d+\.\d+/m.test(hostVersion.stdout)) {
+  if (!/^Agent RunLab Runtime \d+\.\d+\.\d+/m.test(hostVersion.stdout)) {
     fail('host -v smoke test did not print version')
   }
 }

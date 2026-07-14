@@ -12,11 +12,11 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint:style": "node scripts/lint-style.mjs",
-    "verify:real": "node ../../scripts/verify-dashboard-real.mjs",
-    "verify:debugger": "node ../../scripts/verify-dashboard-debugger.mjs",
-    "verify:layout-scroll": "node ../../scripts/verify-dashboard-layout-scroll.mjs",
-    "verify:enhancement-actions": "node ../../scripts/verify-dashboard-enhancement-actions.mjs",
-    "verify:subagent-scroll": "node ../../scripts/verify-dashboard-subagent-scroll.mjs"
+    "verify:real": "node ../../scripts/dashboard/verify-dashboard-real.mjs",
+    "verify:debugger": "node ../../scripts/dashboard/verify-dashboard-debugger.mjs",
+    "verify:layout-scroll": "node ../../scripts/dashboard/verify-dashboard-layout-scroll.mjs",
+    "verify:enhancement-actions": "node ../../scripts/dashboard/verify-dashboard-enhancement-actions.mjs",
+    "verify:subagent-scroll": "node ../../scripts/dashboard/verify-dashboard-subagent-scroll.mjs"
   },
   "dependencies": {
     "@agent-kernel/kernel": "workspace:*",
