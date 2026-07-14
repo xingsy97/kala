@@ -99,10 +99,23 @@ async function callChatCompletions(input: { opts: PolicyGatewayOptions; params: 
       const text = await res.text()
       if (!res.ok) throw new Error(`policy gateway HTTP ${res.status}: ${text.slice(0, 300)}`)
       const json = JSON.parse(text) as ChatCompletionBody
-      const response = parsePolicyResponse(json)
-      const promptIds = extractPromptIds(json, body)
-      const outputIds = extractOutputIds(json)
+      const response = parsePolicyResponse(json, params.tools)
+      let promptIds = extractPromptIds(json, body)
+      let outputIds = extractOutputIds(json)
+      if (promptIds.length === 0 || outputIds.length === 0) {
+        const renderedPrompt = renderChatPromptForTokenize(params)
+        const outputText = reconstructOutputTextFromLogprobs(json) || extractText(response.message.content)
+        const [pIds, oIds] = await Promise.all([
+          promptIds.length === 0 ? tokenizeViaSglang(fetcher, baseUrl, renderedPrompt, params.signal) : Promise.resolve(promptIds),
+          outputIds.length === 0 && outputText ? tokenizeViaSglang(fetcher, baseUrl, outputText, params.signal) : Promise.resolve(outputIds),
+        ])
+        promptIds = pIds
+        outputIds = oIds
+      }
       if (promptIds.length > 0 && outputIds.length > 0) {
+        const outputLogProbsAligned = response.outputLogProbs && response.outputLogProbs.length === outputIds.length
+          ? response.outputLogProbs
+          : undefined
         await writeTokenCaptureArtifact({
           rootDir: opts.artifactRoot,
           requireLogprobs: opts.requireLogprobs,
@@ -121,7 +134,7 @@ async function callChatCompletions(input: { opts: PolicyGatewayOptions; params: 
             ...(opts.weightVersion ? { weightVersion: opts.weightVersion } : {}),
             promptIds,
             outputIds,
-            ...(response.outputLogProbs ? { outputLogProbs: response.outputLogProbs } : {}),
+            ...(outputLogProbsAligned ? { outputLogProbs: outputLogProbsAligned } : {}),
             responseMask: outputIds.map(() => 1),
             ...(response.finishReason ? { finishReason: response.finishReason } : {}),
             usage: {
@@ -146,14 +159,15 @@ async function callChatCompletions(input: { opts: PolicyGatewayOptions; params: 
 
 async function callNativeGenerate(input: { opts: PolicyGatewayOptions; params: LLMCallParams; fetcher: typeof fetch; baseUrl: string }): Promise<LLMResponse> {
   const { opts, params, fetcher, baseUrl } = input
-  if (params.tools.length > 0) {
-    throw new Error('policy gateway native-generate endpoint does not support tool schemas; use chat-completions for non-training tool calls')
-  }
   const endpoint = `${baseUrl}/generate`
-  const prompt = renderNativePrompt(params)
+  const prompt = renderNativePromptWithTools(params)
   const body: Record<string, unknown> = {
     text: prompt,
-    sampling_params: { temperature: 0, max_new_tokens: opts.maxNewTokens ?? 256 },
+    sampling_params: {
+      temperature: 0,
+      max_new_tokens: opts.maxNewTokens ?? 512,
+      stop: ['<|im_end|>', '<|endoftext|>'],
+    },
     return_logprob: true,
     logprob_start_len: 0,
     top_logprobs_num: 0,
@@ -173,6 +187,7 @@ async function callNativeGenerate(input: { opts: PolicyGatewayOptions; params: L
   const promptIds = extractNativePromptIds(json)
   const outputIds = extractNativeOutputIds(json)
   const outputLogProbs = extractNativeOutputLogProbs(json)
+  const message = buildAssistantMessageFromNativeText(outputText, params.tools)
   if (promptIds.length > 0 && outputIds.length > 0) {
     await writeTokenCaptureArtifact({
       rootDir: opts.artifactRoot,
@@ -213,7 +228,7 @@ async function callNativeGenerate(input: { opts: PolicyGatewayOptions; params: L
     ...(opts.weightVersion ? { weightVersion: opts.weightVersion } : {}),
   }
   return {
-    message: { role: 'assistant', content: outputText ? [{ type: 'text', text: outputText }] : [] },
+    message,
     usage: { inputTokens: json.meta_info?.prompt_tokens ?? promptIds.length, outputTokens: json.meta_info?.completion_tokens ?? outputIds.length },
     trace,
   }
@@ -223,10 +238,10 @@ async function toOpenAICompatibleBody(params: LLMCallParams, model: string): Pro
   const messages: unknown[] = []
   if (params.systemPrompt) messages.push({ role: 'system', content: params.systemPrompt })
   for (const message of params.messages) messages.push(...toOpenAIMessages(message))
-  const body: Record<string, unknown> = { model, messages, max_tokens: 4096 }
+  const body: Record<string, unknown> = { model, messages, max_tokens: 1024 }
   if (params.tools.length > 0) {
     body.tools = params.tools.map(toOpenAITool)
-    body.tool_choice = 'auto'
+    body.tool_choice = 'required'
   }
   return body
 }
@@ -250,12 +265,25 @@ function toOpenAITool(tool: ToolSchema): Record<string, unknown> {
   return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } }
 }
 
-function parsePolicyResponse(body: ChatCompletionBody): LLMResponse & { outputLogProbs?: number[]; finishReason?: string } {
+function parsePolicyResponse(body: ChatCompletionBody, tools: readonly ToolSchema[] = []): LLMResponse & { outputLogProbs?: number[]; finishReason?: string } {
   const choice = body.choices?.[0]
   if (!choice?.message) throw new Error('policy gateway response has no choice message')
   const content: MessageContent[] = []
-  if (choice.message.content) content.push({ type: 'text', text: choice.message.content })
-  for (const tool of choice.message.tool_calls ?? []) {
+  const rawContent = choice.message.content ?? ''
+  const parserToolCalls = choice.message.tool_calls ?? []
+  let residualText = rawContent
+  if (parserToolCalls.length === 0 && rawContent) {
+    const toolNames = new Set(tools.map((t) => t.name))
+    const lifted = liftJsonToolCallsFromContent(rawContent, toolNames)
+    if (lifted.toolCalls.length > 0) {
+      residualText = lifted.residualText
+      for (const tc of lifted.toolCalls) {
+        content.push({ type: 'tool_call', callId: `lifted_${Date.now()}_${content.length}`, name: tc.name, input: tc.arguments })
+      }
+    }
+  }
+  if (residualText) content.unshift({ type: 'text', text: residualText })
+  for (const tool of parserToolCalls) {
     content.push({ type: 'tool_call', callId: tool.id, name: tool.function.name, input: parseArgs(tool.function.arguments) })
   }
   return {
@@ -281,15 +309,66 @@ function extractOutputIds(body: ChatCompletionBody): number[] {
   return []
 }
 
-function renderNativePrompt(params: LLMCallParams): string {
-  const lines: string[] = []
-  if (params.systemPrompt) lines.push(`System: ${params.systemPrompt}`)
-  for (const message of params.messages) {
-    const text = extractText(message.content)
-    if (text) lines.push(`${message.role[0]!.toUpperCase()}${message.role.slice(1)}: ${text}`)
+function renderNativePromptWithTools(params: LLMCallParams): string {
+  const parts: string[] = []
+  const systemSegments: string[] = []
+  if (params.systemPrompt) systemSegments.push(params.systemPrompt)
+  if (params.tools.length > 0) {
+    const toolLines = params.tools.map((t) => `- ${t.name}: ${t.description} | schema: ${JSON.stringify(t.inputSchema)}`)
+    systemSegments.push(
+      [
+        '# Tools',
+        'You have access to the following tools. To call a tool, emit EXACTLY:',
+        '<tool_call>',
+        '{"name": "<tool_name>", "arguments": <json_args>}',
+        '</tool_call>',
+        '',
+        'Available tools:',
+        ...toolLines,
+      ].join('\n'),
+    )
   }
-  lines.push('Assistant:')
-  return lines.join('\n')
+  if (systemSegments.length > 0) parts.push(`<|im_start|>system\n${systemSegments.join('\n\n')}<|im_end|>`)
+  for (const message of params.messages) {
+    if (message.role === 'system') {
+      parts.push(`<|im_start|>system\n${extractText(message.content)}<|im_end|>`)
+      continue
+    }
+    if (message.role === 'tool') {
+      for (const c of message.content) {
+        if (c.type === 'tool_result') {
+          parts.push(`<|im_start|>user\n<tool_response>\n${c.content}\n</tool_response><|im_end|>`)
+        }
+      }
+      continue
+    }
+    if (message.role === 'assistant') {
+      const chunks: string[] = []
+      for (const c of message.content) {
+        if (c.type === 'text' && c.text) chunks.push(c.text)
+        else if (c.type === 'tool_call') {
+          chunks.push(`<tool_call>\n${JSON.stringify({ name: c.name, arguments: c.input })}\n</tool_call>`)
+        }
+      }
+      parts.push(`<|im_start|>assistant\n${chunks.join('\n')}<|im_end|>`)
+      continue
+    }
+    parts.push(`<|im_start|>${message.role}\n${extractText(message.content)}<|im_end|>`)
+  }
+  parts.push('<|im_start|>assistant\n')
+  return parts.join('\n')
+}
+
+function buildAssistantMessageFromNativeText(outputText: string, tools: readonly ToolSchema[]): Message {
+  const content: MessageContent[] = []
+  const toolNames = new Set(tools.map((t) => t.name))
+  const lifted = liftJsonToolCallsFromContent(outputText, toolNames)
+  const residual = lifted.residualText.replace(/<\|im_end\|>\s*$/u, '').trim()
+  if (residual) content.push({ type: 'text', text: residual })
+  for (const tc of lifted.toolCalls) {
+    content.push({ type: 'tool_call', callId: `native_${Date.now()}_${content.length}`, name: tc.name, input: tc.arguments })
+  }
+  return { role: 'assistant', content }
 }
 
 function extractNativePromptIds(body: NativeGenerateBody): number[] {
@@ -330,4 +409,123 @@ function parseArgs(raw: string): Record<string, unknown> {
 
 function isNonNegativeInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
+function reconstructOutputTextFromLogprobs(body: ChatCompletionBody): string {
+  const items = body.choices?.[0]?.logprobs?.content ?? []
+  if (items.length === 0) return ''
+  const chunks: number[] = []
+  for (const item of items) {
+    if (Array.isArray(item.bytes)) {
+      for (const b of item.bytes) chunks.push(b)
+    } else if (typeof item.token === 'string') {
+      for (const c of Buffer.from(item.token, 'utf-8')) chunks.push(c)
+    }
+  }
+  return Buffer.from(chunks).toString('utf-8')
+}
+
+async function tokenizeViaSglang(fetcher: typeof fetch, baseUrl: string, text: string, signal: AbortSignal | undefined): Promise<number[]> {
+  if (!text) return []
+  try {
+    const res = await fetcher(`${baseUrl}/tokenize`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: text }),
+      signal,
+    })
+    if (!res.ok) return []
+    const json = await res.json() as { tokens?: number[]; input_ids?: number[]; token_ids?: number[] }
+    const ids = json.tokens ?? json.input_ids ?? json.token_ids ?? []
+    return Array.isArray(ids) && ids.every(isNonNegativeInt) ? ids : []
+  } catch {
+    return []
+  }
+}
+
+function renderChatPromptForTokenize(params: LLMCallParams): string {
+  const parts: string[] = []
+  if (params.systemPrompt) parts.push(`<|im_start|>system\n${params.systemPrompt}<|im_end|>`)
+  for (const message of params.messages) {
+    const text = extractText(message.content)
+    parts.push(`<|im_start|>${message.role}\n${text}<|im_end|>`)
+  }
+  parts.push('<|im_start|>assistant\n')
+  return parts.join('\n')
+}
+
+type LiftedCall = { name: string; arguments: Record<string, unknown> }
+
+export function liftJsonToolCallsFromContent(content: string, toolNames: Set<string>): { toolCalls: LiftedCall[]; residualText: string } {
+  const toolCalls: LiftedCall[] = []
+  let residual = content
+  const patterns: RegExp[] = [
+    /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g,
+    /```(?:json|tool_call)?\s*(\{[\s\S]*?\})\s*```/g,
+  ]
+  for (const re of patterns) {
+    residual = residual.replace(re, (_full, jsonStr: string) => {
+      const parsed = tryParseToolCall(jsonStr, toolNames)
+      if (parsed) { toolCalls.push(parsed); return '' }
+      return _full
+    })
+  }
+  const bareMatch = extractBareJsonToolCall(residual, toolNames)
+  if (bareMatch) {
+    toolCalls.push(bareMatch.call)
+    residual = residual.slice(0, bareMatch.start) + residual.slice(bareMatch.end)
+  }
+  return { toolCalls, residualText: residual.trim() }
+}
+
+function tryParseToolCall(raw: string, toolNames: Set<string>): LiftedCall | null {
+  let obj: unknown
+  try { obj = JSON.parse(raw) } catch { return null }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null
+  const record = obj as Record<string, unknown>
+  const name = typeof record.name === 'string' ? record.name : null
+  if (!name) return null
+  if (toolNames.size > 0 && !toolNames.has(name)) return null
+  const args = record.arguments ?? record.parameters ?? {}
+  if (args && typeof args === 'object' && !Array.isArray(args)) {
+    return { name, arguments: args as Record<string, unknown> }
+  }
+  if (typeof args === 'string') {
+    try {
+      const parsed = JSON.parse(args) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { name, arguments: parsed as Record<string, unknown> }
+      }
+    } catch { /* ignore */ }
+  }
+  return { name, arguments: {} }
+}
+
+function extractBareJsonToolCall(text: string, toolNames: Set<string>): { call: LiftedCall; start: number; end: number } | null {
+  const start = text.indexOf('{')
+  if (start < 0) return null
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escape) escape = false
+      else if (ch === '\\') escape = true
+      else if (ch === '"') inString = false
+    } else {
+      if (ch === '"') inString = true
+      else if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1)
+          const parsed = tryParseToolCall(candidate, toolNames)
+          if (parsed) return { call: parsed, start, end: i + 1 }
+          return null
+        }
+      }
+    }
+  }
+  return null
 }
