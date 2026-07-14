@@ -41,7 +41,7 @@ import {
 import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
 import { subscribeBackgroundTasks } from './tools/background-shell.js'
-import packageJson from '../package.json'
+import packageJson from '../package.json' with { type: 'json' }
 
 const EXECUTOR_VERSION = packageJson.version
 
