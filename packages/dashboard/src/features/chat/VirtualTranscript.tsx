@@ -170,7 +170,7 @@ function VirtualTranscriptInner<Item>(
   const components = useMemo(
     () => ({
       Scroller: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function TranscriptScroller(props, scrollerRef) {
-        return <div {...props} ref={scrollerRef} className={cn(props.className, 'virtual-transcript-scroller')} data-virtuoso-scroller="true" />
+        return <div {...props} ref={scrollerRef} className={cn(props.className, 'virtual-transcript-scroller overflow-x-hidden')} data-virtuoso-scroller="true" />
       }),
       Footer: function TranscriptFooter({ context }: { context?: { slot: JSX.Element | null | undefined; itemClassName: string | undefined } }) {
         const slot = context?.slot
@@ -187,7 +187,7 @@ function VirtualTranscriptInner<Item>(
   )
 
   return (
-    <div className={cn('virtual-transcript min-h-0 flex-1', className)} data-scroll-owner="virtuoso" data-testid={dataTestId}>
+    <div className={cn('virtual-transcript min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden', className)} data-scroll-owner="virtuoso" data-testid={dataTestId}>
       <Virtuoso
         ref={virtuoso}
         style={{ height: '100%' }}

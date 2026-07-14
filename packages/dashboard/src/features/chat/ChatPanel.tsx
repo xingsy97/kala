@@ -395,7 +395,7 @@ export function ChatPanel({
 
   return (
     <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
-      <div className="relative flex h-full w-full min-w-0 flex-1 flex-col">
+      <div className="relative flex h-full w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
         {loading ? (
           <TranscriptLoadingState />
         ) : isEmpty ? (
@@ -420,7 +420,7 @@ export function ChatPanel({
                 <div className="pl-0 pt-4 sm:pl-10">{footerSlot}</div>
               ) : null
             }
-            itemClassName="ak-chat-item mx-auto w-full max-w-[68rem] px-3 py-2 sm:px-6 sm:py-3 lg:px-8"
+            itemClassName="ak-chat-item mx-auto w-full min-w-0 max-w-[68rem] overflow-x-hidden px-3 py-2 sm:px-6 sm:py-3 lg:px-8"
             defaultItemHeight={80}
             dataTestId="virtual-transcript"
           />
@@ -473,8 +473,8 @@ function PendingUserMessageRow({
   const content = item.content ?? [{ type: 'text' as const, text: item.text }]
   const statusLabel = t('chat.transcript.sendingMessage')
   return (
-    <div className="group relative flex justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
-      <div className="relative max-w-[92%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
+    <div className="group relative flex min-w-0 max-w-full justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
+      <div className="relative min-w-0 max-w-[92%] overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
         <InlineTimestamp
           ts={item.createdAt}
           className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
@@ -948,11 +948,11 @@ function MessageRow({
         id={`msg-${index}`}
         data-message-index={index}
         className={cn(
-          'group relative flex justify-end gap-2',
+          'group relative flex min-w-0 max-w-full justify-end gap-2',
           highlighted ? 'rounded-2xl bg-amber-50/60 p-1 dark:bg-amber-950/20' : '',
         )}
       >
-        <div className="relative max-w-[92%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
+        <div className="relative min-w-0 max-w-[92%] overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
           <InlineTimestamp
             ts={ts}
             className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
@@ -1040,7 +1040,7 @@ function MessageRow({
           </div>
         )}
       </div>
-      <div className="relative min-w-0 flex-1">
+      <div className="relative min-w-0 max-w-full flex-1 overflow-hidden">
         {hideHeader ? null : (
           <div
             className={cn(
@@ -1052,7 +1052,7 @@ function MessageRow({
           </div>
         )}
         <InlineTimestamp ts={ts} className="absolute right-0 top-0 text-muted-foreground" />
-        <div className="flex min-w-0 flex-col gap-3">
+        <div className="flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
           {groupedItems.map((item, i) => {
             if (item.kind === 'tool_call_group') {
               if (item.toolName === 'agent' && parentSessionId) {
@@ -1258,7 +1258,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
   return (
     <div
       className={cn(
-        'min-w-0 max-w-full break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]',
+        'min-w-0 max-w-full overflow-hidden break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]',
         '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
         '[&_p]:my-3',
@@ -1267,15 +1267,15 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
         '[&_h3]:mb-1.5 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:font-semibold',
         '[&_h4]:mb-1.5 [&_h4]:mt-4 [&_h4]:text-sm [&_h4]:font-semibold',
         '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border/60 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
-        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground',
+        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere]',
         '[&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg sm:[&_img]:max-w-xs',
         '[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5',
         '[&_li]:my-1 [&_li>p]:my-1',
         '[&_li_ul]:my-1 [&_li_ol]:my-1',
-        '[&_pre]:my-3 [&_pre]:overflow-visible [&_pre]:bg-transparent [&_pre]:p-0',
+        '[&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:bg-transparent [&_pre]:p-0',
         '[&_pre_code]:block [&_pre_code]:min-w-max [&_pre_code]:bg-transparent [&_pre_code]:p-3 [&_pre_code]:text-foreground',
         '[&_hr]:my-4 [&_hr]:border-border/50',
-        '[&_table]:my-3 [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-2 [&_th]:px-2',
+        '[&_table]:my-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:ring-1 [&_table]:ring-border/50 [&_td]:px-2 [&_th]:px-2',
       )}
     >
       <ReactMarkdown
@@ -1669,7 +1669,7 @@ function ToolCallGroupBlock({
       </button>
       {showRows ? (
         <div
-          className="ak-expand-in flex min-w-0 flex-col gap-0.5 border-t border-border/40 px-3 pb-2 pt-1"
+          className="ak-expand-in flex min-w-0 max-w-full flex-col gap-0.5 overflow-hidden border-t border-border/40 px-3 pb-2 pt-1"
           data-testid={`tool-call-group-details-${group.firstCallId}`}
         >
           {rows.map((row) => {
@@ -1683,7 +1683,7 @@ function ToolCallGroupBlock({
                 <div
                   key={row.callId}
                   id={`msg-${messageIndex}-call-${row.callId}`}
-                  className="mt-1 flex min-w-0 flex-col gap-2 pl-1"
+                  className="mt-1 flex min-w-0 max-w-full flex-col gap-2 overflow-hidden pl-1"
                 >
                   <ToolCallBlock
                     call={call}
@@ -1706,7 +1706,7 @@ function ToolCallGroupBlock({
               <div
                 key={row.callId}
                 id={`msg-${messageIndex}-call-${row.callId}`}
-                className="min-w-0"
+                className="min-w-0 max-w-full overflow-hidden"
               >
                 <GroupSummaryRow
                   row={row}
@@ -1715,7 +1715,7 @@ function ToolCallGroupBlock({
                   }
                 />
                 {expanded || pending ? (
-                  <div className="ak-expand-in mt-1 flex min-w-0 flex-col gap-2 pl-5">
+                  <div className="ak-expand-in mt-1 flex min-w-0 max-w-full flex-col gap-2 overflow-hidden pl-5">
                     <ToolCallBlock
                       call={call}
                       approval={pending}

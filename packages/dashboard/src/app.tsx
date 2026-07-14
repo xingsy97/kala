@@ -1061,7 +1061,7 @@ export function App(): JSX.Element {
   )
 
   return (
-    <div className="h-dvh w-screen bg-background text-foreground overflow-hidden flex flex-col">
+    <div className="h-dvh w-screen max-w-[100dvw] overflow-hidden bg-background text-foreground flex flex-col">
       <AppShellNav
         section={section}
         onSelect={handleSectionSelect}
@@ -1084,7 +1084,7 @@ export function App(): JSX.Element {
           <ChevronDown className="h-4 w-4" />
         </Button>
       ) : null}
-      <div className="flex-1 min-h-0">
+      <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'benchmarks' ? (
         <Suspense fallback={<div className="h-full w-full" />}>
@@ -1107,7 +1107,7 @@ export function App(): JSX.Element {
           <PipelinePage />
         </Suspense>
       ) : (
-      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5">
+      <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5" className="min-w-0 max-w-full overflow-hidden">
         {wideLayout ? (
           <>
             {explorerOpen ? (
@@ -1149,7 +1149,7 @@ export function App(): JSX.Element {
         <ResizablePanel
           defaultSize={wideLayout && explorerOpen ? 80 : 100}
           minSize={wideLayout && explorerOpen ? 78 : 100}
-          className="bg-background"
+          className="min-w-0 bg-background"
           data-testid="workbench-panel"
         >
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
@@ -1182,10 +1182,11 @@ export function App(): JSX.Element {
                 data-testid="no-session-placeholder"
               />
             ) : (
-            <ResizablePanelGroup direction="horizontal" autoSaveId="ak-workbench-cols-v1" className="min-h-0 flex-1">
+            <ResizablePanelGroup direction="horizontal" autoSaveId="ak-workbench-cols-v1" className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
               <ResizablePanel
                 defaultSize={wideLayout ? (inspectorOpen ? 74 : 100) : 100}
                 minSize={wideLayout ? 70 : 100}
+                className="min-w-0"
                 data-testid="main-panel"
               >
                 <div className="h-full flex flex-col min-w-0 min-h-0">
@@ -1881,14 +1882,14 @@ function ConnectionStatus({ status }: { status: string }): JSX.Element {
   const label = hostStatusLabel(status, t)
   return (
     <div
-      className="inline-flex h-8 flex-none items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-accent/60 hover:text-foreground hover:scale-[1.02] motion-reduce:transition-none motion-reduce:hover:scale-100"
+      className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-md px-0 text-xs text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-accent/60 hover:text-foreground hover:scale-[1.02] motion-reduce:transition-none motion-reduce:hover:scale-100 sm:w-auto sm:gap-1.5 sm:px-2"
       data-testid="connection-status"
       data-status={status}
       title={label}
       aria-label={label}
     >
       <span className={cn('h-2 w-2 flex-none rounded-full transition-colors duration-300', statusDot(status))} />
-      <span>{label}</span>
+      <span className="hidden sm:inline">{label}</span>
     </div>
   )
 }

@@ -86,11 +86,13 @@ describe('AppShellNav', () => {
     expect(screen.queryByTestId('app-shell-nav-benchmarks')).toBeNull()
   })
 
-  it('renders connection status after the settings button when provided', () => {
+  it('keeps collapse as the rightmost global control', () => {
     renderNav({ connectionStatus: <span data-testid="connection-status">Connected</span> })
     const settings = screen.getByTestId('app-shell-nav-settings-icon')
     const status = screen.getByTestId('connection-status')
+    const collapse = screen.getByTestId('app-shell-nav-collapse')
     expect(settings.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(status.compareDocumentPosition(collapse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('does not render the inspector collapse control in the global nav', () => {

@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy, ExternalLink, Monitor, Moon, Plus, RefreshCw, Sun, Trash2 } from 'lucide-react'
 import { Trans, useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AttachedExecutor, ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload, ServerSettingsPayload } from '@agent-kernel/shared'
+import type { AttachedExecutor, BuildMetadata, ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload, ServerSettingsPayload } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
@@ -45,25 +45,25 @@ type Props = {
   executors?: readonly AttachedExecutor[]
 }
 
-type SectionKey = 'runtime' | 'connection' | 'models' | 'security' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'versions'
+type SectionKey = 'runtime' | 'connection' | 'models' | 'security' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment'
 
 const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
-  { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint' },
-  { key: 'versions', label: 'settings.sections.versions.label', hint: 'settings.sections.versions.hint' },
   { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint' },
-  { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint' },
   { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint' },
   { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint' },
+  { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint' },
+  { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint' },
   { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint' },
   { key: 'hooks', label: 'settings.sections.hooks.label', hint: 'settings.sections.hooks.hint' },
-  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint' },
   { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint' },
+  { key: 'deployment', label: 'settings.sections.deployment.label', hint: 'settings.sections.deployment.hint' },
+  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint' },
 ]
 
 export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [] }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [section, setSection] = useState<SectionKey>('interface')
+  const [section, setSection] = useState<SectionKey>('connection')
 
   const settingsQuery = useQuery({
     queryKey: ['settings'],
@@ -85,27 +85,25 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[min(90dvh,44rem)] max-w-6xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)]"
+        className="h-[calc(100dvh-0.5rem)] max-w-6xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)] sm:h-[min(90dvh,44rem)]"
         data-testid="settings-dialog"
       >
-        <DialogHeader className="border-b border-border/50 px-4 py-3">
+        <DialogHeader className="border-b border-border/50 px-3 py-2.5 sm:px-4 sm:py-3">
           <DialogTitle>{t('settings.title')}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="line-clamp-2 sm:line-clamp-none">
             {t('settings.description')}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="min-h-0 border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r">
-            <ScrollArea className="h-full">
-              <nav className="flex gap-1 p-2 md:block md:space-y-1" aria-label={t('settings.sectionsLabel')}>
-                {SECTIONS.map((s) => (
-                  <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
-                ))}
-              </nav>
-            </ScrollArea>
+        <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
+          <aside className="min-h-0 min-w-0 border-b border-border/50 bg-muted/60 md:border-b-0 md:border-r">
+            <nav className="flex w-full max-w-full gap-1 overflow-x-auto p-2 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:block md:h-full md:space-y-1 md:overflow-x-hidden md:overflow-y-auto" aria-label={t('settings.sectionsLabel')}>
+              {SECTIONS.map((s) => (
+                <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
+              ))}
+            </nav>
           </aside>
-          <ScrollArea className="min-h-0">
-            <div className="p-4 sm:p-6">
+          <ScrollArea className="min-h-0 min-w-0">
+            <div className="min-w-0 p-3 sm:p-6">
               {loadError ? (
                 <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   {t('settings.loadFailed', { error: loadError })}
@@ -128,8 +126,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 <HooksSection payload={payload} />
               ) : section === 'interface' ? (
                 <InterfaceSection />
-              ) : section === 'versions' ? (
-                <VersionsSection payload={payload} executors={executors} />
+              ) : section === 'deployment' ? (
+                <DeploymentSection payload={payload} executors={executors} />
               ) : (
                 <McpSection payload={payload} />
               )}
@@ -159,7 +157,7 @@ function SettingsSectionButton({
       onClick={onClick}
       data-testid={`settings-tab-${section.key}`}
       className={cn(
-        'w-36 flex-none rounded-md px-3 py-2 text-left text-sm transition-colors md:w-full',
+        'w-32 flex-none rounded-md px-3 py-2 text-left text-sm transition-colors sm:w-36 md:w-full',
         active
           ? 'bg-primary/10 text-foreground shadow-inner ring-1 ring-primary/30'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -179,10 +177,10 @@ function SectionHeader({
   subtitle?: string
 }): JSX.Element {
   return (
-    <div className="mb-4">
+    <div className="mb-4 min-w-0">
       <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
       {subtitle ? (
-        <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        <p className="mt-1 break-words text-sm text-muted-foreground">{subtitle}</p>
       ) : null}
     </div>
   )
@@ -216,8 +214,8 @@ function RuntimeSection({
         title={t('settings.sections.runtime.label')}
         subtitle={t('settings.runtime.subtitle')}
       />
-      <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-        <table className="w-full text-sm">
+      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+        <table className="min-w-[34rem] w-full text-sm">
           <tbody>
             {rows.map(([label, path], i) => (
               <tr
@@ -227,7 +225,7 @@ function RuntimeSection({
                   i !== rows.length - 1 && 'border-b',
                 )}
               >
-                <th className="w-56 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">
+                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
                   {label}
                 </th>
                 <td className="px-3 py-2.5 font-mono text-xs">
@@ -245,7 +243,7 @@ function RuntimeSection({
   )
 }
 
-function VersionsSection({
+function DeploymentSection({
   payload,
   executors,
 }: {
@@ -253,41 +251,102 @@ function VersionsSection({
   executors: readonly AttachedExecutor[]
 }): JSX.Element {
   const { t } = useTranslation()
-  const rows: Array<[string, string]> = [
-    [t('settings.versions.dashboard'), DASHBOARD_VERSION],
-    [t('settings.versions.host'), payload.versions?.host ?? '—'],
-    [t('settings.versions.protocol'), payload.versions?.protocol ?? PROTOCOL_VERSION],
+  const build = payload.versions?.build
+  const rows: Array<{
+    component: string
+    detail?: string
+    version: string
+    commit: string
+    builtAt: string
+    instance: string
+    health: string
+  }> = [
+    {
+      component: t('settings.deployment.hostRuntime'),
+      detail: hostDeliveryLabel(build),
+      version: payload.versions?.host ?? '—',
+      commit: build?.gitCommit ?? 'unknown',
+      builtAt: build?.builtAt ?? 'unknown',
+      instance: typeof window === 'undefined' ? t('settings.deployment.sameOriginHost') : window.location.host,
+      health: t('settings.deployment.running'),
+    },
+    {
+      component: t('settings.deployment.dashboardComponent'),
+      detail: dashboardDeliveryLabel(build),
+      version: DASHBOARD_VERSION,
+      commit: build?.gitCommit ?? 'unknown',
+      builtAt: build?.builtAt ?? 'unknown',
+      instance: t('settings.deployment.embeddedInHost'),
+      health: t('settings.deployment.loaded'),
+    },
+    {
+      component: t('settings.deployment.protocolComponent'),
+      detail: t('settings.deployment.wireContract'),
+      version: payload.versions?.protocol ?? PROTOCOL_VERSION,
+      commit: '—',
+      builtAt: '—',
+      instance: t('settings.deployment.sharedByComponents'),
+      health: t('settings.deployment.compatible'),
+    },
+    ...executors.map((executor) => ({
+      component: `${t('settings.deployment.executorComponent')}: ${executor.workspaceName}`,
+      detail: executor.build ? executorDeliveryLabel(executor.build) : t('settings.deployment.legacyExecutor'),
+      version: executor.executorVersion ?? t('settings.deployment.notReported'),
+      commit: executor.build?.gitCommit ?? t('settings.deployment.notReported'),
+      builtAt: executor.build?.builtAt ?? t('settings.deployment.notReported'),
+      instance: executorInstanceLabel(executor),
+      health: executorHealthLabel(executor, t('settings.deployment.connected'), t('settings.deployment.legacyMetadataMissing')),
+    })),
   ]
   return (
     <div>
-      <SectionHeader title={t('settings.sections.versions.label')} subtitle={t('settings.versions.subtitle')} />
-      <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-        <table className="w-full text-sm">
+      <SectionHeader title={t('settings.sections.deployment.label')} subtitle={t('settings.deployment.subtitle')} />
+      <h4 className="mb-2 text-sm font-semibold text-foreground">{t('settings.deployment.componentInventory')}</h4>
+      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+        <table className="min-w-[820px] w-full text-sm">
+          <thead className="bg-muted/50 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.component')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.version')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.commit')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.buildTime')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.instance')}</th>
+              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.health')}</th>
+            </tr>
+          </thead>
           <tbody>
-            {rows.map(([label, value], i) => (
-              <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
-                <th className="w-48 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">{label}</th>
-                <td className="px-3 py-2.5 font-mono text-xs">{value}</td>
+            {rows.map((row, i) => (
+              <tr key={row.component} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
+                <td className="max-w-56 px-3 py-2" title={row.component}>
+                  <div className="font-medium">{row.component}</div>
+                  {row.detail ? <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={row.detail}>{row.detail}</div> : null}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs">{row.version}</td>
+                <td className="px-3 py-2 font-mono text-xs">{row.commit}</td>
+                <td className="max-w-48 px-3 py-2 font-mono text-xs" title={row.builtAt}>{row.builtAt}</td>
+                <td className="px-3 py-2 font-mono text-xs">{row.instance}</td>
+                <td className="px-3 py-2 text-xs">{row.health}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div className="mt-5">
-        <h4 className="text-sm font-semibold text-foreground">{t('settings.versions.connectedExecutors')}</h4>
-        <p className="mt-1 text-xs text-muted-foreground">{t('settings.versions.connectedExecutorsDesc')}</p>
+        <h4 className="text-sm font-semibold text-foreground">{t('settings.deployment.connectedExecutors')}</h4>
+        <p className="mt-1 text-xs text-muted-foreground">{t('settings.deployment.connectedExecutorsDesc')}</p>
         {executors.length === 0 ? (
-          <EmptyRow>{t('settings.versions.noExecutors')}</EmptyRow>
+          <EmptyRow>{t('settings.deployment.noExecutors')}</EmptyRow>
         ) : (
-          <div className="mt-3 overflow-hidden rounded-md ring-1 ring-border/50">
-            <table className="w-full text-sm">
+          <div className="mt-3 max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+            <table className="min-w-[760px] w-full text-sm">
               <thead className="bg-muted/50 text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.workspace')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executor')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executorVersion')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.executorProtocol')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.versions.runtime')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.workspace')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executor')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executorVersion')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executorProtocol')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.runtime')}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.features')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -301,6 +360,7 @@ function VersionsSection({
                     <td className="px-3 py-2 font-mono text-xs">{executor.executorVersion ?? '—'}</td>
                     <td className="px-3 py-2 font-mono text-xs">{executor.clientVersion ?? '—'}</td>
                     <td className="px-3 py-2 font-mono text-xs">{executor.runtime} {executor.runtimeVersion}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{executorCapabilitiesLabel(executor, t)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -310,6 +370,59 @@ function VersionsSection({
       </div>
     </div>
   )
+}
+
+function dashboardDeliveryLabel(build: BuildMetadata | undefined): string {
+  if (!build) return 'unknown'
+  const files = typeof build.embeddedDashboardFiles === 'number' ? `, ${build.embeddedDashboardFiles} files` : ''
+  if (build.dashboardMode === 'embedded') return `embedded in host bundle${files}`
+  if (build.dashboardMode === 'static') return 'static dashboard directory'
+  if (build.dashboardMode === 'vite') return 'Vite development server'
+  return `not bundled (${build.releaseTag})`
+}
+
+function hostDeliveryLabel(build: BuildMetadata | undefined): string {
+  if (!build) return 'local source checkout'
+  if (build.artifactKind === 'cjs') return 'bundle-dashboard-with-runtime.cjs'
+  if (build.artifactKind === 'native') return 'native host binary'
+  return 'source checkout'
+}
+
+function executorDeliveryLabel(build: BuildMetadata): string {
+  if (build.artifactKind === 'cjs') return 'agent-kernel-executor.cjs'
+  if (build.artifactKind === 'native') return 'native executor binary'
+  return 'source checkout'
+}
+
+function runtimeLabel(runtime: AttachedExecutor['runtime']): string {
+  if (runtime === 'node') return 'Node.js'
+  if (runtime === 'browser-webcontainer') return 'Browser WebContainer'
+  return runtime
+}
+
+function executorInstanceLabel(executor: AttachedExecutor): string {
+  const parts: string[] = []
+  if (executor.hostname) parts.push(executor.hostname)
+  parts.push(`${runtimeLabel(executor.runtime)} ${executor.runtimeVersion}`)
+  if (executor.pid !== undefined) parts.push(`pid ${executor.pid}`)
+  return parts.join(' | ')
+}
+
+function executorHealthLabel(executor: AttachedExecutor, connected: string, legacyMetadataMissing: string): string {
+  if (!executor.build) return legacyMetadataMissing
+  return connected
+}
+
+function executorCapabilitiesLabel(executor: AttachedExecutor, t: ReturnType<typeof useTranslation>['t']): string {
+  const features = executor.capabilities?.features
+  if (!features) return t('settings.deployment.legacyMetadataMissing')
+  const labels = [
+    features.backgroundShell ? t('settings.deployment.featureBackgroundShell') : null,
+    features.filePicker ? t('settings.deployment.featureFilePicker') : null,
+    features.overflowFiles ? t('settings.deployment.featureOverflowFiles') : null,
+    features.workspaceSandbox ? t('settings.deployment.featureWorkspaceSandbox') : null,
+  ].filter((label): label is string => Boolean(label))
+  return labels.length > 0 ? labels.join(', ') : t('settings.deployment.noSpecialFeatures')
 }
 
 function SecuritySection({ payload }: { payload: ServerSettingsPayload }): JSX.Element {
@@ -335,12 +448,12 @@ function SecuritySection({ payload }: { payload: ServerSettingsPayload }): JSX.E
         title={t('settings.sections.security.label')}
         subtitle={t('settings.security.subtitle')}
       />
-      <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-        <table className="w-full text-sm">
+      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+        <table className="min-w-[34rem] w-full text-sm">
           <tbody>
             {rows.map(([label, value], i) => (
               <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
-                <th className="w-56 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium">
+                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
                   {label}
                 </th>
                 <td className="px-3 py-2.5 text-sm text-muted-foreground">{value}</td>
@@ -350,7 +463,7 @@ function SecuritySection({ payload }: { payload: ServerSettingsPayload }): JSX.E
         </table>
       </div>
       <div className="mt-4 rounded-md bg-muted/40 px-4 py-3 text-xs text-muted-foreground ring-1 ring-border/50">
-        <div className="font-mono">HOST_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, EXECUTOR_TOKENS, HOST_AUDIT_DIR</div>
+        <div className="break-words font-mono">HOST_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, EXECUTOR_TOKENS, HOST_AUDIT_DIR</div>
       </div>
     </div>
   )
@@ -467,7 +580,7 @@ function ExecutorAccessSection(): JSX.Element {
   return (
     <div>
       <SectionHeader title={t('settings.sections.executorAccess.label')} subtitle={t('settings.executorAccess.subtitle')} />
-      <form onSubmit={submit} className="mb-4 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+      <form onSubmit={submit} className="mb-4 min-w-0 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <label className="text-xs font-medium text-muted-foreground">
             {t('settings.executorAccess.label')}
@@ -496,8 +609,8 @@ function ExecutorAccessSection(): JSX.Element {
         {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
       </form>
       {plainInvite ? (
-        <div className="mb-4 rounded-md bg-primary/5 px-3 py-2 ring-1 ring-primary/30">
-          <div className="flex items-center justify-between gap-2">
+        <div className="mb-4 min-w-0 rounded-md bg-primary/5 px-3 py-2 ring-1 ring-primary/30">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-medium text-foreground">{t('settings.executorAccess.plaintextTitle')}</div>
             <select
               value={copyMode}
@@ -520,8 +633,8 @@ function ExecutorAccessSection(): JSX.Element {
       ) : invites.length === 0 ? (
         <EmptyRow>{t('settings.executorAccess.empty')}</EmptyRow>
       ) : (
-        <div className="overflow-hidden rounded-md ring-1 ring-border/50">
-          <table className="w-full text-sm">
+        <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
+          <table className="min-w-[720px] w-full text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left [box-shadow:inset_0_-1px_0_hsl(var(--border)/0.5)]">{t('settings.executorAccess.label')}</th>
@@ -653,7 +766,7 @@ function ModelsSection({
         title={t('settings.sections.models.label')}
         subtitle={t('settings.models.subtitle')}
       />
-      <form onSubmit={submit} className="mb-4 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+      <form onSubmit={submit} className="mb-4 min-w-0 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
         <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
           <label className="text-xs font-medium text-muted-foreground">
             {t('settings.models.provider')}
@@ -695,7 +808,7 @@ function ModelsSection({
           </Button>
         </div>
         {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
-        <div className="mt-2 text-xs text-muted-foreground">
+        <div className="mt-2 break-words text-xs text-muted-foreground">
           <Trans i18nKey="settings.models.manualStored" values={{ path: payload.paths.manualModels }} components={{ code: <code className="font-mono" /> }} />
         </div>
       </form>
@@ -708,20 +821,20 @@ function ModelsSection({
           {payload.providers.map((p) => (
             <div
               key={p.id}
-              className="rounded-md bg-card/60 p-4 ring-1 ring-border/50"
+              className="min-w-0 rounded-md bg-card/60 p-3 ring-1 ring-border/50 sm:p-4"
               data-testid={`settings-provider-${p.id}`}
             >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
                   <div className="font-medium">{p.label}</div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="min-w-0 break-words text-xs text-muted-foreground">
                     <span className="font-mono">{p.wire}</span>
                     {' · '}
                     <SourceBadge source={p.source ?? 'unknown'} />
                     {p.baseUrl ? (
                       <>
                         {' · '}
-                        <span className="font-mono">{p.baseUrl}</span>
+                        <span className="break-all font-mono">{p.baseUrl}</span>
                       </>
                     ) : null}
                   </div>
@@ -836,8 +949,8 @@ function HooksSection({
           {t('settings.hooks.none', { path: payload.paths.hooksConfig })}
         </EmptyRow>
       ) : (
-        <div className="overflow-hidden rounded-md border border-border">
-          <table className="w-full text-sm">
+        <div className="max-w-full overflow-x-auto rounded-md border border-border">
+          <table className="min-w-[640px] w-full text-sm">
             <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.event')}</th>
@@ -902,7 +1015,7 @@ function InterfaceSection(): JSX.Element {
         subtitle={t('settings.interface.subtitle')}
       />
       <ul className="space-y-3 text-sm">
-        <li className="flex items-start justify-between gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
+        <li className="flex flex-wrap items-start justify-between gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.theme.label')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -965,7 +1078,7 @@ function InterfaceSection(): JSX.Element {
             </button>
           </div>
         </li>
-        <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+        <li className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.showToolCallTab')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1000,7 +1113,7 @@ function InterfaceSection(): JSX.Element {
           onChange={setTopbarOpen}
           testId="settings-toggle-topbar-open"
         />
-        <li className="flex items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+        <li className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.liveToolActivityTail')}</div>
             <p className="mt-0.5 text-xs text-muted-foreground">

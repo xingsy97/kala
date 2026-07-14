@@ -326,6 +326,25 @@ describe('Composer', () => {
     expect(picker.textContent ?? '').not.toContain('ask only for tools marked unsafe')
   })
 
+  it('keeps model and approval picker labels hidden below desktop width', () => {
+    render(
+      <Composer
+        model="claude-opus"
+        models={[{ id: 'claude-opus', label: 'Claude Opus', provider: 'Anthropic', providerId: 'anthropic' }]}
+        onModelChange={() => {}}
+        approvalMode="auto"
+        onApprovalModeChange={() => {}}
+        state={null}
+        config={null}
+        queuedMessages={[]}
+        onSubmit={() => {}}
+        onCompact={() => {}}
+      />,
+    )
+    expect(screen.getByTestId('model-picker').className).toContain('md:w-24')
+    expect(screen.getByTestId('approval-mode-picker').className).toContain('md:w-16')
+  })
+
   it('keeps allow all danger copy out of the compact approval picker label', () => {
     render(
       <Composer

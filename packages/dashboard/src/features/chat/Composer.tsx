@@ -442,11 +442,6 @@ export function Composer({
             'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
           )}
         >
-          <ComposerModeToggle
-            mode={mode}
-            onToggle={toggleMode}
-            className="absolute right-2 top-2 z-10"
-          />
           {pastedImages.length > 0 ? (
             <div
               className="flex flex-wrap gap-2 border-b border-border/50 px-3 py-2"
@@ -607,12 +602,12 @@ export function Composer({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                className="h-9 w-11 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:h-7 sm:w-20 md:w-24 xl:w-40"
+                className="h-9 w-11 flex-none gap-1 border-0 bg-transparent px-2 shadow-none hover:bg-accent md:h-7 md:w-24 xl:w-40"
                 data-testid="model-picker"
                 aria-label={t('common.model')}
               >
                 <Bot className="h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-                <span className="hidden min-w-0 truncate sm:inline">
+                <span className="hidden min-w-0 truncate md:inline">
                   <SelectValue
                     placeholder={models.length === 0 ? t('common.noModels') : t('common.model')}
                   />
@@ -632,7 +627,7 @@ export function Composer({
             >
               <SelectTrigger
                 className={cn(
-                  'h-9 w-11 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent sm:h-7 sm:w-14 md:w-16 xl:w-32',
+                  'h-9 w-11 flex-none border-0 bg-transparent px-2 shadow-none hover:bg-accent md:h-7 md:w-16 xl:w-32',
                   approvalMode === 'allow_all'
                     ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40'
                     : approvalMode === 'ask'
@@ -643,7 +638,7 @@ export function Composer({
                 aria-label={t('composer.approvalMode')}
               >
                 <ShieldCheck className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-                <span className="hidden min-w-0 truncate sm:inline">{approvalModeLabel}</span>
+                <span className="hidden min-w-0 truncate md:inline">{approvalModeLabel}</span>
               </SelectTrigger>
               <SelectContent position="popper" sideOffset={4} className="max-h-[min(24rem,60vh)]">
                 {APPROVAL_MODES.map((m) => {
@@ -680,6 +675,11 @@ export function Composer({
                 disabled={!canSubmit}
                 sendMode={sendMode}
                 onSendModeChange={updateSendMode}
+              />
+              <ComposerModeToggle
+                mode={mode}
+                onToggle={toggleMode}
+                className="h-8 w-8 flex-none rounded-full border border-border/50 bg-muted/45 text-muted-foreground hover:bg-muted hover:text-foreground"
               />
             </div>
           </div>

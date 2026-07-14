@@ -4,9 +4,9 @@ import { cn } from '../../lib/utils.js'
 import { BadCasesTab } from '../artifacts/BadCasesTab.js'
 import type { BenchmarkRunSummary } from './types.js'
 
-type DetailTab = 'overview' | 'trials' | 'badcases' | 'compare'
+type DetailTab = 'overview' | 'artifacts' | 'badcases'
 
-const TABS: readonly DetailTab[] = ['overview', 'trials', 'badcases', 'compare']
+const TABS: readonly DetailTab[] = ['overview', 'artifacts', 'badcases']
 
 export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JSX.Element {
   const { t } = useTranslation()
@@ -62,7 +62,7 @@ export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JS
         </div>
       </header>
 
-      <div role="tablist" className="flex items-center gap-1 border-b border-border/40 px-3 py-1" data-testid="benchmarks-detail-tabs">
+      <div role="tablist" className="flex min-w-0 items-center gap-1 overflow-x-auto border-b border-border/40 px-3 py-1" data-testid="benchmarks-detail-tabs">
         {TABS.map((id) => {
           const active = tab === id
           return (
@@ -86,7 +86,8 @@ export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JS
 
       <div className="min-h-0 flex-1 overflow-auto">
         {tab === 'overview' ? (
-          <dl className="grid grid-cols-2 gap-3 p-4 text-xs" data-testid="benchmarks-detail-overview">
+          <div className="grid gap-4 p-4" data-testid="benchmarks-detail-overview">
+            <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 xl:grid-cols-3">
             <Metric label={t('benchmarks.detail.overview.dataset')} value={run.dataset} />
             <Metric label={t('benchmarks.detail.overview.model')} value={run.model} />
             <Metric
@@ -99,12 +100,21 @@ export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JS
             />
             <Metric label={t('benchmarks.detail.overview.createdAt')} value={run.createdAt} />
             <Metric label={t('benchmarks.detail.overview.updatedAt')} value={run.updatedAt} />
-          </dl>
+            </dl>
+            <Lifecycle run={run} />
+          </div>
         ) : null}
 
-        {tab === 'trials' ? (
-          <div className="p-4 text-xs text-muted-foreground" data-testid="benchmarks-detail-trials">
-            {t('benchmarks.detail.trials.placeholder')}
+        {tab === 'artifacts' ? (
+          <div className="grid gap-3 p-4 text-xs" data-testid="benchmarks-detail-artifacts">
+            <p className="text-muted-foreground">{t('benchmarks.detail.artifacts.description')}</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {artifactHintsFor(run).map((artifact) => (
+                <div key={artifact} className="min-w-0 rounded border border-border/60 bg-card px-3 py-2">
+                  <div className="truncate font-mono text-[11px] text-foreground">{artifact}</div>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -112,11 +122,6 @@ export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JS
           <BadCasesTab initialRunId={run.runId} />
         ) : null}
 
-        {tab === 'compare' ? (
-          <div className="p-4 text-xs text-muted-foreground" data-testid="benchmarks-detail-compare">
-            {t('benchmarks.detail.compare.placeholder')}
-          </div>
-        ) : null}
       </div>
     </div>
   )
@@ -124,9 +129,54 @@ export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JS
 
 function Metric({ label, value }: { label: string; value: string | number }): JSX.Element {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex min-w-0 flex-col gap-0.5 rounded border border-border/50 bg-card px-3 py-2">
       <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="font-medium">{value}</dd>
+      <dd className="break-words font-medium [overflow-wrap:anywhere]">{value}</dd>
     </div>
   )
+}
+
+function Lifecycle({ run }: { run: BenchmarkRunSummary }): JSX.Element {
+  const { t } = useTranslation()
+  const current = lifecycleStep(run)
+  const steps = ['plan', 'infer', 'grade', 'ingest', 'review'] as const
+  const currentIndex = steps.indexOf(current)
+  return (
+    <div className="rounded border border-border/60 bg-card p-3" data-testid="benchmarks-detail-lifecycle">
+      <div className="mb-2 text-xs font-semibold text-foreground">{t('benchmarks.detail.lifecycle.title')}</div>
+      <ol className="grid gap-2 text-xs sm:grid-cols-5">
+        {steps.map((step, index) => (
+          <li
+            key={step}
+            className={cn(
+              'rounded border px-2 py-1.5',
+              index < currentIndex && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+              index === currentIndex && 'border-primary/40 bg-primary/10 text-primary',
+              index > currentIndex && 'border-border/60 text-muted-foreground',
+            )}
+          >
+            {t(`benchmarks.detail.lifecycle.steps.${step}`)}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function lifecycleStep(run: BenchmarkRunSummary): 'plan' | 'infer' | 'grade' | 'ingest' | 'review' {
+  if (run.status === 'pending') return 'plan'
+  if (run.status === 'running') return 'infer'
+  if (run.status === 'complete' && typeof run.resolved === 'number' && typeof run.totalInstances === 'number') return 'review'
+  if (run.kind === 'swebench' || run.kind === 'swe-bench') return 'ingest'
+  return 'review'
+}
+
+function artifactHintsFor(run: BenchmarkRunSummary): string[] {
+  const root = run.kind === 'terminal-bench' ? `runs/terminal-bench/${run.runId}` : `runs/swebench/${run.runId}`
+  return [
+    `${root}/summary.json`,
+    `${root}/progress.json`,
+    `${root}/worker-plan.json`,
+    `${root}/trials/<instance>.json`,
+  ]
 }
