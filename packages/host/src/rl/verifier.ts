@@ -10,11 +10,14 @@ import {
   type ArtifactRef,
 } from '@agent-kernel/shared/enhancement'
 
+import { detectWriteScopeViolations, writeSnapshotSidecar, type WriteScopeSnapshot } from './write-scope.js'
+
 export type RunCommandVerifierInput = {
   rootDir: string
   rolloutId: string
   task: AgentRlTask
   cwd: string
+  writeScopeSnapshot?: WriteScopeSnapshot | null
 }
 
 export type RunCommandVerifierResult = {
@@ -23,6 +26,15 @@ export type RunCommandVerifierResult = {
 }
 
 export async function runCommandVerifier(input: RunCommandVerifierInput): Promise<RunCommandVerifierResult> {
+  if (input.task.verifier.kind === 'swebench') {
+    const { runSwebenchVerifier } = await import('./verifier-swebench.js')
+    return runSwebenchVerifier({
+      rootDir: input.rootDir,
+      rolloutId: input.rolloutId,
+      task: input.task,
+      cwd: input.cwd,
+    })
+  }
   if (input.task.verifier.kind !== 'command') {
     throw new Error(`unsupported verifier for local runner: ${input.task.verifier.kind}`)
   }
@@ -40,13 +52,36 @@ export async function runCommandVerifier(input: RunCommandVerifierInput): Promis
   const base = `rl-verifier/${sanitize(input.rolloutId)}`
   const stdoutRef = await store.writeText('log', `${base}/stdout.txt`, run.stdout)
   const stderrRef = await store.writeText('log', `${base}/stderr.txt`, run.stderr)
+  const passRate = parsePassRate(run.stdout, input.task.verifier.rewardParsePattern)
+  const violations = input.writeScopeSnapshot
+    ? await detectWriteScopeViolations(input.cwd, input.writeScopeSnapshot)
+    : []
+  if (input.writeScopeSnapshot) {
+    await writeSnapshotSidecar(input.rootDir, input.rolloutId, input.writeScopeSnapshot)
+  }
+  let rewardValue = run.timedOut ? 0 : run.exitCode === 0 ? 1 : 0
+  let label: AgentRewardArtifact['label'] = run.timedOut
+    ? 'timeout'
+    : run.exitCode === 0
+      ? 'resolved'
+      : 'unresolved'
+  if (violations.length > 0) {
+    rewardValue = 0
+    label = 'unresolved'
+  }
+  const metadata: Record<string, unknown> = {
+    cwd: input.cwd,
+    timedOut: run.timedOut,
+  }
+  if (passRate !== null) metadata.passRate = passRate
+  if (violations.length > 0) metadata.writeScopeViolations = violations
   const reward: AgentRewardArtifact = {
     schemaVersion: 'agent.reward.v1',
     rolloutId: input.rolloutId,
     taskId: input.task.taskId,
     verifierKind: 'command',
-    reward: run.timedOut ? 0 : run.exitCode === 0 ? 1 : 0,
-    label: run.timedOut ? 'timeout' : run.exitCode === 0 ? 'resolved' : 'unresolved',
+    reward: rewardValue,
+    label,
     startedAt: startedAt.toISOString(),
     completedAt: completedAt.toISOString(),
     durationMs: completedAt.getTime() - startedAt.getTime(),
@@ -55,10 +90,7 @@ export async function runCommandVerifier(input: RunCommandVerifierInput): Promis
     signal: run.signal,
     stdoutRef,
     stderrRef,
-    metadata: {
-      cwd: input.cwd,
-      timedOut: run.timedOut,
-    },
+    metadata,
   }
   AgentRewardArtifactSchema.parse(reward)
   const artifact = await store.writeJson('rl_reward', `rl-rewards/${sanitize(input.rolloutId)}.json`, reward)
@@ -115,4 +147,14 @@ export function defaultWorkspaceForTask(rootDir: string, rolloutId: string, task
 function sanitize(value: string): string {
   const cleaned = value.replace(/[^A-Za-z0-9._:-]+/g, '_')
   return cleaned.length > 0 ? cleaned : 'unknown'
+}
+
+function parsePassRate(stdout: string, pattern: string | undefined): number | null {
+  const source = pattern ?? 'REWARD_PASS_RATE=([0-9.]+)'
+  const re = new RegExp(source)
+  const match = re.exec(stdout)
+  if (!match || !match[1]) return null
+  const value = Number(match[1])
+  if (!Number.isFinite(value)) return null
+  return value
 }

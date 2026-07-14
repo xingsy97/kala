@@ -92,7 +92,7 @@ export type EnhancementCliCommand =
   | { kind: 'rl-write-token-capture-fixture'; rootDir: string; rolloutId: string; sessionId: string; callId: string; taskId?: string; model: string; requireLogprobs: boolean }
   | { kind: 'rl-build-trajectory'; rootDir: string; rolloutId: string; taskId: string; sessionId: string; tokenCaptures: readonly string[]; rewardPath?: string }
   | { kind: 'rl-validate-slime-sample'; rootDir: string; trajectoryPath: string; rewardPath: string; requireLogprobs: boolean }
-  | { kind: 'rl-run-rollout-smoke'; rootDir: string; taskFile: string; taskId?: string; rolloutId?: string; policyBaseUrl?: string; model: string; tokenizerPath?: string; requireLogprobs: boolean; timeoutMs?: number; maxNewTokens?: number; fixturePolicy: boolean }
+  | { kind: 'rl-run-rollout-smoke'; rootDir: string; taskFile: string; taskId?: string; rolloutId?: string; policyBaseUrl?: string; model: string; tokenizerPath?: string; weightVersion?: string; requireLogprobs: boolean; timeoutMs?: number; maxNewTokens?: number; maxTurns?: number; policyEndpoint?: 'native-generate' | 'chat-completions'; fixturePolicy: boolean }
   | { kind: 'rl-inspect-rollout'; rootDir: string; rolloutPath: string }
 
 export function parseEnhancementCli(argv: readonly string[]): EnhancementCliCommand {
@@ -436,6 +436,9 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
     const rest = commandArgv.slice(3)
     const timeoutMs = numberValue(rest, '--timeout-ms')
     const maxNewTokens = numberValue(rest, '--max-new-tokens')
+    const maxTurns = numberValue(rest, '--max-turns')
+    const policyEndpointRaw = value(rest, '--policy-endpoint')
+    const policyEndpoint = policyEndpointRaw === 'chat-completions' || policyEndpointRaw === 'native-generate' ? policyEndpointRaw : undefined
     return {
       kind: 'rl-run-rollout-smoke',
       rootDir: value(rest, '--root-dir') ?? 'runs/rl-smoke',
@@ -445,9 +448,12 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       policyBaseUrl: value(rest, '--policy-base-url') ?? process.env.AGENT_KERNEL_POLICY_BASE_URL,
       model: value(rest, '--model') ?? process.env.AGENT_KERNEL_POLICY_MODEL ?? 'policy-model-unspecified',
       tokenizerPath: value(rest, '--tokenizer') ?? process.env.AGENT_KERNEL_POLICY_TOKENIZER,
+      weightVersion: value(rest, '--weight-version') ?? process.env.AGENT_KERNEL_POLICY_WEIGHT_VERSION,
       requireLogprobs: flag(rest, '--require-logprobs'),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(maxNewTokens !== undefined ? { maxNewTokens } : {}),
+      ...(maxTurns !== undefined ? { maxTurns } : {}),
+      ...(policyEndpoint ? { policyEndpoint } : {}),
       fixturePolicy: flag(rest, '--fixture-policy'),
     }
   }
@@ -732,13 +738,56 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
     const llm = command.fixturePolicy
       ? fixturePolicyAdapter({ rootDir: command.rootDir, rolloutId, model: command.model, requireLogprobs: command.requireLogprobs })
       : policyGatewayFromCli(command, rolloutId)
+    const { defaultWorkspaceForTask } = await import('./rl/verifier.js')
+    const { inProcessRlToolDispatcher, rlToolSchemas } = await import('./rl/executor-dispatcher.js')
+    const workspace = defaultWorkspaceForTask(command.rootDir, rolloutId, task)
+    const tools = inProcessRlToolDispatcher(workspace)
+    const rlSystemPrompt = [
+      'You are a coding agent fixing a bug in an existing software repository (SWE-Bench task).',
+      'The workspace at CWD is a full git checkout of the target project at the pre-fix commit, with the failing test already installed.',
+      'Your job: read the issue, locate the relevant source files, and edit them in place so the failing test passes without breaking any existing tests.',
+      '',
+      'You MUST interact with the workspace ONLY through tool calls. Tools: read, ls, glob, grep, write, edit, bash.',
+      '',
+      'CRITICAL FORMAT: every response must be a single tool call wrapped in tags exactly like this:',
+      '<tool_call>',
+      '{"name": "ls", "arguments": {"path": "."}}',
+      '</tool_call>',
+      '',
+      'Do NOT output ```python``` blocks. Do NOT output prose. ONLY <tool_call>...</tool_call>.',
+      'If you output a code block instead of a tool call, the task fails with reward=0.',
+      '',
+      'Recommended workflow:',
+      '  1. `ls` the repo root and `read` any README/setup docs to understand the project layout.',
+      '  2. `grep` for symbols named in the issue description to locate the offending code.',
+      '  3. `read` the specific source files you plan to change.',
+      '  4. Use `edit` (preferred) or `write` to modify EXISTING source files in place. DO NOT create src/solution.py or any new top-level scaffolding — the fix belongs in the existing project files.',
+      '  5. Optionally `bash` with a focused test command (e.g. `python -m pytest path/to/test.py -x`) to check your fix locally.',
+      '  6. When you believe the fix is complete, call `bash` with `git diff` to inspect what will be submitted, then stop.',
+      '',
+      'Do NOT modify any files under tests/ that were introduced by the failing test — those are the grader.',
+      'Do NOT try to reinstall dependencies or run migrations. Focus on the code change.',
+      '',
+      'Example turn (locating code):',
+      '<tool_call>',
+      '{"name": "grep", "arguments": {"pattern": "AuthenticationForm", "path": "django/contrib/auth"}}',
+      '</tool_call>',
+      '',
+      'Example turn (making an edit):',
+      '<tool_call>',
+      '{"name": "edit", "arguments": {"path": "django/contrib/auth/forms.py", "old_string": "old code", "new_string": "new code"}}',
+      '</tool_call>',
+    ].join('\n')
     const result = await runRlRollout({
       rootDir: command.rootDir,
       task,
       llm,
+      tools,
       rolloutId,
       requireLogprobs: command.requireLogprobs,
+      config: { tools: rlToolSchemas(), systemPrompt: rlSystemPrompt, noToolCallNudges: task.verifier.kind === 'command' ? 0 : 3 },
       ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),
+      ...(command.maxTurns !== undefined ? { maxTurns: command.maxTurns } : {}),
     })
     console.log(JSON.stringify({ artifact: result.artifact, result: result.result }, null, 2))
     if (result.result.status !== 'completed' && result.result.readiness !== 'slime-sample-ready') process.exitCode = 2
@@ -772,7 +821,9 @@ function policyGatewayFromCli(command: Extract<EnhancementCliCommand, { kind: 'r
     baseUrl: command.policyBaseUrl,
     artifactRoot: command.rootDir,
     model: command.model,
+    endpoint: command.policyEndpoint ?? 'native-generate',
     ...(command.tokenizerPath ? { tokenizerPath: command.tokenizerPath } : {}),
+    ...(command.weightVersion ? { weightVersion: command.weightVersion } : {}),
     rolloutId,
     routeKey: rolloutId,
     requireLogprobs: command.requireLogprobs,
