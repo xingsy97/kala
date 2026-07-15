@@ -35,12 +35,10 @@ describe('visibleMessages', () => {
         seq: 3,
         ts: '2026-07-05T00:00:02.000Z',
         event: {
-          kind: 'compact_replaced',
-          preserveFrom: 3,
-          summary: 'hello -> hi',
-          replacedCount: 2,
-          tokensBefore: 100,
-          tokensAfter: 8,
+          kind: 'messages_replaced',
+          reason: 'compaction',
+          replaceRange: { start: 1, end: 3 },
+          replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'hello -> hi' }] }],
         },
         effects: [],
       },
@@ -64,8 +62,8 @@ describe('visibleMessages', () => {
       kind: 'compact_boundary',
       seq: 3,
       trigger: 'unknown',
-      tokensBefore: 100,
-      tokensAfter: 8,
+      tokensBefore: 0,
+      tokensAfter: 0,
     })
   })
 

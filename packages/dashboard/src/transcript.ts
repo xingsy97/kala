@@ -143,15 +143,15 @@ export function visibleTranscript(
           ],
         },
       })
-    } else if (event.kind === 'compact_replaced') {
+    } else if (event.kind === 'messages_replaced' && event.reason === 'compaction') {
       out.push({
         kind: 'compact_boundary',
         seq: entry.seq,
-        trigger: event.trigger ?? 'unknown',
-        replacedCount: event.replacedCount,
-        tokensBefore: event.tokensBefore,
-        tokensAfter: event.tokensAfter,
-        summary: event.summary,
+        trigger: 'unknown',
+        replacedCount: event.replaceRange.end - event.replaceRange.start,
+        tokensBefore: 0,
+        tokensAfter: 0,
+        summary: event.replacementMessages.map((message) => message.content.map((content) => content.type === 'text' ? content.text : '').join('')).join('\n'),
       })
     }
   }

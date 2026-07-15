@@ -17,6 +17,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 
 import {
   appendEventEntry,
+  appendRuntimeMetadataEntry,
   readSessionLog,
   writeHeader,
 } from './log.js'
@@ -55,6 +56,65 @@ describe('readSessionLog', () => {
     expect(parsed.header.sessionId).toBe('s1')
     expect(parsed.events).toHaveLength(1)
     expect(parsed.warnings).toEqual([])
+  })
+
+  it('round-trips runtime metadata entries separately from kernel events', async () => {
+    const path = join(dir, 'runtime-metadata.jsonl')
+    await writeHeader({ path, sessionId: 's-runtime-meta', config, initialState })
+    await appendRuntimeMetadataEntry(path, {
+      sessionId: 's-runtime-meta',
+      action: 'compaction_skipped',
+      payload: { reason: 'no_compactable_content' },
+      artifactRef: { path: 'artifacts/compact/report.json', bytes: 12, sha256: 'abc123' },
+    })
+
+    const parsed = await readSessionLog(path)
+    expect(parsed.events).toEqual([])
+    expect(parsed.runtimeMetadata).toHaveLength(1)
+    expect(parsed.runtimeMetadata[0]).toMatchObject({
+      kind: 'runtime_metadata',
+      sessionId: 's-runtime-meta',
+      action: 'compaction_skipped',
+      payload: { reason: 'no_compactable_content' },
+      artifactRef: { path: 'artifacts/compact/report.json', bytes: 12, sha256: 'abc123' },
+    })
+  })
+
+  it('writes agent module prompt and registry artifacts beside the session log', async () => {
+    const path = join(dir, 'module-session.jsonl')
+    await writeHeader({
+      path,
+      sessionId: 's-module',
+      config: {
+        tools: [{
+          name: 'demo',
+          description: 'demo',
+          inputSchema: { type: 'object' },
+          requiresApproval: false,
+          toolsetId: 'demo-toolset',
+          toolsetVersion: '1.0.0',
+          risk: 'read',
+          executionKind: 'executor',
+          executionHandler: 'demo',
+        }],
+        systemPrompt: 'module prompt',
+        agentModule: {
+          id: 'demo-module',
+          version: '1.0.0',
+          label: 'Demo Module',
+          systemPromptHash: 'prompt-hash',
+          toolRegistryHash: 'tool-hash',
+          toolsets: [{ id: 'demo-toolset', version: '1.0.0', label: 'Demo Toolset', toolCount: 1 }],
+        },
+      },
+      initialState,
+    })
+
+    const artifactDir = join(dir, 'artifacts', 'module-session', 'agent-module')
+    await expect(readFile(join(artifactDir, 'system-prompt.txt'), 'utf8')).resolves.toBe('module prompt')
+    const registry = JSON.parse(await readFile(join(artifactDir, 'tool-registry.json'), 'utf8'))
+    expect(registry.module.id).toBe('demo-module')
+    expect(registry.tools[0].toolsetId).toBe('demo-toolset')
   })
 
   it('redacts LLM trace endpoint and credentials before writing event logs', async () => {

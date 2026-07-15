@@ -56,11 +56,8 @@ export type RolloutTopology = {
 
 export type RolloutCompactionSummary = {
   eventSeq: number
-  trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'
-  preserveFrom: number
-  replacedCount: number
-  tokensBefore: number
-  tokensAfter: number
+  replaceRange: { start: number; end: number }
+  replacementMessageCount: number
 }
 
 export type RolloutSubAgentSummary = {
@@ -323,8 +320,8 @@ function createRolloutSegmentsArtifact(
         tokenIdsCaptured: false,
         summary: `${entry.event.ok ? 'ok' : 'error'} tool_result ${entry.event.callId}: ${summary}`,
       })
-    } else if (entry.event.kind === 'compact_replaced') {
-      const summary = `compact replaced ${entry.event.replacedCount} messages; preserveFrom=${entry.event.preserveFrom}`
+    } else if (entry.event.kind === 'messages_replaced' && entry.event.reason === 'compaction') {
+      const summary = `compaction replaced messages ${entry.event.replaceRange.start}..${entry.event.replaceRange.end} with ${entry.event.replacementMessages.length} message(s)`
       segments.push({
         segmentId: `seg_${String(++index).padStart(5, '0')}`,
         source: 'compaction',
@@ -414,14 +411,11 @@ function buildRolloutTopology(
           durationMs: parsed.durationMs,
         })
       }
-    } else if (entry.event.kind === 'compact_replaced') {
+    } else if (entry.event.kind === 'messages_replaced' && entry.event.reason === 'compaction') {
       compactions.push({
         eventSeq: entry.seq,
-        ...(entry.event.trigger ? { trigger: entry.event.trigger } : {}),
-        preserveFrom: entry.event.preserveFrom,
-        replacedCount: entry.event.replacedCount,
-        tokensBefore: entry.event.tokensBefore,
-        tokensAfter: entry.event.tokensAfter,
+        replaceRange: entry.event.replaceRange,
+        replacementMessageCount: entry.event.replacementMessages.length,
       })
     }
 

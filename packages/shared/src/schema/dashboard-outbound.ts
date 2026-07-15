@@ -20,6 +20,8 @@ import type {
   BgListResult,
   BgOutputResult,
   ConsolidateMemoryResult,
+  ContextPressureLevel,
+  ContextSnapshot,
   ControlUpdate,
   CopyOverflowSessionResult,
   DeleteOverflowSessionResult,
@@ -75,9 +77,10 @@ import type {
   WorkspaceRenamedEvent,
 } from '../protocol.js'
 import { SESSION_ERROR_SCOPES } from '../protocol.js'
-import type { EventEntry, HeaderEntry, LLMTrace, LogEntry, MetadataEntry, SnapshotEntry } from '../log.js'
+import type { EventEntry, HeaderEntry, LLMTrace, LogEntry, MetadataEntry, RuntimeMetadataEntry, SnapshotEntry } from '../log.js'
 import {
   AgentConfigSchema,
+  AgentModuleMetadataSchema,
   AgentEventSchema,
   AgentStateSchema,
   AgentStatusSchema,
@@ -129,11 +132,28 @@ export const LLMTraceSchema = z.object({
 // Session lifecycle events
 // ============================================================================
 
+export const ContextPressureLevelSchema: z.ZodType<ContextPressureLevel> = z.enum([
+  'none',
+  'soft',
+  'hard',
+])
+
+export const ContextSnapshotSchema = z.object({
+  estimatedMessageTokens: z.number().int().nonnegative(),
+  estimatedToolSchemaTokens: z.number().int().nonnegative(),
+  estimatedTotalInputTokens: z.number().int().nonnegative(),
+  reserveTokens: z.number().int().nonnegative(),
+  effectiveLimit: z.number().int().positive().optional(),
+  pressureLevel: ContextPressureLevelSchema,
+  reasonCodes: z.array(z.string()),
+}) satisfies z.ZodType<ContextSnapshot>
+
 export const SessionReadyEventSchema = z.object({
   sessionId: z.string(),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
   config: AgentConfigSchema,
+  contextSnapshot: ContextSnapshotSchema.optional(),
   reason: z.enum(['load', 'created', 'forked']).optional(),
   parentSessionId: z.string().optional(),
   parentCursor: z.number().int().nonnegative().optional(),
@@ -148,6 +168,7 @@ export const StateChangedEventSchema = z.object({
   sessionId: z.string(),
   cursor: z.number().int().nonnegative(),
   state: AgentStateSchema,
+  contextSnapshot: ContextSnapshotSchema.optional(),
 }) satisfies z.ZodType<StateChangedEvent>
 
 export const EventAppendedEventSchema = z.object({
@@ -564,6 +585,7 @@ export const ServerSettingsPayloadSchema = z.object({
       build: BuildMetadataSchema.optional(),
     })
     .optional(),
+  agentModule: AgentModuleMetadataSchema.optional(),
   auth: z
     .object({
       dashboardAuthRequired: z.boolean(),
@@ -674,6 +696,12 @@ export const HeaderEntrySchema = z.object({
   initialState: AgentStateSchema,
 }) satisfies z.ZodType<HeaderEntry>
 
+const LogArtifactRefSchema = z.object({
+  path: z.string(),
+  bytes: z.number(),
+  sha256: z.string(),
+})
+
 export const EventEntrySchema = z.object({
   kind: z.literal('event'),
   seq: z.number().int().nonnegative(),
@@ -681,9 +709,9 @@ export const EventEntrySchema = z.object({
   event: AgentEventSchema,
   effects: z.array(EffectSchema),
   usage: UsageTotalSchema.optional(),
-  effectsArtifact: z.object({ path: z.string(), bytes: z.number(), sha256: z.string() }).optional(),
+  effectsArtifact: LogArtifactRefSchema.optional(),
   llmTrace: LLMTraceSchema.optional(),
-  llmTraceArtifact: z.object({ path: z.string(), bytes: z.number(), sha256: z.string() }).optional(),
+  llmTraceArtifact: LogArtifactRefSchema.optional(),
   model: z.string().optional(),
 }) satisfies z.ZodType<EventEntry>
 
@@ -702,9 +730,19 @@ export const MetadataEntrySchema = z.object({
   workspaceName: z.string().optional(),
 }) satisfies z.ZodType<MetadataEntry>
 
+export const RuntimeMetadataEntrySchema = z.object({
+  kind: z.literal('runtime_metadata'),
+  ts: z.string(),
+  sessionId: z.string(),
+  action: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+  artifactRef: LogArtifactRefSchema.optional(),
+}) satisfies z.ZodType<RuntimeMetadataEntry>
+
 export const LogEntrySchema = z.discriminatedUnion('kind', [
   HeaderEntrySchema,
   EventEntrySchema,
   SnapshotEntrySchema,
   MetadataEntrySchema,
+  RuntimeMetadataEntrySchema,
 ]) satisfies z.ZodType<LogEntry>

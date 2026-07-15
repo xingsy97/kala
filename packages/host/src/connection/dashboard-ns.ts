@@ -83,6 +83,7 @@ import { authenticateDashboardHandshake } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
 import { parseWire, type WireValidationContext } from '../wire-validation.js'
 import { isSkillManager } from '../extensions/skills.js'
+import { contextSnapshot, snapshotFromConfig } from '../context/manager.js'
 
 export type QueuedUserMessage = {
   id: string
@@ -771,6 +772,7 @@ export function configureDashboardNamespace(
           cursor: record.state.cursor,
           state: record.state,
           config: record.config,
+          contextSnapshot: contextSnapshot(record),
           ...(record.workspaceId !== undefined
             ? { workspaceId: record.workspaceId }
             : {}),
@@ -1078,6 +1080,7 @@ export function readyEventFor(
     cursor: record.state.cursor,
     state: record.state,
     config: record.config,
+    contextSnapshot: contextSnapshot(record),
     ...(record.parentSessionId
       ? { parentSessionId: record.parentSessionId }
       : {}),
@@ -1115,6 +1118,7 @@ export function ephemeralReadyEventFor(
     cursor: state.cursor,
     state,
     config: defaultConfig,
+    contextSnapshot: snapshotFromConfig(defaultConfig, state.messages),
     ...(selectedModel ? { selectedModel } : {}),
   }
 }

@@ -331,6 +331,29 @@ function DeploymentSection({
           </tbody>
         </table>
       </div>
+      {payload.agentModule ? (
+        <div className="mt-5 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h4 className="text-sm font-semibold text-foreground">Agent module</h4>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={`${payload.agentModule.id}@${payload.agentModule.version}`}>
+                {payload.agentModule.label} · {payload.agentModule.id}@{payload.agentModule.version}
+              </div>
+            </div>
+            <div className="flex-none text-right font-mono text-[11px] text-muted-foreground">
+              <div>prompt {payload.agentModule.systemPromptHash.slice(0, 12)}</div>
+              <div>tools {payload.agentModule.toolRegistryHash.slice(0, 12)}</div>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {payload.agentModule.toolsets.map((toolset) => (
+              <span key={toolset.id} className="inline-flex h-5 items-center rounded bg-background/80 px-1.5 font-mono text-[11px] leading-none text-muted-foreground ring-1 ring-border/40" title={`${toolset.id}@${toolset.version}`}>
+                {toolset.label} · {toolset.toolCount}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-5">
         <h4 className="text-sm font-semibold text-foreground">{t('settings.deployment.connectedExecutors')}</h4>
         <p className="mt-1 text-xs text-muted-foreground">{t('settings.deployment.connectedExecutorsDesc')}</p>

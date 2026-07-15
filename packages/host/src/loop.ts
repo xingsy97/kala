@@ -39,9 +39,10 @@ import {
 } from '@agent-kernel/shared/enhancement'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
-import { AGENT_TOOL_NAME, interruptSubAgentsForParent, isCancelledSubAgentChild, runAgentTool } from './extensions/agent-tool.js'
+import { interruptSubAgentsForParent, isCancelledSubAgentChild } from './extensions/agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
-import { isSkillManager, runSkillTool, SKILL_TOOL_NAME } from './extensions/skills.js'
+import { isSkillManager } from './extensions/skills.js'
+import { dispatchConfiguredTool } from './agent-modules/execution.js'
 import type {
   HostLoopDeps,
   LoopHandle,
@@ -496,18 +497,7 @@ async function performCallTool(
       )
       return
     }
-    const res = effect.name === AGENT_TOOL_NAME
-      ? await runAgentTool(deps, sessionId, effect, aborts)
-      : effect.name === SKILL_TOOL_NAME
-        ? deps.skills
-          ? await runSkillTool(
-              isSkillManager(deps.skills)
-                ? await deps.skills.refreshSession(deps.store.get(sessionId)!)
-                : deps.skills,
-              effect.input,
-            )
-          : { ok: false, content: 'skills are not configured on this host' }
-        : await deps.tools.callTool(sessionId, effect)
+    const res = await dispatchConfiguredTool(deps, sessionId, effect, aborts)
     await runPostToolHooks(deps, sessionId, effect, res)
     await dispatchToolResult(
       deps,

@@ -10,7 +10,7 @@ import type {
   UsageTotal,
 } from '@agent-kernel/kernel'
 
-export type LogEntryKind = 'header' | 'event' | 'snapshot' | 'metadata'
+export type LogEntryKind = 'header' | 'event' | 'snapshot' | 'metadata' | 'runtime_metadata'
 
 export type HeaderEntry = {
   kind: 'header'
@@ -222,6 +222,15 @@ export type MetadataEntry = {
   workspaceName?: string
 }
 
-export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry | MetadataEntry
+export type RuntimeMetadataEntry = {
+  kind: 'runtime_metadata'
+  ts: string
+  sessionId: string
+  action: string
+  payload: Record<string, unknown>
+  artifactRef?: LogArtifactRef
+}
+
+export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry | MetadataEntry | RuntimeMetadataEntry
 
 export const LOG_FORMAT_VERSION = 2 as const

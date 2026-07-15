@@ -51,7 +51,7 @@ import {
 } from '../src/llm/provider-health.js'
 import { routerAdapter, toFallbackArtifact, type MutableRouter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
-import { createBuiltinTools } from '../src/builtin-tools.js'
+import { resolveBuiltinAgentModule } from '../src/builtin-tools.js'
 import { createHookRunner } from '../src/extensions/hooks.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import {
@@ -108,6 +108,9 @@ Options:
   -h, --help                 Show this help and exit.
   -v, --version              Print version and exit.
   --port <port>              HTTP/WebSocket port. Defaults to HOST_PORT or 3000.
+  --print-agent-module       Print resolved agent module metadata and exit.
+  --print-system-prompt      Print resolved system prompt and exit.
+  --print-tool-registry      Print resolved tool registry and exit.
 
 Common environment:
   HOST_PORT                  Port used when --port is omitted.
@@ -179,11 +182,30 @@ async function main(): Promise<void> {
   })
   const { llm, defaultModel } = registry
 
+  const skills = await discoverSkills()
+  const resolvedAgentModule = resolveBuiltinAgentModule({
+    skills: skills.skills,
+    ...(knownContextWindow(defaultModel)
+      ? { contextLimit: knownContextWindow(defaultModel) }
+      : {}),
+  })
+  if (hasFlag(argv, '--print-agent-module')) {
+    process.stdout.write(`${JSON.stringify(resolvedAgentModule.metadata, null, 2)}\n`)
+    return
+  }
+  if (hasFlag(argv, '--print-system-prompt')) {
+    process.stdout.write(`${resolvedAgentModule.systemPrompt}\n`)
+    return
+  }
+  if (hasFlag(argv, '--print-tool-registry')) {
+    process.stdout.write(`${JSON.stringify(resolvedAgentModule.toolDefinitions, null, 2)}\n`)
+    return
+  }
+
   const dashboard = await createDashboardServing()
   const buildInfo = runtimeBuildInfo(dashboard)
   const hooks = loadHookConfigs()
   const hookRunner = hooks.length > 0 ? createHookRunner() : undefined
-  const skills = await discoverSkills()
   let release = releaseSettings(port)
 
   const manualModelsPath = join(homedir(), '.config', 'agent-kernel', 'models.json')
@@ -208,6 +230,7 @@ async function main(): Promise<void> {
       protocol: PROTOCOL_VERSION,
       build: buildInfo,
     },
+    agentModule: resolvedAgentModule.metadata,
     auth: authSettings(effectiveAuth),
     paths: {
       claudeSettings: join(homedir(), '.claude', 'settings.json'),
@@ -227,13 +250,7 @@ async function main(): Promise<void> {
     port,
     sessionsDir,
     llm,
-    defaultConfig: {
-      tools: [...createBuiltinTools(skills.skills)],
-      systemPrompt: 'You are a coding agent running via agent-kernel.',
-      ...(knownContextWindow(defaultModel)
-        ? { contextLimit: knownContextWindow(defaultModel) }
-        : {}),
-    },
+    defaultConfig: resolvedAgentModule.config,
     models: () => registry.models,
     defaultModel,
     settings: makeSettings,

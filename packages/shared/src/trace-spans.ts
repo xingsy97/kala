@@ -5,8 +5,8 @@
  *   - one AGENT root span per session
  *   - one LLM span per llm_response / llm_error
  *   - one TOOL span per tool_result (or MEMORY if it's the memory tool)
- *   - one CHAIN span per compaction attempt (compact_replaced / _skipped /
- *     _rejected), so summarizer runs are visible alongside main-loop traffic
+ *   - one CHAIN span per successful compaction message replacement, so
+ *     summarizer runs are visible alongside main-loop traffic
  *
  * The shape follows the OpenInference semantic conventions so it can be
  * ingested by Phoenix/Arize collectors and the OpenTelemetry Collector's
@@ -86,11 +86,7 @@ export function exportSessionSpans(input: {
       spans.push(toolSpan(traceId, rootSpanId, entry, toolName))
       continue
     }
-    if (
-      entry.event.kind === 'compact_replaced' ||
-      entry.event.kind === 'compact_skipped' ||
-      entry.event.kind === 'compact_rejected'
-    ) {
+    if (entry.event.kind === 'messages_replaced' && entry.event.reason === 'compaction') {
       spans.push(compactSpan(traceId, rootSpanId, entry))
     }
   }
@@ -165,15 +161,14 @@ function toolSpan(
 
 /**
  * CHAIN span for a compaction attempt. All three terminal events
- * (compact_replaced / compact_skipped / compact_rejected) map here; the
+ * messages_replaced(reason=compaction) maps here; the
  * status and attributes carry the outcome so a single query can find every
  * compaction attempt in a trace regardless of whether it succeeded.
  *
  * We deliberately do NOT emit a separate LLM span for the summarizer call —
- * `compact_replaced.request` carries the messages/tools but the actual LLM
- * call is a synthetic one that never yields an `llm_response` event on the
- * main ledger, so there's no seq to bind an LLM span to. If we ever start
- * emitting a `llm_response` for summarizer calls, add the child LLM span
+ * summarizer call is a synthetic one that never yields an `llm_response` event
+ * on the main ledger, so there's no seq to bind an LLM span to. If we ever
+ * start emitting a `llm_response` for summarizer calls, add the child LLM span
  * here.
  */
 function compactSpan(
@@ -182,16 +177,10 @@ function compactSpan(
   entry: EventEntry,
 ): EnhancementSpan {
   const kind = entry.event.kind
-  const attemptId =
-    (entry.event as { attemptId?: string }).attemptId ?? String(entry.seq)
-  const trigger = (entry.event as { trigger?: string }).trigger
-  const reason = (entry.event as { reason?: string }).reason
-  const status: EnhancementSpan['status'] =
-    kind === 'compact_replaced' ? 'OK' : 'ERROR'
-  const replaced = kind === 'compact_replaced' ? entry.event : undefined
+  const status: EnhancementSpan['status'] = 'OK'
   return {
     traceId,
-    spanId: stableId(`span:compact:${entry.seq}:${attemptId}`, 16),
+    spanId: stableId(`span:compact:${entry.seq}`, 16),
     parentSpanId,
     name: `compaction ${kind}`,
     kind: 'CHAIN',
@@ -202,14 +191,10 @@ function compactSpan(
       'openinference.span.kind': 'CHAIN',
       'gen_ai.operation.name': 'compact_context',
       'agent_kernel.event_seq': entry.seq,
-      'agent_kernel.compact.attempt_id': attemptId,
-      'agent_kernel.compact.trigger': trigger,
-      'agent_kernel.compact.outcome': kind.replace('compact_', ''),
-      'agent_kernel.compact.reason': reason,
-      'agent_kernel.compact.replaced_count': replaced?.replacedCount,
-      'agent_kernel.compact.tokens_before': replaced?.tokensBefore,
-      'agent_kernel.compact.tokens_after': replaced?.tokensAfter,
-      'error.type': status === 'ERROR' ? kind : undefined,
+      'agent_kernel.compact.outcome': 'replaced',
+      'agent_kernel.message_replace.start': entry.event.kind === 'messages_replaced' ? entry.event.replaceRange.start : undefined,
+      'agent_kernel.message_replace.end': entry.event.kind === 'messages_replaced' ? entry.event.replaceRange.end : undefined,
+      'agent_kernel.message_replace.count': entry.event.kind === 'messages_replaced' ? entry.event.replacementMessages.length : undefined,
     }),
     events: [],
   }

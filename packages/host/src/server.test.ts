@@ -52,6 +52,8 @@ const AGENT = {
     required: ['prompt'],
   },
   requiresApproval: false,
+  executionKind: 'host',
+  executionHandler: 'agent',
 } as const
 
 function scriptedLlm(): LLMAdapter {

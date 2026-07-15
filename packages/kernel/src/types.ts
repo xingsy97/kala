@@ -108,6 +108,25 @@ export type ToolSchema = {
   description: string
   inputSchema: Record<string, unknown> // JSON Schema draft-07 (opaque to kernel)
   requiresApproval: boolean
+  toolsetId?: string
+  toolsetVersion?: string
+  risk?: 'read' | 'write' | 'shell' | 'network' | 'memory' | 'agent'
+  executionKind?: 'host' | 'executor'
+  executionHandler?: string
+}
+
+export type AgentModuleMetadata = {
+  id: string
+  version: string
+  label: string
+  systemPromptHash: string
+  toolRegistryHash: string
+  toolsets: readonly {
+    id: string
+    version: string
+    label: string
+    toolCount: number
+  }[]
 }
 
 // ============================================================================
@@ -117,15 +136,12 @@ export type ToolSchema = {
 export type AgentConfig = {
   readonly tools: readonly ToolSchema[]
   readonly systemPrompt?: string
-  /**
-   * Model's total context window in tokens. When set, the reducer derives
-   * `state.contextPressureLevel` from `contextTokens / contextLimit`.
-   * Undefined = pressure never trips.
-   */
+  readonly agentModule?: AgentModuleMetadata
+  /** Model's total context window in tokens. Host context management owns pressure policy. */
   readonly contextLimit?: number
-  /** Soft threshold ratio (default 0.75). UI banner appears at/above this. */
+  /** Soft threshold ratio for host context management. */
   readonly softThreshold?: number
-  /** Hard threshold ratio (default 0.92). Host auto-fires compact at/above. */
+  /** Hard threshold ratio for host context management. */
   readonly hardThreshold?: number
   /** Maximum nested `agent` tool depth. Host default is 3. */
   readonly maxAgentDepth?: number
@@ -151,9 +167,6 @@ export type AgentConfig = {
    */
   readonly noToolCallNudges?: number
 }
-
-export const DEFAULT_SOFT_THRESHOLD = 0.75
-export const DEFAULT_HARD_THRESHOLD = 0.92
 
 // ============================================================================
 // State
@@ -197,8 +210,6 @@ export type MemoryEntry = {
   readonly updatedAt: string
 }
 
-export type ContextPressureLevel = 'none' | 'soft' | 'hard'
-
 /**
  * Session-wide approval policy. Mid-turn changes take effect on the NEXT
  * tool call the LLM emits — pending calls that already went through the
@@ -222,19 +233,8 @@ export type AgentState = {
   readonly pendingCalls: readonly PendingToolCall[]
   readonly status: AgentStatus
   readonly usage: UsageTotal
-  /**
-   * Estimated model-visible input tokens for the current message state. This
-   * is a current-window estimate, not cumulative provider usage.
-   */
-  readonly contextTokens: number
   readonly cursor: number // monotonic event counter, for replay positioning
   readonly cwd?: string
-  /**
-   * Derived on every step from `contextTokens / config.contextLimit`.
-   * `'none'` when contextLimit is unset or well below soft threshold. The
-   * host uses `'hard'` as the trigger for auto-compact.
-   */
-  readonly contextPressureLevel: ContextPressureLevel
   /**
    * Current approval policy. Defaults to `'auto'`; updated in place by
    * the `approval_mode_changed` event.
@@ -299,68 +299,31 @@ export type ClearEvent = {
   kind: 'clear'
 }
 
-/**
- * Replace an old prefix of state.messages with a single summary. Emitted either
- * by the user (manual `/compact`), by the host after a turn reaches the hard
- * tier, or by the host immediately before an oversized provider request.
- * `preserveFrom` is a message index chosen by the host; messages at or after
- * that index are kept verbatim so the most recent user turn and tool-call chain
- * survive compaction. Use `messages.length` when no tail should be preserved.
- */
-export type CompactTrigger = 'manual' | 'auto' | 'preflight' | 'tool_result'
+export type EventArtifactRef = {
+  kind?: string
+  uri?: string
+  path?: string
+  sha256?: string
+  bytes?: number
+  mediaType?: string
+  schemaVersion?: number
+}
 
-export type CompactReplacedEvent = {
-  kind: 'compact_replaced'
-  trigger?: CompactTrigger
-  /**
-   * Host-generated correlation id so `compact_skipped` / `compact_rejected`
-   * for the same attempt can be linked back to the request that produced them.
-   */
-  attemptId?: string
-  preserveFrom: number
-  request?: {
-    model?: string
-    systemPrompt: string
-    messages: readonly Message[]
-    tools: readonly ToolSchema[]
+/**
+ * Generic deterministic message rewrite. Runtime modules such as context
+ * compaction own the policy and IO that produce this fact; the kernel only
+ * validates the range against the current protocol state and applies the
+ * replacement for replay/resume/fork determinism.
+ */
+export type MessagesReplacedEvent = {
+  kind: 'messages_replaced'
+  reason: 'compaction' | 'manual_rewrite' | 'recovery'
+  replaceRange: {
+    start: number
+    end: number
   }
-  responseUsage?: UsageDelta
-  summary: string
-  replacedCount: number
-  tokensBefore: number
-  tokensAfter: number
-}
-
-/**
- * A compaction attempt the host declined to make or that failed at the
- * summarizer boundary before any `compact_replaced` could be dispatched.
- * Never mutates messages. See `docs/host/context-compaction.md` for
- * the reason-code taxonomy.
- */
-export type CompactSkippedEvent = {
-  kind: 'compact_skipped'
-  trigger: CompactTrigger
-  attemptId: string
-  reason:
-    | 'circuit_breaker_open'
-    | 'back_off_same_batch'
-    | 'summarizer_failed'
-    | 'empty_summary'
-    | 'no_compactable_content'
-    | 'session_busy'
-  errorMessage?: string
-}
-
-/**
- * Reducer refused to apply a `compact_replaced` because the proposed pivot
- * violated protocol invariants (would orphan a pending tool_result, or the
- * preserveFrom is outside the legal range). Emitted by the host after it
- * observes the reducer noop, so the failure is visible in the ledger.
- */
-export type CompactRejectedEvent = {
-  kind: 'compact_rejected'
-  attemptId: string
-  reason: 'pending_call_orphaned' | 'invalid_preserve_from'
+  replacementMessages: readonly Message[]
+  artifactRef?: EventArtifactRef
 }
 
 /**
@@ -386,9 +349,7 @@ export type AgentEvent =
   | ToolResultEvent
   | CancelEvent
   | ClearEvent
-  | CompactReplacedEvent
-  | CompactSkippedEvent
-  | CompactRejectedEvent
+  | MessagesReplacedEvent
   | ApprovalModeChangedEvent
   | CwdChangedEvent
 

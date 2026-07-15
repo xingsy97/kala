@@ -18,7 +18,6 @@ describe('RuntimeMetrics', () => {
           status: 'pending_approval' as const,
         },
       ],
-      contextTokens: 1_200,
       usage: { inputTokens: 12_000, outputTokens: 34, cacheCreationTokens: 0, cacheReadTokens: 0 },
     }
     const onCompact = vi.fn()
@@ -27,6 +26,15 @@ describe('RuntimeMetrics', () => {
       <RuntimeMetrics
         state={state}
         config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
+        contextSnapshot={{
+          estimatedMessageTokens: 1_000,
+          estimatedToolSchemaTokens: 100,
+          estimatedTotalInputTokens: 1_200,
+          reserveTokens: 100,
+          effectiveLimit: 4_000,
+          pressureLevel: 'none',
+          reasonCodes: [],
+        }}
         modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
         queuedMessages={2}
         timeline={[

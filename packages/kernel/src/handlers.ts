@@ -327,31 +327,24 @@ export function onClear(state: AgentState): StepResult {
   }
 }
 
-export function onCompactReplaced(
+export function onMessagesReplaced(
   state: AgentState,
-  event: Extract<AgentEvent, { kind: 'compact_replaced' }>,
+  event: Extract<AgentEvent, { kind: 'messages_replaced' }>,
 ): StepResult {
-  const preserved: Message[] = []
-  if (state.messages.length > 0 && state.messages[0]!.role === 'system') {
-    preserved.push(state.messages[0]!)
-  }
-  const preserveFrom = Math.min(
-    Math.max(event.preserveFrom, preserved.length),
-    state.messages.length,
-  )
-  if (state.pendingCalls.length > 0 && !preservesPendingToolCallGroup(state, preserveFrom)) {
+  const { start, end } = event.replaceRange
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return noop(state)
+  if (start < 0 || end < start || end > state.messages.length) return noop(state)
+  if (state.pendingCalls.length > 0 && !preservesPendingToolCallGroup(state, end)) {
     return noop(state)
-  }
-  const tail = state.messages.slice(preserveFrom)
-  const summaryMsg: Message = {
-    role: 'system',
-    content: [{ type: 'text', text: event.summary }],
   }
   return {
     next: {
       ...state,
-      messages: [...preserved, summaryMsg, ...tail],
-      contextTokens: event.tokensAfter,
+      messages: [
+        ...state.messages.slice(0, start),
+        ...event.replacementMessages,
+        ...state.messages.slice(end),
+      ],
     },
     effects: [],
   }

@@ -26,6 +26,7 @@ import type {
   LogArtifactRef,
   LogEntry,
   MetadataEntry,
+  RuntimeMetadataEntry,
   SnapshotEntry,
 } from '@agent-kernel/shared'
 import { LOG_FORMAT_VERSION, redactLlmTrace } from '@agent-kernel/shared'
@@ -70,7 +71,26 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
     ...(params.initialCwd !== undefined ? { initialCwd: params.initialCwd } : {}),
   }
   await writeFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
+  await maybeWriteAgentModuleArtifacts(params.path, entry)
   return entry
+}
+
+async function maybeWriteAgentModuleArtifacts(logPath: string, header: HeaderEntry): Promise<void> {
+  if (!header.config.agentModule) return
+  const root = artifactRootForLog(logPath)
+  const dir = join(root, 'agent-module')
+  await mkdir(dir, { recursive: true })
+  if (header.config.systemPrompt) {
+    await writeFile(join(dir, 'system-prompt.txt'), header.config.systemPrompt, 'utf8')
+  }
+  await writeFile(
+    join(dir, 'tool-registry.json'),
+    JSON.stringify({
+      module: header.config.agentModule,
+      tools: header.config.tools,
+    }, null, 2) + '\n',
+    'utf8',
+  )
 }
 
 export type AppendEventParams = {
@@ -227,11 +247,33 @@ export async function appendMetadataEntry(
   return entry
 }
 
+export async function appendRuntimeMetadataEntry(
+  path: string,
+  input: {
+    sessionId: string
+    action: string
+    payload: Record<string, unknown>
+    artifactRef?: LogArtifactRef
+  },
+): Promise<RuntimeMetadataEntry> {
+  const entry: RuntimeMetadataEntry = {
+    kind: 'runtime_metadata',
+    ts: new Date().toISOString(),
+    sessionId: input.sessionId,
+    action: input.action,
+    payload: input.payload,
+    ...(input.artifactRef ? { artifactRef: input.artifactRef } : {}),
+  }
+  await appendFile(path, JSON.stringify(entry) + '\n', 'utf8')
+  return entry
+}
+
 export type ParsedLog = {
   header: HeaderEntry
   events: EventEntry[]
   snapshots: SnapshotEntry[]
   metadata: MetadataEntry[]
+  runtimeMetadata: RuntimeMetadataEntry[]
   /**
    * Non-fatal parse warnings. Populated when the last line of the file was
    * truncated (the process crashed mid-`appendFile`). The recovered log is
@@ -288,12 +330,14 @@ export async function readSessionLog(path: string): Promise<ParsedLog> {
   const events: EventEntry[] = []
   const snapshots: SnapshotEntry[] = []
   const metadata: MetadataEntry[] = []
+  const runtimeMetadata: RuntimeMetadataEntry[] = []
   for (const e of entries.slice(1)) {
     if (e.kind === 'event') events.push(e)
     else if (e.kind === 'snapshot') snapshots.push(e)
     else if (e.kind === 'metadata') metadata.push(e)
+    else if (e.kind === 'runtime_metadata') runtimeMetadata.push(e)
   }
-  return { header, events, snapshots, metadata, warnings }
+  return { header, events, snapshots, metadata, runtimeMetadata, warnings }
 }
 
 function parseLogLine(line: string, lineNo: number, entries: LogEntry[]): void {

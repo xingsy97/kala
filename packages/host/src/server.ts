@@ -53,6 +53,7 @@ import { attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandl
 import type { AuthConfig } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
 import { noopAuditLogger } from './audit-log.js'
+import { snapshotFromConfig } from './context/manager.js'
 
 export type HostServerOptions = {
   port: number
@@ -303,6 +304,7 @@ export async function startHostServer(
         sessionId,
         cursor: state.cursor,
         state,
+        contextSnapshot: snapshotFromConfig(store.get(sessionId)?.config ?? options.defaultConfig, state.messages),
       })
       io.of('/executor').to(room).emit('event:appended', {
         sessionId,

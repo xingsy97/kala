@@ -306,7 +306,7 @@ export function App(): JSX.Element {
     if (last.seq <= compactStartSeq.current) return
     compactStartSeq.current = null
     inferredCompactSeq.current = null
-    setCompactStatus(last.event.kind === 'compact_replaced' ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(last.event) })
+    setCompactStatus(isCompactionSuccess(last.event) ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(last.event) })
     scheduleCompactIdle(2500)
   }, [compactStatus, session.timeline])
 
@@ -318,7 +318,7 @@ export function App(): JSX.Element {
     if (terminal) {
       compactStartSeq.current = null
       inferredCompactSeq.current = null
-      setCompactStatus(terminal.event.kind === 'compact_replaced' ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(terminal.event) })
+      setCompactStatus(isCompactionSuccess(terminal.event) ? { kind: 'done' } : { kind: 'error', message: compactFailureMessage(terminal.event) })
       scheduleCompactIdle(2500)
       return
     }
@@ -354,7 +354,7 @@ export function App(): JSX.Element {
   // Live transitions: hard + resting → queued; hard clears / turn starts /
   // compact runs → back to idle (or whatever the running-observer set).
   useEffect(() => {
-    const level = session.state?.contextPressureLevel
+    const level = session.contextSnapshot?.pressureLevel
     const status = session.state?.status
     const resting = status === 'idle' || status === 'done' || status === 'error'
     if (level === 'hard' && resting) {
@@ -362,7 +362,7 @@ export function App(): JSX.Element {
       return
     }
     if (compactStatus.kind === 'queued') setCompactStatus({ kind: 'idle' })
-  }, [session.state?.contextPressureLevel, session.state?.status, compactStatus.kind])
+  }, [session.contextSnapshot?.pressureLevel, session.state?.status, compactStatus.kind])
 
   // If the host already has a per-session model on record, that's the truth
   // (persists across reloads because host keeps it in memory). Only push the
@@ -1302,6 +1302,7 @@ export function App(): JSX.Element {
                       ) : null}
                       <ContextPressureBanner
                         state={session.state}
+                        contextSnapshot={session.contextSnapshot}
                         compactRunning={compactStatus.kind === 'running'}
                         suppressed={awaitingAck || compactStatus.kind === 'running'}
                         onCompactNow={runCompactNow}
@@ -1318,6 +1319,7 @@ export function App(): JSX.Element {
                           onApprovalModeChange={onApprovalModeChange}
                           state={session.state}
                           config={session.config}
+                          contextSnapshot={session.contextSnapshot}
                           queuedMessages={visibleQueuedMessages}
                           timeline={session.timeline}
                           onQueuedReorder={(id, beforeId) => {
@@ -1388,7 +1390,7 @@ export function App(): JSX.Element {
                               mode,
                               ...(content ? { content } : {}),
                             })
-                            if (mode === 'steer' && session.state?.contextPressureLevel === 'hard') {
+                            if (mode === 'steer' && session.contextSnapshot?.pressureLevel === 'hard') {
                               if (compactResetTimer.current !== null) {
                                 window.clearTimeout(compactResetTimer.current)
                                 compactResetTimer.current = null
@@ -1435,6 +1437,7 @@ export function App(): JSX.Element {
                       <InspectorPanel
                         state={session.state}
                         config={session.config}
+                        contextSnapshot={session.contextSnapshot}
                         timeline={session.timeline}
                         visibleMessagesCount={chatMessages.length}
                         socket={session.socket}
@@ -1516,6 +1519,7 @@ export function App(): JSX.Element {
           <InspectorPanel
             state={session.state}
             config={session.config}
+            contextSnapshot={session.contextSnapshot}
             timeline={session.timeline}
             visibleMessagesCount={chatMessages.length}
             socket={session.socket}
@@ -1625,12 +1629,14 @@ function isResting(status: import('@agent-kernel/kernel').AgentState['status']):
 }
 
 function isCompactTerminalEvent(kind: string): boolean {
-  return kind === 'compact_replaced' || kind === 'compact_skipped' || kind === 'compact_rejected'
+  return kind === 'messages_replaced'
 }
 
-function compactFailureMessage(event: { kind: string; reason?: string; errorMessage?: string }): string {
-  if (event.kind === 'compact_skipped') return event.errorMessage ?? event.reason ?? 'compact skipped'
-  if (event.kind === 'compact_rejected') return event.reason ?? 'compact rejected'
+function isCompactionSuccess(event: { kind: string; reason?: string }): boolean {
+  return event.kind === 'messages_replaced' && event.reason === 'compaction'
+}
+
+function compactFailureMessage(event: { kind: string; reason?: string }): string {
   return 'compact failed'
 }
 

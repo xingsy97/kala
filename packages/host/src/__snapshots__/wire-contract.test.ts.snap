@@ -4,6 +4,7 @@ exports[`wire contract — schema surface > exports a stable, sorted set of sche
 [
   "AgentConfigSchema",
   "AgentEventSchema",
+  "AgentModuleMetadataSchema",
   "AgentStateSchema",
   "AgentStatusSchema",
   "AgentTypeSummarySchema",
@@ -56,6 +57,7 @@ exports[`wire contract — schema surface > exports a stable, sorted set of sche
   "ClientUserRejectSchema",
   "ConsolidateMemoryResultSchema",
   "ContextPressureLevelSchema",
+  "ContextSnapshotSchema",
   "ControlUpdateSchema",
   "CopyOverflowSessionResultSchema",
   "CopyOverflowSessionSchema",
@@ -89,6 +91,7 @@ exports[`wire contract — schema surface > exports a stable, sorted set of sche
   "QueuedMessagePreviewSchema",
   "ReasoningContentSchema",
   "RoleSchema",
+  "RuntimeMetadataEntrySchema",
   "ServerBgTaskEvictedSchema",
   "ServerBgTaskUpdatedSchema",
   "ServerExecutorChangedPayloadSchema",

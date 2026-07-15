@@ -30,7 +30,7 @@ const header: HeaderEntry = {
   ts: '2026-07-09T00:00:00.000Z',
   sessionId: 's1',
   workspaceId: 'w1',
-  formatVersion: 1,
+  formatVersion: 2,
   kernelVersion: '@agent-kernel/kernel@0.0.0',
   config: { tools: [] },
   initialState: {
@@ -45,7 +45,6 @@ const header: HeaderEntry = {
       cacheReadTokens: 0,
     },
     cursor: 0,
-    contextPressureLevel: 'none',
     approvalMode: 'auto',
   },
 }
@@ -202,64 +201,30 @@ describe('enhancement foundation', () => {
     expect(mem.attributes['gen_ai.tool.name']).toBe('memory')
   })
 
-  it('emits CHAIN spans for each compaction outcome with matching status', () => {
+  it('emits a CHAIN span for compaction message replacement', () => {
     const events: EventEntry[] = [
       {
         kind: 'event',
         seq: 1,
         ts: '2026-07-09T00:00:01.000Z',
         event: {
-          kind: 'compact_replaced',
-          trigger: 'auto',
-          attemptId: 'a1',
-          preserveFrom: 3,
-          summary: 's',
-          replacedCount: 4,
-          tokensBefore: 10_000,
-          tokensAfter: 2_000,
-        },
-        effects: [],
-      },
-      {
-        kind: 'event',
-        seq: 2,
-        ts: '2026-07-09T00:00:02.000Z',
-        event: {
-          kind: 'compact_skipped',
-          trigger: 'auto',
-          attemptId: 'a2',
-          reason: 'circuit_breaker_open',
-        },
-        effects: [],
-      },
-      {
-        kind: 'event',
-        seq: 3,
-        ts: '2026-07-09T00:00:03.000Z',
-        event: {
-          kind: 'compact_rejected',
-          attemptId: 'a3',
-          reason: 'pending_call_orphaned',
+          kind: 'messages_replaced',
+          reason: 'compaction',
+          replaceRange: { start: 1, end: 5 },
+          replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 's' }] }],
         },
         effects: [],
       },
     ]
     const spans = exportSessionSpans({ header, events })
     const chains = spans.filter((s) => s.kind === 'CHAIN')
-    expect(chains).toHaveLength(3)
-    const replaced = chains.find((s) => s.attributes['agent_kernel.compact.attempt_id'] === 'a1')!
+    expect(chains).toHaveLength(1)
+    const replaced = chains[0]!
     expect(replaced.status).toBe('OK')
     expect(replaced.attributes['agent_kernel.compact.outcome']).toBe('replaced')
-    expect(replaced.attributes['agent_kernel.compact.tokens_before']).toBe(10_000)
-    expect(replaced.attributes['agent_kernel.compact.tokens_after']).toBe(2_000)
-    expect(replaced.attributes['agent_kernel.compact.replaced_count']).toBe(4)
-    const skipped = chains.find((s) => s.attributes['agent_kernel.compact.attempt_id'] === 'a2')!
-    expect(skipped.status).toBe('ERROR')
-    expect(skipped.attributes['agent_kernel.compact.outcome']).toBe('skipped')
-    expect(skipped.attributes['agent_kernel.compact.reason']).toBe('circuit_breaker_open')
-    const rejected = chains.find((s) => s.attributes['agent_kernel.compact.attempt_id'] === 'a3')!
-    expect(rejected.status).toBe('ERROR')
-    expect(rejected.attributes['agent_kernel.compact.outcome']).toBe('rejected')
+    expect(replaced.attributes['agent_kernel.message_replace.start']).toBe(1)
+    expect(replaced.attributes['agent_kernel.message_replace.end']).toBe(5)
+    expect(replaced.attributes['agent_kernel.message_replace.count']).toBe(1)
   })
 
   it('creates official SWE-bench prediction rows and harness command args', () => {

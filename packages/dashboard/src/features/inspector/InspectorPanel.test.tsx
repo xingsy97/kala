@@ -829,7 +829,7 @@ describe('InspectorPanel', () => {
     expect(onFork).toHaveBeenCalledWith(120)
   })
 
-  it('shows recorded compact request metadata for compact events', () => {
+  it('shows message replacement details for compaction events', () => {
     const compactMessages = [
       { role: 'system' as const, content: [{ type: 'text' as const, text: 'sys' }] },
       { role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello?' }] },
@@ -850,18 +850,10 @@ describe('InspectorPanel', () => {
             seq: 3,
             ts: '2026-07-04T00:00:02Z',
             event: {
-              kind: 'compact_replaced',
-              preserveFrom: 3,
-              request: {
-                model: 'gpt-test',
-                systemPrompt: 'compact prompt',
-                messages: compactMessages,
-                tools: [],
-              },
-              summary: 'Hello!',
-              replacedCount: 3,
-              tokensBefore: 1008,
-              tokensAfter: 2,
+              kind: 'messages_replaced',
+              reason: 'compaction',
+              replaceRange: { start: 1, end: 3 },
+              replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'Hello!' }] }],
             },
             effects: [],
           },
@@ -872,12 +864,11 @@ describe('InspectorPanel', () => {
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     fireEvent.click(screen.getAllByTestId('timeline-row')[2]!.querySelector('[data-testid="timeline-row-inspect-json"]')!)
     const details = screen.getByTestId('timeline-row-details')
-    expect(details.textContent ?? '').toContain('Compaction Request')
-    expect(details.textContent ?? '').toContain('compact prompt')
-    expect(details.textContent ?? '').not.toContain('reconstructed_from_timeline')
+    expect(details.textContent ?? '').toContain('replace range')
+    expect(details.textContent ?? '').toContain('Message Replacement')
   })
 
-  it('lists compact summarizer requests in the LLM API view with duration metrics', () => {
+  it('does not list compaction replacement events as ordinary LLM calls', () => {
     render(
       <InspectorPanel
         state={baseState}
@@ -886,19 +877,10 @@ describe('InspectorPanel', () => {
             seq: 3,
             ts: '2026-07-04T00:00:02Z',
             event: {
-              kind: 'compact_replaced',
-              preserveFrom: 2,
-              request: {
-                model: 'gpt-compact-test',
-                systemPrompt: 'compact prompt',
-                messages: [{ role: 'user', content: [{ type: 'text', text: 'old context' }] }],
-                tools: [],
-              },
-              summary: 'compact summary body',
-              responseUsage: { inputTokens: 10, outputTokens: 4 },
-              replacedCount: 2,
-              tokensBefore: 1008,
-              tokensAfter: 20,
+              kind: 'messages_replaced',
+              reason: 'compaction',
+              replaceRange: { start: 1, end: 2 },
+              replacementMessages: [{ role: 'system', content: [{ type: 'text', text: 'compact summary body' }] }],
             },
             effects: [],
             model: 'gpt-compact-test',
@@ -918,15 +900,6 @@ describe('InspectorPanel', () => {
     )
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-llm'))
-    expect(screen.getAllByTestId('llm-call-row')).toHaveLength(1)
-    expect(screen.getByTestId('llm-calls-list').textContent ?? '').toContain('compact summary')
-
-    fireEvent.click(screen.getByTestId('llm-call-row'))
-    expect(document.body.textContent ?? '').toContain('Compaction LLM #3')
-    fireEvent.click(screen.getByTestId('llm-detail-view-switch-api'))
-    const apiText = screen.getByTestId('api-call-view').textContent ?? ''
-    expect(apiText).toContain('duration1.2s')
-    expect(apiText).toContain('TTFT210ms')
-    expect(apiText).not.toContain('Parsed Kernel Response')
+    expect(screen.queryAllByTestId('llm-call-row')).toHaveLength(0)
   })
 })

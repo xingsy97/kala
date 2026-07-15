@@ -18,6 +18,7 @@ import type {
 } from './loop.js'
 import type { LLMAdapter, LLMResponse } from './llm/adapter.js'
 import { createSkillManager, discoverSkills } from './extensions/skills.js'
+import { contextSnapshot } from './context/manager.js'
 
 function silentBroadcast(): LoopBroadcast {
   return {
@@ -59,6 +60,17 @@ const AGENT = {
   description: 'spawn agent',
   inputSchema: { type: 'object' },
   requiresApproval: false,
+  executionKind: 'host',
+  executionHandler: 'agent',
+} as const
+
+const SKILL = {
+  name: 'skill',
+  description: 'skill loader',
+  inputSchema: { type: 'object' },
+  requiresApproval: false,
+  executionKind: 'host',
+  executionHandler: 'skill',
 } as const
 
 const MEMORY = {
@@ -450,12 +462,7 @@ describe('host loop', () => {
     const skillConfig = createConfig({
       tools: [
         READ,
-        {
-          name: 'skill',
-          description: 'skill loader',
-          inputSchema: { type: 'object' },
-          requiresApproval: false,
-        },
+        SKILL,
       ],
       systemPrompt: 'sys',
     })
@@ -520,12 +527,7 @@ describe('host loop', () => {
     mkdirSync(workspace, { recursive: true })
     const skillConfig = createConfig({
       tools: [
-        {
-          name: 'skill',
-          description: '<available_skills />',
-          inputSchema: { type: 'object' },
-          requiresApproval: false,
-        },
+        { ...SKILL, description: '<available_skills />' },
         {
           name: 'write',
           description: 'write',
@@ -828,7 +830,7 @@ describe('host loop', () => {
     // Pre-seed a session that has already run one turn so state.messages is
     // non-trivial. Then a manual `/compact` should send those messages to
     // the LLM with the summarizer system prompt, receive a text reply, and
-    // emit a compact_replaced event that shrinks the message list.
+    // emit a messages_replaced event that shrinks the message list.
     const llmCalls: Array<{
       sys?: string
       msgs: number
@@ -885,15 +887,13 @@ describe('host loop', () => {
     expect(llmCalls[1]!.model).toBe('compact-model')
     // Cumulative usage is preserved; current-window context is compacted.
     expect(rec.state.usage.inputTokens).toBe(10)
-    expect(rec.state.contextTokens).toBeLessThan(100)
+    expect(contextSnapshot(rec).estimatedMessageTokens).toBeLessThan(beforeCount * 10)
     const parsed = await readSessionLog(rec.logPath)
-    const compact = parsed.events.find((e) => e.event.kind === 'compact_replaced')
-      ?.event as Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> | undefined
-    expect(compact?.trigger).toBe('manual')
-    expect(compact?.request?.model).toBe('compact-model')
-    expect(compact?.request?.systemPrompt).toMatch(/compacting an agent-kernel coding-agent session/i)
-    expect(compact?.request?.messages).toHaveLength(beforeCount)
-    expect(compact?.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
+    const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
+    expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
+    const metadata = parsed.runtimeMetadata.find((e) => e.action === 'compaction_applied')
+    expect(metadata?.payload.trigger).toBe('manual')
+    expect(metadata?.payload.responseUsage).toEqual({ inputTokens: 8, outputTokens: 3 })
   })
 
   it('manual compact() trims old oversized tool results before summarizing', async () => {
@@ -1079,8 +1079,8 @@ describe('host loop', () => {
       type: 'text',
       text: 'auto-summary',
     })
-    // Pressure recomputed on the reduced input tokens → back to 'none'.
-    expect(after.state.contextPressureLevel).toBe('none')
+    // Pressure is now host-owned and recomputed from the compacted messages.
+    expect(contextSnapshot(after).pressureLevel).toBe('none')
   })
 
   it('auto-compact summarizes the old prefix and preserves the latest user turn', async () => {
@@ -1202,8 +1202,9 @@ describe('host loop', () => {
     expect(calls.map((c) => c.kind)).toEqual(['normal', 'compact', 'normal'])
     expect(calls[2]!.messages.some((m) => m.role === 'system' && JSON.stringify(m).includes('preflight summary'))).toBe(true)
     const parsed = await readSessionLog(store.get(sid)!.logPath)
-    const compact = parsed.events.find((e) => e.event.kind === 'compact_replaced')?.event
-    expect(compact).toMatchObject({ kind: 'compact_replaced', trigger: 'preflight' })
+    const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
+    expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
+    expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_applied' && e.payload.trigger === 'preflight')).toBe(true)
   })
 
   it('compacts between sibling tool results when the first result exhausts context headroom', async () => {
@@ -1285,10 +1286,7 @@ describe('host loop', () => {
     expect(JSON.stringify(toolResults[0])).toContain('TAIL-OF-HUGE-RESULT')
 
     const parsed = await readSessionLog(store.get(sid)!.logPath)
-    const compacts = parsed.events
-      .map((e) => e.event)
-      .filter((event): event is Extract<import('@agent-kernel/kernel').AgentEvent, { kind: 'compact_replaced' }> => event.kind === 'compact_replaced')
-    expect(compacts.some((compact) => compact.trigger === 'tool_result')).toBe(true)
+    expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_applied' && e.payload.trigger === 'tool_result')).toBe(true)
     expect(store.get(sid)!.state.status).toBe('done')
   })
 

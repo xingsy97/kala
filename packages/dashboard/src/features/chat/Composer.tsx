@@ -5,7 +5,7 @@ import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
-import type { FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
+import type { ContextSnapshot, FileListEntry, ModelInfo, QueuedMessagePreview } from '@agent-kernel/shared'
 import type {
   AgentConfig,
   AgentState,
@@ -45,6 +45,7 @@ type Props = {
   onApprovalModeChange(mode: ApprovalMode): void
   state: AgentState | null
   config: AgentConfig | null
+  contextSnapshot: ContextSnapshot | null
   queuedMessages: readonly QueuedMessagePreview[]
   timeline?: readonly TimelineEntry[]
   onQueuedReorder?(id: string, beforeId?: string | null): void
@@ -149,6 +150,7 @@ export function Composer({
   onApprovalModeChange,
   state,
   config,
+  contextSnapshot,
   queuedMessages,
   timeline,
   onQueuedReorder,
@@ -665,6 +667,7 @@ export function Composer({
               <RuntimeMetrics
                 state={state}
                 config={config}
+                contextSnapshot={contextSnapshot}
                 modelInfo={models.find((m) => m.id === model) ?? null}
                 queuedMessages={queuedMessages.length}
                 timeline={timeline}

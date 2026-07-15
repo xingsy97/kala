@@ -19,6 +19,7 @@ import { createInitialState, step } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
   AttachedExecutor,
+  ContextSnapshot,
   ControlUpdate,
   DashboardClientToServerEvents,
   DashboardServerToClientEvents,
@@ -60,6 +61,7 @@ export type SessionView = {
   status: ConnectionStatus
   state: AgentState | null
   config: AgentConfig | null
+  contextSnapshot: ContextSnapshot | null
   timeline: readonly TimelineEntry[]
   streamingText: string
   /**
@@ -95,6 +97,7 @@ export function useSession({
   const [status, setStatus] = useState<ConnectionStatus>('idle')
   const [state, setState] = useState<AgentState | null>(null)
   const [config, setConfig] = useState<AgentConfig | null>(null)
+  const [contextSnapshot, setContextSnapshot] = useState<ContextSnapshot | null>(null)
   const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
@@ -120,6 +123,7 @@ export function useSession({
     setStatus('connecting')
     setState(null)
     setConfig(null)
+    setContextSnapshot(null)
     configRef.current = null
     setTimeline([])
     setStreamingText('')
@@ -190,6 +194,7 @@ export function useSession({
       setStatus('ready')
       setState(p.state)
       setConfig(p.config)
+      setContextSnapshot(p.contextSnapshot ?? null)
       configRef.current = p.config
       setParentSessionId(p.parentSessionId ?? null)
       setParentCursor(p.parentCursor ?? null)
@@ -227,6 +232,7 @@ export function useSession({
       // out-of-order or if the host pushes a mid-stream correction; in
       // both cases the server-computed state wins.
       setState(p.state)
+      setContextSnapshot(p.contextSnapshot ?? null)
       if (p.state.status !== 'thinking') resetStream()
     })
     socket.on('event:appended', (p) => {
@@ -339,8 +345,9 @@ export function useSession({
   return useMemo(
     () => ({
       status,
-      state,
-      config,
+    state,
+    config,
+    contextSnapshot,
       timeline,
       streamingText,
       pendingApprovals,

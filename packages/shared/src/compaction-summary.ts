@@ -1,7 +1,7 @@
 /**
  * Compaction summary schema validation.
  *
- * The `compact_replaced` event replaces the old transcript prefix with one
+ * The `messages_replaced` compaction event replaces the old transcript prefix with one
  * synthetic system message whose body is the summarizer LLM output. If that
  * body silently drops required sections (User Intent, Repository/Runtime
  * State, Decisions, Work Completed, Open Work), the agent loses information it

@@ -28,7 +28,21 @@ export { readSessionLog, appendEventEntry, writeHeader } from './store/log.js'
 export { runHostLoop } from './loop.js'
 export type { HostLoopDeps, LoopHandle } from './loop.js'
 
-export { builtinTools, createBuiltinTools } from './builtin-tools.js'
+export { builtinTools, createBuiltinTools, createBuiltinAgentModule, resolveBuiltinAgentModule } from './builtin-tools.js'
+export { resolveAgentModule, renderToolDescription, renderToolSchema, stableHash } from './agent-modules/renderers.js'
+export type {
+  AgentModule,
+  AgentModuleContext,
+  ResolvedAgentModule,
+  RuntimePolicyPlugin,
+  SystemPromptPlugin,
+  ToolDefinition,
+  ToolExecutionKind,
+  ToolPrompt,
+  ToolRisk,
+  ToolsetContext,
+  ToolsetPlugin,
+} from './agent-modules/types.js'
 export { discoverSkills, skillToolSchema, SKILL_TOOL_NAME } from './extensions/skills.js'
 export type { SkillInfo, SkillRegistry } from './extensions/skills.js'
 

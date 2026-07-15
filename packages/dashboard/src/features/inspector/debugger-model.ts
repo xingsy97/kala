@@ -8,6 +8,7 @@ import {
   type AgentState,
   type Effect,
 } from '@agent-kernel/kernel'
+import type { ContextSnapshot } from '@agent-kernel/shared'
 
 import type { TimelineEntry } from '../../session.js'
 
@@ -93,7 +94,6 @@ export function summarizeStateDiff(before: AgentState, after: AgentState, rawDif
   const stateItems: StateDiffSummaryItem[] = []
   if (before.status !== after.status) stateItems.push({ label: 'status', value: `${before.status} -> ${after.status}`, tone: 'changed' })
   if (before.cursor !== after.cursor) stateItems.push({ label: 'cursor', value: formatNumberChange(before.cursor, after.cursor), tone: 'changed' })
-  if (before.contextPressureLevel !== after.contextPressureLevel) stateItems.push({ label: 'context', value: `${before.contextPressureLevel} -> ${after.contextPressureLevel}`, tone: 'changed' })
   if (before.approvalMode !== after.approvalMode) stateItems.push({ label: 'approval', value: `${before.approvalMode} -> ${after.approvalMode}`, tone: 'changed' })
   if (before.cwd !== after.cwd) stateItems.push({ label: 'cwd', value: `${before.cwd ?? 'unset'} -> ${after.cwd ?? 'unset'}`, tone: 'changed' })
   if (before.error !== after.error) stateItems.push({ label: 'error', value: `${before.error ?? 'none'} -> ${after.error ?? 'none'}`, tone: after.error ? 'added' : 'removed' })
@@ -103,7 +103,6 @@ export function summarizeStateDiff(before: AgentState, after: AgentState, rawDif
   const knownPaths = new Set([
     'status',
     'cursor',
-    'contextPressureLevel',
     'approvalMode',
     'cwd',
     'error',
@@ -208,12 +207,13 @@ export function buildRunHealth(
   state: AgentState | null,
   config: AgentConfig | null | undefined,
   timeline: readonly TimelineEntry[],
+  contextSnapshot?: ContextSnapshot | null,
 ): readonly RunHealthItem[] {
   const missingTrace = timeline.filter((entry) => entry.event.kind === 'llm_response' && !entry.llmTrace).length
   const failedTools = timeline.filter((entry) => entry.event.kind === 'tool_result' && entry.event.ok === false).length
   const llmErrors = timeline.filter((entry) => entry.event.kind === 'llm_error').length
   const pending = state?.pendingCalls.filter((call) => call.status === 'awaiting_approval').length ?? 0
-  const pressure = contextPressure(state, config)
+  const pressure = contextPressure(contextSnapshot, config)
   return [
     {
       id: 'status',
@@ -254,12 +254,15 @@ export function buildRunHealth(
   ]
 }
 
-function contextPressure(state: AgentState | null, config: AgentConfig | null | undefined): { label: string; tone: RunHealthItem['tone'] } {
-  if (!state || !config?.contextLimit) return { label: state?.contextPressureLevel ?? 'not configured', tone: 'neutral' }
-  const percent = Math.round(((state.contextTokens ?? state.usage.inputTokens) / config.contextLimit) * 100)
-  const level = state.contextPressureLevel ?? 'none'
+function contextPressure(contextSnapshot: ContextSnapshot | null | undefined, config: AgentConfig | null | undefined): { label: string; tone: RunHealthItem['tone'] } {
+  if (!contextSnapshot) return { label: config?.contextLimit ? 'unknown' : 'not configured', tone: 'neutral' }
+  const limit = contextSnapshot.effectiveLimit ?? config?.contextLimit
+  const percent = limit && limit > 0
+    ? Math.round((contextSnapshot.estimatedTotalInputTokens / limit) * 100)
+    : null
+  const level = contextSnapshot.pressureLevel
   return {
-    label: `${level} · ${percent}%`,
+    label: percent === null ? level : `${level} · ${percent}%`,
     tone: level === 'hard' ? 'error' : level === 'soft' ? 'warn' : 'ok',
   }
 }

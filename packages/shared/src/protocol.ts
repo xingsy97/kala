@@ -8,6 +8,7 @@
 
 import type {
   AgentConfig,
+  AgentModuleMetadata,
   AgentEvent,
   AgentState,
   ApprovalMode,
@@ -46,6 +47,7 @@ export type SessionReadyEvent = {
   cursor: number
   state: AgentState
   config: AgentConfig
+  contextSnapshot?: ContextSnapshot
   /**
    * Why this event fired. `'load'` (default) — a dashboard subscribed to an
    * existing or ephemeral session. `'created'` — the session was just
@@ -170,6 +172,19 @@ export type StateChangedEvent = {
   sessionId: string
   cursor: number
   state: AgentState
+  contextSnapshot?: ContextSnapshot
+}
+
+export type ContextPressureLevel = 'none' | 'soft' | 'hard'
+
+export type ContextSnapshot = {
+  estimatedMessageTokens: number
+  estimatedToolSchemaTokens: number
+  estimatedTotalInputTokens: number
+  reserveTokens: number
+  effectiveLimit?: number
+  pressureLevel: ContextPressureLevel
+  reasonCodes: readonly string[]
 }
 
 export type EventAppendedEvent = {
@@ -997,6 +1012,7 @@ export type ServerSettingsPayload = {
     protocol: string
     build?: BuildMetadata
   }
+  agentModule?: AgentModuleMetadata
   auth?: {
     dashboardAuthRequired: boolean
     githubOAuth: {

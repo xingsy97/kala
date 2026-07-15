@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
-import type { ModelInfo } from '@agent-kernel/shared'
+import type { ContextSnapshot, ModelInfo } from '@agent-kernel/shared'
 
 import { formatTokens } from '../../lib/format.js'
 import { cn } from '../../lib/utils.js'
@@ -14,6 +14,7 @@ import {
 type Props = {
   state: AgentState | null
   config: AgentConfig | null
+  contextSnapshot: ContextSnapshot | null
   modelInfo: ModelInfo | null
   queuedMessages: number
   timeline?: readonly TimelineEntry[]
@@ -24,6 +25,7 @@ type Props = {
 export function RuntimeMetrics({
   state,
   config,
+  contextSnapshot,
   modelInfo,
   queuedMessages: _queuedMessages,
   timeline = [],
@@ -43,17 +45,17 @@ export function RuntimeMetrics({
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [open])
 
-  const contextTokens = state?.contextTokens ?? 0
+  const contextTokens = contextSnapshot?.estimatedTotalInputTokens ?? 0
   const totalContextWindow = modelInfo?.contextWindow ?? config?.contextLimit ?? null
-  const userContextWindow = config?.contextLimit ?? totalContextWindow
+  const userContextWindow = contextSnapshot?.effectiveLimit ?? config?.contextLimit ?? totalContextWindow
   const ratio = userContextWindow && userContextWindow > 0
     ? Math.max(0, contextTokens / userContextWindow)
     : 0
   const percent = Math.round(ratio * 100)
   const visualRatio = Math.min(1, ratio)
-  const tone = state?.contextPressureLevel === 'hard'
+  const tone = contextSnapshot?.pressureLevel === 'hard'
     ? 'text-rose-600 dark:text-rose-300'
-    : state?.contextPressureLevel === 'soft'
+    : contextSnapshot?.pressureLevel === 'soft'
       ? 'text-amber-600 dark:text-amber-300'
       : 'text-sky-600 dark:text-sky-300'
   const title = userContextWindow && userContextWindow > 0

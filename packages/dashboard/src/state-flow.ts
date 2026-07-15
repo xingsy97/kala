@@ -31,7 +31,7 @@ function nextStatus(from: AgentStatus, entry: TimelineEntry): AgentStatus {
   if (event.kind === 'llm_error') return 'error'
   if (event.kind === 'clear') return 'idle'
   if (event.kind === 'cancel') return 'done'
-  if (event.kind === 'compact_replaced') return from === 'error' ? 'error' : 'done'
+  if (event.kind === 'messages_replaced') return from === 'error' ? 'error' : 'done'
   if (entry.effects.some((e) => e.kind === 'request_approval')) return 'awaiting_approval'
   if (entry.effects.some((e) => e.kind === 'call_tool')) return 'executing_tools'
   if (entry.effects.some((e) => e.kind === 'call_llm')) return 'thinking'

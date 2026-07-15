@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createConfig } from '@agent-kernel/kernel'
-import type { AgentConfig, AgentEvent, Message } from '@agent-kernel/kernel'
+import type { AgentConfig, Message } from '@agent-kernel/kernel'
 
 import { SessionStore } from '../store/session.js'
 import { readSessionLog } from '../store/log.js'
@@ -40,29 +40,26 @@ const READ = {
   requiresApproval: false,
 } as const
 
-type CompactSkippedEvent = Extract<AgentEvent, { kind: 'compact_skipped' }>
-type CompactReplacedEvent = Extract<AgentEvent, { kind: 'compact_replaced' }>
-type CompactRejectedEvent = Extract<AgentEvent, { kind: 'compact_rejected' }>
-
-async function readSkipEvents(logPath: string): Promise<CompactSkippedEvent[]> {
-  const parsed = await readSessionLog(logPath)
-  return parsed.events
-    .filter((e) => e.event.kind === 'compact_skipped')
-    .map((e) => e.event as CompactSkippedEvent)
+type CompactionMetadata = {
+  action: string
+  payload: Record<string, unknown>
 }
 
-async function readReplacedEvents(logPath: string): Promise<CompactReplacedEvent[]> {
+async function readSkipEvents(logPath: string): Promise<CompactionMetadata[]> {
   const parsed = await readSessionLog(logPath)
-  return parsed.events
-    .filter((e) => e.event.kind === 'compact_replaced')
-    .map((e) => e.event as CompactReplacedEvent)
+  return parsed.runtimeMetadata.filter((e) => e.action === 'compaction_skipped')
 }
 
-async function readRejectedEvents(logPath: string): Promise<CompactRejectedEvent[]> {
+async function readReplacedEvents(logPath: string) {
   const parsed = await readSessionLog(logPath)
   return parsed.events
-    .filter((e) => e.event.kind === 'compact_rejected')
-    .map((e) => e.event as CompactRejectedEvent)
+    .filter((e) => e.event.kind === 'messages_replaced' && e.event.reason === 'compaction')
+    .map((e) => e.event)
+}
+
+async function readRejectedEvents(logPath: string): Promise<CompactionMetadata[]> {
+  const parsed = await readSessionLog(logPath)
+  return parsed.runtimeMetadata.filter((e) => e.action === 'compaction_rejected')
 }
 
 /** A minimal summary that passes validateCompactionSummary (all required sections present). */
@@ -134,8 +131,8 @@ describe('compaction extension', () => {
 
     const rec = store.get(sessionId)!
     const skips = await readSkipEvents(rec.logPath)
-    expect(skips.filter((s) => s.reason === 'summarizer_failed').length).toBe(3)
-    expect(skips.filter((s) => s.reason === 'circuit_breaker_open').length).toBeGreaterThanOrEqual(1)
+    expect(skips.filter((s) => s.payload.reason === 'summarizer_failed').length).toBe(3)
+    expect(skips.filter((s) => s.payload.reason === 'circuit_breaker_open').length).toBeGreaterThanOrEqual(1)
   })
 
   it('manual bypasses the open breaker and success closes it', async () => {
@@ -160,11 +157,11 @@ describe('compaction extension', () => {
     await loop.compact(sessionId, 'auto')
     let rec = store.get(sessionId)!
     let skips = await readSkipEvents(rec.logPath)
-    expect(skips.some((s) => s.reason === 'circuit_breaker_open')).toBe(true)
+    expect(skips.some((s) => s.payload.reason === 'circuit_breaker_open')).toBe(true)
 
     // Manual: bypasses the breaker; keep trying manual until one succeeds.
     // (Whether an individual failing manual throws or is skipped is
-    // implementation detail; we only need one successful compact_replaced.)
+    // implementation detail; we only need one successful messages_replaced.)
     for (let i = 0; i < 5; i++) {
       try {
         await loop.compact(sessionId, 'manual')
@@ -183,10 +180,10 @@ describe('compaction extension', () => {
     await loop.compact(sessionId, 'auto')
     skips = await readSkipEvents(rec.logPath)
     const newSkips = skips.slice(skipsBefore)
-    expect(newSkips.every((s) => s.reason !== 'circuit_breaker_open')).toBe(true)
+    expect(newSkips.every((s) => s.payload.reason !== 'circuit_breaker_open')).toBe(true)
   })
 
-  it('empty summary is rejected: no compact_replaced, empty_summary skip emitted', async () => {
+  it('empty summary is rejected: no messages_replaced, empty_summary metadata emitted', async () => {
     let call = 0
     const llm: LLMAdapter = {
       name: 'empty-mock',
@@ -209,7 +206,7 @@ describe('compaction extension', () => {
     expect(rec.state.messages.length).toBe(before)
     expect(await readReplacedEvents(rec.logPath)).toHaveLength(0)
     const skips = await readSkipEvents(rec.logPath)
-    expect(skips.some((s) => s.reason === 'empty_summary')).toBe(true)
+    expect(skips.some((s) => s.payload.reason === 'empty_summary')).toBe(true)
   })
 
   it('manual compact on empty session emits nothing_to_compact throw', async () => {
@@ -249,10 +246,10 @@ describe('compaction extension', () => {
     expect(rec.state.messages[1]?.content).toEqual([{ type: 'text', text: `${OK_SUMMARY}\n\nSecond pass.` }])
     const replaced = await readReplacedEvents(rec.logPath)
     expect(replaced).toHaveLength(2)
-    expect(replaced[1]?.request?.messages.map((m) => m.role)).toEqual(['system', 'system'])
+    expect(replaced[1]?.replaceRange).toEqual({ start: 1, end: 2 })
   })
 
-  it('compact_replaced carries a cmp_ attemptId', async () => {
+  it('successful compaction writes a cmp_ attemptId in runtime metadata', async () => {
     let call = 0
     const llm: LLMAdapter = {
       name: 'attempt-mock',
@@ -267,12 +264,12 @@ describe('compaction extension', () => {
     await loop.compact(sessionId)
 
     const rec = store.get(sessionId)!
-    const replaced = await readReplacedEvents(rec.logPath)
-    expect(replaced).toHaveLength(1)
-    expect(replaced[0]!.attemptId).toMatch(/^cmp_/)
+    const parsed = await readSessionLog(rec.logPath)
+    const meta = parsed.runtimeMetadata.find((entry) => entry.action === 'compaction_applied')
+    expect(meta?.payload.attemptId).toMatch(/^cmp_/)
   })
 
-  it('compact_replaced persists the summarizer LLM trace and model', async () => {
+  it('messages_replaced persists the summarizer LLM trace and model', async () => {
     let call = 0
     const llm: LLMAdapter = {
       name: 'trace-mock',
@@ -298,7 +295,7 @@ describe('compaction extension', () => {
     await loop.compact(sessionId)
 
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
-    const compactEntry = parsed.events.find((e) => e.event.kind === 'compact_replaced')
+    const compactEntry = parsed.events.find((e) => e.event.kind === 'messages_replaced')
     expect(compactEntry?.llmTraceArtifact?.path).toContain('llm-traces')
     expect(compactEntry?.model).toBe('gpt-compact-test')
   })
@@ -369,7 +366,7 @@ describe('compaction extension', () => {
     // single increment.
     const rec = store.get(sessionId)!
     const skips = await readSkipEvents(rec.logPath)
-    expect(skips.filter((s) => s.reason === 'summarizer_failed')).toHaveLength(1)
+    expect(skips.filter((s) => s.payload.reason === 'summarizer_failed')).toHaveLength(1)
     expect(call).toBe(5)
   })
 
