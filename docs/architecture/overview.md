@@ -96,7 +96,7 @@ The only process with a **public IP** (or at least, reachable inbound by dashboa
 
 Lives close to the files it needs to touch. Dials **out** to Host via Socket.IO. Never accepts inbound connections.
 
-**One executor per workspace, one workspace per machine.** The executor's `workspaceId` (a stable ULID persisted in `~/.agent-kernel/workspace-id`) is the routing key Host uses to dispatch tool calls; the `workspaceName` (defaults to `os.hostname()`) is the display label. Two executor processes with the same `workspaceId` are treated as replicas of the same workspace.
+**One executor per workspace, one workspace per local profile.** The executor's `workspaceId` (a stable ULID persisted in `~/.agent-kernel/workspace-id`) is the routing key Host uses to dispatch tool calls; the `workspaceName` (defaults to `os.hostname()`) is the display label. Two executor processes with the same `workspaceId` are treated as replicas of the same workspace. A development machine can run an additional isolated executor with `--profile dev`, which stores its lock, `workspace-id`, and token under `~/.agent-kernel/profiles/dev/`.
 
 **Two forms**:
 

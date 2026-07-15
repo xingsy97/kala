@@ -9,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 15_000
 const DEFAULT_LIMIT = 5
 const MAX_LIMIT = 10
 const SNIPPET_MAX_CHARS = 500
+const SNIPPET_ELLIPSIS = '...'
 
 type SearchResult = {
   title: string
@@ -109,7 +110,7 @@ export function parseDuckDuckGoHtml(html: string, limit: number): SearchResult[]
     const snippetRaw = nextSnippet?.text ?? ''
     const snippet =
       snippetRaw.length > SNIPPET_MAX_CHARS
-        ? snippetRaw.slice(0, SNIPPET_MAX_CHARS) + '…'
+        ? snippetRaw.slice(0, SNIPPET_MAX_CHARS - SNIPPET_ELLIPSIS.length) + SNIPPET_ELLIPSIS
         : snippetRaw
     results.push({ title: anchor.title, url, snippet })
   }

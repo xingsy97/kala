@@ -15,6 +15,9 @@
  *   EXECUTOR_TOKEN / --token    optional long-term executor token
  *   EXECUTOR_INVITE / --invite  optional invite token from Dashboard
  *   EXECUTOR_ID / --id          optional; defaults to a ULID
+ *   AGENT_KERNEL_EXECUTOR_PROFILE / --profile
+ *     optional local profile. Non-default profiles use isolated lock,
+ *     workspace-id, and executor-token files under ~/.agent-kernel/profiles/<profile>/.
  *   AGENT_KERNEL_AUTO_UPDATE / --auto-update
  *     optional; update the release asset from the latest GitHub Release before connecting.
  *   AGENT_KERNEL_NO_UPDATE_CHECK / --no-update-check
@@ -26,7 +29,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 
@@ -37,6 +39,7 @@ import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
 import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
+import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
 const VERSION = packageJson.version
@@ -50,6 +53,7 @@ type Args = {
   token?: string
   invite?: string
   id?: string
+  profile?: string
   autoUpdate?: boolean
   noUpdateCheck?: boolean
   updateRepo?: string
@@ -84,6 +88,7 @@ function parseArgs(argv: readonly string[]): Args {
       case '--token':
       case '--invite':
       case '--id':
+      case '--profile':
       case '--update-repo': {
         const value = inline ?? argv[++i]
         if (value === undefined) break
@@ -93,6 +98,7 @@ function parseArgs(argv: readonly string[]): Args {
         else if (key === '--token') out.token = value
         else if (key === '--invite') out.invite = value
         else if (key === '--id') out.id = value
+        else if (key === '--profile') out.profile = value
         else out.updateRepo = value
         break
       }
@@ -118,6 +124,7 @@ Options:
   --token <token>            Long-term executor token. Defaults to EXECUTOR_TOKEN.
   --invite <token>           One-time invite token. Defaults to EXECUTOR_INVITE.
   --id <id>                  Executor id. Defaults to EXECUTOR_ID or generated id.
+  --profile <name>           Local profile for lock, workspace id, and token files.
   --auto-update              Update release asset before connecting.
   --no-update-check          Disable release update check.
   --update-repo <owner/repo> GitHub release repo. Defaults to AGENT_KERNEL_UPDATE_REPO.
@@ -128,11 +135,14 @@ Common environment:
   SANDBOX_ROOTS              Colon-separated sandbox roots.
   EXECUTOR_TOKEN             Long-term executor token.
   EXECUTOR_INVITE            One-time invite token.
+  AGENT_KERNEL_EXECUTOR_PROFILE
+                             Local profile. Example: dev.
   LOG_LEVEL                  trace, debug, info, warn, error. Default: info.
   LOG_FORMAT                 pretty/human or json. Default: pretty.
 
 Examples:
   node agent-kernel-executor.cjs --host http://localhost:3000
+  node agent-kernel-executor.cjs --host http://localhost:3000 --profile dev
   HOST_URL=http://localhost:3000 node agent-kernel-executor.cjs --sandbox-root /workspace
   EXECUTOR_INVITE=ak_invite_... node agent-kernel-executor.cjs --host http://host:3000
 `)
@@ -151,11 +161,12 @@ function printVersion(): void {
  */
 async function acquireLocalLock(
   logger: ReturnType<typeof createRuntimeLogger>,
+  profile?: string,
 ): Promise<string> {
-  const dir = join(homedir(), '.agent-kernel')
+  const dir = executorProfileDir(profile)
   mkdirSync(dir, { recursive: true })
   const lockPath = join(dir, 'executor.lock')
-  // proper-lockfile locks a target file — write an empty sentinel first
+  // proper-lockfile locks a target file - write an empty sentinel first
   // so its existence check succeeds.
   if (!existsSync(lockPath)) {
     writeFileSync(lockPath, '', { flag: 'a', mode: 0o600 })
@@ -210,7 +221,8 @@ async function main(): Promise<void> {
     : []
   const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : envRoots
   const invite = args.invite ?? process.env.EXECUTOR_INVITE
-  const token = args.token ?? process.env.EXECUTOR_TOKEN ?? (invite ? undefined : loadExecutorToken())
+  const profile = normalizeExecutorProfile(args.profile ?? process.env.AGENT_KERNEL_EXECUTOR_PROFILE)
+  const token = args.token ?? process.env.EXECUTOR_TOKEN ?? (invite ? undefined : loadExecutorToken(undefined, profile))
   const executorId = args.id ?? process.env.EXECUTOR_ID
   const autoUpdate = args.autoUpdate === true || process.env.AGENT_KERNEL_AUTO_UPDATE === '1'
   const noUpdateCheck = args.noUpdateCheck === true || process.env.AGENT_KERNEL_NO_UPDATE_CHECK === '1'
@@ -226,16 +238,15 @@ async function main(): Promise<void> {
 
   const authKind = invite ? 'invite' : token ? 'token' : 'none'
   const rootsLabel = sandboxRoots.length > 0 ? sandboxRoots.join(':') : '<no jail>'
+  const profileLabel = profile ?? 'default'
   process.stderr.write(
-    `agent-kernel-executor: connecting to ${host} (auth=${authKind}, workspace=${name ?? '<hostname>'}, sandbox=${rootsLabel})\n`,
+    `agent-kernel-executor: connecting to ${host} (auth=${authKind}, profile=${profileLabel}, workspace=${name ?? '<hostname>'}, sandbox=${rootsLabel})\n`,
   )
 
-  // Local single-instance lock. A single machine may only run one executor
-  // at a time — otherwise two processes would race for the same workspaceId
-  // and only one would end up bound on the host side (the other would be
-  // rejected by the host's workspaceId arbitration, but the misleading
-  // failure mode is worse than an early exit here).
-  const lockPath = await acquireLocalLock(logger)
+  // Local single-instance lock for this profile. Different profiles get
+  // distinct workspace ids and token files, so a dev machine can run one
+  // release executor and one isolated test executor at the same time.
+  const lockPath = await acquireLocalLock(logger, profile)
   process.on('exit', () => {
     // Best-effort release. proper-lockfile also survives crashes via mtime
     // staleness so we don't panic if this doesn't run.
@@ -258,13 +269,14 @@ async function main(): Promise<void> {
 
   const handle = startExecutor({
     host,
+    workspaceId: loadOrCreateWorkspaceId(undefined, profile),
     ...(name !== undefined ? { workspaceName: name } : {}),
     ...(sandboxRoots.length > 0 ? { sandboxRoots } : {}),
     ...(token !== undefined ? { token } : {}),
     ...(invite !== undefined ? { invite } : {}),
     ...(executorId !== undefined ? { executorId } : {}),
     onToken(nextToken) {
-      saveExecutorToken(nextToken)
+      saveExecutorToken(nextToken, undefined, profile)
       logger.info('executor identity saved for future reconnects')
     },
   })

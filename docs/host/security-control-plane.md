@@ -64,7 +64,9 @@ The product path is invite based:
    use, mints a long-term executor token, and persists only its hash.
 6. Host returns the long-term token in `executor:welcome`.
 7. Executor writes it to `~/.agent-kernel/executor-token` and uses it on later
-   reconnects.
+   reconnects. If the operator starts the executor with `--profile <name>`, the
+   token is stored under `~/.agent-kernel/profiles/<name>/executor-token`
+   instead.
 
 The operator never has to type a `workspaceId` or JSON token mapping.
 

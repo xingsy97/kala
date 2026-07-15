@@ -131,8 +131,8 @@ describe('websearch tool', () => {
     `
     const results = parseDuckDuckGoHtml(html, 5)
     expect(results).toHaveLength(1)
-    expect(results[0].snippet.length).toBeLessThanOrEqual(501)
-    expect(results[0].snippet.endsWith('…')).toBe(true)
+    expect(results[0].snippet.length).toBeLessThanOrEqual(500)
+    expect(results[0].snippet.endsWith('...')).toBe(true)
   })
 
   it('drops results with unresolvable hrefs', async () => {

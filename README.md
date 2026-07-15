@@ -100,7 +100,19 @@ pnpm --filter @agent-kernel/host dev                   # listens on :3000, serve
 # Terminal 2 — executor (dials into host, provides the tools)
 pnpm --filter @agent-kernel/executor exec tsx bin/agent-kernel-executor.ts \
   --host http://localhost:3000 \
-  --workspace $(pwd)/examples/scratch
+  --sandbox-root $(pwd)/examples/scratch
+```
+
+To run a development executor beside a release executor on the same machine, give
+the dev process its own local profile. Profiles isolate the local lock,
+`workspace-id`, and saved executor token; the default profile keeps the existing
+single-workspace behavior.
+
+```bash
+pnpm --filter @agent-kernel/executor exec tsx bin/agent-kernel-executor.ts \
+  --host http://localhost:3000 \
+  --profile dev \
+  --sandbox-root $(pwd)/examples/scratch
 ```
 
 Prefer an OpenAI-compatible endpoint (self-hosted gateway, `newapi`, LiteLLM, ollama's OpenAI-shim, Codex endpoints, etc.)? Just add the provider under Settings, or drop it into `~/.agent-kernel/config.json` (or leave it in `~/.codex/config.toml` — Host auto-imports).
@@ -139,7 +151,7 @@ bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv 
 Executor on the machine that holds the files:
 
 ```bash
-bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/OWNER/REPO/releases/latest/download/run.sh"; COMPONENT=executor HOST_URL=http://<vm-ip>:3000 bash "$tmp" -- --workspace "$(pwd)/my-project"'
+bash -c 'set -euo pipefail; tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; wget -nv -O "$tmp" "https://github.com/OWNER/REPO/releases/latest/download/run.sh"; COMPONENT=executor HOST_URL=http://<vm-ip>:3000 bash "$tmp" -- --sandbox-root "$(pwd)/my-project"'
 ```
 
 Environment variables the bootstrap and host understand:

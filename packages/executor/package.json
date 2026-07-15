@@ -40,7 +40,6 @@
     "ulid": "^2.3.0"
   },
   "devDependencies": {
-    "@agent-kernel/host": "workspace:*",
     "@types/node": "^22.9.0",
     "@types/picomatch": "^3.0.1",
     "@types/proper-lockfile": "^4.1.4",
