@@ -1640,7 +1640,7 @@ function ToolCallGroupBlock({
         {group.calls.length > 1 ? (
           <span
             className={cn(
-              'flex-none rounded px-1.5 py-0.5 font-mono text-[11px]',
+              'inline-flex h-5 flex-none items-center rounded px-1.5 font-mono text-[11px] leading-none',
               group.mixed
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-background/80 text-muted-foreground',
@@ -1653,7 +1653,7 @@ function ToolCallGroupBlock({
         {singleStatus ? (
           <span
             className={cn(
-              'flex-none rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider',
+              'inline-flex h-5 flex-none items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider',
               singleStatus.className,
             )}
           >
@@ -1809,13 +1809,13 @@ function summarizeToolGroupLifecycle(
 function ToolLifecycleSummaryBadges({ summary }: { summary: Partial<Record<ToolLifecycleKind, number>> }): JSX.Element {
   const kinds: readonly ToolLifecycleKind[] = ['approval', 'running', 'failed', 'succeeded', 'orphaned']
   return (
-    <span className="flex min-w-0 flex-none items-center gap-1">
+    <span className="flex min-w-0 flex-none items-center gap-1 leading-none">
       {kinds.map((kind) => {
         const count = summary[kind] ?? 0
         if (count === 0) return null
         const badge = toolLifecycleBadge(kind)
         return (
-          <span key={kind} className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider', badge.className)}>
+          <span key={kind} className={cn('inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider', badge.className)}>
             {count} {badge.label}
           </span>
         )
