@@ -122,6 +122,45 @@ type ToolCallLifecycle = {
   result?: Extract<AgentEvent, { kind: 'tool_result' }>
 }
 
+function mergeArtifactEntry(
+  current: readonly TimelineEntry[],
+  base: TimelineEntry,
+  payload: ServerLogArtifactPayload,
+): readonly TimelineEntry[] {
+  const hydrated = hydrateTimelineEntry(base, payload)
+  const without = current.filter((entry) => entry.seq !== hydrated.seq)
+  return [...without, hydrated].sort((a, b) => a.seq - b.seq)
+}
+
+function mergeTimelineArtifacts(
+  timeline: readonly TimelineEntry[],
+  artifacts: readonly TimelineEntry[],
+): readonly TimelineEntry[] {
+  if (artifacts.length === 0) return timeline
+  const bySeq = new Map(artifacts.map((entry) => [entry.seq, entry]))
+  return timeline.map((entry) => {
+    const hydrated = bySeq.get(entry.seq)
+    if (!hydrated) return entry
+    return {
+      ...entry,
+      effects: hydrated.effects,
+      ...(hydrated.llmTrace ? { llmTrace: hydrated.llmTrace } : {}),
+      hasEffectsArtifact: false,
+      hasLlmTraceArtifact: hydrated.llmTrace ? false : entry.hasLlmTraceArtifact,
+    }
+  })
+}
+
+function hydrateTimelineEntry(entry: TimelineEntry, payload: ServerLogArtifactPayload): TimelineEntry {
+  return {
+    ...entry,
+    ...(payload.effects ? { effects: payload.effects } : {}),
+    ...(payload.llmTrace ? { llmTrace: payload.llmTrace } : {}),
+    hasEffectsArtifact: payload.effects ? false : entry.hasEffectsArtifact,
+    hasLlmTraceArtifact: payload.llmTrace ? false : entry.hasLlmTraceArtifact,
+  }
+}
+
 type SubAgentRelationSummary = {
   parentSessionId: string | null
   parentCursor: number | null
@@ -220,6 +259,7 @@ export function InspectorPanel({
   const [teachingMode, setTeachingMode] = useState(false)
   const [replaySeq, setReplaySeq] = useState<number | null>(null)
   const [selected, setSelected] = useState<DetailSelection>(null)
+  const [artifactTimeline, setArtifactTimeline] = useState<readonly TimelineEntry[]>([])
   const [pendingForkSeq, setPendingForkSeq] = useState<number | null>(null)
   const [traceFilter, setTraceFilter] = useState<ReadonlySet<TraceCategory>>(
     () => new Set<TraceCategory>(TRACE_CATEGORY_ORDER),
@@ -231,11 +271,12 @@ export function InspectorPanel({
     if (!showToolCallTab && inspectorView === 'tools') setInspectorView('trace')
   }, [showToolCallTab, inspectorView])
 
-  const flow = useMemo(() => stateFlow(timeline), [timeline])
-  const llmCalls = useMemo(() => buildLlmCalls(timeline), [timeline])
-  const toolCalls = useMemo(() => buildToolCalls(timeline), [timeline])
+  const hydratedTimeline = useMemo(() => mergeTimelineArtifacts(timeline, artifactTimeline), [timeline, artifactTimeline])
+  const flow = useMemo(() => stateFlow(hydratedTimeline), [hydratedTimeline])
+  const llmCalls = useMemo(() => buildLlmCalls(hydratedTimeline), [hydratedTimeline])
+  const toolCalls = useMemo(() => buildToolCalls(hydratedTimeline), [hydratedTimeline])
   const parentHistory = useHistoryTimeline(socket ?? null, parentSessionId ?? null)
-  const replaySnapshots = useMemo(() => buildReplaySnapshots(timeline, state, config), [timeline, state, config])
+  const replaySnapshots = useMemo(() => buildReplaySnapshots(hydratedTimeline, state, config), [hydratedTimeline, state, config])
   const replaySnapshot = useMemo(() => {
     if (replaySnapshots.length === 0) return null
     if (replaySeq === null) return replaySnapshots.at(-1) ?? null
@@ -247,14 +288,14 @@ export function InspectorPanel({
     setReplaySeq(seq)
   }
   const inspectTraceSeq = (seq: number): void => {
-    const entryIndex = timeline.findIndex((entry) => entry.seq === seq)
-    const entry = timeline[entryIndex]
+    const entryIndex = hydratedTimeline.findIndex((entry) => entry.seq === seq)
+    const entry = hydratedTimeline[entryIndex]
     if (!entry) return
     setReplaySeq(seq)
     setSelected({
       kind: 'event',
       entry,
-      priorCallLlm: findPriorCallLlm(timeline, entryIndex),
+      priorCallLlm: findPriorCallLlm(hydratedTimeline, entryIndex),
       flow: flow.find((step) => step.seq === entry.seq),
     })
   }
@@ -266,6 +307,7 @@ export function InspectorPanel({
     const sessionId = state.sessionId
     const onArtifact = (p: ServerLogArtifactPayload): void => {
       if (p.sessionId !== sessionId || p.seq !== entry.seq || p.error) return
+      setArtifactTimeline((current) => mergeArtifactEntry(current, entry, p))
       setSelected((current) => {
         if (current?.kind !== 'event' || current.entry.seq !== entry.seq) return current
         return {
@@ -288,6 +330,29 @@ export function InspectorPanel({
   }, [socket, selected, state?.sessionId])
 
   useEffect(() => {
+    if (!socket || !state?.sessionId || selected?.kind !== 'llm') return
+    const call = selected.call
+    const requestEntry = hydratedTimeline.find((entry) => entry.seq === call.requestSeq)
+    if (!requestEntry?.hasEffectsArtifact) return
+    const sessionId = state.sessionId
+    const onArtifact = (p: ServerLogArtifactPayload): void => {
+      if (p.sessionId !== sessionId || p.seq !== call.requestSeq || p.error) return
+      setArtifactTimeline((current) => mergeArtifactEntry(current, requestEntry, p))
+    }
+    socket.on('server:log_artifact', onArtifact)
+    socket.emit('client:load_log_artifact', { sessionId, seq: call.requestSeq })
+    return () => {
+      socket.off('server:log_artifact', onArtifact)
+    }
+  }, [hydratedTimeline, socket, selected, state?.sessionId])
+
+  useEffect(() => {
+    if (selected?.kind !== 'llm') return
+    const fresh = llmCalls.find((call) => call.id === selected.call.id)
+    if (fresh && fresh !== selected.call) setSelected({ kind: 'llm', call: fresh })
+  }, [llmCalls, selected])
+
+  useEffect(() => {
     if (replaySnapshots.length === 0) {
       if (replaySeq !== null) setReplaySeq(null)
       return
@@ -307,7 +372,7 @@ export function InspectorPanel({
       <DebuggerHeader
         state={state}
         config={config}
-        timeline={timeline}
+        timeline={hydratedTimeline}
         visibleMessagesCount={visibleMessagesCount}
       />
       <InspectorTabs
@@ -319,7 +384,7 @@ export function InspectorPanel({
 
       {inspectorView === 'status' ? (
         <div className="flex min-h-0 flex-1 flex-col" data-testid="inspector-view-panel-status">
-          <Overview state={state} config={config} timeline={timeline} visibleMessagesCount={visibleMessagesCount} />
+          <Overview state={state} config={config} timeline={hydratedTimeline} visibleMessagesCount={visibleMessagesCount} />
           <div className="min-h-0 flex-1">
             <RuntimeSection
               view={runtimeView}
@@ -329,7 +394,7 @@ export function InspectorPanel({
               replaySeq={replaySeq}
               config={config}
               contextSnapshot={contextSnapshot}
-              timeline={timeline}
+              timeline={hydratedTimeline}
               toolCalls={toolCalls}
               subAgentRelation={subAgentRelationSummary(parentSessionId ?? null, parentCursor ?? null, toolCalls)}
               topology={statusTopology(socket ?? null, state, llmCalls)}
@@ -340,7 +405,7 @@ export function InspectorPanel({
         <div className="min-h-0 flex-1" data-testid={`inspector-view-panel-${inspectorView}`}>
           <TraceSection
             view={inspectorView}
-            timeline={timeline}
+            timeline={hydratedTimeline}
             flow={flow}
             llmCalls={llmCalls}
             toolCalls={toolCalls}
@@ -371,7 +436,7 @@ export function InspectorPanel({
 
       <DetailDialog
         selection={selected}
-        timeline={timeline}
+        timeline={hydratedTimeline}
         onForkRequest={onFork ? (seq) => setPendingForkSeq(seq) : undefined}
         onOpenChange={(open) => {
           if (!open) setSelected(null)
