@@ -178,7 +178,7 @@ describe('InspectorPanel', () => {
     expect(topology.textContent ?? '').toContain('Host')
     expect(topology.textContent ?? '').toContain('Executor')
     expect(topology.textContent ?? '').toContain('LLM')
-    expect(topology.textContent ?? '').toContain('kernel / model unknown')
+    expect(topology.textContent ?? '').toContain('model unknown')
     const stateRuntime = screen.getByTestId('state-runtime')
     expect(screen.getByTestId('run-health-panel')).toBeTruthy()
     expect(screen.queryByTestId('watch-expressions')).toBeNull()

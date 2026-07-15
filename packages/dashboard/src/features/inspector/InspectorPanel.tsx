@@ -33,6 +33,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { DashboardSocket, TimelineEntry } from '../../session.js'
 import { stateFlow, type StateFlowStep } from '../../state-flow.js'
+import { formatTokens } from '../../lib/format.js'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -566,8 +567,8 @@ function Overview({
   const { t } = useTranslation()
   const contextLimit = config?.contextLimit
   const context = contextLimit
-    ? `${state?.usage.inputTokens ?? 0} / ${contextLimit}`
-    : `${state?.usage.inputTokens ?? 0} input`
+    ? `${formatTokens(state?.usage.inputTokens ?? 0, { thousands: 'compact' })} / ${formatTokens(contextLimit, { thousands: 'compact' })}`
+    : `${formatTokens(state?.usage.inputTokens ?? 0, { thousands: 'compact' })} input`
   const pending = state?.pendingCalls.find((c) => c.status !== 'rejected')
   return (
     <section className="flex-none bg-card px-3 pb-3" aria-label={t('inspector.overview')}>
@@ -585,7 +586,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
   return (
     <div className="min-w-0 rounded bg-sidebar px-2 py-1.5 ring-1 ring-border/30">
       <div className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={cn('mt-0.5 truncate font-mono text-[11px] text-foreground', tone)} title={value}>
+      <div className={cn('mt-0.5 break-words font-mono text-[11px] leading-snug text-foreground', tone)} title={value}>
         {value}
       </div>
     </div>
@@ -1174,17 +1175,40 @@ function RuntimeSection({
 
 function StatusTopology({ nodes }: { nodes: readonly StatusTopologyNode[] }): JSX.Element {
   return (
-    <div className="grid gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-4" data-testid="status-topology">
+    <div className="grid min-w-0 gap-1.5 text-xs sm:grid-cols-2" data-testid="status-topology">
       {nodes.map((node, index) => (
-        <div key={node.id} className="flex min-w-0 items-center gap-2 rounded bg-background/70 px-2 py-1 ring-1 ring-border/30" title={node.value}>
-          <span className={cn('h-2 w-2 flex-none rounded-full', topologyTone(node.status))} />
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{node.label}</span>
-          <span className="min-w-0 truncate font-mono text-[10px] text-foreground">{node.value}</span>
-          {index < nodes.length - 1 ? <ChevronRight className="hidden h-3 w-3 flex-none text-muted-foreground xl:block" aria-hidden="true" /> : null}
+        <div key={node.id} className="min-w-0 rounded bg-background/70 px-2 py-1.5 ring-1 ring-border/30" title={`${node.label}: ${node.value}`}>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className={cn('h-2 w-2 flex-none rounded-full', topologyTone(node.status))} />
+            <span className="min-w-0 flex-1 text-[10px] font-medium uppercase text-muted-foreground">{node.label}</span>
+            {index < nodes.length - 1 ? <ChevronRight className="h-3 w-3 flex-none text-muted-foreground/60" aria-hidden="true" /> : null}
+          </div>
+          <div className="mt-1 min-w-0 break-words font-mono text-[10px] leading-snug text-foreground">{shortTopologyValue(node)}</div>
         </div>
       ))}
     </div>
   )
+}
+
+function shortTopologyValue(node: StatusTopologyNode): string {
+  if (node.id === 'host') return node.value.replace(/^socket /u, '')
+  if (node.id === 'executor') return compactPath(node.value)
+  if (node.id === 'llm') return compactModelLabel(node.value)
+  return node.value
+}
+
+function compactPath(value: string): string {
+  if (!value.startsWith('/')) return value
+  const parts = value.split('/').filter(Boolean)
+  if (parts.length <= 3) return value
+  return `/${parts.slice(-3).join('/')}`
+}
+
+function compactModelLabel(value: string): string {
+  return value
+    .replace('anthropic / ', '')
+    .replace('kernel / ', '')
+    .replace(/-internal$/u, '')
 }
 
 function topologyTone(status: StatusTopologyNode['status']): string {
@@ -1329,16 +1353,25 @@ function SubAgentRelationPanel({ summary }: { summary: SubAgentRelationSummary }
 
 function RunHealthPanel({ items }: { items: readonly RunHealthItem[] }): JSX.Element {
   return (
-    <div className="grid gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-3" data-testid="run-health-panel">
+    <div className="grid min-w-0 gap-1.5 text-xs sm:grid-cols-2 xl:grid-cols-3" data-testid="run-health-panel">
       {items.map((item) => (
-        <div key={item.id} className="flex min-w-0 items-center gap-2 rounded bg-background/70 px-2 py-1 ring-1 ring-border/30">
-          <HeartPulse className={cn('h-3 w-3 flex-none', healthTone(item.tone))} aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{item.label}</span>
-          <span className={cn('flex-none truncate font-mono text-[10px]', healthTone(item.tone))}>{item.value}</span>
+        <div key={item.id} className="min-w-0 rounded bg-background/70 px-2 py-1.5 ring-1 ring-border/30" title={`${item.label}: ${item.value}`}>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <HeartPulse className={cn('h-3 w-3 flex-none', healthTone(item.tone))} aria-hidden="true" />
+            <span className="min-w-0 flex-1 text-[10px] font-medium uppercase text-muted-foreground">{shortHealthLabel(item.label)}</span>
+          </div>
+          <div className={cn('mt-1 min-w-0 break-words font-mono text-[10px] leading-snug', healthTone(item.tone))}>{item.value}</div>
         </div>
       ))}
     </div>
   )
+}
+
+function shortHealthLabel(label: string): string {
+  if (label === 'Missing HTTP traces') return 'Missing traces'
+  if (label === 'Pending approvals') return 'Approvals'
+  if (label === 'Failed tools') return 'Tool failures'
+  return label
 }
 
 function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; toolCalls: readonly ToolCallLifecycle[] }): JSX.Element {
