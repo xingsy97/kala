@@ -67,6 +67,7 @@ Emitted once per client, right after handshake succeeds.
   cursor: number              // current event cursor of the session
   state: AgentState           // current snapshot (see SPEC §1.4)
   config: AgentConfig         // (see SPEC §1.3)
+  contextSnapshot?: ContextSnapshot // host-owned context estimate for UI/policy
   parentSessionId?: string    // for forked sessions
   parentCursor?: number       // fork point on the parent
   workspaceId?: string        // routing key — the workspace this session is bound to (§5.1). Undefined for legacy sessions predating the field.
@@ -84,6 +85,7 @@ Emitted after every kernel `step` call that mutated state.
   sessionId: string
   cursor: number              // = state.cursor (matches SPEC I1)
   state: AgentState
+  contextSnapshot?: ContextSnapshot
 }
 ```
 
@@ -116,12 +118,11 @@ summary. Authorization secrets MUST be redacted before persistence.
 `llm_error` events whenever the active model is known, even if provider request
 capture was disabled or the adapter did not return an `llmTrace`.
 
-**Extended event kinds**: `event.kind` may be `compact_replaced`,
+**Extended event kinds**: `event.kind` may be `messages_replaced`,
 `approval_mode_changed`, or `cwd_changed` in addition to the base v0.1 union.
-`compact_replaced` events carry the summarizer `request` (`model`,
-`systemPrompt`, `messages`, `tools`), a `trigger` of `manual` or `auto`,
-required `preserveFrom`, and optional `responseUsage`, so history can show the
-exact compact LLM request and result side by side.
+Successful context compaction is represented as
+`messages_replaced(reason='compaction')`. Summarizer request/response details
+belong in runtime metadata or artifacts, not in the kernel event.
 
 ### 3.4 `session:error`
 
@@ -257,11 +258,11 @@ streaming. Wired to the dashboard ESC key during a `thinking` turn.
 ```
 
 Ask the host to summarize stale transcript context with the summarizer LLM.
-Emitted from the exact `/compact` input — the dashboard does **not** append
-`/compact` as a `user_message`. Host chooses a safe recent-user-message pivot,
-summarizes the prefix, preserves the suffix verbatim, and records a
-`compact_replaced` event carrying the summarizer request, trigger (`manual`),
-required `preserveFrom`, summary text, replaced count, and token deltas.
+Emitted from the exact `/compact` input; the dashboard does not append
+`/compact` as a `user_message`. Host chooses a safe replacement range,
+summarizes that range, preserves the required tail verbatim, and records a
+`messages_replaced(reason='compaction')` event. Attempt metadata is written as
+runtime metadata/artifacts.
 
 #### `client:set_approval_mode`
 

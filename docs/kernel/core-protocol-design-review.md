@@ -1,6 +1,6 @@
 # Core State Machine and Protocol Design Review
 
-**Status**: design review snapshot, 2026-07-07.
+**Status**: historical design review snapshot, 2026-07-07. Superseded for context compaction by `docs/host/context-compaction.md`.
 **Scope**: kernel FSM, event/effect schema, JSONL event log, Host/Dashboard/Executor wire protocol, and the boundary between core state and peripheral side effects.
 
 ## 1. Review Lens
@@ -56,8 +56,8 @@ The implementation uses `Record<AgentStatus, Partial<Record<AgentEvent['kind'], 
 
 - **Reducer-lifted tools are exceptions**: `memory { scope: 'session' }` makes tool input first-class `AgentState`. This should remain a short allowlist in `tool-lift.ts`. Future tools should default to opaque tool results or dashboard-derived views.
 - **`ask` mode semantics must stay explicit**: current implementation forces approval for every tool in `ask`; this is useful and distinct from `auto`. Docs previously described it as an alias. That drift has been corrected.
-- **Compaction is protocol-adjacent**: `compact_replaced` is a kernel event because replay must see the message replacement. The summarizer request/response is metadata for the dashboard, not reducer logic. Host must avoid dispatching compaction around unresolved tool calls.
-- **Context pressure is derived state**: keeping `contextPressureLevel` in state is reasonable for teaching and UI, but policy actions remain Host/Dashboard concerns.
+- **Compaction is replay-visible but policy-free**: `messages_replaced` is a kernel event because replay must see the message replacement. Compaction policy, context pressure, summarizer request/response, and skipped/rejected attempts are host/runtime metadata concerns.
+- **Context pressure is host state**: the host computes `ContextSnapshot`; the kernel does not carry `contextPressureLevel`.
 
 ### 3.4 FSM Review Rules
 
@@ -82,7 +82,7 @@ Good properties:
 - Event names describe facts, not transport actions.
 - `llm_response` and `tool_result` are provider/executor independent.
 - `clear` keeps session identity and workspace binding; it is a current-session reset, not session creation.
-- `compact_replaced` carries enough metadata for teaching without making provider trace part of reducer state.
+- `messages_replaced` carries only the deterministic replacement fact; teaching/debug metadata lives in runtime metadata or artifacts.
 
 Risks:
 
@@ -184,7 +184,7 @@ This review corrected the following drift:
 - `docs/kernel/spec.md` described `ImageSource.kind: 'file'`; implementation uses `file_ref`.
 - `docs/kernel/spec.md` omitted `ThinkingContent`, cache token usage fields, `thinkingBudget`, and `preflight` compaction trigger.
 - `docs/kernel/spec.md` described `ask` as equivalent to `auto`; implementation and tests define `ask` as approval for every tool.
-- `docs/kernel/spec.md` described `compact_replaced` and `cwd_changed` as legal in broader status sets than the reducer table allows.
+- Older `docs/kernel/spec.md` revisions described compaction and cwd events as legal in broader status sets than the reducer table allowed.
 - `docs/protocol/wire-protocol.md` was missing newer queue-edit and file/overflow control-plane messages, plus `client:fork.seedMessage`.
 - `docs/protocol/wire-protocol.md` had one stale statement implying executor routing by `workspaceName`; routing is by `workspaceId`.
 

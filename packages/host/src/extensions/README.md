@@ -41,7 +41,7 @@ The loop exposes a fixed set of seams. Each extension plugs into one or more:
 |---|---|---|---|
 | **beforeCallLlm** | before each LLM call | compaction (preflight) | `maybeAutoCompact`-adjacent `compact()` ← `loop.ts` `messagesForLlmCall` |
 | **beforeCallTool** | before a tool dispatches | hooks (pre) + loop-guard | `runPreToolHooks` ← `loop.ts:295` |
-| **provideTool** | tool dispatch itself | agent builtin, skills | `runAgentTool` ← `loop.ts:314`, `runSkillTool` ← `loop.ts:317` |
+| **provideTool** | tool dispatch itself | agent builtin, skills | `dispatchConfiguredTool` reads `ToolSchema.executionKind` / `executionHandler` from the session config |
 | **afterCallTool** | after a tool settles | hooks (post) | `runPostToolHooks` ← `loop.ts:320` |
 | **onTurnDone** | after a turn completes | compaction (auto) | `maybeAutoCompact` ← `loop.ts:88` |
 | **manualTrigger** | operator command | compaction (`/compact`), memory | `runCompact` ← `loop.ts:97`, `consolidateMemory` ← `connection/dashboard-ns.ts:457` |
@@ -58,12 +58,27 @@ The loop exposes a fixed set of seams. Each extension plugs into one or more:
 | `skills.ts` | provideTool, discovery | no — pure, kernel `ToolSchema` only |
 | `memory-consolidation.ts` | manualTrigger | types only |
 
-## Why this isn't a registry (yet)
+## Agent modules and toolsets
 
-The dispatch in `loop.ts`'s `performCallTool` still hard-codes
-`effect.name === AGENT_TOOL_NAME` / `SKILL_TOOL_NAME`. A typed `Extension`
-interface with a `registry.fire(phase)` fan-out is the natural next step, but the
-seven phases above don't collapse into one clean interface without guessing at
-future needs. This round only relocated the code and broke the cycle; the
-registry is a deliberate follow-up. See [ADR 0005](../../../../docs/meta/adr/0005-kernel-boundary.md)
-for the boundary this directory enforces.
+The default host assembles its agent surface through `AgentModule`:
+
+```
+AgentModule = SystemPromptPlugin + ToolsetPlugin[] + RuntimePolicyPlugin?
+```
+
+`SystemPromptPlugin` owns the provider-facing system prompt. Each
+`ToolsetPlugin` owns a named toolset, including tool prompt text, risk policy,
+execution kind, and the handler name. The renderer in `src/agent-modules/`
+turns that richer structure into the plain kernel `AgentConfig`: a system
+prompt, `ToolSchema[]`, and compact `agentModule` metadata.
+
+Tool execution uses the same rendered metadata. `loop.ts` delegates tool calls
+to `dispatchConfiguredTool()`, which routes `executionKind: 'executor'` tools to
+the executor registry and `executionKind: 'host'` tools to registered host
+handlers such as `agent` and `skill`. The loop therefore no longer needs to know
+which tool names are built in; that belongs to the module/toolset layer.
+
+The session header stores the rendered module metadata. On session creation, the
+host also writes `agent-module/system-prompt.txt` and
+`agent-module/tool-registry.json` artifacts beside the JSONL log so a run can be
+audited or reproduced without reconstructing startup state from code.

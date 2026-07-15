@@ -173,9 +173,9 @@ The current implementation has meaningful context observability:
   body.
 - The `API Call` tab shows the actual request/response artifacts, avoiding
   duplicate or fake request-body displays.
-- Context compaction is represented as `compact_replaced` events in the JSONL
-  ledger, with dashboard detail views for compaction request/summary metadata
-  when available.
+- Context compaction is represented as deterministic `messages_replaced` events
+  in the JSONL ledger, with compaction request/summary metadata stored as
+  artifacts/runtime metadata for dashboard detail views.
 - Structured memory contribution is counted only from explicit memory tool calls
   and matching tool results already present in kernel messages.
 - Browser debugger e2e covers tool registry visibility, context proportions,
