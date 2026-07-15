@@ -29,6 +29,7 @@ import type {
   ClientListFiles,
   ClientListSessions,
   ClientListSubAgents,
+  ClientLoadLogArtifact,
   ClientLoadHistory,
   ClientReadBgOutput,
   ClientReadFile,
@@ -138,6 +139,11 @@ export const ClientLoadHistorySchema = z.object({
   sessionId: z.string(),
   sinceCursor: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<ClientLoadHistory>
+
+export const ClientLoadLogArtifactSchema = z.object({
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+}) satisfies z.ZodType<ClientLoadLogArtifact>
 
 export const ClientDeleteSessionSchema = z.object({
   sessionId: z.string(),

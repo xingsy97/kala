@@ -43,6 +43,8 @@ export type TimelineEntry = {
   ts: string
   event: AgentEvent
   effects: readonly Effect[]
+  hasEffectsArtifact?: boolean
+  hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
 }
@@ -206,6 +208,8 @@ export function useSession({
         ts: e.ts,
         event: e.event,
         effects: e.effects,
+        ...(e.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+        ...(e.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
         ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
         ...(e.model ? { model: e.model } : {}),
       }))
@@ -247,6 +251,8 @@ export function useSession({
             ts: p.ts,
             event: p.event,
             effects: p.effects,
+            ...(p.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+            ...(p.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
             ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
             ...(p.model ? { model: p.model } : {}),
           },

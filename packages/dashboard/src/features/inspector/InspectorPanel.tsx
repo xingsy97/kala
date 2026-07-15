@@ -28,7 +28,7 @@ import type {
   MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
-import { redactLlmTrace, type LLMTrace, type ServerHistoryPayload } from '@agent-kernel/shared'
+import { redactLlmTrace, type LLMTrace, type ServerHistoryPayload, type ServerLogArtifactPayload } from '@agent-kernel/shared'
 import { useTranslation } from 'react-i18next'
 
 import type { DashboardSocket, TimelineEntry } from '../../session.js'
@@ -257,6 +257,34 @@ export function InspectorPanel({
   }
 
   useEffect(() => {
+    if (!socket || !state?.sessionId || selected?.kind !== 'event') return
+    const entry = selected.entry
+    if (!entry.hasEffectsArtifact && !entry.hasLlmTraceArtifact) return
+    const sessionId = state.sessionId
+    const onArtifact = (p: ServerLogArtifactPayload): void => {
+      if (p.sessionId !== sessionId || p.seq !== entry.seq || p.error) return
+      setSelected((current) => {
+        if (current?.kind !== 'event' || current.entry.seq !== entry.seq) return current
+        return {
+          ...current,
+          entry: {
+            ...current.entry,
+            ...(p.effects ? { effects: p.effects } : {}),
+            ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
+            hasEffectsArtifact: false,
+            hasLlmTraceArtifact: false,
+          },
+        }
+      })
+    }
+    socket.on('server:log_artifact', onArtifact)
+    socket.emit('client:load_log_artifact', { sessionId, seq: entry.seq })
+    return () => {
+      socket.off('server:log_artifact', onArtifact)
+    }
+  }, [socket, selected, state?.sessionId])
+
+  useEffect(() => {
     if (replaySnapshots.length === 0) {
       if (replaySeq !== null) setReplaySeq(null)
       return
@@ -470,6 +498,8 @@ function useHistoryTimeline(socket: DashboardSocket | null, sessionId: string | 
           ts: e.ts,
           event: e.event,
           effects: e.effects,
+          ...(e.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+          ...(e.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
           ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
           ...(e.model ? { model: e.model } : {}),
         }))

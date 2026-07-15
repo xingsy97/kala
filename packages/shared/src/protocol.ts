@@ -178,8 +178,23 @@ export type EventAppendedEvent = {
   ts: string
   event: AgentEvent
   effects: readonly Effect[]
+  hasEffectsArtifact?: boolean
+  hasLlmTraceArtifact?: boolean
   llmTrace?: LLMTrace
   model?: string
+}
+
+export type ClientLoadLogArtifact = {
+  sessionId: string
+  seq: number
+}
+
+export type ServerLogArtifactPayload = {
+  sessionId: string
+  seq: number
+  effects?: readonly Effect[]
+  llmTrace?: LLMTrace
+  error?: string
 }
 
 export const SESSION_ERROR_SCOPES = ['kernel', 'llm', 'executor', 'host'] as const
@@ -1078,6 +1093,7 @@ export type DashboardClientToServerEvents = {
   'client:list_executors': (payload: ClientListExecutors) => void
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
+  'client:load_log_artifact': (payload: ClientLoadLogArtifact) => void
   'client:delete_session': (payload: ClientDeleteSession) => void
   'client:set_model': (payload: ClientSetModel) => void
   'client:update_preferences': (payload: ClientUpdatePreferences) => void
@@ -1133,6 +1149,7 @@ export type DashboardServerToClientEvents = {
   'server:overflow_contents': (payload: OverflowContentsResult) => void
   'server:memory_consolidated': (payload: ConsolidateMemoryResult) => void
   'server:history': (payload: ServerHistoryPayload) => void
+  'server:log_artifact': (payload: ServerLogArtifactPayload) => void
   'server:session_deleted': (payload: ServerSessionDeletedPayload) => void
   'server:bg_task_updated': (payload: ServerBgTaskUpdated) => void
   'server:bg_task_evicted': (payload: ServerBgTaskEvicted) => void

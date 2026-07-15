@@ -35,7 +35,7 @@ export type HeaderEntry = {
    */
   workspaceName?: string
   initialCwd?: string
-  formatVersion: 1
+  formatVersion: 2
   kernelVersion: string
   config: AgentConfig
   initialState: AgentState
@@ -46,9 +46,16 @@ export type EventEntry = {
   seq: number
   ts: string
   event: AgentEvent
+  /**
+   * Lightweight effect summaries for timeline/state inspection. Large reducer
+   * outputs such as full LLM prompt messages are stored out-of-band and loaded
+   * only when an inspector needs the raw payload.
+   */
   effects: readonly Effect[]
   usage?: UsageTotal
+  effectsArtifact?: LogArtifactRef
   llmTrace?: LLMTrace
+  llmTraceArtifact?: LogArtifactRef
   /**
    * Model that answered this event, when the event was produced by an LLM
    * call (`llm_response` / `llm_error`). Recorded independently of `llmTrace`
@@ -56,6 +63,12 @@ export type EventEntry = {
    * was suppressed or an older adapter didn't capture one.
    */
   model?: string
+}
+
+export type LogArtifactRef = {
+  path: string
+  bytes: number
+  sha256: string
 }
 
 export type LLMTrace = {
@@ -211,4 +224,4 @@ export type MetadataEntry = {
 
 export type LogEntry = HeaderEntry | EventEntry | SnapshotEntry | MetadataEntry
 
-export const LOG_FORMAT_VERSION = 1 as const
+export const LOG_FORMAT_VERSION = 2 as const

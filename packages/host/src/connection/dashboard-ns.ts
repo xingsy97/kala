@@ -30,6 +30,7 @@ import type {
   ClientListSessions,
   ClientListSubAgents,
   ClientLoadHistory,
+  ClientLoadLogArtifact,
   ClientReadBgOutput,
   ClientReadFile,
   ClientReadOverflow,
@@ -75,7 +76,8 @@ import { resetCompactRuntime } from '../extensions/compaction.js'
 import { readSessionLog } from '../store/log.js'
 import { SessionStore, type SessionRecord } from '../store/session.js'
 import { createExecutorRegistry } from './executor.js'
-import { resolve as resolvePath, sep } from 'node:path'
+import { dirname, resolve as resolvePath, sep } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { AuthConfig } from '../auth-control.js'
 import { authenticateDashboardHandshake } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
@@ -234,6 +236,8 @@ export function configureDashboardNamespace(
             ts: e.ts,
             event: e.event,
             effects: e.effects,
+            ...(e.effectsArtifact ? { hasEffectsArtifact: true } : {}),
+            ...(e.llmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
             ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
             ...(e.model ? { model: e.model } : {}),
           }))
@@ -245,6 +249,42 @@ export function configureDashboardNamespace(
           'host',
           err instanceof Error ? err.message : String(err),
         )
+      }
+    })
+
+    socket.on('client:load_log_artifact', async (raw: ClientLoadLogArtifact) => {
+      const p = vparse(schema.ClientLoadLogArtifactSchema, raw, 'client:load_log_artifact', (raw as ClientLoadLogArtifact | undefined)?.sessionId)
+      if (!p) return
+      try {
+        let target: SessionRecord | undefined = deps.store.get(p.sessionId)
+        if (!target) target = await deps.store.load(p.sessionId)
+        const parsed = await readSessionLog(target.logPath)
+        const entry = parsed.events.find((e) => e.seq === p.seq)
+        if (!entry) {
+          socket.emit('server:log_artifact', { sessionId: p.sessionId, seq: p.seq, error: 'event not found' })
+          return
+        }
+        const payload: { effects?: unknown; llmTrace?: unknown } = {}
+        if (entry.effectsArtifact) {
+          payload.effects = await readJsonLogArtifact(target.logPath, entry.effectsArtifact.path)
+        }
+        if (entry.llmTraceArtifact) {
+          payload.llmTrace = await readJsonLogArtifact(target.logPath, entry.llmTraceArtifact.path)
+        } else if (entry.llmTrace) {
+          payload.llmTrace = entry.llmTrace
+        }
+        socket.emit('server:log_artifact', {
+          sessionId: p.sessionId,
+          seq: p.seq,
+          ...(payload.effects ? { effects: payload.effects as never } : {}),
+          ...(payload.llmTrace ? { llmTrace: payload.llmTrace as never } : {}),
+        })
+      } catch (err) {
+        socket.emit('server:log_artifact', {
+          sessionId: p.sessionId,
+          seq: p.seq,
+          error: err instanceof Error ? err.message : String(err),
+        })
       }
     })
 
@@ -1016,6 +1056,15 @@ async function validateDirectoryExists(
 async function broadcastSessionList(deps: DashboardDeps): Promise<void> {
   const sessions = await deps.store.listSummaries()
   deps.dashboardNs.emit('server:sessions', { sessions })
+}
+
+async function readJsonLogArtifact(logPath: string, refPath: string): Promise<unknown> {
+  const base = dirname(logPath)
+  const resolved = resolvePath(base, refPath)
+  if (resolved !== base && !resolved.startsWith(base + sep)) {
+    throw new Error('artifact path escapes session directory')
+  }
+  return JSON.parse(await readFile(resolved, 'utf8'))
 }
 
 export function readyEventFor(

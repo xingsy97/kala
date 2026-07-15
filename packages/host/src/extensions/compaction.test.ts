@@ -299,8 +299,7 @@ describe('compaction extension', () => {
 
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     const compactEntry = parsed.events.find((e) => e.event.kind === 'compact_replaced')
-    expect(compactEntry?.llmTrace?.model).toBe('gpt-compact-test')
-    expect(compactEntry?.llmTrace?.response?.metrics?.durationMs).toBe(1234)
+    expect(compactEntry?.llmTraceArtifact?.path).toContain('llm-traces')
     expect(compactEntry?.model).toBe('gpt-compact-test')
   })
 

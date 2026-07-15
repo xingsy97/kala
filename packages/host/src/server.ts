@@ -32,6 +32,7 @@ import type { HookConfig, HookPayload, HookRunner } from './extensions/hooks.js'
 import { selectHooks } from './extensions/hooks.js'
 import { createSkillManager, defaultSkillRoots, discoverSkills, type SkillManager, type SkillRegistry } from './extensions/skills.js'
 import { SessionStore, type SessionRecord } from './store/session.js'
+import { slimEffect } from './store/log.js'
 import { WorkspaceAliasStore } from './store/workspace-alias.js'
 import {
   createExecutorRegistry,
@@ -286,13 +287,16 @@ export async function startHostServer(
   const broadcast: LoopBroadcast = {
     onEvent(sessionId, seq, event, effects, state, llmTrace, model) {
       const room = `session:${sessionId}`
+      const slimEffects = effects.map(slimEffect)
+      const hasEffectsArtifact = effects.some((effect) => effect.kind === 'call_llm')
       io.of('/dashboard').to(room).emit('event:appended', {
         sessionId,
         seq,
         ts: new Date().toISOString(),
         event,
-        effects,
-        ...(llmTrace ? { llmTrace } : {}),
+        effects: slimEffects,
+        ...(hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+        ...(llmTrace ? { hasLlmTraceArtifact: true } : {}),
         ...(model ? { model } : {}),
       })
       io.of('/dashboard').to(room).emit('state:changed', {
@@ -305,8 +309,9 @@ export async function startHostServer(
         seq,
         ts: new Date().toISOString(),
         event,
-        effects,
-        ...(llmTrace ? { llmTrace } : {}),
+        effects: slimEffects,
+        ...(hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
+        ...(llmTrace ? { hasLlmTraceArtifact: true } : {}),
         ...(model ? { model } : {}),
       })
       io.of('/executor').to(room).emit('state:changed', {

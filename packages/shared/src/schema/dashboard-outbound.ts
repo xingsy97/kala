@@ -47,6 +47,7 @@ import type {
   ServerExecutorInvitesPayload,
   ServerExecutorsPayload,
   ServerHistoryPayload,
+  ServerLogArtifactPayload,
   ServerMessageQueueEvent,
   ServerModelsPayload,
   ServerSessionDeletedPayload,
@@ -155,9 +156,19 @@ export const EventAppendedEventSchema = z.object({
   ts: z.string(),
   event: AgentEventSchema,
   effects: z.array(EffectSchema),
+  hasEffectsArtifact: z.boolean().optional(),
+  hasLlmTraceArtifact: z.boolean().optional(),
   llmTrace: LLMTraceSchema.optional(),
   model: z.string().optional(),
 }) satisfies z.ZodType<EventAppendedEvent>
+
+export const ServerLogArtifactPayloadSchema = z.object({
+  sessionId: z.string(),
+  seq: z.number().int().nonnegative(),
+  effects: z.array(EffectSchema).optional(),
+  llmTrace: LLMTraceSchema.optional(),
+  error: z.string().optional(),
+}) satisfies z.ZodType<ServerLogArtifactPayload>
 
 const SessionErrorScopeSchema = z.enum(
   SESSION_ERROR_SCOPES as unknown as [SessionErrorScope, ...SessionErrorScope[]],
@@ -657,7 +668,7 @@ export const HeaderEntrySchema = z.object({
   workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
   initialCwd: z.string().optional(),
-  formatVersion: z.literal(1),
+  formatVersion: z.literal(2),
   kernelVersion: z.string(),
   config: AgentConfigSchema,
   initialState: AgentStateSchema,
@@ -670,7 +681,9 @@ export const EventEntrySchema = z.object({
   event: AgentEventSchema,
   effects: z.array(EffectSchema),
   usage: UsageTotalSchema.optional(),
+  effectsArtifact: z.object({ path: z.string(), bytes: z.number(), sha256: z.string() }).optional(),
   llmTrace: LLMTraceSchema.optional(),
+  llmTraceArtifact: z.object({ path: z.string(), bytes: z.number(), sha256: z.string() }).optional(),
   model: z.string().optional(),
 }) satisfies z.ZodType<EventEntry>
 

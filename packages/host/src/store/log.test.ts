@@ -100,14 +100,17 @@ describe('readSessionLog', () => {
     expect(raw).not.toContain('test-redacted-api-key')
     expect(raw).not.toContain('anthropic-secret')
     expect(raw).not.toContain('body-secret')
-    expect(raw).toContain('https://<redacted>/v1/chat/completions')
 
     const parsed = await readSessionLog(path)
     const entry = parsed.events[0]!
     expect(entry.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
-    expect(entry.llmTrace?.request.headers.authorization).toBe('[redacted]')
-    expect(entry.llmTrace?.request.headers['x-api-key']).toBe('[redacted]')
-    expect(entry.llmTrace?.request.headers['content-type']).toBe('application/json')
+    expect(entry.llmTrace?.request.body).toBeUndefined()
+    expect(entry.llmTraceArtifact?.path).toContain('llm-traces')
+    const trace = JSON.parse(await readFile(join(dir, entry.llmTraceArtifact!.path), 'utf8'))
+    expect(trace.request.url).toBe('https://<redacted>/v1/chat/completions')
+    expect(trace.request.headers.authorization).toBe('[redacted]')
+    expect(trace.request.headers['x-api-key']).toBe('[redacted]')
+    expect(trace.request.headers['content-type']).toBe('application/json')
   })
 
   it('recovers from a truncated final line (crash mid-append)', async () => {

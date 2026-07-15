@@ -379,10 +379,8 @@ describe('host loop', () => {
     const parsed = await readSessionLog(store.get(sessionId)!.logPath)
     const response = parsed.events.find((entry) => entry.event.kind === 'llm_response')
     expect(response?.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
-    expect(response?.llmTrace?.request.headers.authorization).toBe('[redacted]')
-    expect(response?.llmTrace?.request.headers['x-api-key']).toBe('[redacted]')
-    expect(JSON.stringify(response?.llmTrace)).not.toContain('api.example.test')
-    expect(JSON.stringify(response?.llmTrace)).not.toContain('test-redacted-api-key')
+    expect(response?.llmTrace?.request.body).toBeUndefined()
+    expect(response?.llmTraceArtifact?.path).toContain('llm-traces')
     expect(response?.model).toBe('gpt-5.5')
     expect(seen).toHaveLength(1)
     expect(seen[0]?.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
@@ -598,12 +596,10 @@ describe('host loop', () => {
     expect(toolDescriptions[0]).toContain('<available_skills />')
     expect(toolDescriptions[1]).toContain('<name>fresh-skill</name>')
     const parsed = await readSessionLog(record.logPath)
-    const secondCallLlm = parsed.events
-      .flatMap((entry) => entry.effects)
-      .filter((effect) => effect.kind === 'call_llm')[1]
-    expect(secondCallLlm?.kind === 'call_llm'
-      ? secondCallLlm.tools.find((tool) => tool.name === 'skill')?.description
-      : '').toContain('<name>fresh-skill</name>')
+    const secondCallLlmEntry = parsed.events.filter((entry) => entry.effects.some((effect) => effect.kind === 'call_llm'))[1]
+    const fullEffects = JSON.parse(await readFile(join(dir, secondCallLlmEntry!.effectsArtifact!.path), 'utf8'))
+    const secondCallLlm = fullEffects.find((effect: { kind: string }) => effect.kind === 'call_llm')
+    expect(secondCallLlm.tools.find((tool: { name: string }) => tool.name === 'skill')?.description).toContain('<name>fresh-skill</name>')
   })
 
   it('translates LLM throw into llm_error event', async () => {
@@ -2143,7 +2139,7 @@ describe('SessionStore', () => {
     const rec = await store.create({ config: cfg, sessionId: 'abc' })
     const parsed = await readSessionLog(rec.logPath)
     expect(parsed.header.sessionId).toBe('abc')
-    expect(parsed.header.formatVersion).toBe(1)
+    expect(parsed.header.formatVersion).toBe(2)
     expect(parsed.events).toHaveLength(0)
   })
 
