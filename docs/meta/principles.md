@@ -2,7 +2,7 @@
 
 These are hard constraints. Any new PR that violates one of them is considered incomplete and must be revised before merging. Each principle maps to at least one lint, test, or e2e enforcement so it can be checked mechanically.
 
-Read before starting work; self-check after writing; use as a review checklist.
+Read before starting work; self-check after writing; use this as a review checklist.
 
 ---
 
@@ -13,6 +13,7 @@ Read before starting work; self-check after writing; use as a review checklist.
 Server absolute paths, artifact hashes, JSONL filenames, and raw `instance_id` strings must not appear in the main dashboard UI. They may only appear inside an explicit `<details>` "Show technical details" fold.
 
 **Enforcement**:
+
 - `packages/dashboard/scripts/verify-visual-pages.mjs` scans each page's main-body DOM: matches for `/\/home\//`, `/\/tmp\//`, `/\.agent-kernel/`, `/\.jsonl\b/` cause a failure.
 - The only allowed exceptions are the Artifacts page Raw JSON viewer and content inside an explicit `<details>` element.
 
@@ -20,21 +21,21 @@ Server absolute paths, artifact hashes, JSONL filenames, and raw `instance_id` s
 
 UI copy must answer "what is the user trying to do at this step", not "which internal component is being invoked".
 
-**Enforcement**: on review, cross-check `resources.ts` against the rename table in [../planning/roadmap-notes/product-polish.md](../planning/roadmap-notes/product-polish.md); internal vocabulary such as `executor`, `predictions`, `ingest`, `patchesDir` appearing in the default view DOM causes a failure.
+**Enforcement**: on review, cross-check `resources.ts` against the rename table in [../planning/roadmap-notes/product-polish.md](../planning/roadmap-notes/product-polish.md); internal vocabulary such as `executor`, `predictions`, `ingest`, or `patchesDir` appearing in the default view DOM causes a failure.
 
 ### A3. Distinct vocabulary per state transition
 
 Each layer of state transition must use its own vocabulary; do not reuse a term from a higher layer:
 
-- `prediction ready` ≠ `patch applies` ≠ `tests passed` ≠ `resolved`
-- Only SWE-bench uses `resolved`. Terminal-Bench uses `resolved/unresolved` but must annotate the source parser. WebArena uses `score`. τ-bench uses `reward`.
+- `prediction ready` is distinct from `patch applies`, `tests passed`, and `resolved`.
+- Only SWE-bench uses `resolved`. Terminal-Bench uses `resolved/unresolved` but must annotate the source parser. WebArena uses `score`. Tau-bench uses `reward`.
 - `resolved` may only appear after Import Results has completed.
 
-**Enforcement**: `BenchmarksPage.test.tsx` asserts that when the state is `Run Agent completed`, the DOM does not contain the word `resolved`. The benchmark copy matrix test asserts Terminal-Bench does not surface `Official Score`, WebArena does not surface `resolved`, and τ-bench does not surface `Required actions` (except when `ACTION` is in the reward basis).
+**Enforcement**: `BenchmarksPage.test.tsx` asserts that when the state is `Run Agent completed`, the DOM does not contain the word `resolved`. The benchmark copy matrix test asserts Terminal-Bench does not surface `Official Score`, WebArena does not surface `resolved`, and Tau-bench does not surface `Required actions` except when `ACTION` is in the reward basis.
 
 ### A4. English and Chinese kept in sync
 
-Every new UI string must be added in both `en` and `zh`.
+Every new UI string must be added in both `en` and `zh` locale resources.
 
 **Enforcement**: a structure test in `resources.ts` asserts that the `en` and `zh` key sets are exactly equal; a single-language PR fails CI.
 
@@ -46,13 +47,13 @@ After writing UI copy, re-read it as a reader with no prior context. If a phrase
 
 ---
 
-## B. Ground-truth
+## B. Ground truth
 
 ### B1. UI changes must be exercised by a headless browser
 
-Any PR that touches the dashboard must be exercised by puppeteer or playwright and produce a screenshot. HTTP probes, unit tests, and typechecks are not equivalent evidence.
+Any PR that touches the dashboard must be exercised by Puppeteer or Playwright and produce a screenshot. HTTP probes, unit tests, and typechecks are not equivalent evidence.
 
-**Enforcement**: `scripts/verify-wizard-e2e.mjs` and the follow-up `verify-visual-pages.mjs`, `verify-benchmarks-page.mjs`, `verify-operations-page.mjs` are gates. The PR description must include the screenshot path.
+**Enforcement**: `scripts/verify-wizard-e2e.mjs` and the follow-up `verify-visual-pages.mjs`, `verify-benchmarks-page.mjs`, and `verify-operations-page.mjs` are gates. The PR description must include the screenshot path.
 
 ### B2. Default choices must be exercised end-to-end
 
@@ -68,9 +69,9 @@ Every default value in the UI must be exercised in CI or an e2e run and must suc
 
 ### B4. Progress visibility
 
-Any operation longer than 3 seconds must have UI progress feedback that includes three elements: what is being processed now, total count, completed count. A `progress.json` file that the frontend does not read does not count.
+Any operation longer than 3 seconds must have UI progress feedback that includes three elements: what is being processed now, total count, and completed count. A `progress.json` file that the frontend does not read does not count.
 
-**Enforcement**: e2e coverage of "click Run → within 3s a progress element appears in the page"; every long-running backend task has a `progress.json` and a corresponding frontend hook.
+**Enforcement**: e2e coverage of "click Run -> within 3s a progress element appears in the page"; every long-running backend task has a `progress.json` and a corresponding frontend hook.
 
 ---
 
@@ -78,7 +79,7 @@ Any operation longer than 3 seconds must have UI progress feedback that includes
 
 ### C1. Modal vs page
 
-If a user will spend more than a few minutes, compare multiple objects, or return later — any one of those means it must be a page, not a modal. Only when all three are false is a modal appropriate.
+If a user will spend more than a few minutes, compare multiple objects, or return later, any one of those means it must be a page, not a modal. Only when all three are false is a modal appropriate.
 
 **Enforcement**: any new dialog PR must answer these three questions in its description; violations get reverted.
 
@@ -90,7 +91,7 @@ Every step's output panel must follow an `Input / Action / Output` structure. Te
 
 ### C3. Visual consistency
 
-No card-in-card. No native scrollbars. No long explanatory prose inside the main workflow area (fold it or move it to a tooltip).
+No card-in-card. No native scrollbars. No long explanatory prose inside the main workflow area; fold it or move it to a tooltip.
 
 **Enforcement**: `verify-visual-pages.mjs` takes screenshots for comparison; native scrollbars are detected via computed style.
 
@@ -98,13 +99,13 @@ No card-in-card. No native scrollbars. No long explanatory prose inside the main
 
 Every page must have a sticky header. Every major page state must be deep-linkable so a refresh returns the user to the same run, artifact, or executor.
 
-**Enforcement**: page-level e2e that exercises "load hash directly → restore the correct state".
+**Enforcement**: page-level e2e that exercises "load hash directly -> restore the correct state".
 
 ### C5. Accessibility and responsive design
 
 - Icon-only actions must have a tooltip or aria-label.
 - Primary navigation must have both an icon and a text label.
-- Layout: 3-column at 1024+; 2-column at 768–1023; Inspector becomes a drawer below 768.
+- Layout: 3-column at 1024+; 2-column at 768-1023; Inspector becomes a drawer below 768.
 
 **Enforcement**: Playwright screenshots cover desktop and mobile viewports; an aria-label lint runs on the DOM.
 
@@ -126,29 +127,29 @@ Write the concrete implementation first. Extract a shared interface only after a
 
 ### D3. No unneeded error handling
 
-Validate only at system boundaries (user input, external APIs); trust framework guarantees internally. Defensive fallbacks, feature flags, and backwards-compatibility shims are prohibited.
+Validate only at system boundaries: user input and external APIs. Trust framework guarantees internally. Defensive fallbacks, feature flags, and backwards-compatibility shims are prohibited unless a boundary contract explicitly requires them.
 
 ### D4. No "what" comments
 
-Comments describe non-obvious "why": hidden constraints, subtle invariants, workarounds, surprising behavior. A comment such as `// increment i` should be deleted on review.
+Comments describe non-obvious "why": hidden constraints, subtle invariants, workarounds, and surprising behavior. A comment such as `// increment i` should be deleted on review.
 
 **Enforcement**: enforced during review.
 
 ### D5. Cross-cutting capabilities do not enter the core state machine
 
-Authentication, audit, notifications, hooks, internal RPC, benchmark ops, and similar cross-cutting concerns must live at the host boundary or in an extension layer. They must not pollute the kernel reducer or the core state machine, which expresses agent execution semantics only. Observation, accountability, UI controls, and external side effects belong in independent modules that subscribe to or wrap the kernel.
+Authentication, audit, notifications, hooks, internal RPC, benchmark operations, and similar cross-cutting concerns must live at the host boundary or in an extension layer. They must not pollute the kernel reducer or the core state machine, which expresses agent execution semantics only. Observation, accountability, UI controls, and external side effects belong in independent modules that subscribe to or wrap the kernel.
 
 **Enforcement**: any new `AgentEvent` variant or reducer branch must document why it is agent transcript semantics rather than a host or control-plane event.
 
 ### D6. Executor performs environment adaptation only
 
-The executor wire protocol does not carry `kernel` / `direct` / `internal` mode. The executor executes `tool:call` and returns the result. Whether that result enters the message list, session JSONL, audit log, or dashboard RPC response is a host decision.
+The executor wire protocol does not carry `kernel`, `direct`, or `internal` mode. The executor executes `tool:call` and returns the result. Whether that result enters the message list, session JSONL, audit log, or dashboard RPC response is a host decision.
 
-**Enforcement**: `ToolCallMessage` must not contain fields such as `dispatchMode` / `directMode`; executor code must not branch on the transcript destination of a tool result.
+**Enforcement**: `ToolCallMessage` must not contain fields such as `dispatchMode` or `directMode`; executor code must not branch on the transcript destination of a tool result.
 
 ### D7. Audit log and session JSONL have distinct roles
 
-The session JSONL is the agent execution trace and replay log. The audit log is a control-plane accountability log. The audit log records actor, action, target, outcome, summary metadata, and reference IDs (`sessionId`, `sessionSeq`, `callId`, artifact URIs). It does not duplicate full LLM bodies, full user messages, or full tool outputs.
+The session JSONL is the agent execution trace and replay log. The audit log is a control-plane accountability log. The audit log records actor, action, target, outcome, summary metadata, and reference IDs such as `sessionId`, `sessionSeq`, `callId`, and artifact URIs. It does not duplicate full LLM bodies, full user messages, or full tool outputs.
 
 **Enforcement**: when introducing an audit event, check whether a session JSONL source of truth already exists; reference it rather than copying the payload.
 
@@ -170,17 +171,17 @@ Twelve design documents is the ceiling. Additional design ideas go under `docs/p
 
 A design document with no corresponding code after two weeks is deleted or downgraded to an issue.
 
-**Enforcement**: `scripts/verify-doc-code-binding.mjs` (to be added) scans the frontmatter of each `docs/planning/enhancement/*.md` for a `commit:` field.
+**Enforcement**: `scripts/verify-doc-code-binding.mjs` should scan the frontmatter of each `docs/planning/enhancement/*.md` for a `commit:` field.
 
 ---
 
 ## F. Non-goals
 
 - **F1** No standalone sandbox executor abstraction layer.
-- **F2** No pure-infrastructure direction (HDFS / Kubernetes / MQ). This project is a product plus evaluation platform, and infrastructure work does not belong here.
+- **F2** No pure-infrastructure direction such as HDFS, Kubernetes, or MQ. This project is a product plus evaluation platform; infrastructure work does not belong here.
 - **F3** No mock-first implementations or placeholder stubs.
 - **F4** No new `docs/planning/enhancement/*.md`.
-- **F5** No OSWorld-class desktop or computer-use benchmarks. They are not in the first four benchmarks and are too GUI/VM-heavy for the executor + browser + tool-protocol thread.
+- **F5** No OSWorld-class desktop or computer-use benchmarks. They are not in the first benchmark set and are too GUI/VM-heavy for the executor plus browser plus tool-protocol path.
 
 ---
 
@@ -190,9 +191,9 @@ A design document with no corresponding code after two weeks is deleted or downg
 
 Each entry is a single line no longer than 150 characters; the substantive content lives in a separate memory file.
 
-### G2. Web search uses Serper
+### G2. Web search uses Serper when freshness is required
 
-When a web search is needed, use the Serper API (key in `~/.claude/secrets.env`), not the built-in `WebSearch` tool.
+When a fresh web search is needed, use the configured Serper API rather than relying on stale local knowledge.
 
 ---
 
@@ -206,7 +207,7 @@ Before merging a PR:
 - [ ] `en` and `zh` updated together (A4)
 - [ ] UI changes include a headless-browser screenshot (B1)
 - [ ] Default choices are exercised in e2e (B2)
-- [ ] No `mock` / `fake` / `TODO-replace` on the production path (B3)
+- [ ] No `mock`, `fake`, or `TODO-replace` on the production path (B3)
 - [ ] Operations longer than 3 seconds have frontend progress feedback (B4)
 - [ ] Dialog vs page decision is justified (C1)
 - [ ] StepCard structure is three-section (C2)
