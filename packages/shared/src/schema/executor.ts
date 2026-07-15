@@ -154,7 +154,7 @@ export const ToolCallMessageSchema = z.object({
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
   cwd: z.string().optional(),
-  timeoutMs: z.number().int().nonnegative().optional(),
+  ackTimeoutMs: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<ToolCallMessage>
 
 export const ToolCancelMessageSchema = z.object({

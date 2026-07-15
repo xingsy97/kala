@@ -824,7 +824,7 @@ export type ToolCallMessage = {
   name: string
   input: Record<string, unknown>
   cwd?: string
-  timeoutMs?: number
+  ackTimeoutMs?: number
 }
 
 export type ToolCancelMessage = {

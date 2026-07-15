@@ -79,6 +79,22 @@ describe('bash', () => {
     expect(out).toContain('killed after 200ms (timeout)')
   })
 
+  it('honours timeout_seconds from the public tool schema', async () => {
+    const out = await bashTool.run(
+      { command: 'sleep 5', timeout_seconds: 1 },
+      makeCtx(root),
+    )
+    expect(out).toContain('killed after 1000ms (timeout)')
+  })
+
+  it('honours timeout_ms for older recorded tool calls', async () => {
+    const out = await bashTool.run(
+      { command: 'sleep 5', timeout_ms: 200 },
+      makeCtx(root),
+    )
+    expect(out).toContain('killed after 200ms (timeout)')
+  })
+
   it('rejects cwd outside the workspace', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'ak-bash-out-'))
     try {

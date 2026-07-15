@@ -50,7 +50,7 @@ import type {
 import type { ToolDispatcher } from '../loop.js'
 import type { AuditLogger } from '../audit-log.js'
 
-export const DEFAULT_TOOL_TIMEOUT_MS = 60_000
+export const DEFAULT_TOOL_ACK_TIMEOUT_MS = 60_000
 
 /**
  * How long to hold a detached executor's pending calls and its "attached"
@@ -119,7 +119,7 @@ export type ExecutorRegistry = ToolDispatcher & ExecutorLookup & {
 export function createExecutorRegistry(
   _io: Server,
   resolver: WorkspaceResolver,
-  toolTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS,
+  toolAckTimeoutMs = DEFAULT_TOOL_ACK_TIMEOUT_MS,
   audit?: AuditLogger,
   detachGraceMs = DETACH_GRACE_MS,
 ): ExecutorRegistry {
@@ -181,14 +181,15 @@ export function createExecutorRegistry(
   function redispatchPending(oldBind: Bind, newBind: Bind): void {
     for (const p of oldBind.pending.values()) {
       clearTimeout(p.timer)
+      const ackTimeoutMs = ackTimeoutMsFor(p.name, p.input, toolAckTimeoutMs)
       const timer = setTimeout(() => {
         if (newBind.pending.delete(p.callId)) {
           p.resolve({
             ok: false,
-            content: `tool call timed out after ${toolTimeoutMs}ms (post-reconnect)`,
+            content: `tool call ack timed out after ${ackTimeoutMs}ms (post-reconnect)`,
           })
         }
-      }, toolTimeoutMs)
+      }, ackTimeoutMs)
       newBind.pending.set(p.callId, {
         sessionId: p.sessionId,
         callId: p.callId,
@@ -206,7 +207,7 @@ export function createExecutorRegistry(
           name: p.name,
           input: p.input,
           ...(p.cwd !== undefined ? { cwd: p.cwd } : {}),
-          timeoutMs: toolTimeoutMs,
+          ackTimeoutMs,
         },
         (ack: ToolResultAck) => {
           const pending = newBind.pending.get(ack.callId)
@@ -285,9 +286,9 @@ export function createExecutorRegistry(
     return new Promise<T>((resolve) => {
       const callId = `direct-${Math.random().toString(36).slice(2, 10)}`
       const timer = setTimeout(() => {
-        resolve(onError(`${name} timed out after ${toolTimeoutMs}ms`))
+        resolve(onError(`${name} ack timed out after ${toolAckTimeoutMs}ms`))
         audit?.log({ action: 'internal_tool.result', actor: { kind: 'system' }, target: { workspaceId, callId, toolName: name }, outcome: 'error', error: 'timeout' })
-      }, toolTimeoutMs)
+      }, toolAckTimeoutMs)
       // sessionId here is a routing convenience for executor-side overflow
       // paths and audit correlation. It never mutates a real session.
       bind.socket.emit(
@@ -297,7 +298,7 @@ export function createExecutorRegistry(
           callId,
           name,
           input,
-          timeoutMs: toolTimeoutMs,
+          ackTimeoutMs: toolAckTimeoutMs,
         },
         (ack: ToolResultAck) => {
           clearTimeout(timer)
@@ -452,6 +453,7 @@ export function createExecutorRegistry(
       const picked = pickBindFor(sessionId)
       if (!picked.ok) return { ok: false, content: picked.reason }
       const bind = picked.bind
+      const ackTimeoutMs = ackTimeoutMsFor(eff.name, eff.input, toolAckTimeoutMs)
       audit?.log({ action: 'tool.dispatch', actor: { kind: 'system' }, target: { sessionId, workspaceId: bind.announcement.workspaceId, callId: eff.callId, toolName: eff.name }, outcome: 'ok', metadata: { cwd: eff.cwd } })
       return await new Promise<{ ok: boolean; content: string }>((resolve) => {
         const timer = setTimeout(() => {
@@ -459,10 +461,10 @@ export function createExecutorRegistry(
             audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId, callId: eff.callId, toolName: eff.name }, outcome: 'error', error: 'timeout' })
             resolve({
               ok: false,
-              content: `tool call timed out after ${toolTimeoutMs}ms`,
+              content: `tool call ack timed out after ${ackTimeoutMs}ms`,
             })
           }
-        }, toolTimeoutMs)
+        }, ackTimeoutMs)
         bind.pending.set(eff.callId, {
           sessionId,
           callId: eff.callId,
@@ -480,7 +482,7 @@ export function createExecutorRegistry(
             name: eff.name,
             input: eff.input,
             ...(eff.cwd !== undefined ? { cwd: eff.cwd } : {}),
-            timeoutMs: toolTimeoutMs,
+            ackTimeoutMs,
           },
           (ack: ToolResultAck) => {
             const pending = bind.pending.get(ack.callId)
@@ -742,4 +744,26 @@ export function createExecutorRegistry(
       }
     },
   }
+}
+
+function ackTimeoutMsFor(
+  toolName: string,
+  input: Record<string, unknown>,
+  defaultAckTimeoutMs: number,
+): number {
+  if (toolName !== 'bash') return defaultAckTimeoutMs
+  if (input['run_in_background'] === true) return defaultAckTimeoutMs
+  const toolTimeoutMs = bashToolTimeoutMs(input)
+  if (toolTimeoutMs === undefined) return defaultAckTimeoutMs
+  return Math.max(defaultAckTimeoutMs, toolTimeoutMs + Math.min(Math.max(Math.round(toolTimeoutMs * 0.1), 5_000), 60_000))
+}
+
+function bashToolTimeoutMs(input: Record<string, unknown>): number | undefined {
+  const seconds = positiveInt(input['timeout_seconds']) ?? positiveInt(input['timeoutSeconds'])
+  if (seconds !== undefined) return seconds * 1000
+  return positiveInt(input['timeout_ms']) ?? positiveInt(input['timeoutMs'])
+}
+
+function positiveInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
 }

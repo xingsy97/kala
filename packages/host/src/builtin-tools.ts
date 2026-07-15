@@ -132,8 +132,8 @@ const shellToolset: ToolsetPlugin = {
       tool('bash', 'executor', 'shell', true, 'bash', {
         purpose: 'Run a bash command inside the executor sandbox. Captures stdout and stderr up to 1MB.',
         whenToUse: ['Run tests, builds, linters, package scripts, or precise shell inspections.', 'Use background mode for long-running commands.'],
-        constraints: ['Avoid destructive commands unless explicitly requested.', 'Use timeouts appropriate to the command.'],
-      }, { type: 'object', required: ['command'], properties: { command: { type: 'string' }, timeout_ms: { type: 'integer', minimum: 1 }, run_in_background: { type: 'boolean' } } }),
+        constraints: ['Avoid destructive commands unless explicitly requested.', 'Set timeout_seconds to the expected command duration for foreground commands.', 'Use run_in_background for long-running commands, servers, experiments, or commands that need polling.'],
+      }, { type: 'object', required: ['command'], properties: { command: { type: 'string' }, timeout_seconds: { type: 'integer', minimum: 1, description: 'Maximum foreground command runtime in seconds. Pick a value appropriate to the command.' }, run_in_background: { type: 'boolean' } } }),
       tool('bash_output', 'executor', 'shell', false, 'bash_output', {
         purpose: 'Read output from a background bash task by task_id.',
         whenToUse: ['Poll long-running tests, builds, dev servers, or experiments.'],

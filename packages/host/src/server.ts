@@ -36,7 +36,7 @@ import { slimEffect } from './store/log.js'
 import { WorkspaceAliasStore } from './store/workspace-alias.js'
 import {
   createExecutorRegistry,
-  DEFAULT_TOOL_TIMEOUT_MS,
+  DEFAULT_TOOL_ACK_TIMEOUT_MS,
 } from './connection/executor.js'
 import {
   configureDashboardNamespace,
@@ -134,7 +134,7 @@ export async function startHostServer(
   const executors = createExecutorRegistry(
     io,
     { workspaceIdFor: (sid) => store.get(sid)?.workspaceId },
-    options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+    options.toolTimeoutMs ?? DEFAULT_TOOL_ACK_TIMEOUT_MS,
     audit,
     options.detachGraceMs,
   )
