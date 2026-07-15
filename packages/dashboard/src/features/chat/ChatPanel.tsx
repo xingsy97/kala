@@ -552,7 +552,7 @@ function collectTranscriptToolActivity(
   }
 
   const toolNames = new Set(calls.map((call) => call.name))
-  if (calls.length < 4 || toolNames.size <= 1 || firstMessageIndex === null) return null
+  if (calls.length < 2 || toolNames.size <= 1 || firstMessageIndex === null) return null
 
   return {
     group: makeToolCallGroup(calls, resultsByCallId, true),

@@ -820,13 +820,13 @@ describe('ChatPanel', () => {
 
     render(<ChatPanel items={visibleTranscript([], timeline, '')} />)
 
-    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.getAllByText('Tool activity')).toHaveLength(2)
     expect(screen.getByText('checking next')).toBeTruthy()
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
-    expect(screen.getByTestId('tool-call-group-c4')).toBeTruthy()
+    expect(screen.getByTestId('tool-call-group-c3')).toBeTruthy()
   })
 
-  it('keeps short mixed tool runs as separate compact rows', () => {
+  it('collapses short mixed tool runs into one activity block', () => {
     render(
       <ChatPanel
         messages={[
@@ -841,11 +841,27 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.getByText('Tool activity')).toBeTruthy()
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
-    expect(screen.getByTestId('tool-call-group-c2')).toBeTruthy()
-    expect(screen.getByText('read')).toBeTruthy()
-    expect(screen.getByText('bash')).toBeTruthy()
+    expect(screen.getByText('2 ops')).toBeTruthy()
+    expect(screen.getByText(/read 1, bash 1/)).toBeTruthy()
+  })
+
+  it('collapses short mixed tool activity split across timeline items', () => {
+    const timeline: TimelineEntry[] = [
+      toolCallEntry(1, 'c1', 'grep', { pattern: 'foo', path: '/repo' }),
+      toolResultEntry(2, 'c1', true, 'hit'),
+      toolCallEntry(3, 'c2', 'read', { path: '/repo/a.ts' }),
+      toolResultEntry(4, 'c2', true, 'file'),
+    ]
+
+    render(<ChatPanel items={visibleTranscript([], timeline, '')} />)
+
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.getByText('2 ops')).toBeTruthy()
+    expect(screen.getByText(/grep 1, read 1/)).toBeTruthy()
+    expect(screen.queryByText('Tool result')).toBeNull()
   })
 
   it('renders empty state end-to-end for an ephemeral session (system prompt only, no timeline)', () => {

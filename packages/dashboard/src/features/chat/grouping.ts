@@ -10,10 +10,8 @@ import type {
  * consecutive tool_call blocks inside one assistant message.content, and hides
  * tool_result blocks that belong to grouped calls.
  *
- * Short mixed runs stay as individual single-tool rows so the transcript keeps
- * enough immediate context. Larger mixed runs become one activity block; the UI
- * then summarizes lifecycle, tool mix, and per-call detail without changing the
- * protocol transcript.
+ * Mixed runs become one activity block; the UI then summarizes lifecycle, tool
+ * mix, and per-call detail without changing the protocol transcript.
  */
 export type ToolCallGroup = {
   kind: 'tool_call_group'
@@ -48,7 +46,7 @@ export function groupConsecutiveToolCalls(
     const run = content.slice(i, j) as ToolCallContent[]
 
     const toolNames = new Set(run.map((call) => call.name))
-    if (run.length >= 4 && toolNames.size > 1) {
+    if (run.length > 1 && toolNames.size > 1) {
       out.push(makeToolCallGroup(run, resultsByCallId, true))
     } else {
       let k = 0
