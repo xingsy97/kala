@@ -397,7 +397,10 @@ export function ChatPanel({
     <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
       <div className="relative flex h-full w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
         {loading ? (
-          <TranscriptLoadingState />
+          <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+            <TranscriptLoadingState />
+            {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
+          </div>
         ) : isEmpty ? (
           <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
             <EmptyState onSuggest={onSuggest} />

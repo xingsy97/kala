@@ -47,6 +47,23 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
+  it('keeps the thinking row visible while the transcript skeleton is loading', () => {
+    render(
+      <ChatPanel
+        loading
+        messages={[]}
+        footerSlot={(
+          <InlineStatusRow
+            state={{ ...createInitialState({}), status: 'thinking' }}
+            streamingActive={false}
+          />
+        )}
+      />,
+    )
+
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+  })
+
   it('does not render the seed system prompt as a Tool result bubble', () => {
     render(
       <ChatPanel
