@@ -1726,7 +1726,7 @@ function readInitialConfig(): Config {
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
-function NoSessionArea({
+export function NoSessionArea({
   onNewSession,
   hasSessions,
 }: {
@@ -1751,7 +1751,7 @@ function NoSessionArea({
             ? t('app.noSessionWithSessions')
             : t('app.noSessionEmpty')}
         </p>
-        <Button type="button" onClick={onNewSession} data-testid="no-session-new-button">
+        <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
           {t('app.newSessionButton')}
         </Button>
       </div>
