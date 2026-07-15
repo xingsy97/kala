@@ -1474,7 +1474,7 @@ describe('wire protocol', () => {
             },
           }
         }
-        if (call === 2) {
+        if (params.messages.length === 1 && JSON.stringify(params.messages).includes('long child task')) {
           await new Promise<void>((_resolve, reject) => {
             const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
             if (params.signal?.aborted) abort()

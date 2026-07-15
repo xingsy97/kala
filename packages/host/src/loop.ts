@@ -39,7 +39,7 @@ import {
 } from '@agent-kernel/shared/enhancement'
 import type { SessionRecord } from './store/session.js'
 import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
-import { AGENT_TOOL_NAME, interruptSubAgentsForParent, runAgentTool } from './extensions/agent-tool.js'
+import { AGENT_TOOL_NAME, interruptSubAgentsForParent, isCancelledSubAgentChild, runAgentTool } from './extensions/agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
 import { isSkillManager, runSkillTool, SKILL_TOOL_NAME } from './extensions/skills.js'
 import type {
@@ -216,10 +216,15 @@ async function performCallLlm(
   runtime?: LoopRuntime,
 ): Promise<void> {
   const model = deps.models?.get(sessionId)
-  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
-  await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, messages, effect)
   const controller = new AbortController()
   aborts.set(sessionId, controller)
+  const messages = await messagesForLlmCall(deps, sessionId, config, effect.messages, runtime)
+  await maybeWriteMessageAssemblyArtifact(deps, sessionId, model, messages, effect)
+  const live = deps.store.get(sessionId)
+  if (!live || live.state.status !== 'thinking' || controller.signal.aborted || isCancelledSubAgentChild(sessionId)) {
+    if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
+    return
+  }
   // Only ask for token deltas when the broadcast wants them. If no consumer
   // is wired up, we skip streaming entirely — the adapter falls through to
   // the plain buffered path and no partial-message accounting is needed.

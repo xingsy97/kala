@@ -62,6 +62,10 @@ export function activeSubAgentsForParent(parentSessionId: string): readonly Acti
   return [...activeSubAgents.values()].filter((entry) => entry.parentSessionId === parentSessionId)
 }
 
+export function isCancelledSubAgentChild(childSessionId: string): boolean {
+  return [...activeSubAgents.values()].some((entry) => entry.childSessionId === childSessionId && entry.cancelled)
+}
+
 export async function interruptSubAgent(
   deps: HostLoopDeps,
   aborts: Map<string, AbortController>,
@@ -170,16 +174,6 @@ export async function runAgentTool(
   await persistSubAgentPolicyArtifact(deps, parent, child.sessionId, effect.callId, policy)
 
   const startedAt = new Date()
-  deps.broadcast.onSubAgentStarted?.({
-    parentSessionId,
-    parentCallId: effect.callId,
-    childSessionId: child.sessionId,
-    ...(agentType !== undefined ? { agentType } : {}),
-    prompt,
-    ...(model !== undefined ? { model } : {}),
-    startedAt: startedAt.toISOString(),
-  })
-
   const active: ActiveSubAgent = {
     parentSessionId,
     parentCallId: effect.callId,
@@ -189,6 +183,15 @@ export async function runAgentTool(
     cancelled: false,
   }
   activeSubAgents.set(activeKey(parentSessionId, effect.callId), active)
+  deps.broadcast.onSubAgentStarted?.({
+    parentSessionId,
+    parentCallId: effect.callId,
+    childSessionId: child.sessionId,
+    ...(agentType !== undefined ? { agentType } : {}),
+    prompt,
+    ...(model !== undefined ? { model } : {}),
+    startedAt: startedAt.toISOString(),
+  })
 
   const priorModel = model ? deps.models?.get(child.sessionId) : undefined
   if (model && isSettableModelResolver(deps.models)) {
@@ -209,12 +212,14 @@ export async function runAgentTool(
   let dispatchError: string | undefined
   try {
     try {
-      await dispatchOne(
-        deps,
-        child.sessionId,
-        { kind: 'user_message', text: prompt },
-        aborts,
-      )
+      if (!active.cancelled) {
+        await dispatchOne(
+          deps,
+          child.sessionId,
+          { kind: 'user_message', text: prompt },
+          aborts,
+        )
+      }
     } catch (err) {
       dispatchError = err instanceof Error ? err.message : String(err)
     } finally {
