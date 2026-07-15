@@ -6,12 +6,14 @@ import { useBooleanPref } from './prefs.js'
 
 export type DesktopNotificationKind =
   | 'approval_required'
+  | 'waiting_for_user'
   | 'session_error'
   | 'connection_lost'
   | 'workspace_offline'
 
 export const PREF_DESKTOP_NOTIFICATIONS_ENABLED = 'ak-desktop-notifications-enabled'
 export const PREF_DESKTOP_NOTIFICATION_APPROVAL = 'ak-desktop-notification-approval-required'
+export const PREF_DESKTOP_NOTIFICATION_WAITING = 'ak-desktop-notification-waiting-for-user'
 export const PREF_DESKTOP_NOTIFICATION_ERROR = 'ak-desktop-notification-session-error'
 export const PREF_DESKTOP_NOTIFICATION_CONNECTION = 'ak-desktop-notification-connection-lost'
 export const PREF_DESKTOP_NOTIFICATION_WORKSPACE = 'ak-desktop-notification-workspace-offline'
@@ -28,6 +30,12 @@ export const DESKTOP_NOTIFICATION_PREFS: ReadonlyArray<{
     key: PREF_DESKTOP_NOTIFICATION_APPROVAL,
     label: 'Approval required',
     description: 'A tool call is waiting for approve/reject.',
+  },
+  {
+    kind: 'waiting_for_user',
+    key: PREF_DESKTOP_NOTIFICATION_WAITING,
+    label: 'Waiting for you',
+    description: 'The active turn finished and the session is ready for your next input.',
   },
   {
     kind: 'session_error',
@@ -100,6 +108,7 @@ export function useDesktopNotificationPrefs(): DesktopNotificationPrefs {
   const [enabled] = useBooleanPref(PREF_DESKTOP_NOTIFICATIONS_ENABLED, false)
   const [sound] = useBooleanPref(PREF_DESKTOP_NOTIFICATION_SOUND, true)
   const [approval] = useBooleanPref(PREF_DESKTOP_NOTIFICATION_APPROVAL, true)
+  const [waiting] = useBooleanPref(PREF_DESKTOP_NOTIFICATION_WAITING, true)
   const [error] = useBooleanPref(PREF_DESKTOP_NOTIFICATION_ERROR, true)
   const [connection] = useBooleanPref(PREF_DESKTOP_NOTIFICATION_CONNECTION, true)
   const [workspace] = useBooleanPref(PREF_DESKTOP_NOTIFICATION_WORKSPACE, true)
@@ -110,12 +119,13 @@ export function useDesktopNotificationPrefs(): DesktopNotificationPrefs {
       sound,
       byKind: {
         approval_required: approval,
+        waiting_for_user: waiting,
         session_error: error,
         connection_lost: connection,
         workspace_offline: workspace,
       },
     }),
-    [approval, connection, enabled, error, sound, workspace],
+    [approval, connection, enabled, error, sound, waiting, workspace],
   )
 }
 
@@ -150,6 +160,7 @@ export function useInterventionDesktopNotifications({
   sessionLabel,
   pendingApprovalsCount,
   pendingApprovalSummary,
+  waitingForUser,
   lastError,
   connectionStatus,
   workspaceOnline,
@@ -159,6 +170,7 @@ export function useInterventionDesktopNotifications({
   sessionLabel: string
   pendingApprovalsCount: number
   pendingApprovalSummary?: Pick<ApprovalRequiredEvent, 'callId' | 'name'>
+  waitingForUser: boolean
   lastError: SessionErrorEvent | null
   connectionStatus: string
   workspaceOnline: boolean | null
@@ -173,6 +185,7 @@ export function useInterventionDesktopNotifications({
     : `${sessionId}:none`
   const previous = useRef<{
     approvalSig: string
+    waitingForUser: boolean
     errorSig: string
     connectionStatus: string
     workspaceOnline: boolean | null
@@ -182,6 +195,7 @@ export function useInterventionDesktopNotifications({
     const prev = previous.current
     previous.current = {
       approvalSig,
+      waitingForUser,
       errorSig,
       connectionStatus,
       workspaceOnline,
@@ -191,6 +205,12 @@ export function useInterventionDesktopNotifications({
       const tool = pendingApprovalSummary?.name ?? 'tool call'
       sendDesktopNotification(prefs, 'approval_required', 'Approval required', {
         body: `${sessionLabel}: ${tool}${pendingApprovalsCount > 1 ? ` and ${pendingApprovalsCount - 1} more` : ''}`,
+      })
+    }
+
+    if (waitingForUser && prev?.waitingForUser === false) {
+      sendDesktopNotification(prefs, 'waiting_for_user', 'Waiting for you', {
+        body: `${sessionLabel}: ready for your next message`,
       })
     }
 
@@ -224,6 +244,7 @@ export function useInterventionDesktopNotifications({
     pendingApprovalsCount,
     prefs,
     sessionLabel,
+    waitingForUser,
     workspaceLabel,
     workspaceOnline,
   ])

@@ -84,6 +84,7 @@ import { cn } from './lib/utils.js'
 import { withViewTransition } from './lib/viewTransition.js'
 import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
+import type { TimelineEntry } from './session.js'
 import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   PREF_EXPLORER_OPEN,
@@ -286,8 +287,8 @@ export function App(): JSX.Element {
   }, [session.timeline, session.queuedMessages, session.state?.status, session.streamingText])
 
   useEffect(() => {
-    setOptimisticQueuedMessages((prev) => reconcileOptimisticQueuedMessages(prev, session.queuedMessages))
-  }, [session.queuedMessages])
+    setOptimisticQueuedMessages((prev) => reconcileOptimisticQueuedMessages(prev, session.queuedMessages, session.timeline))
+  }, [session.queuedMessages, session.timeline])
 
   const scheduleCompactIdle = (ms: number): void => {
     if (compactResetTimer.current !== null) {
@@ -699,6 +700,12 @@ export function App(): JSX.Element {
     sessionLabel,
     pendingApprovalsCount,
     pendingApprovalSummary: session.pendingApprovals[0],
+    waitingForUser: isWaitingForUserInput({
+      status: session.state?.status,
+      streamingActive: session.streamingText.length > 0,
+      awaitingAck,
+      pendingApprovalsCount,
+    }),
     lastError: session.lastError,
     connectionStatus: session.status,
     workspaceOnline: hasSelectedSession && control.executorsLoaded ? sessionWorkspaceOnline : null,
@@ -1247,6 +1254,7 @@ export function App(): JSX.Element {
                           <>
                             <InlineStatusRow
                               state={session.state}
+                              fallbackStatus={currentSession?.status}
                               streamingActive={session.streamingText.length > 0}
                               awaitingAck={awaitingAck}
                               onCancel={() => {
@@ -1656,6 +1664,21 @@ function sessionActivityStatus({
   return status
 }
 
+function isWaitingForUserInput({
+  status,
+  streamingActive,
+  awaitingAck,
+  pendingApprovalsCount,
+}: {
+  status: import('@agent-kernel/kernel').AgentState['status'] | undefined
+  streamingActive: boolean
+  awaitingAck: boolean
+  pendingApprovalsCount: number
+}): boolean {
+  if (awaitingAck || streamingActive || pendingApprovalsCount > 0) return false
+  return status === 'idle' || status === 'done' || status === 'error'
+}
+
 function mergeOptimisticQueuedMessages(
   serverMessages: readonly QueuedMessagePreview[],
   optimisticMessages: readonly QueuedMessagePreview[],
@@ -1668,13 +1691,33 @@ function mergeOptimisticQueuedMessages(
   ]
 }
 
-function reconcileOptimisticQueuedMessages(
+export function reconcileOptimisticQueuedMessages(
   optimisticMessages: readonly QueuedMessagePreview[],
   serverMessages: readonly QueuedMessagePreview[],
+  timeline: readonly TimelineEntry[] = [],
 ): readonly QueuedMessagePreview[] {
   if (optimisticMessages.length === 0) return optimisticMessages
   const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
-  const next = optimisticMessages.filter((item) => !serverKeys.has(queuedMessageKey(item)))
+  const ackedUserTexts = new Map<string, number[]>()
+  for (const entry of timeline) {
+    if (entry.event.kind !== 'user_message') continue
+    const text = entry.event.text ?? entry.event.content?.map((part) => part.type === 'text' ? part.text : '').join('') ?? ''
+    const ts = Date.parse(entry.ts)
+    const bucket = ackedUserTexts.get(text) ?? []
+    bucket.push(Number.isFinite(ts) ? ts : Number.POSITIVE_INFINITY)
+    ackedUserTexts.set(text, bucket)
+  }
+  const next = optimisticMessages.filter((item) => {
+    if (serverKeys.has(queuedMessageKey(item))) return false
+    const bucket = ackedUserTexts.get(item.text)
+    if (!bucket || bucket.length === 0) return true
+    const createdAt = Date.parse(item.createdAt)
+    const minTs = Number.isFinite(createdAt) ? createdAt : Number.NEGATIVE_INFINITY
+    const index = bucket.findIndex((ts) => ts >= minTs)
+    if (index === -1) return true
+    bucket.splice(index, 1)
+    return false
+  })
   return next.length === optimisticMessages.length ? optimisticMessages : next
 }
 

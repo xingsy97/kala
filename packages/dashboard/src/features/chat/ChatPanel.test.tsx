@@ -6,11 +6,45 @@ import { createInitialState } from '@agent-kernel/kernel'
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
 import { ChatPanel } from './ChatPanel.js'
+import { InlineStatusRow } from './InlineStatusRow.js'
 
 describe('ChatPanel', () => {
   it('renders empty state', () => {
     render(<ChatPanel messages={[]} />)
     expect(screen.getByText(/No messages yet/i)).toBeTruthy()
+  })
+
+  it('renders the thinking status row even when the transcript is empty', () => {
+    render(
+      <ChatPanel
+        messages={[]}
+        footerSlot={(
+          <InlineStatusRow
+            state={{ ...createInitialState({}), status: 'thinking' }}
+            streamingActive={false}
+          />
+        )}
+      />,
+    )
+
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
+  })
+
+  it('renders the thinking row from a fallback status while session state is loading', () => {
+    render(
+      <ChatPanel
+        messages={[]}
+        footerSlot={(
+          <InlineStatusRow
+            state={null}
+            fallbackStatus="thinking"
+            streamingActive={false}
+          />
+        )}
+      />,
+    )
+
+    expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
   it('does not render the seed system prompt as a Tool result bubble', () => {

@@ -31,19 +31,21 @@ export type CompactStatus =
 
 type Props = {
   state: AgentState | null
+  fallbackStatus?: AgentState['status']
   streamingActive: boolean
   awaitingAck?: boolean
   onCancel?: () => void
 }
 
-export function InlineStatusRow({ state, streamingActive, awaitingAck, onCancel }: Props): JSX.Element | null {
-  if (state) {
-    switch (state.status) {
+export function InlineStatusRow({ state, fallbackStatus, streamingActive, awaitingAck, onCancel }: Props): JSX.Element | null {
+  const status = state?.status ?? fallbackStatus
+  if (status) {
+    switch (status) {
       case 'thinking':
         if (streamingActive) return null
         return <ThinkingRow onCancel={onCancel} />
       case 'executing_tools':
-        return <ToolsRow calls={state.pendingCalls} onCancel={onCancel} />
+        return <ToolsRow calls={state?.pendingCalls ?? []} onCancel={onCancel} />
       case 'awaiting_approval':
         return <AwaitingApprovalRow />
     }

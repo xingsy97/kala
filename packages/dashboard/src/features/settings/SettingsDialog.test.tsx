@@ -214,8 +214,8 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
-    fireEvent.click(screen.getByTestId('settings-tab-interface'))
-    await screen.findByTestId('settings-theme-toggle')
+    fireEvent.click(screen.getByTestId('settings-tab-notifications'))
+    await screen.findByText('Browser notifications and local sound for session events that need attention.')
     expect(screen.getByTestId('desktop-notification-permission').textContent).toContain('not requested')
 
     fireEvent.click(screen.getByTestId('settings-toggle-desktop-notifications'))
@@ -229,6 +229,15 @@ describe('SettingsDialog', () => {
 
     fireEvent.click(screen.getByTestId('settings-toggle-notification-ak-desktop-notification-session-error'))
     expect(localStorage.getItem('ak-desktop-notification-session-error')).toBe('0')
+  })
+
+  it('keeps notifications as the final settings tab', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    const tabs = screen.getAllByTestId(/^settings-tab-/)
+    expect(tabs.at(-1)?.getAttribute('data-testid')).toBe('settings-tab-notifications')
   })
 
   it('offers follow system as a theme preference', async () => {
@@ -274,11 +283,47 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
-    fireEvent.click(screen.getByTestId('settings-tab-interface'))
-    await screen.findByTestId('settings-theme-toggle')
+    fireEvent.click(screen.getByTestId('settings-tab-notifications'))
+    await screen.findByText('Browser notifications and local sound for session events that need attention.')
     const toggle = screen.getByTestId('settings-toggle-desktop-notifications') as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
     expect(screen.getByText(/Notifications are blocked/i)).toBeTruthy()
+  })
+
+  it('renders executor invites with stable ids and binding context', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        invites: [
+          {
+            id: 'invite-alpha-0001',
+            label: 'Connect Workspace',
+            createdAt: '2026-07-15T00:00:00.000Z',
+            revoked: false,
+          },
+          {
+            id: 'invite-beta-0002',
+            label: 'Connect Workspace',
+            workspaceId: 'ws-bound',
+            createdAt: '2026-07-15T01:00:00.000Z',
+            lastUsedAt: '2026-07-15T02:00:00.000Z',
+            revoked: false,
+          },
+        ],
+      }), { status: 200 }))
+
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-executorAccess'))
+
+    await screen.findByTestId('executor-invite-list')
+    expect(screen.getAllByTestId('executor-invite-row')).toHaveLength(2)
+    expect(screen.getByText('invite-alpha')).toBeTruthy()
+    expect(screen.getByText('invite-beta-')).toBeTruthy()
+    expect(screen.getByText('Not bound')).toBeTruthy()
+    expect(screen.getByText('No workspace has used this invite yet')).toBeTruthy()
+    expect(screen.getByText('ws-bound')).toBeTruthy()
   })
 
   it('shows deployment component inventory and executor build metadata', async () => {

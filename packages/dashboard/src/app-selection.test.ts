@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 
-import { nextSessionSelection, sessionExists } from './app.js'
+import { nextSessionSelection, reconcileOptimisticQueuedMessages, sessionExists } from './app.js'
+import type { TimelineEntry } from './session.js'
 
 function session(id: string, eventCount: number): SessionSummary {
   return {
@@ -67,5 +68,32 @@ describe('session selection robustness', () => {
         explicit: true,
       }),
     ).toBeNull()
+  })
+})
+
+describe('optimistic queued messages', () => {
+  it('drops an optimistic queue row once the queued turn appears in the timeline', () => {
+    const timeline: TimelineEntry[] = [
+      {
+        seq: 1,
+        ts: '2026-07-07T00:00:00.000Z',
+        event: { kind: 'user_message', text: 'run this later' },
+        effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+      },
+    ]
+
+    expect(
+      reconcileOptimisticQueuedMessages(
+        [{ id: 'optimistic-1', text: 'run this later', mode: 'queue', createdAt: '2026-07-07T00:00:00.000Z' }],
+        [],
+        timeline,
+      ),
+    ).toEqual([])
+  })
+
+  it('keeps an optimistic queue row while the host has not acknowledged it', () => {
+    const optimistic = [{ id: 'optimistic-1', text: 'still pending', mode: 'queue' as const, createdAt: '2026-07-07T00:00:00.000Z' }]
+
+    expect(reconcileOptimisticQueuedMessages(optimistic, [], [])).toBe(optimistic)
   })
 })
