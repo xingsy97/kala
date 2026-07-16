@@ -75,7 +75,7 @@ vi.mock('react-virtuoso', async () => {
     const totalCount = typeof props.totalCount === 'number' ? props.totalCount : 0
     const itemContent = props.itemContent as ((index: number) => React.ReactNode) | undefined
     const computeItemKey = props.computeItemKey as ((index: number) => React.Key) | undefined
-    const components = props.components as { Footer?: React.ComponentType<{ context?: unknown }> } | undefined
+    const components = props.components as { Footer?: React.ComponentType<{ context?: unknown }>; Scroller?: React.ComponentType<React.HTMLAttributes<HTMLDivElement>> } | undefined
     const context = props.context
     const children: React.ReactNode[] = Array.from({ length: totalCount }, (_, index) =>
       React.createElement(
@@ -85,11 +85,12 @@ vi.mock('react-virtuoso', async () => {
       ),
     )
     if (components?.Footer) children.push(React.createElement(components.Footer, { key: 'footer', context }))
-    return React.createElement(
-      'div',
-      { 'data-testid': 'virtuoso-scroller', 'data-virtuoso-scroller': 'true' },
-      children,
-    )
+    const Scroller = components?.Scroller ?? 'div'
+    const scrollerProps = {
+      'data-testid': 'virtuoso-scroller',
+      'data-virtuoso-scroller': 'true',
+    } as React.HTMLAttributes<HTMLDivElement>
+    return React.createElement(Scroller, scrollerProps, children)
   })
   Virtuoso.displayName = 'VirtuosoMock'
   return { Virtuoso }

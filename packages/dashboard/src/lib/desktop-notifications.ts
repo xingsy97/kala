@@ -155,6 +155,21 @@ export function sendDesktopNotification(
   return true
 }
 
+function isDashboardTabFocused(): boolean {
+  return document.visibilityState === 'visible' && document.hasFocus()
+}
+
+function notifyWaitingForUser(prefs: DesktopNotificationPrefs, sessionLabel: string): void {
+  if (!prefs.byKind.waiting_for_user) return
+  if (isDashboardTabFocused()) {
+    if (prefs.sound) playNotificationSound()
+    return
+  }
+  sendDesktopNotification(prefs, 'waiting_for_user', 'Waiting for you', {
+    body: `${sessionLabel}: ready for your next message`,
+  })
+}
+
 export function useInterventionDesktopNotifications({
   sessionId,
   sessionLabel,
@@ -165,6 +180,7 @@ export function useInterventionDesktopNotifications({
   connectionStatus,
   workspaceOnline,
   workspaceLabel,
+  ready = true,
 }: {
   sessionId: string
   sessionLabel: string
@@ -175,6 +191,7 @@ export function useInterventionDesktopNotifications({
   connectionStatus: string
   workspaceOnline: boolean | null
   workspaceLabel?: string
+  ready?: boolean
 }): void {
   const prefs = useDesktopNotificationPrefs()
   const approvalSig = pendingApprovalSummary
@@ -184,6 +201,7 @@ export function useInterventionDesktopNotifications({
     ? `${sessionId}:${lastError.scope}:${lastError.message}`
     : `${sessionId}:none`
   const previous = useRef<{
+    sessionId: string
     approvalSig: string
     waitingForUser: boolean
     errorSig: string
@@ -193,13 +211,19 @@ export function useInterventionDesktopNotifications({
 
   useEffect(() => {
     const prev = previous.current
+    if (!ready) {
+      previous.current = null
+      return
+    }
     previous.current = {
+      sessionId,
       approvalSig,
       waitingForUser,
       errorSig,
       connectionStatus,
       workspaceOnline,
     }
+    if (prev?.sessionId !== sessionId) return
 
     if (pendingApprovalsCount > 0 && approvalSig !== prev?.approvalSig) {
       const tool = pendingApprovalSummary?.name ?? 'tool call'
@@ -209,9 +233,7 @@ export function useInterventionDesktopNotifications({
     }
 
     if (waitingForUser && prev?.waitingForUser === false) {
-      sendDesktopNotification(prefs, 'waiting_for_user', 'Waiting for you', {
-        body: `${sessionLabel}: ready for your next message`,
-      })
+      notifyWaitingForUser(prefs, sessionLabel)
     }
 
     if (lastError && errorSig !== prev?.errorSig) {
@@ -244,6 +266,8 @@ export function useInterventionDesktopNotifications({
     pendingApprovalsCount,
     prefs,
     sessionLabel,
+    sessionId,
+    ready,
     waitingForUser,
     workspaceLabel,
     workspaceOnline,

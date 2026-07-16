@@ -2,6 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .ak-chat-container {
+    max-width: min(var(--ak-chat-content-width, 68rem), 100%);
+    padding-left: var(--ak-chat-side-space, 1rem);
+    padding-right: var(--ak-chat-side-space, 1rem);
+  }
+
+  .ak-chat-item,
+  .ak-chat-item .ak-chat-text {
+    font-size: var(--ak-chat-font-size, 15px);
+    line-height: var(--ak-chat-line-height, 1.7);
+  }
+
+  .ak-chat-item .katex {
+    font-size: var(--ak-chat-math-scale, 2em);
+  }
+
+  .ak-chat-item .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0;
+  }
+
+  @media (min-width: 640px) {
+    .ak-chat-container {
+      padding-left: var(--ak-chat-side-space-sm, 2rem);
+      padding-right: var(--ak-chat-side-space-sm, 2rem);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .ak-chat-container {
+      padding-left: var(--ak-chat-side-space-lg, 3rem);
+      padding-right: var(--ak-chat-side-space-lg, 3rem);
+    }
+  }
+}
+
 /**
  * Design tokens — shadcn/ui semantic layer.
  *
@@ -351,6 +389,14 @@ body {
 
   .ak-composer-simple[data-empty="true"]::before {
     content: attr(data-placeholder);
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: hsl(var(--muted-foreground));
     pointer-events: none;
   }

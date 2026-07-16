@@ -175,6 +175,48 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('later from simple', 'queue', undefined, undefined)
   })
 
+  it('keeps simple mode placeholder visual-only and replaces it on paste', () => {
+    const onSubmit = vi.fn()
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({ onSubmit })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const input = screen.getByTestId('composer-input-simple')
+    expect(input.getAttribute('data-placeholder')).toBeTruthy()
+    expect(input.getAttribute('data-empty')).toBe('true')
+    expect(input.textContent).toBe('')
+
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: (type: string) => (type === 'text/plain' ? 'pasted text' : ''),
+        items: [],
+      },
+    })
+
+    expect(input.getAttribute('data-empty')).toBeNull()
+    expect(input.textContent).toBe('pasted text')
+    fireEvent.click(screen.getByTestId('composer-send'))
+    expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined)
+  })
+
+  it('keeps context usage next to send in simple mode', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer()
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const shell = screen.getByTestId('composer-simple-shell')
+    const indicator = screen.getByTestId('context-usage-indicator')
+    const send = screen.getByTestId('composer-send')
+
+    expect(shell.contains(indicator)).toBe(true)
+    expect(shell.contains(send)).toBe(true)
+    expect(indicator.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('shows queued message management in simple mode', () => {
     const onQueuedDelete = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')

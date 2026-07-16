@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from 'react'
 import {
   Archive,
@@ -31,6 +32,8 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { useTranslation } from 'react-i18next'
 
 import type {
@@ -105,9 +108,28 @@ type Props = {
   /** UI-level compaction operation status rendered inline at transcript tail. */
   compactStatus?: CompactStatus
   liveToolActivityTailCount?: number
+  displayPrefs?: ChatDisplayPrefs
   onDismissCompactStatus?: () => void
   loading?: boolean
 }
+
+export type ChatDisplayPrefs = {
+  fontSize: number
+  contentWidth: number
+  sideSpace: number
+  lineHeight: number
+  mathScale?: number
+}
+
+const CHAT_FONT_SIZE_PX = [12, 13, 14, 15, 16, 18, 20] as const
+const CHAT_LINE_HEIGHT = [1.45, 1.7, 1.95] as const
+const CHAT_CONTENT_WIDTH_REM = [54, 68, 84] as const
+const CHAT_MATH_SCALE_EM = [1.25, 1.5, 2, 2.5, 3] as const
+const CHAT_SIDE_SPACE = [
+  { base: '0.75rem', sm: '1.5rem', lg: '2rem' },
+  { base: '1rem', sm: '2rem', lg: '3rem' },
+  { base: '1.25rem', sm: '3rem', lg: '5rem' },
+] as const
 
 type RenderTranscriptItem = TranscriptItem | {
   kind: 'compact_feedback'
@@ -168,6 +190,7 @@ export function ChatPanel({
   scrollToBottomToken,
   compactStatus,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  displayPrefs,
   onDismissCompactStatus,
   loading = false,
 }: Props): JSX.Element {
@@ -392,17 +415,18 @@ export function ChatPanel({
     transcriptRef.current?.scrollToBottom()
     effectiveOnPinnedChange(true)
   }, [effectiveOnPinnedChange, transcriptRef])
+  const displayStyle = chatDisplayStyle(displayPrefs)
 
   return (
     <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
-      <div className="relative flex h-full w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
+      <div className="relative flex h-full w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden" style={displayStyle}>
         {loading ? (
-          <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
             <TranscriptLoadingState />
             {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
           </div>
         ) : isEmpty ? (
-          <div className="mx-auto w-full max-w-[68rem] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <div className="ak-chat-container mx-auto w-full py-4 sm:py-6">
             <EmptyState onSuggest={onSuggest} />
             {footerSlot ? <div className="pl-0 pt-6 sm:pl-10">{footerSlot}</div> : null}
           </div>
@@ -423,7 +447,7 @@ export function ChatPanel({
                 <div className="pl-0 pt-4 sm:pl-10">{footerSlot}</div>
               ) : null
             }
-            itemClassName="ak-chat-item mx-auto w-full min-w-0 max-w-[68rem] overflow-x-hidden px-3 py-2 sm:px-6 sm:py-3 lg:px-8"
+            itemClassName="ak-chat-container ak-chat-item mx-auto w-full min-w-0 overflow-x-hidden py-2 sm:py-3"
             defaultItemHeight={80}
             dataTestId="virtual-transcript"
           />
@@ -445,6 +469,28 @@ export function ChatPanel({
       </div>
     </OverflowReaderContext.Provider>
   )
+}
+
+function chatDisplayStyle(displayPrefs: ChatDisplayPrefs | undefined): CSSProperties {
+  const fontSize = clampIndex(displayPrefs?.fontSize, CHAT_FONT_SIZE_PX, 3)
+  const lineHeight = clampIndex(displayPrefs?.lineHeight, CHAT_LINE_HEIGHT, 1)
+  const contentWidth = clampIndex(displayPrefs?.contentWidth, CHAT_CONTENT_WIDTH_REM, 1)
+  const mathScale = clampIndex(displayPrefs?.mathScale, CHAT_MATH_SCALE_EM, 2)
+  const sideSpace = CHAT_SIDE_SPACE[clampIndex(displayPrefs?.sideSpace, CHAT_SIDE_SPACE, 1)] ?? CHAT_SIDE_SPACE[1]
+  return {
+    '--ak-chat-font-size': `${CHAT_FONT_SIZE_PX[fontSize]}px`,
+    '--ak-chat-line-height': String(CHAT_LINE_HEIGHT[lineHeight]),
+    '--ak-chat-content-width': `${CHAT_CONTENT_WIDTH_REM[contentWidth]}rem`,
+    '--ak-chat-math-scale': `${CHAT_MATH_SCALE_EM[mathScale]}em`,
+    '--ak-chat-side-space': sideSpace.base,
+    '--ak-chat-side-space-sm': sideSpace.sm,
+    '--ak-chat-side-space-lg': sideSpace.lg,
+  } as CSSProperties
+}
+
+function clampIndex<T extends readonly unknown[]>(value: number | undefined, values: T, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(values.length - 1, Math.max(0, Math.round(value ?? fallback)))
 }
 
 function CompactFeedbackTranscriptRow({
@@ -725,7 +771,7 @@ function useVirtualTranscriptScrollToken(
 
 function TranscriptLoadingState(): JSX.Element {
   return (
-    <div className="mx-auto flex w-full max-w-[68rem] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6 lg:px-8" data-testid="transcript-loading-state">
+    <div className="mx-auto flex w-full flex-col gap-4 py-4 sm:py-6" data-testid="transcript-loading-state">
       {Array.from({ length: 3 }).map((_, index) => (
         <div key={index} className="flex min-w-0 gap-3">
           <div className="h-7 w-7 flex-none rounded-full bg-muted" />
@@ -1118,13 +1164,13 @@ function ContentBlock({
     }
     if (role === 'user') {
       return (
-        <div className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
+        <div className="ak-chat-text min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {content.text}
         </div>
       )
     }
     return (
-      <div className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">
+      <div className="ak-chat-text min-w-0 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere]">
         {content.text}
       </div>
     )
@@ -1261,7 +1307,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
   return (
     <div
       className={cn(
-        'min-w-0 max-w-full overflow-hidden break-words text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]',
+        'ak-chat-text min-w-0 max-w-full overflow-hidden break-words text-foreground [overflow-wrap:anywhere]',
         '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4',
         '[&_p]:my-3',
@@ -1282,7 +1328,8 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           pre({ children }) {
             return <MarkdownPre>{children}</MarkdownPre>

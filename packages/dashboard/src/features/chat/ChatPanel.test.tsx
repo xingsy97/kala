@@ -64,6 +64,28 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
+  it('shows a transcript skeleton instead of the empty welcome while loading', () => {
+    render(<ChatPanel loading messages={[]} />)
+
+    expect(screen.getByTestId('transcript-loading-state')).toBeTruthy()
+    expect(screen.queryByText(/No messages yet/i)).toBeNull()
+  })
+
+  it('applies persisted chat display preferences through CSS variables', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[{ role: 'assistant', content: [{ type: 'text', text: 'hello' }] }]}
+        displayPrefs={{ fontSize: 6, contentWidth: 2, sideSpace: 0, lineHeight: 2, mathScale: 4 }}
+      />,
+    )
+    const root = container.querySelector('[style*="--ak-chat-font-size"]') as HTMLElement | null
+
+    expect(root?.style.getPropertyValue('--ak-chat-font-size')).toBe('20px')
+    expect(root?.style.getPropertyValue('--ak-chat-content-width')).toBe('84rem')
+    expect(root?.style.getPropertyValue('--ak-chat-line-height')).toBe('1.95')
+    expect(root?.style.getPropertyValue('--ak-chat-math-scale')).toBe('3em')
+  })
+
   it('does not render the seed system prompt as a Tool result bubble', () => {
     render(
       <ChatPanel
@@ -148,7 +170,7 @@ describe('ChatPanel', () => {
     const row = screen.getAllByTestId('virtuoso-test-item')[0]
     expect(row?.textContent).toContain('hello')
     const contentWrapper = row?.querySelector('[data-virt-index]')
-    expect(contentWrapper?.className).toContain('max-w-[68rem]')
+    expect(contentWrapper?.className).toContain('ak-chat-container')
     expect(contentWrapper?.className).toContain('mx-auto')
   })
 
@@ -328,6 +350,22 @@ describe('ChatPanel', () => {
       expect.anything(),
     )
     errorSpy.mockRestore()
+  })
+
+  it('renders assistant TeX math with KaTeX', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Inline $x^2$ and block:\n\n$$\\int_0^1 x dx$$' }],
+          },
+        ]}
+      />,
+    )
+
+    expect(container.querySelectorAll('.katex').length).toBeGreaterThanOrEqual(2)
+    expect(container.textContent ?? '').toContain('x')
   })
 
   it('leaves user text as literal (no markdown parsing)', () => {

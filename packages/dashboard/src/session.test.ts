@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import type { SessionSummary } from '@agent-kernel/shared'
 import type { TimelineEntry } from './session.js'
-import { mergeBySeq } from './session.js'
+import { mergeBySeq, mergeSessionSummaries } from './session.js'
 
 function entry(seq: number, kind: TimelineEntry['event']['kind']): TimelineEntry {
   if (kind === 'llm_response') {
@@ -56,5 +57,21 @@ describe('mergeBySeq', () => {
 
     expect(merged?.llmTrace?.model).toBe('gpt-5.5')
     expect(merged?.model).toBe('gpt-5.5')
+  })
+})
+
+describe('mergeSessionSummaries', () => {
+  it('does not keep an old running status after a fresh resting summary arrives', () => {
+    const base: SessionSummary = {
+      sessionId: 's1',
+      createdAt: '2026-07-15T00:00:00.000Z',
+      lastEventAt: '2026-07-15T00:00:01.000Z',
+      eventCount: 1,
+      status: 'thinking',
+    }
+
+    const merged = mergeSessionSummaries([base], [{ ...base, eventCount: 2, status: 'done' }])
+
+    expect(merged[0]?.status).toBe('done')
   })
 })

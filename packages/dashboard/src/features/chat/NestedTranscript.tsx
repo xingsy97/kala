@@ -19,6 +19,8 @@
 import { Children, isValidElement, useCallback, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { useTranslation } from 'react-i18next'
 
 import type {
@@ -340,7 +342,8 @@ function NestedMarkdown({ text, compact }: { text: string; compact: boolean }): 
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           pre({ children }) {
             return <MarkdownPre>{children}</MarkdownPre>

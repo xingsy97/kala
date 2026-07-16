@@ -216,6 +216,37 @@ describe('Explorer', () => {
     expect(indicator.getAttribute('title')).toBe('Working')
   })
 
+  it('keeps running indicators scoped to each session row in the same workspace', () => {
+    const second: SessionSummary = {
+      ...sessionSummary,
+      sessionId: '02JXXXXXXXXXXXXXXXXXXXXX',
+      firstUserMessage: 'second task',
+      status: 'done',
+    }
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary, second]}
+        selectedSessionId={sessionSummary.sessionId}
+        sessionStatuses={new Map([
+          [sessionSummary.sessionId, 'loading'],
+          [second.sessionId, 'executing_tools'],
+        ])}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const rows = screen.getAllByTestId('session-row')
+    const firstRow = rows.find((row) => row.getAttribute('data-session-id') === sessionSummary.sessionId)
+    const secondRow = rows.find((row) => row.getAttribute('data-session-id') === second.sessionId)
+    expect(firstRow?.querySelector('[data-testid="session-status-indicator"]')?.getAttribute('data-status')).toBe('loading')
+    expect(secondRow?.querySelector('[data-testid="session-status-indicator"]')?.getAttribute('data-status')).toBe('executing_tools')
+  })
+
   it('places sessions with no workspaceId under an Unassigned bucket', () => {
     const orphan: SessionSummary = {
       ...sessionSummary,
@@ -305,15 +336,63 @@ describe('Explorer', () => {
     )
   })
 
+  it('does not allow renaming sessions under an offline workspace', () => {
+    const onRename = vi.fn()
+    render(
+      <Explorer
+        executors={[]}
+        sessions={[{ ...sessionSummary, workspaceId: 'ws-offline', workspaceName: 'offline box' }]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={onRename}
+      />,
+    )
+
+    fireEvent.doubleClick(screen.getByTestId('session-row'))
+    expect(screen.queryByTestId('session-rename-input')).toBeNull()
+    const button = screen.getByTestId('session-rename-button') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(onRename).not.toHaveBeenCalled()
+  })
+
+  it('submits session rename only once when Enter is followed by blur', () => {
+    const onRename = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={null}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={onRename}
+      />,
+    )
+    fireEvent.doubleClick(screen.getByTestId('session-row'))
+    const input = screen.getByTestId('session-rename-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'renamed once' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.blur(input)
+
+    expect(onRename).toHaveBeenCalledTimes(1)
+    expect(onRename).toHaveBeenCalledWith(sessionSummary.sessionId, 'renamed once')
+  })
+
   it('shows explicit row actions for rename and session info', () => {
     const onRename = vi.fn()
     const onOpenSessionInfo = vi.fn()
+    const onSelect = vi.fn()
     render(
       <Explorer
         executors={[executor]}
         sessions={[sessionSummary]}
         selectedSessionId={sessionSummary.sessionId}
-        onSelect={() => {}}
+        onSelect={onSelect}
         onNewSession={() => {}}
         onConnectWorkspace={() => {}}
         onDelete={() => {}}
@@ -324,6 +403,7 @@ describe('Explorer', () => {
 
     fireEvent.click(screen.getByTestId('session-info-button'))
     expect(onOpenSessionInfo).toHaveBeenCalledWith(sessionSummary.sessionId)
+    expect(onSelect).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId('session-rename-button'))
     const input = screen.getByTestId('session-rename-input') as HTMLInputElement
@@ -333,6 +413,38 @@ describe('Explorer', () => {
       sessionSummary.sessionId,
       'renamed from button',
     )
+  })
+
+  it('renders active running statuses with the same row-local spinner', () => {
+    const second: SessionSummary = {
+      ...sessionSummary,
+      sessionId: '02JXXXXXXXXXXXXXXXXXXXXX',
+      firstUserMessage: 'second task',
+    }
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary, second]}
+        selectedSessionId={sessionSummary.sessionId}
+        sessionStatuses={new Map([
+          [sessionSummary.sessionId, 'thinking'],
+          [second.sessionId, 'executing_tools'],
+        ])}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+      />,
+    )
+
+    const indicators = screen.getAllByTestId('session-status-indicator')
+    expect(indicators.map((indicator) => indicator.getAttribute('data-status'))).toEqual(['thinking', 'executing_tools'])
+    for (const indicator of indicators) {
+      const icon = indicator.querySelector('svg')
+      expect(icon?.className.baseVal).toContain('animate-spin')
+      expect(indicator.querySelector('.animate-pulse')).toBeNull()
+    }
   })
 
   it('marks the selected session without shifting the row grid', () => {

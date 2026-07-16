@@ -78,6 +78,7 @@ export type SessionView = {
   parentSessionId: string | null
   parentCursor: number | null
   selectedModel: string | null
+  hydratedSessionId: string | null
   socket: DashboardSocket | null
 }
 
@@ -105,6 +106,7 @@ export function useSession({
   const [parentSessionId, setParentSessionId] = useState<string | null>(null)
   const [parentCursor, setParentCursor] = useState<number | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
+  const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
   // Latest AgentConfig — needed by the client-side fold on event:appended,
   // which lives inside a stable useEffect closure and can't read the React
@@ -137,6 +139,7 @@ export function useSession({
     setParentSessionId(null)
     setParentCursor(null)
     setSelectedModel(null)
+    setHydratedSessionId(null)
 
     const drainStreamBuffer = (): void => {
       const buf = streamBufferRef.current
@@ -199,6 +202,7 @@ export function useSession({
       setParentSessionId(p.parentSessionId ?? null)
       setParentCursor(p.parentCursor ?? null)
       setSelectedModel(p.selectedModel ?? null)
+      setHydratedSessionId(p.sessionId)
       // Timeline was cleared for a fresh connect; ask the host to replay
       // the log so a page reload doesn't leave the user staring at an
       // empty timeline for a session that already has history. Live
@@ -345,9 +349,9 @@ export function useSession({
   return useMemo(
     () => ({
       status,
-    state,
-    config,
-    contextSnapshot,
+      state,
+      config,
+      contextSnapshot,
       timeline,
       streamingText,
       pendingApprovals,
@@ -356,6 +360,7 @@ export function useSession({
       parentSessionId,
       parentCursor,
       selectedModel,
+      hydratedSessionId,
       socket: socketRef.current,
     }),
     [
@@ -370,6 +375,7 @@ export function useSession({
       parentSessionId,
       parentCursor,
       selectedModel,
+      hydratedSessionId,
     ],
   )
 }
@@ -702,7 +708,7 @@ export function useControlPlane(
   return { executors, sessions, executorsLoaded, sessionsLoaded, refreshSessions }
 }
 
-function mergeSessionSummaries(
+export function mergeSessionSummaries(
   prev: readonly SessionSummary[],
   incoming: readonly SessionSummary[],
 ): readonly SessionSummary[] {
@@ -713,20 +719,12 @@ function mergeSessionSummaries(
   for (const old of prev) {
     const fresh = incomingById.get(old.sessionId)
     if (!fresh) continue
-    next.push({ ...fresh, status: fresherStatus(old.status, fresh.status) })
+    next.push(fresh)
   }
   for (const fresh of incoming) {
     if (!prevById.has(fresh.sessionId)) next.push(fresh)
   }
   return next
-}
-
-function fresherStatus(
-  oldStatus: SessionSummary['status'] | undefined,
-  newStatus: SessionSummary['status'] | undefined,
-): SessionSummary['status'] | undefined {
-  if (isRunningSessionStatus(oldStatus) && isRestingSessionStatus(newStatus)) return oldStatus
-  return newStatus
 }
 
 function updateSessionSummary(
@@ -769,10 +767,6 @@ function updateSessionSummaryFromEvent(
         : { firstUserMessage: entry.event.text.slice(0, 120) }),
     }
   })
-}
-
-function isRunningSessionStatus(status: SessionSummary['status'] | undefined): boolean {
-  return status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval'
 }
 
 function isRestingSessionStatus(status: SessionSummary['status'] | undefined): boolean {

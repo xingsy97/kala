@@ -43,6 +43,14 @@ const payload: ServerSettingsPayload = {
       embeddedDashboardFiles: 42,
     },
   },
+  agentPrompt: {
+    selectedPreset: 'codex',
+    presets: [
+      { id: 'codex', label: 'Codex', description: 'Direct coding-agent prompt.' },
+      { id: 'claude-code', label: 'Claude Code', description: 'Concise pair-programming prompt.' },
+    ],
+    configPath: '<home>/.config/agent-kernel/agent.json',
+  },
   paths: {
     claudeSettings: '<home>/.claude/settings.json',
     codexConfig: '<home>/.codex/config.toml',
@@ -118,6 +126,32 @@ describe('SettingsDialog', () => {
 
     const other = screen.getByTestId('settings-provider-openai-compat')
     expect(other.textContent).toContain('No model attached')
+  })
+
+  it('updates the agent prompt preset', async () => {
+    const nextPayload: ServerSettingsPayload = {
+      ...payload,
+      agentPrompt: payload.agentPrompt ? { ...payload.agentPrompt, selectedPreset: 'claude-code' } : undefined,
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(nextPayload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(nextPayload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-agent'))
+    fireEvent.click(await screen.findByTestId('settings-agent-preset-claude-code'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/settings/agent-prompt', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ preset: 'claude-code' }),
+      }))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-agent-preset-claude-code').getAttribute('aria-pressed')).toBe('true')
+    })
   })
 
   it('does not label missing source metadata as manual', async () => {
@@ -273,6 +307,27 @@ describe('SettingsDialog', () => {
 
     expect(localStorage.getItem('ak-live-tool-activity-tail-count')).toBe('5')
     expect(input.value).toBe('5')
+  })
+
+  it('stores chat display preferences locally', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    await screen.findByTestId('settings-chat-font-size')
+
+    fireEvent.click(screen.getByTestId('settings-chat-font-size-6'))
+    fireEvent.click(screen.getByTestId('settings-chat-content-width-2'))
+    fireEvent.click(screen.getByTestId('settings-chat-side-space-0'))
+    fireEvent.click(screen.getByTestId('settings-chat-line-height-2'))
+    fireEvent.click(screen.getByTestId('settings-chat-math-scale-4'))
+
+    expect(localStorage.getItem('ak-chat-font-size')).toBe('6')
+    expect(localStorage.getItem('ak-chat-content-width')).toBe('2')
+    expect(localStorage.getItem('ak-chat-side-space')).toBe('0')
+    expect(localStorage.getItem('ak-chat-line-height')).toBe('2')
+    expect(localStorage.getItem('ak-chat-math-scale')).toBe('4')
   })
 
   it('keeps desktop notifications disabled when browser permission is denied', async () => {

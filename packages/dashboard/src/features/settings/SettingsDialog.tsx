@@ -17,6 +17,16 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  DEFAULT_CHAT_CONTENT_WIDTH,
+  DEFAULT_CHAT_FONT_SIZE,
+  DEFAULT_CHAT_LINE_HEIGHT,
+  DEFAULT_CHAT_MATH_SCALE,
+  DEFAULT_CHAT_SIDE_SPACE,
+  PREF_CHAT_CONTENT_WIDTH,
+  PREF_CHAT_FONT_SIZE,
+  PREF_CHAT_LINE_HEIGHT,
+  PREF_CHAT_MATH_SCALE,
+  PREF_CHAT_SIDE_SPACE,
   PREF_EXPLORER_OPEN,
   PREF_INSPECTOR_OPEN,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -45,10 +55,11 @@ type Props = {
   executors?: readonly AttachedExecutor[]
 }
 
-type SectionKey = 'runtime' | 'connection' | 'models' | 'security' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
+type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'security' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
 
 const SECTIONS: readonly { key: SectionKey; label: string; hint: string }[] = [
   { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint' },
+  { key: 'agent', label: 'settings.sections.agent.label', hint: 'settings.sections.agent.hint' },
   { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint' },
   { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint' },
   { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint' },
@@ -115,6 +126,8 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
                 <RuntimeSection payload={payload} />
               ) : section === 'connection' ? (
                 <ConnectionSection />
+              ) : section === 'agent' ? (
+                <AgentSection payload={payload} onPayloadChange={applyPayload} />
               ) : section === 'models' ? (
                 <ModelsSection payload={payload} onPayloadChange={applyPayload} onModelsChanged={onModelsChanged} />
               ) : section === 'security' ? (
@@ -242,6 +255,84 @@ function RuntimeSection({
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+function AgentSection({
+  payload,
+  onPayloadChange,
+}: {
+  payload: ServerSettingsPayload
+  onPayloadChange(payload: ServerSettingsPayload): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const agentPrompt = payload.agentPrompt
+
+  const updatePreset = useMutation({
+    mutationFn: async (preset: string): Promise<ServerSettingsPayload> => {
+      const res = await fetch('/settings/agent-prompt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ preset }),
+      })
+      const body = await res.json() as ServerSettingsPayload | { error?: string }
+      if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
+      return body as ServerSettingsPayload
+    },
+    onSuccess: (next) => {
+      onPayloadChange(next)
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+  })
+
+  return (
+    <div>
+      <SectionHeader title={t('settings.sections.agent.label')} subtitle={t('settings.agent.subtitle')} />
+      {!agentPrompt ? (
+        <EmptyRow>{t('settings.agent.unavailable')}</EmptyRow>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {agentPrompt.presets.map((preset) => {
+              const selected = preset.id === agentPrompt.selectedPreset
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={cn(
+                    'min-h-28 rounded-md border p-4 text-left transition-colors',
+                    selected
+                      ? 'border-primary bg-primary/10 ring-1 ring-primary/40'
+                      : 'border-border bg-card/60 hover:bg-accent/60',
+                  )}
+                  onClick={() => {
+                    setError(null)
+                    if (!selected) updatePreset.mutate(preset.id)
+                  }}
+                  disabled={updatePreset.isPending}
+                  data-testid={`settings-agent-preset-${preset.id}`}
+                  aria-pressed={selected}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-foreground">{preset.label}</div>
+                    {selected ? <Check className="h-4 w-4 text-primary" aria-hidden="true" /> : null}
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{preset.description}</p>
+                </button>
+              )
+            })}
+          </div>
+          {error ? <div className="text-xs text-destructive">{error}</div> : null}
+          <div className="rounded-md bg-muted/30 p-3 text-xs text-muted-foreground ring-1 ring-border/50">
+            <div>{t('settings.agent.appliesToNewSessions')}</div>
+            <div className="mt-1 break-all font-mono">{agentPrompt.configPath}</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1045,6 +1136,11 @@ function InterfaceSection(): JSX.Element {
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     { min: 0, max: 10 },
   )
+  const [chatFontSize, setChatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: 6 })
+  const [chatContentWidth, setChatContentWidth] = useNumberPref(PREF_CHAT_CONTENT_WIDTH, DEFAULT_CHAT_CONTENT_WIDTH, { min: 0, max: 2 })
+  const [chatSideSpace, setChatSideSpace] = useNumberPref(PREF_CHAT_SIDE_SPACE, DEFAULT_CHAT_SIDE_SPACE, { min: 0, max: 2 })
+  const [chatLineHeight, setChatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
+  const [chatMathScale, setChatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
   const [theme, , setTheme] = useTheme()
   return (
     <div>
@@ -1116,6 +1212,61 @@ function InterfaceSection(): JSX.Element {
             </button>
           </div>
         </li>
+        <SegmentedNumberPref
+          label={t('settings.interface.chatFontSize')}
+          description={t('settings.interface.chatFontSizeDesc')}
+          value={chatFontSize}
+          onChange={setChatFontSize}
+          testId="settings-chat-font-size"
+          options={[0, 1, 2, 3, 4, 5, 6].map((value) => ({
+            value,
+            label: t(`settings.interface.chatFontSizeOptions.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatContentWidth')}
+          description={t('settings.interface.chatContentWidthDesc')}
+          value={chatContentWidth}
+          onChange={setChatContentWidth}
+          testId="settings-chat-content-width"
+          options={[0, 1, 2].map((value) => ({
+            value,
+            label: t(`settings.interface.size3.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatSideSpace')}
+          description={t('settings.interface.chatSideSpaceDesc')}
+          value={chatSideSpace}
+          onChange={setChatSideSpace}
+          testId="settings-chat-side-space"
+          options={[0, 1, 2].map((value) => ({
+            value,
+            label: t(`settings.interface.size3.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatLineHeight')}
+          description={t('settings.interface.chatLineHeightDesc')}
+          value={chatLineHeight}
+          onChange={setChatLineHeight}
+          testId="settings-chat-line-height"
+          options={[0, 1, 2].map((value) => ({
+            value,
+            label: t(`settings.interface.size3.${value}`),
+          }))}
+        />
+        <SegmentedNumberPref
+          label={t('settings.interface.chatMathScale')}
+          description={t('settings.interface.chatMathScaleDesc')}
+          value={chatMathScale}
+          onChange={setChatMathScale}
+          testId="settings-chat-math-scale"
+          options={[0, 1, 2, 3, 4].map((value) => ({
+            value,
+            label: t(`settings.interface.chatMathScaleOptions.${value}`),
+          }))}
+        />
         <li className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.showToolCallTab')}</div>
@@ -1172,6 +1323,56 @@ function InterfaceSection(): JSX.Element {
         </li>
       </ul>
     </div>
+  )
+}
+
+function SegmentedNumberPref({
+  label,
+  description,
+  value,
+  onChange,
+  options,
+  testId,
+}: {
+  label: string
+  description: string
+  value: number
+  onChange(next: number): void
+  options: readonly { value: number; label: string }[]
+  testId: string
+}): JSX.Element {
+  return (
+    <li className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-border bg-card/60 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">{label}</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="flex max-w-full flex-wrap gap-1 rounded-md border border-border bg-background/70 p-1"
+        data-testid={testId}
+      >
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={value === option.value}
+            onClick={() => onChange(option.value)}
+            data-testid={`${testId}-${option.value}`}
+            className={cn(
+              'min-h-8 rounded px-2.5 py-1 text-xs transition-colors',
+              value === option.value
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </li>
   )
 }
 

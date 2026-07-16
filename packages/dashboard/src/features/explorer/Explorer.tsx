@@ -31,7 +31,6 @@ import {
   Search,
   TriangleAlert,
   Trash2,
-  Wrench,
   X,
 } from 'lucide-react'
 import type { AttachedExecutor, SessionSummary } from '@agent-kernel/shared'
@@ -124,6 +123,10 @@ export function Explorer({
   const data = useMemo(
     () => buildTree(executors, orderedSessions),
     [executors, orderedSessions],
+  )
+  const onlineWorkspaceIds = useMemo(
+    () => new Set(executors.map((executor) => executor.workspaceId).filter((id): id is string => typeof id === 'string' && id.length > 0)),
+    [executors],
   )
   const visibleData = useMemo(() => filterTree(data, query), [data, query])
   const initialOpenState = useMemo(
@@ -236,7 +239,10 @@ export function Explorer({
                 dragHandle={dragHandle}
                 editingSessionId={editingSessionId}
                 onDeleteRequest={(sess) => setPendingDelete(sess)}
-                onStartEdit={(sess) => setEditingSessionId(sess.sessionId)}
+                onStartEdit={(sess) => {
+                  if (!isSessionWorkspaceOnline(sess, onlineWorkspaceIds)) return
+                  setEditingSessionId(sess.sessionId)
+                }}
                 onCancelEdit={() => setEditingSessionId(null)}
                 onSubmitEdit={(sess, next) => {
                   setEditingSessionId(null)
@@ -258,6 +264,7 @@ export function Explorer({
                 onNewSession={onNewSession}
                 query={query}
                 sessionStatuses={sessionStatuses}
+                onlineWorkspaceIds={onlineWorkspaceIds}
               />
             )}
           </Tree>
@@ -426,6 +433,7 @@ function Row({
   onNewSession,
   query,
   sessionStatuses,
+  onlineWorkspaceIds,
 }: {
   node: NodeApi<TreeNode>
   style: React.CSSProperties
@@ -444,6 +452,7 @@ function Row({
   onNewSession(workspaceId?: string): void
   query: string
   sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
+  onlineWorkspaceIds: ReadonlySet<string>
 }): JSX.Element {
   if (node.data.kind === 'workspace') {
     return (
@@ -473,8 +482,13 @@ function Row({
       onOpenSessionInfo={onOpenSessionInfo}
       query={query}
       activeStatus={sessionStatuses?.get((node.data as SessionNode).sessionId)}
+      renameDisabled={!isSessionWorkspaceOnline(node.data as SessionNode, onlineWorkspaceIds)}
     />
   )
+}
+
+function isSessionWorkspaceOnline(session: SessionNode, onlineWorkspaceIds: ReadonlySet<string>): boolean {
+  return session.workspaceId === undefined || onlineWorkspaceIds.has(session.workspaceId)
 }
 
 function WorkspaceRow({
@@ -626,6 +640,7 @@ function SessionRow({
   onOpenSessionInfo,
   query,
   activeStatus,
+  renameDisabled,
 }: {
   node: NodeApi<SessionNode>
   style: React.CSSProperties
@@ -638,6 +653,7 @@ function SessionRow({
   onOpenSessionInfo?(sessionId: string): void
   query: string
   activeStatus?: SessionActivityStatus
+  renameDisabled?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const s = node.data
@@ -663,6 +679,7 @@ function SessionRow({
       onDoubleClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
+        if (renameDisabled) return
         onStartEdit(s)
       }}
     >
@@ -738,14 +755,18 @@ function SessionRow({
           <Button
             variant="ghost"
             size="icon"
+            onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
+              if (renameDisabled) return
               onStartEdit(s)
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
             data-testid="session-rename-button"
             title={t('explorer.renameSession')}
             aria-label={t('explorer.renameSessionAria', { sessionId: s.sessionId })}
+            disabled={renameDisabled}
             className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
           >
             <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
@@ -754,11 +775,13 @@ function SessionRow({
             <Button
               variant="ghost"
               size="icon"
+              onPointerDown={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation()
                 onOpenSessionInfo(s.sessionId)
               }}
+              onDoubleClick={(e) => e.stopPropagation()}
               data-testid="session-info-button"
               title={t('explorer.sessionInfoTitle')}
               aria-label={t('explorer.sessionInfoAria', { sessionId: s.sessionId })}
@@ -770,11 +793,13 @@ function SessionRow({
           <Button
             variant="ghost"
             size="icon"
+            onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
               onDeleteRequest(s)
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
             data-testid="session-delete-button"
             title={t('explorer.deleteSessionTitle')}
             aria-label={t('explorer.deleteSessionAria', { sessionId: s.sessionId })}
@@ -809,7 +834,7 @@ export function SessionStatusIndicator({
   const { t } = useTranslation()
   const label = statusIndicatorLabel(status, t)
   const base = 'inline-flex h-3.5 w-3.5 flex-none items-center justify-center'
-  if (status === 'loading') {
+  if (status === 'loading' || status === 'thinking' || status === 'executing_tools') {
     return (
       <span
         className={base}
@@ -820,35 +845,6 @@ export function SessionStatusIndicator({
       >
         <LoaderCircle
           className="h-3 w-3 animate-spin text-sky-500 dark:text-sky-400"
-          strokeWidth={2.4}
-        />
-      </span>
-    )
-  }
-  if (status === 'thinking') {
-    return (
-      <span
-        className={base}
-        data-testid="session-status-indicator"
-        data-status={status}
-        aria-label={label}
-        title={label}
-      >
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-sky-500 dark:bg-sky-400" />
-      </span>
-    )
-  }
-  if (status === 'executing_tools') {
-    return (
-      <span
-        className={base}
-        data-testid="session-status-indicator"
-        data-status={status}
-        aria-label={label}
-        title={label}
-      >
-        <Wrench
-          className="h-3 w-3 animate-[spin_2s_linear_infinite] text-violet-500 dark:text-violet-400"
           strokeWidth={2.4}
         />
       </span>
@@ -975,6 +971,12 @@ function RenameInput({
   const { t } = useTranslation()
   const [value, setValue] = useState(initial)
   const ref = useRef<HTMLInputElement>(null)
+  const submitted = useRef(false)
+  const submit = (): void => {
+    if (submitted.current) return
+    submitted.current = true
+    onSubmit(value)
+  }
   useEffect(() => {
     ref.current?.focus()
     ref.current?.select()
@@ -989,13 +991,14 @@ function RenameInput({
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault()
-          onSubmit(value)
+          submit()
         } else if (e.key === 'Escape') {
           e.preventDefault()
+          submitted.current = true
           onCancel()
         }
       }}
-      onBlur={() => onSubmit(value)}
+      onBlur={submit}
       data-testid={testId}
       aria-label={ariaLabel ?? t('explorer.renameSession')}
       spellCheck={false}

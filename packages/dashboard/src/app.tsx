@@ -87,6 +87,16 @@ import type { PendingUserTranscriptMessage } from './transcript.js'
 import type { TimelineEntry } from './session.js'
 import {
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  DEFAULT_CHAT_CONTENT_WIDTH,
+  DEFAULT_CHAT_FONT_SIZE,
+  DEFAULT_CHAT_LINE_HEIGHT,
+  DEFAULT_CHAT_MATH_SCALE,
+  DEFAULT_CHAT_SIDE_SPACE,
+  PREF_CHAT_CONTENT_WIDTH,
+  PREF_CHAT_FONT_SIZE,
+  PREF_CHAT_LINE_HEIGHT,
+  PREF_CHAT_MATH_SCALE,
+  PREF_CHAT_SIDE_SPACE,
   PREF_EXPLORER_OPEN,
   PREF_INSPECTOR_OPEN,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -95,6 +105,7 @@ import {
   useNumberPref,
 } from './lib/prefs.js'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
+import { useRunningTitleIndicator } from './lib/running-title.js'
 import { useTheme, type Theme } from './lib/theme.js'
 import {
   useBackgroundShellToasts,
@@ -166,6 +177,7 @@ export function App(): JSX.Element {
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
+  const [metadataSessionId, setMetadataSessionId] = useState<string | null>(null)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [compactStatus, setCompactStatus] = useState<CompactStatus>({ kind: 'idle' })
@@ -182,6 +194,11 @@ export function App(): JSX.Element {
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     { min: 0, max: 10 },
   )
+  const [chatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: 6 })
+  const [chatContentWidth] = useNumberPref(PREF_CHAT_CONTENT_WIDTH, DEFAULT_CHAT_CONTENT_WIDTH, { min: 0, max: 2 })
+  const [chatSideSpace] = useNumberPref(PREF_CHAT_SIDE_SPACE, DEFAULT_CHAT_SIDE_SPACE, { min: 0, max: 2 })
+  const [chatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
+  const [chatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
   const wideLayout = useMinWidth(1024)
   const isMobile = useIsMobile()
   const { models, defaultModel, reload: reloadModels } = useModels()
@@ -566,8 +583,19 @@ export function App(): JSX.Element {
   const currentSession = control.sessions.find(
     (s) => s.sessionId === config.sessionId,
   )
+  const metadataTargetSessionId = metadataSessionId ?? config.sessionId
+  const metadataSession = control.sessions.find(
+    (s) => s.sessionId === metadataTargetSessionId,
+  )
+  const metadataIsCurrentSession = metadataTargetSessionId === config.sessionId
   const hasSelectedSession = currentSession !== undefined
   const sessionListLoading = !control.executorsLoaded || !control.sessionsLoaded
+  const sessionHydrated = session.hydratedSessionId === config.sessionId
+  const selectedHistorySessionLoading = Boolean(
+    hasSelectedSession &&
+      !sessionHydrated &&
+      ((currentSession?.eventCount ?? 0) > 0 || Boolean(currentSession?.firstUserMessage)),
+  )
   const currentWorkspaceExecutor = useMemo(() => {
     if (!currentSession?.workspaceId) return undefined
     return control.executors.find(
@@ -590,8 +618,16 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (hasSelectedSession) return
     setMetadataOpen(false)
+    setMetadataSessionId(null)
     setCwdDialogOpen(false)
   }, [hasSelectedSession])
+
+  useEffect(() => {
+    if (metadataSessionId === null) return
+    if (control.sessions.some((s) => s.sessionId === metadataSessionId)) return
+    setMetadataOpen(false)
+    setMetadataSessionId(null)
+  }, [control.sessions, metadataSessionId])
 
   useEffect(() => {
     if (workspaceInfoId === null || workspaceInfoExists) return
@@ -649,16 +685,18 @@ export function App(): JSX.Element {
     awaitingAck,
     compactRunning: compactStatus.kind === 'running',
   })
+  useRunningTitleIndicator(isRunningSessionActivity(activeSessionStatus))
+  const sidebarActiveSessionStatus = sessionHydrated ? activeSessionStatus : undefined
   const sessionStatuses = useMemo(() => {
     const statuses = new Map<string, SessionActivityStatus>()
     for (const summary of control.sessions) {
-      if (summary.status) statuses.set(summary.sessionId, summary.status)
+      if (summary.status && isRunningSessionActivity(summary.status)) statuses.set(summary.sessionId, summary.status)
     }
-    if (hasSelectedSession && activeSessionStatus) {
-      statuses.set(config.sessionId, activeSessionStatus)
+    if (hasSelectedSession && sidebarActiveSessionStatus) {
+      statuses.set(config.sessionId, sidebarActiveSessionStatus)
     }
     return statuses
-  }, [control.sessions, hasSelectedSession, config.sessionId, activeSessionStatus])
+  }, [control.sessions, hasSelectedSession, config.sessionId, sidebarActiveSessionStatus])
 
   const pendingApprovalsCount = session.pendingApprovals.length
   // Pinned-to-bottom is owned by ChatPanel/VirtualTranscript now; we mirror
@@ -710,6 +748,7 @@ export function App(): JSX.Element {
     connectionStatus: session.status,
     workspaceOnline: hasSelectedSession && control.executorsLoaded ? sessionWorkspaceOnline : null,
     workspaceLabel: currentSession?.workspaceName ?? currentSession?.workspaceId,
+    ready: sessionHydrated,
   })
 
   useSessionToasts({
@@ -758,7 +797,10 @@ export function App(): JSX.Element {
         keywords: ['metadata', 'details'],
         disabled: !hasSelectedSession,
         disabledReason: t('commandPalette.disabled.noSessionSelected'),
-        run: () => setMetadataOpen(true),
+        run: () => {
+          setMetadataSessionId(config.sessionId)
+          setMetadataOpen(true)
+        },
       },
       {
         id: 'session.change-cwd',
@@ -1140,7 +1182,7 @@ export function App(): JSX.Element {
                       onRename={renameSessionAt}
                       onRenameWorkspace={renameWorkspaceAt}
                       onOpenSessionInfo={(sid) => {
-                        if (sid !== config.sessionId) selectSession(sid)
+                        setMetadataSessionId(sid)
                         setMetadataOpen(true)
                       }}
                       onWorkspaceInfo={setWorkspaceInfoId}
@@ -1223,6 +1265,14 @@ export function App(): JSX.Element {
                         scrollToBottomToken={chatScrollToBottomToken}
                         compactStatus={compactStatus}
                         liveToolActivityTailCount={liveToolActivityTailCount}
+                        displayPrefs={{
+                          fontSize: chatFontSize,
+                          contentWidth: chatContentWidth,
+                          sideSpace: chatSideSpace,
+                          lineHeight: chatLineHeight,
+                          mathScale: chatMathScale,
+                        }}
+                        loading={selectedHistorySessionLoading}
                         onDismissCompactStatus={() => setCompactStatus({ kind: 'idle' })}
                         pendingApprovals={session.pendingApprovals}
                         onReadOverflow={readOverflow}
@@ -1504,8 +1554,8 @@ export function App(): JSX.Element {
             onRename={renameSessionAt}
             onRenameWorkspace={renameWorkspaceAt}
             onOpenSessionInfo={(sid) => {
-              if (sid !== config.sessionId) selectSession(sid)
               setExplorerDrawerOpen(false)
+              setMetadataSessionId(sid)
               setMetadataOpen(true)
             }}
             onWorkspaceInfo={(workspaceId) => {
@@ -1570,15 +1620,22 @@ export function App(): JSX.Element {
       ) : null}
       <SessionMetadataDialog
         open={metadataOpen}
-        onOpenChange={setMetadataOpen}
-        sessionId={config.sessionId}
-        summary={currentSession}
-        state={session.state}
-        selectedModel={session.selectedModel}
-        {...(executorHost !== undefined ? { executorHost } : {})}
-        onRename={(label) => renameSessionAt(config.sessionId, label)}
-        onOpenChangeCwdDialog={openCwdDialog}
-        onChangeApprovalMode={onApprovalModeChange}
+        onOpenChange={(open) => {
+          setMetadataOpen(open)
+          if (!open) setMetadataSessionId(null)
+        }}
+        sessionId={metadataTargetSessionId}
+        summary={metadataSession}
+        state={metadataIsCurrentSession ? session.state : null}
+        selectedModel={metadataIsCurrentSession ? session.selectedModel : null}
+        {...(metadataIsCurrentSession && executorHost !== undefined ? { executorHost } : {})}
+        onRename={(label) => renameSessionAt(metadataTargetSessionId, label)}
+        onOpenChangeCwdDialog={() => {
+          if (metadataIsCurrentSession) openCwdDialog()
+        }}
+        onChangeApprovalMode={(mode) => {
+          if (metadataIsCurrentSession) onApprovalModeChange(mode)
+        }}
       />
       <WorkspacePicker
         open={pendingWorkspacePick !== null}
@@ -1662,6 +1719,10 @@ function sessionActivityStatus({
   if (awaitingAck || streamingActive || compactRunning) return 'loading'
   if (!status) return undefined
   return status
+}
+
+function isRunningSessionActivity(status: SessionActivityStatus | undefined): boolean {
+  return status === 'loading' || status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval'
 }
 
 function isWaitingForUserInput({

@@ -425,6 +425,16 @@ export function Composer({
                 onEnterSubmit={() => { void submit() }}
               />
             </div>
+            <RuntimeMetrics
+              state={state}
+              config={config}
+              contextSnapshot={contextSnapshot}
+              modelInfo={models.find((m) => m.id === model) ?? null}
+              queuedMessages={queuedMessages.length}
+              timeline={timeline}
+              onCompact={onCompact}
+              compactDisabled={disabled}
+            />
             <SendButton
               disabled={!canSubmit}
               sendMode={sendMode}
