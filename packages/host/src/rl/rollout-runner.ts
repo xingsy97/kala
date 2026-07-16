@@ -81,7 +81,6 @@ export async function runRlRollout(input: RunRlRolloutInput): Promise<RunRlRollo
       tools: input.config?.tools ?? [],
       ...(input.config?.systemPrompt ? { systemPrompt: input.config.systemPrompt } : {}),
       ...(input.config?.contextLimit ? { contextLimit: input.config.contextLimit } : {}),
-      ...(input.config?.noToolCallNudges !== undefined ? { noToolCallNudges: input.config.noToolCallNudges } : {}),
     },
     initialCwd: workspace,
     initialApprovalMode: 'allow_all',

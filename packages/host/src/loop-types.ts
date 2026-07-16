@@ -112,6 +112,8 @@ export type HostLoopDeps = {
 export type LoopHandle = {
   dispatch(sessionId: string, event: AgentEvent): Promise<void>
   compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'): Promise<void>
+  hasActiveLlmCall(sessionId: string): boolean
+  recoverInterruptedLlm(sessionId: string): Promise<boolean>
   /**
    * Abort the in-flight LLM call for a session, if any. Any streamed text
    * so far becomes the final assistant message with a `[cancelled]` suffix,

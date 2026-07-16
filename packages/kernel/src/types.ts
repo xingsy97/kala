@@ -159,13 +159,6 @@ export type AgentConfig = {
    * Ignored by non-Anthropic adapters.
    */
   readonly thinkingBudget?: number
-  /**
-   * When >0, if the assistant returns a message with no tool calls, inject a
-   * synthetic user reminder and re-invoke the LLM instead of finishing. Value
-   * is the max number of nudges before giving up. Undefined/0 = finish
-   * immediately (legacy behavior).
-   */
-  readonly noToolCallNudges?: number
 }
 
 // ============================================================================
@@ -240,8 +233,6 @@ export type AgentState = {
    * the `approval_mode_changed` event.
    */
   readonly approvalMode: ApprovalMode
-  /** Count of no-tool-call nudges issued this session (see AgentConfig.noToolCallNudges). */
-  readonly nudgeCount?: number
   readonly error?: string
 }
 
@@ -266,6 +257,8 @@ export type LlmResponseEvent = {
   kind: 'llm_response'
   message: Message // must have role === 'assistant'
   usage?: UsageDelta
+  /** Provider-native stop reason, e.g. Anthropic `stop_reason` or OpenAI `finish_reason`. */
+  finishReason?: string
 }
 
 export type LlmErrorEvent = {

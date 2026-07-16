@@ -985,6 +985,24 @@ export type ClientDeleteManualModel = {
   id: string
 }
 
+export type AgentSystemPromptPresetId = 'codex' | 'claude-code'
+
+export type SettingsAgentPromptPreset = {
+  id: AgentSystemPromptPresetId
+  label: string
+  description: string
+}
+
+export type SettingsAgentPrompt = {
+  selectedPreset: AgentSystemPromptPresetId
+  presets: readonly SettingsAgentPromptPreset[]
+  configPath: string
+}
+
+export type ClientUpdateAgentPromptSettings = {
+  preset: AgentSystemPromptPresetId
+}
+
 export type SettingsHookSummary = {
   event: 'pre_tool_use' | 'post_tool_use' | 'session_start' | 'session_end'
   command: string
@@ -1013,6 +1031,7 @@ export type ServerSettingsPayload = {
     build?: BuildMetadata
   }
   agentModule?: AgentModuleMetadata
+  agentPrompt?: SettingsAgentPrompt
   auth?: {
     dashboardAuthRequired: boolean
     githubOAuth: {

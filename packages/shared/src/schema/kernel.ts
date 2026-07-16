@@ -218,6 +218,7 @@ const LlmResponseEventSchema = z.object({
   kind: z.literal('llm_response'),
   message: MessageSchema,
   usage: UsageDeltaSchema.optional(),
+  finishReason: z.string().optional(),
 })
 
 const LlmErrorEventSchema = z.object({

@@ -13,6 +13,8 @@ import type { LLMTrace } from '@agent-kernel/shared'
 export type LLMResponse = {
   message: Message
   usage?: UsageDelta
+  /** Provider-native stop reason, e.g. Anthropic `stop_reason` or OpenAI `finish_reason`. */
+  finishReason?: string
   trace?: LLMTrace
 }
 

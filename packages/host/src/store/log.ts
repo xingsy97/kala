@@ -40,6 +40,9 @@ export type WriteHeaderParams = {
   initialState: AgentState
   parentSessionId?: string
   parentCursor?: number
+  parentCallId?: string
+  agentType?: string
+  subAgentStartedAt?: string
   workspaceId?: string
   workspaceName?: string
   initialCwd?: string
@@ -61,6 +64,15 @@ export async function writeHeader(params: WriteHeaderParams): Promise<HeaderEntr
       : {}),
     ...(params.parentCursor !== undefined
       ? { parentCursor: params.parentCursor }
+      : {}),
+    ...(params.parentCallId !== undefined
+      ? { parentCallId: params.parentCallId }
+      : {}),
+    ...(params.agentType !== undefined
+      ? { agentType: params.agentType }
+      : {}),
+    ...(params.subAgentStartedAt !== undefined
+      ? { subAgentStartedAt: params.subAgentStartedAt }
       : {}),
     ...(params.workspaceId !== undefined
       ? { workspaceId: params.workspaceId }

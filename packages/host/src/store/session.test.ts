@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createConfig } from '@agent-kernel/kernel'
+import { createConfig, step } from '@agent-kernel/kernel'
 
 import { SessionStore } from './session.js'
 import { appendEventEntry, readSessionLog, writeHeader } from './log.js'
@@ -435,5 +435,26 @@ describe('SessionStore crash recovery', () => {
         .join('')
       expect(text).toBe('[interrupted]')
     }
+  })
+
+  it('repairs a cached mid-stream session without forcing a disk reload', async () => {
+    const sessionId = 'sess-cached-thinking'
+    const cfg = createConfig({ tools: [], systemPrompt: 'sys' })
+    const store = new SessionStore(dir)
+    const rec = await store.create({ sessionId, config: cfg })
+    const event = { kind: 'user_message', text: 'hello' } as const
+    const { next, effects } = step(rec.state, event, rec.config)
+    await store.record(sessionId, event, effects, next)
+
+    const recovered = await store.recoverInterruptedLlm(sessionId)
+
+    expect(recovered).not.toBeNull()
+    expect(recovered?.record).toBe(rec)
+    expect(rec.state.status).toBe('done')
+    expect(rec.state.cursor).toBe(2)
+
+    const parsed = await readSessionLog(rec.logPath)
+    expect(parsed.events).toHaveLength(2)
+    expect(parsed.events[1]!.event.kind).toBe('llm_response')
   })
 })

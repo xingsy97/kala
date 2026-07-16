@@ -18,6 +18,7 @@ describe('parseCodexToml', () => {
     const input = [
       'model = "gpt-5.5"',
       'model_provider = "newapi"',
+      'model_context_window = 353346',
       'unrelated = 42',
       '',
       '[model_providers.newapi]',
@@ -37,6 +38,7 @@ describe('parseCodexToml', () => {
     const out = parseCodexToml(input)
     expect(out.model).toBe('gpt-5.5')
     expect(out.defaultProviderId).toBe('newapi')
+    expect(out.modelContextWindow).toBe(353346)
     expect(out.providers).toHaveLength(2)
     const [newapi, direct] = out.providers
     expect(newapi!.id).toBe('newapi')
@@ -78,6 +80,7 @@ describe('loadRuntimeConfig', () => {
       [
         'model = "gpt-5.5"',
         'model_provider = "newapi"',
+        'model_context_window = 353346',
         '[model_providers.newapi]',
         'name = "newapi"',
         'base_url = "https://api.example.test/v1"',
@@ -99,7 +102,7 @@ describe('loadRuntimeConfig', () => {
       expect(cfg.models.map((m) => m.contextWindow)).toEqual([
         1_000_000,
         undefined,
-        400_000,
+        353_346,
       ])
       expect(cfg.models.map((m) => m.source)).toEqual([
         'claude-settings',
@@ -178,6 +181,32 @@ describe('loadRuntimeConfig', () => {
     })
     expect(cfg.providers).toEqual([])
     expect(cfg.models).toEqual([])
+  })
+
+  it('resolves codex provider keys from auth.json when the env key is not exported', () => {
+    const codexPath = join(dir, 'codex.toml')
+    const authPath = join(dir, 'auth.json')
+    writeFileSync(
+      codexPath,
+      [
+        'model = "gpt-5.5"',
+        'model_provider = "newapi"',
+        '[model_providers.newapi]',
+        'name = "napi"',
+        'base_url = "https://api.example.test/v1"',
+        'env_key = "AK_TEST_AUTH_ONLY_KEY"',
+      ].join('\n'),
+    )
+    writeFileSync(authPath, JSON.stringify({ OPENAI_API_KEY: 'auth-openai-key' }))
+
+    const cfg = loadRuntimeConfig({
+      claudeSettingsPath: join(dir, 'missing.json'),
+      codexConfigPath: codexPath,
+      codexAuthPath: authPath,
+    })
+
+    expect(cfg.models.map((m) => m.id)).toEqual(['gpt-5.5'])
+    expect(cfg.providers[0]?.apiKey).toBe('auth-openai-key')
   })
 
   it('returns empty when both files are missing', () => {

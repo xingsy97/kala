@@ -75,6 +75,52 @@ describe('step: user_message', () => {
     expect(effects).toEqual([])
   })
 
+  it('recovers from error with a fresh user message', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'error',
+      error: 'provider failed',
+      pendingCalls: [
+        { callId: 'stale', name: 'read', input: {}, status: 'dispatched' },
+      ],
+    }
+    const { next, effects } = step(s0, { kind: 'user_message', text: 'try again' }, CONFIG)
+    expect(next.status).toBe('thinking')
+    expect(next.error).toBeUndefined()
+    expect(next.pendingCalls).toEqual([])
+    expect(next.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'try again' }],
+    })
+    expect(effects).toEqual([{ kind: 'call_llm', messages: next.messages, tools: CONFIG.tools }])
+  })
+
+  it('repairs orphaned tool calls before a fresh user message', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'error',
+      error: 'previous turn failed after cancel',
+      messages: [
+        ...initial().messages,
+        asst({ type: 'tool_call', callId: 'c-orphan', name: 'bash', input: { command: 'sleep 90' } }),
+      ],
+      pendingCalls: [],
+    }
+
+    const { next, effects } = step(s0, { kind: 'user_message', text: 'continue now' }, CONFIG)
+
+    expect(next.status).toBe('thinking')
+    expect(next.messages.at(-2)).toEqual({
+      role: 'tool',
+      content: [{ type: 'tool_result', callId: 'c-orphan', ok: false, content: 'cancelled by user' }],
+    })
+    expect(next.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'continue now' }],
+    })
+    expect(effects[0]).toMatchObject({ kind: 'call_llm' })
+  })
+
   it('cursor advances by exactly 1', () => {
     const s0 = initial()
     const { next } = step(s0, { kind: 'user_message', text: 'hi' }, CONFIG)
@@ -467,6 +513,10 @@ describe('step: cancel + errors', () => {
     const s0: AgentState = {
       ...initial(),
       status: 'executing_tools',
+      messages: [
+        ...initial().messages,
+        asst({ type: 'tool_call', callId: 'c1', name: 'read', input: {} }),
+      ],
       pendingCalls: [
         { callId: 'c1', name: 'read', input: {}, status: 'dispatched' },
       ],
@@ -474,7 +524,37 @@ describe('step: cancel + errors', () => {
     const { next, effects } = step(s0, { kind: 'cancel' }, CONFIG)
     expect(next.status).toBe('done')
     expect(next.pendingCalls).toEqual([])
+    expect(next.messages.at(-1)).toEqual({
+      role: 'tool',
+      content: [{ type: 'tool_result', callId: 'c1', ok: false, content: 'cancelled by user' }],
+    })
     expect(effects).toEqual([{ kind: 'finish' }])
+  })
+
+  it('cancel records every pending tool call as cancelled so the transcript is provider-valid', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'awaiting_approval',
+      messages: [
+        ...initial().messages,
+        asst(
+          { type: 'tool_call', callId: 'c1', name: 'read', input: {} },
+          { type: 'tool_call', callId: 'c2', name: 'write', input: {} },
+        ),
+      ],
+      pendingCalls: [
+        { callId: 'c1', name: 'read', input: {}, status: 'dispatched' },
+        { callId: 'c2', name: 'write', input: {}, status: 'awaiting_approval' },
+      ],
+    }
+
+    const { next } = step(s0, { kind: 'cancel' }, CONFIG)
+
+    const toolResults = next.messages
+      .flatMap((message) => message.content)
+      .filter((content): content is Extract<Message['content'][number], { type: 'tool_result' }> => content.type === 'tool_result')
+    expect(toolResults.map((result) => result.callId)).toEqual(['c1', 'c2'])
+    expect(toolResults.every((result) => result.ok === false && result.content === 'cancelled by user')).toBe(true)
   })
 
   it('llm_error moves to error status', () => {

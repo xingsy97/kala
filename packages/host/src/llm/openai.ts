@@ -134,6 +134,7 @@ export function openaiAdapter(opts: OpenAIOptions): LLMAdapter {
         ...parsed,
         trace: makeOpenAITrace(url, effectiveModel, body, {
           status: res.status,
+          ...(parsed.finishReason ? { finishReason: parsed.finishReason } : {}),
           body: json,
         }, {
           gatewayRequestId: extractOpenAIRequestId(res.headers, json),
@@ -193,6 +194,7 @@ async function callStreaming(
   let completionTokens = 0
   let cachedTokens = 0
   let streamChatId: string | undefined
+  let finishReason: string | undefined
   const streamEventTypes: string[] = []
   let firstChunkAt: number | undefined
 
@@ -213,6 +215,7 @@ async function callStreaming(
       let evt: {
         id?: string
         choices?: Array<{
+          finish_reason?: string
           delta?: {
             content?: string
             tool_calls?: Array<{
@@ -236,6 +239,7 @@ async function callStreaming(
       streamEventTypes.push('chat.completion.chunk')
       if (!streamChatId && typeof evt.id === 'string' && evt.id) streamChatId = evt.id
       const choice = evt.choices?.[0]
+      if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
       const delta = choice?.delta
       if (delta?.content) {
         firstChunkAt ??= performance.now()
@@ -293,8 +297,10 @@ async function callStreaming(
   return {
     message,
     usage,
+    ...(finishReason ? { finishReason } : {}),
     trace: makeOpenAITrace(url, model, body, {
       status: res.status,
+      ...(finishReason ? { finishReason } : {}),
       streamEventTypes,
       metrics: streamMetrics(startedAt, firstChunkAt),
       body: {
@@ -535,7 +541,11 @@ function parseResponse(body: OpenAIResponseBody): LLMResponse {
         ),
       }
     : undefined
-  return { message, usage }
+  return {
+    message,
+    usage,
+    ...(choice.finish_reason ? { finishReason: choice.finish_reason } : {}),
+  }
 }
 
 function numOr(v: unknown, fallback: number): number {

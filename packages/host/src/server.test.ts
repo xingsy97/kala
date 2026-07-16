@@ -267,6 +267,65 @@ describe('wire protocol', () => {
     }
   })
 
+  it('updates agent prompt settings through HTTP', async () => {
+    let selectedPreset: 'codex' | 'claude-code' = 'codex'
+    const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-'))
+    const localServer = await startHostServer({
+      port: 0,
+      sessionsDir: localSessionsDir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      settings: () => ({
+        providers: [],
+        defaultModel: '',
+        hooks: [],
+        agentPrompt: {
+          selectedPreset,
+          presets: [
+            { id: 'codex', label: 'Codex', description: 'Codex prompt' },
+            { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
+          ],
+          configPath: '/tmp/agent.json',
+        },
+        paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+        mcp: { supported: false, note: '' },
+      }),
+      updateAgentPrompt: (input) => {
+        selectedPreset = input.preset
+        return {
+          providers: [],
+          defaultModel: '',
+          hooks: [],
+          agentPrompt: {
+            selectedPreset,
+            presets: [
+              { id: 'codex', label: 'Codex', description: 'Codex prompt' },
+              { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
+            ],
+            configPath: '/tmp/agent.json',
+          },
+          paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
+          mcp: { supported: false, note: '' },
+        }
+      },
+    })
+
+    try {
+      const response = await fetch(`http://localhost:${localServer.port}/settings/agent-prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ preset: 'claude-code' }),
+      })
+      expect(response.status).toBe(200)
+      const body = await response.json() as { agentPrompt?: { selectedPreset?: string } }
+      expect(body.agentPrompt?.selectedPreset).toBe('claude-code')
+      expect(selectedPreset).toBe('claude-code')
+    } finally {
+      await localServer.close()
+      rmSync(localSessionsDir, { recursive: true, force: true })
+    }
+  })
+
   it('handshake auth rejects mismatched protocol major', async () => {
     // Simulate an old dashboard build talking to a newer host.
     const bad: ClientSocket<

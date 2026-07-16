@@ -117,7 +117,7 @@ export type DashboardDeps = {
   loop: LoopHandle
   loopDeps: HostLoopDeps
   executors: ReturnType<typeof createExecutorRegistry>
-  defaultConfig: AgentConfig
+  defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
   audit?: AuditLogger
   broadcastError(
@@ -138,6 +138,9 @@ export function configureDashboardNamespace(
   ns: DashboardNs,
   deps: DashboardDeps,
 ): void {
+  const getDefaultConfig = (): AgentConfig => typeof deps.defaultConfig === 'function'
+    ? deps.defaultConfig()
+    : deps.defaultConfig
   ns.use((socket, nextFn) => {
     const auth = socket.handshake.auth as HandshakeAuth | undefined
     if (!auth || auth.role !== 'dashboard') {
@@ -308,9 +311,9 @@ export function configureDashboardNamespace(
     await socket.join(`session:${sessionId}`)
     const ready: SessionReadyEvent = record
       ? readyEventFor(record, deps.selectedModels.get(sessionId))
-      : ephemeralReadyEventFor(
+        : ephemeralReadyEventFor(
           sessionId,
-          deps.defaultConfig,
+          getDefaultConfig(),
           deps.selectedModels.get(sessionId),
         )
     socket.emit('session:ready', ready)
@@ -334,7 +337,7 @@ export function configureDashboardNamespace(
         ? readyEventFor(target, deps.selectedModels.get(sessionId))
         : ephemeralReadyEventFor(
             sessionId,
-            deps.defaultConfig,
+            getDefaultConfig(),
             deps.selectedModels.get(sessionId),
           )
       socket.emit('session:ready', payload)
@@ -612,20 +615,11 @@ export function configureDashboardNamespace(
       const result = await deps.executors.killBg(p)
       ack(result)
     })
-    socket.on('sub_agent:list', (raw: ClientListSubAgents, ack) => {
+    socket.on('sub_agent:list', async (raw: ClientListSubAgents, ack) => {
       const p = vparse(schema.ClientListSubAgentsSchema, raw, 'sub_agent:list')
       if (!p) return
-      // Cheap scan — we don't expect many thousands of sessions in memory,
-      // and each row is a plain object. An index by parentSessionId is a
-      // follow-up if this shows up in a profile.
-      //
-      // Optional fields (parentCallId, agentType, startedAt) are omitted here
-      // because SessionRecord does not carry them today. Push events
-      // (`server:sub_agent_started/_finished`) DO carry them for live runs; this
-      // RPC is the log-replay fallback and returns only what the record has.
       const children: SubAgentSummary[] = []
-      for (const rec of deps.store.list()) {
-        if (rec.parentSessionId !== p.parentSessionId) continue
+      for (const rec of await deps.store.listChildren(p.parentSessionId)) {
         const status: SubAgentSummary['status'] =
           rec.state.status === 'done'
             ? 'completed'
@@ -634,7 +628,11 @@ export function configureDashboardNamespace(
               : 'running'
         children.push({
           childSessionId: rec.sessionId,
+          ...(rec.parentCallId !== undefined ? { parentCallId: rec.parentCallId } : {}),
+          ...(rec.agentType !== undefined ? { agentType: rec.agentType } : {}),
           status,
+          ...(rec.subAgentStartedAt !== undefined ? { startedAt: rec.subAgentStartedAt } : {}),
+          ...(status !== 'running' && rec.lastEventAt !== undefined ? { finishedAt: rec.lastEventAt } : {}),
         })
       }
       ack({ requestId: p.requestId, parentSessionId: p.parentSessionId, children })
@@ -688,7 +686,7 @@ export function configureDashboardNamespace(
         }
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
-          defaultConfig: deriveSessionConfig(deps.defaultConfig, p.tools),
+          defaultConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }
@@ -944,7 +942,7 @@ async function handleUserMessage(
   deps: DashboardDeps,
   p: ClientUserMessage,
 ): Promise<void> {
-  const record = await loadRecordForDashboard(deps, p.sessionId)
+  let record = await loadRecordForDashboard(deps, p.sessionId)
   if (!record) {
     deps.broadcastError(
       p.sessionId,
@@ -952,6 +950,11 @@ async function handleUserMessage(
       'session not created — click "New" in the sidebar to start a session bound to a workspace',
     )
     return
+  }
+  if (record.state.status === 'thinking' && !deps.loop.hasActiveLlmCall(p.sessionId)) {
+    await deps.loop.recoverInterruptedLlm(p.sessionId)
+    record = await loadRecordForDashboard(deps, p.sessionId)
+    if (!record) return
   }
   const mode = p.mode ?? 'steer'
   const queued: QueuedUserMessage = {

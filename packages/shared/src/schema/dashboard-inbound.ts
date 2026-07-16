@@ -47,6 +47,7 @@ import type {
   ClientUserMessage,
   ClientUserReject,
   ClientAddManualModel,
+  ClientUpdateAgentPromptSettings,
   ClientDeleteManualModel,
   CopyOverflowSession,
   DeleteOverflowSession,
@@ -321,3 +322,7 @@ export const ClientDeleteManualModelSchema = z.object({
   providerId: z.string(),
   id: z.string(),
 }) satisfies z.ZodType<ClientDeleteManualModel>
+
+export const ClientUpdateAgentPromptSettingsSchema = z.object({
+  preset: z.enum(['codex', 'claude-code']),
+}) satisfies z.ZodType<ClientUpdateAgentPromptSettings>

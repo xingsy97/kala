@@ -22,6 +22,7 @@ import type {
   AttachedExecutor,
   ClientAddManualModel,
   ClientDeleteManualModel,
+  ClientUpdateAgentPromptSettings,
   ServerExecutorIdentitiesPayload,
   ServerExecutorIdentityRevokedPayload,
   ServerExecutorInvitePayload,
@@ -313,6 +314,7 @@ export function attachJsonRoutes(
     settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
     addManualModel?: (input: ClientAddManualModel) => ServerSettingsPayload
     deleteManualModel?: (input: ClientDeleteManualModel) => ServerSettingsPayload
+    updateAgentPrompt?: (input: ClientUpdateAgentPromptSettings) => ServerSettingsPayload
     artifactRootDir?: string | false
     sessions?: SessionStore
     routerHealth?: () => unknown
@@ -551,6 +553,22 @@ export function attachJsonRoutes(
       }
       return
     }
+    if (path === '/settings/agent-prompt' && req.method === 'POST' && payloads.updateAgentPrompt) {
+      claimRoute(req)
+      void readJson(req)
+        .then((body) => {
+          const input = parseWire(schema.ClientUpdateAgentPromptSettingsSchema, body, { channel: 'POST /settings/agent-prompt' })
+          if (!input) {
+            sendError(res, 400, 'invalid agent prompt settings input')
+            return
+          }
+          const result = payloads.updateAgentPrompt!(input)
+          payloads.audit?.log({ action: 'settings.agent_prompt_update', actor: httpActor(req, payloads.auth), target: { preset: input.preset }, outcome: 'ok' })
+          sendJson(req, res, result)
+        })
+        .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
+      return
+    }
     if (path === '/eval/swebench/plan' && req.method === 'POST') {
       claimRoute(req)
       void readJson(req)
@@ -633,6 +651,7 @@ function isProtectedJsonRoute(path: string): boolean {
   return path === '/models' ||
     path === '/settings' ||
     path === '/settings/models' ||
+    path === '/settings/agent-prompt' ||
     path === '/auth/executor-invites' ||
     path.startsWith('/auth/executor-invites/') ||
     path === '/auth/executor-identities' ||

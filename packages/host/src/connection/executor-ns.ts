@@ -36,7 +36,7 @@ export type ExecutorNs = Namespace<
 export type ExecutorDeps = {
   store: SessionStore
   executors: ReturnType<typeof createExecutorRegistry>
-  defaultConfig: AgentConfig
+  defaultConfig: AgentConfig | (() => AgentConfig)
   auth?: AuthConfig
   audit?: AuditLogger
   broadcastError(

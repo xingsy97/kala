@@ -19,6 +19,12 @@ export type HeaderEntry = {
   sessionId: string
   parentSessionId?: string
   parentCursor?: number
+  /** Parent tool_call id when this session was spawned by the `agent` tool. */
+  parentCallId?: string
+  /** Display/type label requested for the sub-agent, when provided. */
+  agentType?: string
+  /** Spawn timestamp for runtime recovery and dashboard replay. */
+  subAgentStartedAt?: string
   /**
    * Workspace this session is bound to — stable ULID minted by the
    * executor on first launch. Written once at create time and never
@@ -81,6 +87,8 @@ export type LLMTrace = {
   }
   response?: {
     status: number
+    /** Provider-native stop reason, e.g. Anthropic `stop_reason` or OpenAI `finish_reason`. */
+    finishReason?: string
     body?: unknown
     streamEventTypes?: readonly string[]
     metrics?: {

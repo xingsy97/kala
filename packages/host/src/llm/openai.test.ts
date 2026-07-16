@@ -76,6 +76,8 @@ describe('openaiAdapter', () => {
 
     expect(res.message.role).toBe('assistant')
     expect(res.message.content).toEqual([{ type: 'text', text: 'hi there' }])
+    expect(res.finishReason).toBe('stop')
+    expect(res.trace?.response?.finishReason).toBe('stop')
     expect(res.usage).toEqual({ inputTokens: 12, outputTokens: 4, cacheReadTokens: 0 })
     expect(sink[0].url).toBe('https://api.openai.com/v1/chat/completions')
     const body = JSON.parse(String(sink[0].init.body))
@@ -184,6 +186,8 @@ describe('openaiAdapter', () => {
         input: { path: 'README.md' },
       },
     ])
+    expect(res.finishReason).toBe('tool_calls')
+    expect(res.trace?.response?.finishReason).toBe('tool_calls')
   })
 
   it('round-trips a full assistant→tool→user cycle to OpenAI shape', async () => {

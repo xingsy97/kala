@@ -51,15 +51,18 @@ import {
 } from '../src/llm/provider-health.js'
 import { routerAdapter, toFallbackArtifact, type MutableRouter } from '../src/llm/router.js'
 import type { LLMAdapter } from '../src/llm/adapter.js'
-import { resolveBuiltinAgentModule } from '../src/builtin-tools.js'
+import { AGENT_SYSTEM_PROMPT_PRESETS, normalizeAgentSystemPromptPreset, resolveBuiltinAgentModule } from '../src/builtin-tools.js'
 import { createHookRunner } from '../src/extensions/hooks.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import {
   knownContextWindow,
+  defaultAgentSettingsPath,
+  loadAgentRuntimeSettings,
   loadHookConfigs,
   loadRuntimeConfig,
   modelInfo,
   type ProviderSpec,
+  writeAgentRuntimeSettings,
   writeManualModels,
 } from '../src/runtime-config.js'
 import { startHostServer } from '../src/server.js'
@@ -183,12 +186,16 @@ async function main(): Promise<void> {
   const { llm, defaultModel } = registry
 
   const skills = await discoverSkills()
-  const resolvedAgentModule = resolveBuiltinAgentModule({
+  const agentSettingsPath = defaultAgentSettingsPath()
+  let agentSettings = loadAgentRuntimeSettings(agentSettingsPath)
+  const resolveCurrentAgentModule = () => resolveBuiltinAgentModule({
     skills: skills.skills,
+    systemPromptPreset: agentSettings.systemPromptPreset,
     ...(knownContextWindow(defaultModel)
       ? { contextLimit: knownContextWindow(defaultModel) }
       : {}),
   })
+  let resolvedAgentModule = resolveCurrentAgentModule()
   if (hasFlag(argv, '--print-agent-module')) {
     process.stdout.write(`${JSON.stringify(resolvedAgentModule.metadata, null, 2)}\n`)
     return
@@ -231,6 +238,11 @@ async function main(): Promise<void> {
       build: buildInfo,
     },
     agentModule: resolvedAgentModule.metadata,
+    agentPrompt: {
+      selectedPreset: agentSettings.systemPromptPreset,
+      presets: AGENT_SYSTEM_PROMPT_PRESETS,
+      configPath: agentSettingsPath,
+    },
     auth: authSettings(effectiveAuth),
     paths: {
       claudeSettings: join(homedir(), '.claude', 'settings.json'),
@@ -250,7 +262,7 @@ async function main(): Promise<void> {
     port,
     sessionsDir,
     llm,
-    defaultConfig: resolvedAgentModule.config,
+    defaultConfig: () => resolvedAgentModule.config,
     models: () => registry.models,
     defaultModel,
     settings: makeSettings,
@@ -262,6 +274,12 @@ async function main(): Promise<void> {
     deleteManualModel: (input) => {
       registry.deleteManual(input.providerId, input.id)
       writeManualModels(manualModelsPath, registry.manualModels)
+      return makeSettings()
+    },
+    updateAgentPrompt: (input) => {
+      agentSettings = { systemPromptPreset: normalizeAgentSystemPromptPreset(input.preset) }
+      writeAgentRuntimeSettings(agentSettingsPath, agentSettings)
+      resolvedAgentModule = resolveCurrentAgentModule()
       return makeSettings()
     },
     auth: effectiveAuth,
@@ -345,6 +363,7 @@ function createModelRegistry(
       models.push(modelInfo(modelId, p.label, {
         providerId: p.id,
         source: manualModels.some((m) => m.providerId === p.id && m.id === modelId) ? 'manual' : p.source,
+        ...(p.contextWindows?.[modelId] ? { contextWindow: p.contextWindows[modelId] } : {}),
       }))
       byPrefix.push({ prefix: modelId, adapter })
       if (!primary) primary = adapter

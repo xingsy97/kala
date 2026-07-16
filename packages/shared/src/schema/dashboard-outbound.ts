@@ -68,6 +68,7 @@ import type {
   SessionRenamedEvent,
   SessionSummary,
   SettingsHookSummary,
+  SettingsAgentPrompt,
   SettingsProviderSummary,
   StateChangedEvent,
   SubAgentListResult,
@@ -114,6 +115,7 @@ export const LLMTraceSchema = z.object({
   response: z
     .object({
       status: z.number().int(),
+      finishReason: z.string().optional(),
       body: z.unknown().optional(),
       streamEventTypes: z.array(z.string()).optional(),
       metrics: z
@@ -157,6 +159,9 @@ export const SessionReadyEventSchema = z.object({
   reason: z.enum(['load', 'created', 'forked']).optional(),
   parentSessionId: z.string().optional(),
   parentCursor: z.number().int().nonnegative().optional(),
+  parentCallId: z.string().optional(),
+  agentType: z.string().optional(),
+  subAgentStartedAt: z.string().optional(),
   workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
   selectedModel: z.string().optional(),
@@ -574,6 +579,16 @@ const SettingsSkillSummarySchema = z.object({
   diagnostics: z.array(SettingsSkillDiagnosticSchema),
 })
 
+const SettingsAgentPromptSchema = z.object({
+  selectedPreset: z.enum(['codex', 'claude-code']),
+  presets: z.array(z.object({
+    id: z.enum(['codex', 'claude-code']),
+    label: z.string(),
+    description: z.string(),
+  })),
+  configPath: z.string(),
+}) satisfies z.ZodType<SettingsAgentPrompt>
+
 export const ServerSettingsPayloadSchema = z.object({
   providers: z.array(SettingsProviderSummarySchema),
   defaultModel: z.string(),
@@ -586,6 +601,7 @@ export const ServerSettingsPayloadSchema = z.object({
     })
     .optional(),
   agentModule: AgentModuleMetadataSchema.optional(),
+  agentPrompt: SettingsAgentPromptSchema.optional(),
   auth: z
     .object({
       dashboardAuthRequired: z.boolean(),

@@ -59,7 +59,7 @@ export type HostServerOptions = {
   port: number
   sessionsDir: string
   llm: LLMAdapter
-  defaultConfig: AgentConfig
+  defaultConfig: AgentConfig | (() => AgentConfig)
   toolTimeoutMs?: number
   /**
    * Grace window after an executor disconnects before its "detached" event
@@ -102,6 +102,7 @@ export type HostServerOptions = {
   settings?: ServerSettingsPayload | (() => ServerSettingsPayload)
   addManualModel?: Parameters<typeof attachJsonRoutes>[1]['addManualModel']
   deleteManualModel?: Parameters<typeof attachJsonRoutes>[1]['deleteManualModel']
+  updateAgentPrompt?: Parameters<typeof attachJsonRoutes>[1]['updateAgentPrompt']
   routerHealth?: () => unknown
 }
 
@@ -126,6 +127,9 @@ export async function startHostServer(
   })
 
   const store = new SessionStore(options.sessionsDir)
+  const getDefaultConfig = (): AgentConfig => typeof options.defaultConfig === 'function'
+    ? options.defaultConfig()
+    : options.defaultConfig
   const defaultSkillRootsList = defaultSkillRoots()
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
@@ -159,6 +163,7 @@ export async function startHostServer(
     ...(options.settings ? { settings: settingsWithSkills(options.settings) } : {}),
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
+    ...(options.updateAgentPrompt ? { updateAgentPrompt: options.updateAgentPrompt } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
     ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
     ...(auth ? { auth } : {}),
@@ -268,6 +273,10 @@ export async function startHostServer(
               return
             }
           }
+          if (record.state.status === 'thinking' && !loop.hasActiveLlmCall(sessionId)) {
+            await loop.recoverInterruptedLlm(sessionId)
+            record = store.get(sessionId)
+          }
           if (!record || !isRestingStatus(record.state.status)) return
           const next = queue.shift()
           if (queue.length === 0) queuedMessages.delete(sessionId)
@@ -304,7 +313,7 @@ export async function startHostServer(
         sessionId,
         cursor: state.cursor,
         state,
-        contextSnapshot: snapshotFromConfig(store.get(sessionId)?.config ?? options.defaultConfig, state.messages),
+        contextSnapshot: snapshotFromConfig(store.get(sessionId)?.config ?? getDefaultConfig(), state.messages),
       })
       io.of('/executor').to(room).emit('event:appended', {
         sessionId,
@@ -368,7 +377,7 @@ export async function startHostServer(
     },
   }
 
-  const skills = options.skills ?? createSkillManager(store, options.defaultConfig)
+  const skills = options.skills ?? createSkillManager(store, getDefaultConfig())
 
   const loopDeps = {
     store,
@@ -416,7 +425,7 @@ export async function startHostServer(
     loop,
     loopDeps,
     executors,
-    defaultConfig: options.defaultConfig,
+    defaultConfig: getDefaultConfig,
     ...(auth ? { auth } : {}),
     audit,
     broadcastError,
@@ -436,7 +445,7 @@ export async function startHostServer(
   configureExecutorNamespace(executorNs, {
     store,
     executors,
-    defaultConfig: options.defaultConfig,
+    defaultConfig: getDefaultConfig,
     ...(auth ? { auth } : {}),
     audit,
     broadcastError,

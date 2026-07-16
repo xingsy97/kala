@@ -25,6 +25,7 @@ import process from 'node:process'
 
 import type { ManualModelInput, ModelInfo, ModelSource } from '@agent-kernel/shared'
 
+import { normalizeAgentSystemPromptPreset, type AgentSystemPromptPreset } from './builtin-tools.js'
 import type { HookConfig, HookEvent } from './extensions/hooks.js'
 
 export type ProviderSpec = {
@@ -35,6 +36,7 @@ export type ProviderSpec = {
   baseUrl?: string
   apiKey: string
   models: readonly string[]
+  contextWindows?: Readonly<Record<string, number>>
 }
 
 export type RuntimeConfig = {
@@ -44,9 +46,14 @@ export type RuntimeConfig = {
   manualModels: readonly ManualModelInput[]
 }
 
+export type AgentRuntimeSettings = {
+  systemPromptPreset: AgentSystemPromptPreset
+}
+
 export type LoadRuntimeConfigOptions = {
   claudeSettingsPath?: string
   codexConfigPath?: string
+  codexAuthPath?: string
   manualModelsPath?: string
 }
 
@@ -58,13 +65,15 @@ export function loadRuntimeConfig(
     opts.claudeSettingsPath ?? join(home, '.claude', 'settings.json')
   const codexPath =
     opts.codexConfigPath ?? join(home, '.codex', 'config.toml')
+  const codexAuthPath =
+    opts.codexAuthPath ?? join(home, '.codex', 'auth.json')
   const manualPath =
     opts.manualModelsPath ?? join(home, '.config', 'agent-kernel', 'models.json')
 
   const providers: ProviderSpec[] = []
   const claude = loadClaudeSettings(claudePath)
   if (claude) providers.push(claude)
-  const codex = loadCodexProviders(codexPath)
+  const codex = loadCodexProviders(codexPath, codexAuthPath)
   providers.push(...codex.providers)
   const discoveredModels = new Map(providers.map((p) => [p.id, new Set(p.models)]))
   const manualModels = loadManualModels(manualPath).filter((m) => {
@@ -74,7 +83,11 @@ export function loadRuntimeConfig(
   applyManualModels(providers, manualModels)
 
   const models: ModelInfo[] = providers.flatMap((p) =>
-    p.models.map((m) => modelInfo(m, p.label, { providerId: p.id, source: modelSourceFor(p, m, manualModels, discoveredModels) })),
+    p.models.map((m) => modelInfo(m, p.label, {
+      providerId: p.id,
+      source: modelSourceFor(p, m, manualModels, discoveredModels),
+      ...(p.contextWindows?.[m] ? { contextWindow: p.contextWindows[m] } : {}),
+    })),
   )
 
   const defaultModel =
@@ -177,14 +190,15 @@ type CodexParsed = {
   providers: readonly ProviderSpec[]
 }
 
-function loadCodexProviders(path: string): CodexParsed {
+function loadCodexProviders(path: string, authPath: string): CodexParsed {
   const raw = tryReadFile(path)
   if (raw === undefined) return { providers: [] }
   const parsed = parseCodexToml(raw)
+  const auth = loadCodexAuth(authPath)
   const providers: ProviderSpec[] = []
   const defaultModel = parsed.model
   for (const p of parsed.providers) {
-    const apiKey = p.envKey ? process.env[p.envKey] : undefined
+    const apiKey = resolveCodexApiKey(p.envKey, auth)
     if (!apiKey) continue
     // Codex config declares providers but not per-provider model lists.
     // The user names one default model at the top; attach it to the
@@ -203,6 +217,7 @@ function loadCodexProviders(path: string): CodexParsed {
       ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}),
       apiKey,
       models,
+      ...(defaultModel && parsed.modelContextWindow ? { contextWindows: { [defaultModel]: parsed.modelContextWindow } } : {}),
     })
   }
   return {
@@ -240,6 +255,26 @@ export function writeManualModels(path: string, models: readonly ManualModelInpu
     ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
   }))
   writeFileSync(path, `${JSON.stringify({ models: normalized }, null, 2)}\n`, 'utf8')
+}
+
+export function defaultAgentSettingsPath(home = homedir()): string {
+  return join(home, '.config', 'agent-kernel', 'agent.json')
+}
+
+export function loadAgentRuntimeSettings(path = defaultAgentSettingsPath()): AgentRuntimeSettings {
+  const raw = tryReadFile(path)
+  if (raw === undefined) return { systemPromptPreset: 'codex' }
+  try {
+    const parsed = JSON.parse(raw) as { systemPromptPreset?: unknown }
+    return { systemPromptPreset: normalizeAgentSystemPromptPreset(parsed.systemPromptPreset) }
+  } catch {
+    return { systemPromptPreset: 'codex' }
+  }
+}
+
+export function writeAgentRuntimeSettings(path: string, settings: AgentRuntimeSettings): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `${JSON.stringify({ systemPromptPreset: normalizeAgentSystemPromptPreset(settings.systemPromptPreset) }, null, 2)}\n`, 'utf8')
 }
 
 function applyManualModels(
@@ -287,6 +322,7 @@ type CodexProviderBlock = {
 type CodexTomlSubset = {
   model?: string
   defaultProviderId?: string
+  modelContextWindow?: number
   providers: CodexProviderBlock[]
 }
 
@@ -338,9 +374,11 @@ export function parseCodexToml(text: string): CodexTomlSubset {
 
   const model = top.model
   const defaultProviderId = top.model_provider
+  const modelContextWindow = parsePositiveInt(top.model_context_window)
   return {
     ...(model ? { model } : {}),
     ...(defaultProviderId ? { defaultProviderId } : {}),
+    ...(modelContextWindow ? { modelContextWindow } : {}),
     providers,
   }
 }
@@ -363,7 +401,40 @@ function parseTomlValue(raw: string): string | undefined {
   if (s.startsWith('"') && s.endsWith('"') && s.length >= 2) {
     return s.slice(1, -1).replace(/\\"/g, '"')
   }
+  if (/^\d+$/.test(s)) return s
   return undefined
+}
+
+function parsePositiveInt(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined
+  const n = Number(raw)
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined
+}
+
+function loadCodexAuth(path: string): Record<string, string> {
+  const raw = tryReadFile(path)
+  if (raw === undefined) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.length > 0 && value !== 'env') out[key] = value
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function resolveCodexApiKey(envKey: string | undefined, auth: Readonly<Record<string, string>>): string | undefined {
+  if (envKey) {
+    const fromEnv = process.env[envKey]
+    if (fromEnv) return fromEnv
+    const fromAuth = auth[envKey]
+    if (fromAuth) return fromAuth
+  }
+  return auth.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY
 }
 
 function tryReadFile(path: string): string | undefined {

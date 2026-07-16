@@ -100,6 +100,7 @@ const transitions: Record<AgentStatus, TransitionRow> = {
     cwd_changed: (s, e) => onCwdChanged(s, e.cwd),
   },
   error: {
+    user_message: (s, e, c) => onUserMessage(s, e, c),
     clear: (s) => onClear(s),
     messages_replaced: (s, e) => onMessagesReplaced(s, e),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),

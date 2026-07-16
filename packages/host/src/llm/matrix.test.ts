@@ -42,7 +42,7 @@ const ANTHROPIC: Fixture = {
     'data: {"type":"message_start","message":{"id":"m","usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}\n\n',
-    'data: {"type":"message_delta","usage":{"output_tokens":1}}\n\n',
+    'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n',
     'data: {"type":"message_stop"}\n\n',
   ],
   toolStreamChunks: [
@@ -50,7 +50,7 @@ const ANTHROPIC: Fixture = {
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"search","input":{}}}\n\n',
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":\\"x\\"}"}}\n\n',
     'data: {"type":"content_block_stop","index":0}\n\n',
-    'data: {"type":"message_delta","usage":{"output_tokens":2}}\n\n',
+    'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":2}}\n\n',
     'data: {"type":"message_stop"}\n\n',
   ],
   makeAdapter: (fetchImpl) => anthropicAdapter({ apiKey: 'k', fetchImpl }),
@@ -197,6 +197,7 @@ describe.each(ADAPTERS)('%s adapter — streaming tool_use assembly', (_name, fx
     const call = calls[0] as { type: 'tool_call'; name: string; input: unknown }
     expect(call.name).toBe('search')
     expect(call.input).toEqual({ q: 'x' })
+    expect(res.finishReason).toMatch(/tool/)
   })
 })
 
@@ -218,5 +219,6 @@ describe.each(ADAPTERS)('%s adapter — streamed text equals final text', (_name
       .join('')
     expect(deltas.join('')).toBe(finalText)
     expect(finalText).toBe('hi')
+    expect(res.finishReason).toMatch(/^(end_turn|stop)$/)
   })
 })

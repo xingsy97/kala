@@ -138,6 +138,7 @@ export function anthropicAdapter(opts: AnthropicOptions): LLMAdapter {
         ...parsed,
         trace: makeAnthropicTrace(apiUrl, effectiveModel, body, {
           status: res.status,
+          ...(parsed.finishReason ? { finishReason: parsed.finishReason } : {}),
           body: json,
         }, {
           gatewayRequestId: extractAnthropicRequestId(res.headers, json),
@@ -193,6 +194,7 @@ async function callStreaming(
   let cacheCreationTokens = 0
   let cacheReadTokens = 0
   let streamMessageId: string | undefined
+  let finishReason: string | undefined
   const streamEventTypes: string[] = []
 
   const reader = res.body.getReader()
@@ -239,6 +241,9 @@ async function callStreaming(
           cacheCreationTokens += u.cacheCreation
           cacheReadTokens += u.cacheRead
         },
+        (reason) => {
+          finishReason = reason
+        },
       )
     }
   }
@@ -257,13 +262,16 @@ async function callStreaming(
   return {
     message,
     usage,
+    ...(finishReason ? { finishReason } : {}),
     trace: makeAnthropicTrace(apiUrl, model, body, {
       status: res.status,
+      ...(finishReason ? { finishReason } : {}),
       streamEventTypes,
       metrics: streamMetrics(startedAt, firstChunkAt),
       body: {
         role: 'assistant',
         content: blocks,
+        ...(finishReason ? { stop_reason: finishReason } : {}),
         usage: {
           input_tokens: inputTokens,
           output_tokens: outputTokens,
@@ -340,6 +348,7 @@ function handleStreamEvent(
     cacheCreation: number
     cacheRead: number
   }) => void,
+  onFinishReason: (reason: string) => void,
 ): void {
   const kind = evt.type as string | undefined
   if (kind === 'content_block_start') {
@@ -404,6 +413,14 @@ function handleStreamEvent(
     return
   }
   if (kind === 'message_delta') {
+    const delta = (evt.delta as Record<string, unknown> | undefined) ?? {}
+    const finishReason =
+      typeof delta.stop_reason === 'string'
+        ? delta.stop_reason
+        : typeof evt.stop_reason === 'string'
+          ? evt.stop_reason
+          : undefined
+    if (finishReason) onFinishReason(finishReason)
     const usage = (evt.usage as { output_tokens?: number }) ?? {}
     if (typeof usage.output_tokens === 'number') {
       // message_delta usage.output_tokens is the running total, not a delta.
@@ -600,7 +617,11 @@ function parseResponse(body: AnthropicResponseBody): LLMResponse {
         cacheReadTokens: numOr(body.usage.cache_read_input_tokens, 0),
       }
     : undefined
-  return { message, usage }
+  return {
+    message,
+    usage,
+    ...(body.stop_reason ? { finishReason: body.stop_reason } : {}),
+  }
 }
 
 function numOr(v: unknown, fallback: number): number {

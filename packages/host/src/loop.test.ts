@@ -132,6 +132,33 @@ describe('host loop', () => {
     void state
   })
 
+  it('records an empty assistant response without hidden retry messages', async () => {
+    const calls: number[] = []
+    const llm: LLMAdapter = {
+      name: 'empty-once',
+      async call(params) {
+        calls.push(params.messages.length)
+        return { message: { role: 'assistant', content: [] } }
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+    })
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'continue' })
+
+    expect(calls).toEqual([2])
+    const rec = store.get(sessionId)!
+    expect(rec.state.status).toBe('done')
+    const last = rec.state.messages.at(-1)
+    expect(last).toEqual({ role: 'assistant', content: [] })
+    const parsed = await readSessionLog(rec.logPath)
+    expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message', 'llm_response'])
+  })
+
   it('writes message assembly artifacts outside the replay log when configured', async () => {
     const artifactRootDir = join(dir, 'artifacts')
     const llm = scriptedLlm([
@@ -370,6 +397,7 @@ describe('host loop', () => {
           content: [{ type: 'text', text: 'trace captured' }],
         },
         usage: { inputTokens: 7, outputTokens: 4 },
+        finishReason: 'stop',
         trace,
       },
     ])
@@ -394,6 +422,10 @@ describe('host loop', () => {
     expect(response?.llmTrace?.request.body).toBeUndefined()
     expect(response?.llmTraceArtifact?.path).toContain('llm-traces')
     expect(response?.model).toBe('gpt-5.5')
+    expect(response?.event.kind).toBe('llm_response')
+    if (response?.event.kind === 'llm_response') {
+      expect(response.event.finishReason).toBe('stop')
+    }
     expect(seen).toHaveLength(1)
     expect(seen[0]?.llmTrace?.request.url).toBe('https://<redacted>/v1/chat/completions')
     expect(seen[0]?.llmTrace?.request.headers.authorization).toBe('[redacted]')
@@ -1515,7 +1547,66 @@ describe('host loop', () => {
     expect(children[0]!.workspaceId).toBe('ws-agent')
     const childLog = await readSessionLog(children[0]!.logPath)
     expect(childLog.header.parentSessionId).toBe(parent.sessionId)
+    expect(childLog.header.parentCallId).toBe('agent-1')
+    expect(childLog.header.subAgentStartedAt).toMatch(/T/)
     expect(children[0]!.state.status).toBe('done')
+  })
+
+  it('starts sibling sub-agent tool calls concurrently', async () => {
+    const parentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    const parent = await store.create({
+      config: parentConfig,
+      sessionId: 'sess-agent-parallel-parent',
+      workspaceId: 'ws-agent-parallel',
+    })
+    const childWaiters: Array<() => void> = []
+    let llmCalls = 0
+    const llm: LLMAdapter = {
+      name: 'parallel-scripted',
+      async call() {
+        llmCalls += 1
+        if (llmCalls === 1) {
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'tool_call', callId: 'agent-a', name: 'agent', input: { prompt: 'A' } },
+                { type: 'tool_call', callId: 'agent-b', name: 'agent', input: { prompt: 'B' } },
+              ],
+            },
+          }
+        }
+        if (llmCalls === 2 || llmCalls === 3) {
+          await new Promise<void>((resolve) => childWaiters.push(resolve))
+          return { message: { role: 'assistant', content: [{ type: 'text', text: `child ${llmCalls}` }] } }
+        }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'parent done' }] } }
+      },
+    }
+    const started: SubAgentStartedPayload[] = []
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: {
+        ...silentBroadcast(),
+        onSubAgentStarted(p) {
+          started.push(p)
+        },
+      },
+    })
+
+    const run = loop.dispatch(parent.sessionId, { kind: 'user_message', text: 'go' })
+    while (started.length < 2) await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(started.map((p) => p.parentCallId).sort()).toEqual(['agent-a', 'agent-b'])
+    while (childWaiters.length < 2) await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(childWaiters).toHaveLength(2)
+    childWaiters.forEach((resolve) => resolve())
+    await run
+
+    const parentLog = await readSessionLog(parent.logPath)
+    const results = parentLog.events.filter((e) => e.event.kind === 'tool_result')
+    expect(results.map((e) => e.event.kind === 'tool_result' ? e.event.callId : '').sort()).toEqual(['agent-a', 'agent-b'])
   })
 
   it('persists a resolved sub-agent policy artifact when a role is requested', async () => {

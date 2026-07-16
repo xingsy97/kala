@@ -156,6 +156,8 @@ describe('anthropicAdapter — prompt caching', () => {
       messages: [{ role: 'user', content: [{ type: 'text', text: 'q' }] }],
       tools: [],
     })
+    expect(res.finishReason).toBe('end_turn')
+    expect(res.trace?.response?.finishReason).toBe('end_turn')
     expect(res.usage).toEqual({
       inputTokens: 50,
       outputTokens: 12,
@@ -196,7 +198,7 @@ describe('anthropicAdapter — prompt caching', () => {
         'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hel"}}\n\n',
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}\n\n',
-        'data: {"type":"message_delta","usage":{"output_tokens":2}}\n\n',
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
         'data: {"type":"message_stop"}\n\n',
       ]),
     })
@@ -209,6 +211,8 @@ describe('anthropicAdapter — prompt caching', () => {
 
     expect(deltas).toEqual(['hel', 'lo'])
     expect(res.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(res.finishReason).toBe('end_turn')
+    expect(res.trace?.response?.finishReason).toBe('end_turn')
     expect(res.trace?.response?.metrics?.durationMs).toEqual(expect.any(Number))
     expect(res.trace?.response?.metrics?.timeToFirstChunkMs).toEqual(expect.any(Number))
   })

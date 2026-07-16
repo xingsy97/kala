@@ -158,10 +158,14 @@ export async function runAgentTool(
   }
 
   const effectiveTools = pickEffectiveTools(effect.input.tools, policy.allowedTools)
+  const startedAt = new Date()
   const child = await deps.store.create({
     config: filteredAgentConfig(parent.config, effectiveTools),
     parentSessionId,
     parentCursor: parent.state.cursor,
+    parentCallId: effect.callId,
+    ...(agentType !== undefined ? { agentType } : {}),
+    subAgentStartedAt: startedAt.toISOString(),
     ...(parent.workspaceId !== undefined ? { workspaceId: parent.workspaceId } : {}),
     ...(parent.workspaceName !== undefined ? { workspaceName: parent.workspaceName } : {}),
     ...(parent.state.cwd !== undefined ? { initialCwd: parent.state.cwd } : {}),
@@ -173,7 +177,6 @@ export async function runAgentTool(
 
   await persistSubAgentPolicyArtifact(deps, parent, child.sessionId, effect.callId, policy)
 
-  const startedAt = new Date()
   const active: ActiveSubAgent = {
     parentSessionId,
     parentCallId: effect.callId,

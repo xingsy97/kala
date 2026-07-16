@@ -150,11 +150,11 @@ async function callChatCompletions(input: { opts: PolicyGatewayOptions; params: 
         provider: 'openai',
         model: params.model ?? opts.model,
         request: { url: endpoint, headers, body },
-        response: { status: res.status, body: json },
+        response: { status: res.status, ...(response.finishReason ? { finishReason: response.finishReason } : {}), body: json },
         gatewayRequestId: res.headers.get('x-request-id') ?? undefined,
         ...(opts.weightVersion ? { weightVersion: opts.weightVersion } : {}),
       }
-      return { message: response.message, usage: response.usage, trace }
+      return { message: response.message, usage: response.usage, ...(response.finishReason ? { finishReason: response.finishReason } : {}), trace }
 }
 
 async function callNativeGenerate(input: { opts: PolicyGatewayOptions; params: LLMCallParams; fetcher: typeof fetch; baseUrl: string }): Promise<LLMResponse> {
@@ -223,13 +223,15 @@ async function callNativeGenerate(input: { opts: PolicyGatewayOptions; params: L
     provider: 'openai',
     model: params.model ?? opts.model,
     request: { url: endpoint, headers, body },
-    response: { status: res.status, body: json },
+    response: { status: res.status, ...(json.meta_info?.finish_reason ? { finishReason: formatNativeFinishReason(json.meta_info.finish_reason) } : {}), body: json },
     gatewayRequestId: res.headers.get('x-request-id') ?? undefined,
     ...(opts.weightVersion ? { weightVersion: opts.weightVersion } : {}),
   }
+  const finishReason = json.meta_info?.finish_reason ? formatNativeFinishReason(json.meta_info.finish_reason) : undefined
   return {
     message,
     usage: { inputTokens: json.meta_info?.prompt_tokens ?? promptIds.length, outputTokens: json.meta_info?.completion_tokens ?? outputIds.length },
+    ...(finishReason ? { finishReason } : {}),
     trace,
   }
 }
@@ -241,7 +243,7 @@ async function toOpenAICompatibleBody(params: LLMCallParams, model: string): Pro
   const body: Record<string, unknown> = { model, messages, max_tokens: 1024 }
   if (params.tools.length > 0) {
     body.tools = params.tools.map(toOpenAITool)
-    body.tool_choice = 'required'
+    body.tool_choice = 'auto'
   }
   return body
 }

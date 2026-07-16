@@ -36,6 +36,9 @@ export type SessionRecord = {
   readonly config: AgentConfig
   readonly parentSessionId?: string
   readonly parentCursor?: number
+  readonly parentCallId?: string
+  readonly agentType?: string
+  readonly subAgentStartedAt?: string
   readonly workspaceId?: string
   readonly workspaceName?: string
   lastEventAt?: string
@@ -62,6 +65,9 @@ export type CreateSessionParams = {
   config: AgentConfig
   parentSessionId?: string
   parentCursor?: number
+  parentCallId?: string
+  agentType?: string
+  subAgentStartedAt?: string
   initialState?: AgentState
   sessionId?: string
   workspaceId?: string
@@ -121,6 +127,15 @@ export class SessionStore {
       ...(params.parentCursor !== undefined
         ? { parentCursor: params.parentCursor }
         : {}),
+      ...(params.parentCallId !== undefined
+        ? { parentCallId: params.parentCallId }
+        : {}),
+      ...(params.agentType !== undefined
+        ? { agentType: params.agentType }
+        : {}),
+      ...(params.subAgentStartedAt !== undefined
+        ? { subAgentStartedAt: params.subAgentStartedAt }
+        : {}),
       ...(params.workspaceId !== undefined
         ? { workspaceId: params.workspaceId }
         : {}),
@@ -142,6 +157,15 @@ export class SessionStore {
         : {}),
       ...(params.parentCursor !== undefined
         ? { parentCursor: params.parentCursor }
+        : {}),
+      ...(params.parentCallId !== undefined
+        ? { parentCallId: params.parentCallId }
+        : {}),
+      ...(params.agentType !== undefined
+        ? { agentType: params.agentType }
+        : {}),
+      ...(params.subAgentStartedAt !== undefined
+        ? { subAgentStartedAt: params.subAgentStartedAt }
         : {}),
       ...(params.workspaceId !== undefined
         ? { workspaceId: params.workspaceId }
@@ -188,6 +212,19 @@ export class SessionStore {
       return this.loadFromFile(sessionId, found)
     }
     return this.loadFromFile(sessionId, path)
+  }
+
+  async recoverInterruptedLlm(sessionId: string): Promise<{
+    record: SessionRecord
+    event: AgentEvent
+    effects: readonly Effect[]
+  } | null> {
+    const record = this.records.get(sessionId) ?? (await this.load(sessionId))
+    if (record.state.status !== 'thinking' || record.state.pendingCalls.length > 0) {
+      return null
+    }
+    const recovered = await this.appendInterruptedLlmRecovery(record)
+    return recovered ? { record, ...recovered } : null
   }
 
   /**
@@ -339,6 +376,29 @@ export class SessionStore {
 
   list(): SessionRecord[] {
     return [...this.records.values()]
+  }
+
+  async listChildren(parentSessionId: string): Promise<SessionRecord[]> {
+    const loaded = new Map<string, SessionRecord>()
+    for (const record of this.records.values()) {
+      if (record.parentSessionId === parentSessionId) loaded.set(record.sessionId, record)
+    }
+    if (!existsSync(this.sessionsDir)) return [...loaded.values()]
+    const files = readdirSync(this.sessionsDir).filter((f) => f.endsWith('.jsonl'))
+    for (const file of files) {
+      const path = join(this.sessionsDir, file)
+      if (loadedRecordForPath(this.records, path)) continue
+      try {
+        const parsed = await readSessionLog(path)
+        if (parsed.header.parentSessionId !== parentSessionId) continue
+        const record = await this.loadFromFile(parsed.header.sessionId, path)
+        loaded.set(record.sessionId, record)
+      } catch {
+        // Skip malformed or partially-written logs; session listing should be
+        // best-effort and never block the dashboard from rendering.
+      }
+    }
+    return [...loaded.values()]
   }
 
   /**
@@ -572,6 +632,15 @@ export class SessionStore {
       ...(parsed.header.parentCursor !== undefined
         ? { parentCursor: parsed.header.parentCursor }
         : {}),
+      ...(parsed.header.parentCallId !== undefined
+        ? { parentCallId: parsed.header.parentCallId }
+        : {}),
+      ...(parsed.header.agentType !== undefined
+        ? { agentType: parsed.header.agentType }
+        : {}),
+      ...(parsed.header.subAgentStartedAt !== undefined
+        ? { subAgentStartedAt: parsed.header.subAgentStartedAt }
+        : {}),
       ...(latestWorkspaceId !== undefined
         ? { workspaceId: latestWorkspaceId }
         : {}),
@@ -585,6 +654,37 @@ export class SessionStore {
     this.records.set(sessionId, record)
     this.summaryCache.delete(path)
     return record
+  }
+
+  private async appendInterruptedLlmRecovery(record: SessionRecord): Promise<{
+    event: AgentEvent
+    effects: readonly Effect[]
+  } | null> {
+    if (record.state.status !== 'thinking' || record.state.pendingCalls.length > 0) {
+      return null
+    }
+    const event: AgentEvent = interruptedLlmRecoveryEvent()
+    const { next, effects } = step(record.state, event, record.config)
+    const entry = await appendEventEntry({
+      path: record.logPath,
+      seq: next.cursor,
+      event,
+      effects,
+    })
+    record.state = next
+    record.lastEventAt = entry.ts
+    this.summaryCache.delete(record.logPath)
+    return { event, effects }
+  }
+}
+
+function interruptedLlmRecoveryEvent(): AgentEvent {
+  return {
+    kind: 'llm_response',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: '[interrupted]' }],
+    },
   }
 }
 

@@ -21,37 +21,71 @@ export function createBuiltinTools(
 export function resolveBuiltinAgentModule(input: {
   skills?: readonly SkillInfo[]
   contextLimit?: number
+  systemPromptPreset?: AgentSystemPromptPreset
 } = {}) {
-  return resolveAgentModule(createBuiltinAgentModule(), {
+  return resolveAgentModule(createBuiltinAgentModule(input.systemPromptPreset), {
     mode: 'coding',
     skills: input.skills ?? [],
     ...(input.contextLimit !== undefined ? { contextLimit: input.contextLimit } : {}),
   })
 }
 
-export function createBuiltinAgentModule(): AgentModule {
+export type AgentSystemPromptPreset = 'codex' | 'claude-code'
+
+export const AGENT_SYSTEM_PROMPT_PRESETS: readonly { id: AgentSystemPromptPreset; label: string; description: string }[] = [
+  { id: 'codex', label: 'Codex', description: 'Direct coding-agent prompt with explicit execution and verification rules.' },
+  { id: 'claude-code', label: 'Claude Code', description: 'Concise pair-programming prompt shaped for file edits, commands, and progress tracking.' },
+]
+
+export function normalizeAgentSystemPromptPreset(value: unknown): AgentSystemPromptPreset {
+  return value === 'claude-code' ? 'claude-code' : 'codex'
+}
+
+export function createBuiltinAgentModule(preset: AgentSystemPromptPreset = 'codex'): AgentModule {
+  const systemPrompt = preset === 'claude-code'
+    ? claudeCodeSystemPromptPlugin
+    : codexSystemPromptPlugin
   return {
-    id: 'coding-agent',
+    id: `coding-agent-${preset}`,
     version: '2026-07-15',
-    label: 'Coding Agent',
-    systemPrompt: codingSystemPromptPlugin,
+    label: preset === 'claude-code' ? 'Claude Code Prompt' : 'Codex Prompt',
+    systemPrompt,
     toolsets: [skillToolset, filesystemToolset, shellToolset, planningToolset, agentToolset, webToolset, memoryToolset],
   }
 }
 
-const codingSystemPromptPlugin: SystemPromptPlugin = {
-  id: 'coding-system-prompt',
+const codexSystemPromptPlugin: SystemPromptPlugin = {
+  id: 'codex-system-prompt',
   version: '2026-07-15',
-  label: 'Coding System Prompt',
+  label: 'Codex System Prompt',
   render() {
     return [
-      'You are Agent RunLab, a coding agent running inside a shared developer workspace.',
+      'You are Codex, a coding agent running inside Agent RunLab in a shared developer workspace.',
       'Work pragmatically: inspect the codebase before changing it, make focused edits, and verify the result with the narrowest reliable tests.',
       'Prefer existing project patterns over new abstractions. Use fast search tools first, especially ripgrep-backed search, before broad file reads.',
       'Treat filesystem, shell, network, and memory tools as real side effects. Avoid destructive actions unless the user clearly requested them or approval policy permits them.',
       'When editing, keep unrelated files and user changes intact. Do not revert work you did not make.',
+      'If the user asks you to modify files, run commands, or continue unfinished work, either ask a necessary clarification, explain a real blocker, or continue by using tools. Do not claim that you changed, ran, verified, or completed something unless a tool result confirms it.',
       'For multi-step work, keep a concise task list and update it as the state changes. Mark work complete only after verification.',
       'Report concrete outcomes: what changed, what was verified, and what remains risky or untested.',
+    ].join('\n\n')
+  },
+}
+
+const claudeCodeSystemPromptPlugin: SystemPromptPlugin = {
+  id: 'claude-code-system-prompt',
+  version: '2026-07-15',
+  label: 'Claude Code System Prompt',
+  render() {
+    return [
+      'You are Claude Code, an interactive coding agent running inside Agent RunLab.',
+      'Help the user with software engineering tasks in the current workspace. Be direct, concise, and action-oriented.',
+      'Before making changes, understand the relevant files and existing conventions. Prefer precise reads and searches over broad exploration.',
+      'When the user requests an implementation, move the work forward with file and shell tools once the task is clear. It is acceptable to clarify or report a real blocker first, but do not only describe future work when you can act.',
+      'If you say you added, updated, fixed, removed, ran, or verified something, that statement must be backed by a tool call result in the current turn.',
+      'Respect existing user changes. Never revert unrelated work. Avoid destructive shell commands unless the user explicitly requests them.',
+      'Use todo tracking for multi-step work. Keep exactly one active task and mark tasks complete only after the corresponding work is actually done.',
+      'Finish with a short report of changed files, verification, and any remaining risks.',
     ].join('\n\n')
   },
 }

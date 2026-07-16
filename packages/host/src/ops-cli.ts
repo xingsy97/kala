@@ -785,7 +785,7 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
       tools,
       rolloutId,
       requireLogprobs: command.requireLogprobs,
-      config: { tools: rlToolSchemas(), systemPrompt: rlSystemPrompt, noToolCallNudges: task.verifier.kind === 'command' ? 0 : 3 },
+      config: { tools: rlToolSchemas(), systemPrompt: rlSystemPrompt },
       ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),
       ...(command.maxTurns !== undefined ? { maxTurns: command.maxTurns } : {}),
     })

@@ -25,6 +25,7 @@ import type {
   FinishEffect,
   RequestApprovalEffect,
   Effect,
+  Message,
 } from '@agent-kernel/kernel'
 import { estimateMessageTokens, step } from '@agent-kernel/kernel'
 
@@ -118,8 +119,33 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       const ctrl = inFlightAborts.get(sessionId)
       if (ctrl) ctrl.abort()
     },
+    hasActiveLlmCall(sessionId) {
+      return inFlightAborts.has(sessionId)
+    },
+    async recoverInterruptedLlm(sessionId) {
+      if (inFlightAborts.has(sessionId)) return false
+      const record = deps.store.get(sessionId)
+      if (!record || record.state.status !== 'thinking' || record.state.pendingCalls.length > 0) {
+        return false
+      }
+      await dispatchOne(deps, sessionId, interruptedLlmRecoveryEvent(), inFlightAborts, undefined, undefined, {
+        handle,
+        loopGuard,
+      })
+      return true
+    },
   }
   return handle
+}
+
+function interruptedLlmRecoveryEvent(): AgentEvent {
+  return {
+    kind: 'llm_response',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: '[interrupted]' }],
+    },
+  }
 }
 
 export async function dispatchOne(
@@ -179,8 +205,31 @@ export async function dispatchOne(
     if (inFlight) inFlight.abort()
   }
 
+  if (effects.length > 1 && effects.every(isCallToolEffect)) {
+    const resultQueue = createSerialQueue()
+    await Promise.all(
+      effects.map((eff) => performCallTool(deps, record.sessionId, eff, aborts, runtime, resultQueue)),
+    )
+    return
+  }
+
   for (const eff of effects) {
     await performEffect(deps, record, eff, aborts, runtime)
+  }
+}
+
+function isCallToolEffect(effect: Effect): effect is CallToolEffect {
+  return effect.kind === 'call_tool'
+}
+
+type SerialQueue = <T>(task: () => Promise<T>) => Promise<T>
+
+function createSerialQueue(): SerialQueue {
+  let tail = Promise.resolve()
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    const run = tail.catch(() => undefined).then(task)
+    tail = run.then(() => undefined, () => undefined)
+    return run
   }
 }
 
@@ -238,17 +287,14 @@ async function performCallLlm(
       }
     : undefined
   try {
-    const res = await deps.llm.call({
-      messages,
+    const res = await callLlmOnce({
+      deps,
       tools: effect.tools,
       signal: controller.signal,
-      ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
-      ...(model ? { model } : {}),
-      ...(config.thinkingBudget !== undefined
-        ? { thinkingBudget: config.thinkingBudget }
-        : {}),
-      ...(onTextDelta ? { onTextDelta } : {}),
-    })
+      config,
+      model,
+      onTextDelta,
+    }, messages)
     await dispatchOne(
       deps,
       sessionId,
@@ -256,6 +302,7 @@ async function performCallLlm(
         kind: 'llm_response',
         message: res.message,
         ...(res.usage ? { usage: res.usage } : {}),
+        ...(res.finishReason ? { finishReason: res.finishReason } : {}),
       },
       aborts,
       res.trace,
@@ -290,6 +337,27 @@ async function performCallLlm(
   } finally {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
   }
+}
+
+function callLlmOnce(input: {
+  deps: HostLoopDeps
+  tools: CallLlmEffect['tools']
+  signal: AbortSignal
+  config: AgentConfig
+  model?: string
+  onTextDelta?: (delta: string) => void
+}, messages: readonly Message[]) {
+  return input.deps.llm.call({
+    messages,
+    tools: input.tools,
+    signal: input.signal,
+    ...(input.config.systemPrompt ? { systemPrompt: input.config.systemPrompt } : {}),
+    ...(input.model ? { model: input.model } : {}),
+    ...(input.config.thinkingBudget !== undefined
+      ? { thinkingBudget: input.config.thinkingBudget }
+      : {}),
+    ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
+  })
 }
 
 async function maybeWriteMessageAssemblyArtifact(
@@ -456,6 +524,7 @@ async function performCallTool(
   effect: CallToolEffect,
   aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
+  resultQueue?: SerialQueue,
 ): Promise<void> {
   try {
     const blockedByLoop = guardPostCompactionLoop(sessionId, effect, runtime?.loopGuard)
@@ -468,6 +537,7 @@ async function performCallTool(
         blockedByLoop,
         aborts,
         runtime,
+        resultQueue,
       )
       return
     }
@@ -481,6 +551,7 @@ async function performCallTool(
         memoryPolicyBlock,
         aborts,
         runtime,
+        resultQueue,
       )
       return
     }
@@ -494,6 +565,7 @@ async function performCallTool(
         blocked,
         aborts,
         runtime,
+        resultQueue,
       )
       return
     }
@@ -507,6 +579,7 @@ async function performCallTool(
       res.content,
       aborts,
       runtime,
+      resultQueue,
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -518,6 +591,7 @@ async function performCallTool(
       message,
       aborts,
       runtime,
+      resultQueue,
     )
   }
 }
@@ -530,24 +604,29 @@ async function dispatchToolResult(
   content: string,
   aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
+  resultQueue?: SerialQueue,
 ): Promise<void> {
-  const record = deps.store.get(sessionId)
-  const capped = capToolResultForContext(content, record?.config.contextLimit)
-  await dispatchOne(
-    deps,
-    sessionId,
-    {
-      kind: 'tool_result',
-      callId,
-      ok,
-      content: capped,
-    },
-    aborts,
-    undefined,
-    undefined,
-    runtime,
-  )
-  await maybeCompactAfterToolResult(deps, sessionId, runtime)
+  const write = async (): Promise<void> => {
+    const record = deps.store.get(sessionId)
+    const capped = capToolResultForContext(content, record?.config.contextLimit)
+    await dispatchOne(
+      deps,
+      sessionId,
+      {
+        kind: 'tool_result',
+        callId,
+        ok,
+        content: capped,
+      },
+      aborts,
+      undefined,
+      undefined,
+      runtime,
+    )
+    await maybeCompactAfterToolResult(deps, sessionId, runtime)
+  }
+  if (resultQueue) await resultQueue(write)
+  else await write()
 }
 
 async function maybeCompactAfterToolResult(
