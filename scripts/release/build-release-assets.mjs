@@ -67,6 +67,13 @@ if (includeDashboard) {
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'])
 }
 
+if (!nativeOnly) {
+  await run('pnpm', ['--filter', '@agent-kernel/kernel', 'build'])
+  await run('pnpm', ['--filter', '@agent-kernel/shared', 'build'])
+  await run('pnpm', ['--filter', '@agent-kernel/executor', 'build'])
+  await run('pnpm', ['--filter', '@agent-kernel/host', 'build'])
+}
+
 for (const item of entries) {
   const embeddedDashboard = item.component === 'host' && includeDashboard
     ? embeddedDashboardBanner(dashboardDist)
