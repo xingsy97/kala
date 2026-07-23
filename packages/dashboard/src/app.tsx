@@ -238,8 +238,8 @@ export function App(): JSX.Element {
   const suppressNextAutoSessionSelection = useRef(false)
   const suppressNextWaitingNotification = useRef(false)
   const [themePreference, toggleTheme, , effectiveTheme] = useTheme()
-  // Drives the root container's height via a CSS var; see hook comment
-  // for the iOS PWA `100dvh` background.
+  // Drives the app shell, drawers, and dialogs from one visible-viewport
+  // height source instead of mixing 100dvh with ad hoc safe-area fixes.
   useVisualViewportHeight()
   const [liveToolActivityTailCount] = useNumberPref(
     PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
@@ -1323,7 +1323,7 @@ export function App(): JSX.Element {
 
   return (
     <PwaLifecycleHost>
-    <div className="h-full w-full max-w-full overflow-hidden bg-background text-foreground flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+    <div className="ak-app-shell flex flex-col bg-background text-foreground">
       <AppShellNav
         section={section}
         onSelect={handleSectionSelect}

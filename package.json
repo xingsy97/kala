@@ -21,6 +21,7 @@
     "verify:dashboard-real": "pnpm --filter @agent-kernel/dashboard verify:real",
     "verify:dashboard-debugger": "pnpm --filter @agent-kernel/dashboard verify:debugger",
     "verify:dashboard-layout-scroll": "pnpm --filter @agent-kernel/dashboard verify:layout-scroll",
+    "verify:dashboard-mobile-pwa": "pnpm --filter @agent-kernel/dashboard verify:mobile-pwa",
     "verify:dashboard-enhancement-actions": "pnpm --filter @agent-kernel/dashboard verify:enhancement-actions",
     "verify:dashboard-subagent-scroll": "pnpm --filter @agent-kernel/dashboard verify:subagent-scroll",
     "verify:swebench-smoke": "node scripts/eval/benchmarks/swebench/verify-swebench-smoke.mjs",

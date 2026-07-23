@@ -29,7 +29,12 @@ export const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'ak-motion-dialog fixed left-[50%] top-[50%] z-50 grid max-h-[calc(var(--ak-viewport-h,100dvh)-1rem)] w-[calc(100vw-1rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border border-border/60 bg-background p-6 shadow-lg sm:w-full sm:rounded-lg',
+        // Center the dialog inside the safe area rather than the raw
+        // viewport: shift the vertical center by half the difference
+        // between top and bottom safe-area insets. On iOS PWA with a
+        // notch this pushes the dialog down enough that the top edge
+        // no longer sits under the status bar / dynamic island.
+        'ak-motion-dialog fixed left-[50%] top-[calc(50%+(env(safe-area-inset-top)-env(safe-area-inset-bottom))/2)] z-50 grid max-h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem)] w-[calc(100vw-1rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden border border-border/60 bg-background p-6 shadow-lg sm:w-full sm:rounded-lg',
         className,
       )}
       {...props}
