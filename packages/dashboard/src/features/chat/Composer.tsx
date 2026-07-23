@@ -418,7 +418,14 @@ export function Composer({
       onSubmit={handleSubmit}
       className={cn(
         'bg-card px-3 sm:px-6 lg:px-8',
-        mode === 'simple' ? 'pb-1.5 pt-1 sm:pb-2 sm:pt-1.5' : 'pb-2.5 pt-1.5 sm:pb-4 sm:pt-2',
+        // Include env(safe-area-inset-bottom) so the composer's bg-card
+        // extends all the way to the physical bottom of the screen on iOS
+        // PWA (home indicator area). Without this the safe-area strip
+        // paints in the parent bg-background, leaving a black band below
+        // the composer.
+        mode === 'simple'
+          ? 'pt-1 pb-[max(env(safe-area-inset-bottom),0.375rem)] sm:pt-1.5 sm:pb-[max(env(safe-area-inset-bottom),0.5rem)]'
+          : 'pt-1.5 pb-[max(env(safe-area-inset-bottom),0.625rem)] sm:pt-2 sm:pb-[max(env(safe-area-inset-bottom),1rem)]',
       )}
       style={displayStyle}
       data-testid="composer"
@@ -535,10 +542,10 @@ export function Composer({
                   if (!found) mentionRequestId.current += 1
                 }
               }}
-              rows={2}
+              rows={1}
               disabled={disabled}
               placeholder={placeholderText}
-              className="max-h-56 min-h-[56px] w-full resize-none border-0 bg-transparent px-4 py-3 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
+              className="max-h-56 min-h-[40px] w-full resize-none border-0 bg-transparent px-4 py-2.5 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
               data-testid="composer-input"
               onPaste={(e) => {
                 void handlePaste(e)

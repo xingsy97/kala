@@ -331,25 +331,36 @@
 }
 
 /**
- * iOS Safari PWA (display-mode: standalone) + viewport-fit=cover leaves a
- * blank strip at the bottom of the screen for any element sized via normal
- * flow with height: 100% / 100vh / 100dvh. The only reliable fix documented
- * by WebKit and confirmed on the openchamber tracker + Stack Overflow
- * (see https://stackoverflow.com/q/66005655 and openchamber/openchamber#2287)
- * is to take the root container out of flow with position: fixed pinned to
- * all four sides of the layout viewport. `inset: 0` + `height: 100dvh`
- * makes it exactly one viewport tall regardless of what iOS decides the
- * html/body flow height is.
+ * Mobile/PWA viewport model.
+ *
+ * html/body/#root own the browser canvas and background. The real app height
+ * lives on `.ak-app-shell`, which consumes `--ak-viewport-h` from
+ * useVisualViewportHeight(). This keeps desktop, mobile browser, iOS PWA,
+ * drawers, and dialogs on the same visible-viewport measurement instead of
+ * mixing `100dvh`, fixed roots, and component-specific keyboard guesses.
  */
 html,
 body {
   height: 100%;
+  min-height: 100%;
+  background: hsl(var(--background));
 }
 #root {
-  position: fixed;
-  inset: 0;
-  height: 100dvh;
-  width: 100vw;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  background: hsl(var(--background));
+}
+.ak-app-shell {
+  height: var(--ak-viewport-h, 100dvh);
+  min-height: 0;
+  max-height: var(--ak-viewport-h, 100dvh);
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 /**
@@ -357,13 +368,32 @@ body {
  * than the actual layout viewport when viewport-fit=cover is set + the
  * device has a notch/landscape safe area. Without an explicit clamp the
  * page becomes horizontally scrollable in the installed app, even when
- * the browser tab renders fine at the same URL. Belt-and-suspenders:
- * both html and body clamp width and forbid horizontal overflow.
+ * the browser tab renders fine at the same URL. Clamp the document width and
+ * forbid horizontal overflow at the canvas layer.
  */
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+}
+
+/**
+ * iOS Safari auto-zooms the page whenever the user focuses a form
+ * control whose computed font-size is below 16px, so the zoomed input
+ * stays legible. In a tightly designed app that zoom leaves half the
+ * chrome off-screen and the user has to manually pinch back out. Rather
+ * than add maximum-scale=1 to the viewport meta (which also disables
+ * pinch-to-zoom for accessibility) we clamp the minimum font-size only
+ * on true touch devices (`pointer: coarse` + `hover: none`), and only
+ * on form controls. Desktop / trackpad renders unchanged.
+ */
+@media (pointer: coarse) and (hover: none) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: max(16px, 1em);
+  }
 }
 
 body {

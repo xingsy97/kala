@@ -15,6 +15,7 @@
     "verify:real": "node ../../scripts/dashboard/verify-dashboard-real.mjs",
     "verify:debugger": "node ../../scripts/dashboard/verify-dashboard-debugger.mjs",
     "verify:layout-scroll": "node ../../scripts/dashboard/verify-dashboard-layout-scroll.mjs",
+    "verify:mobile-pwa": "node ../../scripts/dashboard/verify-dashboard-mobile-pwa.mjs",
     "verify:enhancement-actions": "node ../../scripts/dashboard/verify-dashboard-enhancement-actions.mjs",
     "verify:subagent-scroll": "node ../../scripts/dashboard/verify-dashboard-subagent-scroll.mjs"
   },

@@ -1,0 +1,358 @@
+#!/usr/bin/env node
+/**
+ * Dashboard mobile/PWA viewport regression check.
+ *
+ * This uses real Chrome against a built dashboard served by the real host. It
+ * cannot emulate iOS Safari's keyboard perfectly, but it does verify the app's
+ * browser-visible contract across desktop, mobile browser, and standalone PWA
+ * display modes: one viewport-sized shell, no horizontal overflow, composer in
+ * view, dialogs inside the visible viewport, and touch inputs at 16px+.
+ */
+import { spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
+
+import puppeteer from 'puppeteer-core'
+
+const requireFromHost = createRequire(new URL('../../packages/host/package.json', import.meta.url))
+const { io } = requireFromHost('socket.io-client')
+const { PROTOCOL_VERSION } = await import('../../packages/shared/dist/index.js')
+
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
+const PORT = Number(process.env.VERIFY_MOBILE_PWA_PORT ?? 3186)
+const HOST_URL = `http://localhost:${PORT}`
+const SESSION_ID = `mobile-pwa-${Date.now()}`
+const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-mobile-pwa-sessions-'))
+const SHOTS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-mobile-pwa-shots-'))
+const CHROME = process.env.CHROME_PATH ?? detectBrowser()
+
+const cases = [
+  {
+    name: 'desktop browser',
+    viewport: { width: 1440, height: 820, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+    standalone: false,
+  },
+  {
+    name: 'mobile browser',
+    viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+    standalone: false,
+  },
+  {
+    name: 'standalone PWA',
+    viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+    standalone: true,
+  },
+]
+
+const checks = []
+const hostLog = []
+let host
+let browser
+
+function check(name, pass, detail = '') {
+  checks.push({ name, pass, detail })
+  console.log(`${pass ? 'PASS' : 'FAIL'} ${name}${detail ? ` - ${detail}` : ''}`)
+}
+
+try {
+  writeSessionFixture()
+  await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], { name: 'dashboard build', timeoutMs: 45_000 })
+
+  host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/agent-kernel-host.ts'], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      HOST_PORT: String(PORT),
+      SESSIONS_DIR,
+      DASHBOARD_DIR: join(REPO_ROOT, 'packages/dashboard/dist'),
+    },
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  pipeLog(host, hostLog)
+  await waitForLog(hostLog, `127.0.0.1:${PORT}`, 10_000)
+  await verifyHostListsFixture()
+
+  if (!CHROME) throw new Error('no chromium found; set CHROME_PATH')
+  browser = await puppeteer.launch({
+    executablePath: CHROME,
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+  })
+
+  for (const scenario of cases) {
+    await verifyScenario(scenario)
+  }
+  console.log(`Screenshots written to ${SHOTS_DIR}`)
+} catch (err) {
+  check('script completed without uncaught error', false, err?.stack ?? String(err))
+} finally {
+  if (browser) await browser.close().catch(() => {})
+  await stopProcess(host)
+}
+
+const failed = checks.filter((c) => !c.pass)
+if (failed.length > 0) {
+  console.error('\n--- host log tail ---')
+  console.error(hostLog.slice(-40).join(''))
+  process.exit(1)
+}
+
+async function verifyScenario(scenario) {
+  const page = await browser.newPage()
+  page.setDefaultTimeout(10_000)
+  await page.setViewport(scenario.viewport)
+  if (scenario.viewport.isMobile) {
+    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1')
+  }
+  const client = await page.target().createCDPSession()
+  await client.send('Network.setBypassServiceWorker', { bypass: false })
+  await client.send('Emulation.setEmulatedMedia', {
+    features: [
+      { name: 'display-mode', value: scenario.standalone ? 'standalone' : 'browser' },
+      { name: 'prefers-color-scheme', value: 'dark' },
+    ],
+  })
+  await page.goto(`${HOST_URL}/?sessionId=${SESSION_ID}`, { waitUntil: 'networkidle2', timeout: 20_000 })
+  await ensureFixtureSessionSelected(page)
+  await page.waitForSelector('[data-testid="composer"]')
+  await sleep(250)
+  await verifyViewportContract(page, scenario.name)
+  await focusComposerAndVerify(page, scenario.name)
+  await verifySettingsDialog(page, scenario.name)
+  await page.screenshot({ path: join(SHOTS_DIR, `${slug(scenario.name)}.png`), fullPage: false })
+  await page.close()
+}
+
+async function verifyViewportContract(page, name) {
+  const metrics = await page.evaluate(() => {
+    const root = document.getElementById('root')
+    const shell = document.querySelector('.ak-app-shell')
+    const composer = document.querySelector('[data-testid="composer"]')
+    const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
+    const chat = document.querySelector('[data-testid="chat-panel"]')
+    const rectFor = (el) => {
+      const rect = el?.getBoundingClientRect()
+      return rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height } : null
+    }
+    const inputFontSizes = Array.from(document.querySelectorAll('input, textarea, select, [contenteditable="true"]'))
+      .map((el) => Number.parseFloat(getComputedStyle(el).fontSize))
+      .filter(Number.isFinite)
+    return {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      visualViewportHeight: window.visualViewport?.height ?? null,
+      cssViewportH: getComputedStyle(document.documentElement).getPropertyValue('--ak-viewport-h').trim(),
+      keyboard: document.documentElement.dataset.akKeyboard ?? null,
+      bodyScrollWidth: document.documentElement.scrollWidth,
+      root: rectFor(root),
+      shell: rectFor(shell),
+      composer: rectFor(composer),
+      toolbar: rectFor(toolbar),
+      chat: rectFor(chat),
+      minInputFontSize: inputFontSizes.length > 0 ? Math.min(...inputFontSizes) : null,
+    }
+  })
+  const expectedHeight = metrics.visualViewportHeight ?? metrics.innerHeight
+  check(`${name}: app shell uses visible viewport height`, Math.abs(metrics.shell?.height - expectedHeight) <= 2, JSON.stringify(metrics))
+  check(`${name}: document has no horizontal overflow`, metrics.bodyScrollWidth <= metrics.innerWidth + 1, JSON.stringify(metrics))
+  check(`${name}: composer remains inside visible viewport`, Boolean(metrics.composer) && metrics.composer.bottom <= expectedHeight + 1 && metrics.composer.top >= -1, JSON.stringify(metrics))
+  check(`${name}: toolbar and chat keep vertical order`, Boolean(metrics.toolbar && metrics.chat && metrics.composer) && metrics.toolbar.bottom <= metrics.chat.top + 1 && metrics.chat.bottom <= metrics.composer.top + 1, JSON.stringify(metrics))
+  if (metrics.innerWidth < 600) {
+    check(`${name}: touch form controls avoid iOS focus zoom`, metrics.minInputFontSize === null || metrics.minInputFontSize >= 16, JSON.stringify(metrics))
+  }
+}
+
+async function focusComposerAndVerify(page, name) {
+  const target = await page.$('[data-testid="composer-input-simple"], [data-testid="composer-input"]')
+  if (!target) {
+    check(`${name}: focusable composer input exists`, false)
+    return
+  }
+  await target.click()
+  await sleep(250)
+  const metrics = await page.evaluate(() => {
+    const shell = document.querySelector('.ak-app-shell')
+    const composer = document.querySelector('[data-testid="composer"]')
+    const active = document.activeElement
+    const rectFor = (el) => {
+      const rect = el?.getBoundingClientRect()
+      return rect ? { top: rect.top, bottom: rect.bottom, height: rect.height } : null
+    }
+    return {
+      activeTag: active?.tagName ?? '',
+      activeIsContentEditable: active?.isContentEditable ?? false,
+      activeFontSize: active ? Number.parseFloat(getComputedStyle(active).fontSize) : null,
+      innerHeight: window.innerHeight,
+      visualViewportHeight: window.visualViewport?.height ?? null,
+      shell: rectFor(shell),
+      composer: rectFor(composer),
+      keyboard: document.documentElement.dataset.akKeyboard ?? null,
+    }
+  })
+  const focusedFormControl = ['INPUT', 'TEXTAREA', 'SELECT'].includes(metrics.activeTag) || metrics.activeIsContentEditable === true
+  check(`${name}: composer input receives focus`, focusedFormControl, JSON.stringify(metrics))
+  const expectedHeight = metrics.visualViewportHeight ?? metrics.innerHeight
+  check(`${name}: focused app shell still matches visible viewport`, Math.abs(metrics.shell?.height - expectedHeight) <= 2, JSON.stringify(metrics))
+  check(`${name}: focused composer remains visible`, Boolean(metrics.composer) && metrics.composer.bottom <= expectedHeight + 1 && metrics.composer.top >= -1, JSON.stringify(metrics))
+  if (name !== 'desktop browser') {
+    check(`${name}: focused form control is mobile zoom-safe`, focusedFormControl && metrics.activeFontSize !== null && metrics.activeFontSize >= 16, JSON.stringify(metrics))
+  }
+}
+
+async function verifySettingsDialog(page, name) {
+  await page.keyboard.press('Escape')
+  await sleep(100)
+  await page.click('[data-testid="app-shell-nav-settings-icon"]')
+  await page.waitForSelector('[data-testid="settings-dialog"]')
+  await sleep(150)
+  const metrics = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="settings-dialog"]')
+    const rect = el?.getBoundingClientRect()
+    return rect ? {
+      top: rect.top,
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      width: rect.width,
+      height: rect.height,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+    } : null
+  })
+  check(`${name}: settings dialog fits visible viewport`, Boolean(metrics) && metrics.top >= -1 && metrics.left >= -1 && metrics.right <= metrics.viewportWidth + 1 && metrics.bottom <= metrics.viewportHeight + 1, JSON.stringify(metrics))
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="settings-dialog"]'))
+}
+
+function writeSessionFixture() {
+  const config = { tools: [], systemPrompt: 'mobile PWA layout fixture' }
+  const initialState = {
+    sessionId: SESSION_ID,
+    messages: [{ role: 'system', content: [{ type: 'text', text: config.systemPrompt }] }],
+    pendingCalls: [],
+    status: 'idle',
+    usage: { inputTokens: 0, outputTokens: 0 },
+    cursor: 0,
+    cwd: '/tmp/agent-runlab-mobile',
+    contextPressureLevel: 'none',
+    approvalMode: 'auto',
+  }
+  const entries = [
+    {
+      kind: 'header',
+      seq: 0,
+      ts: new Date().toISOString(),
+      sessionId: SESSION_ID,
+      initialCwd: '/tmp/agent-runlab-mobile',
+      formatVersion: 1,
+      kernelVersion: '0.0.0',
+      config,
+      initialState,
+    },
+    {
+      kind: 'event',
+      seq: 1,
+      ts: new Date().toISOString(),
+      event: { kind: 'user_message', text: 'Check the mobile layout.' },
+      effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+    },
+    {
+      kind: 'event',
+      seq: 2,
+      ts: new Date().toISOString(),
+      event: {
+        kind: 'llm_response',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'The dashboard should keep the composer visible without horizontal overflow on mobile and PWA surfaces.' }],
+        },
+        usage: { inputTokens: 42, outputTokens: 18 },
+      },
+      effects: [{ kind: 'finish' }],
+    },
+  ]
+  mkdirSync(SESSIONS_DIR, { recursive: true })
+  writeFileSync(join(SESSIONS_DIR, `${Date.now()}_${SESSION_ID}.jsonl`), `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`)
+}
+
+async function verifyHostListsFixture() {
+  const socket = io(`${HOST_URL}/dashboard`, {
+    transports: ['websocket'],
+    auth: { sessionId: SESSION_ID, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+  })
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('socket connect timeout')), 5_000)
+      socket.on('connect', () => {
+        clearTimeout(timer)
+        resolve(undefined)
+      })
+      socket.on('connect_error', reject)
+    })
+    const sessions = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('client:list_sessions timeout')), 5_000)
+      socket.once('server:sessions', (payload) => {
+        clearTimeout(timer)
+        resolve(payload.sessions ?? [])
+      })
+      socket.emit('client:list_sessions', {})
+    })
+    check('host lists mobile PWA fixture session', sessions.some((s) => s.sessionId === SESSION_ID), JSON.stringify(sessions))
+  } finally {
+    socket.close()
+  }
+}
+
+async function ensureFixtureSessionSelected(page) {
+  await page.waitForSelector('[data-testid="workbench-toolbar"]', { timeout: 10_000 })
+  const hasComposer = await page.$('[data-testid="composer"]')
+  if (hasComposer) return
+  const row = await page.$(`[data-testid="session-row"][data-session-id="${SESSION_ID}"]`)
+  if (row) await row.click()
+}
+
+function detectBrowser() {
+  const candidates = ['/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/snap/bin/chromium']
+  for (const path of candidates) if (existsSync(path)) return path
+  return undefined
+}
+
+function pipeLog(child, out) {
+  child.stdout?.on('data', (chunk) => out.push(String(chunk)))
+  child.stderr?.on('data', (chunk) => out.push(String(chunk)))
+}
+
+async function waitForLog(lines, needle, timeoutMs) {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (lines.join('').includes(needle)) return
+    await sleep(100)
+  }
+  throw new Error(`timed out waiting for host log: ${needle}`)
+}
+
+async function run(cmd, args, { name, timeoutMs }) {
+  const child = spawn(cmd, args, { cwd: REPO_ROOT, stdio: 'inherit' })
+  const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs)
+  const code = await new Promise((resolve) => child.on('exit', resolve))
+  clearTimeout(timer)
+  if (code !== 0) throw new Error(`${name} failed with ${code}`)
+}
+
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null) return
+  try {
+    process.kill(-child.pid, 'SIGTERM')
+  } catch {
+    child.kill('SIGTERM')
+  }
+  await sleep(300)
+}
+
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+}

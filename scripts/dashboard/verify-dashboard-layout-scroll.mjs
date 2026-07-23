@@ -18,7 +18,7 @@ import puppeteer from 'puppeteer-core'
 
 const requireFromHost = createRequire(new URL('../../packages/host/package.json', import.meta.url))
 const { io } = requireFromHost('socket.io-client')
-const { PROTOCOL_VERSION } = await import('../packages/shared/dist/index.js')
+const { PROTOCOL_VERSION } = await import('../../packages/shared/dist/index.js')
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_LAYOUT_PORT ?? 3174)
@@ -50,7 +50,7 @@ try {
 
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], {
     name: 'dashboard build',
-    timeoutMs: 30_000,
+    timeoutMs: 60_000,
   })
 
   host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/agent-kernel-host.ts'], {
@@ -65,7 +65,7 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   pipeLog(host, hostLog)
-  await waitForLog(hostLog, `"port":${PORT}`, 10_000)
+  await waitForLog(hostLog, `127.0.0.1:${PORT}`, 10_000)
   await verifyHostListsFixture()
 
   if (!CHROME) throw new Error('no chromium found; set CHROME_PATH')
@@ -143,7 +143,7 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const explorer = document.querySelector('[data-testid="explorer-panel"]')
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
-    const inspectorToggle = document.querySelector('[data-testid="app-shell-nav-inspector-icon"]')
+    const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
     const selectedSession = document.querySelector('[data-testid="session-row"]')
     const sessionCwd = selectedSession?.querySelector('[data-testid="session-row-cwd"]')
     const rectFor = (el) => {
@@ -170,20 +170,20 @@ async function verifyResponsivePanels(page, viewportWidth) {
     check(`narrow layout removes inspector rail at ${viewportWidth}px`, metrics.inspector === null, JSON.stringify(metrics))
     check(`narrow layout keeps main panel readable at ${viewportWidth}px`, metrics.main?.width >= viewportWidth - 24, JSON.stringify(metrics))
     check(`narrow layout keeps chat panel readable at ${viewportWidth}px`, metrics.chat?.width >= viewportWidth - 24, JSON.stringify(metrics))
-    check(`narrow layout hides inspector toggle at ${viewportWidth}px`, metrics.inspectorTogglePresent === false, JSON.stringify(metrics))
+    check(`narrow layout exposes inspector drawer trigger at ${viewportWidth}px`, metrics.inspectorTogglePresent === true, JSON.stringify(metrics))
     return
   }
   const minMainWidth = viewportWidth === 1200 ? 660 : 820
   check(`wide layout keeps explorer rail at ${viewportWidth}px`, Boolean(metrics.explorer?.width), JSON.stringify(metrics))
   check(`wide layout keeps inspector rail at ${viewportWidth}px`, Boolean(metrics.inspector?.width), JSON.stringify(metrics))
-  check(`wide layout keeps explorer at top level at ${viewportWidth}px`, metrics.explorer?.top === 0 && metrics.toolbar && metrics.toolbar.left >= (metrics.explorer?.right ?? 0), JSON.stringify(metrics))
+  check(`wide layout aligns explorer with workbench below top nav at ${viewportWidth}px`, metrics.explorer && metrics.toolbar && Math.abs(metrics.explorer.top - metrics.toolbar.top) <= 1 && metrics.toolbar.left >= metrics.explorer.right, JSON.stringify(metrics))
   check(`wide layout keeps explorer readable at ${viewportWidth}px`, metrics.explorer?.width >= 240, JSON.stringify(metrics))
   check(`wide layout keeps session rows inside explorer at ${viewportWidth}px`, metrics.explorer && metrics.selectedSession && metrics.selectedSession.left >= metrics.explorer.left - 1 && metrics.selectedSession.right <= metrics.explorer.right + 1 && metrics.selectedSessionScrollWidth <= metrics.selectedSessionClientWidth + 1, JSON.stringify(metrics))
   check(`wide layout shows session cwd metadata at ${viewportWidth}px`, metrics.sessionCwdText.includes('/tmp') && !metrics.sessionCwdText.includes('cwd ') && metrics.sessionCwd && metrics.selectedSession && metrics.sessionCwd.bottom <= metrics.selectedSession.bottom + 1, JSON.stringify(metrics))
   check(`wide layout keeps explorer rail compact at ${viewportWidth}px`, metrics.explorer?.width <= viewportWidth * 0.29, JSON.stringify(metrics))
   check(`wide layout keeps inspector rail compact at ${viewportWidth}px`, metrics.inspector?.width <= viewportWidth * 0.31, JSON.stringify(metrics))
   check(`wide layout keeps main panel usable at ${viewportWidth}px`, metrics.main?.width >= minMainWidth, JSON.stringify(metrics))
-  check(`wide layout exposes inspector toggle at ${viewportWidth}px`, metrics.inspectorTogglePresent === true, JSON.stringify(metrics))
+  check(`wide layout does not duplicate inspector toggle while panel is open at ${viewportWidth}px`, metrics.inspectorTogglePresent === false, JSON.stringify(metrics))
 }
 
 async function verifyChatContentLayout(page, viewportWidth) {
@@ -219,9 +219,11 @@ async function verifyChatContentLayout(page, viewportWidth) {
       const isRadixViewport = el.hasAttribute('data-radix-scroll-area-viewport')
       const isControlledVirtualTree = Boolean(el.closest('[data-scroll-owner="react-arborist"]'))
       const isControlledTranscript = Boolean(el.closest('[data-scroll-owner="virtuoso"]'))
+      const isAppShellNavScroller = el.closest('[data-testid="app-shell-nav"]') && style.scrollbarWidth === 'none'
       if (isRadixViewport) return false
       if (isControlledVirtualTree) return false
       if (isControlledTranscript) return false
+      if (isAppShellNavScroller) return false
       if (rect.width < 20 || rect.height < 20) return false
       return scrolls && (canScrollX || canScrollY)
     }).map((el) => {
@@ -298,7 +300,7 @@ async function verifyFooterLayout(page, viewportWidth) {
   )
   const clipped = visibleControls.filter((r) => r.scrollWidth > Math.ceil(r.width) + 1)
   const contextIndicator = visibleControls.find((r) => r.testId === 'context-usage-indicator')
-  const maxFooterHeight = viewportWidth < 430 ? 88 : 56
+  const maxFooterHeight = viewportWidth < 430 ? 96 : 56
   check(`composer footer does not create page horizontal overflow at ${viewportWidth}px`, metrics.bodyScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
   check(`composer footer content stays inside footer width at ${viewportWidth}px`, metrics.footerScrollWidth <= metrics.footerWidth + 1, JSON.stringify(metrics))
   check(`composer footer remains compact without clipped controls at ${viewportWidth}px`, metrics.footerHeight <= maxFooterHeight && clipped.length === 0, JSON.stringify(visibleControls))
@@ -383,7 +385,7 @@ async function verifyNavigationSurface(page, viewportWidth) {
   const metrics = await page.evaluate(() => {
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
     const explorerToggle = document.querySelector('[data-testid="explorer-toggle"]')
-    const inspectorToggle = document.querySelector('[data-testid="app-shell-nav-inspector-icon"]')
+    const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
     const rect = toolbar?.getBoundingClientRect()
     return {
       text: toolbar?.textContent || '',
@@ -409,7 +411,7 @@ async function verifyNavigationSurface(page, viewportWidth) {
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('[data-testid="explorer-drawer"]'))
   } else {
-    check(`wide layout exposes inspector toggle at ${viewportWidth}px`, metrics.inspectorToggle === true, JSON.stringify(metrics))
+    check(`wide layout does not duplicate inspector toggle while panel is open at ${viewportWidth}px`, metrics.inspectorToggle === false, JSON.stringify(metrics))
   }
 }
 

@@ -126,7 +126,7 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
-    expect(screen.getByTestId('settings-dialog').className).toContain('h-[calc(var(--ak-viewport-h,100dvh)-0.5rem)]')
+    expect(screen.getByTestId('settings-dialog').className).toContain('h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-0.5rem)]')
     expect(screen.getByTestId('settings-tab-connection').className).toContain('w-32')
   })
 
