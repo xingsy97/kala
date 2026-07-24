@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildDeployPlan, installScript, releaseFiles, remotePathForShell, sh } from './deploy-plan.mjs'
+import {
+  buildDeployPlan,
+  installScript,
+  releaseFiles,
+  remotePathForShell,
+  rsyncUploadArgs,
+  seedUploadScript,
+  sh,
+} from './deploy-plan.mjs'
 
 const ROOT = '/repo'
 const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'bundle-dashboard-with-runtime.cjs']
@@ -48,6 +56,7 @@ describe('deploy plan', () => {
     expect(plan.restartTimeoutMs).toBe(600000)
     expect(plan.statusTimeoutMs).toBe(660000)
     expect(plan.pollMs).toBe(2000)
+    expect(plan.seedCommand).toContain('cp -p "$REMOTE_BIN/bundle-dashboard-with-runtime.cjs"')
     expect(plan.installCommand).toContain('agent-kernel-executor.cjs')
   })
 
@@ -75,5 +84,32 @@ describe('deploy plan', () => {
     expect(script).toContain('chmod +x "$REMOTE_BIN/agent-kernel-executor.cjs"')
     expect(script).toContain('chmod +x "$REMOTE_BIN/run.sh"')
     expect(script).not.toContain('chmod +x "$REMOTE_BIN/manifest.json"')
+  })
+
+  it('seeds the upload directory from installed assets for incremental transfer', () => {
+    const script = seedUploadScript('~/bin', '~/bin/.upload', [
+      'agent-kernel-executor.cjs',
+      'bundle-dashboard-with-runtime.cjs',
+    ])
+    expect(script).toContain('command -v rsync')
+    expect(script).toContain('mkdir -p "$REMOTE_BIN" "$UPLOAD_DIR"')
+    expect(script).toContain('if [ -f "$REMOTE_BIN/agent-kernel-executor.cjs" ]')
+    expect(script).toContain('cp -p "$REMOTE_BIN/bundle-dashboard-with-runtime.cjs" "$UPLOAD_DIR/bundle-dashboard-with-runtime.cjs"')
+  })
+
+  it('builds a compressed, resumable rsync transfer with SSH liveness checks', () => {
+    const args = rsyncUploadArgs({
+      releaseDir: '/repo/release',
+      files: ['bundle-dashboard-with-runtime.cjs', 'manifest.json'],
+      sshTarget: 'deploy-target',
+      uploadDir: '~/bin/.upload',
+    })
+    expect(args).toContain('--checksum')
+    expect(args).toContain('--compress')
+    expect(args).toContain('--partial')
+    expect(args).toContain('--timeout=120')
+    expect(args).toContain('--rsh=ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3')
+    expect(args).toContain('/repo/release/bundle-dashboard-with-runtime.cjs')
+    expect(args.at(-1)).toBe('deploy-target:~/bin/.upload/')
   })
 })

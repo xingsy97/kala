@@ -49,7 +49,7 @@ pnpm run deploy:remote -- \
   --remote-bin <remote-bin-dir>
 ```
 
-The deploy script uploads release assets to a timestamped directory under `--remote-bin`, backs up replaced files, installs the new files, then requests a graceful host restart through `/runtime/restart`.
+The deploy script seeds a timestamped upload directory from the currently installed assets, then uses compressed `rsync` transfer with checksum-based skipping and block deltas. `rsync` must be installed locally and remotely. It backs up replaced files, installs the completed upload atomically, and requests a graceful host restart through `/runtime/restart`. Transfer and install stages report their elapsed time. A stalled SSH transfer fails after two minutes of inactivity and retries the partial upload up to two times instead of hanging indefinitely.
 
 Useful optional flags:
 

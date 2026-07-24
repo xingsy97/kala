@@ -58,6 +58,7 @@ export function buildDeployPlan({ args, env, root, now = new Date(), exists = ex
     files,
     uploadDir,
     uploadDirShell: remotePathForShell(uploadDir),
+    seedCommand: seedUploadScript(remoteBin, uploadDir, files),
     installCommand: installScript(remoteBin, uploadDir, files),
   }
 }
@@ -92,6 +93,35 @@ export function installScript(remoteBinDir, remoteUploadDir, names) {
   lines.push('printf "%s\n" "$UPLOAD_DIR" > "$REMOTE_BIN/.agent-kernel-upload-current"')
   lines.push('rmdir "$UPLOAD_DIR" 2>/dev/null || true')
   return lines.join('\n')
+}
+
+export function seedUploadScript(remoteBinDir, remoteUploadDir, names) {
+  const lines = [
+    'set -euo pipefail',
+    'command -v rsync >/dev/null || { echo "remote deploy requires rsync" >&2; exit 127; }',
+    `REMOTE_BIN=${remotePathForShell(remoteBinDir)}`,
+    `UPLOAD_DIR=${remotePathForShell(remoteUploadDir)}`,
+    'mkdir -p "$REMOTE_BIN" "$UPLOAD_DIR"',
+  ]
+  for (const name of names) {
+    lines.push(`if [ -f "$REMOTE_BIN/${name}" ]; then cp -p "$REMOTE_BIN/${name}" "$UPLOAD_DIR/${name}"; fi`)
+  }
+  return lines.join('\n')
+}
+
+export function rsyncUploadArgs({ releaseDir, files, sshTarget, uploadDir }) {
+  return [
+    '--archive',
+    '--checksum',
+    '--compress',
+    '--human-readable',
+    '--partial',
+    '--timeout=120',
+    '--info=progress2,stats2',
+    '--rsh=ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3',
+    ...files.map((file) => join(releaseDir, file)),
+    `${sshTarget}:${uploadDir}/`,
+  ]
 }
 
 export function parseOptions(args) {
