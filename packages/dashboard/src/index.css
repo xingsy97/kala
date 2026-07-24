@@ -4,7 +4,7 @@
 
 @layer components {
   .ak-chat-container {
-    max-width: min(var(--ak-chat-content-width, 68rem), 100%);
+    max-width: min(var(--ak-chat-content-width, 84rem), 100%);
     padding-left: var(--ak-chat-side-space, 1rem);
     padding-right: var(--ak-chat-side-space, 1rem);
   }
@@ -346,12 +346,32 @@ body {
   background: hsl(var(--background));
 }
 #root {
+  /*
+   * Keep #root in normal flow at full height so iOS can still "scroll the
+   * focused input into view" during keyboard transitions. The visible app
+   * surface is owned by .ak-app-shell, which is pinned to the visualViewport
+   * (see below), so #root's height no longer causes a black void.
+   */
   height: 100%;
   min-height: 100%;
   overflow: hidden;
   background: hsl(var(--background));
 }
 .ak-app-shell {
+  /*
+   * Pin the app shell to the *visible* viewport rectangle reported by
+   * visualViewport. On iOS PWA (iPad especially) the software keyboard does
+   * not shrink the layout viewport reliably: the page is instead scroll-shifted
+   * up, which left the composer stranded behind the keyboard with a black void
+   * below it. Anchoring the shell with position:fixed at the visualViewport
+   * offset+height makes the shell (and its bottom-docked composer) always fill
+   * exactly the visible area and follow the keyboard, while #root stays in flow
+   * so iOS keyboard scroll-into-view still works.
+   */
+  position: fixed;
+  top: var(--ak-viewport-offset-top, 0px);
+  left: 0;
+  right: 0;
   height: var(--ak-viewport-h, 100dvh);
   min-height: 0;
   max-height: var(--ak-viewport-h, 100dvh);

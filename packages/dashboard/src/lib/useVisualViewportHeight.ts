@@ -21,10 +21,12 @@ export function useVisualViewportHeight(): number {
     const update = (): void => {
       const h = Math.max(1, Math.round(vv?.height ?? window.innerHeight))
       const layoutHeight = Math.max(1, Math.round(window.innerHeight))
+      const offsetTop = Math.max(0, Math.round(vv?.offsetTop ?? 0))
       const keyboardOpen = Boolean(vv && layoutHeight - h > 120)
       setHeight(h)
       root.style.setProperty('--ak-viewport-h', `${h}px`)
       root.style.setProperty('--ak-layout-vh', `${layoutHeight}px`)
+      root.style.setProperty('--ak-viewport-offset-top', `${offsetTop}px`)
       root.dataset.akKeyboard = keyboardOpen ? 'open' : 'closed'
     }
     update()
