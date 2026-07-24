@@ -88,6 +88,7 @@ describe('SessionMetadataDialog', () => {
         onRename={() => {}}
         onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
       />,
     )
     const dlg = screen.getByTestId('session-metadata-dialog')
@@ -109,6 +110,7 @@ describe('SessionMetadataDialog', () => {
         onRename={() => {}}
         onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
       />,
     )
     expect(screen.getByTestId('session-metadata-cwd').textContent).toContain(
@@ -136,6 +138,7 @@ describe('SessionMetadataDialog', () => {
         onRename={() => {}}
         onOpenChangeCwdDialog={onOpenChangeCwdDialog}
         onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
       />,
     )
     fireEvent.click(screen.getByTestId('session-metadata-cwd-change'))
@@ -156,6 +159,7 @@ describe('SessionMetadataDialog', () => {
         onRename={onRename}
         onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
       />,
     )
     const input = screen.getByTestId('session-metadata-label') as HTMLInputElement
@@ -179,6 +183,7 @@ describe('SessionMetadataDialog', () => {
         onRename={onRename}
         onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={() => {}}
       />,
     )
     const labelInput = screen.getByTestId('session-metadata-label') as HTMLInputElement
@@ -200,11 +205,36 @@ describe('SessionMetadataDialog', () => {
         onRename={() => {}}
         onOpenChangeCwdDialog={() => {}}
         onChangeApprovalMode={onChangeApprovalMode}
+        onChangeToolCardMode={() => {}}
       />,
     )
     fireEvent.click(screen.getByRole('option', { name: 'Ask everything' }))
     expect(onChangeApprovalMode).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId('session-metadata-save'))
     expect(onChangeApprovalMode).toHaveBeenCalledWith('ask')
+  })
+
+  it('defaults Tool Card Mode to Dots and saves an explicit Standard choice', () => {
+    const onChangeToolCardMode = vi.fn()
+    render(
+      <SessionMetadataDialog
+        open
+        onOpenChange={() => {}}
+        sessionId={baseSummary.sessionId}
+        summary={baseSummary}
+        state={baseState}
+        selectedModel={null}
+        onRename={() => {}}
+        onOpenChangeCwdDialog={() => {}}
+        onChangeApprovalMode={() => {}}
+        onChangeToolCardMode={onChangeToolCardMode}
+      />,
+    )
+
+    expect(screen.getByTestId('session-metadata-tool-card-mode').textContent).toContain('dots')
+    fireEvent.click(screen.getByRole('option', { name: 'Standard' }))
+    expect(onChangeToolCardMode).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('session-metadata-save'))
+    expect(onChangeToolCardMode).toHaveBeenCalledWith('standard')
   })
 })

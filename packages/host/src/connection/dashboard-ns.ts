@@ -1045,13 +1045,11 @@ async function applyPreferencesUpdate(
     )
     return
   }
-  deps.dashboardNs
-    .to(sessionRoom(sessionId))
-    .emit('server:control_update', {
-      kind: 'session_meta_changed',
-      sessionId,
-      preferences: effective,
-    })
+  deps.dashboardNs.emit('server:control_update', {
+    kind: 'session_meta_changed',
+    sessionId,
+    preferences: effective,
+  })
   const record = deps.store.get(sessionId)
   if (record) {
     deps.dashboardNs.to(sessionRoom(sessionId)).emit('state:changed', {

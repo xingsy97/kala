@@ -166,8 +166,7 @@ function collectNestedToolActivity(
     }
   }
 
-  const toolNames = new Set(calls.map((call) => call.name))
-  if (calls.length < 2 || toolNames.size <= 1) return null
+  if (calls.length < 2) return null
   return makeToolCallGroup(calls, resultsByCallId, true)
 }
 

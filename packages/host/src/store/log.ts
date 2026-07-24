@@ -246,7 +246,7 @@ export async function appendSnapshotEntry(
 
 export async function appendMetadataEntry(
   path: string,
-  patch: { label?: string; workspaceId?: string; workspaceName?: string; selectedModel?: string },
+  patch: { label?: string; workspaceId?: string; workspaceName?: string; selectedModel?: string; toolCardMode?: 'dots' | 'standard' },
 ): Promise<MetadataEntry> {
   const entry: MetadataEntry = {
     kind: 'metadata',
@@ -255,6 +255,7 @@ export async function appendMetadataEntry(
     ...(patch.workspaceId !== undefined ? { workspaceId: patch.workspaceId } : {}),
     ...(patch.workspaceName !== undefined ? { workspaceName: patch.workspaceName } : {}),
     ...(patch.selectedModel !== undefined ? { selectedModel: patch.selectedModel } : {}),
+    ...(patch.toolCardMode !== undefined ? { toolCardMode: patch.toolCardMode } : {}),
   }
   await appendFile(path, JSON.stringify(entry) + '\n', 'utf8')
   return entry

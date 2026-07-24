@@ -1,4 +1,4 @@
-import type { GroupedToolRenderer } from './renderer.js'
+import type { GroupedToolRenderer, SummaryDelta } from './renderer.js'
 import { countLines, firstLine, genericRenderer, truncate } from './renderer.js'
 
 const asString = (v: unknown): string =>
@@ -6,7 +6,7 @@ const asString = (v: unknown): string =>
 
 export const bashRenderer: GroupedToolRenderer = ({ calls, results }) => {
   return calls.map((c) => {
-    const cmd = asString(c.input.command)
+    const cmd = asString(c.input.command ?? c.input.cmd)
     const r = results.get(c.callId)
     return {
       callId: c.callId,
@@ -52,17 +52,95 @@ export const writeRenderer: GroupedToolRenderer = ({ calls, results }) => {
     const content = asString(c.input.content)
     const lines = content.length ? countLines(content) : 0
     const r = results.get(c.callId)
+    const mutation = r?.ok ? mutationStats(r.content) : null
     return {
       callId: c.callId,
       primary: path || c.callId,
-      ...(lines > 0
-        ? { secondary: `${lines} lines${r && !r.ok ? ' · failed' : ''}` }
-        : r
-          ? { secondary: r.ok ? 'ok' : 'failed' }
-          : {}),
+      ...(mutation
+        ? { secondary: mutation }
+        : lines > 0
+          ? { secondary: `${lines} lines${r && !r.ok ? ' · failed' : ''}` }
+          : r
+            ? { secondary: r.ok ? 'ok' : 'failed' }
+            : {}),
       ok: r ? r.ok : true,
     }
   })
+}
+
+export const replaceRenderer: GroupedToolRenderer = ({ calls, results }) => {
+  return calls.map((c) => {
+    const path = asString(c.input.file_path ?? c.input.path)
+    const r = results.get(c.callId)
+    const mutation = r?.ok ? mutationStats(r.content) : null
+    return {
+      callId: c.callId,
+      primary: path || c.callId,
+      ...(r
+        ? { secondary: r.ok ? (mutation ?? 'edited') : 'failed' }
+        : {}),
+      ok: r ? r.ok : true,
+    }
+  })
+}
+
+export const multiReplaceRenderer: GroupedToolRenderer = ({ calls, results }) => {
+  return calls.map((c) => {
+    const path = asString(c.input.file_path ?? c.input.path)
+    const edits = Array.isArray(c.input.edits) ? c.input.edits.length : 0
+    const r = results.get(c.callId)
+    const mutation = r?.ok ? mutationStats(r.content) : null
+    return {
+      callId: c.callId,
+      primary: path || c.callId,
+      secondary: r
+        ? (r.ok ? (mutation ?? `${edits} edit${edits === 1 ? '' : 's'}`) : 'failed')
+        : `${edits} edit${edits === 1 ? '' : 's'}`,
+      ok: r ? r.ok : true,
+    }
+  })
+}
+
+export const patchRenderer: GroupedToolRenderer = ({ calls, results }) => {
+  return calls.map((c) => {
+    const patch = asString(c.input.patch)
+    const target = patch.split('\n').map((line) => /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line)?.[1]).find(Boolean)
+    const r = results.get(c.callId)
+    const mutation = r?.ok ? mutationStats(r.content) : null
+    return {
+      callId: c.callId,
+      primary: truncate(target ?? 'patch', 96),
+      ...(r ? { secondary: r.ok ? (mutation ?? 'applied') : 'failed' } : {}),
+      ok: r ? r.ok : true,
+    }
+  })
+}
+
+function mutationStats(content: string): SummaryDelta | null {
+  try {
+    const value = JSON.parse(content) as unknown
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const files = (value as Record<string, unknown>).files
+    if (!Array.isArray(files) || files.length === 0) return null
+    let additions = 0
+    let deletions = 0
+    let sawStats = false
+    for (const file of files) {
+      if (!file || typeof file !== 'object' || Array.isArray(file)) continue
+      const record = file as Record<string, unknown>
+      if (typeof record.additions === 'number' && Number.isFinite(record.additions)) {
+        additions += record.additions
+        sawStats = true
+      }
+      if (typeof record.deletions === 'number' && Number.isFinite(record.deletions)) {
+        deletions += record.deletions
+        sawStats = true
+      }
+    }
+    return sawStats ? { kind: 'delta', additions, deletions } : null
+  } catch {
+    return null
+  }
 }
 
 export const editRenderer: GroupedToolRenderer = ({ calls, results }) => {
@@ -87,20 +165,6 @@ export const multiEditRenderer: GroupedToolRenderer = ({ calls, results }) => {
       callId: c.callId,
       primary: path || c.callId,
       secondary: r ? (r.ok ? `${edits} edit${edits === 1 ? '' : 's'}` : 'failed') : `${edits} edit${edits === 1 ? '' : 's'}`,
-      ok: r ? r.ok : true,
-    }
-  })
-}
-
-export const patchRenderer: GroupedToolRenderer = ({ calls, results }) => {
-  return calls.map((c) => {
-    const patch = asString(c.input.patch)
-    const target = patch.split('\n').map((line) => /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line)?.[1]).find(Boolean)
-    const r = results.get(c.callId)
-    return {
-      callId: c.callId,
-      primary: truncate(target ?? 'patch', 96),
-      ...(r ? { secondary: r.ok ? 'applied' : 'failed' } : {}),
       ok: r ? r.ok : true,
     }
   })
@@ -215,8 +279,8 @@ export const RENDERERS: Record<string, GroupedToolRenderer> = {
   write: writeRenderer,
   write_file: writeRenderer,
   edit: editRenderer,
-  replace_in_file: editRenderer,
-  replace_many_in_file: multiEditRenderer,
+  replace_in_file: replaceRenderer,
+  replace_many_in_file: multiReplaceRenderer,
   apply_file_patch: patchRenderer,
   grep: grepRenderer,
   glob: globRenderer,

@@ -19,6 +19,7 @@ import type {
   ServerModelsPayload,
   SessionErrorEvent,
   SessionSummary,
+  ToolCardMode,
 } from '@agent-kernel/shared'
 import { deriveSessionState, isSessionResting, isSessionRunning } from '@agent-kernel/shared'
 
@@ -1528,6 +1529,7 @@ export function App(): JSX.Element {
                         scrollToBottomToken={chatScrollToBottomToken}
                         compactStatus={compactStatus}
                         liveToolActivityTailCount={liveToolActivityTailCount}
+                        toolCardMode={currentSession?.preferences?.toolCardMode ?? 'dots'}
                         displayPrefs={{
                           fontSize: chatFontSize,
                           contentWidth: chatContentWidth,
@@ -1942,7 +1944,7 @@ export function App(): JSX.Element {
         sessionId={metadataTargetSessionId ?? ''}
         summary={metadataSession}
         state={metadataIsCurrentSession ? session.state : null}
-        selectedModel={metadataIsCurrentSession ? session.selectedModel : null}
+        selectedModel={metadataIsCurrentSession ? session.selectedModel : metadataSession?.preferences?.selectedModel ?? null}
         {...(metadataIsCurrentSession && executorHost !== undefined ? { executorHost } : {})}
         onRename={(label) => {
           if (metadataTargetSessionId !== null) renameSessionAt(metadataTargetSessionId, label)
@@ -1952,6 +1954,11 @@ export function App(): JSX.Element {
         }}
         onChangeApprovalMode={(mode) => {
           if (metadataIsCurrentSession) onApprovalModeChange(mode)
+        }}
+        onChangeToolCardMode={(mode: ToolCardMode) => {
+          if (controlSocket && metadataTargetSessionId !== null) {
+            updateSessionPreferences(controlSocket, metadataTargetSessionId, { toolCardMode: mode })
+          }
         }}
       />
       <WorkspacePicker

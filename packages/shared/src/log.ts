@@ -229,6 +229,7 @@ export type MetadataEntry = {
   workspaceId?: string
   workspaceName?: string
   selectedModel?: string
+  toolCardMode?: import('./protocol.js').ToolCardMode
 }
 
 export type RuntimeMetadataEntry = {

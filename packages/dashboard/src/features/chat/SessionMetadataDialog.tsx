@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ApprovalMode } from '@agent-kernel/kernel'
-import type { SessionSummary } from '@agent-kernel/shared'
+import type { SessionSummary, ToolCardMode } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -44,6 +44,7 @@ type Props = {
   onRename(label: string): void
   onOpenChangeCwdDialog(): void
   onChangeApprovalMode(mode: ApprovalMode): void
+  onChangeToolCardMode(mode: ToolCardMode): void
 }
 
 const APPROVAL_MODE_ITEMS: ReadonlyArray<{ value: ApprovalMode; labelKey: string }> = [
@@ -64,30 +65,36 @@ export function SessionMetadataDialog({
   onRename,
   onOpenChangeCwdDialog,
   onChangeApprovalMode,
+  onChangeToolCardMode,
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const initialLabel = summary?.label ?? ''
   const initialCwd = state?.cwd ?? summary?.currentCwd ?? ''
   const approvalMode = state?.approvalMode ?? 'auto'
+  const toolCardMode = summary?.preferences?.toolCardMode ?? 'dots'
 
   const [labelDraft, setLabelDraft] = useState(initialLabel)
   const [approvalDraft, setApprovalDraft] = useState<ApprovalMode>(approvalMode)
+  const [toolCardModeDraft, setToolCardModeDraft] = useState<ToolCardMode>(toolCardMode)
 
   useEffect(() => {
     if (open) {
       setLabelDraft(initialLabel)
       setApprovalDraft(approvalMode)
+      setToolCardModeDraft(toolCardMode)
     }
-  }, [open, initialLabel, approvalMode])
+  }, [open, initialLabel, approvalMode, toolCardMode])
 
   const labelChanged = labelDraft.trim() !== (summary?.label ?? '').trim()
   const approvalChanged = approvalDraft !== approvalMode
-  const canSave = labelChanged || approvalChanged
+  const toolCardModeChanged = toolCardModeDraft !== toolCardMode
+  const canSave = labelChanged || approvalChanged || toolCardModeChanged
 
   const save = (): void => {
     const nextLabel = labelDraft.trim()
     if (labelChanged) onRename(nextLabel)
     if (approvalChanged) onChangeApprovalMode(approvalDraft)
+    if (toolCardModeChanged) onChangeToolCardMode(toolCardModeDraft)
     onOpenChange(false)
   }
 
@@ -204,6 +211,17 @@ export function SessionMetadataDialog({
                     {t(item.labelKey)}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </FieldRow>
+          <FieldRow label={t('dialogs.toolCardMode')}>
+            <Select value={toolCardModeDraft} onValueChange={(value) => setToolCardModeDraft(value as ToolCardMode)}>
+              <SelectTrigger data-testid="session-metadata-tool-card-mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dots">{t('dialogs.toolCardModes.dots')}</SelectItem>
+                <SelectItem value="standard">{t('dialogs.toolCardModes.standard')}</SelectItem>
               </SelectContent>
             </Select>
           </FieldRow>
