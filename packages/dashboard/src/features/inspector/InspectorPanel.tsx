@@ -2537,7 +2537,7 @@ function ReplayPanel({
   onSelect(seq: number | null): void
 }): JSX.Element {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [rawOpen, setRawOpen] = useState(false)
   if (snapshots.length === 0 || !selected) return <div className="flex-none bg-card/50 px-2 pb-1" />
   const diff = diffStates(selected.before, selected.after, 16)
@@ -2562,6 +2562,7 @@ function ReplayPanel({
             <ChevronDown className={cn('h-3.5 w-3.5 flex-none text-muted-foreground transition-transform', open ? '' : '-rotate-90')} aria-hidden="true" />
           </button>
           <span className="rounded bg-muted/55 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-border/25">#{selected.seq}</span>
+          <span className="flex-none text-[10px] text-muted-foreground">{t('inspector.trace.changes', { count: diff.length })}</span>
           <button type="button" disabled={!previous} onClick={() => previous && onSelect(previous.seq)} className="inline-flex h-5 w-5 items-center justify-center rounded bg-muted/55 text-muted-foreground ring-1 ring-border/25 hover:bg-accent hover:text-foreground disabled:opacity-40" title={t('inspector.trace.previousEvent')}>
             <ChevronLeft className="h-3 w-3" aria-hidden="true" />
           </button>

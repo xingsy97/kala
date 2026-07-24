@@ -36,14 +36,34 @@ const cases = [
     standalone: false,
   },
   {
-    name: 'mobile browser',
+    name: 'mobile browser 320',
+    viewport: { width: 320, height: 700, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+    standalone: false,
+    fullSettings: false,
+  },
+  {
+    name: 'mobile browser 375',
+    viewport: { width: 375, height: 812, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+    standalone: false,
+    fullSettings: false,
+  },
+  {
+    name: 'mobile browser 390',
     viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
     standalone: false,
+    fullSettings: true,
+  },
+  {
+    name: 'mobile browser 430',
+    viewport: { width: 430, height: 932, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+    standalone: false,
+    fullSettings: false,
   },
   {
     name: 'standalone PWA',
     viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
     standalone: true,
+    fullSettings: true,
   },
 ]
 
@@ -121,13 +141,54 @@ async function verifyScenario(scenario) {
   await page.waitForSelector('[data-testid="composer"]')
   await sleep(250)
   await verifyViewportContract(page, scenario.name)
+  await verifyDotsToolActivity(page, scenario.name)
   await focusComposerAndVerify(page, scenario.name)
-  await verifySettingsDialog(page, scenario.name)
+  await verifySettingsDialog(page, scenario.name, scenario.fullSettings !== false)
   if (scenario.name === 'desktop browser') {
     await verifyToolCardModePreference(page, scenario.name)
+    await verifyInspectorDefaults(page, scenario.name)
   }
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(scenario.name)}.png`), fullPage: false })
   await page.close()
+}
+
+async function verifyDotsToolActivity(page, name) {
+  await page.waitForSelector('[data-testid="tool-card-dots-mobile-tool-0"]')
+  const metrics = await page.evaluate(() => {
+    const rails = Array.from(document.querySelectorAll('[data-testid^="tool-card-dots-"]'))
+    const rail = rails[0]
+    const rect = rail?.getBoundingClientRect()
+    const chat = document.querySelector('[data-testid="chat-panel"]')
+    return {
+      railCount: rails.length,
+      dotCount: rail?.querySelectorAll('[data-testid^="tool-card-dot-"]').length ?? 0,
+      hasToolActivityLabel: (chat?.textContent ?? '').includes('Tool activity'),
+      narrationCount: Array.from(chat?.querySelectorAll('.ak-chat-text') ?? [])
+        .filter((node) => node.textContent?.startsWith('Inspect fixture file')).length,
+      assistantAvatarCount: chat?.querySelectorAll('[aria-label="Assistant"]').length ?? 0,
+      directionVisible: Boolean(rail?.querySelector('[data-testid="tool-activity-direction"]')),
+      rail: rect ? { left: rect.left, right: rect.right, width: rect.width, height: rect.height } : null,
+      viewportWidth: window.innerWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+    }
+  })
+  check(`${name}: narrated tool turns render as one short chronological dots rail`, metrics.railCount === 1 && metrics.dotCount === 6 && metrics.narrationCount === 6 && metrics.assistantAvatarCount === 1 && metrics.directionVisible && (metrics.rail?.width ?? Number.POSITIVE_INFINITY) <= 220 && !metrics.hasToolActivityLabel, JSON.stringify(metrics))
+  check(`${name}: dots rail stays inside the viewport`, Boolean(metrics.rail) && metrics.rail.left >= -1 && metrics.rail.right <= metrics.viewportWidth + 1 && metrics.documentScrollWidth <= metrics.viewportWidth + 1, JSON.stringify(metrics))
+
+  await page.click('[data-testid="tool-card-dot-mobile-tool-2"]')
+  await page.waitForSelector('[data-testid="tool-call-group-details-mobile-tool-0"]')
+  const expanded = await page.evaluate(() => {
+    const details = document.querySelector('[data-testid="tool-call-group-details-mobile-tool-0"]')
+    const rect = details?.getBoundingClientRect()
+    return {
+      rect: rect ? { left: rect.left, right: rect.right, width: rect.width } : null,
+      viewportWidth: window.innerWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+    }
+  })
+  check(`${name}: expanded tool details stay width-bounded`, Boolean(expanded.rect) && expanded.rect.left >= -1 && expanded.rect.right <= expanded.viewportWidth + 1 && expanded.documentScrollWidth <= expanded.viewportWidth + 1, JSON.stringify(expanded))
+  await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-tool-dots-expanded.png`), fullPage: false })
+  await page.click('[data-testid="tool-call-group-toggle-mobile-tool-0"]')
 }
 
 async function verifyViewportContract(page, name) {
@@ -206,7 +267,7 @@ async function focusComposerAndVerify(page, name) {
   }
 }
 
-async function verifySettingsDialog(page, name) {
+async function verifySettingsDialog(page, name, fullSettings) {
   await page.keyboard.press('Escape')
   await sleep(100)
   await page.click('[data-testid="app-shell-nav-settings-icon"]')
@@ -228,7 +289,7 @@ async function verifySettingsDialog(page, name) {
   })
   check(`${name}: settings dialog fits visible viewport`, Boolean(metrics) && metrics.top >= -1 && metrics.left >= -1 && metrics.right <= metrics.viewportWidth + 1 && metrics.bottom <= metrics.viewportHeight + 1, JSON.stringify(metrics))
 
-  const sections = ['runtime', 'deployment', 'security', 'socketAdmin', 'hooks']
+  const sections = fullSettings ? ['runtime', 'deployment', 'security', 'socketAdmin', 'hooks'] : []
   for (const section of sections) {
     await page.click(`[data-testid="settings-tab-${section}"]`)
     await sleep(100)
@@ -284,9 +345,40 @@ async function verifySettingsDialog(page, name) {
       JSON.stringify(contentMetrics),
     )
   }
+  if (fullSettings) {
+    await page.click('[data-testid="settings-tab-interface"]')
+    await page.waitForSelector('[data-testid="settings-toggle-durable-session-cache"]')
+    const interfaceControls = await page.evaluate(() => ({
+      durable: Boolean(document.querySelector('[data-testid="settings-toggle-durable-session-cache"]')),
+      wakeLock: Boolean(document.querySelector('[data-testid="settings-toggle-keep-screen-awake"]')),
+      cacheManagement: Boolean(document.querySelector('[data-testid="settings-session-cache-management"]')),
+    }))
+    check(`${name}: browser capability controls are exposed`, interfaceControls.durable && interfaceControls.wakeLock && interfaceControls.cacheManagement, JSON.stringify(interfaceControls))
+    await page.click('[data-testid="settings-tab-notifications"]')
+    await page.waitForSelector('[data-testid="settings-toggle-app-badge"]')
+    check(`${name}: app badge control is exposed`, Boolean(await page.$('[data-testid="settings-toggle-app-badge"]')))
+  }
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-settings.png`), fullPage: false })
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="settings-dialog"]'))
+}
+
+async function verifyInspectorDefaults(page, name) {
+  const toggle = await page.$('[data-testid="state-diff-toggle"]')
+  if (!toggle) {
+    check(`${name}: inspector state diff control exists`, false)
+    return
+  }
+  const metrics = await page.evaluate(() => {
+    const control = document.querySelector('[data-testid="state-diff-toggle"]')
+    const replay = document.querySelector('[data-testid="replay-panel"]')
+    return {
+      expanded: control?.getAttribute('aria-expanded'),
+      bodyVisible: Boolean(document.querySelector('[data-testid="state-diff-view"]')),
+      summary: replay?.textContent ?? '',
+    }
+  })
+  check(`${name}: state diff starts collapsed with change count visible`, metrics.expanded === 'false' && !metrics.bodyVisible && metrics.summary.includes('changes'), JSON.stringify(metrics))
 }
 
 async function verifyToolCardModePreference(page, name) {
@@ -321,7 +413,15 @@ async function verifyToolCardModePreference(page, name) {
   const persistedMode = await page.$eval(modeTrigger, (element) => element.textContent?.trim() ?? '')
   check(`${name}: Tool Card Mode persists after save`, persistedMode === 'Standard', persistedMode)
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-tool-card-mode.png`), fullPage: false })
-  await page.keyboard.press('Escape')
+
+  await page.click(modeTrigger)
+  await page.waitForSelector('[role="option"]')
+  await page.evaluate(() => {
+    const option = Array.from(document.querySelectorAll('[role="option"]'))
+      .find((element) => element.textContent?.trim() === 'Dots')
+    if (option instanceof HTMLElement) option.click()
+  })
+  await page.click('[data-testid="session-metadata-save"]')
   await page.waitForFunction(() => !document.querySelector('[data-testid="session-metadata-dialog"]'))
 }
 
@@ -357,9 +457,39 @@ function writeSessionFixture() {
       event: { kind: 'user_message', text: 'Check the mobile layout.' },
       effects: [{ kind: 'call_llm', messages: [], tools: [] }],
     },
+    ...Array.from({ length: 6 }, (_, index) => {
+      const callId = `mobile-tool-${index}`
+      const responseSeq = 2 + index * 2
+      return [
+        {
+          kind: 'event',
+          seq: responseSeq,
+          ts: new Date().toISOString(),
+          event: {
+            kind: 'llm_response',
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: `Inspect fixture file ${index}.` },
+                { type: 'tool_call', callId, name: 'read', input: { path: `/tmp/agent-runlab-mobile/file-${index}.ts` } },
+              ],
+            },
+            usage: { inputTokens: 42 + index, outputTokens: 18 },
+          },
+          effects: [{ kind: 'call_tool', callId, name: 'read', input: { path: `/tmp/agent-runlab-mobile/file-${index}.ts` } }],
+        },
+        {
+          kind: 'event',
+          seq: responseSeq + 1,
+          ts: new Date().toISOString(),
+          event: { kind: 'tool_result', callId, ok: true, content: `line ${index + 1}` },
+          effects: [{ kind: 'call_llm', messages: [], tools: [] }],
+        },
+      ]
+    }).flat(),
     {
       kind: 'event',
-      seq: 2,
+      seq: 14,
       ts: new Date().toISOString(),
       event: {
         kind: 'llm_response',
@@ -367,7 +497,7 @@ function writeSessionFixture() {
           role: 'assistant',
           content: [{ type: 'text', text: 'The dashboard should keep the composer visible without horizontal overflow on mobile and PWA surfaces.' }],
         },
-        usage: { inputTokens: 42, outputTokens: 18 },
+        usage: { inputTokens: 48, outputTokens: 18 },
       },
       effects: [{ kind: 'finish' }],
     },

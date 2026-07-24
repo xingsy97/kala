@@ -201,6 +201,8 @@ describe('InspectorPanel', () => {
     expect(screen.getAllByTestId('timeline-row')).toHaveLength(4)
     expect(screen.getByTestId('trace-toolbar')).toBeTruthy()
     expect(screen.getByTestId('replay-panel')).toBeTruthy()
+    expect(screen.queryByTestId('state-diff-view')).toBeNull()
+    fireEvent.click(screen.getByTestId('state-diff-toggle'))
     expect(screen.getByTestId('state-diff-view').textContent ?? '').toContain('status')
     expect(screen.getByTestId('timeline-minimap')).toBeTruthy()
     expect(document.body.textContent ?? '').toContain('idle → thinking')
@@ -289,18 +291,19 @@ describe('InspectorPanel', () => {
     render(<InspectorPanel state={baseState} timeline={timeline} visibleMessagesCount={3} />)
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
-    expect(screen.getByTestId('state-diff-view')).toBeTruthy()
-    expect(screen.getByTestId('state-diff-summary-messages').textContent ?? '').toContain('+ tool message')
+    expect(screen.queryByTestId('state-diff-view')).toBeNull()
+    expect(screen.getByTestId('replay-panel').textContent ?? '').toContain('changes')
     expect(screen.queryByTestId('state-raw-diff-view')).toBeNull()
 
     const toggle = screen.getByTestId('state-diff-toggle')
-    expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByTestId('state-diff-view')).toBeNull()
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByTestId('state-diff-view')).toBeTruthy()
+    expect(screen.getByTestId('state-diff-summary-messages').textContent ?? '').toContain('+ tool message')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByTestId('state-diff-view')).toBeNull()
   })
 
   it('keeps raw state diff available behind an explicit toggle', () => {
@@ -308,6 +311,7 @@ describe('InspectorPanel', () => {
 
     fireEvent.click(screen.getByTestId('inspector-sidebar-tab-trace'))
     fireEvent.change(screen.getByTestId('replay-scrubber'), { target: { value: '1' } })
+    fireEvent.click(screen.getByTestId('state-diff-toggle'))
 
     expect(screen.getByTestId('state-diff-summary-messages').textContent ?? '').toContain('+ assistant message #2')
     expect(screen.getByTestId('state-diff-summary-usage').textContent ?? '').toContain('42,180')

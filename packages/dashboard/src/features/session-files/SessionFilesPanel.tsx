@@ -24,6 +24,7 @@ import type {
 } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
+import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { DEFAULT_FILE_VIEW_FONT_SIZE, PREF_FILE_VIEW_FONT_SIZE, useNumberPref } from '../../lib/prefs.js'
 import { workspaceReadBinary } from '../../lib/workspace-exec.js'
 import { notify } from '../../notify.js'
@@ -36,7 +37,8 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
-import { downloadFilename, fileResultDownloadBlob, saveBlob } from './file-download.js'
+import { downloadFilename, fileResultDownloadBlob } from './file-download.js'
+import { saveFile } from '../../lib/save-file.js'
 
 type DashboardSocket = Socket<DashboardServerToClientEvents, DashboardClientToServerEvents>
 
@@ -136,7 +138,7 @@ export function WorkspaceFileViewDialog({
                 {viewerMeta(viewer).map((item) => <span key={item}>{item}</span>)}
               </div>
             </div>
-            <div className="flex w-full flex-none flex-wrap items-center gap-x-2 gap-y-1 sm:w-auto sm:justify-end">
+            <div className="flex w-full min-w-0 flex-none flex-wrap items-center justify-between gap-1 sm:w-auto sm:flex-nowrap sm:justify-end">
               <div className="flex flex-wrap items-center gap-1">
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!copyableViewerContent(viewer)} onClick={() => void copyView('content')} title="Copy visible content" aria-label="Copy visible content">
                   {copied === 'content' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -411,9 +413,11 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
   if (viewer.kind === 'image') {
     return (
       <ViewerShell title={viewer.path} meta={viewerMeta(viewer).join(' · ')} chrome={chrome}>
-        <div className="flex h-full min-h-0 items-center justify-center overflow-auto bg-muted/25 p-4">
-          <img className="max-h-full max-w-full object-contain" src={`data:${viewer.mediaType};base64,${viewer.content}`} alt={viewer.path} />
-        </div>
+        <ScrollArea className="h-full min-h-0 bg-muted/25">
+          <div className="flex min-h-full min-w-max items-center justify-center p-4">
+            <img className="max-h-full max-w-full object-contain" src={`data:${viewer.mediaType};base64,${viewer.content}`} alt={viewer.path} />
+          </div>
+        </ScrollArea>
       </ViewerShell>
     )
   }
@@ -520,8 +524,8 @@ function copyableViewerContent(viewer: FileViewState): string | undefined {
 async function downloadWorkspaceFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, cachedViewer?: FileViewState, cwd?: string): Promise<void> {
   const cached = cachedViewer && viewerPath(cachedViewer) === path ? downloadableBlob(cachedViewer) : undefined
   if (cached) {
-    saveBlob(cached.blob, downloadFilename(path))
-    notify.success('Download started', { description: path, id: `file-download:${path}` })
+    const result = await saveFile({ blob: cached.blob, suggestedName: downloadFilename(path) })
+    if (result !== 'cancelled') notify.success(result === 'saved' ? 'File saved' : 'Download started', { description: path, id: `file-download:${path}` })
     return
   }
   const result = await requestFile(socket, workspaceId, sessionId, path, { cwd, download: true, maxBytes: FILE_DOWNLOAD_MAX_BYTES, timeoutMs: 120_000 })
@@ -531,8 +535,8 @@ async function downloadWorkspaceFile(socket: DashboardSocket, workspaceId: strin
     notify.error('File download unavailable', { description: result.error ?? 'The file is too large or cannot be read by the executor.', id: `file-download:${path}` })
     return
   }
-  saveBlob(downloadable.blob, downloadFilename(path))
-  notify.success('Download started', { description: path, id: `file-download:${path}` })
+  const saved = await saveFile({ blob: downloadable.blob, suggestedName: downloadFilename(path) })
+  if (saved !== 'cancelled') notify.success(saved === 'saved' ? 'File saved' : 'Download started', { description: path, id: `file-download:${path}` })
 }
 
 function downloadableBlob(viewer: FileViewState): { blob: Blob } | undefined {

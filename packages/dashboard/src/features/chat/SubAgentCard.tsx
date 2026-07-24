@@ -166,6 +166,8 @@ const SubAgentRow = memo(function SubAgentRow({
       : envelope?.status === 'failed' || envelope?.status === 'cancelled'
         ? envelope.body
         : null
+  const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
+  const useCompactTranscript = terminal && view.messages.length <= 12
 
   // Default open for live rows and for failed ones (so the error is
   // visible without a click). Completed rows collapse to the header to
@@ -265,8 +267,21 @@ const SubAgentRow = memo(function SubAgentRow({
             </div>
           ) : null}
           {view.messages.length > 0 ? (
-            <div className={cn('flex min-h-0 flex-col', compact ? 'h-56' : 'h-[28rem]')}>
-              <NestedTranscript messages={view.messages} compact={compact} />
+            <div
+              className={cn(
+                'flex min-h-0 flex-col',
+                useCompactTranscript
+                  ? compact ? 'max-h-56 overflow-y-auto' : 'max-h-80 overflow-y-auto'
+                  : compact ? 'h-56' : 'h-[min(28rem,55dvh)]',
+              )}
+              data-testid={`sub-agent-transcript-frame-${call.callId}`}
+              data-layout={useCompactTranscript ? 'content' : 'viewport'}
+            >
+              <NestedTranscript
+                messages={view.messages}
+                compact={compact}
+                virtualized={!useCompactTranscript}
+              />
             </div>
           ) : (
             <EmptyChild status={status} />

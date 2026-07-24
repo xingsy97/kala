@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -266,10 +266,11 @@ describe('ArtifactViews', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/artifacts/manifest', { cache: 'no-store' })
     })
-    await screen.findByText('llm/s1/1.request.json')
-    expect(screen.getByText('large.log')).toBeTruthy()
+    const mobileInventory = await screen.findByTestId('artifact-inventory-mobile-list')
+    expect(within(mobileInventory).getByText('llm/s1/1.request.json')).toBeTruthy()
+    expect(within(mobileInventory).getByText('large.log')).toBeTruthy()
     expect(screen.getByText('20/21')).toBeTruthy()
-    expect(screen.getByText('hash skipped')).toBeTruthy()
+    expect(within(mobileInventory).getByText('hash skipped')).toBeTruthy()
   })
 
   it('loads eval summaries from artifact content when the Eval Runs tab is selected', async () => {
@@ -361,15 +362,16 @@ describe('ArtifactViews', () => {
     router.setContent('runs/swebench/run1/artifacts/local__repo-1/final.diff', 'diff --git a/file b/file\n', 'text/x-diff')
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} onOpenSession={onOpenSession} />)
-    await screen.findByText('llm/s1/1.request.json')
+    await screen.findByTestId('artifact-inventory-mobile-list')
 
     fireEvent.click(screen.getByRole('button', { name: /^eval$/i }))
 
     await waitFor(() => expect(screen.getAllByText('run1').length).toBeGreaterThanOrEqual(1))
+    const mobileRuns = screen.getByTestId('eval-runs-mobile-list')
     expect(screen.getByText('Runs')).toBeTruthy()
     expect(screen.getByText('Selected pass')).toBeTruthy()
-    expect(screen.getByText('local')).toBeTruthy()
-    expect(screen.getByText('agent-test')).toBeTruthy()
+    expect(within(mobileRuns).getByText('local')).toBeTruthy()
+    expect(within(mobileRuns).getByText('agent-test')).toBeTruthy()
     expect(screen.getAllByText('50%').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Progress')).toBeTruthy()
     expect(screen.getByText('Failure Breakdown')).toBeTruthy()
@@ -527,7 +529,7 @@ describe('ArtifactViews', () => {
     router.setContent('runs/eval/judge-score/judge/model_judge.score.judge-trace.json', { scorer: 'model_judge.score', judgeModel: 'judge-test', parsed: { score: 1, passed: true } })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
-    await screen.findByText('llm/s1/1.request.json')
+    await screen.findByTestId('artifact-inventory-mobile-list')
 
     fireEvent.click(screen.getByRole('button', { name: /^eval$/i }))
 
@@ -555,11 +557,12 @@ describe('ArtifactViews', () => {
     })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
-    await screen.findByText('llm/s1/1.request.json')
+    await screen.findByTestId('artifact-inventory-mobile-list')
 
     fireEvent.click(screen.getByRole('button', { name: /profiles/i }))
 
-    await screen.findByText('s1')
+    const mobileProfiles = await screen.findByTestId('profiles-mobile-list')
+    expect(within(mobileProfiles).getByText('s1')).toBeTruthy()
     expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('1,234').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('567').length).toBeGreaterThanOrEqual(1)
@@ -581,10 +584,11 @@ describe('ArtifactViews', () => {
     router.enqueue('/enhancement/action', new Response(JSON.stringify({ action: 'profile-session', profilePath: '/tmp/artifacts/profile.json', profile: { sessionId: 's2' } }), { status: 200 }))
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
-    await screen.findByText('llm/s1/1.request.json')
+    await screen.findByTestId('artifact-inventory-mobile-list')
 
     fireEvent.click(screen.getByRole('button', { name: /profiles/i }))
-    await screen.findByText('s1')
+    const mobileProfiles = await screen.findByTestId('profiles-mobile-list')
+    expect(within(mobileProfiles).getByText('s1')).toBeTruthy()
     fireEvent.click(screen.getByText('Profile Artifact Actions'))
     fireEvent.change(screen.getByLabelText('Session ID'), { target: { value: 's2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Run Action' }))
@@ -723,15 +727,16 @@ describe('ArtifactViews', () => {
     })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
-    await screen.findByText('llm/s1/1.request.json')
+    await screen.findByTestId('artifact-inventory-mobile-list')
 
     fireEvent.click(screen.getByRole('button', { name: /memory/i }))
 
-    await screen.findByText('user-style')
-    expect(screen.getByText('old-rule')).toBeTruthy()
+    const mobileMemory = await screen.findByTestId('memory-mobile-list')
+    expect(within(mobileMemory).getByText('user-style')).toBeTruthy()
+    expect(within(mobileMemory).getByText('old-rule')).toBeTruthy()
     expect(screen.getByText('Tombstoned')).toBeTruthy()
-    expect(screen.getByText('90%')).toBeTruthy()
-    expect(screen.getByText('User prefers concise answers')).toBeTruthy()
+    expect(within(mobileMemory).getByText('90%')).toBeTruthy()
+    expect(within(mobileMemory).getByText('User prefers concise answers')).toBeTruthy()
     expect(screen.getByText('2026-07-09T00:00:00.000Z')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith(
       '/artifacts/content?path=runs%2Fmemory%2Fmemory-index.json',

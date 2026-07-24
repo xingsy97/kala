@@ -294,6 +294,8 @@ describe('SubAgentCard', () => {
     fireEvent.click(screen.getByTestId('sub-agent-toggle-c1'))
     await waitFor(() => expect(screen.getByText(/child answer visible/)).toBeTruthy())
     expect(document.querySelector('.katex')).toBeTruthy()
+    expect(screen.getByTestId('sub-agent-transcript-frame-c1').getAttribute('data-layout')).toBe('content')
+    expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('false')
   })
 
   it('recovers a running child session from sub_agent:list after refresh', async () => {
@@ -320,6 +322,8 @@ describe('SubAgentCard', () => {
 
     await waitFor(() => expect(screen.getByTestId('sub-agent-row-c-live').getAttribute('data-sub-agent-status')).toBe('running'))
     await waitFor(() => expect(screen.getByText(/child is still working/)).toBeTruthy())
+    expect(screen.getByTestId('sub-agent-transcript-frame-c-live').getAttribute('data-layout')).toBe('viewport')
+    expect(screen.getByTestId('nested-transcript').getAttribute('data-virtualized')).toBe('true')
   })
 
   it('surfaces a resolved policy artifact inline on the expanded row', async () => {

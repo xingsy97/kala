@@ -45,6 +45,7 @@ import { VirtualTranscript } from './VirtualTranscript.js'
 type Props = {
   messages: readonly Message[]
   compact?: boolean
+  virtualized?: boolean
 }
 
 type NestedRenderItem =
@@ -53,7 +54,7 @@ type NestedRenderItem =
 
 type NestedSummaryRow = SummaryRow & { toolName: string }
 
-export function NestedTranscript({ messages, compact = false }: Props): JSX.Element {
+export function NestedTranscript({ messages, compact = false, virtualized = true }: Props): JSX.Element {
   const visible = messages.filter((m) => m.role !== 'system')
   const resultsByCallId = collectAllToolResults(visible)
   const groupedCallIds = collectNestedGroupedResultCallIds(visible, resultsByCallId)
@@ -87,20 +88,35 @@ export function NestedTranscript({ messages, compact = false }: Props): JSX.Elem
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-1 flex-col text-[12px] leading-relaxed',
+        'flex min-w-0 flex-col text-[12px] leading-relaxed',
+        virtualized && 'flex-1',
         compact && 'text-[11px]',
       )}
       data-testid="nested-transcript"
+      data-virtualized={virtualized ? 'true' : 'false'}
     >
-      <VirtualTranscript<NestedRenderItem>
-        items={renderItems}
-        renderItem={renderItem}
-        keyFor={(item, i) => item.kind === 'tool_activity' ? `tool-${item.group.firstCallId}` : `msg-${item.messageIndex}-${i}`}
-        pinnedToBottom={pinned}
-        onPinnedChange={setPinned}
-        itemClassName={cn('px-3 py-1', compact && 'px-2 py-0.5')}
-        defaultItemHeight={40}
-      />
+      {virtualized ? (
+        <VirtualTranscript<NestedRenderItem>
+          items={renderItems}
+          renderItem={renderItem}
+          keyFor={(item, i) => item.kind === 'tool_activity' ? `tool-${item.group.firstCallId}` : `msg-${item.messageIndex}-${i}`}
+          pinnedToBottom={pinned}
+          onPinnedChange={setPinned}
+          itemClassName={cn('px-3 py-1', compact && 'px-2 py-0.5')}
+          defaultItemHeight={40}
+        />
+      ) : (
+        <div>
+          {renderItems.map((item, index) => (
+            <div
+              key={item.kind === 'tool_activity' ? `tool-${item.group.firstCallId}` : `msg-${item.messageIndex}-${index}`}
+              className={cn('px-3 py-1', compact && 'px-2 py-0.5')}
+            >
+              {renderItem(item)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
