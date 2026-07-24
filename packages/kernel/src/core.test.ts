@@ -5,6 +5,8 @@ import {
   fold,
   foldWithTrace,
   fork,
+  legalTransitions,
+  stateInvariantViolation,
   step,
 } from './index.js'
 import type {
@@ -344,6 +346,117 @@ describe('step: llm_response with tool calls', () => {
     expect(read?.status).toBe('dispatched')
     expect(write?.status).toBe('awaiting_approval')
     expect(effects).toHaveLength(2)
+  })
+})
+
+describe('transition diagnostics', () => {
+  it('reports applied transitions with their source and destination', () => {
+    const result = step(initial(), { kind: 'user_message', text: 'hello' }, CONFIG)
+    expect(result.transition).toEqual({
+      outcome: 'applied',
+      from: 'idle',
+      to: 'thinking',
+      event: 'user_message',
+    })
+  })
+
+  it('reports illegal state/event pairs while preserving cursor semantics', () => {
+    const state = initial()
+    const result = step(state, { kind: 'tool_result', callId: 'missing', ok: true, content: '' }, CONFIG)
+    expect(result.transition).toEqual({
+      outcome: 'ignored',
+      from: 'idle',
+      to: 'idle',
+      event: 'tool_result',
+      reason: 'event_not_legal_in_state',
+    })
+    expect(result.next).toEqual({ ...state, cursor: state.cursor + 1 })
+    expect(result.effects).toEqual([])
+  })
+
+  it('reports malformed payloads for otherwise legal transitions', () => {
+    const state = { ...initial(), status: 'thinking' as const }
+    const result = step(state, {
+      kind: 'messages_replaced',
+      reason: 'compaction',
+      replaceRange: { start: -1, end: 1 },
+      replacementMessages: [],
+    }, CONFIG)
+    expect(result.transition).toMatchObject({
+      outcome: 'rejected',
+      from: 'thinking',
+      to: 'thinking',
+      event: 'messages_replaced',
+      reason: 'invalid_event_payload',
+    })
+  })
+
+  it('describes every status and reports every absent transition cell as ignored', () => {
+    const states: Record<AgentState['status'], AgentState> = {
+      idle: initial(),
+      thinking: { ...initial(), status: 'thinking' },
+      awaiting_approval: {
+        ...initial(),
+        status: 'awaiting_approval',
+        pendingCalls: [{ callId: 'awaiting', name: 'write', input: {}, status: 'awaiting_approval' }],
+      },
+      executing_tools: {
+        ...initial(),
+        status: 'executing_tools',
+        pendingCalls: [{ callId: 'running', name: 'read', input: {}, status: 'dispatched' }],
+      },
+      done: { ...initial(), status: 'done' },
+      error: { ...initial(), status: 'error', error: 'failed' },
+    }
+    const events: AgentEvent[] = [
+      { kind: 'user_message', text: 'hello' },
+      { kind: 'llm_response', message: asst({ type: 'text', text: 'done' }) },
+      { kind: 'llm_error', error: 'failed' },
+      { kind: 'user_approve', callId: 'awaiting' },
+      { kind: 'user_reject', callId: 'awaiting' },
+      { kind: 'tool_result', callId: 'running', ok: true, content: 'ok' },
+      { kind: 'cancel' },
+      { kind: 'clear' },
+      { kind: 'messages_replaced', reason: 'recovery', replaceRange: { start: 0, end: 0 }, replacementMessages: [] },
+      { kind: 'approval_mode_changed', mode: 'ask' },
+      { kind: 'cwd_changed', cwd: '/workspace' },
+    ]
+
+    expect(Object.keys(legalTransitions).sort()).toEqual(Object.keys(states).sort())
+    for (const [status, state] of Object.entries(states) as Array<[AgentState['status'], AgentState]>) {
+      const legal = new Set(legalTransitions[status])
+      for (const event of events) {
+        const result = step(state, event, CONFIG)
+        if (!legal.has(event.kind)) {
+          expect(result.transition, `${status} + ${event.kind}`).toMatchObject({
+            outcome: 'ignored',
+            from: status,
+            event: event.kind,
+            reason: 'event_not_legal_in_state',
+          })
+          expect(result.next.cursor).toBe(state.cursor + 1)
+          expect(result.effects).toEqual([])
+        }
+      }
+    }
+  })
+
+  it('detects contradictory status payloads', () => {
+    expect(stateInvariantViolation({
+      ...initial(),
+      status: 'executing_tools',
+      pendingCalls: [],
+    })).toMatch(/requires dispatched calls/)
+    expect(stateInvariantViolation({
+      ...initial(),
+      status: 'done',
+      error: 'stale',
+    })).toMatch(/cannot retain an error/)
+    expect(stateInvariantViolation({
+      ...initial(),
+      status: 'error',
+      error: 'failed',
+    })).toBeUndefined()
   })
 })
 

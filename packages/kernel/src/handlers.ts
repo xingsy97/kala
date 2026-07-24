@@ -20,7 +20,7 @@ import type {
   Message,
   MessageContent,
   PendingToolCall,
-  StepResult,
+  HandlerResult,
   ToolCallContent,
   UsageDelta,
 } from './types.js'
@@ -29,13 +29,15 @@ import {
   afterPendingSettled,
   extractToolCalls,
   noop,
+  rejectInvalidEvent,
 } from './helpers.js'
+import { transitionAgentState } from './state.js'
 
 export function onUserMessage(
   state: AgentState,
   event: Extract<AgentEvent, { kind: 'user_message' }>,
   config: AgentConfig,
-): StepResult {
+): HandlerResult {
   const content: MessageContent[] = event.content
     ? [...event.content]
     : [{ type: 'text', text: event.text ?? '' }]
@@ -47,13 +49,11 @@ export function onUserMessage(
   // Defensive reset: entering a fresh turn wipes any residual pendingCalls or
   // error text so invariant I5 (status ↔ pendingCalls) can't be left broken
   // by a prior malformed transition.
-  const next: AgentState = {
-    ...state,
-    messages: [...repairedMessages, userMsg],
-    pendingCalls: [],
-    status: 'thinking',
-    error: undefined,
-  }
+  const next = transitionAgentState(
+    state,
+    { status: 'thinking', pendingCalls: [] },
+    { messages: [...repairedMessages, userMsg] },
+  )
   return {
     next,
     effects: [{ kind: 'call_llm', messages: next.messages, tools: config.tools }],
@@ -86,8 +86,8 @@ export function onLlmResponse(
   message: Message,
   usage: UsageDelta | undefined,
   config: AgentConfig,
-): StepResult {
-  if (message.role !== 'assistant') return noop(state)
+): HandlerResult {
+  if (message.role !== 'assistant') return rejectInvalidEvent(state)
 
   const messages = [...state.messages, message]
   const nextUsage = usage ? addUsage(state.usage, usage) : state.usage
@@ -95,7 +95,7 @@ export function onLlmResponse(
 
   if (toolCalls.length === 0) {
     return {
-      next: { ...state, messages, usage: nextUsage, status: 'done' },
+      next: transitionAgentState(state, { status: 'done', pendingCalls: [] }, { messages, usage: nextUsage }),
       effects: [{ kind: 'finish' }],
     }
   }
@@ -172,13 +172,11 @@ export function onLlmResponse(
 
   if (pending.length === 0) {
     return {
-      next: {
-        ...state,
-        messages: messagesWithRejections,
-        usage: nextUsage,
-        pendingCalls: [],
-        status: 'thinking',
-      },
+      next: transitionAgentState(
+        state,
+        { status: 'thinking', pendingCalls: [] },
+        { messages: messagesWithRejections, usage: nextUsage },
+      ),
       effects: [
         {
           kind: 'call_llm',
@@ -196,13 +194,11 @@ export function onLlmResponse(
     : 'executing_tools'
 
   return {
-    next: {
-      ...state,
-      messages: messagesWithRejections,
-      usage: nextUsage,
-      pendingCalls: nextPending,
-      status,
-    },
+    next: transitionAgentState(
+      state,
+      { status, pendingCalls: nextPending },
+      { messages: messagesWithRejections, usage: nextUsage },
+    ),
     effects,
   }
 }
@@ -223,20 +219,20 @@ function decide(
   }
 }
 
-export function onLlmError(state: AgentState, error: string): StepResult {
+export function onLlmError(state: AgentState, error: string): HandlerResult {
   // Invariant I5: status='error' → pendingCalls.length===0. Any tool calls
   // staged during the failed turn become unresolvable at this point (the LLM
   // that would have consumed their results is gone); drop them so downstream
   // consumers don't render orphaned pending entries.
   return {
-    next: { ...state, pendingCalls: [], status: 'error', error },
+    next: transitionAgentState(state, { status: 'error', pendingCalls: [], error }),
     effects: [{ kind: 'emit_error', error }],
   }
 }
 
-export function onUserApprove(state: AgentState, callId: string): StepResult {
+export function onUserApprove(state: AgentState, callId: string): HandlerResult {
   const target = state.pendingCalls.find((c) => c.callId === callId)
-  if (!target || target.status !== 'awaiting_approval') return noop(state)
+  if (!target || target.status !== 'awaiting_approval') return rejectInvalidEvent(state)
 
   const pendingCalls = state.pendingCalls.map((c) =>
     c.callId === callId ? { ...c, status: 'dispatched' as const } : c,
@@ -252,11 +248,10 @@ export function onUserApprove(state: AgentState, callId: string): StepResult {
 
   const stillAwaiting = pendingCalls.some((c) => c.status === 'awaiting_approval')
   return {
-    next: {
-      ...state,
-      pendingCalls,
+    next: transitionAgentState(state, {
       status: stillAwaiting ? 'awaiting_approval' : 'executing_tools',
-    },
+      pendingCalls,
+    }),
     effects: [effect],
   }
 }
@@ -266,9 +261,9 @@ export function onUserReject(
   callId: string,
   reason: string | undefined,
   config: AgentConfig,
-): StepResult {
+): HandlerResult {
   const target = state.pendingCalls.find((c) => c.callId === callId)
-  if (!target || target.status !== 'awaiting_approval') return noop(state)
+  if (!target || target.status !== 'awaiting_approval') return rejectInvalidEvent(state)
 
   const rejectedContent = reason ?? 'User rejected this tool call.'
   const toolResultMsg: Message = {
@@ -295,9 +290,9 @@ export function onToolResult(
   ok: boolean,
   content: string,
   config: AgentConfig,
-): StepResult {
+): HandlerResult {
   const target = state.pendingCalls.find((c) => c.callId === callId)
-  if (!target || target.status !== 'dispatched') return noop(state)
+  if (!target || target.status !== 'dispatched') return rejectInvalidEvent(state)
 
   const toolResultMsg: Message = {
     role: 'tool',
@@ -309,7 +304,7 @@ export function onToolResult(
   return afterPendingSettled(state, messages, pendingCalls, config)
 }
 
-export function onCancel(state: AgentState): StepResult {
+export function onCancel(state: AgentState): HandlerResult {
   const cancelledResults = state.pendingCalls.map<Message>((call) => ({
     role: 'tool',
     content: [{
@@ -320,33 +315,34 @@ export function onCancel(state: AgentState): StepResult {
     }],
   }))
   return {
-    next: {
-      ...state,
-      messages: cancelledResults.length > 0
-        ? [...state.messages, ...cancelledResults]
-        : state.messages,
-      status: 'done',
-      pendingCalls: [],
-    },
+    next: transitionAgentState(
+      state,
+      { status: 'done', pendingCalls: [] },
+      {
+        messages: cancelledResults.length > 0
+          ? [...state.messages, ...cancelledResults]
+          : state.messages,
+      },
+    ),
     effects: [{ kind: 'finish' }],
   }
 }
 
-export function onClear(state: AgentState): StepResult {
+export function onClear(state: AgentState): HandlerResult {
   return {
-    next: {
-      ...state,
-      messages: [],
-      pendingCalls: [],
-      status: 'idle',
-      usage: {
+    next: transitionAgentState(
+      state,
+      { status: 'idle', pendingCalls: [] },
+      {
+        messages: [],
+        usage: {
         inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 0,
-    },
-      error: undefined,
-    },
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+      },
+    ),
     effects: [],
   }
 }
@@ -354,12 +350,12 @@ export function onClear(state: AgentState): StepResult {
 export function onMessagesReplaced(
   state: AgentState,
   event: Extract<AgentEvent, { kind: 'messages_replaced' }>,
-): StepResult {
+): HandlerResult {
   const { start, end } = event.replaceRange
-  if (!Number.isInteger(start) || !Number.isInteger(end)) return noop(state)
-  if (start < 0 || end < start || end > state.messages.length) return noop(state)
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return rejectInvalidEvent(state)
+  if (start < 0 || end < start || end > state.messages.length) return rejectInvalidEvent(state)
   if (state.pendingCalls.length > 0 && !preservesPendingToolCallGroup(state, end)) {
-    return noop(state)
+    return rejectInvalidEvent(state)
   }
   return {
     next: {
@@ -392,12 +388,12 @@ function preservesPendingToolCallGroup(state: AgentState, preserveFrom: number):
 export function onApprovalModeChanged(
   state: AgentState,
   mode: ApprovalMode,
-): StepResult {
+): HandlerResult {
   if (state.approvalMode === mode) return noop(state)
   return { next: { ...state, approvalMode: mode }, effects: [] }
 }
 
-export function onCwdChanged(state: AgentState, cwd: string): StepResult {
+export function onCwdChanged(state: AgentState, cwd: string): HandlerResult {
   if (state.cwd === cwd) return noop(state)
   return { next: { ...state, cwd }, effects: [] }
 }

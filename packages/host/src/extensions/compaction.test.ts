@@ -107,6 +107,12 @@ function turnReply(text: string = 'ok') {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((yes) => { resolve = yes })
+  return { promise, resolve }
+}
+
 describe('compaction extension', () => {
   let dir: string
   let store: SessionStore
@@ -224,6 +230,37 @@ describe('compaction extension', () => {
     expect(await readReplacedEvents(rec.logPath)).toHaveLength(0)
     const skips = await readSkipEvents(rec.logPath)
     expect(skips.some((s) => s.payload.reason === 'empty_summary')).toBe(true)
+  })
+
+  it('rejects a summary if the session advances while the summarizer is in flight', async () => {
+    const summary = deferred<ReturnType<typeof summaryReply>>()
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'stale-summary-mock',
+      async call() {
+        call += 1
+        if (call === 1) return turnReply()
+        return summary.promise
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'first turn' })
+
+    const compacting = loop.compact(sessionId, 'manual')
+    await Promise.resolve()
+    await loop.dispatch(sessionId, { kind: 'approval_mode_changed', mode: 'full' })
+    summary.resolve(summaryReply())
+    await compacting
+
+    const record = store.get(sessionId)!
+    expect(await readReplacedEvents(record.logPath)).toHaveLength(0)
+    const rejected = await readRejectedEvents(record.logPath)
+    expect(rejected).toContainEqual(expect.objectContaining({
+      payload: expect.objectContaining({ reason: 'session_changed' }),
+    }))
+    expect(record.state.messages.some((message) =>
+      message.content.some((content) => content.type === 'text' && content.text === 'first turn'),
+    )).toBe(true)
   })
 
   it('manual compact on empty session emits nothing_to_compact throw', async () => {

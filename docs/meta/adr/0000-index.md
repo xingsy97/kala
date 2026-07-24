@@ -43,6 +43,7 @@ What follows from this decision — good and bad.
 | [0013](0013-dashboard-finder-layout.md) | Dashboard Finder-style layout + control-plane events | accepted |
 | [0014](0014-subagent-approval-mode.md) | Sub-agent sessions force `allow_all` approval mode | accepted |
 | [0015](0015-self-improvement-substrate.md) | A substrate for self-improving meta-agents | accepted |
+| [0016](0016-state-flow-management.md) | State flow management by layer | accepted |
 
 ## When to add an ADR
 

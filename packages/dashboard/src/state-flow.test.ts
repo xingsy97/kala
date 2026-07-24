@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TimelineEntry } from './session.js'
-import { stateFlow } from './state-flow.js'
+import { projectStatusFromEntry, stateFlow } from './state-flow.js'
 
 describe('stateFlow', () => {
   it('derives reducer status transitions from event effects', () => {
@@ -49,5 +49,18 @@ describe('stateFlow', () => {
       ['executing_tools', 'thinking'],
       ['thinking', 'done'],
     ])
+  })
+
+  it('projects terminal and approval states without requiring full kernel state', () => {
+    const entry = (event: TimelineEntry['event'], effects: TimelineEntry['effects'] = []): TimelineEntry => ({
+      seq: 1, ts: '2026-07-05T00:00:00Z', event, effects,
+    })
+
+    expect(projectStatusFromEntry('thinking', entry(
+      { kind: 'llm_response', message: { role: 'assistant', content: [] } },
+      [{ kind: 'request_approval', callId: 'c1', name: 'write', input: {} }],
+    ))).toBe('awaiting_approval')
+    expect(projectStatusFromEntry('thinking', entry({ kind: 'llm_error', error: 'failed' }))).toBe('error')
+    expect(projectStatusFromEntry('executing_tools', entry({ kind: 'cancel' }))).toBe('done')
   })
 })

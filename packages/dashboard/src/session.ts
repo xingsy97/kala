@@ -7,21 +7,16 @@
  * local mutation.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import type {
   AgentConfig,
-  AgentEvent,
   AgentState,
-  Effect,
-  Message,
 } from '@agent-kernel/kernel'
-import { createInitialState, step } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
   AttachedExecutor,
   CompactStatusEvent,
-  CompactionMetadata,
   ContextUsageSnapshot,
   ControlUpdate,
   DashboardClientToServerEvents,
@@ -31,44 +26,30 @@ import type {
   SessionErrorEvent,
   SessionReadyEvent,
   SessionSummary,
-  LLMTrace,
   HostRestartEvent,
   HumanAttentionTimeline,
 } from '@agent-kernel/shared'
-import { PROTOCOL_VERSION, buildHumanAttentionTimeline, estimateMessageTokens, estimateToolSchemaTokens } from '@agent-kernel/shared'
+import { PROTOCOL_VERSION, buildHumanAttentionTimeline } from '@agent-kernel/shared'
 import { io, type Socket } from 'socket.io-client'
 
 import { decideSessionHydration } from './session-hydration-policy.js'
-import type { CachedSessionView, CachedSessionViewInput, SessionViewCache } from './session-view-cache.js'
+import { projectStatusFromEntry } from './state-flow.js'
+import {
+  EMPTY_SESSION_PROJECTION,
+  mergeBySeq,
+  reduceSessionProjection,
+  timelineEntry,
+  type ConnectionStatus,
+  type TimelineEntry,
+} from './session-projection.js'
+import type { CachedSessionView, SessionViewCache } from './session-view-cache.js'
+
+export type { ConnectionStatus, TimelineEntry } from './session-projection.js'
 
 export type DashboardSocket = Socket<
   DashboardServerToClientEvents,
   DashboardClientToServerEvents
 >
-
-export type TimelineEntry = {
-  seq: number
-  ts: string
-  event: AgentEvent
-  effects: readonly Effect[]
-  hasEffectsArtifact?: boolean
-  hasLlmTraceArtifact?: boolean
-  llmTrace?: LLMTrace
-  model?: string
-  /**
-   * Rich metadata for `messages_replaced (compaction)` events. Sourced
-   * from the wire `event:appended` / `server:history` payload; the kernel
-   * event itself only carries `replaceRange` + `replacementMessages`.
-   */
-  compactionMetadata?: CompactionMetadata
-}
-
-export type ConnectionStatus =
-  | 'idle'
-  | 'connecting'
-  | 'ready'
-  | 'error'
-  | 'disconnected'
 
 export type SessionView = {
   status: ConnectionStatus
@@ -126,26 +107,11 @@ export function useSession({
   cache,
   onForked,
 }: UseSessionOptions): SessionView {
-  const [status, setStatus] = useState<ConnectionStatus>('idle')
-  const [state, setState] = useState<AgentState | null>(null)
-  const [config, setConfig] = useState<AgentConfig | null>(null)
-  const [contextSnapshot, setContextUsageSnapshot] = useState<ContextUsageSnapshot | null>(null)
-  const [remoteCompactStatus, setRemoteCompactStatus] = useState<CompactStatusEvent | null>(null)
-  const [timeline, setTimeline] = useState<readonly TimelineEntry[]>([])
+  const [projection, dispatchProjection] = useReducer(reduceSessionProjection, EMPTY_SESSION_PROJECTION)
   const [streamingText, setStreamingText] = useState('')
-  const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessagePreview[]>([])
-  const [lastError, setLastError] = useState<SessionErrorEvent | null>(null)
-  const [parentSessionId, setParentSessionId] = useState<string | null>(null)
-  const [parentCursor, setParentCursor] = useState<number | null>(null)
-  const [selectedModel, setSelectedModel] = useState<string | null>(null)
-  const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null)
   const [boundSocket, setBoundSocket] = useState<BoundDashboardSocket | null>(null)
   const socketRef = useRef<DashboardSocket | null>(null)
-  // Latest AgentConfig — needed by the client-side fold on event:appended,
-  // which lives inside a stable useEffect closure and can't read the React
-  // `config` state directly.
-  const configRef = useRef<AgentConfig | null>(null)
-  const contextSnapshotRef = useRef<ContextUsageSnapshot | null>(null)
+  const generationRef = useRef(0)
   // Streaming smoother: token_delta events land in `streamBufferRef`, and a
   // requestAnimationFrame loop drains a chunk per frame into React state. This
   // collapses 60-100 setState calls/sec into ~60 frames/sec AND paces bursty
@@ -154,86 +120,37 @@ export function useSession({
   const streamRafRef = useRef<number | null>(null)
   const onForkedRef = useRef(onForked)
   onForkedRef.current = onForked
-  contextSnapshotRef.current = contextSnapshot
 
   useEffect(() => {
+    if (!cache || !projection.sessionId || projection.hydratedSessionId !== projection.sessionId) return
+    cache.set(projection.sessionId, {
+      sessionId: projection.sessionId, status: projection.status, state: projection.state,
+      config: projection.config, contextSnapshot: projection.contextSnapshot, timeline: projection.timeline,
+      queuedMessages: projection.queuedMessages, lastError: projection.lastError,
+      parentSessionId: projection.parentSessionId, parentCursor: projection.parentCursor,
+      selectedModel: projection.selectedModel, hydratedSessionId: projection.hydratedSessionId,
+    })
+  }, [cache, projection])
+
+  useEffect(() => {
+    const generation = ++generationRef.current
     if (sessionId === null) {
       socketRef.current?.close()
       socketRef.current = null
       setBoundSocket(null)
-      setStatus('idle')
-      setState(null)
-      setConfig(null)
-      setContextUsageSnapshot(null)
-      setRemoteCompactStatus(null)
-      configRef.current = null
-      setTimeline([])
+      dispatchProjection({ kind: 'select', generation, sessionId: null })
       setStreamingText('')
-      setQueuedMessages([])
-      setLastError(null)
-      setParentSessionId(null)
-      setParentCursor(null)
-      setSelectedModel(null)
-      setHydratedSessionId(null)
       return
     }
-    setStatus('connecting')
-    setState(null)
-    setConfig(null)
-    setContextUsageSnapshot(null)
-    setRemoteCompactStatus(null)
-    configRef.current = null
-    setTimeline([])
+    let cached = cache?.get(sessionId) ?? null
+    dispatchProjection({ kind: 'select', generation, sessionId, cached })
     setStreamingText('')
     streamBufferRef.current = ''
     if (streamRafRef.current !== null) {
       cancelAnimationFrame(streamRafRef.current)
       streamRafRef.current = null
     }
-    setQueuedMessages([])
-    setLastError(null)
-    setParentSessionId(null)
-    setParentCursor(null)
-    setSelectedModel(null)
-    setHydratedSessionId(null)
-
-    let cacheDraft: CachedSessionViewInput = {
-      sessionId,
-      status: 'connecting',
-      state: null,
-      config: null,
-      contextSnapshot: null,
-      timeline: [],
-      queuedMessages: [],
-      lastError: null,
-      parentSessionId: null,
-      parentCursor: null,
-      selectedModel: null,
-      hydratedSessionId: null,
-    }
-    let cached = cache?.get(sessionId) ?? null
     let resetHistoryBaseOnNextReplay = false
-    if (cached) {
-      cacheDraft = cached
-      setStatus('connecting')
-      setState(cached.state)
-      setConfig(cached.config)
-      setContextUsageSnapshot(cached.contextSnapshot)
-      configRef.current = cached.config
-      setTimeline(cached.timeline)
-      setQueuedMessages(cached.queuedMessages)
-      setLastError(cached.lastError)
-      setParentSessionId(cached.parentSessionId)
-      setParentCursor(cached.parentCursor)
-      setSelectedModel(cached.selectedModel)
-      setHydratedSessionId(sessionId)
-    }
-
-    const writeCacheSnapshot = (patch: Parameters<SessionViewCache['patch']>[1]): void => {
-      if (!cache) return
-      cacheDraft = { ...cacheDraft, ...patch, sessionId }
-      cache.set(sessionId, cacheDraft)
-    }
 
     const drainStreamBuffer = (): void => {
       const buf = streamBufferRef.current
@@ -277,18 +194,7 @@ export function useSession({
         cached = await cache.hydrate(sessionId)
         if (disposed) return
         if (cached) {
-          cacheDraft = cached
-          setState(cached.state)
-          setConfig(cached.config)
-          setContextUsageSnapshot(cached.contextSnapshot)
-          configRef.current = cached.config
-          setTimeline(cached.timeline)
-          setQueuedMessages(cached.queuedMessages)
-          setLastError(cached.lastError)
-          setParentSessionId(cached.parentSessionId)
-          setParentCursor(cached.parentCursor)
-          setSelectedModel(cached.selectedModel)
-          setHydratedSessionId(sessionId)
+          dispatchProjection({ kind: 'hydrate', generation, sessionId, cached })
         }
       }
 
@@ -328,26 +234,7 @@ export function useSession({
         return
       }
       if (p.sessionId !== sessionId) return
-      setStatus('ready')
-      setState(p.state)
-      setConfig(p.config)
-      setContextUsageSnapshot(p.contextSnapshot ?? null)
-      configRef.current = p.config
-      setParentSessionId(p.parentSessionId ?? null)
-      setParentCursor(p.parentCursor ?? null)
-      setSelectedModel(p.selectedModel ?? null)
-      setHydratedSessionId(p.sessionId)
-      writeCacheSnapshot({
-        status: 'ready',
-        state: p.state,
-        config: p.config,
-        contextSnapshot: p.contextSnapshot ?? null,
-        parentSessionId: p.parentSessionId ?? null,
-        parentCursor: p.parentCursor ?? null,
-        selectedModel: p.selectedModel ?? null,
-        hydratedSessionId: p.sessionId,
-        lastError: null,
-      })
+      dispatchProjection({ kind: 'ready', generation, sessionId, payload: p })
       // Timeline was cleared for a fresh connect; ask the host to replay
       // the log so a page reload doesn't leave the user staring at an
       // empty timeline for a session that already has history. Live
@@ -357,9 +244,8 @@ export function useSession({
       if (hydration.kind === 'load_full_history') {
         if (hydration.resetTimeline) {
           cache?.delete(p.sessionId)
-          cacheDraft = { ...cacheDraft, timeline: [], hydratedSessionId: p.sessionId }
           resetHistoryBaseOnNextReplay = true
-          setTimeline([])
+          dispatchProjection({ kind: 'reset_timeline', generation, sessionId })
         }
         socket.emit('client:load_history', { sessionId: p.sessionId })
         return
@@ -371,24 +257,9 @@ export function useSession({
     })
     socket.on('server:history', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
-      const entries: TimelineEntry[] = p.entries.map((e) => ({
-        seq: e.seq,
-        ts: e.ts,
-        event: e.event,
-        effects: e.effects,
-        ...(e.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
-        ...(e.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
-        ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
-        ...(e.model ? { model: e.model } : {}),
-        ...(e.compactionMetadata ? { compactionMetadata: e.compactionMetadata } : {}),
-      }))
-      setTimeline((prev) => {
-        const base = resetHistoryBaseOnNextReplay ? [] : prev
-        resetHistoryBaseOnNextReplay = false
-        const next = mergeBySeq(base, entries)
-        writeCacheSnapshot({ timeline: next })
-        return next
-      })
+      const reset = resetHistoryBaseOnNextReplay
+      resetHistoryBaseOnNextReplay = false
+      dispatchProjection({ kind: 'history', generation, sessionId, entries: p.entries.map(timelineEntry), reset })
     })
     socket.on('state:changed', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
@@ -397,60 +268,15 @@ export function useSession({
       // via kernel step()). This handler runs if a wire event lands
       // out-of-order or if the host pushes a mid-stream correction; in
       // both cases the server-computed state wins.
-      setState(p.state)
-      setContextUsageSnapshot(p.contextSnapshot ?? null)
-      writeCacheSnapshot({ state: p.state, contextSnapshot: p.contextSnapshot ?? null })
+      dispatchProjection({ kind: 'authoritative', generation, sessionId, payload: p })
       if (p.state.status !== 'thinking') resetStream()
     })
     socket.on('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
-      setLastError(null)
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
         resetStream()
       }
-      // Client-side fold: apply the event to the last known state so the
-      // dashboard doesn't need `state:changed` to stay in sync. If config
-      // isn't loaded yet (very early race between event:appended and
-      // session:ready) we skip — state:changed above will correct it.
-      setState((prev) => {
-        if (prev === null || configRef.current === null) return prev
-        const { next } = step(prev, p.event, configRef.current)
-        writeCacheSnapshot({ state: next })
-        return next
-      })
-      // For messages_replaced (compaction), recompute the client-side
-      // contextSnapshot from the just-folded state so the context-window
-      // indicator drops immediately, without waiting for the server's
-      // `state:changed` correction (which does arrive but can lag due to
-      // socket ordering + our own re-render timing).
-      if (p.event.kind === 'messages_replaced' && p.event.reason === 'compaction' && configRef.current) {
-        const cfg = configRef.current
-        const priorSnapshot = contextSnapshotRef.current
-        setState((prev) => {
-          if (prev === null) return prev
-          const snapshot = reprojectContextSnapshotAfterCompaction(cfg, prev.messages, priorSnapshot)
-          setContextUsageSnapshot(snapshot)
-          writeCacheSnapshot({ contextSnapshot: snapshot })
-          return prev
-        })
-      }
-      setTimeline((prev) => {
-        const next = mergeBySeq(prev, [
-          {
-            seq: p.seq,
-            ts: p.ts,
-            event: p.event,
-            effects: p.effects,
-            ...(p.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
-            ...(p.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
-            ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}),
-            ...(p.model ? { model: p.model } : {}),
-            ...(p.compactionMetadata ? { compactionMetadata: p.compactionMetadata } : {}),
-          },
-        ])
-        writeCacheSnapshot({ timeline: next })
-        return next
-      })
+      dispatchProjection({ kind: 'appended', generation, sessionId, payload: p })
     })
     socket.on('approval:required', () => {
       // Best-effort: the reducer's next state:changed already carries the
@@ -463,15 +289,13 @@ export function useSession({
       if (!isCurrentSocket()) return
       if (p.sessionId === sessionId) {
         const items = p.items ?? []
-        setQueuedMessages(items)
-        writeCacheSnapshot({ queuedMessages: items })
+        dispatchProjection({ kind: 'queue', generation, sessionId, items })
       }
     })
     socket.on('session:error', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       resetStream()
-      setLastError(p)
-      writeCacheSnapshot({ lastError: p })
+      dispatchProjection({ kind: 'error', generation, sessionId, error: p })
     })
     socket.on('session:token_delta', (p) => {
       if (!isCurrentSocket()) return
@@ -481,8 +305,7 @@ export function useSession({
       if (p.kind === 'host_restart') noteHostRestart(p)
       if (p.kind === 'session_meta_changed' && p.sessionId === sessionId && p.preferences && 'selectedModel' in p.preferences) {
         const model = p.preferences.selectedModel && p.preferences.selectedModel.length > 0 ? p.preferences.selectedModel : null
-        setSelectedModel(model)
-        writeCacheSnapshot({ selectedModel: model })
+        dispatchProjection({ kind: 'model', generation, sessionId, selectedModel: model })
       }
     })
     socket.on('connect_error', (err) => {
@@ -494,11 +317,11 @@ export function useSession({
       if (msg === 'version_incompatible' || msg === 'auth_failed') {
         socket.disconnect()
       }
-      setStatus('error')
+      dispatchProjection({ kind: 'status', generation, sessionId, status: 'error' })
     })
     socket.io.on('reconnect_failed', () => {
       if (!isCurrentSocket()) return
-      setStatus('error')
+      dispatchProjection({ kind: 'status', generation, sessionId, status: 'error' })
     })
     socket.on('disconnect', (reason) => {
       if (!isCurrentSocket()) return
@@ -507,18 +330,18 @@ export function useSession({
       // keep dialing.
       if (reason === 'io server disconnect') {
         if (Date.now() < plannedRestartUntil) {
-          setStatus('disconnected')
+          dispatchProjection({ kind: 'status', generation, sessionId, status: 'disconnected' })
           return
         }
         socket.disconnect()
-        setStatus('error')
+        dispatchProjection({ kind: 'status', generation, sessionId, status: 'error' })
         return
       }
-      setStatus('disconnected')
+      dispatchProjection({ kind: 'status', generation, sessionId, status: 'disconnected' })
     })
     socket.on('server:compact_status', (p: CompactStatusEvent) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
-      setRemoteCompactStatus(p)
+      dispatchProjection({ kind: 'compact', generation, sessionId, compactStatus: p })
     })
     }
 
@@ -536,6 +359,11 @@ export function useSession({
       setBoundSocket((current) => current?.socket === socket ? null : current)
     }
   }, [host, sessionId, token, cache])
+
+  const {
+    status, state, config, contextSnapshot, compactStatus: remoteCompactStatus, timeline,
+    queuedMessages, lastError, parentSessionId, parentCursor, selectedModel, hydratedSessionId,
+  } = projection
 
   const pendingApprovals = useMemo<readonly ApprovalRequiredEvent[]>(() => {
     if (!state || !sessionId) return []
@@ -1029,22 +857,14 @@ function updateSessionSummaryFromEvent(
   entry: EventAppendedEvent,
 ): readonly SessionSummary[] {
   return updateSessionSummary(sessions, entry.sessionId, (summary) => {
-    const previousState = {
-      ...createInitialState({ sessionId: summary.sessionId }),
-      status: summary.status ?? 'idle',
-      cursor: Math.max(0, entry.seq - 1),
-      ...(summary.currentCwd ? { cwd: summary.currentCwd } : {}),
-    }
-    const { next } = step(previousState, entry.event, {
-      systemPrompt: '',
-      tools: [],
-    })
+    const nextStatus = projectStatusFromEntry(summary.status ?? 'idle', timelineEntry(entry))
+    const nextCwd = entry.event.kind === 'cwd_changed' ? entry.event.cwd : summary.currentCwd
     return {
       ...summary,
-      status: next.status,
+      status: nextStatus,
       lastEventAt: entry.ts,
       eventCount: Math.max(summary.eventCount, entry.seq),
-      ...(next.cwd ? { currentCwd: next.cwd } : { currentCwd: undefined }),
+      ...(nextCwd ? { currentCwd: nextCwd } : { currentCwd: undefined }),
       ...(summary.firstUserMessage || entry.event.kind !== 'user_message' || !entry.event.text
         ? {}
         : { firstUserMessage: entry.event.text.slice(0, 120) }),
@@ -1056,78 +876,4 @@ function isRestingSessionStatus(status: SessionSummary['status'] | undefined): b
   return status === undefined || status === 'idle' || status === 'done' || status === 'error'
 }
 
-export function mergeBySeq(
-  prev: readonly TimelineEntry[],
-  add: readonly TimelineEntry[],
-): readonly TimelineEntry[] {
-  if (add.length === 0) return prev
-  const map = new Map<number, TimelineEntry>()
-  for (const e of prev) map.set(e.seq, e)
-  for (const e of add) {
-    const existing = map.get(e.seq)
-    if (!existing) {
-      map.set(e.seq, e)
-      continue
-    }
-    if (sameTimelineEvent(existing, e)) map.set(e.seq, { ...existing, ...e })
-  }
-  const out = [...map.values()]
-  out.sort((a, b) => a.seq - b.seq)
-  return out
-}
-
-function sameTimelineEvent(a: TimelineEntry, b: TimelineEntry): boolean {
-  if (a.event.kind !== b.event.kind) return false
-  if ('callId' in a.event || 'callId' in b.event) {
-    return 'callId' in a.event && 'callId' in b.event && a.event.callId === b.event.callId
-  }
-  return true
-}
-
-/**
- * Recompute a fresh `ContextUsageSnapshot` after the client folds a
- * `messages_replaced (compaction)` event. Mirrors host `snapshotFromConfig`
- * so the numbers agree with the server's follow-up `state:changed`; keeps
- * `contextWindow` / `model` / `estimator` from the prior snapshot so we
- * don't accidentally regress to `unknown` mid-flight.
- *
- * The `system` (reserve) bucket is intentionally left at its prior value:
- * the reserve heuristic doesn't depend on message count, and we don't have
- * `contextLimit` handy without importing more from the host. It'll be
- * corrected on the next `state:changed`.
- */
-function reprojectContextSnapshotAfterCompaction(
-  cfg: AgentConfig,
-  messages: readonly Message[],
-  prior: ContextUsageSnapshot | null,
-): ContextUsageSnapshot {
-  const transcriptTokens = estimateMessageTokens(messages)
-  const toolTokens = estimateToolSchemaTokens(cfg.tools)
-  const priorReserve = prior?.breakdown.system ?? 0
-  const priorMemory = prior?.breakdown.memory ?? 0
-  const priorAttachments = prior?.breakdown.attachments ?? 0
-  const priorPending = prior?.breakdown.pendingUserInput ?? 0
-  const inputTokens = transcriptTokens + toolTokens + priorReserve
-  return {
-    model: prior?.model ?? { ref: 'unknown' },
-    contextWindow: prior?.contextWindow ?? { tokens: null, source: 'unknown' },
-    usage: {
-      inputTokens,
-      totalTokens: inputTokens,
-    },
-    breakdown: {
-      system: priorReserve,
-      transcript: transcriptTokens,
-      tools: toolTokens,
-      memory: priorMemory,
-      attachments: priorAttachments,
-      pendingUserInput: priorPending,
-    },
-    estimator: prior?.estimator ?? {
-      total: { kind: 'heuristic', confidence: 'rough' },
-      breakdown: { kind: 'heuristic', confidence: 'rough' },
-      version: 'heuristic-v1',
-    },
-    updatedAt: Date.now(),
-  }
-}
+export { mergeBySeq } from './session-projection.js'
