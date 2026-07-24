@@ -176,8 +176,11 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
               ))}
             </nav>
           </aside>
-          <ScrollArea className="min-h-0 min-w-0 bg-background">
-            <div className="min-w-0 p-4 text-foreground sm:p-7">
+          <ScrollArea
+            className="min-h-0 min-w-0 max-w-full overflow-x-hidden bg-background"
+            viewportClassName="[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0 [&>div]:!max-w-full"
+          >
+            <div className="min-w-0 max-w-full overflow-x-hidden p-4 text-foreground sm:p-7" data-testid="settings-responsive-content">
               {loadError ? (
                 <div className="rounded-md border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                   {t('settings.loadFailed', { error: loadError })}
@@ -365,31 +368,18 @@ function RuntimeSection({
           {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
         </div>
       ) : null}
-      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
-        <table className="min-w-[34rem] w-full text-sm">
-          <tbody>
-            {rows.map(([label, path], i) => (
-              <tr
-                key={label}
-                className={cn(
-                  'border-border/50',
-                  i !== rows.length - 1 && 'border-b',
-                )}
-              >
-                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
-                  {label}
-                </th>
-                <td className="px-3 py-2.5 font-mono text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="min-w-0 break-all" title={path}>{path}</span>
-                    <CopyButton value={path} />
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <SettingsKeyValueList
+        testId="settings-runtime-paths"
+        rows={rows.map(([label, path]) => ({
+          label,
+          value: (
+            <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
+              <span className="min-w-0 flex-1 break-all" title={path}>{path}</span>
+              <CopyButton value={path} />
+            </div>
+          ),
+        }))}
+      />
     </div>
   )
 }
@@ -555,45 +545,27 @@ function DeploymentSection({
         </div>
       ) : null}
       <h4 className="mb-2 text-sm font-semibold text-foreground">{t('settings.deployment.componentInventory')}</h4>
-      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
-        <table className="min-w-[820px] w-full text-sm">
-          <thead className="bg-muted/50 text-xs text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.component')}</th>
-              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.version')}</th>
-              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.commit')}</th>
-              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.buildTime')}</th>
-              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.instance')}</th>
-              <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.health')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={row.component} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
-                <td className="max-w-56 px-3 py-2" title={row.component}>
-                  <div className="font-medium">{row.component}</div>
-                  {row.detail ? <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={row.detail}>{row.detail}</div> : null}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs">{row.version}</td>
-                <td className="px-3 py-2 font-mono text-xs">{row.commit}</td>
-                <td className="max-w-48 px-3 py-2 font-mono text-xs" title={row.builtAt}>{row.builtAt}</td>
-                <td className="px-3 py-2 font-mono text-xs">{row.instance}</td>
-                <td className="px-3 py-2 text-xs">{row.health}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <SettingsRecordList testId="settings-component-inventory">
+        {rows.map((row) => (
+          <SettingsRecord key={row.component} title={row.component} detail={row.detail}>
+            <SettingsRecordField label={t('settings.deployment.version')} mono>{row.version}</SettingsRecordField>
+            <SettingsRecordField label={t('settings.deployment.commit')} mono>{row.commit}</SettingsRecordField>
+            <SettingsRecordField label={t('settings.deployment.buildTime')} mono>{row.builtAt}</SettingsRecordField>
+            <SettingsRecordField label={t('settings.deployment.instance')} mono>{row.instance}</SettingsRecordField>
+            <SettingsRecordField label={t('settings.deployment.health')}>{row.health}</SettingsRecordField>
+          </SettingsRecord>
+        ))}
+      </SettingsRecordList>
       {payload.agentModule ? (
         <div className="mt-5 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
-          <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <h4 className="text-sm font-semibold text-foreground">Agent module</h4>
               <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={`${payload.agentModule.id}@${payload.agentModule.version}`}>
                 {payload.agentModule.label} · {payload.agentModule.id}@{payload.agentModule.version}
               </div>
             </div>
-            <div className="flex-none text-right font-mono text-[11px] text-muted-foreground">
+            <div className="w-full min-w-0 text-left font-mono text-[11px] text-muted-foreground sm:w-auto sm:flex-none sm:text-right">
               <div>prompt {payload.agentModule.systemPromptHash.slice(0, 12)}</div>
               <div>tools {payload.agentModule.toolRegistryHash.slice(0, 12)}</div>
             </div>
@@ -613,35 +585,17 @@ function DeploymentSection({
         {executors.length === 0 ? (
           <EmptyRow>{t('settings.deployment.noExecutors')}</EmptyRow>
         ) : (
-          <div className="mt-3 max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
-            <table className="min-w-[760px] w-full text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.workspace')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executor')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executorVersion')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.executorProtocol')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.runtime')}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t('settings.deployment.features')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {executors.map((executor, i) => (
-                  <tr key={executor.executorId} className={cn('border-border/50', i !== executors.length - 1 && 'border-b')}>
-                    <td className="max-w-44 px-3 py-2">
-                      <div className="truncate font-medium" title={executor.workspaceName}>{executor.workspaceName}</div>
-                      <div className="truncate font-mono text-[11px] text-muted-foreground" title={executor.workspaceId}>{executor.workspaceId}</div>
-                    </td>
-                    <td className="max-w-44 truncate px-3 py-2 font-mono text-xs" title={executor.executorId}>{executor.executorId}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{executor.executorVersion ?? '—'}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{executor.clientVersion ?? '—'}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{executor.runtime} {executor.runtimeVersion}</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">{executorCapabilitiesLabel(executor, t)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SettingsRecordList testId="settings-connected-executors" className="mt-3">
+            {executors.map((executor) => (
+              <SettingsRecord key={executor.executorId} title={executor.workspaceName} detail={executor.workspaceId}>
+                <SettingsRecordField label={t('settings.deployment.executor')} mono>{executor.executorId}</SettingsRecordField>
+                <SettingsRecordField label={t('settings.deployment.executorVersion')} mono>{executor.executorVersion ?? '—'}</SettingsRecordField>
+                <SettingsRecordField label={t('settings.deployment.executorProtocol')} mono>{executor.clientVersion ?? '—'}</SettingsRecordField>
+                <SettingsRecordField label={t('settings.deployment.runtime')} mono>{executor.runtime} {executor.runtimeVersion}</SettingsRecordField>
+                <SettingsRecordField label={t('settings.deployment.features')}>{executorCapabilitiesLabel(executor, t)}</SettingsRecordField>
+              </SettingsRecord>
+            ))}
+          </SettingsRecordList>
         )}
       </div>
     </div>
@@ -724,20 +678,10 @@ function SecuritySection({ payload }: { payload: ServerSettingsPayload }): JSX.E
         title={t('settings.sections.security.label')}
         subtitle={t('settings.security.subtitle')}
       />
-      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
-        <table className="min-w-[34rem] w-full text-sm">
-          <tbody>
-            {rows.map(([label, value], i) => (
-              <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
-                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
-                  {label}
-                </th>
-                <td className="px-3 py-2.5 text-sm text-muted-foreground"><span className="break-words [overflow-wrap:anywhere]">{value}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <SettingsKeyValueList rows={rows.map(([label, value]) => ({
+        label,
+        value: <span className="break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">{value}</span>,
+      }))} />
       <div className="mt-4 rounded-md bg-muted/40 px-4 py-3 text-xs text-muted-foreground ring-1 ring-border/50">
         <div className="break-words font-mono">HOST_GITHUB_OAUTH_REQUIRED, GITHUB_USERNAME_WHITELIST, EXECUTOR_TOKENS, HOST_AUDIT_DIR</div>
       </div>
@@ -910,20 +854,10 @@ function SocketAdminSection({ payload, onPayloadChange }: { payload: ServerSetti
         </div>
         <p className="mt-3 text-xs leading-5 text-muted-foreground">{t('settings.socketAdmin.modeDesc')}</p>
       </div>
-      <div className="max-w-full overflow-x-auto rounded-md ring-1 ring-border/50">
-        <table className="min-w-[34rem] w-full text-sm">
-          <tbody>
-            {rows.map(([label, value], i) => (
-              <tr key={label} className={cn('border-border/50', i !== rows.length - 1 && 'border-b')}>
-                <th className="w-40 border-r border-border/50 bg-muted/50 px-3 py-2.5 text-left font-medium sm:w-56">
-                  {label}
-                </th>
-                <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground"><span className="break-all">{value}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <SettingsKeyValueList rows={rows.map(([label, value]) => ({
+        label,
+        value: <span className="break-all font-mono text-xs text-muted-foreground">{value}</span>,
+      }))} />
     </div>
   )
 }
@@ -1627,39 +1561,19 @@ function HooksSection({
           {t('settings.hooks.none', { path: payload.paths.hooksConfig })}
         </EmptyRow>
       ) : (
-        <div className="max-w-full overflow-x-auto rounded-md border border-border">
-          <table className="min-w-[640px] w-full text-sm">
-            <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.event')}</th>
-                <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.match')}</th>
-                <th className="border-b border-border/50 px-3 py-2 text-left">{t('settings.hooks.command')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payload.hooks.map((h, i) => (
-                <tr
-                  key={i}
-                  className={cn(
-                    'border-border/50',
-                    i !== payload.hooks.length - 1 && 'border-b',
-                  )}
-                >
-                  <td className="px-3 py-2 font-mono text-xs">{h.event}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                    {h.match ?? '*'}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 break-all" title={h.command}>{h.command}</span>
-                      <CopyButton value={h.command} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <SettingsRecordList testId="settings-hooks-list">
+          {payload.hooks.map((hook, index) => (
+            <SettingsRecord key={`${hook.event}-${index}`} title={hook.event}>
+              <SettingsRecordField label={t('settings.hooks.match')} mono>{hook.match ?? '*'}</SettingsRecordField>
+              <SettingsRecordField label={t('settings.hooks.command')}>
+                <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
+                  <span className="min-w-0 flex-1 break-all" title={hook.command}>{hook.command}</span>
+                  <CopyButton value={hook.command} />
+                </div>
+              </SettingsRecordField>
+            </SettingsRecord>
+          ))}
+        </SettingsRecordList>
       )}
       <details className="mt-4 rounded-md border border-border bg-muted/30 p-3 text-xs">
         <summary className="cursor-pointer text-muted-foreground">{t('settings.hooks.example')}</summary>
@@ -2664,6 +2578,84 @@ function EmptyRow({ children }: { children: React.ReactNode }): JSX.Element {
   return (
     <div className="rounded-md border border-dashed border-white/15 bg-black/20 px-4 py-6 text-sm text-zinc-400">
       {children}
+    </div>
+  )
+}
+
+function SettingsKeyValueList({
+  rows,
+  testId,
+}: {
+  rows: readonly { label: string; value: React.ReactNode }[]
+  testId?: string
+}): JSX.Element {
+  return (
+    <dl className="overflow-hidden rounded-md ring-1 ring-border/50" data-testid={testId}>
+      {rows.map((row, index) => (
+        <div
+          key={row.label}
+          className={cn(
+            'grid min-w-0 gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(8rem,0.42fr)_minmax(0,1fr)] sm:items-center sm:gap-4',
+            index !== rows.length - 1 && 'border-b border-border/50',
+          )}
+        >
+          <dt className="text-xs font-medium text-muted-foreground sm:text-sm sm:text-foreground">{row.label}</dt>
+          <dd className="min-w-0 text-foreground">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function SettingsRecordList({
+  children,
+  testId,
+  className,
+}: {
+  children: React.ReactNode
+  testId?: string
+  className?: string
+}): JSX.Element {
+  return (
+    <div className={cn('grid min-w-0 gap-2', className)} data-testid={testId}>
+      {children}
+    </div>
+  )
+}
+
+function SettingsRecord({
+  title,
+  detail,
+  children,
+}: {
+  title: string
+  detail?: string
+  children: React.ReactNode
+}): JSX.Element {
+  return (
+    <div className="min-w-0 rounded-md bg-muted/20 p-3 ring-1 ring-border/50">
+      <div className="min-w-0 border-b border-border/40 pb-2">
+        <div className="break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]">{title}</div>
+        {detail ? <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{detail}</div> : null}
+      </div>
+      <dl className="mt-2 grid min-w-0 gap-x-4 gap-y-2 sm:grid-cols-2">{children}</dl>
+    </div>
+  )
+}
+
+function SettingsRecordField({
+  label,
+  mono = false,
+  children,
+}: {
+  label: string
+  mono?: boolean
+  children: React.ReactNode
+}): JSX.Element {
+  return (
+    <div className="grid min-w-0 grid-cols-[minmax(6rem,0.42fr)_minmax(0,1fr)] items-baseline gap-2 text-xs">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn('min-w-0 break-words text-foreground [overflow-wrap:anywhere]', mono && 'font-mono')}>{children}</dd>
     </div>
   )
 }

@@ -123,6 +123,9 @@ async function verifyScenario(scenario) {
   await verifyViewportContract(page, scenario.name)
   await focusComposerAndVerify(page, scenario.name)
   await verifySettingsDialog(page, scenario.name)
+  if (scenario.name === 'desktop browser') {
+    await verifyToolCardModePreference(page, scenario.name)
+  }
   await page.screenshot({ path: join(SHOTS_DIR, `${slug(scenario.name)}.png`), fullPage: false })
   await page.close()
 }
@@ -224,8 +227,102 @@ async function verifySettingsDialog(page, name) {
     } : null
   })
   check(`${name}: settings dialog fits visible viewport`, Boolean(metrics) && metrics.top >= -1 && metrics.left >= -1 && metrics.right <= metrics.viewportWidth + 1 && metrics.bottom <= metrics.viewportHeight + 1, JSON.stringify(metrics))
+
+  const sections = ['runtime', 'deployment', 'security', 'socketAdmin', 'hooks']
+  for (const section of sections) {
+    await page.click(`[data-testid="settings-tab-${section}"]`)
+    await sleep(100)
+    const contentMetrics = await page.evaluate(() => {
+      const content = document.querySelector('[data-testid="settings-responsive-content"]')
+      if (!content) return null
+      const contentRect = content.getBoundingClientRect()
+      const overflowingDescendants = Array.from(content.querySelectorAll('*')).flatMap((element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.width === 0 || rect.height === 0) return []
+        const escapesContent = rect.left < contentRect.left - 1 || rect.right > contentRect.right + 1
+        if (!escapesContent) return []
+        return [{
+          tag: element.tagName,
+          testId: element.getAttribute('data-testid'),
+          className: typeof element.className === 'string' ? element.className.slice(0, 100) : '',
+          left: rect.left,
+          right: rect.right,
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        }]
+      })
+      const ancestors = []
+      let current = content.parentElement
+      while (current && ancestors.length < 8) {
+        const rect = current.getBoundingClientRect()
+        ancestors.push({
+          tag: current.tagName,
+          className: typeof current.className === 'string' ? current.className.slice(0, 100) : '',
+          width: rect.width,
+          clientWidth: current.clientWidth,
+          scrollWidth: current.scrollWidth,
+          display: getComputedStyle(current).display,
+        })
+        current = current.parentElement
+      }
+      return {
+        clientWidth: content.clientWidth,
+        scrollWidth: content.scrollWidth,
+        viewportClientWidth: content.parentElement?.clientWidth ?? 0,
+        viewportScrollWidth: content.parentElement?.scrollWidth ?? 0,
+        overflowingDescendants: overflowingDescendants.slice(0, 8),
+        ancestors,
+      }
+    })
+    check(
+      `${name}: ${section} settings stay width-bounded`,
+      Boolean(contentMetrics)
+        && contentMetrics.scrollWidth <= contentMetrics.clientWidth + 1
+        && contentMetrics.clientWidth <= contentMetrics.viewportClientWidth + 1
+        && contentMetrics.viewportScrollWidth <= contentMetrics.viewportClientWidth + 1
+        && contentMetrics.overflowingDescendants.length === 0,
+      JSON.stringify(contentMetrics),
+    )
+  }
+  await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-settings.png`), fullPage: false })
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('[data-testid="settings-dialog"]'))
+}
+
+async function verifyToolCardModePreference(page, name) {
+  const infoButton = await page.$('[data-testid="session-info-button"]')
+  if (!infoButton) {
+    check(`${name}: session info control exists`, false)
+    return
+  }
+
+  await infoButton.click()
+  await page.waitForSelector('[data-testid="session-metadata-dialog"]')
+  const modeTrigger = '[data-testid="session-metadata-tool-card-mode"]'
+  const initialMode = await page.$eval(modeTrigger, (element) => element.textContent?.trim() ?? '')
+  check(`${name}: Tool Card Mode defaults to Dots`, initialMode === 'Dots', initialMode)
+
+  await page.click(modeTrigger)
+  await page.waitForSelector('[role="option"]')
+  const selected = await page.evaluate(() => {
+    const option = Array.from(document.querySelectorAll('[role="option"]'))
+      .find((element) => element.textContent?.trim() === 'Standard')
+    if (!(option instanceof HTMLElement)) return false
+    option.click()
+    return true
+  })
+  check(`${name}: Standard Tool Card Mode option is available`, selected)
+  await page.click('[data-testid="session-metadata-save"]')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="session-metadata-dialog"]'))
+  await sleep(150)
+
+  await infoButton.click()
+  await page.waitForSelector('[data-testid="session-metadata-dialog"]')
+  const persistedMode = await page.$eval(modeTrigger, (element) => element.textContent?.trim() ?? '')
+  check(`${name}: Tool Card Mode persists after save`, persistedMode === 'Standard', persistedMode)
+  await page.screenshot({ path: join(SHOTS_DIR, `${slug(name)}-tool-card-mode.png`), fullPage: false })
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-testid="session-metadata-dialog"]'))
 }
 
 function writeSessionFixture() {

@@ -1,7 +1,7 @@
 import '@testing-library/react'
 import { cleanup } from '@testing-library/react'
 import * as React from 'react'
-import { afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { i18n } from '../i18n/index.js'
@@ -14,8 +14,8 @@ class ResizeObserverStub implements ResizeObserver {
 
 globalThis.ResizeObserver ??= ResizeObserverStub
 
-if (!window.matchMedia) {
-  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+function createMatchMedia(): typeof window.matchMedia {
+  return vi.fn().mockImplementation((query: string) => ({
     matches: false,
     media: query,
     onchange: null,
@@ -26,6 +26,20 @@ if (!window.matchMedia) {
     dispatchEvent: vi.fn(),
   }))
 }
+
+function installMatchMedia(): void {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: createMatchMedia(),
+  })
+}
+
+installMatchMedia()
+
+beforeEach(() => {
+  installMatchMedia()
+})
 
 const virtuosoScrollToIndexMock = vi.fn()
 const virtuosoScrollToMock = vi.fn()
@@ -131,4 +145,5 @@ afterEach(() => {
   virtuosoScrollByMock.mockClear()
   testQueryClient.clear()
   testQueryClient = createTestQueryClient()
+  installMatchMedia()
 })
