@@ -121,6 +121,21 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Override host endpoint')).toBeTruthy()
   })
 
+  it('keeps section content width-bounded instead of relying on horizontal scrolling', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    const content = screen.getByTestId('settings-responsive-content')
+    expect(content.className).toContain('max-w-full')
+    expect(content.className).toContain('overflow-x-hidden')
+
+    fireEvent.click(screen.getByTestId('settings-tab-runtime'))
+    const paths = await screen.findByTestId('settings-runtime-paths')
+    expect(paths.querySelector('table')).toBeNull()
+    expect(paths.className).not.toContain('overflow-x-auto')
+  })
+
   it('uses a mobile-safe settings shell', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
@@ -682,8 +697,9 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Dashboard')).toBeTruthy()
     expect(screen.getByText('Protocol')).toBeTruthy()
     expect(screen.getByText('Executor: example-executor')).toBeTruthy()
-    expect(screen.getByText('Instance')).toBeTruthy()
-    expect(screen.getByText('Health')).toBeTruthy()
+    expect(screen.getByTestId('settings-component-inventory')).toBeTruthy()
+    expect(screen.getAllByText('Instance').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Health').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('abc123').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('embedded in host bundle, 42 files')).toBeTruthy()
     expect(screen.getByText('bundle-dashboard-with-runtime.cjs')).toBeTruthy()
