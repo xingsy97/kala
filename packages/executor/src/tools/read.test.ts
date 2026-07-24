@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { readTool } from './read.js'
+import { readFileTool } from './read-file.js'
 import { makeCtx } from './_test-helpers.js'
 import { ToolError } from './registry.js'
 
-describe('read', () => {
+describe('read_file', () => {
   let root: string
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'ak-read-'))
@@ -16,7 +16,7 @@ describe('read', () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
   it('returns content with cat -n style line numbers', async () => {
-    const out = await readTool.run(
+    const out = await readFileTool.run(
       { path: join(root, 'file.txt') },
       makeCtx(root),
     )
@@ -24,7 +24,7 @@ describe('read', () => {
   })
 
   it('supports offset and limit', async () => {
-    const out = await readTool.run(
+    const out = await readFileTool.run(
       { path: join(root, 'file.txt'), offset: 1, limit: 1 },
       makeCtx(root),
     )
@@ -33,18 +33,18 @@ describe('read', () => {
 
   it('throws ENOENT for missing files', async () => {
     await expect(
-      readTool.run({ path: join(root, 'nope.txt') }, makeCtx(root)),
+      readFileTool.run({ path: join(root, 'nope.txt') }, makeCtx(root)),
     ).rejects.toBeInstanceOf(ToolError)
   })
 
   it('throws EISDIR for directories', async () => {
-    await expect(readTool.run({ path: root }, makeCtx(root))).rejects.toThrow(
+    await expect(readFileTool.run({ path: root }, makeCtx(root))).rejects.toThrow(
       /EISDIR/,
     )
   })
 
   it('throws EINVAL when path is missing', async () => {
-    await expect(readTool.run({}, makeCtx(root))).rejects.toThrow(/EINVAL/)
+    await expect(readFileTool.run({}, makeCtx(root))).rejects.toThrow(/EINVAL/)
   })
 
   it('rejects paths outside the workspace', async () => {
@@ -52,7 +52,7 @@ describe('read', () => {
     try {
       writeFileSync(join(outside, 'x.txt'), 'no')
       await expect(
-        readTool.run({ path: join(outside, 'x.txt') }, makeCtx(root)),
+        readFileTool.run({ path: join(outside, 'x.txt') }, makeCtx(root)),
       ).rejects.toThrow(/EACCES/)
     } finally {
       rmSync(outside, { recursive: true, force: true })

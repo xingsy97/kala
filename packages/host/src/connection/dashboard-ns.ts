@@ -104,10 +104,11 @@ export type QueuedUserMessage = {
 }
 
 export type MessageQueueManager = {
-  enqueue(sessionId: string, msg: QueuedUserMessage, priority?: 'front'): void
-  reorder(sessionId: string, id: string, beforeId?: string | null): void
-  update(sessionId: string, id: string, text: string): void
-  delete(sessionId: string, id: string): void
+  hydrate(sessionId: string): Promise<void>
+  enqueue(sessionId: string, msg: QueuedUserMessage, priority?: 'front'): Promise<void>
+  reorder(sessionId: string, id: string, beforeId?: string | null): Promise<void>
+  update(sessionId: string, id: string, text: string): Promise<void>
+  delete(sessionId: string, id: string): Promise<void>
   pending(sessionId: string): number
   snapshot(sessionId: string): ServerMessageQueueEvent
   drain(sessionId: string): Promise<void>
@@ -136,6 +137,8 @@ export type DashboardDeps = {
     message: string,
   ): void
   contextWindowForModel?(model: string | undefined): ContextWindowOverride | undefined
+  effectiveDefaultModel?(): string | undefined
+  effectiveModelForSession?(record: SessionRecord): string | undefined
   normalizeModelRef?(model: string): string | undefined
   dashboardNs: DashboardNs
   messageQueues: MessageQueueManager
@@ -338,14 +341,19 @@ export function configureDashboardNamespace(
     }
     if (record) await refreshSessionSkillsIfNeeded(deps, record)
     await socket.join(sessionRoom(sessionId))
+    await deps.messageQueues.hydrate(sessionId)
+    const defaultModel = effectiveDefaultModel(deps)
     const ready: SessionReadyEvent = record
-      ? readyEventFor(record, selectedModelForRecord(record), 'load', contextWindowForSession(deps, record))
+      ? readyEventFor(record, effectiveModelForRecord(deps, record), 'load', contextWindowForSession(deps, record))
         : ephemeralReadyEventFor(
           sessionId,
           getDefaultConfig(),
+          defaultModel,
+          contextWindowForModelRef(deps, defaultModel),
         )
     socket.emit('session:ready', ready)
     socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
+    void deps.messageQueues.drain(sessionId)
 
     socket.on('subscribe', async (raw: ClientSubscribe) => {
       const p = vparse(schema.ClientSubscribeSchema, raw, 'subscribe', (raw as ClientSubscribe | undefined)?.sessionId)
@@ -354,7 +362,7 @@ export function configureDashboardNamespace(
       let target = deps.store.get(sessionId)
       if (!target) {
         try {
-          target = await deps.store.load(sessionId)
+          target = await deps.store.load(sessionId, { runtimeConfig: getDefaultConfig() })
         } catch {
           target = undefined
         }
@@ -363,14 +371,19 @@ export function configureDashboardNamespace(
         await refreshSessionSkillsIfNeeded(deps, target)
       }
       await socket.join(sessionRoom(sessionId))
+      await deps.messageQueues.hydrate(sessionId)
+      const defaultModel = effectiveDefaultModel(deps)
       const payload: SessionReadyEvent = target
-        ? readyEventFor(target, selectedModelForRecord(target), 'load', contextWindowForSession(deps, target))
+        ? readyEventFor(target, effectiveModelForRecord(deps, target), 'load', contextWindowForSession(deps, target))
         : ephemeralReadyEventFor(
             sessionId,
             getDefaultConfig(),
+            defaultModel,
+            contextWindowForModelRef(deps, defaultModel),
           )
       socket.emit('session:ready', payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
+      void deps.messageQueues.drain(sessionId)
     })
 
     socket.on('client:user_message', async (raw: ClientUserMessage) => {
@@ -518,20 +531,20 @@ export function configureDashboardNamespace(
       deps.audit?.log({ action: 'dashboard.cwd_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { cwd: validation.cwd } })
       await broadcastSessionList(deps)
     })
-    socket.on('client:reorder_queued_message', (raw: ClientReorderQueuedMessage) => {
+    socket.on('client:reorder_queued_message', async (raw: ClientReorderQueuedMessage) => {
       const p = vparse(schema.ClientReorderQueuedMessageSchema, raw, 'client:reorder_queued_message', (raw as ClientReorderQueuedMessage | undefined)?.sessionId)
       if (!p) return
-      deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId)
+      await deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId)
     })
-    socket.on('client:update_queued_message', (raw: ClientUpdateQueuedMessage) => {
+    socket.on('client:update_queued_message', async (raw: ClientUpdateQueuedMessage) => {
       const p = vparse(schema.ClientUpdateQueuedMessageSchema, raw, 'client:update_queued_message', (raw as ClientUpdateQueuedMessage | undefined)?.sessionId)
       if (!p) return
-      deps.messageQueues.update(p.sessionId, p.id, p.text)
+      await deps.messageQueues.update(p.sessionId, p.id, p.text)
     })
-    socket.on('client:delete_queued_message', (raw: ClientDeleteQueuedMessage) => {
+    socket.on('client:delete_queued_message', async (raw: ClientDeleteQueuedMessage) => {
       const p = vparse(schema.ClientDeleteQueuedMessageSchema, raw, 'client:delete_queued_message', (raw as ClientDeleteQueuedMessage | undefined)?.sessionId)
       if (!p) return
-      deps.messageQueues.delete(p.sessionId, p.id)
+      await deps.messageQueues.delete(p.sessionId, p.id)
     })
     socket.on('client:rename_session', async (raw: ClientRenameSession) => {
       const p = vparse(schema.ClientRenameSessionSchema, raw, 'client:rename_session', (raw as ClientRenameSession | undefined)?.sessionId)
@@ -636,7 +649,7 @@ export function configureDashboardNamespace(
         actor: auditActor(socket),
         target: { workspaceId: raw.workspaceId },
         outcome: 'ok',
-        metadata: { path: raw.path },
+        metadata: { path: raw.path, cwd: raw.cwd ?? null },
       })
       const result = await deps.executors.workspaceReadBinary(raw as WorkspaceReadBinaryRequest)
       ack?.(result)
@@ -816,6 +829,7 @@ export function configureDashboardNamespace(
         const { record, created } = await deps.store.ensure({
           sessionId: p.sessionId,
           defaultConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
+          runtimeConfig: deriveSessionConfig(getDefaultConfig(), p.tools),
           ...(p.workspaceId !== undefined ? { workspaceId: p.workspaceId } : {}),
           ...(p.workspaceName !== undefined
             ? { workspaceName: p.workspaceName }
@@ -829,7 +843,7 @@ export function configureDashboardNamespace(
           'session:ready',
           readyEventFor(
             record,
-            selectedModelForRecord(record),
+            effectiveModelForRecord(deps, record),
             created ? 'created' : 'load',
             contextWindowForSession(deps, record),
           ),
@@ -883,7 +897,7 @@ export function configureDashboardNamespace(
             : {}),
         })
         await refreshSessionSkillsIfNeeded(deps, record)
-        const parentModel = selectedModelForRecord(source)
+        const parentModel = effectiveModelForRecord(deps, source)
         if (parentModel) {
           await deps.store.updatePreferences(record.sessionId, { selectedModel: parentModel })
           record.preferences = { ...record.preferences, selectedModel: parentModel }
@@ -904,7 +918,7 @@ export function configureDashboardNamespace(
           cursor: record.state.cursor,
           state: record.state,
           config: record.config,
-          contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record)),
+          contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record), parentModel),
           ...(parentModel ? { selectedModel: parentModel } : {}),
           ...(record.workspaceId !== undefined
             ? { workspaceId: record.workspaceId }
@@ -1044,17 +1058,29 @@ async function applyPreferencesUpdate(
       sessionId,
       cursor: record.state.cursor,
       state: record.state,
-      contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record)),
+      contextSnapshot: contextSnapshot(record, record.state.messages, contextWindowForSession(deps, record), effectiveModelForRecord(deps, record)),
     })
   }
 }
 
 function contextWindowForSession(deps: DashboardDeps, record: SessionRecord): ContextWindowOverride | undefined {
-  return deps.contextWindowForModel?.(selectedModelForRecord(record))
+  return deps.contextWindowForModel?.(effectiveModelForRecord(deps, record))
+}
+
+function contextWindowForModelRef(deps: DashboardDeps, model: string | undefined): ContextWindowOverride | undefined {
+  return deps.contextWindowForModel?.(model)
 }
 
 function selectedModelForRecord(record: SessionRecord): string | undefined {
   return record.preferences.selectedModel
+}
+
+function effectiveModelForRecord(deps: DashboardDeps, record: SessionRecord): string | undefined {
+  return deps.effectiveModelForSession?.(record) ?? selectedModelForRecord(record)
+}
+
+function effectiveDefaultModel(deps: DashboardDeps): string | undefined {
+  return deps.effectiveDefaultModel?.()
 }
 
 function normalizePreferencesPatch(
@@ -1112,7 +1138,8 @@ async function handleUserMessage(
   deps: DashboardDeps,
   p: ClientUserMessage,
 ): Promise<void> {
-  let record = await loadRecordForDashboard(deps, p.sessionId)
+  let record = deps.store.get(p.sessionId)
+  if (!record) record = await loadRecordForDashboard(deps, p.sessionId)
   if (!record) {
     deps.broadcastError(
       p.sessionId,
@@ -1121,36 +1148,36 @@ async function handleUserMessage(
     )
     return
   }
+  const messageModel = effectiveModelForRecord(deps, record)
   if (record.state.status === 'thinking' && !deps.loop.hasActiveLlmCall(p.sessionId)) {
     await deps.loop.recoverInterruptedLlm(p.sessionId)
     record = await loadRecordForDashboard(deps, p.sessionId)
     if (!record) return
   }
   const mode = p.mode ?? 'steer'
-  const selectedModel = selectedModelForRecord(record)
   const queued: QueuedUserMessage = {
     id: ulid(),
     text: p.text,
     mode,
     createdAt: new Date().toISOString(),
     ...(p.content ? { content: p.content } : {}),
-    ...(selectedModel ? { model: selectedModel } : {}),
+    ...(messageModel ? { model: messageModel } : {}),
   }
   if (mode === 'queue') {
-    deps.messageQueues.enqueue(p.sessionId, queued)
+    await deps.messageQueues.enqueue(p.sessionId, queued)
     await deps.messageQueues.drain(p.sessionId)
     return
   }
   if (!isRestingStatus(record.state.status)) {
     if (record.state.status === 'thinking') deps.loop.cancelStream(p.sessionId)
-    deps.messageQueues.enqueue(p.sessionId, queued, 'front')
+    await deps.messageQueues.enqueue(p.sessionId, queued, 'front')
     return
   }
   await deps.loop.dispatch(p.sessionId, {
     kind: 'user_message',
     text: p.text,
     ...(p.content ? { content: p.content } : {}),
-  }, queued.model ? { model: queued.model } : undefined)
+  }, messageModel ? { model: messageModel } : undefined)
 }
 
 async function loadRecordForDashboard(
@@ -1160,7 +1187,10 @@ async function loadRecordForDashboard(
   let record: SessionRecord | undefined = deps.store.get(sessionId)
   if (!record) {
     try {
-      record = await deps.store.load(sessionId)
+      const defaultConfig = typeof deps.defaultConfig === 'function'
+        ? deps.defaultConfig()
+        : deps.defaultConfig
+      record = await deps.store.load(sessionId, { runtimeConfig: defaultConfig })
     } catch {
       record = undefined
     }
@@ -1280,7 +1310,7 @@ export function readyEventFor(
     cursor: record.state.cursor,
     state: record.state,
     config: record.config,
-    contextSnapshot: contextSnapshot(record, record.state.messages, contextOverride),
+    contextSnapshot: contextSnapshot(record, record.state.messages, contextOverride, selectedModel),
     ...(record.parentSessionId
       ? { parentSessionId: record.parentSessionId }
       : {}),

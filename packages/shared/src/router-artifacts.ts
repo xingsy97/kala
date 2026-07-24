@@ -10,6 +10,8 @@ import { inferProvider, stableId, compactRecord } from './trace-spans.js'
 export type RouterDecisionArtifact = {
   selectedProvider?: string
   selectedModel?: string
+  requestedModelRef?: string
+  routedModelId?: string
   reasonCodes: readonly string[]
   fallbacks: readonly string[]
   budget?: {
@@ -87,6 +89,8 @@ export type ExecutorCapabilitySnapshotArtifact = {
 export function createRouterDecisionArtifact(input: {
   requestedModel?: string
   selectedModel?: string
+  requestedModelRef?: string
+  routedModelId?: string
   adapterName?: string
   reasonCodes?: readonly string[]
   fallbacks?: readonly string[]
@@ -104,6 +108,8 @@ export function createRouterDecisionArtifact(input: {
   return {
     ...(selectedProvider ? { selectedProvider } : {}),
     ...(input.selectedModel ?? input.requestedModel ? { selectedModel: input.selectedModel ?? input.requestedModel } : {}),
+    ...(input.requestedModelRef ?? input.requestedModel ? { requestedModelRef: input.requestedModelRef ?? input.requestedModel } : {}),
+    ...(input.routedModelId ?? input.selectedModel ? { routedModelId: input.routedModelId ?? input.selectedModel } : {}),
     reasonCodes: input.reasonCodes ?? [
       input.requestedModel ? 'session_model_selected' : 'adapter_default_model',
       ...(toolPolicy ? toolReasonCodes(toolPolicy) : []),

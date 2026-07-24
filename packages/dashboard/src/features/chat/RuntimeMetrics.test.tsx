@@ -6,7 +6,7 @@ import type { ContextUsageSnapshot } from '@agent-kernel/shared'
 
 import { RuntimeMetrics } from './RuntimeMetrics.js'
 
-function contextSnapshot(inputTokens: number, contextWindow: number, source: ContextUsageSnapshot['contextWindow']['source'] = 'manual_config', modelRef = 'test-model'): ContextUsageSnapshot {
+function contextSnapshot(inputTokens: number, contextWindow: number | null, source: ContextUsageSnapshot['contextWindow']['source'] = 'manual_config', modelRef = 'test-model'): ContextUsageSnapshot {
   return {
     model: { ref: modelRef, id: modelRef },
     contextWindow: { tokens: contextWindow, source },
@@ -122,5 +122,24 @@ describe('RuntimeMetrics', () => {
     expect(popover.textContent ?? '').toContain('Model context')
     expect(popover.textContent ?? '').toContain('1.0M')
     expect(popover.textContent ?? '').toContain('model_registry')
+  })
+
+  it('does not fill an unknown host context window from client model info', () => {
+    render(
+      <RuntimeMetrics
+        state={createInitialState({ sessionId: 'sess-unknown-context' })}
+        config={{ contextLimit: 400_000, hardThreshold: 0.8 }}
+        contextSnapshot={contextSnapshot(2_000, null, 'unknown', 'custom:model')}
+        modelInfo={{ id: 'custom:model', label: 'Custom', provider: 'manual', contextWindow: 1_000_000 }}
+        queuedMessages={0}
+      />,
+    )
+
+    const indicator = screen.getByTestId('context-usage-indicator')
+    expect(indicator.getAttribute('title') ?? '').toContain('unavailable')
+    expect(indicator.getAttribute('title') ?? '').not.toContain('1.0M')
+    fireEvent.click(indicator)
+    const popover = screen.getByTestId('context-pressure-popover')
+    expect(popover.textContent ?? '').toContain('unknown')
   })
 })

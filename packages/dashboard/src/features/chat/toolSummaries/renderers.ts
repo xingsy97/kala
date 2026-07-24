@@ -31,6 +31,21 @@ export const readRenderer: GroupedToolRenderer = ({ calls, results }) => {
   })
 }
 
+export const readFilesRenderer: GroupedToolRenderer = ({ calls, results }) => {
+  return calls.map((c) => {
+    const files = Array.isArray(c.input.files) ? c.input.files : []
+    const first = files.find((file): file is Record<string, unknown> => !!file && typeof file === 'object')
+    const firstPath = asString(first?.path)
+    const r = results.get(c.callId)
+    return {
+      callId: c.callId,
+      primary: firstPath ? truncate(firstPath, 96) : `${files.length} files`,
+      ...(r ? { secondary: r.ok ? `${files.length} file${files.length === 1 ? '' : 's'}` : 'failed' } : {}),
+      ok: r ? r.ok : true,
+    }
+  })
+}
+
 export const writeRenderer: GroupedToolRenderer = ({ calls, results }) => {
   return calls.map((c) => {
     const path = asString(c.input.file_path ?? c.input.path)
@@ -58,6 +73,34 @@ export const editRenderer: GroupedToolRenderer = ({ calls, results }) => {
       callId: c.callId,
       primary: path || c.callId,
       ...(r ? { secondary: r.ok ? 'edited' : 'failed' } : {}),
+      ok: r ? r.ok : true,
+    }
+  })
+}
+
+export const multiEditRenderer: GroupedToolRenderer = ({ calls, results }) => {
+  return calls.map((c) => {
+    const path = asString(c.input.file_path ?? c.input.path)
+    const edits = Array.isArray(c.input.edits) ? c.input.edits.length : 0
+    const r = results.get(c.callId)
+    return {
+      callId: c.callId,
+      primary: path || c.callId,
+      secondary: r ? (r.ok ? `${edits} edit${edits === 1 ? '' : 's'}` : 'failed') : `${edits} edit${edits === 1 ? '' : 's'}`,
+      ok: r ? r.ok : true,
+    }
+  })
+}
+
+export const patchRenderer: GroupedToolRenderer = ({ calls, results }) => {
+  return calls.map((c) => {
+    const patch = asString(c.input.patch)
+    const target = patch.split('\n').map((line) => /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line)?.[1]).find(Boolean)
+    const r = results.get(c.callId)
+    return {
+      callId: c.callId,
+      primary: truncate(target ?? 'patch', 96),
+      ...(r ? { secondary: r.ok ? 'applied' : 'failed' } : {}),
       ok: r ? r.ok : true,
     }
   })
@@ -167,8 +210,14 @@ export const lsRenderer: GroupedToolRenderer = ({ calls, results }) => {
 export const RENDERERS: Record<string, GroupedToolRenderer> = {
   bash: bashRenderer,
   read: readRenderer,
+  read_file: readRenderer,
+  read_files: readFilesRenderer,
   write: writeRenderer,
+  write_file: writeRenderer,
   edit: editRenderer,
+  replace_in_file: editRenderer,
+  replace_many_in_file: multiEditRenderer,
+  apply_file_patch: patchRenderer,
   grep: grepRenderer,
   glob: globRenderer,
   ls: lsRenderer,

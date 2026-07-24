@@ -576,9 +576,9 @@ function createModelRegistry(
         manualDefaultModel = undefined
         return
       }
-      const exists = models.some((m) => (m.ref ?? m.id) === trimmed || m.id === trimmed)
-      if (!exists) throw new Error(`unknown model: ${trimmed}`)
-      manualDefaultModel = trimmed
+      const match = models.find((m) => (m.ref ?? m.id) === trimmed || m.id === trimmed)
+      if (!match) throw new Error(`unknown model: ${trimmed}`)
+      manualDefaultModel = match.ref ?? match.id
     },
   }
 }

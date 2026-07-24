@@ -20,6 +20,7 @@ import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
 import { ProviderHTTPError, wrapProviderFetchError } from './provider-error.js'
 import { buildOpenAIRequestBody } from './provider-request-builder.js'
 import type { OpenAIToolCall } from './provider-request-builder.js'
+import { parseSseJson, readSseStream } from './streaming/sse.js'
 import { normalizeOpenAIToolCalls, parseToolArguments } from '../tools/tool-call-normalizer.js'
 
 export type OpenAIOptions = {
@@ -168,21 +169,9 @@ async function callStreaming(
   const streamEventTypes: string[] = []
   let firstChunkAt: number | undefined
 
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      const payload = line.slice(6)
-      if (!payload || payload === '[DONE]') continue
-      let evt: {
+  await readSseStream(res.body, ({ data: payload }) => {
+    if (payload === '[DONE]') return
+    const evt = parseSseJson<{
         id?: string
         choices?: Array<{
           finish_reason?: string
@@ -200,48 +189,43 @@ async function callStreaming(
           completion_tokens?: number
           prompt_tokens_details?: { cached_tokens?: number }
         }
-      }
-      try {
-        evt = JSON.parse(payload)
-      } catch {
-        continue
-      }
-      streamEventTypes.push('chat.completion.chunk')
-      if (!streamChatId && typeof evt.id === 'string' && evt.id) streamChatId = evt.id
-      const choice = evt.choices?.[0]
-      if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
-      const delta = choice?.delta
-      if (delta?.content) {
-        firstChunkAt ??= performance.now()
-        textBuf += delta.content
-        onTextDelta(delta.content)
-      }
-      if (delta?.tool_calls) {
-        firstChunkAt ??= performance.now()
-        for (const tc of delta.tool_calls) {
-          const existing = toolCalls.get(tc.index) ?? {
-            id: '',
-            name: '',
-            argsBuf: '',
-          }
-          if (tc.id) existing.id = tc.id
-          if (tc.function?.name) existing.name = tc.function.name
-          if (tc.function?.arguments) existing.argsBuf += tc.function.arguments
-          toolCalls.set(tc.index, existing)
+      }>(payload)
+    if (!evt) return
+    streamEventTypes.push('chat.completion.chunk')
+    if (!streamChatId && typeof evt.id === 'string' && evt.id) streamChatId = evt.id
+    const choice = evt.choices?.[0]
+    if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
+    const delta = choice?.delta
+    if (delta?.content) {
+      firstChunkAt ??= performance.now()
+      textBuf += delta.content
+      onTextDelta(delta.content)
+    }
+    if (delta?.tool_calls) {
+      firstChunkAt ??= performance.now()
+      for (const tc of delta.tool_calls) {
+        const existing = toolCalls.get(tc.index) ?? {
+          id: '',
+          name: '',
+          argsBuf: '',
         }
-      }
-      if (evt.usage) {
-        if (typeof evt.usage.prompt_tokens === 'number') {
-          promptTokens = evt.usage.prompt_tokens
-        }
-        if (typeof evt.usage.completion_tokens === 'number') {
-          completionTokens = evt.usage.completion_tokens
-        }
-        const cached = evt.usage.prompt_tokens_details?.cached_tokens
-        if (typeof cached === 'number') cachedTokens = cached
+        if (tc.id) existing.id = tc.id
+        if (tc.function?.name) existing.name = tc.function.name
+        if (tc.function?.arguments) existing.argsBuf += tc.function.arguments
+        toolCalls.set(tc.index, existing)
       }
     }
-  }
+    if (evt.usage) {
+      if (typeof evt.usage.prompt_tokens === 'number') {
+        promptTokens = evt.usage.prompt_tokens
+      }
+      if (typeof evt.usage.completion_tokens === 'number') {
+        completionTokens = evt.usage.completion_tokens
+      }
+      const cached = evt.usage.prompt_tokens_details?.cached_tokens
+      if (typeof cached === 'number') cachedTokens = cached
+    }
+  })
 
   const content: MessageContent[] = []
   if (textBuf.length > 0) content.push({ type: 'text', text: textBuf })

@@ -270,9 +270,10 @@ describe('SessionFilesPanel', () => {
   it('opens a targeted file view at the requested line and column', async () => {
     const socket = makeSessionFilesSocket({ file: { kind: 'text', content: 'a\nb\nc', size: 5 } })
 
-    render(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" target={{ path: '/repo/source.ts', line: 3, column: 2 }} />)
+    render(<WorkspaceFileViewDialog open onOpenChange={() => {}} socket={socket.asDashboardSocket()} workspaceId="ws-1" sessionId="sess-1" cwd="/repo/pkg" target={{ path: 'source.ts', line: 3, column: 2 }} />)
 
     expect((await screen.findByTestId('monaco-editor')).textContent).toContain('a\nb\nc')
+    expect(socket.emitMock).toHaveBeenCalledWith('workspace:read_binary', expect.objectContaining({ path: 'source.ts', cwd: '/repo/pkg' }), expect.any(Function))
     expect(setPositionMock).toHaveBeenCalledWith({ lineNumber: 3, column: 2 })
     expect(revealLineInCenterMock).toHaveBeenCalledWith(3)
   })

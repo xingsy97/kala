@@ -17,7 +17,7 @@ export function evaluateDashboardContextPressure(input: {
   config?: Pick<AgentConfig, 'contextLimit' | 'softThreshold' | 'hardThreshold'> | null
   fallbackModelContextWindow?: number | null
 }): DashboardContextPressure {
-  const fallbackTokens = input.fallbackModelContextWindow ?? input.config?.contextLimit
+  const fallbackTokens = input.snapshot ? undefined : input.fallbackModelContextWindow ?? input.config?.contextLimit
   const evaluation = evaluateContextPressure(
     input.snapshot,
     fallbackTokens ? { unknownModelFallbackTokens: fallbackTokens } : {},

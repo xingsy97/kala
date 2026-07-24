@@ -3,12 +3,15 @@ export type { Sandbox, SandboxOptions } from './sandbox.js'
 export {
   createToolRegistry,
   ToolError,
-  readTool,
+  readFileTool,
+  readFilesTool,
   lsTool,
   globTool,
   grepTool,
-  writeTool,
-  editTool,
+  writeFileTool,
+  replaceInFileTool,
+  replaceManyInFileTool,
+  applyFilePatchTool,
   bashTool,
   allTools,
 } from './tools/index.js'

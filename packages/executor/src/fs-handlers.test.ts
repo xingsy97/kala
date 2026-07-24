@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { listDirs } from './fs-handlers.js'
+import { listDirs, listFiles } from './fs-handlers.js'
 import { createSandbox } from './sandbox.js'
 
 /**
@@ -36,5 +36,22 @@ describe('filesystem inspection handlers', () => {
       { name: 'src', type: 'directory' },
       { name: 'README.md', type: 'file' },
     ])
+  })
+
+  it('lists searchable workspace files with ignore rules and limit caps', async () => {
+    mkdirSync(join(root, 'src'), { recursive: true })
+    mkdirSync(join(root, 'node_modules/pkg'), { recursive: true })
+    mkdirSync(join(root, '.git'), { recursive: true })
+    writeFileSync(join(root, 'src', 'a.ts'), 'a', 'utf8')
+    writeFileSync(join(root, 'src', 'b.ts'), 'b', 'utf8')
+    writeFileSync(join(root, '.hidden.ts'), 'hidden', 'utf8')
+    writeFileSync(join(root, 'node_modules/pkg', 'ignored.ts'), 'ignored', 'utf8')
+    writeFileSync(join(root, '.git', 'ignored.ts'), 'ignored', 'utf8')
+
+    const result = await listFiles({ requestId: 'r2', workspaceId: 'w1', query: '.ts', limit: 1 }, createSandbox({ roots: [root] }))
+
+    expect(result.error).toBeUndefined()
+    expect(result.files).toEqual([{ path: 'src/a.ts', size: 1 }])
+    expect(result.truncated).toBe(true)
   })
 })

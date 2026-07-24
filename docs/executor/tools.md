@@ -1,480 +1,239 @@
 # Tool Set
 
 **Status**: Normative for the executor tool surface.
-Every executor bundled in this repo MUST implement the tools below. Third-party executors MAY implement a subset (declared via `executor:announce.tools` — see [wire-protocol.md](../protocol/wire-protocol.md)).
 
----
+Every bundled executor MUST implement the tools below. Third-party executors MAY implement a subset declared through `executor:announce.tools`.
 
-## 0. Design principles
+## Design Principles
 
-1. **Take the intersection of leading agents first.** The core tools below are the intersection of Claude Code / opencode / codex / pi's tool sets, plus small explicitly-documented additions where the product depends on them.
-2. **Approval-gate only what can lose data.** Read-only tools never require approval. Write / mutate tools always require approval. This is the *default*; runtime config MAY override.
-3. **JSON Schema as the input contract.** Executor validates input against the schema before running. Failure → `ok: false, content: <validation error>`.
-4. **Output is always a string.** Structured data is JSON-stringified. This keeps the wire protocol dumb and the kernel string-only.
-5. **Deterministic errors.** All error strings begin with a stable prefix (`ERROR: `, `EACCES: `, `ENOENT: `, etc.) so LLMs can pattern-match.
+1. Tool names use explicit `snake_case` identifiers.
+2. Read-only tools never require approval. File mutation tools always require approval by default.
+3. JSON Schema is the input contract.
+4. Tool output is still a string on the wire. Structured output is JSON-stringified.
+5. Mutating file tools share one mutation engine for path resolution, text decoding, exact replacement validation, patch parsing, diff generation, stale guards, and per-file locks.
+6. Error strings keep stable prefixes such as `EINVAL:`, `ENOENT:`, `EACCES:`, `EAMBIG:`, and `ENOTFOUND:`.
 
----
-
-## 1. Tool summary table
+## Tool Summary
 
 | Name | Purpose | Approval | Category |
 |---|---|---|---|
-| `read` | Read a file | ❌ | Read-only |
-| `ls` | List directory | ❌ | Read-only |
-| `glob` | Find files by pattern | ❌ | Read-only |
-| `grep` | Content search | ❌ | Read-only |
-| `write` | Overwrite entire file | ✅ | Mutating |
-| `edit` | Precise string replace | ✅ | Mutating |
-| `bash` | Execute shell command; can start background tasks with `run_in_background` | ✅ | Mutating |
-| `todowrite` | Replace the session todo list | ❌ | Planning tool |
-| `websearch` | Serper search with DuckDuckGo HTML fallback | ❌ | Network |
-| `memory` | List, read, write, or delete memory entries (session / workspace / global scope) | ❌ | Memory |
-| `agent` | Spawn a host-side child agent session | ❌ | Host builtin |
-| `bash_output` | Poll background shell task output | ❌ | Background shell |
-| `kill_shell` | Stop a background shell task | ✅ | Background shell |
+| `read_file` | Read one text file | No | Read-only |
+| `read_files` | Read multiple text files with batcat-style sections | No | Read-only |
+| `ls` | List directory entries | No | Read-only |
+| `glob` | Find files by glob pattern | No | Read-only |
+| `grep` | Search file contents | No | Read-only |
+| `write_file` | Create or fully overwrite one text file | Yes | Mutating |
+| `replace_in_file` | One exact string replacement in one file | Yes | Mutating |
+| `replace_many_in_file` | Multiple exact string replacements in one file | Yes | Mutating |
+| `apply_file_patch` | Apply patch-format file mutations | Yes | Mutating |
+| `bash` | Execute shell command; supports background mode | Yes | Mutating |
+| `bash_output` | Poll background shell output | No | Background shell |
+| `kill_shell` | Stop a background shell task | Yes | Background shell |
+| `todowrite` | Replace the session todo list | No | Planning |
+| `memory` | List, read, write, or delete memory entries | No | Memory |
+| `websearch` | Web search | No | Network |
+| `webfetch` | Fetch a web page | No | Network |
+| `agent` | Spawn a host-side child agent | No | Host builtin |
 
-`todowrite` is an ordinary executor tool. The kernel records it as a normal `call_tool` / `tool_result`; Dashboard task UI derives its display from the event/effect trace. `memory` is the only current reducer-lifted tool when `scope: 'session'` and `operation` is `write` or `delete` — the reducer lifts `(key, content)` into `state.memory`; workspace/global scope go to disk under the executor. `agent` is declared as a tool schema but runs inside Host, not Executor — it creates a child JSONL session in the same workspace and returns the child assistant text.
+`read`, `write`, and `edit` are not part of the bundled executor surface anymore.
 
----
+## File Read Tools
 
-## 2. Per-tool specifications
+### `read_file`
 
-### 2.1 `read`
+Reads one UTF-8 text file. Output is line-numbered with tab-separated line numbers.
 
-Read a UTF-8 text file. For binary or huge files, prefer `bash` with `head` / `xxd`.
-
-**Schema**:
 ```json
 {
   "type": "object",
-  "properties": {
-    "path": { "type": "string", "description": "Absolute path" },
-    "offset": { "type": "integer", "minimum": 0, "description": "0-indexed line to start from" },
-    "limit": { "type": "integer", "minimum": 1, "description": "Max lines to read (default: 2000)" }
-  },
-  "required": ["path"]
-}
-```
-
-**Output**: file contents, prepended with `cat -n`-style line numbers starting at `offset + 1`, one line per source line. Lines are joined by `\n`.
-
-**Errors** (returned as `ok: false, content: <string>`):
-- `ENOENT: no such file: <path>`
-- `EACCES: permission denied: <path>`
-- `EISDIR: path is a directory (use ls): <path>`
-- `E2BIG: file exceeds size limit (<n> bytes); use offset/limit or bash+head`
-
-**Sandbox**: `path` MUST resolve inside the executor's working directory whitelist. Reject with `EACCES: outside workspace` otherwise.
-
-### 2.2 `ls`
-
-List directory contents.
-
-**Schema**:
-```json
-{
-  "type": "object",
+  "required": ["path"],
   "properties": {
     "path": { "type": "string" },
-    "hidden": { "type": "boolean", "default": false }
-  },
-  "required": ["path"]
-}
-```
-
-**Output**: newline-separated entries. Each entry: `<name>[/]` (trailing `/` for directories). Sorted lexicographically.
-
-**Errors**:
-- `ENOENT`, `EACCES`, `ENOTDIR: not a directory: <path>`
-
-### 2.3 `glob`
-
-Find files by glob pattern.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "pattern": { "type": "string", "description": "e.g. **/*.ts" },
-    "cwd": { "type": "string", "description": "Working directory (defaults to workspace root)" }
-  },
-  "required": ["pattern"]
-}
-```
-
-**Output**: newline-separated absolute paths, sorted by mtime descending (newest first). If sorting by mtime is not practical, sort lexicographically and document.
-
-**Cap**: at most **1000** matches returned. If more exist, append a final line: `... and <n> more (refine pattern)`.
-
-**Errors**:
-- `EINVAL: invalid glob pattern: <pattern>`
-
-### 2.4 `grep`
-
-Content search, ripgrep-style.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "pattern": { "type": "string", "description": "Regex pattern (POSIX ERE or Rust regex)" },
-    "path": { "type": "string", "description": "File or directory to search (defaults to workspace root)" },
-    "glob": { "type": "string", "description": "Optional file glob filter, e.g. '*.ts'" },
-    "output_mode": {
-      "type": "string",
-      "enum": ["files_with_matches", "count", "content"],
-      "default": "files_with_matches"
-    },
-    "case_insensitive": { "type": "boolean", "default": false }
-  },
-  "required": ["pattern"]
-}
-```
-
-**Output**: depends on `output_mode`:
-- `files_with_matches`: newline-separated paths
-- `count`: `<path>:<count>` per line
-- `content`: `<path>:<line-num>:<line-content>` per line
-
-**Cap**: 1000 lines. Append `... and N more matches (refine pattern or use output_mode=count)`.
-
-**Errors**:
-- `EINVAL: invalid regex: <pattern>` — include underlying regex error message
-- `ENOENT: path not found`
-
-### 2.5 `write`
-
-Overwrite an entire file. Creates parent directories if missing.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "path": { "type": "string" },
-    "content": { "type": "string" }
-  },
-  "required": ["path", "content"]
-}
-```
-
-**Output**: `Wrote <n> bytes to <path>` (or `Created <path> with <n> bytes` if the file didn't exist).
-
-**Errors**:
-- `EACCES: permission denied`
-- `EACCES: outside workspace`
-- `EISDIR: path is a directory: <path>`
-- `E2BIG: content exceeds size limit`
-
-**Approval**: `requiresApproval: true`. Approval flow is kernel + dashboard's job (see SPEC §4.4).
-
-### 2.6 `edit`
-
-Precise string replace within a file.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "path": { "type": "string" },
-    "old_string": {
-      "type": "string",
-      "description": "Text to find. MUST be unique in the file unless replace_all=true."
-    },
-    "new_string": {
-      "type": "string",
-      "description": "Replacement text."
-    },
-    "replace_all": {
-      "type": "boolean",
-      "default": false,
-      "description": "If true, replace every occurrence. If false, error unless old_string is unique."
-    }
-  },
-  "required": ["path", "old_string", "new_string"]
-}
-```
-
-**Output**: `Replaced <n> occurrence(s) in <path>`.
-
-**Errors**:
-- `ENOENT: file does not exist (use write to create): <path>`
-- `EAMBIG: old_string matches <n> times; set replace_all=true or provide more context`
-- `ENOTFOUND: old_string not found in <path>`
-- `EACCES` / `EISDIR` as usual
-
-**Approval**: `requiresApproval: true`.
-
-**Sandbox**: same path resolution as `write`.
-
-### 2.7 `bash`
-
-Execute a shell command. Most powerful, most dangerous. Supports background tasks.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "command": { "type": "string" },
-    "cwd": { "type": "string", "description": "Working directory (defaults to session cwd, or workspace root)" },
-    "timeoutMs": { "type": "integer", "minimum": 100, "default": 30000 },
-    "run_in_background": { "type": "boolean", "default": false, "description": "If true, spawn and return a taskId immediately without waiting" }
-  },
-  "required": ["command"]
-}
-```
-
-**Output**:
-- Foreground: stdout + stderr + trailing `--- exit code: <n>, duration: <ms>ms` (or `--- killed after <timeoutMs>ms (timeout)`).
-- Background: JSON `{"taskId":"...","note":"started"}`.
-
-**Errors**:
-- `EINVAL: command is empty`
-- `EACCES: cwd outside workspace`
-- Executor MUST return `ok: true` if the process ran, regardless of exit code. Non-zero exit is data, not an executor error.
-
-**Approval**: `requiresApproval: true`.
-
-**Session cwd**: `CallToolEffect` includes an optional `cwd` field copied from `state.cwd`; when the tool input omits `cwd` the executor uses the session cwd, falling back to the workspace root.
-
-### 2.8 `todowrite`
-
-Replace the session's todo list.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "todos": {
-      "type": "array",
-      "items": {
-        "type": "object",
-            "properties": {
-              "content": { "type": "string" },
-              "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"] },
-              "priority": { "type": "string", "enum": ["high", "medium", "low"] }
-            },
-            "required": ["content", "status"]
-      }
-    }
-  },
-  "required": ["todos"]
-}
-```
-
-**Output**: `todos updated: <n> item(s)`.
-
-**Reducer behavior**: none. This is a normal tool call. The dashboard may derive a task display from successful `todowrite` calls in the timeline, but `AgentState` does not contain todos.
-
-### 2.9 `websearch`
-
-Search the web. When `SERPER_API_KEY` is configured, the executor uses Serper. Without that key, it falls back to DuckDuckGo HTML endpoints.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "query": { "type": "string", "minLength": 1 },
-    "limit": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 }
-  },
-  "required": ["query"]
-}
-```
-
-**Output**: Plain text search results with title, URL, and snippet. Snippets are truncated to 500 characters. If the provider returns no results, the tool returns `No results for: <query>`.
-
-**Errors** (`ok: false, content: <string>`):
-- `ETIMEDOUT: search timed out after 15000ms`
-- `EHTTP: Serper returned HTTP <status>`
-- `EHTTP: DuckDuckGo returned HTTP <status>`
-- `ESEARCH_UNAVAILABLE: DuckDuckGo returned a landing/challenge page instead of search results`
-- `ENETWORK: search failed: <error message>`
-
-**Approval**: `requiresApproval: false`.
-
-**Implementation**: `packages/executor/src/tools/websearch.ts` posts to `https://google.serper.dev/search` when `SERPER_API_KEY` is present. Otherwise it tries DuckDuckGo HTML/lite endpoints and parses result anchors/snippets.
-
-### 2.10 `memory`
-
-Three-tier persistent scratchpad the agent maintains for itself across turns and — for workspace/global scope — across sessions and even reboots. Modelled after Claude Code's `CLAUDE.md` and opencode's memory tools, but with an explicit scope selector rather than filename conventions.
-
-**Scopes** (broadest → narrowest):
-
-- `global` — `~/.agent-kernel/memory/<key>.md` on the executor host. Shared across every workspace on that machine. Use for personal preferences, coding style, machine-wide facts.
-- `workspace` — `<firstSandboxRoot>/.agent-kernel/memory/<key>.md`. Shared across every session in that workspace. Falls back to `process.cwd()/.agent-kernel/memory/` when no sandbox root is configured. Use for project conventions, build commands, service URLs.
-- `session` — **not on disk**. The kernel reducer intercepts a successful `memory { operation: 'write', scope: 'session' }` result and lifts the `(key, content)` into `state.memory[]`; `memory { operation: 'delete', scope: 'session' }` removes it. Session memory dies with the session unless forked (fork copies state, so it carries over). Use for scratch notes valid only for this conversation.
-
-**Keys**: constrained to `/^[a-zA-Z0-9_-]{1,64}$/` to prevent path traversal and keep listings sortable.
-**Content**: plain text / markdown, capped at **128 KB per entry**.
-
-**Schema**:
-```json
-{
-  "type": "object",
-  "required": ["operation", "scope"],
-  "properties": {
-    "operation": { "type": "string", "enum": ["list", "read", "write", "delete"] },
-    "scope": { "type": "string", "enum": ["session", "workspace", "global"] },
-    "key": { "type": "string", "description": "Required for read/write/delete." },
-    "content": { "type": "string" },
-    "updatedAt": { "type": "string", "description": "ISO-8601 timestamp for session-scope entries; workspace/global use file mtime." }
+    "offset": { "type": "integer", "minimum": 0 },
+    "limit": { "type": "integer", "minimum": 1 }
   }
 }
 ```
 
-Use `operation: "list"` to list all keys in the scope. Reading a `session` scope entry returns a pointer to `state.memory` (which the LLM already sees inlined in transcripts) rather than duplicating.
+Example output:
 
-**Approval**: `requiresApproval: false`. Memory writes are treated like `todowrite` — the agent is note-taking for itself, not mutating user files.
+```text
+1\talpha
+2\tbeta
+```
 
-**Reducer coupling**: session-scope memory is a first-class piece of `AgentState` — the reducer lifts `input.key`/`input.content` into `state.memory` when `tool_result.ok === true`, `tool.name === 'memory'`, `input.scope === 'session'`, and `input.operation === 'write'`. `operation === 'delete'` removes the matching key. Parsing from `input` (not `content`) means a broken executor cannot corrupt kernel state. Workspace/global scope round-trip normally through executor IO and produce opaque tool_result strings; kernel state is untouched.
+### `read_files`
 
-**Errors** (`ok: false, content: <string>`):
-- `EINVAL: field "scope" must be one of: session, workspace, global`
-- `EINVAL: field "key" must match /^[a-zA-Z0-9_-]{1,64}$/`
-- `E2BIG: content exceeds memory entry cap (128 KB)`
-- `ENOENT: no memory entry: scope=<s> key=<k>` (read only; delete is idempotent)
+Reads several UTF-8 text files in one call. Use this when related implementation, interface, and test files are already known.
 
-**Implementation**: `packages/executor/src/tools/memory.ts`. Session lift happens in `packages/kernel/src/core.ts` (`applyMemoryOp`).
-
-### 2.11 `agent` (host builtin)
-
-Spawn a child agent session and return its final assistant text.
-
-**Schema**:
 ```json
 {
   "type": "object",
+  "required": ["files"],
   "properties": {
-    "prompt": { "type": "string" },
-    "tools": { "type": "array", "items": { "type": "string" } },
-    "model": { "type": "string" }
-  },
-  "required": ["prompt"]
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "offset": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "max_bytes": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+  }
 }
 ```
 
-**Output**: the child session's final assistant text, or an error if the child ended in a non-`done` status.
+Example output:
 
-**Approval**: `requiresApproval: false`. The child inherits the parent's `approvalMode` from `AgentState.cwd`/`approvalMode`, so gated tools inside the child still respect the parent's approval settings.
+```text
+===== src/a.ts =====
+1\timport ...
 
-**Depth guard**: `AgentConfig.maxAgentDepth` (default 3) caps recursive spawning; deeper calls fail with `agent depth exceeded`.
+===== src/b.ts =====
+20\texport ...
+```
 
-The `agent` tool is declared in the config's tool list but never dispatched to the executor — Host intercepts it in `performCallTool`.
+The default combined output cap is 200 KB; the hard cap is 1 MB.
 
-### 2.12 `bash_output`
+## File Mutation Result
 
-Poll a background shell task's logs.
+`write_file`, `replace_in_file`, `replace_many_in_file`, and `apply_file_patch` return a JSON string with this shape:
 
-**Schema**:
+```json
+{
+  "ok": true,
+  "summary": "Applied 2 replacement(s) in /repo/src/a.ts",
+  "files": [
+    {
+      "path": "/repo/src/a.ts",
+      "operation": "modified",
+      "additions": 2,
+      "deletions": 1,
+      "diff": "--- /repo/src/a.ts\n+++ /repo/src/a.ts\n@@ ...",
+      "bytes_before": 1200,
+      "bytes_after": 1220,
+      "replacements": [{ "index": 0, "count": 1 }]
+    }
+  ],
+  "warnings": []
+}
+```
+
+`diff` means the actual unified diff caused by the tool execution. It is not the `apply_file_patch` input.
+
+## File Mutation Tools
+
+### `write_file`
+
+Creates or fully overwrites one UTF-8 text file.
+
 ```json
 {
   "type": "object",
+  "required": ["path", "content"],
   "properties": {
-    "task_id": { "type": "string" },
-    "offset": { "type": "integer", "minimum": 0 },
-    "block": { "type": "boolean", "default": false },
-    "timeout_ms": { "type": "integer", "minimum": 100, "default": 5000 }
-  },
-  "required": ["task_id"]
+    "path": { "type": "string" },
+    "content": { "type": "string" }
+  }
 }
 ```
 
-**Output**: the log slice since `offset`, plus task status trailer.
+### `replace_in_file`
 
-### 2.13 `kill_shell`
+Applies one exact string replacement in one text file.
 
-Stop a background shell task by id.
-
-**Schema**:
 ```json
 {
   "type": "object",
+  "required": ["path", "old_string", "new_string"],
   "properties": {
-    "task_id": { "type": "string" }
-  },
-  "required": ["task_id"]
+    "path": { "type": "string" },
+    "old_string": { "type": "string" },
+    "new_string": { "type": "string" },
+    "replace_all": { "type": "boolean", "default": false }
+  }
 }
 ```
 
-**Approval**: `requiresApproval: true`.
+When `replace_all` is false, `old_string` must match exactly once.
 
----
+### `replace_many_in_file`
 
-## 3. Sandbox and workspace whitelist
+Applies several exact string replacements to one text file in order. The file is committed once only if every edit succeeds.
 
-Every executor starts with a **workspace whitelist**:
-- Node daemon: `--workspace <path>` (may be repeated for multiple roots) or empty (trust whole machine)
-- Browser WebContainer: implicit (the in-memory vfs is the whitelist)
+```json
+{
+  "type": "object",
+  "required": ["path", "edits"],
+  "properties": {
+    "path": { "type": "string" },
+    "edits": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["old_string", "new_string"],
+        "properties": {
+          "old_string": { "type": "string" },
+          "new_string": { "type": "string" },
+          "replace_all": { "type": "boolean", "default": false }
+        }
+      }
+    }
+  }
+}
+```
 
-**Path resolution rule**: For any tool that accepts a `path`, the executor MUST:
-1. If the path is not absolute, resolve it against the **session `cwd`** if set, otherwise the **first workspace root**. LLM-supplied relative paths like `.` or `sub/file.txt` always mean "inside the workspace".
-2. Resolve to an absolute canonical path (follow symlinks).
-3. Verify the result is under one of the whitelisted roots.
-4. If not, return `EACCES: outside workspace`.
+### `apply_file_patch`
 
-Reading through symlinks that point outside the workspace is a data leak — the resolution MUST catch it.
+Applies a patch-format mutation to files. A patch can add, update, delete, or move files, and it may touch one file or many files.
 
-**Session cwd**: `state.cwd` (mutated by `cwd_changed` events, or seeded from the create-session dialog) is passed via the effect's `cwd` field to each `tool:call`. Executors merge it into the tool input as the default working directory.
+```json
+{
+  "type": "object",
+  "required": ["patch"],
+  "properties": {
+    "patch": { "type": "string" }
+  }
+}
+```
 
----
+Patch format:
 
-## 4. Tool discovery
+```text
+*** Begin Patch
+*** Add File: path
++new line
+*** Update File: path
+@@
+ context line
+-old line
++new line
+*** Delete File: path
+*** Update File: old-path
+*** Move to: new-path
+*** End Patch
+```
 
-Executor announces its capabilities on connect (see wire-protocol §5.1). The `tools` field is a subset of the names above. Host's `AgentConfig` for the session lists the schemas — Host is responsible for making sure the LLM only sees tools the executor can actually run.
+Update hunks use strict context. Missing or ambiguous context fails.
 
-If an executor announces a tool with a name that clashes with an existing tool but different semantics, that's a bug. Namespaced tool names are not supported yet.
+## Mutation Protection Rules
 
----
+- Text mutations preserve UTF-8 BOM and the file's dominant line ending where possible.
+- Directories, likely binary files, and files above the text size cap are rejected.
+- Exact replacements fail on missing or ambiguous `old_string` unless `replace_all=true`.
+- `replace_many_in_file` is all-or-nothing for the target file.
+- Commit compares loaded bytes with bytes immediately before write and rejects stale writes.
+- Per-file locks serialize cooperating mutations inside one executor process.
+- Design target: `replace_in_file` and `replace_many_in_file` should require a prior full `read_file` or `read_files`; the current wire protocol still needs a durable read-state field before runtime enforcement can be complete.
 
-## 5. MCP compatibility
+## Other Tools
 
-The tool schemas above are MCP-compatible: they follow JSON Schema draft-07, and the input surface matches the MCP `tools/call` request format. An `agent-kernel` executor can be adapted into an MCP server (stdio transport) with a thin wrapper; third-party MCP tools can be adapted into an executor via the same wrapper in reverse.
-
-The MCP runtime is not yet implemented — the design and rationale live in [`../host/mcp.md`](../host/mcp.md). The point of noting MCP compatibility here is that **tool schemas are designed not to close the door on MCP interop.**
-
----
-
-## 6. Adding new tools
-
-Two ways:
-
-**Executor-side:** Executor implements the tool, adds it to `executor:announce.tools`, and provides an inputSchema out-of-band. Host does not automatically pick this up — Host's `AgentConfig` is configured at session start.
-
-**Config-side:** User provides a full `ToolSchema` in the config file used at session creation. Executor MUST already implement that tool name.
-
-Dynamic mid-session tool registration is not supported; config is immutable per session.
-
----
-
-## 7. Testing tools
-
-Each tool has a test file at `packages/executor/src/tools/<name>.test.ts` covering:
-- Happy path
-- Missing file / directory
-- Path outside workspace
-- Schema violation (missing required field, wrong type)
-- (For `write` / `edit`) idempotency / rewrite scenarios
-- (For `bash`) timeout, non-zero exit, killed process, background start/poll/kill
-- (For `web_search`) mocked DuckDuckGo HTML fixtures
-
-Tools are pure functions of `(input, filesystem, network)` → `(output)`. Tests use tmpdir fixtures and `nock`/`msw` for HTTP. See [testing.md](../meta/testing.md) for the general strategy.
-
----
-
-## 8. Deliberately excluded
-
-| Tool | Why |
-|---|---|
-| `web_fetch` | Position overlaps `web_search` (agent typically discovers URLs via search; users can paste page content directly), and the SSRF / length-cap / auth-policy design cost outweighs the payoff. |
-| `todo_read` | `todowrite` replaces the complete list, so a separate read tool adds little value. |
-| third-party `subagent` / `task` executors | `agent` is a host-side builtin, not an executor-side recursive primitive. |
-| `memory` / `remember` | Persistence layer for cross-session context is a separate subsystem. |
-| Third-party MCP servers at runtime | Configuration accepted, runtime not implemented yet. |
-
-Explicit exclusion is a feature: keeping the tool surface tight is what lets the kernel stay small.
+`ls`, `glob`, `grep`, `bash`, `bash_output`, `kill_shell`, `todowrite`, `memory`, `websearch`, `webfetch`, and host builtin `agent` keep their existing schemas and behavior except that docs and prompts should refer to the renamed file tools above.

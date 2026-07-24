@@ -240,6 +240,8 @@ export type ProviderFallbackAttempt = {
   provider: string
   adapterName?: string
   model?: string
+  requestedModelRef?: string
+  routedModelId?: string
   label?: ProviderErrorLabel
   durationMs?: number
   retryCount: number
@@ -255,6 +257,8 @@ export type ProviderFallbackArtifact = {
   selectedProvider?: string
   selectedAdapter?: string
   selectedModel?: string
+  requestedModelRef?: string
+  routedModelId?: string
 }
 
 export async function writeFallbackArtifact(input: {

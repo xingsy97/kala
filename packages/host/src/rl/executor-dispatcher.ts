@@ -7,7 +7,9 @@ import type { ToolDispatcher } from '../loop-types.js'
 /**
  * In-process tool dispatcher for the RL smoke runner. Runs the executor's
  * built-in tools directly against a sandbox rooted at `workdir`. Only the
- * RL whitelist is exposed: read, write, edit, bash, ls, grep, glob.
+ * RL whitelist is exposed: read_file, read_files, write_file,
+ * replace_in_file, replace_many_in_file, apply_file_patch, bash, ls, grep,
+ * glob.
  */
 export function inProcessRlToolDispatcher(workdir: string): ToolDispatcher {
   const sandbox = createSandbox({ roots: [workdir] })
@@ -46,7 +48,18 @@ export function inProcessRlToolDispatcher(workdir: string): ToolDispatcher {
   }
 }
 
-export const RL_WHITELIST = new Set<string>(['read', 'write', 'edit', 'bash', 'ls', 'grep', 'glob'])
+export const RL_WHITELIST = new Set<string>([
+  'read_file',
+  'read_files',
+  'write_file',
+  'replace_in_file',
+  'replace_many_in_file',
+  'apply_file_patch',
+  'bash',
+  'ls',
+  'grep',
+  'glob',
+])
 
 export function rlToolSchemas(): readonly ToolSchema[] {
   return createBuiltinTools().filter((schema) => RL_WHITELIST.has(schema.name))

@@ -61,9 +61,9 @@ export function RuntimeMetrics({
     config,
     fallbackModelContextWindow: modelInfo?.contextWindow ?? null,
   })
-  const totalContextWindow = contextSnapshot?.contextWindow.tokens ?? modelInfo?.contextWindow ?? config?.contextLimit ?? null
+  const totalContextWindow = contextSnapshot ? contextSnapshot.contextWindow.tokens : modelInfo?.contextWindow ?? config?.contextLimit ?? null
   const userContextWindow = evaluation.limitTokens
-  const contextSource = contextSnapshot?.contextWindow.source ?? (modelInfo?.contextWindow ? 'model_registry' : config?.contextLimit ? 'manual_config' : 'unknown')
+  const contextSource = contextSnapshot ? contextSnapshot.contextWindow.source : modelInfo?.contextWindow ? 'model_registry' : config?.contextLimit ? 'manual_config' : 'unknown'
   const ratio = evaluation.ratio ?? 0
   const percent = evaluation.percent
   const visualRatio = Math.min(1, ratio)

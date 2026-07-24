@@ -65,7 +65,7 @@ import { formatTokens } from '../../lib/format.js'
 import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT } from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
-import { DiffPreview } from './DiffPreview.js'
+import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
 import { CodeBlock } from './CodeBlock.js'
 import { CompactFeedbackRow, type CompactStatus } from './InlineStatusRow.js'
 import {
@@ -1738,7 +1738,7 @@ function ToolCallBlock({
 }): JSX.Element {
   const { t } = useTranslation()
   const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
-  const hasDiffPreview = isPendingApproval && (call.name === 'edit' || call.name === 'write')
+  const hasDiffPreview = isPendingApproval && hasDiffPreviewForTool(call.name)
   const [open, setOpen] = useState(false)
   return (
     <div

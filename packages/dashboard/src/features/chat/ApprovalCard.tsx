@@ -3,7 +3,7 @@
  *
  * When one or more tool calls await user approval, the composer flips to this
  * card. It shows one approval at a time (1 of N) with prev/next navigation, a
- * details expansion (diff for edit/write, JSON otherwise), and top-right
+ * details expansion (diff for file mutation tools, JSON otherwise), and top-right
  * batch "Approve all / Reject all" affordances. Keyboard: Enter approves,
  * Escape rejects, ←/→ navigate.
  *
@@ -36,7 +36,7 @@ import { Button } from '../../components/ui/button.js'
 import { JsonBlock } from '../../components/ui/json-block.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
-import { DiffPreview } from './DiffPreview.js'
+import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
 import { pickPrimaryArg } from './InlineStatusRow.js'
 
 type Props = {
@@ -123,7 +123,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
 
   if (!approval) return null
 
-  const hasDiff = approval.name === 'edit' || approval.name === 'write'
+  const hasDiff = hasDiffPreviewForTool(approval.name)
   const primary = pickPrimaryArg(approval.name, approval.input)
 
   return (

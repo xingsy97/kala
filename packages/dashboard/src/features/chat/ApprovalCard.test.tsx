@@ -48,7 +48,7 @@ describe('ApprovalCard', () => {
     expect(onDecision).toHaveBeenCalledWith('c1', 'reject')
   })
 
-  it('toggles View details and shows a diff for edit/write, JSON otherwise', () => {
+  it('toggles View details and shows a diff for file mutation tools, JSON otherwise', () => {
     // Bash → JSON view (no DiffPreview because non-file tool)
     const { unmount } = render(
       <ApprovalCard
@@ -64,15 +64,16 @@ describe('ApprovalCard', () => {
     expect(details.textContent ?? '').toContain('ls -la')
     unmount()
 
-    // Write tool → DiffPreview is used (verified indirectly by not being a JsonBlock label).
+    // New write_file tool -> DiffPreview is used.
     render(
       <ApprovalCard
-        approvals={[mkApproval('c2', 'write', { file_path: '/tmp/a', content: 'hi' })]}
+        approvals={[mkApproval('c2', 'write_file', { path: '/tmp/a', content: 'hi' })]}
         onDecision={vi.fn()}
       />,
     )
     fireEvent.click(screen.getByTestId('approval-details-toggle'))
     expect(screen.getByTestId('approval-details')).toBeTruthy()
+    expect(screen.getByTestId('diff-preview-header').textContent ?? '').toContain('write_file')
   })
 
   it('renders a carousel with prev/next and index badge for multi-pending', () => {

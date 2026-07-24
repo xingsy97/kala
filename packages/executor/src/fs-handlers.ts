@@ -19,7 +19,7 @@
  */
 
 import { cp, readdir, readFile, rm, stat } from 'node:fs/promises'
-import { join, relative, sep } from 'node:path'
+import { join } from 'node:path'
 
 import type {
   ClientReadOverflow,
@@ -28,12 +28,12 @@ import type {
   DeleteOverflowSession,
   DeleteOverflowSessionResult,
   DirListResult,
-  FileListEntry,
   FileListResult,
   OverflowContentsResult,
 } from '@agent-kernel/shared'
 
 import type { Sandbox } from './sandbox.js'
+import { discoverWorkspaceFiles } from './workspace/files.js'
 
 // ============================================================================
 // listDirs — directory picker one-level-at-a-time
@@ -85,19 +85,6 @@ export async function listDirs(
 // listFiles — workspace file search (used by the @-mention picker)
 // ============================================================================
 
-const FILE_LIST_SKIP_DIRS = new Set<string>([
-  'node_modules',
-  '.git',
-  '.pnpm',
-  'dist',
-  'build',
-  'out',
-  '.next',
-  '.turbo',
-  '.cache',
-  'coverage',
-])
-
 const FILE_LIST_DEFAULT_LIMIT = 500
 const FILE_LIST_MAX_LIMIT = 2000
 const FILE_LIST_WALK_CEILING = 20000
@@ -117,46 +104,19 @@ export async function listFiles(
   const rawLimit = payload.limit ?? FILE_LIST_DEFAULT_LIMIT
   const limit = Math.max(1, Math.min(FILE_LIST_MAX_LIMIT, rawLimit))
   const query = (payload.query ?? '').trim().toLowerCase()
-  const matches: FileListEntry[] = []
-  let walked = 0
-  let truncated = false
 
   try {
-    outer: for (const root of roots) {
-      const stack: string[] = [root]
-      while (stack.length > 0) {
-        if (walked >= FILE_LIST_WALK_CEILING) {
-          truncated = true
-          break outer
-        }
-        const dir = stack.pop()!
-        let entries
-        try {
-          entries = await readdir(dir, { withFileTypes: true })
-        } catch {
-          continue
-        }
-        for (const entry of entries) {
-          walked += 1
-          if (entry.name.startsWith('.') && entry.name !== '.') {
-            if (entry.isDirectory()) continue
-          }
-          if (entry.isDirectory()) {
-            if (FILE_LIST_SKIP_DIRS.has(entry.name)) continue
-            stack.push(join(dir, entry.name))
-            continue
-          }
-          if (!entry.isFile()) continue
-          const abs = join(dir, entry.name)
-          const rel = relative(root, abs).split(sep).join('/')
-          if (query.length > 0 && !rel.toLowerCase().includes(query)) continue
-          if (matches.length >= limit) {
-            truncated = true
-            break outer
-          }
-          matches.push({ path: rel, size: 0 })
-        }
-      }
+    const result = await discoverWorkspaceFiles({
+      roots,
+      query,
+      limit,
+      walkCeiling: FILE_LIST_WALK_CEILING,
+    })
+    return {
+      requestId: payload.requestId,
+      workspaceId: payload.workspaceId,
+      files: result.files,
+      truncated: result.truncated,
     }
   } catch (err) {
     return {
@@ -166,14 +126,6 @@ export async function listFiles(
       truncated: false,
       error: err instanceof Error ? err.message : String(err),
     }
-  }
-
-  matches.sort((a, b) => a.path.localeCompare(b.path))
-  return {
-    requestId: payload.requestId,
-    workspaceId: payload.workspaceId,
-    files: matches,
-    truncated,
   }
 }
 

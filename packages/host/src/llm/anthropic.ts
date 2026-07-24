@@ -16,10 +16,11 @@ import type {
 import type { LLMTrace } from '@agent-kernel/shared'
 
 import type { LLMAdapter, LLMCallParams, LLMResponse } from './adapter.js'
-import { classifyProviderError, isRetryable } from './provider-health.js'
 import { ProviderHTTPError, wrapProviderFetchError } from './provider-error.js'
 import { buildAnthropicRequestBody } from './provider-request-builder.js'
 import type { AnthropicBlock } from './provider-request-builder.js'
+import { retryProviderCall } from './retry/provider-retry.js'
+import { parseSseJson, readSseStream } from './streaming/sse.js'
 import { normalizeAnthropicBlocks } from '../tools/tool-call-normalizer.js'
 
 export type AnthropicOptions = {
@@ -133,11 +134,11 @@ async function fetchAnthropicWithRetry(input: {
   maxRetries: number
   retryDelayMs: number
 }): Promise<Response> {
-  let lastErr: unknown
-  const attempts = Math.max(1, input.maxRetries + 1)
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    try {
-      const res = await input.fetchImpl(input.apiUrl, {
+  return await retryProviderCall({
+    retries: input.maxRetries,
+    minTimeoutMs: input.retryDelayMs,
+    signal: input.signal,
+    run: async () => await input.fetchImpl(input.apiUrl, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -146,39 +147,9 @@ async function fetchAnthropicWithRetry(input: {
         },
         body: JSON.stringify(input.body),
         signal: input.signal,
-      }).catch((err: unknown) => wrapProviderFetchError('Anthropic', input.apiUrl, err))
-      if (res.ok || attempt === attempts - 1 || !isRetryable(classifyProviderError({ status: res.status }))) return res
-      lastErr = new AnthropicHTTPError(res.status, await safeText(res), input.apiUrl)
-    } catch (err) {
-      if (isAbortError(err) || attempt === attempts - 1 || !isRetryable(classifyProviderError(err))) throw err
-      lastErr = err
-    }
-    await delay(input.retryDelayMs * (attempt + 1), input.signal)
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
-}
-
-function isAbortError(err: unknown): boolean {
-  return err instanceof Error && err.name === 'AbortError'
-}
-
-async function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  if (ms <= 0) return
-  if (signal?.aborted) throw abortError()
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      reject(abortError())
-    }
-    signal?.addEventListener('abort', onAbort, { once: true })
+      }).catch((err: unknown) => wrapProviderFetchError('Anthropic', input.apiUrl, err)),
+    shouldRetryResult: async (res) => res.ok ? undefined : new AnthropicHTTPError(res.status, await safeText(res), input.apiUrl),
   })
-}
-
-function abortError(): Error {
-  const err = new Error('aborted')
-  err.name = 'AbortError'
-  return err
 }
 
 /**
@@ -229,56 +200,38 @@ async function callStreaming(
   let finishReason: string | undefined
   const streamEventTypes: string[] = []
 
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
   let firstChunkAt: number | undefined
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      const payload = line.slice(6)
-      if (!payload) continue
-      let evt: Record<string, unknown>
-      try {
-        evt = JSON.parse(payload) as Record<string, unknown>
-      } catch {
-        continue
-      }
-      if (typeof evt.type === 'string') streamEventTypes.push(evt.type)
-      if (evt.type === 'message_start' && !streamMessageId) {
-        const msg = evt.message as { id?: string } | undefined
-        if (msg && typeof msg.id === 'string') streamMessageId = msg.id
-      }
-      handleStreamEvent(
-        evt,
-        blocks,
-        toolInputBuf,
-        (text) => {
-          firstChunkAt ??= performance.now()
-          onTextDelta(text)
-        },
-        () => {
-          firstChunkAt ??= performance.now()
-        },
-        (u) => {
-          inputTokens += u.input
-          outputTokens += u.output
-          cacheCreationTokens += u.cacheCreation
-          cacheReadTokens += u.cacheRead
-        },
-        (reason) => {
-          finishReason = reason
-        },
-      )
+  await readSseStream(res.body, ({ data: payload }) => {
+    const evt = parseSseJson<Record<string, unknown>>(payload)
+    if (!evt) return
+    if (typeof evt.type === 'string') streamEventTypes.push(evt.type)
+    if (evt.type === 'message_start' && !streamMessageId) {
+      const msg = evt.message as { id?: string } | undefined
+      if (msg && typeof msg.id === 'string') streamMessageId = msg.id
     }
-  }
+    handleStreamEvent(
+      evt,
+      blocks,
+      toolInputBuf,
+      (text) => {
+        firstChunkAt ??= performance.now()
+        onTextDelta(text)
+      },
+      () => {
+        firstChunkAt ??= performance.now()
+      },
+      (u) => {
+        inputTokens += u.input
+        outputTokens += u.output
+        cacheCreationTokens += u.cacheCreation
+        cacheReadTokens += u.cacheRead
+      },
+      (reason) => {
+        finishReason = reason
+      },
+    )
+  })
 
   const content = normalizeAnthropicBlocks({ blocks, finishReason }).content
   const message: Message = { role: 'assistant', content }

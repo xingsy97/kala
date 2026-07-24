@@ -247,6 +247,8 @@ function summariseArgs(call: PendingToolCall, t: ReturnType<typeof useTranslatio
 }
 
 export function pickPrimaryArg(name: string, input: Record<string, unknown>): string | null {
+  const specialized = pickSpecializedPrimaryArg(name, input)
+  if (specialized !== null) return specialized
   const candidates = ARG_PRIORITY[name] ?? DEFAULT_ARG_PRIORITY
   for (const key of candidates) {
     const v = input[key]
@@ -258,12 +260,36 @@ export function pickPrimaryArg(name: string, input: Record<string, unknown>): st
   return null
 }
 
+function pickSpecializedPrimaryArg(name: string, input: Record<string, unknown>): string | null {
+  if (name === 'read_files') {
+    const files = Array.isArray(input.files) ? input.files : []
+    const first = files.find((file): file is Record<string, unknown> => !!file && typeof file === 'object')
+    const firstPath = typeof first?.path === 'string' ? first.path : undefined
+    if (firstPath) return files.length > 1 ? `${firstPath} +${files.length - 1}` : firstPath
+    if (files.length > 0) return `${files.length} files`
+  }
+  if (name === 'apply_file_patch') {
+    const patch = typeof input.patch === 'string' ? input.patch : ''
+    const target = patch.split('\n').map((line) => {
+      const match = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line)
+      return match?.[1]
+    }).find((value): value is string => typeof value === 'string' && value.length > 0)
+    if (target) return target
+    if (patch.length > 0) return 'patch'
+  }
+  return null
+}
+
 const DEFAULT_ARG_PRIORITY: readonly string[] = ['path', 'command', 'query', 'pattern', 'url']
 const ARG_PRIORITY: Record<string, readonly string[]> = {
   bash: ['command'],
   read: ['file_path', 'path'],
+  read_file: ['path'],
   write: ['file_path', 'path'],
+  write_file: ['path'],
   edit: ['file_path', 'path'],
+  replace_in_file: ['path'],
+  replace_many_in_file: ['path'],
   grep: ['pattern'],
   glob: ['pattern'],
   ls: ['path'],

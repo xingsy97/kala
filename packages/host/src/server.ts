@@ -65,6 +65,7 @@ import type { RuntimeLogger } from './logger.js'
 import type { SocketAdminConfig } from './socket-admin.js'
 import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
+import { loadPersistedMessageQueue, persistMessageQueueSnapshot } from './message-queue-store.js'
 
 export type HostServerOptions = {
   port: number
@@ -180,10 +181,10 @@ export async function startHostServer(
   }
   if (options.socketAdmin) activateSocketAdmin(options.socketAdmin)
 
-  const store = new SessionStore(options.sessionsDir)
   const getDefaultConfig = (): AgentConfig => typeof options.defaultConfig === 'function'
     ? options.defaultConfig()
     : options.defaultConfig
+  const store = new SessionStore(options.sessionsDir, { runtimeConfig: getDefaultConfig })
   const defaultSkillRootsList = defaultSkillRoots()
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
@@ -283,6 +284,15 @@ export async function startHostServer(
     const byId = advertisedModels().filter((m) => m.id === selected)
     return byId.length === 1 ? byId[0]!.ref ?? byId[0]!.id : undefined
   }
+  const effectiveDefaultModel = (): string | undefined => {
+    const configured = typeof options.defaultModel === 'function' ? options.defaultModel() : options.defaultModel
+    if (!configured) return undefined
+    const fallback = configured.trim()
+    return normalizeModelRef(configured) ?? (fallback.length > 0 ? fallback : undefined)
+  }
+  const effectiveModelForSession = (sessionId: string): string | undefined => {
+    return store.get(sessionId)?.preferences.selectedModel ?? effectiveDefaultModel()
+  }
   const contextWindowForModel = (model: string | undefined): ContextWindowOverride | undefined => {
     const selected = model?.trim()
     if (!selected) return undefined
@@ -322,6 +332,8 @@ export async function startHostServer(
 
   const queuedMessages = new Map<string, QueuedUserMessage[]>()
   const drainingQueues = new Set<string>()
+  const queueLoads = new Map<string, Promise<QueuedUserMessage[]>>()
+  const queueMutations = new Map<string, Promise<void>>()
 
   const dashboardNs: DashboardNs = io.of('/dashboard') as unknown as DashboardNs
   const executorNs: ExecutorNs = io.of('/executor') as unknown as ExecutorNs
@@ -345,43 +357,98 @@ export async function startHostServer(
     dashboardNs.to(sessionRoom(sessionId)).emit('server:message_queue', queueSnapshot(sessionId))
   }
 
+  const loadQueue = async (sessionId: string): Promise<QueuedUserMessage[]> => {
+    const existing = queuedMessages.get(sessionId)
+    if (existing) return existing
+    let pending = queueLoads.get(sessionId)
+    if (!pending) {
+      pending = loadPersistedMessageQueue(store, sessionId).catch(() => [])
+      queueLoads.set(sessionId, pending)
+    }
+    const restored = await pending
+    queueLoads.delete(sessionId)
+    if (restored.length > 0) queuedMessages.set(sessionId, restored)
+    return queuedMessages.get(sessionId) ?? []
+  }
+
+  const persistQueue = async (sessionId: string, queue: readonly QueuedUserMessage[]): Promise<void> => {
+    await persistMessageQueueSnapshot(store, sessionId, queue)
+    if (queue.length === 0) queuedMessages.delete(sessionId)
+    else queuedMessages.set(sessionId, [...queue])
+  }
+
+  const withQueueMutation = async <T>(sessionId: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = queueMutations.get(sessionId) ?? Promise.resolve()
+    let done!: () => void
+    const current = new Promise<void>((resolve) => {
+      done = resolve
+    })
+    const chain = previous.then(() => current, () => current)
+    queueMutations.set(sessionId, chain)
+    try {
+      await previous.catch(() => {})
+      return await fn()
+    } finally {
+      done()
+      if (queueMutations.get(sessionId) === chain) queueMutations.delete(sessionId)
+    }
+  }
+
   const messageQueues: MessageQueueManager = {
-    enqueue(sessionId, msg, priority) {
-      const queue = queuedMessages.get(sessionId) ?? []
-      if (priority === 'front') queue.unshift(msg)
-      else queue.push(msg)
-      queuedMessages.set(sessionId, queue)
+    async hydrate(sessionId) {
+      await loadQueue(sessionId)
+    },
+    async enqueue(sessionId, msg, priority) {
+      await withQueueMutation(sessionId, async () => {
+        const queue = [...await loadQueue(sessionId)]
+        if (priority === 'front') queue.unshift(msg)
+        else queue.push(msg)
+        await persistQueue(sessionId, queue)
+      })
       emitQueueUpdate(sessionId)
     },
-    reorder(sessionId, id, beforeId) {
-      const queue = queuedMessages.get(sessionId) ?? []
-      const from = queue.findIndex((item) => item.id === id)
-      if (from === -1) return
-      const [item] = queue.splice(from, 1)
-      if (!item) return
-      const to = beforeId ? queue.findIndex((candidate) => candidate.id === beforeId) : -1
-      if (to === -1) queue.push(item)
-      else queue.splice(to, 0, item)
-      if (queue.length === 0) queuedMessages.delete(sessionId)
-      else queuedMessages.set(sessionId, queue)
+    async reorder(sessionId, id, beforeId) {
+      let changed = false
+      await withQueueMutation(sessionId, async () => {
+        const queue = [...await loadQueue(sessionId)]
+        const from = queue.findIndex((item) => item.id === id)
+        if (from === -1) return
+        const [item] = queue.splice(from, 1)
+        if (!item) return
+        const to = beforeId ? queue.findIndex((candidate) => candidate.id === beforeId) : -1
+        if (to === -1) queue.push(item)
+        else queue.splice(to, 0, item)
+        await persistQueue(sessionId, queue)
+        changed = true
+      })
+      if (!changed) return
       emitQueueUpdate(sessionId)
     },
-    update(sessionId, id, text) {
-      const queue = queuedMessages.get(sessionId) ?? []
-      const index = queue.findIndex((item) => item.id === id)
-      if (index === -1) return
-      const trimmed = text.trim()
-      if (trimmed.length === 0) return
-      queue[index] = { ...queue[index]!, text: trimmed }
-      queuedMessages.set(sessionId, queue)
+    async update(sessionId, id, text) {
+      let changed = false
+      await withQueueMutation(sessionId, async () => {
+        const queue = [...await loadQueue(sessionId)]
+        const index = queue.findIndex((item) => item.id === id)
+        if (index === -1) return
+        const trimmed = text.trim()
+        if (trimmed.length === 0) return
+        queue[index] = { ...queue[index]!, text: trimmed }
+        await persistQueue(sessionId, queue)
+        changed = true
+      })
+      if (!changed) return
       emitQueueUpdate(sessionId)
     },
-    delete(sessionId, id) {
-      const queue = queuedMessages.get(sessionId) ?? []
-      const next = queue.filter((item) => item.id !== id)
-      if (next.length === queue.length) return
-      if (next.length === 0) queuedMessages.delete(sessionId)
-      else queuedMessages.set(sessionId, next)
+    async delete(sessionId, id) {
+      let changed = false
+      await withQueueMutation(sessionId, async () => {
+        const queue = await loadQueue(sessionId)
+        const next = queue.filter((item) => item.id !== id)
+        if (next.length === queue.length) return
+        await persistQueue(sessionId, next)
+        changed = true
+      })
+      if (!changed) return
       emitQueueUpdate(sessionId)
     },
     pending(sessionId) {
@@ -393,8 +460,8 @@ export async function startHostServer(
       drainingQueues.add(sessionId)
       try {
         while (true) {
-          const queue = queuedMessages.get(sessionId) ?? []
-          if (queue.length === 0) return
+          await loadQueue(sessionId)
+          if ((queuedMessages.get(sessionId)?.length ?? 0) === 0) return
           let record = store.get(sessionId)
           if (!record) {
             try {
@@ -408,10 +475,15 @@ export async function startHostServer(
             record = store.get(sessionId)
           }
           if (!record || !isRestingStatus(record.state.status)) return
-          const next = queue.shift()
-          if (queue.length === 0) queuedMessages.delete(sessionId)
-          emitQueueUpdate(sessionId)
+          const next = await withQueueMutation(sessionId, async () => {
+            const queue = [...await loadQueue(sessionId)]
+            if (queue.length === 0) return undefined
+            const item = queue.shift()
+            await persistQueue(sessionId, queue)
+            return item
+          })
           if (!next) return
+          emitQueueUpdate(sessionId)
           await loop.dispatch(sessionId, {
             kind: 'user_message',
             text: next.text,
@@ -450,8 +522,8 @@ export async function startHostServer(
         contextSnapshot: snapshotFromConfig(
           store.get(sessionId)?.config ?? getDefaultConfig(),
           state.messages,
-          contextWindowForModel(store.get(sessionId)?.preferences.selectedModel),
-          store.get(sessionId)?.preferences.selectedModel,
+          contextWindowForModel(effectiveModelForSession(sessionId)),
+          effectiveModelForSession(sessionId),
         ),
       })
       io.of('/executor').to(room).emit('event:appended', {
@@ -558,8 +630,8 @@ export async function startHostServer(
     tools: executors,
     broadcast,
     models: {
-      get: (sessionId: string) => store.get(sessionId)?.preferences.selectedModel,
-      contextWindow: (sessionId: string) => contextWindowForModel(store.get(sessionId)?.preferences.selectedModel)?.contextWindow,
+      get: effectiveModelForSession,
+      contextWindow: (sessionId: string) => contextWindowForModel(effectiveModelForSession(sessionId))?.contextWindow,
     },
     ...(options.hooks !== undefined ? { hooks: options.hooks } : {}),
     ...(options.hookRunner !== undefined ? { hookRunner: options.hookRunner } : {}),
@@ -616,6 +688,8 @@ export async function startHostServer(
     audit,
     broadcastError,
     contextWindowForModel,
+    effectiveDefaultModel,
+    effectiveModelForSession: (record) => effectiveModelForSession(record.sessionId),
     normalizeModelRef,
     dashboardNs,
     messageQueues,

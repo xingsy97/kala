@@ -144,6 +144,22 @@ describe('ChatPanel', () => {
     expect(onOpenWorkspaceFile).toHaveBeenCalledWith({ path: 'src/app.tsx', line: 12, column: 4 })
   })
 
+  it('opens dot-relative workspace file links from assistant Markdown', () => {
+    const onOpenWorkspaceFile = vi.fn()
+    render(
+      <ChatPanel
+        messages={[{ role: 'assistant', content: [{ type: 'text', text: 'Open [local](./src/app.tsx) and [parent](../README.md).' }] }]}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: 'View file: ./src/app.tsx' }))
+    fireEvent.click(screen.getByRole('link', { name: 'View file: ../README.md' }))
+
+    expect(onOpenWorkspaceFile).toHaveBeenNthCalledWith(1, { path: './src/app.tsx' })
+    expect(onOpenWorkspaceFile).toHaveBeenNthCalledWith(2, { path: '../README.md' })
+  })
+
   it('does not intercept external assistant Markdown links as workspace files', () => {
     const onOpenWorkspaceFile = vi.fn()
     render(

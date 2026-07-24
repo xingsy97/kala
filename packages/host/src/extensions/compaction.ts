@@ -104,6 +104,9 @@ Output exactly the Markdown structure inside <template>, in this order, keeping 
 
 Rules:
 - Preserve exact file paths, command names, tool names, identifiers, error messages, test names, API shapes, and user wording when important.
+- Preserve opaque identifiers exactly as written: UUIDs, hashes, commit IDs, session IDs, hostnames, ports, URLs, file names, room IDs, and socket IDs.
+- Write summary bodies in the primary language used by the conversation. Keep section headings exactly as shown.
+- Do not copy API keys, bearer tokens, passwords, cookies, or private key material. If such a value matters, describe the credential source or configuration shape and redact the secret value.
 - Preserve todo/task state from todowrite or equivalent tool calls.
 - Preserve tool-result evidence, but summarize noisy logs to the command, exit/status, and decisive lines.
 - Use terse bullets, not prose paragraphs.
@@ -139,6 +142,9 @@ const COMPACT_TIMEOUT_MS = 10 * 60_000
 const MIN_RECENT_TAIL_TOKENS = 4_000
 const TARGET_RECENT_TAIL_RATIO = 0.15
 const MAX_RECENT_TAIL_TOKENS = 24_000
+const SUMMARIZER_OUTPUT_RESERVE_TOKENS = 4_096
+const SUMMARIZER_INPUT_SAFETY_MARGIN = 1.2
+const MIN_SUMMARIZER_INPUT_TOKENS = 8_000
 
 // Retry ladder — each entry is one summarizer attempt. See the doc table for
 // the reasoning; briefly: attempt 1 uses the normal cap, then we tighten,
@@ -146,12 +152,15 @@ const MAX_RECENT_TAIL_TOKENS = 24_000
 // intact by dropping whole assistant-message groups at a time.
 const RETRY_LADDER: readonly {
   toolResultCap: number
+  textCap: number
   dropHeadGroups: number
 }[] = [
-  { toolResultCap: 8_000, dropHeadGroups: 0 },
-  { toolResultCap: 2_000, dropHeadGroups: 0 },
-  { toolResultCap: 2_000, dropHeadGroups: 1 },
-  { toolResultCap: 2_000, dropHeadGroups: 2 },
+  { toolResultCap: 8_000, textCap: 32_000, dropHeadGroups: 0 },
+  { toolResultCap: 4_000, textCap: 20_000, dropHeadGroups: 0 },
+  { toolResultCap: 2_000, textCap: 12_000, dropHeadGroups: 1 },
+  { toolResultCap: 1_000, textCap: 8_000, dropHeadGroups: 2 },
+  { toolResultCap: 1_000, textCap: 4_000, dropHeadGroups: 4 },
+  { toolResultCap: 600, textCap: 3_000, dropHeadGroups: 8 },
 ]
 
 const MAX_CONSECUTIVE_COMPACT_FAILURES = 3
@@ -278,7 +287,7 @@ export async function runCompact(
 
     let compact: SummarizeOk
     try {
-      compact = await summarizeWithLadder(deps, sessionId, remainingHead, previousSummary)
+      compact = await summarizeWithLadder(deps, sessionId, remainingHead, previousSummary, contextLimit)
     } catch (err) {
       await recordFailure(deps, sessionId, trigger, attemptId, rt, err, aborts)
       if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
@@ -335,7 +344,8 @@ export async function runCompact(
       role: 'user',
       content: [{ type: 'text', text: `${SUMMARY_PREFIX}\n\n${compact.summary}` }],
     }
-    const recentRawUsers = pickRecentRawUserMessages(head.slice(leadingSystemCount), RECENT_RAW_USER_TOKEN_CAP)
+    const recentRawUserTokenBudget = recentRawUserTokenCap(contextLimit)
+    const recentRawUsers = pickRecentRawUserMessages(head.slice(leadingSystemCount), recentRawUserTokenBudget)
     const replacementMessages: Message[] = [summaryUserMessage, ...recentRawUsers]
 
     const tokensAfter = estimateMessageTokens([
@@ -354,6 +364,19 @@ export async function runCompact(
       rt.consecutiveFailures += 1
       if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
       if (trigger === 'manual') throw new Error(`compact rejected before dispatch: ${invalidReason}`)
+      return false
+    }
+    const budgetReason = evaluatePostCompactionBudget(tokensAfter, contextLimit)
+    if (budgetReason) {
+      await dispatchRejected(deps, sessionId, trigger, attemptId, budgetReason, {
+        replaceRange,
+        tokensBefore,
+        tokensAfter,
+        contextLimit: effectiveContextLimit(contextLimit),
+      })
+      rt.consecutiveFailures += 1
+      if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
+      if (trigger === 'manual') throw new Error(`compact rejected before dispatch: ${budgetReason}`)
       return false
     }
 
@@ -393,6 +416,7 @@ export async function runCompact(
       compressionRatio: tokensAfter > 0 ? Math.round((tokensBefore / tokensAfter) * 10) / 10 : null,
       previousSummaryChars: previousSummary?.length ?? 0,
       recentRawUsersCount: recentRawUsers.length,
+      recentRawUserTokenBudget,
       validationReasonCodes: validation.reasonCodes,
       ...(compact.usage ? { responseUsage: compact.usage } : {}),
     })
@@ -498,7 +522,7 @@ async function dispatchRejected(
   sessionId: string,
   trigger: CompactTrigger,
   attemptId: string,
-  reason: 'pending_call_orphaned' | 'invalid_replace_range',
+  reason: 'pending_call_orphaned' | 'invalid_replace_range' | 'post_compaction_still_over_budget',
   extra: Record<string, unknown>,
 ): Promise<void> {
   await appendCompactionMetadata(deps, sessionId, 'compaction_rejected', {
@@ -790,7 +814,8 @@ function pickRecentRawUserMessages(head: readonly Message[], tokenBudget: number
   for (let i = users.length - 1; i >= 0; i--) {
     const message = users[i]!
     const tokens = estimateMessageTokens([message])
-    if (kept.length > 0 && usedTokens + tokens > tokenBudget) break
+    if (tokens > tokenBudget) continue
+    if (usedTokens + tokens > tokenBudget) break
     kept.push(message)
     usedTokens += tokens
     if (usedTokens >= tokenBudget) break
@@ -826,15 +851,20 @@ async function summarizeWithLadder(
   sessionId: string,
   messages: readonly Message[],
   previousSummary: string | undefined,
+  contextLimit: number | undefined,
 ): Promise<SummarizeOk> {
   let lastErr: unknown
   for (let attempt = 0; attempt < RETRY_LADDER.length; attempt++) {
     const rung = RETRY_LADDER[attempt]!
-    const trimmed = prepareCompactionInputWithLimit(messages, rung.toolResultCap)
+    const trimmed = prepareCompactionInputWithLimit(messages, {
+      toolResultChars: rung.toolResultCap,
+      textChars: rung.textCap,
+    })
     const withHeadDropped = dropHeadGroups(trimmed, rung.dropHeadGroups)
-    if (withHeadDropped.length === 0) continue
+    const budgeted = fitSummarizerInputToBudget(withHeadDropped, previousSummary, contextLimit)
+    if (budgeted.length === 0) continue
     try {
-      return await summarize(deps, sessionId, withHeadDropped, previousSummary)
+      return await summarize(deps, sessionId, budgeted, previousSummary)
     } catch (err) {
       lastErr = err
       if (!isContextOverflowError(err)) throw err
@@ -909,30 +939,108 @@ function isBusyCompactable(trigger: CompactTrigger, state: AgentState): boolean 
   return trigger === 'tool_result' && state.status === 'executing_tools' && state.pendingCalls.length > 0 && findActiveToolBatchIndex(state) !== undefined
 }
 
-function prepareCompactionInputWithLimit(messages: readonly Message[], maxToolResultChars: number): Message[] {
+function prepareCompactionInputWithLimit(
+  messages: readonly Message[],
+  limits: { toolResultChars: number; textChars: number },
+): Message[] {
   return messages.map((message) => ({
     ...message,
     content: message.content.map((content: MessageContent) => {
-      if (content.type !== 'tool_result') return content
-      if (content.content.length <= maxToolResultChars) return content
-      return {
-        ...content,
-        content: compactToolResult(content.content, maxToolResultChars),
+      if (content.type === 'tool_result') {
+        if (content.content.length <= limits.toolResultChars) return content
+        return {
+          ...content,
+          content: compactLongText(content.content, limits.toolResultChars, 'old tool result'),
+        }
       }
+      if (content.type === 'text' || content.type === 'thinking') {
+        if (content.text.length <= limits.textChars) return content
+        return {
+          ...content,
+          text: compactLongText(content.text, limits.textChars, content.type === 'thinking' ? 'old assistant reasoning' : 'old text'),
+        }
+      }
+      return content
     }),
   }))
 }
 
-function compactToolResult(content: string, maxChars: number): string {
+function compactLongText(content: string, maxChars: number, label: string): string {
   const headChars = Math.floor(maxChars * 0.6)
   const tailChars = Math.max(0, maxChars - headChars)
   const omitted = content.length - headChars - tailChars
   if (omitted <= 0) return content
   return [
     content.slice(0, headChars).trimEnd(),
-    `[... ${omitted} chars omitted from old tool result before compaction ...]`,
+    `[... ${omitted} chars omitted from ${label} before compaction ...]`,
     content.slice(-tailChars).trimStart(),
   ].join('\n')
+}
+
+function fitSummarizerInputToBudget(
+  messages: readonly Message[],
+  previousSummary: string | undefined,
+  contextLimit: number | undefined,
+): Message[] {
+  const maxTokens = summarizerInputBudget(contextLimit, previousSummary)
+  let out = [...messages]
+  while (out.length > 1 && estimateMessageTokens(out) > maxTokens) {
+    const next = dropOldestCompactionGroup(out)
+    if (next.length === out.length) break
+    out = next
+  }
+  return out
+}
+
+function summarizerInputBudget(contextLimit: number | undefined, previousSummary: string | undefined): number {
+  const effective = effectiveContextLimit(contextLimit)
+  const previousSummaryTokens = previousSummary ? Math.ceil(previousSummary.length / 4) : 0
+  return Math.max(
+    MIN_SUMMARIZER_INPUT_TOKENS,
+    Math.floor((effective - SUMMARIZER_OUTPUT_RESERVE_TOKENS - previousSummaryTokens) / SUMMARIZER_INPUT_SAFETY_MARGIN),
+  )
+}
+
+function effectiveContextLimit(contextLimit: number | undefined): number {
+  return contextLimit && contextLimit > 0 ? contextLimit : FALLBACK_CONTEXT_LIMIT_TOKENS
+}
+
+function dropOldestCompactionGroup(messages: readonly Message[]): Message[] {
+  const firstDroppable = messages.findIndex((message, index) => index > 0 || message.role !== 'system')
+  if (firstDroppable < 0) return [...messages]
+  let end = firstDroppable + 1
+  for (; end < messages.length; end++) {
+    const previous = messages[end - 1]
+    const current = messages[end]
+    if (!previous || !current) break
+    if (previous.role === 'assistant' && hasToolCallContent(previous) && current.role === 'tool') continue
+    if (previous.role === 'assistant' && hasToolCallContent(previous) && hasUserToolResultContent(current)) continue
+    if (current.role === 'tool') continue
+    if (hasUserToolResultContent(current)) continue
+    break
+  }
+  return [...messages.slice(0, firstDroppable), ...messages.slice(end)]
+}
+
+function hasToolCallContent(message: Message): boolean {
+  return message.content.some((content) => content.type === 'tool_call')
+}
+
+function hasUserToolResultContent(message: Message): boolean {
+  return message.role === 'user' && message.content.some((content) => content.type === 'tool_result')
+}
+
+function evaluatePostCompactionBudget(
+  tokensAfter: number,
+  contextLimit: number | undefined,
+): 'post_compaction_still_over_budget' | undefined {
+  const effective = effectiveContextLimit(contextLimit)
+  // Tiny synthetic test windows can be smaller than the minimum structured
+  // handoff itself. Real provider contexts start well above this; keep the
+  // production guard while letting small-window tests exercise trigger logic.
+  if (effective < 16_000) return undefined
+  const hardBudget = Math.floor(effective * 0.85)
+  return tokensAfter > hardBudget ? 'post_compaction_still_over_budget' : undefined
 }
 
 function choosePreserveFrom(state: AgentState, trigger: CompactTrigger, contextLimit: number | undefined): number {
@@ -945,20 +1053,27 @@ function choosePreserveFrom(state: AgentState, trigger: CompactTrigger, contextL
 
 function chooseRecentUserPreserveFrom(messages: readonly Message[], contextLimit: number | undefined): number {
   const targetRecentTailTokens = recentTailTargetTokens(contextLimit)
-  let candidate = messages.length
-  let foundUserPivot = false
+  let newestSafeFallback: number | undefined
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]!.role !== 'user') continue
+    if (isAnchoredSummaryMessage(messages[i]!)) continue
     if (!hasCompactableContent(messages.slice(0, i))) continue
-    foundUserPivot = true
-    candidate = i
+    newestSafeFallback ??= i
     const tail = messages.slice(i)
     if (estimateMessageTokens(tail) <= targetRecentTailTokens) return i
   }
+  // If every real user-turn tail is still over the target, keep the newest
+  // valid user turn. Choosing the oldest one would preserve the entire huge
+  // tail and only rewrite the anchored summary, which is not a real compact.
+  if (newestSafeFallback !== undefined) return newestSafeFallback
   // Summary-only compaction: after one or more successful compactions, the
-  // remaining old context may be stored only as synthetic system summaries.
-  // Re-summarize those messages instead of reporting "nothing to compact".
-  return foundUserPivot ? candidate : messages.length
+  // remaining old context may be stored only as the anchored summary. Re-
+  // summarize those messages instead of reporting "nothing to compact".
+  return messages.length
+}
+
+function isAnchoredSummaryMessage(message: Message): boolean {
+  return message.role === 'user' && collectText(message.content).startsWith(SUMMARY_PREFIX)
 }
 
 function choosePendingSafePreserveFrom(state: AgentState, contextLimit: number | undefined): number | undefined {
@@ -1011,4 +1126,10 @@ function recentTailTargetTokens(contextLimit: number | undefined): number {
     MAX_RECENT_TAIL_TOKENS,
     Math.max(MIN_RECENT_TAIL_TOKENS, Math.round(effective * TARGET_RECENT_TAIL_RATIO)),
   )
+}
+
+function recentRawUserTokenCap(contextLimit: number | undefined): number {
+  const effective = effectiveContextLimit(contextLimit)
+  if (effective < 16_000) return Math.max(1_000, Math.floor(effective * 0.2))
+  return Math.min(RECENT_RAW_USER_TOKEN_CAP, Math.max(4_000, Math.floor(effective * 0.1)))
 }

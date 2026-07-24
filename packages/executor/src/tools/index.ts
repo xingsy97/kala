@@ -1,9 +1,12 @@
-export { readTool } from './read.js'
+export { readFileTool } from './read-file.js'
+export { readFilesTool } from './read-files.js'
 export { lsTool } from './ls.js'
 export { globTool } from './glob.js'
 export { grepTool } from './grep.js'
-export { writeTool } from './write.js'
-export { editTool } from './edit.js'
+export { writeFileTool } from './write-file.js'
+export { replaceInFileTool } from './replace-in-file.js'
+export { replaceManyInFileTool } from './replace-many-in-file.js'
+export { applyFilePatchTool } from './apply-file-patch.js'
 export { bashTool } from './bash.js'
 export { bashOutputTool } from './bash-output.js'
 export { killShellTool } from './kill-shell.js'
@@ -17,12 +20,15 @@ export { createToolRegistry, ToolError } from './registry.js'
 export type { Tool, ToolContext, ToolRunner } from './registry.js'
 
 import type { Tool } from './registry.js'
-import { readTool } from './read.js'
+import { readFileTool } from './read-file.js'
+import { readFilesTool } from './read-files.js'
 import { lsTool } from './ls.js'
 import { globTool } from './glob.js'
 import { grepTool } from './grep.js'
-import { writeTool } from './write.js'
-import { editTool } from './edit.js'
+import { writeFileTool } from './write-file.js'
+import { replaceInFileTool } from './replace-in-file.js'
+import { replaceManyInFileTool } from './replace-many-in-file.js'
+import { applyFilePatchTool } from './apply-file-patch.js'
 import { bashTool } from './bash.js'
 import { bashOutputTool } from './bash-output.js'
 import { killShellTool } from './kill-shell.js'
@@ -33,12 +39,15 @@ import { memoryTool } from './memory.js'
 import { internalDirectTools } from './internal.js'
 
 export const allTools: readonly Tool[] = [
-  readTool,
+  readFileTool,
+  readFilesTool,
+  writeFileTool,
+  replaceInFileTool,
+  replaceManyInFileTool,
+  applyFilePatchTool,
   lsTool,
   globTool,
   grepTool,
-  writeTool,
-  editTool,
   bashTool,
   bashOutputTool,
   killShellTool,

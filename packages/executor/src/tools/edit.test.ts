@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { editTool } from './edit.js'
+import { replaceInFileTool } from './replace-in-file.js'
 import { makeCtx } from './_test-helpers.js'
 
-describe('edit', () => {
+describe('replace_in_file', () => {
   let root: string
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'ak-edit-'))
@@ -16,11 +16,11 @@ describe('edit', () => {
   it('replaces a unique occurrence', async () => {
     const p = join(root, 'a.txt')
     writeFileSync(p, 'one two three')
-    const out = await editTool.run(
+    const out = await replaceInFileTool.run(
       { path: p, old_string: 'two', new_string: 'TWO' },
       makeCtx(root),
     )
-    expect(out).toContain('Replaced 1')
+    expect(JSON.parse(out)).toMatchObject({ ok: true, files: [{ replacements: [{ index: 0, count: 1 }] }] })
     expect(readFileSync(p, 'utf8')).toBe('one TWO three')
   })
 
@@ -28,7 +28,7 @@ describe('edit', () => {
     const p = join(root, 'a.txt')
     writeFileSync(p, 'a a a')
     await expect(
-      editTool.run(
+      replaceInFileTool.run(
         { path: p, old_string: 'a', new_string: 'b' },
         makeCtx(root),
       ),
@@ -38,11 +38,11 @@ describe('edit', () => {
   it('replaces all with replace_all=true', async () => {
     const p = join(root, 'a.txt')
     writeFileSync(p, 'a a a')
-    const out = await editTool.run(
+    const out = await replaceInFileTool.run(
       { path: p, old_string: 'a', new_string: 'b', replace_all: true },
       makeCtx(root),
     )
-    expect(out).toContain('Replaced 3')
+    expect(JSON.parse(out)).toMatchObject({ ok: true, files: [{ replacements: [{ index: 0, count: 3 }] }] })
     expect(readFileSync(p, 'utf8')).toBe('b b b')
   })
 
@@ -50,7 +50,7 @@ describe('edit', () => {
     const p = join(root, 'a.txt')
     writeFileSync(p, 'nothing')
     await expect(
-      editTool.run(
+      replaceInFileTool.run(
         { path: p, old_string: 'missing', new_string: 'x' },
         makeCtx(root),
       ),
@@ -59,7 +59,7 @@ describe('edit', () => {
 
   it('throws ENOENT for missing files', async () => {
     await expect(
-      editTool.run(
+      replaceInFileTool.run(
         { path: join(root, 'nope.txt'), old_string: 'a', new_string: 'b' },
         makeCtx(root),
       ),
@@ -72,7 +72,7 @@ describe('edit', () => {
     const p = join(root, 'a.txt')
     writeFileSync(p, 'one two three')
     await expect(
-      editTool.run(
+      replaceInFileTool.run(
         { path: p, old_string: 'two', new_string: 'TWO' },
         makeCtx(root, ctrl.signal),
       ),

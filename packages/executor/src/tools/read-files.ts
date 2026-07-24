@@ -1,0 +1,45 @@
+import type { Tool } from './registry.js'
+import { ToolError } from './registry.js'
+import { optionalPositiveInt, requireString } from './schema.js'
+import { readOneFile } from './read-file.js'
+
+const MAX_FILES = 20
+const DEFAULT_MAX_BYTES = 200_000
+const HARD_MAX_BYTES = 1_000_000
+
+type ReadFileEntry = { path: string; offset?: number; limit?: number }
+
+export const readFilesTool: Tool = {
+  name: 'read_files',
+  async run(input, ctx) {
+    const files = parseFiles(input)
+    const requestedMax = optionalPositiveInt(input, 'max_bytes', 1) ?? DEFAULT_MAX_BYTES
+    const maxBytes = Math.min(requestedMax, HARD_MAX_BYTES)
+    const chunks: string[] = []
+    for (const file of files) {
+      const content = await readOneFile(file, ctx)
+      chunks.push(`===== ${file.path} =====\n${content}`)
+      const total = Buffer.byteLength(chunks.join('\n\n'), 'utf8')
+      if (total > maxBytes) {
+        chunks.push(`... read_files output truncated at ${maxBytes} bytes ...`)
+        break
+      }
+    }
+    return chunks.join('\n\n')
+  },
+}
+
+function parseFiles(input: Record<string, unknown>): ReadFileEntry[] {
+  const raw = input['files']
+  if (!Array.isArray(raw)) throw new ToolError('EINVAL', 'missing or non-array field "files"')
+  if (raw.length === 0) throw new ToolError('EINVAL', 'files must not be empty')
+  if (raw.length > MAX_FILES) throw new ToolError('E2BIG', `read_files supports at most ${MAX_FILES} files`)
+  return raw.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new ToolError('EINVAL', `files[${index}] must be an object`)
+    const record = item as Record<string, unknown>
+    const path = requireString(record, 'path')
+    const offset = optionalPositiveInt(record, 'offset', 0)
+    const limit = optionalPositiveInt(record, 'limit', 1)
+    return { path, ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) }
+  })
+}
