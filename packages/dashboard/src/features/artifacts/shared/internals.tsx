@@ -420,7 +420,18 @@ export function ArtifactInventory({
               <div className="text-xs text-muted-foreground">{t('artifacts.inventory.loadingManifest')}</div>
             ) : null}
             {manifest ? (
-              <ScrollArea className="h-full rounded-md border border-border">
+              <>
+              <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="artifact-inventory-mobile-list">
+                {manifest.entries.map((entry) => (
+                  <div key={entry.path} className="min-w-0 px-3 py-2">
+                    <div className="truncate font-mono text-xs" title={entry.path}>{entry.path}</div>
+                    <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="truncate">{entry.kind}</span><span className="flex-none">{formatBytes(entry.bytes)}</span><span className="ml-auto flex-none">{entry.sha256 ? entry.sha256.slice(0, 8) : t('artifacts.inventory.hashSkipped')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <ScrollArea className="hidden h-full rounded-md border border-border/50 md:block">
                 <div className="min-w-[720px] divide-y divide-border text-xs">
                   <div className="grid grid-cols-[1.4fr_150px_100px_170px] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                     <div>{t('artifacts.inventory.path')}</div>
@@ -447,6 +458,7 @@ export function ArtifactInventory({
                   ))}
                 </div>
               </ScrollArea>
+              </>
             ) : null}
           </div>
         </div>
@@ -521,7 +533,16 @@ export function EvalRunsView({
         <EnhancementActionPanel title={t('artifacts.eval.actions')} actions={evalActionConfigs} onComplete={onArtifactActionComplete} />
         <div className="min-h-0 overflow-hidden rounded-md border border-border">
           {rows.length > 0 ? (
-          <ScrollArea className="h-full">
+          <>
+          <div className="divide-y divide-border/50 md:hidden" data-testid="eval-runs-mobile-list">
+            {rows.map((row) => (
+              <button key={row.key} type="button" className={cn('w-full min-w-0 px-3 py-2 text-left', selectedRunPath === row.key && 'bg-primary/10')} onClick={() => onSelectRun(row.key)}>
+                <div className="truncate font-mono text-xs">{row.summary?.experimentId ?? row.progress?.runId ?? row.key}</div>
+                <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground"><span className="truncate">{row.summary?.dataset ?? row.progress?.dataset ?? t('artifacts.fallback.unknown')}</span><span className="truncate">{row.summary?.model ?? row.progress?.model ?? t('artifacts.fallback.unknown')}</span><span className="ml-auto flex-none font-mono">{row.summary?.resolved ?? 0}/{row.summary?.trialCount ?? row.progress?.selectedCount ?? 0} · {formatPercent(row.summary?.metrics?.passRate)}</span></div>
+              </button>
+            ))}
+          </div>
+          <ScrollArea className="hidden h-full md:block">
             <div className="min-w-[760px] divide-y divide-border text-xs">
               <div className="grid grid-cols-[1.15fr_1fr_120px_90px_90px_90px_90px] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                 <div>{t('artifacts.eval.columns.run')}</div>
@@ -555,6 +576,7 @@ export function EvalRunsView({
               ))}
             </div>
           </ScrollArea>
+          </>
           ) : null}
         </div>
         {selectedRun ? (
@@ -2623,7 +2645,16 @@ function EvalTrialDetail({
         {error ? <div className="m-3 rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">{error}</div> : null}
         {!loading && trials.length === 0 && !error ? <div className="p-3 text-xs text-muted-foreground">{t('artifacts.eval.noTrials')}</div> : null}
         {trials.length > 0 ? (
-          <ScrollArea className="h-full">
+          <>
+          <div className="divide-y divide-border/50 md:hidden" data-testid="eval-trials-mobile-list">
+            {trials.map((row) => { const id = trialStableId(row); return (
+              <button key={row.path} type="button" className={cn('w-full min-w-0 px-3 py-2 text-left', selectedTrialId === id && 'bg-primary/10')} onClick={() => onSelectTrial(id)}>
+                <div className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-mono text-xs">{trialInstanceId(row)}</span><ResultPill resolved={row.trial.resolved} /></div>
+                <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground"><span className="truncate">{row.trial.failureLabel ?? row.trial.status ?? '-'}</span><span className="ml-auto flex-none font-mono">{formatDuration(row.trial.metrics?.durationMs)} · {formatBytesMetric(row.trial.metrics?.patchBytes)}</span></div>
+              </button>
+            ) })}
+          </div>
+          <ScrollArea className="hidden h-full md:block">
             <div className="min-w-[720px] divide-y divide-border text-xs">
               <div className="grid grid-cols-[1.2fr_110px_90px_120px_90px_80px] gap-3 bg-muted/20 px-3 py-2 font-medium text-muted-foreground">
                 <div>{t('artifacts.eval.columns.instance')}</div>
@@ -2656,6 +2687,7 @@ function EvalTrialDetail({
               })}
             </div>
           </ScrollArea>
+          </>
         ) : null}
       </div>
       <aside className="min-h-0 bg-muted/20 p-3">
@@ -3031,7 +3063,17 @@ export function ProfilesView({
         <EnhancementActionPanel title={t('artifacts.profiles.actions')} actions={profileActionConfigs} onComplete={onArtifactActionComplete} />
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">{t('artifacts.profiles.none')}</div> : null}
         {rows.length > 0 ? (
-          <ScrollArea className="h-full rounded-md border border-border">
+          <>
+          <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="profiles-mobile-list">
+            {rows.map((row) => (
+              <div key={row.path} className="min-w-0 px-3 py-2">
+                <div className="truncate font-mono text-xs">{row.profile.sessionId ?? row.path}</div>
+                <div className="mt-1 truncate text-[11px] text-muted-foreground">{(row.profile.models ?? []).join(', ') || t('artifacts.fallback.unknown')}</div>
+                <div className="mt-1 grid grid-cols-3 gap-2 font-mono text-[11px]"><span>LLM {row.profile.llmCalls ?? 0}</span><span>Tools {row.profile.toolCalls ?? 0}</span><span className="text-right">{formatInteger((row.profile.totalInputTokens ?? 0) + (row.profile.totalOutputTokens ?? 0))} tok</span></div>
+              </div>
+            ))}
+          </div>
+          <ScrollArea className="hidden h-full rounded-md border border-border/50 md:block">
             <div className="min-w-[980px] divide-y divide-border text-xs">
               <div className="grid grid-cols-[1.25fr_70px_70px_95px_95px_85px_85px_85px_85px] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                 <div>{t('artifacts.profiles.columns.profile')}</div>
@@ -3062,6 +3104,7 @@ export function ProfilesView({
               ))}
             </div>
           </ScrollArea>
+          </>
         ) : null}
       </div>
     </div>
@@ -3118,7 +3161,17 @@ export function MemoryView({
         <EnhancementActionPanel title={t('artifacts.memory.actions')} actions={memoryActionConfigs} onComplete={onArtifactActionComplete} />
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">{t('artifacts.memory.none')}</div> : null}
         {entries.length > 0 ? (
-          <ScrollArea className="h-full rounded-md border border-border">
+          <>
+          <div className="divide-y divide-border/50 rounded-md bg-muted/20 md:hidden" data-testid="memory-mobile-list">
+            {entries.map(({ row, entry }, index) => (
+              <div key={`${row.path}:${entry.scope ?? 'unknown'}:${entry.key ?? index}`} className="min-w-0 px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.key ?? t('artifacts.fallback.unknown')}</span><MemoryStatus status={entry.status} /></div>
+                <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{entry.description ?? entry.name ?? '-'}</div>
+                <div className="mt-1 flex min-w-0 gap-2 font-mono text-[11px] text-muted-foreground"><span>{entry.scope ?? t('artifacts.fallback.unknown')}</span><span>{formatConfidence(entry.confidence)}</span><span className="ml-auto max-w-[50%] truncate" title={entry.source ?? entry.path}>{entry.source ?? entry.path ?? '-'}</span></div>
+              </div>
+            ))}
+          </div>
+          <ScrollArea className="hidden h-full rounded-md border border-border/50 md:block">
             <div className="min-w-[980px] divide-y divide-border text-xs">
               <div className="grid grid-cols-[110px_110px_1fr_1.4fr_90px_130px_1fr] gap-3 bg-muted/40 px-3 py-2 font-medium text-muted-foreground">
                 <div>{t('artifacts.memory.columns.scope')}</div>
@@ -3151,6 +3204,7 @@ export function MemoryView({
               ))}
             </div>
           </ScrollArea>
+          </>
         ) : null}
       </div>
     </div>
@@ -3210,7 +3264,7 @@ export function OpsView({
         {manifest && rows.length === 0 && !error ? <div className="text-xs text-muted-foreground">{t('artifacts.ops.none')}</div> : null}
         {rows.length > 0 ? (
           <ScrollArea className="h-full rounded-md border border-border">
-            <div className="min-w-[980px] divide-y divide-border text-xs">
+            <div className="divide-y divide-border/50 text-xs">
               {groups.map((group) => (
                 <div key={group.label} className="grid gap-2 p-3">
                   <div className="flex items-center justify-between gap-3">
@@ -3223,7 +3277,7 @@ export function OpsView({
                         key={row.path}
                         type="button"
                         onClick={() => onOpenArtifact({ path: row.path, label: row.path })}
-                        className="grid grid-cols-[170px_minmax(0,1fr)_minmax(220px,0.8fr)] gap-3 rounded border border-border bg-background/70 px-2 py-2 text-left transition-colors hover:bg-muted/40"
+                        className="grid min-w-0 gap-1 rounded border border-border/50 bg-background/70 px-2 py-2 text-left transition-colors hover:bg-muted/40 md:grid-cols-[170px_minmax(0,1fr)_minmax(220px,0.8fr)] md:gap-3"
                       >
                         <div className="min-w-0">
                           <div className="truncate font-mono text-[11px]">{opsKindLabel(row.kind)}</div>

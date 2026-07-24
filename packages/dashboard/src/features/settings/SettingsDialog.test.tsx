@@ -576,6 +576,20 @@ describe('SettingsDialog', () => {
     expect(input.value).toBe('750')
   })
 
+  it('exposes durable cache, wake lock, and app badge controls as progressive enhancements', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    expect(await screen.findByTestId('settings-toggle-durable-session-cache')).toBeTruthy()
+    expect(screen.getByTestId('settings-session-cache-management')).toBeTruthy()
+    expect(screen.getByTestId('settings-toggle-keep-screen-awake')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('settings-tab-notifications'))
+    expect(await screen.findByTestId('settings-toggle-app-badge')).toBeTruthy()
+  })
+
   it('stores chat and file view display preferences locally', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)

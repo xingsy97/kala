@@ -18,7 +18,7 @@ import puppeteer from 'puppeteer-core'
 
 const requireFromHost = createRequire(new URL('../../packages/host/package.json', import.meta.url))
 const { io } = requireFromHost('socket.io-client')
-const { PROTOCOL_VERSION } = await import('../packages/shared/dist/index.js')
+const { PROTOCOL_VERSION } = await import('../../packages/shared/dist/index.js')
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname
 const PORT = Number(process.env.VERIFY_SUBAGENT_SCROLL_PORT ?? 3176)
@@ -26,6 +26,7 @@ const HOST_URL = `http://localhost:${PORT}`
 const PARENT_SESSION_ID = `subagent-scroll-parent-${Date.now()}`
 const CHILD_SESSION_ID = `subagent-scroll-child-${Date.now()}`
 const SESSIONS_DIR = mkdtempSync(join(tmpdir(), 'agent-kernel-subagent-scroll-sessions-'))
+const SCREENSHOT_PATH = join(tmpdir(), `agent-kernel-subagent-scroll-${Date.now()}.png`)
 const CHROME = process.env.CHROME_PATH ?? detectBrowser()
 
 const checks = []
@@ -42,7 +43,7 @@ try {
   writeFixtureSessions()
   await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'], {
     name: 'dashboard build',
-    timeoutMs: 30_000,
+    timeoutMs: 90_000,
   })
 
   host = spawn('pnpm', ['--dir', 'packages/host', 'exec', 'tsx', 'bin/agent-kernel-host.ts'], {
@@ -57,7 +58,7 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   pipeLog(host, hostLog)
-  await waitForLog(hostLog, `"port":${PORT}`, 10_000)
+  await waitForLog(hostLog, `host listening on http://127.0.0.1:${PORT}`, 10_000)
   await verifyHostListsFixture()
 
   if (!CHROME) throw new Error('no chromium found; set CHROME_PATH')
@@ -78,6 +79,8 @@ try {
 
   await verifySubAgentReplayExpansion(page)
   await verifyChatScrollerGeometry(page)
+  await page.screenshot({ path: SCREENSHOT_PATH, fullPage: false })
+  console.log(`Screenshot written to ${SCREENSHOT_PATH}`)
 } catch (err) {
   check('script completed without uncaught error', false, err?.stack ?? String(err))
 } finally {
@@ -102,15 +105,19 @@ async function verifySubAgentReplayExpansion(page) {
   const metrics = await page.evaluate(() => {
     const row = document.querySelector('[data-testid="sub-agent-row-agent-call-1"]')
     const nested = document.querySelector('[data-testid="nested-transcript"]')
+    const frame = document.querySelector('[data-testid="sub-agent-transcript-frame-agent-call-1"]')
     return {
       rowText: row?.textContent ?? '',
       nestedHeight: nested?.getBoundingClientRect().height ?? 0,
       nestedText: nested?.textContent ?? '',
+      frameHeight: frame?.getBoundingClientRect().height ?? 0,
+      frameLayout: frame?.getAttribute('data-layout') ?? '',
+      virtualized: nested?.getAttribute('data-virtualized') ?? '',
     }
   })
   check(
-    'expanded replayed sub-agent shows child transcript',
-    metrics.nestedHeight > 40 && metrics.nestedText.includes('child answer visible in replay'),
+    'expanded replayed terminal sub-agent shrinks to its child transcript',
+    metrics.nestedHeight > 40 && metrics.frameHeight < 240 && metrics.frameLayout === 'content' && metrics.virtualized === 'false' && metrics.nestedText.includes('child answer visible in replay'),
     JSON.stringify(metrics),
   )
 }

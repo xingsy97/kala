@@ -127,12 +127,12 @@ export function WorkspaceMetadataDialog({
             {t('workspaceMetadata.description')}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 px-5 py-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4">
           <form onSubmit={submit} className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-metadata-rename-form">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="workspace-display-name">
               {t('workspaceMetadata.displayName')}
             </label>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <input
                 id="workspace-display-name"
                 value={draft}
@@ -140,14 +140,14 @@ export function WorkspaceMetadataDialog({
                 className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
                 data-testid="workspace-metadata-name-input"
               />
-              <Button type="submit" size="sm" disabled={draft.trim().length === 0 || draft.trim() === displayName} data-testid="workspace-metadata-rename-button">
+              <Button type="submit" size="sm" className="sm:flex-none" disabled={draft.trim().length === 0 || draft.trim() === displayName} data-testid="workspace-metadata-rename-button">
                 <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                 {t('workspaceMetadata.rename')}
               </Button>
             </div>
           </form>
           <section className="rounded-md border border-border/50 bg-card p-3" data-testid="workspace-identity-card">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                   {identity ? <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden /> : <ShieldOff className="h-4 w-4 text-muted-foreground" aria-hidden />}
@@ -174,7 +174,15 @@ export function WorkspaceMetadataDialog({
             </div>
           </section>
           <div className="overflow-hidden rounded-md border border-border/50">
-            <table className="w-full text-sm">
+            <dl className="divide-y divide-border/50 sm:hidden" data-testid="workspace-metadata-mobile-values">
+              {rows.map(([label, value]) => (
+                <div key={label} className="min-w-0 px-3 py-2">
+                  <dt className="text-[11px] font-medium text-muted-foreground">{label}</dt>
+                  <dd className="mt-0.5 break-all font-mono text-xs text-foreground">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <table className="hidden w-full text-sm sm:table">
               <tbody>
                 {rows.map(([label, value], i) => (
                   <tr

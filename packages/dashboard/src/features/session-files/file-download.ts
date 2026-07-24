@@ -1,3 +1,5 @@
+import { downloadBlob } from '../../lib/save-file.js'
+
 type DownloadableFileResult =
   | { kind: 'text'; content: string; truncated?: boolean }
   | { kind: 'image' | 'pdf'; content: string; mediaType: string }
@@ -14,13 +16,7 @@ export function fileResultDownloadBlob(result: DownloadableFileResult): { blob: 
 }
 
 export function saveBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.rel = 'noopener'
-  anchor.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  downloadBlob(blob, filename)
 }
 
 export function downloadFilename(path: string): string {

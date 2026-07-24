@@ -39,7 +39,7 @@ import { PROTOCOL_VERSION, buildHumanAttentionTimeline, estimateMessageTokens, e
 import { io, type Socket } from 'socket.io-client'
 
 import { decideSessionHydration } from './session-hydration-policy.js'
-import type { CachedSessionViewInput, SessionViewCache } from './session-view-cache.js'
+import type { CachedSessionView, CachedSessionViewInput, SessionViewCache } from './session-view-cache.js'
 
 export type DashboardSocket = Socket<
   DashboardServerToClientEvents,
@@ -113,7 +113,7 @@ export type UseSessionOptions = {
   host: string
   sessionId: string | null
   token?: string
-  cache?: SessionViewCache
+  cache?: SessionViewCache & { hydrate?(sessionId: string): Promise<CachedSessionView | null> }
   onForked?: (payload: SessionReadyEvent) => void
 }
 
@@ -211,7 +211,7 @@ export function useSession({
       selectedModel: null,
       hydratedSessionId: null,
     }
-    const cached = cache?.get(sessionId) ?? null
+    let cached = cache?.get(sessionId) ?? null
     let resetHistoryBaseOnNextReplay = false
     if (cached) {
       cacheDraft = cached
@@ -270,30 +270,56 @@ export function useSession({
       setStreamingText('')
     }
 
-    const socket = io(`${host}/dashboard`, {
-      auth: {
-        sessionId,
-        role: 'dashboard',
-        clientVersion: PROTOCOL_VERSION,
-        ...(token !== undefined ? { token } : {}),
-      },
-      reconnection: true,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 30_000,
-      reconnectionAttempts: 30,
-      randomizationFactor: 0.5,
-    }) as DashboardSocket
-    socketRef.current = socket
-    setBoundSocket({ sessionId, socket })
-    const isCurrentSocket = (): boolean => socketRef.current === socket
-    let plannedRestartUntil = 0
-
-    const noteHostRestart = (event: HostRestartEvent): void => {
-      if (!isCurrentSocket()) return
-      if (event.phase === 'restarting') {
-        plannedRestartUntil = Date.now() + 120_000
+    let disposed = false
+    let socket: DashboardSocket | null = null
+    const connect = async (): Promise<void> => {
+      if (!cached && cache?.hydrate) {
+        cached = await cache.hydrate(sessionId)
+        if (disposed) return
+        if (cached) {
+          cacheDraft = cached
+          setState(cached.state)
+          setConfig(cached.config)
+          setContextUsageSnapshot(cached.contextSnapshot)
+          configRef.current = cached.config
+          setTimeline(cached.timeline)
+          setQueuedMessages(cached.queuedMessages)
+          setLastError(cached.lastError)
+          setParentSessionId(cached.parentSessionId)
+          setParentCursor(cached.parentCursor)
+          setSelectedModel(cached.selectedModel)
+          setHydratedSessionId(sessionId)
+        }
       }
+
+      socket = io(`${host}/dashboard`, {
+        auth: {
+          sessionId,
+          role: 'dashboard',
+          clientVersion: PROTOCOL_VERSION,
+          ...(token !== undefined ? { token } : {}),
+        },
+        reconnection: true,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 30_000,
+        reconnectionAttempts: 30,
+        randomizationFactor: 0.5,
+      }) as DashboardSocket
+      socketRef.current = socket
+      setBoundSocket({ sessionId, socket })
+      bindSocket(socket)
     }
+
+    const bindSocket = (socket: DashboardSocket): void => {
+      const isCurrentSocket = (): boolean => socketRef.current === socket
+      let plannedRestartUntil = 0
+
+      const noteHostRestart = (event: HostRestartEvent): void => {
+        if (!isCurrentSocket()) return
+        if (event.phase === 'restarting') {
+          plannedRestartUntil = Date.now() + 120_000
+        }
+      }
 
     socket.on('session:ready', (p) => {
       if (!isCurrentSocket()) return
@@ -494,15 +520,19 @@ export function useSession({
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       setRemoteCompactStatus(p)
     })
+    }
+
+    void connect()
 
     return () => {
+      disposed = true
       if (streamRafRef.current !== null) {
         cancelAnimationFrame(streamRafRef.current)
         streamRafRef.current = null
       }
       streamBufferRef.current = ''
-      socket.close()
-      socketRef.current = null
+      socket?.close()
+      if (socketRef.current === socket) socketRef.current = null
       setBoundSocket((current) => current?.socket === socket ? null : current)
     }
   }, [host, sessionId, token, cache])

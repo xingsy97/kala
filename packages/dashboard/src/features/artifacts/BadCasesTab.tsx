@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation } from '@tanstack/react-query'
+import { saveFile } from '../../lib/save-file.js'
 
 type FailureCategory =
   | 'patch-apply-failure'
@@ -194,7 +195,7 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
       return { ...payload, runId: vars.runId, format: vars.format }
     },
     onSuccess: (payload) => {
-      downloadBlob(new Blob([payload.content], { type: 'application/x-ndjson' }), `badcases-${payload.runId}-${payload.format}.jsonl`)
+      void saveFile({ blob: new Blob([payload.content], { type: 'application/x-ndjson' }), suggestedName: `badcases-${payload.runId}-${payload.format}.jsonl` })
     },
     onError: (err) => {
       setError(err instanceof Error ? err.message : String(err))
@@ -227,7 +228,7 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
       setRolloutDone(null)
     },
     onSuccess: (payload) => {
-      downloadBlob(new Blob([payload.content], { type: 'application/x-ndjson' }), `rollouts-${payload.runId}-${payload.target}.jsonl`)
+      void saveFile({ blob: new Blob([payload.content], { type: 'application/x-ndjson' }), suggestedName: `rollouts-${payload.runId}-${payload.target}.jsonl` })
       setRolloutDone(payload.rolloutCount)
     },
     onError: (err) => {
@@ -462,14 +463,4 @@ export function BadCasesTab({ initialRunId = '' }: BadCasesTabProps): JSX.Elemen
       </div>
     </div>
   )
-}
-
-export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.rel = 'noopener'
-  link.click()
-  URL.revokeObjectURL(url)
 }

@@ -12,6 +12,7 @@ import {
 } from 'react'
 import {
   Archive,
+  ArrowRight,
   Ban,
   Check,
   CheckCircle2,
@@ -248,8 +249,23 @@ export function ChatPanel({
     let prevRole: 'user' | 'assistant' | 'tool' | null = null
     let i = 0
     while (i < rawItems.length) {
-      const transcriptGroup = collectTranscriptToolActivity(rawItems, i, mi, resultsByCallId)
+      const transcriptGroup = collectTranscriptToolActivity(
+        rawItems,
+        i,
+        mi,
+        resultsByCallId,
+        {
+          absorbReasoning: toolCardMode === 'dots',
+          preserveAgentCalls: Boolean(parentSessionId),
+        },
+      )
       if (transcriptGroup) {
+        for (const entry of transcriptGroup.before) {
+          kept.push(entry.item)
+          mapping.push(entry.messageIndex)
+          hideHeader.push(prevRole === 'assistant')
+          prevRole = 'assistant'
+        }
         kept.push({
           kind: 'tool_activity',
           group: transcriptGroup.group,
@@ -260,9 +276,14 @@ export function ChatPanel({
         })
         mapping.push(transcriptGroup.firstMessageIndex)
         hideHeader.push(prevRole === 'assistant')
+        prevRole = 'assistant'
+        for (const entry of transcriptGroup.after) {
+          kept.push(entry.item)
+          mapping.push(entry.messageIndex)
+          hideHeader.push(true)
+        }
         for (const call of transcriptGroup.group.calls) groupedIds.add(call.callId)
         mi = transcriptGroup.lastMessageIndex
-        prevRole = 'assistant'
         i = transcriptGroup.nextIndex
         continue
       }
@@ -303,7 +324,7 @@ export function ChatPanel({
       hideHeader.push(false)
     }
     return { transcriptItems: kept, messageIndexByItem: mapping, hideHeaderByItem: hideHeader, groupedCallIds: groupedIds }
-  }, [rawItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus])
+  }, [rawItems, intraMessageGroupedCallIds, resultsByCallId, compactStatus, parentSessionId, toolCardMode])
 
   // Translate message-index highlight into item-index so VirtualTranscript
   // can scroll to the right row. -1 means "no highlight" or unresolved.
@@ -561,8 +582,15 @@ type TranscriptToolActivity = {
   firstMessageIndex: number
   lastMessageIndex: number
   nextIndex: number
+  before: TranscriptToolActivityMessage[]
+  after: TranscriptToolActivityMessage[]
   seq?: number
   ts?: string
+}
+
+type TranscriptToolActivityMessage = {
+  item: Extract<TranscriptItem, { kind: 'message' }>
+  messageIndex: number
 }
 
 function collectTranscriptToolActivity(
@@ -570,9 +598,21 @@ function collectTranscriptToolActivity(
   startIndex: number,
   previousMessageIndex: number,
   resultsByCallId: ReadonlyMap<string, ToolResultContent>,
+  options: { absorbReasoning: boolean; preserveAgentCalls: boolean },
 ): TranscriptToolActivity | null {
+  if (options.absorbReasoning) {
+    return collectDotsTranscriptToolActivity(
+      items,
+      startIndex,
+      previousMessageIndex,
+      resultsByCallId,
+      options.preserveAgentCalls,
+    )
+  }
+
   const start = items[startIndex]
-  if (!isPureToolCallAssistantItem(start)) return null
+  const startCalls = toolActivityAssistantCalls(start, false)
+  if (!startCalls || startCalls.length === 0) return null
 
   const calls: ToolCallContent[] = []
   let i = startIndex
@@ -585,17 +625,18 @@ function collectTranscriptToolActivity(
 
   while (i < items.length) {
     const assistantItem = items[i]
-    if (!isPureToolCallAssistantItem(assistantItem)) break
+    const itemCalls = toolActivityAssistantCalls(assistantItem, false)
+    if (!itemCalls || !assistantItem || assistantItem.kind !== 'message') break
+    if (options.preserveAgentCalls && itemCalls.some((call) => call.name === 'agent')) break
     messageIndex += 1
     if (firstMessageIndex === null) firstMessageIndex = messageIndex
     lastMessageIndex = messageIndex
     if (firstSeq === undefined) firstSeq = assistantItem.seq
     if (firstTs === undefined) firstTs = assistantItem.ts
 
-    for (const content of assistantItem.message.content) {
-      if (content.type !== 'tool_call') continue
-      calls.push(content)
-      knownCallIds.add(content.callId)
+    for (const call of itemCalls) {
+      calls.push(call)
+      knownCallIds.add(call.callId)
     }
     i += 1
 
@@ -606,24 +647,148 @@ function collectTranscriptToolActivity(
     }
   }
 
-  if (calls.length < 2 || firstMessageIndex === null) return null
+  if (
+    calls.length === 0
+    || firstMessageIndex === null
+    || (!options.absorbReasoning && calls.length < 2)
+  ) return null
 
   return {
-    group: makeToolCallGroup(calls, resultsByCallId, true),
+    group: makeToolCallGroup(calls, resultsByCallId, calls.length > 1),
     firstMessageIndex,
     lastMessageIndex,
     nextIndex: i,
+    before: [],
+    after: [],
     ...(firstSeq !== undefined ? { seq: firstSeq } : {}),
     ...(firstTs !== undefined ? { ts: firstTs } : {}),
   }
 }
 
-function isPureToolCallAssistantItem(
+function collectDotsTranscriptToolActivity(
+  items: readonly TranscriptItem[],
+  startIndex: number,
+  previousMessageIndex: number,
+  resultsByCallId: ReadonlyMap<string, ToolResultContent>,
+  preserveAgentCalls: boolean,
+): TranscriptToolActivity | null {
+  const start = items[startIndex]
+  if (!isDotsAssistantMessageWithToolCalls(start, preserveAgentCalls)) return null
+
+  const calls: ToolCallContent[] = []
+  const knownCallIds = new Set<string>()
+  const before: TranscriptToolActivityMessage[] = []
+  const after: TranscriptToolActivityMessage[] = []
+  let foundFirstCall = false
+  let i = startIndex
+  let messageIndex = previousMessageIndex
+  let firstMessageIndex: number | null = null
+  let lastMessageIndex = previousMessageIndex
+  let firstSeq: number | undefined
+  let firstTs: string | undefined
+
+  while (i < items.length) {
+    const item = items[i]
+    if (!item || item.kind !== 'message') break
+
+    if (item.message.role === 'assistant') {
+      if (preserveAgentCalls && item.message.content.some(
+        (content) => content.type === 'tool_call' && content.name === 'agent',
+      )) break
+
+      messageIndex += 1
+      lastMessageIndex = messageIndex
+      const beforeContent: MessageContent[] = []
+      const afterContent: MessageContent[] = []
+      for (const content of item.message.content) {
+        if (content.type === 'tool_call') {
+          if (firstMessageIndex === null) {
+            firstMessageIndex = messageIndex
+            firstSeq = item.seq
+            firstTs = item.ts
+          }
+          foundFirstCall = true
+          calls.push(content)
+          knownCallIds.add(content.callId)
+          continue
+        }
+        if (content.type === 'thinking') continue
+        ;(foundFirstCall ? afterContent : beforeContent).push(content)
+      }
+      if (beforeContent.length > 0) {
+        before.push({ item: withMessageContent(item, beforeContent), messageIndex })
+      }
+      if (afterContent.length > 0) {
+        after.push({ item: withMessageContent(item, afterContent), messageIndex })
+      }
+      i += 1
+      continue
+    }
+
+    if (item.message.role === 'tool' && isToolResultItemForKnownCalls(item, knownCallIds)) {
+      messageIndex += 1
+      lastMessageIndex = messageIndex
+      i += 1
+      continue
+    }
+
+    break
+  }
+
+  if (calls.length === 0 || firstMessageIndex === null) return null
+  return {
+    group: makeToolCallGroup(calls, resultsByCallId, calls.length > 1),
+    firstMessageIndex,
+    lastMessageIndex,
+    nextIndex: i,
+    before,
+    after,
+    ...(firstSeq !== undefined ? { seq: firstSeq } : {}),
+    ...(firstTs !== undefined ? { ts: firstTs } : {}),
+  }
+}
+
+function isDotsAssistantMessageWithToolCalls(
   item: TranscriptItem | undefined,
+  preserveAgentCalls: boolean,
 ): item is Extract<TranscriptItem, { kind: 'message' }> {
   if (!item || item.kind !== 'message' || item.message.role !== 'assistant') return false
-  if (item.message.content.length === 0) return false
-  return item.message.content.every((content) => content.type === 'tool_call')
+  return item.message.content.some(
+    (content) => content.type === 'tool_call' && (!preserveAgentCalls || content.name !== 'agent'),
+  )
+}
+
+function withMessageContent(
+  item: Extract<TranscriptItem, { kind: 'message' }>,
+  content: MessageContent[],
+): Extract<TranscriptItem, { kind: 'message' }> {
+  return {
+    ...item,
+    message: { ...item.message, content },
+  }
+}
+
+function toolActivityAssistantCalls(
+  item: TranscriptItem | undefined,
+  absorbReasoning: boolean,
+): ToolCallContent[] | null {
+  if (!item || item.kind !== 'message' || item.message.role !== 'assistant') return null
+  if (item.message.content.length === 0) return null
+  const calls: ToolCallContent[] = []
+  for (const content of item.message.content) {
+    if (content.type === 'tool_call') {
+      calls.push(content)
+      continue
+    }
+    if (content.type === 'text' && content.text.trim().length === 0) {
+      continue
+    }
+    if (content.type === 'thinking' && (absorbReasoning || content.text.trim().length === 0)) {
+      continue
+    }
+    return null
+  }
+  return calls
 }
 
 function isToolResultItemForKnownCalls(
@@ -654,6 +819,48 @@ function ToolActivityTranscriptRow({
   liveToolActivityTailCount: number
   toolCardMode: ToolCardMode
 }): JSX.Element {
+  if (toolCardMode === 'dots') {
+    return (
+      <div
+        id={`msg-${item.firstMessageIndex}`}
+        data-message-index={item.firstMessageIndex}
+        className={cn(
+          'group relative flex min-w-0 gap-3',
+          highlighted ? 'rounded-2xl bg-amber-50/60 p-2 -mx-2 dark:bg-amber-950/20' : '',
+        )}
+      >
+        <div className="flex w-7 flex-none items-start justify-center pt-0.5">
+          {hideHeader ? (
+            <GripHandle />
+          ) : (
+            <div
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase tracking-wider text-foreground"
+              aria-label="Assistant"
+            >
+              AK
+            </div>
+          )}
+        </div>
+        <div className="relative min-w-0 flex-1">
+          {hideHeader ? null : (
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Assistant
+            </div>
+          )}
+          <InlineTimestamp ts={item.ts} className="absolute right-0 top-0 text-muted-foreground" />
+          <ToolCallGroupBlock
+            group={item.group}
+            messageIndex={item.firstMessageIndex}
+            approvalByCallId={approvalByCallId}
+            onApprovalDecision={onApprovalDecision}
+            liveToolActivityTailCount={liveToolActivityTailCount}
+            toolCardMode={toolCardMode}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div
       id={`msg-${item.firstMessageIndex}`}
@@ -2580,7 +2787,8 @@ function ToolCallGroupBlock({
   const visibleTailCallIds = autoRevealTail ? new Set(unresolvedTailCallIds) : null
   const showRows = open || anyPending || autoRevealTail
   const dots = toolActivityDots(group, rows, approvalByCallId)
-  const visibleDots = prioritizedToolActivityDots(dots, 20)
+  const visibleDots = prioritizedToolActivityDots(dots, 7)
+  const collapsedDots = toolCardMode === 'dots' && !open
 
   const toggleOpen = (): void => {
     setOpen((v) => {
@@ -2594,54 +2802,79 @@ function ToolCallGroupBlock({
     <div
       id={`msg-${messageIndex}-group-${group.firstCallId}`}
       className={cn(
-        'min-w-0 max-w-full overflow-hidden rounded-lg transition-colors',
-        anyPending
+        'min-w-0 max-w-full transition-colors',
+        collapsedDots
+          ? 'overflow-visible'
+          : 'overflow-hidden rounded-lg',
+        !collapsedDots && (anyPending
           ? 'bg-amber-50/60 ring-1 ring-amber-400/60 dark:bg-amber-950/20 dark:ring-amber-500/40'
-          : 'bg-muted/40',
+          : 'bg-muted/40'),
       )}
       data-testid={`tool-call-group-${group.firstCallId}`}
     >
-      {toolCardMode === 'dots' && !open ? (
+      {collapsedDots ? (
         <div
-          className={cn(
-            'grid min-h-9 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-foreground',
-            anyPending ? 'bg-amber-100/20 dark:bg-amber-950/20' : '',
-          )}
+          className="flex h-6 w-fit max-w-full min-w-0 items-center sm:h-5"
           data-testid={`tool-card-dots-${group.firstCallId}`}
+          aria-label={`${group.calls.length} tool calls`}
         >
-          <button type="button" onClick={toggleOpen} className="flex min-w-0 items-center gap-2 text-left">
-            <Wrench className={cn('h-3.5 w-3.5 flex-none', anyPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')} />
-            <span className="truncate text-[11px] font-medium">Tool activity</span>
-            <span className="flex-none font-mono text-[10px] text-muted-foreground">{group.calls.length}</span>
-          </button>
-          <div className="flex min-w-0 items-center justify-end gap-1" aria-label={`${group.calls.length} tool calls`}>
-            {visibleDots.map((dot) => (
-              <button
-                key={dot.callId}
-                type="button"
-                title={dot.title}
-                aria-label={dot.title}
-                data-testid={`tool-card-dot-${dot.callId}`}
-                onClick={() => {
-                  setOpen(true)
-                  setExpandedCallId(dot.callId)
-                }}
-                className={cn(
-                  'h-2.5 w-2.5 flex-none rounded-full ring-offset-1 ring-offset-background transition-transform hover:scale-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  dot.status === 'succeeded' && 'bg-emerald-500',
-                  dot.status === 'failed' && 'bg-rose-500',
-                  dot.status === 'approval' && 'animate-pulse bg-amber-400 ring-1 ring-amber-500/50',
-                  dot.status === 'running' && 'animate-pulse border border-foreground/70 bg-foreground/20',
-                )}
-              />
+          <div className="flex min-w-0 flex-none items-center">
+            {visibleDots.map((dot, index) => (
+              <div key={dot.callId} className="flex flex-none items-center">
+                {index > 0 ? (
+                  <span
+                    className="h-px w-2 bg-border/70 sm:w-3"
+                    data-testid="tool-activity-connector"
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  title={dot.title}
+                  aria-label={dot.title}
+                  data-testid={`tool-card-dot-${dot.callId}`}
+                  onClick={() => {
+                    setOpen(true)
+                    setExpandedCallId(dot.callId)
+                  }}
+                  className="group/dot flex h-6 w-5 flex-none items-center justify-center rounded-full ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-5 sm:w-4"
+                >
+                  <span
+                    className={cn(
+                      'h-2 w-2 rounded-full transition-transform group-hover/dot:scale-150',
+                      dot.status === 'succeeded' && 'bg-emerald-500',
+                      dot.status === 'failed' && 'bg-rose-500',
+                      dot.status === 'approval' && 'animate-pulse bg-amber-400 ring-1 ring-amber-500/50',
+                      dot.status === 'running' && 'animate-pulse bg-foreground/20 ring-1 ring-inset ring-foreground/70',
+                    )}
+                  />
+                </button>
+              </div>
             ))}
             {dots.length > visibleDots.length ? (
-              <span className="ml-0.5 flex-none font-mono text-[10px] text-muted-foreground">+{dots.length - visibleDots.length}</span>
+              <>
+                <span className="h-px w-2 bg-border/70 sm:w-3" aria-hidden="true" />
+                <button
+                  type="button"
+                  onClick={toggleOpen}
+                  className="flex h-6 w-5 flex-none items-center justify-center rounded-full ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-5 sm:w-4"
+                  title={`${dots.length - visibleDots.length} additional tool calls`}
+                  aria-label={`${dots.length - visibleDots.length} additional tool calls`}
+                >
+                  <span className="h-2.5 w-2.5 rounded-full bg-background ring-1 ring-inset ring-muted-foreground/70 transition-transform hover:scale-125" />
+                </button>
+              </>
             ) : null}
-            <button type="button" onClick={toggleOpen} className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Expand tool activity">
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
           </div>
+          <button
+            type="button"
+            onClick={toggleOpen}
+            className="ml-1 flex h-6 w-5 flex-none items-center justify-center rounded text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-5"
+            aria-label="Expand tool activity"
+            data-testid="tool-activity-direction"
+          >
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </div>
       ) : (
       <button

@@ -112,6 +112,8 @@ import {
   PREF_CHAT_LINE_HEIGHT,
   PREF_CHAT_MATH_SCALE,
   PREF_CHAT_SIDE_SPACE,
+  PREF_APP_BADGE_ENABLED,
+  PREF_DURABLE_SESSION_CACHE_ENABLED,
   PREF_EXPLORER_OPEN,
   PREF_FILE_EXPLORER_FONT_SIZE,
   PREF_INSPECTOR_OPEN,
@@ -120,19 +122,24 @@ import {
   PREF_SESSION_EXPLORER_SECTION_OPEN,
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_TOPBAR_OPEN,
+  PREF_KEEP_SCREEN_AWAKE,
   useBooleanPref,
   useNumberPref,
 } from './lib/prefs.js'
 import {
   DEFAULT_SESSION_VIEW_CACHE_MAX_MB,
   PREF_SESSION_VIEW_CACHE_MAX_MB,
-  createSessionViewCache,
   sessionViewCacheMaxBytesFromMb,
 } from './session-view-cache.js'
+import { createDurableSessionViewCache, sessionCacheNamespace } from './durable-session-cache.js'
+import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
 import { useRunningTitleIndicator } from './lib/running-title.js'
 import { useTheme, type Theme } from './lib/theme.js'
 import { useVisualViewportHeight } from './lib/useVisualViewportHeight.js'
+import { deriveAppBadgeCount, updateAppBadge } from './lib/app-badge.js'
+import { useScreenWakeLock } from './lib/wake-lock.js'
+import { useDeferredDispose } from './lib/use-deferred-dispose.js'
 import {
   useBackgroundShellToasts,
   useInactiveSessionSummaryToasts,
@@ -255,16 +262,27 @@ export function App(): JSX.Element {
   const [chatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
   const [chatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
   const [sessionViewCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
+  const [durableSessionCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
+  const [appBadgeEnabled] = useBooleanPref(PREF_APP_BADGE_ENABLED, true)
+  const [keepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
   const sessionExplorerFontSizePx = SESSION_EXPLORER_FONT_SIZE_PX[sessionExplorerFontSize] ?? SESSION_EXPLORER_FONT_SIZE_PX[DEFAULT_SESSION_EXPLORER_FONT_SIZE]
   const fileExplorerFontSizePx = FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? FILE_EXPLORER_FONT_SIZE_PX[DEFAULT_FILE_EXPLORER_FONT_SIZE]
-  const sessionViewCacheRef = useRef(createSessionViewCache({ maxBytes: sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb) }))
   const cachedSessionIdsRef = useRef<ReadonlySet<string>>(new Set())
+  const [hostEndpoint, setHostEndpoint] = useState<ResolvedHostEndpoint>(() => resolveHostEndpoint())
+  const cacheNamespace = sessionCacheNamespace(hostEndpoint.url, PROTOCOL_VERSION)
+  const sessionViewCache = useMemo(() => createDurableSessionViewCache({
+    namespace: cacheNamespace,
+    maxBytes: sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb),
+    enabled: durableSessionCacheEnabled,
+  }), [cacheNamespace])
   useEffect(() => {
-    sessionViewCacheRef.current.setMaxBytes(sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb))
-  }, [sessionViewCacheMaxMb])
+    sessionViewCache.setMaxBytes(sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb))
+    sessionViewCache.setEnabled(durableSessionCacheEnabled)
+  }, [durableSessionCacheEnabled, sessionViewCache, sessionViewCacheMaxMb])
+  useDeferredDispose(sessionViewCache, (cache) => cache.close())
   const getCachedSessionView = useCallback(
-    (sessionId: string) => sessionViewCacheRef.current.get(sessionId),
-    [],
+    (sessionId: string) => sessionViewCache.get(sessionId),
+    [sessionViewCache],
   )
   const wideLayout = useMinWidth(1024)
   const isMobile = useIsMobile()
@@ -322,7 +340,6 @@ export function App(): JSX.Element {
     }
   }, [config])
 
-  const [hostEndpoint, setHostEndpoint] = useState<ResolvedHostEndpoint>(() => resolveHostEndpoint())
   useEffect(() => {
     const refresh = () => setHostEndpoint(resolveHostEndpoint())
     window.addEventListener('agent-kernel:host-endpoint-changed', refresh)
@@ -336,7 +353,7 @@ export function App(): JSX.Element {
   const session = useSession({
     host: hostEndpoint.url,
     sessionId: config.sessionId,
-    cache: sessionViewCacheRef.current,
+    cache: sessionViewCache,
     ...(config.token !== undefined ? { token: config.token } : {}),
     onForked: (p) => {
       setForkingFromSeq(null)
@@ -356,25 +373,57 @@ export function App(): JSX.Element {
     (s) => s.sessionId === config.sessionId,
   )
   const activeSessionId = currentSession?.sessionId ?? null
+  const activeSessionRunning = isSessionRunning({
+    status: session.state?.status ?? currentSession?.status,
+    pendingCalls: session.state?.pendingCalls,
+    streamingActive: session.streamingText.length > 0,
+    awaitingAck,
+    compactRunning: compactStatus.kind === 'running',
+  })
+  useScreenWakeLock(keepScreenAwake && activeSessionRunning)
+
+  useEffect(() => {
+    const count = appBadgeEnabled ? deriveAppBadgeCount({
+      sessions: control.sessions,
+      activePendingApprovals: session.pendingApprovals.length,
+      activeSessionHasError: Boolean(session.lastError),
+      disconnected: activeSessionId !== null && (session.status === 'disconnected' || session.status === 'error'),
+    }) : 0
+    void updateAppBadge(count)
+  }, [activeSessionId, appBadgeEnabled, control.sessions, session.lastError, session.pendingApprovals.length, session.status])
+  useEffect(() => {
+    const clearBadge = (): void => { void updateAppBadge(0) }
+    window.addEventListener('pagehide', clearBadge)
+    return () => {
+      window.removeEventListener('pagehide', clearBadge)
+      clearBadge()
+    }
+  }, [])
+
+  useEffect(() => {
+    const flushCache = (): void => { void sessionViewCache.flush() }
+    window.addEventListener('pagehide', flushCache)
+    return () => window.removeEventListener('pagehide', flushCache)
+  }, [sessionViewCache])
 
   useEffect(() => {
     if (!control.sessionsLoaded) return
     const nextIds = new Set(control.sessions.map((s) => s.sessionId))
-    for (const removedId of removedSessionIds(cachedSessionIdsRef.current, nextIds)) sessionViewCacheRef.current.delete(removedId)
+    for (const removedId of removedSessionIds(cachedSessionIdsRef.current, nextIds)) sessionViewCache.delete(removedId)
     cachedSessionIdsRef.current = nextIds
-  }, [control.sessions, control.sessionsLoaded])
+  }, [control.sessions, control.sessionsLoaded, sessionViewCache])
 
   useEffect(() => {
     const socket = session.socket
     if (!socket) return
     const onEventAppended = (payload: EventAppendedEvent): void => {
-      if (payload.event.kind === 'clear') sessionViewCacheRef.current.delete(payload.sessionId)
+      if (payload.event.kind === 'clear') sessionViewCache.delete(payload.sessionId)
     }
     socket.on('event:appended', onEventAppended)
     return () => {
       socket.off('event:appended', onEventAppended)
     }
-  }, [session.socket])
+  }, [session.socket, sessionViewCache])
 
   useEffect(() => {
     setCompactStatus({ kind: 'idle' })
@@ -628,7 +677,7 @@ export function App(): JSX.Element {
   }, [])
   const clearCurrentSession = (): void => {
     if (!session.socket || config.sessionId === null) return
-    sessionViewCacheRef.current.delete(config.sessionId)
+    sessionViewCache.delete(config.sessionId)
     clearSession(session.socket, config.sessionId)
   }
   const pickWorkspaceForNew = async (
@@ -688,7 +737,7 @@ export function App(): JSX.Element {
   const deleteSessionAt = useCallback((sessionId: string, options: { cascade?: boolean } = {}): void => {
     if (!controlSocket) return
     for (const id of sessionIdsForCacheInvalidation(controlSessionsRef.current, sessionId, Boolean(options.cascade))) {
-      sessionViewCacheRef.current.delete(id)
+      sessionViewCache.delete(id)
     }
     deleteSession(controlSocket, sessionId, options)
     if (sessionId === config.sessionId) {
@@ -701,7 +750,7 @@ export function App(): JSX.Element {
         explicit: false,
       }))
     }
-  }, [config.sessionId, controlSocket])
+  }, [config.sessionId, controlSocket, sessionViewCache])
   const renameSessionAt = useCallback((sessionId: string, label: string): void => {
     if (!controlSocket) return
     renameSession(controlSocket, sessionId, label)
@@ -1932,6 +1981,7 @@ export function App(): JSX.Element {
             onOpenChange={setSettingsOpen}
             onModelsChanged={reloadModels}
             executors={control.executors}
+            sessionCache={sessionViewCache}
           />
         </Suspense>
       ) : null}

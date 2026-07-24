@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -277,6 +277,12 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByTestId('tool-card-dots-dot-1')).toBeTruthy()
+    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.queryByText('2')).toBeNull()
+    expect(screen.getByLabelText('Assistant')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dots-dot-1').className).not.toMatch(/bg-muted/)
+    expect(screen.getAllByTestId('tool-activity-connector')).toHaveLength(1)
+    expect(screen.getByTestId('tool-activity-direction')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).toContain('read · /repo/a.ts · succeeded')
     expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).toContain('bash · pnpm test · failed')
     fireEvent.click(screen.getByTestId('tool-card-dot-dot-2'))
@@ -1497,6 +1503,146 @@ describe('ChatPanel', () => {
     expect(screen.getByText('2 ops')).toBeTruthy()
     expect(screen.getByText(/grep 1, read 1/)).toBeTruthy()
     expect(screen.queryByText('Tool result')).toBeNull()
+  })
+
+  it('merges reasoning-bearing tool turns into one dots rail without hiding reasoning in Standard mode', () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: [
+          { type: 'thinking' as const, text: 'inspect the first file' },
+          { type: 'tool_call' as const, callId: 'reason-dot-1', name: 'read', input: { path: '/repo/a.ts' } },
+        ],
+      },
+      {
+        role: 'tool' as const,
+        content: [{ type: 'tool_result' as const, callId: 'reason-dot-1', ok: true, content: 'a' }],
+      },
+      {
+        role: 'assistant' as const,
+        content: [
+          { type: 'thinking' as const, text: 'inspect the second file' },
+          { type: 'tool_call' as const, callId: 'reason-dot-2', name: 'read', input: { path: '/repo/b.ts' } },
+        ],
+      },
+      {
+        role: 'tool' as const,
+        content: [{ type: 'tool_result' as const, callId: 'reason-dot-2', ok: true, content: 'b' }],
+      },
+    ]
+
+    const { rerender } = render(<DashboardChatPanel messages={messages} />)
+
+    expect(screen.getAllByTestId(/tool-card-dot-reason-dot-/)).toHaveLength(2)
+    expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
+    expect(screen.queryByText('Tool activity')).toBeNull()
+    expect(screen.queryByText('Thinking')).toBeNull()
+
+    rerender(<DashboardChatPanel messages={messages} toolCardMode="standard" />)
+
+    expect(screen.getAllByText('Thinking')).toHaveLength(2)
+    expect(screen.getAllByTestId(/tool-call-group-reason-dot-/)).toHaveLength(2)
+  })
+
+  it('keeps one dots rail when standalone reasoning separates tool turns', () => {
+    render(
+      <DashboardChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [{ type: 'tool_call', callId: 'rail-1', name: 'read', input: { path: '/repo/a.ts' } }],
+          },
+          {
+            role: 'tool',
+            content: [{ type: 'tool_result', callId: 'rail-1', ok: true, content: 'a' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'thinking', text: 'compare the next file' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'tool_call', callId: 'rail-2', name: 'read', input: { path: '/repo/b.ts' } }],
+          },
+          {
+            role: 'tool',
+            content: [{ type: 'tool_result', callId: 'rail-2', ok: true, content: 'b' }],
+          },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', text: 'verify the result' },
+              { type: 'tool_call', callId: 'rail-3', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [{ type: 'tool_result', callId: 'rail-3', ok: true, content: 'passed' }],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
+    expect(screen.getAllByTestId(/tool-card-dot-rail-/)).toHaveLength(3)
+    expect(screen.queryByText('Thinking')).toBeNull()
+  })
+
+  it('keeps one dots rail when visible assistant narration separates tool turns', () => {
+    render(
+      <DashboardChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'First inspect the workspace.' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'tool_call', callId: 'narrated-1', name: 'read', input: { path: '/repo' } }],
+          },
+          {
+            role: 'tool',
+            content: [{ type: 'tool_result', callId: 'narrated-1', ok: true, content: 'files' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Now run and edit a file.' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'tool_call', callId: 'narrated-2', name: 'bash', input: { command: 'pnpm test' } }],
+          },
+          {
+            role: 'tool',
+            content: [{ type: 'tool_result', callId: 'narrated-2', ok: true, content: 'passed' }],
+          },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'Apply the precise edit.' },
+              { type: 'tool_call', callId: 'narrated-3', name: 'replace_many_in_file', input: { path: '/repo/a.ts' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [{ type: 'tool_result', callId: 'narrated-3', ok: true, content: 'edited' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Everything is complete.' }],
+          },
+        ]}
+      />,
+    )
+
+    const rail = screen.getByTestId('tool-card-dots-narrated-1')
+    expect(screen.getAllByTestId(/tool-card-dots-/)).toHaveLength(1)
+    expect(within(rail).getAllByTestId(/tool-card-dot-narrated-/)).toHaveLength(3)
+    expect(screen.getByText('First inspect the workspace.')).toBeTruthy()
+    expect(screen.getByText('Now run and edit a file.')).toBeTruthy()
+    expect(screen.getByText('Apply the precise edit.')).toBeTruthy()
+    expect(screen.getByText('Everything is complete.')).toBeTruthy()
+    expect(screen.getAllByLabelText('Assistant')).toHaveLength(1)
   })
 
   it('renders structured tool results by default with a raw toggle', () => {

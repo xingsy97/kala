@@ -65,6 +65,9 @@ import {
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_SHOW_TOOL_CALL_TAB,
   PREF_TOPBAR_OPEN,
+  PREF_DURABLE_SESSION_CACHE_ENABLED,
+  PREF_APP_BADGE_ENABLED,
+  PREF_KEEP_SCREEN_AWAKE,
   useBooleanPref,
   useNumberPref,
 } from '../../lib/prefs.js'
@@ -73,6 +76,9 @@ import {
   PREF_SESSION_VIEW_CACHE_MAX_MB,
 } from '../../session-view-cache.js'
 import { useTheme } from '../../lib/theme.js'
+import type { DurableSessionViewCache } from '../../durable-session-cache.js'
+import { appBadgeSupported } from '../../lib/app-badge.js'
+import { wakeLockSupported } from '../../lib/wake-lock.js'
 import {
   BUILTIN_VSCODE_THEMES,
   builtinThemeForScheme,
@@ -108,6 +114,7 @@ type Props = {
   onOpenChange(open: boolean): void
   onModelsChanged?(): void
   executors?: readonly AttachedExecutor[]
+  sessionCache?: DurableSessionViewCache
 }
 
 function errorMessageFromBody(body: unknown): string | null {
@@ -134,7 +141,7 @@ const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: L
   { key: 'notifications', label: 'settings.sections.notifications.label', hint: 'settings.sections.notifications.hint', icon: Bell },
 ]
 
-export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [] }: Props): JSX.Element {
+export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [section, setSection] = useState<SectionKey>('connection')
@@ -206,7 +213,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
               ) : section === 'hooks' ? (
                 <HooksSection payload={payload} />
               ) : section === 'interface' ? (
-                <InterfaceSection />
+                <InterfaceSection sessionCache={sessionCache} />
               ) : section === 'deployment' ? (
                 <DeploymentSection payload={payload} executors={executors} />
               ) : section === 'notifications' ? (
@@ -1588,7 +1595,7 @@ command = "/usr/local/bin/lint-shell.sh"`}
   )
 }
 
-function InterfaceSection(): JSX.Element {
+function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessionViewCache }): JSX.Element {
   const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
@@ -1608,6 +1615,8 @@ function InterfaceSection(): JSX.Element {
   const [chatLineHeight, setChatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
   const [chatMathScale, setChatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
   const [sessionCacheMaxMb, setSessionCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
+  const [durableCacheEnabled, setDurableCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
+  const [keepScreenAwake, setKeepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
   const [theme, , setTheme, effectiveTheme] = useTheme()
   const [storedVSCodeTheme, setStoredVSCodeTheme] = useState<StoredVSCodeTheme | null>(() => readStoredVSCodeTheme())
   const currentThemeLabel = storedVSCodeTheme?.label ?? builtinThemeForScheme(effectiveTheme).label
@@ -1876,6 +1885,22 @@ function InterfaceSection(): JSX.Element {
             <span className="text-xs text-muted-foreground">MB</span>
           </div>
         </li>
+        <InterfaceToggle
+          label="Durable session cache"
+          description="Keep recently viewed session content in this browser for fast reloads. The host remains authoritative."
+          checked={durableCacheEnabled}
+          onChange={setDurableCacheEnabled}
+          testId="settings-toggle-durable-session-cache"
+        />
+        <SessionCacheManagement cache={sessionCache} enabled={durableCacheEnabled} />
+        <InterfaceToggle
+          label="Keep screen awake while running"
+          description={wakeLockSupported() ? 'Prevent screen sleep while the selected session is actively running.' : 'Screen Wake Lock is unavailable in this browser.'}
+          checked={keepScreenAwake && wakeLockSupported()}
+          onChange={setKeepScreenAwake}
+          testId="settings-toggle-keep-screen-awake"
+          disabled={!wakeLockSupported()}
+        />
       </ul>
     </div>
   )
@@ -2162,6 +2187,7 @@ function SegmentedNumberPref({
 
 function NotificationsSection(): JSX.Element {
   const { t } = useTranslation()
+  const [appBadgeEnabled, setAppBadgeEnabled] = useBooleanPref(PREF_APP_BADGE_ENABLED, true)
   return (
     <div>
       <SectionHeader
@@ -2171,9 +2197,64 @@ function NotificationsSection(): JSX.Element {
       <ul className="space-y-3 text-sm">
         <DesktopNotificationsSettings />
         <BackgroundPushSettings />
+        <InterfaceToggle
+          label="App badge"
+          description={appBadgeSupported() ? 'Show a quiet actionable count on the installed app icon.' : 'App badging is unavailable in this browser.'}
+          checked={appBadgeEnabled && appBadgeSupported()}
+          onChange={setAppBadgeEnabled}
+          testId="settings-toggle-app-badge"
+          disabled={!appBadgeSupported()}
+        />
       </ul>
     </div>
   )
+}
+
+function SessionCacheManagement({ cache, enabled }: { cache?: DurableSessionViewCache; enabled: boolean }): JSX.Element {
+  const [stats, setStats] = useState<{ sessions: number; estimatedBytes: number; maxBytes: number } | null>(null)
+  const [persistent, setPersistent] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const refresh = async (): Promise<void> => {
+    setStats(cache ? await cache.durableStats().catch(() => null) : null)
+    setPersistent(await navigator.storage?.persisted?.().catch(() => false) ?? null)
+  }
+  useEffect(() => { void refresh() }, [cache, enabled])
+
+  const clear = async (): Promise<void> => {
+    if (!cache) return
+    setBusy(true)
+    await cache.clearDurable()
+    await refresh()
+    setBusy(false)
+  }
+  const requestPersistence = async (): Promise<void> => {
+    if (!navigator.storage?.persist) return
+    setBusy(true)
+    setPersistent(await navigator.storage.persist().catch(() => false))
+    setBusy(false)
+  }
+
+  return (
+    <li className="rounded-md border border-border/50 bg-card/60 px-4 py-3" data-testid="settings-session-cache-management">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 text-xs text-muted-foreground">
+          <div>{enabled ? `${stats?.sessions ?? 0} cached sessions - ${formatBytes(stats?.estimatedBytes ?? 0)}` : 'Durable cache disabled'}</div>
+          <div className="mt-0.5">Browser storage: {persistent === null ? 'unknown' : persistent ? 'persistent' : 'evictable'}</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" className="h-8" disabled={busy || !navigator.storage?.persist} onClick={() => void requestPersistence()}>Keep cache</Button>
+          <Button type="button" size="sm" variant="outline" className="h-8" disabled={busy || !cache} onClick={() => void clear()}>Clear cache</Button>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function InterfaceToggle({
@@ -2182,12 +2263,14 @@ function InterfaceToggle({
   checked,
   onChange,
   testId,
+  disabled = false,
 }: {
   label: string
   description: string
   checked: boolean
   onChange(next: boolean): void
   testId: string
+  disabled?: boolean
 }): JSX.Element {
   return (
     <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
@@ -2195,7 +2278,7 @@ function InterfaceToggle({
         <div className="font-medium">{label}</div>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
-      <Toggle checked={checked} onChange={onChange} ariaLabel={label} testId={testId} />
+      <Toggle checked={checked} onChange={onChange} ariaLabel={label} testId={testId} disabled={disabled} />
     </li>
   )
 }

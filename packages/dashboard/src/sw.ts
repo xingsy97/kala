@@ -10,9 +10,8 @@
  * - Navigations fall back to index.html for SPA routes, but denylist all
  *   host RPC surfaces so the SW never intercepts socket.io upgrades or
  *   long-lived API calls.
- * - Runtime cache for read-only GET /api/** with NetworkFirst + 3s timeout,
- *   so a flaky link still shows the last-known dashboard state instead of a
- *   browser error page.
+ * - Host API, Socket.IO, and session data are always network-owned. The
+ *   service worker never turns stale runtime data into an apparent live view.
  * - Push handler (commit 4/5) will land alongside — this file is shared
  *   between "make it installable" and "make push work".
  *
@@ -22,14 +21,13 @@
 
 import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching'
 import { registerRoute, NavigationRoute } from 'workbox-routing'
-import { NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies'
+import { StaleWhileRevalidate } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: string; revision: string | null }> }
 
 const APP_SHELL_URL = '/index.html'
-const RUNTIME_API_CACHE = 'ak-api-readonly-v1'
 const RUNTIME_ICON_CACHE = 'ak-icons-v1'
 
 // Precache the app shell + hashed assets. `__WB_MANIFEST` is replaced by
@@ -59,25 +57,6 @@ const HOST_RPC_DENYLIST: RegExp[] = [
 registerRoute(
   new NavigationRoute(createHandlerBoundToURL(APP_SHELL_URL), {
     denylist: HOST_RPC_DENYLIST,
-  }),
-)
-
-// Read-only GET /api/** — NetworkFirst so live data wins, falling back to
-// cache during transient network failures. Non-GET (POST/PUT/DELETE) is
-// implicitly NetworkOnly because workbox strategies only match GET.
-registerRoute(
-  ({ url, request }) => request.method === 'GET' && url.pathname.startsWith('/api/'),
-  new NetworkFirst({
-    cacheName: RUNTIME_API_CACHE,
-    networkTimeoutSeconds: 3,
-    plugins: [
-      new CacheableResponsePlugin({ statuses: [200] }),
-      new ExpirationPlugin({
-        maxEntries: 200,
-        maxAgeSeconds: 60 * 60 * 24,
-        purgeOnQuotaError: true,
-      }),
-    ],
   }),
 )
 

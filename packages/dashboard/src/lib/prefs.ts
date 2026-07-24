@@ -57,6 +57,9 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   chatLineHeight: { key: 'ak-chat-line-height', type: 'number', defaultValue: 1, min: 0, max: 2 },
   chatMathScale: { key: 'ak-chat-math-scale', type: 'number', defaultValue: 2, min: 0, max: 4 },
   sessionViewCacheMaxMb: { key: 'ak-session-view-cache-max-mb', type: 'number', defaultValue: 500, min: 0, max: 4096 },
+  durableSessionCacheEnabled: { key: 'ak-durable-session-cache-enabled', type: 'boolean', defaultValue: true },
+  appBadgeEnabled: { key: 'ak-app-badge-enabled', type: 'boolean', defaultValue: true },
+  keepScreenAwake: { key: 'ak-keep-screen-awake', type: 'boolean', defaultValue: false },
   desktopNotificationsEnabled: { key: 'ak-desktop-notifications-enabled', type: 'boolean', defaultValue: false },
   desktopNotificationApproval: { key: 'ak-desktop-notification-approval-required', type: 'boolean', defaultValue: true },
   desktopNotificationWaiting: { key: 'ak-desktop-notification-waiting-for-user', type: 'boolean', defaultValue: true },
@@ -212,6 +215,9 @@ export const PREF_CHAT_CONTENT_WIDTH = DASHBOARD_PREFERENCES.chatContentWidth.ke
 export const PREF_CHAT_SIDE_SPACE = DASHBOARD_PREFERENCES.chatSideSpace.key
 export const PREF_CHAT_LINE_HEIGHT = DASHBOARD_PREFERENCES.chatLineHeight.key
 export const PREF_CHAT_MATH_SCALE = DASHBOARD_PREFERENCES.chatMathScale.key
+export const PREF_DURABLE_SESSION_CACHE_ENABLED = DASHBOARD_PREFERENCES.durableSessionCacheEnabled.key
+export const PREF_APP_BADGE_ENABLED = DASHBOARD_PREFERENCES.appBadgeEnabled.key
+export const PREF_KEEP_SCREEN_AWAKE = DASHBOARD_PREFERENCES.keepScreenAwake.key
 export const PREF_MODEL = DASHBOARD_PREFERENCES.model.key
 export const PREF_HOST_ENDPOINT = DASHBOARD_PREFERENCES.hostEndpoint.key
 export const PREF_THEME = DASHBOARD_PREFERENCES.theme.key
