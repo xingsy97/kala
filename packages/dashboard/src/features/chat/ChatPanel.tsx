@@ -46,7 +46,7 @@ import type {
   ToolCallContent,
   ToolResultContent,
 } from '@agent-kernel/kernel'
-import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
+import type { ApprovalRequiredEvent, ToolCardMode } from '@agent-kernel/shared'
 
 import { Button } from '../../components/ui/button.js'
 import {
@@ -76,7 +76,7 @@ import {
   makeToolCallGroup,
 } from './grouping.js'
 import { SubAgentCard } from './SubAgentCard.js'
-import { GroupSummaryRow, firstLine, pickRenderer, truncate, type SummaryRow } from './toolSummaries/index.js'
+import { GroupSummaryRow, firstLine, pickRenderer, truncate, type SummaryDelta, type SummaryRow } from './toolSummaries/index.js'
 import type { DashboardSocket } from '../../session.js'
 import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
@@ -113,6 +113,7 @@ type Props = {
   /** UI-level compaction operation status rendered inline at transcript tail. */
   compactStatus?: CompactStatus
   liveToolActivityTailCount?: number
+  toolCardMode?: ToolCardMode
   displayPrefs?: ChatDisplayPrefs
   onDismissCompactStatus?: () => void
   loading?: boolean
@@ -191,6 +192,7 @@ export function ChatPanel({
   scrollToBottomToken,
   compactStatus,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  toolCardMode = 'dots',
   displayPrefs,
   onDismissCompactStatus,
   loading = false,
@@ -345,6 +347,7 @@ export function ChatPanel({
             approvalByCallId={approvalByCallId}
             onApprovalDecision={onApprovalDecision}
             liveToolActivityTailCount={liveToolActivityTailCount}
+            toolCardMode={toolCardMode}
           />
         )
       }
@@ -374,6 +377,7 @@ export function ChatPanel({
           parentSessionId={parentSessionId}
           socket={socket ?? null}
           liveToolActivityTailCount={liveToolActivityTailCount}
+          toolCardMode={toolCardMode}
           assistantRerunTarget={assistantRerunTarget}
         />
       )
@@ -392,6 +396,7 @@ export function ChatPanel({
       socket,
       onDismissCompactStatus,
       liveToolActivityTailCount,
+      toolCardMode,
     ],
   )
 
@@ -601,8 +606,7 @@ function collectTranscriptToolActivity(
     }
   }
 
-  const toolNames = new Set(calls.map((call) => call.name))
-  if (calls.length < 2 || toolNames.size <= 1 || firstMessageIndex === null) return null
+  if (calls.length < 2 || firstMessageIndex === null) return null
 
   return {
     group: makeToolCallGroup(calls, resultsByCallId, true),
@@ -640,6 +644,7 @@ function ToolActivityTranscriptRow({
   approvalByCallId,
   onApprovalDecision,
   liveToolActivityTailCount,
+  toolCardMode,
 }: {
   item: Extract<RenderTranscriptItem, { kind: 'tool_activity' }>
   highlighted: boolean
@@ -647,6 +652,7 @@ function ToolActivityTranscriptRow({
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   liveToolActivityTailCount: number
+  toolCardMode: ToolCardMode
 }): JSX.Element {
   return (
     <div
@@ -682,6 +688,7 @@ function ToolActivityTranscriptRow({
           approvalByCallId={approvalByCallId}
           onApprovalDecision={onApprovalDecision}
           liveToolActivityTailCount={liveToolActivityTailCount}
+          toolCardMode={toolCardMode}
         />
       </div>
     </div>
@@ -947,6 +954,7 @@ function MessageRow({
   parentSessionId,
   socket,
   liveToolActivityTailCount,
+  toolCardMode,
   assistantRerunTarget,
 }: {
   index: number
@@ -965,6 +973,7 @@ function MessageRow({
   parentSessionId?: string
   socket?: DashboardSocket | null
   liveToolActivityTailCount: number
+  toolCardMode: ToolCardMode
   assistantRerunTarget?: MessageRerunTarget | null
 }): JSX.Element | null {
   const { t } = useTranslation()
@@ -1160,6 +1169,7 @@ function MessageRow({
                   approvalByCallId={approvalByCallId}
                   onApprovalDecision={onApprovalDecision}
                   liveToolActivityTailCount={liveToolActivityTailCount}
+                  toolCardMode={toolCardMode}
                 />
               )
             }
@@ -1852,6 +1862,7 @@ function ToolResultBlock({
 
   const displayContent =
     fullOutput.state === 'loaded' ? fullOutput.content : result.content
+  const displayOutput = parseToolResultDisplay(displayContent)
 
   return (
     <div className="min-w-0 max-w-full">
@@ -1915,15 +1926,600 @@ function ToolResultBlock({
               Failed to read full output: {fullOutput.error}
             </div>
           ) : null}
-          <ScrollArea>
-            <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
-              {displayContent}
-            </pre>
-          </ScrollArea>
+          <ToolResultContentView
+            content={displayOutput.content}
+            rawClassName="px-3 py-2"
+          />
+          {displayOutput.metadata ? (
+            <ToolResultMetadataFields metadata={displayOutput.metadata} />
+          ) : null}
         </div>
       ) : null}
     </div>
   )
+}
+
+type ToolResultDisplayMetadata = {
+  exitCode: string
+  duration: string
+}
+
+type ToolResultDisplay = {
+  content: string
+  metadata: ToolResultDisplayMetadata | null
+}
+
+const TOOL_RESULT_METADATA_RE = /(?:^|\n)--- exit code: ([^,\n]+), duration: ([^\n]+)\s*$/
+
+function parseToolResultDisplay(content: string): ToolResultDisplay {
+  const match = TOOL_RESULT_METADATA_RE.exec(content)
+  if (!match) return { content, metadata: null }
+  return {
+    content: content.slice(0, match.index).replace(/\n$/, ''),
+    metadata: { exitCode: match[1]!.trim(), duration: match[2]!.trim() },
+  }
+}
+
+function parseToolError(content: string): { code?: string; message: string } | null {
+  const trimmed = content.trim()
+  if (!trimmed) return null
+  const withoutPrefix = trimmed.replace(/^ERROR:\s*/i, '')
+  const parts = withoutPrefix.split(':').map((part) => part.trim()).filter(Boolean)
+  if (parts.length === 0) return null
+  const first = parts[0]
+  const second = parts[1]
+  const code = first && /^[A-Z][A-Z0-9_]+$/.test(first) ? first : undefined
+  if (!code) return { message: withoutPrefix }
+  const messageParts = second === code ? parts.slice(2) : parts.slice(1)
+  const message = messageParts.join(': ') || withoutPrefix.replace(new RegExp(`^${code}:\\s*`), '')
+  return { code, message: message || withoutPrefix }
+}
+
+type StructuredToolResultFile = {
+  path?: string
+  operation?: string
+  additions?: number
+  deletions?: number
+  diff?: string
+  bytes_before?: number
+  bytes_after?: number
+  replacements?: Array<{ index?: number; count?: number }>
+}
+
+type StructuredToolResult = {
+  ok?: boolean
+  summary?: string
+  files?: StructuredToolResultFile[]
+}
+
+function parseStructuredToolResult(content: string): StructuredToolResult | null {
+  const trimmed = content.trim()
+  if (!trimmed.startsWith('{')) return null
+  try {
+    const value = JSON.parse(trimmed) as unknown
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const record = value as Record<string, unknown>
+    const files = Array.isArray(record.files)
+      ? record.files.map(normalizeStructuredToolResultFile).filter((file): file is StructuredToolResultFile => file !== null)
+      : []
+    const hasRenderableFields =
+      typeof record.summary === 'string' ||
+      files.length > 0
+    if (!hasRenderableFields) return null
+    return {
+      ...(typeof record.ok === 'boolean' ? { ok: record.ok } : {}),
+      ...(typeof record.summary === 'string' ? { summary: record.summary } : {}),
+      ...(files.length > 0 ? { files } : {}),
+    }
+  } catch {
+    return null
+  }
+}
+
+function normalizeStructuredToolResultFile(value: unknown): StructuredToolResultFile | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const replacements = Array.isArray(record.replacements)
+    ? record.replacements.map(normalizeReplacement).filter((item): item is { index?: number; count?: number } => item !== null)
+    : undefined
+  const file: StructuredToolResultFile = {
+    ...(typeof record.path === 'string' ? { path: record.path } : {}),
+    ...(typeof record.operation === 'string' ? { operation: record.operation } : {}),
+    ...(isFiniteNumber(record.additions) ? { additions: record.additions } : {}),
+    ...(isFiniteNumber(record.deletions) ? { deletions: record.deletions } : {}),
+    ...(typeof record.diff === 'string' ? { diff: record.diff } : {}),
+    ...(isFiniteNumber(record.bytes_before) ? { bytes_before: record.bytes_before } : {}),
+    ...(isFiniteNumber(record.bytes_after) ? { bytes_after: record.bytes_after } : {}),
+    ...(replacements && replacements.length > 0 ? { replacements } : {}),
+  }
+  return Object.keys(file).length > 0 ? file : null
+}
+
+function normalizeReplacement(value: unknown): { index?: number; count?: number } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const replacement = {
+    ...(isFiniteNumber(record.index) ? { index: record.index } : {}),
+    ...(isFiniteNumber(record.count) ? { count: record.count } : {}),
+  }
+  return Object.keys(replacement).length > 0 ? replacement : null
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function ToolResultContentView({
+  content,
+  fallback,
+  rawClassName,
+}: {
+  content: string
+  fallback?: string
+  rawClassName?: string
+}): JSX.Element {
+  const [raw, setRaw] = useState(false)
+  const structuredResult = parseStructuredToolResult(content)
+  if (!structuredResult) {
+    return (
+      <ScrollArea>
+        <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
+          {fallback || content || '(no output)'}
+        </pre>
+      </ScrollArea>
+    )
+  }
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-2 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
+        <span className="text-muted-foreground">Result</span>
+        <button
+          type="button"
+          onClick={() => setRaw((value) => !value)}
+          className="rounded bg-muted px-2 py-0.5 font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
+        >
+          {raw ? 'Rendered result' : 'Raw result'}
+        </button>
+      </div>
+      {raw ? (
+        <ScrollArea>
+          <pre className={cn('min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]', rawClassName ?? 'px-2.5 py-2')}>
+            {content || '(no output)'}
+          </pre>
+        </ScrollArea>
+      ) : (
+        <StructuredToolResultView result={structuredResult} />
+      )}
+    </div>
+  )
+}
+
+function StructuredToolResultView({ result }: { result: StructuredToolResult }): JSX.Element {
+  const files = result.files ?? []
+  return (
+    <div className="space-y-2 px-2.5 py-2 text-[11px]">
+      {result.summary ? <div className="leading-relaxed text-foreground">{result.summary}</div> : null}
+      {files.length > 0 ? (
+        <div className="space-y-2">
+          {files.map((file, index) => (
+            <StructuredToolResultFileView key={`${file.path ?? 'file'}-${index}`} file={file} />
+          ))}
+        </div>
+      ) : null}
+      {!result.summary && files.length === 0 ? <div className="text-muted-foreground">(no output)</div> : null}
+    </div>
+  )
+}
+
+function StructuredToolResultFileView({ file }: { file: StructuredToolResultFile }): JSX.Element {
+  const metric = typeof file.additions === 'number' || typeof file.deletions === 'number'
+    ? { kind: 'delta' as const, additions: file.additions ?? 0, deletions: file.deletions ?? 0 }
+    : null
+  const replacementCount = file.replacements?.reduce((sum, item) => sum + (item.count ?? 0), 0)
+  return (
+    <div className="overflow-hidden rounded border border-border/40 bg-background/50">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2 py-1.5">
+        {file.operation ? <ToolTextBadge tone={operationTone(file.operation)}>{file.operation}</ToolTextBadge> : null}
+        {metric ? <ToolDeltaBadges metric={metric} /> : null}
+        {typeof replacementCount === 'number' && replacementCount > 0 ? <ToolTextBadge>{replacementCount} replacement{replacementCount === 1 ? '' : 's'}</ToolTextBadge> : null}
+        {typeof file.bytes_before === 'number' && typeof file.bytes_after === 'number' ? (
+          <ToolTextBadge>{formatBytes(file.bytes_before)} to {formatBytes(file.bytes_after)}</ToolTextBadge>
+        ) : null}
+        <span className="min-w-[8rem] flex-1 truncate font-mono text-foreground" title={file.path}>{file.path ?? '(no path)'}</span>
+      </div>
+      {file.diff ? <ToolResultDiffView diff={file.diff} /> : null}
+    </div>
+  )
+}
+
+function operationTone(operation: string): 'neutral' | 'success' | 'danger' | 'warning' | 'primary' {
+  if (operation === 'created' || operation === 'added') return 'success'
+  if (operation === 'deleted' || operation === 'removed') return 'danger'
+  if (operation === 'modified' || operation === 'updated') return 'warning'
+  return 'neutral'
+}
+
+function ToolResultDiffView({ diff }: { diff: string }): JSX.Element {
+  const lines = diff.split('\n')
+  return (
+    <ScrollArea className="max-h-96 max-w-full">
+      <pre className="min-w-max whitespace-pre py-1 pr-2 font-mono text-[11px] leading-snug">
+        {lines.map((line, index) => (
+          <span key={index} className={cn('block px-2', resultDiffLineClass(line))}>{line || ' '}</span>
+        ))}
+      </pre>
+    </ScrollArea>
+  )
+}
+
+function resultDiffLineClass(line: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+  if (line.startsWith('-') && !line.startsWith('---')) return 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
+  if (line.startsWith('@@')) return 'bg-muted text-muted-foreground'
+  if (line.startsWith('---') || line.startsWith('+++')) return 'bg-muted/50 text-muted-foreground'
+  return 'text-foreground dark:text-muted-foreground'
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+function ToolResultMetadataFields({
+  metadata,
+  compact = false,
+}: {
+  metadata: ToolResultDisplayMetadata
+  compact?: boolean
+}): JSX.Element {
+  return (
+    <div
+      className={cn(
+        'flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground',
+        compact ? '' : 'border-t border-border/40 px-3 py-1.5',
+      )}
+    >
+      <span className="inline-flex h-5 items-center gap-1 rounded bg-background/70 px-1.5 leading-none">
+        <span className="uppercase tracking-wider text-muted-foreground/70">exit</span>
+        <span className="font-mono text-foreground">{metadata.exitCode}</span>
+      </span>
+      <span className="inline-flex h-5 items-center gap-1 rounded bg-background/70 px-1.5 leading-none">
+        <span className="uppercase tracking-wider text-muted-foreground/70">duration</span>
+        <span className="font-mono text-foreground">{metadata.duration}</span>
+      </span>
+    </div>
+  )
+}
+
+function ToolTextBadge({
+  children,
+  tone = 'neutral',
+  className,
+}: {
+  children: React.ReactNode
+  tone?: 'neutral' | 'success' | 'danger' | 'warning' | 'primary'
+  className?: string
+}): JSX.Element {
+  return (
+    <span
+      className={cn(
+        'inline-flex h-5 flex-none items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider',
+        tone === 'success' && 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+        tone === 'danger' && 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
+        tone === 'warning' && 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+        tone === 'primary' && 'bg-primary text-primary-foreground',
+        tone === 'neutral' && 'bg-background/80 text-muted-foreground',
+        className,
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+function ToolDeltaBadges({ metric }: { metric: SummaryDelta | null }): JSX.Element | null {
+  if (!metric) return null
+  return (
+    <span className="inline-flex h-5 flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[11px] leading-none shadow-sm" aria-label={`${metric.additions} additions, ${metric.deletions} deletions`}>
+      <span className="inline-flex h-5 items-center gap-1 border-r border-border/50 px-1.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+        <span className="text-[10px] text-emerald-600/80 dark:text-emerald-300/80">+</span>
+        {metric.additions}
+      </span>
+      <span className="inline-flex h-5 items-center gap-1 px-1.5 font-mono font-semibold text-rose-700 dark:text-rose-300">
+        <span className="text-[10px] text-rose-600/80 dark:text-rose-300/80">-</span>
+        {metric.deletions}
+      </span>
+    </span>
+  )
+}
+
+function ToolNameChip({ name }: { name: string }): JSX.Element {
+  return (
+    <span className="inline-flex h-5 max-w-[45%] flex-none items-center rounded bg-background/85 px-1.5 font-mono text-[11px] leading-none text-foreground ring-1 ring-border/50" title={name}>
+      <span className="truncate">{name}</span>
+    </span>
+  )
+}
+
+function ToolCallInlineDetail({
+  call,
+  approval,
+  onApprovalDecision,
+}: {
+  call: ToolCallContent
+  approval: ApprovalRequiredEvent | null
+  onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
+}): JSX.Element {
+  const isPendingApproval = approval !== null && typeof onApprovalDecision === 'function'
+  const hasDiffPreview = isPendingApproval && hasDiffPreviewForTool(call.name)
+  const summary = summarizeToolCallInput(call)
+  return (
+    <div
+      className="min-w-0 overflow-hidden rounded-md border border-border/40 bg-background/40"
+      data-testid={isPendingApproval ? `tool-call-pending-${call.callId}` : undefined}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
+        <ToolTextBadge>request</ToolTextBadge>
+        <span className="min-w-0 truncate font-mono text-foreground">{call.name}</span>
+        {summary ? <ToolCallInputFieldBadges fields={summary.fields} /> : null}
+        {isPendingApproval ? (
+          <ToolTextBadge tone="warning">Approval needed</ToolTextBadge>
+        ) : null}
+      </div>
+      {isPendingApproval && hasDiffPreview ? (
+        <div className="p-2">
+          <DiffPreview toolName={call.name} input={approval.input} />
+        </div>
+      ) : summary?.rows?.length ? (
+        <ToolCallInputSummaryRows rows={summary.rows} />
+      ) : (
+        <ScrollArea>
+          <pre className="min-w-0 whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+            {JSON.stringify(call.input, null, 2)}
+          </pre>
+        </ScrollArea>
+      )}
+      {isPendingApproval ? (
+        <p className="border-t border-border/30 px-2.5 py-1.5 text-[11px] italic text-amber-700 dark:text-amber-300">
+          Approve or reject below.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+type ToolCallInputSummary = {
+  fields: Array<{ label: string; value: string }>
+  rows?: string[]
+}
+
+function summarizeToolCallInput(call: ToolCallContent): ToolCallInputSummary | null {
+  const path = inputString(call.input.path ?? call.input.file_path)
+  if (call.name === 'replace_many_in_file') {
+    const edits = Array.isArray(call.input.edits) ? call.input.edits : []
+    return {
+      fields: [
+        ...(path ? [{ label: 'path', value: path }] : []),
+        { label: 'edits', value: String(edits.length) },
+      ],
+      rows: edits.slice(0, 3).map((edit, index) => {
+        const record = edit && typeof edit === 'object' && !Array.isArray(edit) ? edit as Record<string, unknown> : {}
+        const oldText = truncate(firstLine(inputString(record.old_string)), 56)
+        const newText = truncate(firstLine(inputString(record.new_string)), 56)
+        const suffix = record.replace_all === true ? ' · all' : ''
+        return `${index + 1}. ${oldText || '(empty)'} -> ${newText || '(empty)'}${suffix}`
+      }),
+    }
+  }
+  if (call.name === 'replace_in_file') {
+    return {
+      fields: [
+        ...(path ? [{ label: 'path', value: path }] : []),
+        ...(call.input.replace_all === true ? [{ label: 'mode', value: 'replace all' }] : []),
+      ],
+      rows: [`${truncate(firstLine(inputString(call.input.old_string)), 72) || '(empty)'} -> ${truncate(firstLine(inputString(call.input.new_string)), 72) || '(empty)'}`],
+    }
+  }
+  if (call.name === 'write_file') {
+    const content = inputString(call.input.content)
+    return {
+      fields: [
+        ...(path ? [{ label: 'path', value: path }] : []),
+        { label: 'lines', value: String(content ? countDisplayLines(content) : 0) },
+      ],
+    }
+  }
+  return null
+}
+
+function ToolCallInputFieldBadges({ fields }: { fields: ToolCallInputSummary['fields'] }): JSX.Element | null {
+  if (fields.length === 0) return null
+  return (
+    <>
+      {fields.map((field) => (
+        <span key={field.label} className="inline-flex h-5 min-w-0 max-w-full items-center gap-1 rounded bg-muted/70 px-1.5 leading-none">
+          <span className="flex-none uppercase tracking-wider text-muted-foreground/70">{field.label}</span>
+          <span className="min-w-0 truncate font-mono text-foreground">{field.value}</span>
+        </span>
+      ))}
+    </>
+  )
+}
+
+function ToolCallInputSummaryRows({ rows }: { rows: string[] }): JSX.Element {
+  return (
+    <div className="px-2.5 py-2 text-[11px]">
+      <div className="min-w-0 rounded bg-muted/40 px-2 py-1 font-mono text-[11px] leading-relaxed text-muted-foreground">
+        {rows.map((row) => (
+          <div key={row} className="truncate">{row}</div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function inputString(value: unknown): string {
+  return typeof value === 'string' ? value : value == null ? '' : String(value)
+}
+
+function countDisplayLines(value: string): number {
+  if (value.length === 0) return 0
+  return value.split('\n').length
+}
+
+function ToolResultInlineDetail({
+  result,
+}: {
+  result: ToolResultContent
+}): JSX.Element {
+  const overflowReader = useContext(OverflowReaderContext)
+  const isOverflowed = detectOverflowMarker(result.content)
+  const [fullOutput, setFullOutput] = useState<
+    { state: 'idle' } | { state: 'loading' } | { state: 'loaded'; content: string } | { state: 'error'; error: string }
+  >({ state: 'idle' })
+  const displayContent = fullOutput.state === 'loaded' ? fullOutput.content : result.content
+  const displayOutput = parseToolResultDisplay(displayContent)
+  const parsedError = result.ok ? null : parseToolError(displayOutput.content)
+
+  const handleViewFull = async (): Promise<void> => {
+    if (!overflowReader || fullOutput.state === 'loading') return
+    setFullOutput({ state: 'loading' })
+    const res = await overflowReader(result.callId)
+    if (res.error) setFullOutput({ state: 'error', error: res.error })
+    else setFullOutput({ state: 'loaded', content: res.content ?? '' })
+  }
+
+  return (
+    <div className="min-w-0 overflow-hidden rounded-md border border-border/40 bg-background/40">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-border/30 px-2.5 py-1.5 text-[11px]">
+        <ToolTextBadge tone={result.ok ? 'success' : 'danger'}>{result.ok ? 'succeeded' : 'failed'}</ToolTextBadge>
+        {parsedError?.code ? <ToolTextBadge tone="danger">{parsedError.code}</ToolTextBadge> : null}
+        {displayOutput.metadata ? <ToolResultMetadataFields metadata={displayOutput.metadata} compact /> : null}
+        {isOverflowed ? (
+          <ToolTextBadge tone="warning">truncated</ToolTextBadge>
+        ) : null}
+      </div>
+      {isOverflowed && fullOutput.state !== 'loaded' && overflowReader ? (
+        <div className="flex items-center justify-between border-b border-border/30 px-2.5 py-1.5 text-[11px]">
+          <span className="text-muted-foreground">Output truncated inline.</span>
+          <button
+            type="button"
+            onClick={() => {
+              void handleViewFull()
+            }}
+            disabled={fullOutput.state === 'loading'}
+            className="rounded bg-primary/10 px-2 py-0.5 font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+          >
+            {fullOutput.state === 'loading' ? 'Loading…' : 'View full output'}
+          </button>
+        </div>
+      ) : null}
+      {fullOutput.state === 'error' ? (
+        <div className="border-b border-border/30 bg-rose-50/60 px-2.5 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+          Failed to read full output: {fullOutput.error}
+        </div>
+      ) : null}
+      <ToolResultContentView
+        content={displayOutput.content}
+        fallback={parsedError?.message}
+      />
+    </div>
+  )
+}
+
+function summarizeToolResultInline(content: string): string {
+  const parsed = parseToolResultDisplay(content)
+  const text = parsed.content.trim()
+  if (text) return summarizeStructuredToolResult(text) ?? truncate(firstLine(text), 72)
+  if (parsed.metadata) return `exit ${parsed.metadata.exitCode} · ${parsed.metadata.duration}`
+  return '(no output)'
+}
+
+type ToolHeaderResultSummary =
+  | { kind: 'none' }
+  | { kind: 'delta'; metric: SummaryDelta }
+  | { kind: 'text'; text: string; title?: string }
+  | { kind: 'error'; code?: string; message: string }
+
+function summarizeToolResultForHeader(
+  call: ToolCallContent,
+  row: SummaryRow | null,
+  result: ToolResultContent,
+): ToolHeaderResultSummary {
+  if (!result.ok) {
+    const parsed = parseToolError(parseToolResultDisplay(result.content).content)
+    return parsed
+      ? { kind: 'error', ...(parsed.code ? { code: parsed.code } : {}), message: parsed.message }
+      : { kind: 'error', message: summarizeToolResultInline(result.content) }
+  }
+
+  if (typeof row?.secondary === 'object' && row.secondary.kind === 'delta') return { kind: 'delta', metric: row.secondary }
+  if (typeof row?.secondary === 'string' && shouldPreferRowSecondary(call.name, row.secondary)) return { kind: 'text', text: row.secondary }
+  const text = summarizeToolResultInline(result.content)
+  return text ? { kind: 'text', text, title: result.content } : { kind: 'none' }
+}
+
+function shouldPreferRowSecondary(toolName: string, secondary: string): boolean {
+  if (secondary === 'ok' || secondary === 'failed') return false
+  return toolName === 'read' || toolName === 'read_file' || toolName === 'read_files' || toolName === 'ls' || toolName === 'glob' || toolName === 'grep'
+}
+
+function shouldShowCompactHeaderText(toolName: string, text: string): boolean {
+  if (!text || text === '(no output)') return false
+  return shouldPreferRowSecondary(toolName, text)
+}
+
+function ToolHeaderResultSummaryView({
+  summary,
+  hideDelta = false,
+}: {
+  summary: ToolHeaderResultSummary
+  hideDelta?: boolean
+}): JSX.Element | null {
+  if (summary.kind === 'none') return null
+  if (summary.kind === 'delta' && hideDelta) return null
+  if (summary.kind === 'delta') return <ToolDeltaBadges metric={summary.metric} />
+  if (summary.kind === 'error') {
+    return (
+      <span className="flex min-w-0 items-center gap-1.5">
+        {summary.code ? <ToolTextBadge tone="danger">{summary.code}</ToolTextBadge> : null}
+        <span className="min-w-0 truncate text-[11px] leading-5 text-rose-700 dark:text-rose-300" title={summary.message}>
+          {summary.message}
+        </span>
+      </span>
+    )
+  }
+  return (
+    <span className="min-w-0 truncate text-[11px] leading-5 text-muted-foreground" title={summary.title ?? summary.text}>
+      {summary.text}
+    </span>
+  )
+}
+
+function summarizeStructuredToolResult(text: string): string | null {
+  try {
+    const value = JSON.parse(text) as unknown
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const record = value as Record<string, unknown>
+    const summary = typeof record.summary === 'string' ? record.summary : ''
+    const files = Array.isArray(record.files) ? record.files : []
+    const firstFile = files.find((file): file is Record<string, unknown> => !!file && typeof file === 'object' && !Array.isArray(file))
+    const replacements = Array.isArray(firstFile?.replacements)
+      ? firstFile.replacements.reduce((sum, item) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return sum
+          const count = (item as Record<string, unknown>).count
+          return sum + (typeof count === 'number' && Number.isFinite(count) ? count : 0)
+        }, 0)
+      : null
+    const pieces: string[] = []
+    if (replacements !== null) pieces.push(`${replacements} replacement${replacements === 1 ? '' : 's'}`)
+    if (pieces.length > 0) return pieces.join(' · ')
+    if (summary) return truncate(summary, 72)
+    return null
+  } catch {
+    return null
+  }
 }
 
 const OVERFLOW_MARKER_PREFIX = '--- output truncated:'
@@ -1940,12 +2536,14 @@ function ToolCallGroupBlock({
   approvalByCallId,
   onApprovalDecision,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  toolCardMode = 'dots',
 }: {
   group: ToolCallGroup
   messageIndex: number
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   liveToolActivityTailCount?: number
+  toolCardMode?: ToolCardMode
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
@@ -1954,6 +2552,9 @@ function ToolCallGroupBlock({
   const singleCall = group.calls.length === 1 ? group.calls[0]! : null
   const singleRow = singleCall ? rows.find((r) => r.callId === singleCall.callId) : null
   const singleResult = singleCall ? group.results.get(singleCall.callId) ?? null : null
+  const singleHeaderResult = singleCall && singleResult
+    ? summarizeToolResultForHeader(singleCall, singleRow ?? null, singleResult)
+    : { kind: 'none' as const }
   const singlePending = singleCall ? approvalByCallId.get(singleCall.callId) ?? null : null
   const singleStatus = singlePending
     ? toolLifecycleBadge('approval')
@@ -1978,6 +2579,8 @@ function ToolCallGroupBlock({
   const autoRevealTail = group.mixed && unresolvedTailCallIds.length > 0
   const visibleTailCallIds = autoRevealTail ? new Set(unresolvedTailCallIds) : null
   const showRows = open || anyPending || autoRevealTail
+  const dots = toolActivityDots(group, rows, approvalByCallId)
+  const visibleDots = prioritizedToolActivityDots(dots, 20)
 
   const toggleOpen = (): void => {
     setOpen((v) => {
@@ -1998,11 +2601,54 @@ function ToolCallGroupBlock({
       )}
       data-testid={`tool-call-group-${group.firstCallId}`}
     >
+      {toolCardMode === 'dots' && !open ? (
+        <div
+          className={cn(
+            'grid min-h-9 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-foreground',
+            anyPending ? 'bg-amber-100/20 dark:bg-amber-950/20' : '',
+          )}
+          data-testid={`tool-card-dots-${group.firstCallId}`}
+        >
+          <button type="button" onClick={toggleOpen} className="flex min-w-0 items-center gap-2 text-left">
+            <Wrench className={cn('h-3.5 w-3.5 flex-none', anyPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')} />
+            <span className="truncate text-[11px] font-medium">Tool activity</span>
+            <span className="flex-none font-mono text-[10px] text-muted-foreground">{group.calls.length}</span>
+          </button>
+          <div className="flex min-w-0 items-center justify-end gap-1" aria-label={`${group.calls.length} tool calls`}>
+            {visibleDots.map((dot) => (
+              <button
+                key={dot.callId}
+                type="button"
+                title={dot.title}
+                aria-label={dot.title}
+                data-testid={`tool-card-dot-${dot.callId}`}
+                onClick={() => {
+                  setOpen(true)
+                  setExpandedCallId(dot.callId)
+                }}
+                className={cn(
+                  'h-2.5 w-2.5 flex-none rounded-full ring-offset-1 ring-offset-background transition-transform hover:scale-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  dot.status === 'succeeded' && 'bg-emerald-500',
+                  dot.status === 'failed' && 'bg-rose-500',
+                  dot.status === 'approval' && 'animate-pulse bg-amber-400 ring-1 ring-amber-500/50',
+                  dot.status === 'running' && 'animate-pulse border border-foreground/70 bg-foreground/20',
+                )}
+              />
+            ))}
+            {dots.length > visibleDots.length ? (
+              <span className="ml-0.5 flex-none font-mono text-[10px] text-muted-foreground">+{dots.length - visibleDots.length}</span>
+            ) : null}
+            <button type="button" onClick={toggleOpen} className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Expand tool activity">
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      ) : (
       <button
         type="button"
         onClick={toggleOpen}
         className={cn(
-          'flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors',
+          'grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-foreground transition-colors',
           anyPending
             ? 'hover:bg-amber-100/40 dark:hover:bg-amber-950/30'
             : 'hover:bg-muted',
@@ -2021,57 +2667,65 @@ function ToolCallGroupBlock({
               : 'text-muted-foreground',
           )}
         />
-        <span className="min-w-0 max-w-[45%] truncate rounded bg-background/80 px-1.5 py-0.5 font-mono text-[11px]">
-          {groupTitle}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ToolNameChip name={groupTitle} />
+          {singleRow?.primary ? (
+            <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={singleRow.primary}>
+              {singleRow.primary}
+            </span>
+          ) : group.mixed ? (
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={toolMix}>
+              {toolMix}
+            </span>
+          ) : primaryTargets ? (
+            <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={primaryTargets}>
+              {primaryTargets}
+            </span>
+          ) : null}
+          {singleHeaderResult.kind === 'error' ? (
+            <span className="hidden min-w-0 items-center gap-1.5 sm:flex">
+              <ToolHeaderResultSummaryView summary={singleHeaderResult} hideDelta />
+            </span>
+          ) : null}
         </span>
-        {singleRow?.primary ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
-            {singleRow.primary}
-          </span>
-        ) : group.mixed ? (
-          <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground sm:inline" title={toolMix}>
-            {toolMix}
-          </span>
-        ) : primaryTargets ? (
-          <span className="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground sm:inline" title={primaryTargets}>
-            {primaryTargets}
-          </span>
-        ) : null}
-        {singleResult ? (
-          <span className="hidden min-w-0 flex-[0.8] truncate text-[11px] text-muted-foreground md:inline" title={singleResult.content}>
-            → {truncate(firstLine(singleResult.content), 72)}
-          </span>
-        ) : null}
-        {group.calls.length > 1 ? (
-          <span
-            className={cn(
-              'inline-flex h-5 flex-none items-center rounded px-1.5 font-mono text-[11px] leading-none',
-              group.mixed
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-background/80 text-muted-foreground',
-            )}
-          >
-            {group.mixed ? `${group.calls.length} ops` : `× ${group.calls.length}`}
-          </span>
-        ) : null}
-        {!singleCall ? <ToolLifecycleSummaryBadges summary={groupLifecycle} /> : null}
-        {singleStatus ? (
-          <span
-            className={cn(
-              'inline-flex h-5 flex-none items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider',
-              singleStatus.className,
-            )}
-          >
-            {singleStatus.label}
-          </span>
-        ) : null}
-        {singleCall ? null : <span className="flex-1" />}
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-        )}
+        <span className="flex min-w-0 flex-none items-center gap-1.5">
+          {singleHeaderResult.kind === 'delta' ? <ToolDeltaBadges metric={singleHeaderResult.metric} /> : null}
+          {singleHeaderResult.kind === 'text' && shouldShowCompactHeaderText(singleCall?.name ?? '', singleHeaderResult.text) ? (
+            <span className="hidden h-5 max-w-32 items-center truncate rounded bg-background/70 px-1.5 text-[11px] leading-none text-muted-foreground lg:inline-flex" title={singleHeaderResult.title ?? singleHeaderResult.text}>
+              {singleHeaderResult.text}
+            </span>
+          ) : null}
+          {group.calls.length > 1 ? (
+            <span
+              className={cn(
+                'inline-flex h-5 flex-none items-center rounded px-1.5 font-mono text-[11px] leading-none',
+                group.mixed
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-background/80 text-muted-foreground',
+              )}
+            >
+              {group.mixed ? `${group.calls.length} ops` : `× ${group.calls.length}`}
+            </span>
+          ) : null}
+          {!singleCall ? <ToolLifecycleSummaryBadges summary={groupLifecycle} /> : null}
+          {singleStatus ? (
+            <span
+              className={cn(
+                'inline-flex h-5 flex-none items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider',
+                singleStatus.className,
+              )}
+            >
+              {singleStatus.label}
+            </span>
+          ) : null}
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+          )}
+        </span>
       </button>
+      )}
       {showRows ? (
         <div
           className="ak-expand-in flex min-w-0 max-w-full flex-col gap-0.5 overflow-hidden border-t border-border/40 px-3 pb-2 pt-1"
@@ -2090,16 +2744,14 @@ function ToolCallGroupBlock({
                   id={`msg-${messageIndex}-call-${row.callId}`}
                   className="mt-1 flex min-w-0 max-w-full flex-col gap-2 overflow-hidden pl-1"
                 >
-                  <ToolCallBlock
+                  <ToolCallInlineDetail
                     call={call}
                     approval={pending}
                     onApprovalDecision={onApprovalDecision}
                   />
                   {result ? (
-                  <ToolResultBlock
+                  <ToolResultInlineDetail
                     result={result}
-                    toolName={call.name}
-                    defaultOpen
                   />
                 ) : null}
                 </div>
@@ -2121,13 +2773,13 @@ function ToolCallGroupBlock({
                 />
                 {expanded || pending ? (
                   <div className="ak-expand-in mt-1 flex min-w-0 max-w-full flex-col gap-2 overflow-hidden pl-5">
-                    <ToolCallBlock
+                    <ToolCallInlineDetail
                       call={call}
                       approval={pending}
                       onApprovalDecision={onApprovalDecision}
                     />
                     {result ? (
-                      <ToolResultBlock result={result} toolName={call.name} />
+                      <ToolResultInlineDetail result={result} />
                     ) : null}
                   </div>
                 ) : null}
@@ -2138,6 +2790,52 @@ function ToolCallGroupBlock({
       ) : null}
     </div>
   )
+}
+
+type ToolActivityDot = {
+  callId: string
+  status: 'succeeded' | 'failed' | 'approval' | 'running'
+  title: string
+}
+
+function toolActivityDots(
+  group: ToolCallGroup,
+  rows: readonly SummaryRow[],
+  approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>,
+): ToolActivityDot[] {
+  return group.calls.map((call) => {
+    const result = group.results.get(call.callId)
+    const row = rows.find((candidate) => candidate.callId === call.callId)
+    const status: ToolActivityDot['status'] = approvalByCallId.has(call.callId)
+      ? 'approval'
+      : result
+        ? result.ok ? 'succeeded' : 'failed'
+        : 'running'
+    const target = row?.primary && row.primary !== call.callId ? ` · ${row.primary}` : ''
+    const delta = typeof row?.secondary === 'object' && row.secondary.kind === 'delta'
+      ? ` · +${row.secondary.additions} -${row.secondary.deletions}`
+      : ''
+    return {
+      callId: call.callId,
+      status,
+      title: `${call.name}${target} · ${status}${delta}`,
+    }
+  })
+}
+
+function prioritizedToolActivityDots(dots: readonly ToolActivityDot[], limit: number): ToolActivityDot[] {
+  if (dots.length <= limit) return [...dots]
+  const priority = new Set(
+    dots
+      .filter((dot) => dot.status !== 'succeeded')
+      .slice(0, limit)
+      .map((dot) => dot.callId),
+  )
+  for (const dot of dots) {
+    if (priority.size >= limit) break
+    priority.add(dot.callId)
+  }
+  return dots.filter((dot) => priority.has(dot.callId))
 }
 
 function summarizeToolActivityRows(group: ToolCallGroup): SummaryRow[] {

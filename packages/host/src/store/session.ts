@@ -187,6 +187,9 @@ export class SessionStore {
     if (record.preferences.selectedModel) {
       await appendMetadataEntry(record.logPath, { selectedModel: record.preferences.selectedModel })
     }
+    if (record.preferences.toolCardMode) {
+      await appendMetadataEntry(record.logPath, { toolCardMode: record.preferences.toolCardMode })
+    }
     this.records.set(sessionId, record)
     this.summaryCache.delete(logPath)
     return record
@@ -216,9 +219,17 @@ export class SessionStore {
       else next.selectedModel = selectedModel
       changed = true
     }
+    if ('toolCardMode' in patch) {
+      if (patch.toolCardMode === undefined) delete next.toolCardMode
+      else next.toolCardMode = patch.toolCardMode
+      changed = true
+    }
     if (changed) {
       rec.preferences = next
-      await appendMetadataEntry(rec.logPath, { selectedModel: next.selectedModel ?? '' })
+      await appendMetadataEntry(rec.logPath, {
+        ...('selectedModel' in patch ? { selectedModel: next.selectedModel ?? '' } : {}),
+        ...('toolCardMode' in patch && next.toolCardMode ? { toolCardMode: next.toolCardMode } : {}),
+      })
       this.summaryCache.delete(rec.logPath)
     }
     return next
@@ -677,10 +688,12 @@ export class SessionStore {
       parsed.header.workspaceName
     const label = latestStringFromMetadata(parsed.metadata, 'label')
     const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
+    const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
     const preferences: SessionPreferences = {
       ...(selectedModel
         ? { selectedModel }
         : {}),
+      ...(toolCardMode ? { toolCardMode } : {}),
     }
 
     const record: SessionRecord = {
@@ -785,6 +798,7 @@ function summarizeRecord(record: SessionRecord): SessionSummary {
     ...(record.state.cwd ? { currentCwd: record.state.cwd } : {}),
     ...(firstUserMessage ? { firstUserMessage: firstUserMessage.slice(0, 120) } : {}),
     ...(record.label ? { label: record.label } : {}),
+    ...(Object.keys(record.preferences).length > 0 ? { preferences: record.preferences } : {}),
   }
 }
 
@@ -817,6 +831,8 @@ function summarizeLog(
       ? firstUserEvent.event.text
       : undefined
   const label = latestStringFromMetadata(parsed.metadata, 'label')
+  const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
+  const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
   const workspaceId =
     latestStringFromMetadata(parsed.metadata, 'workspaceId') ?? header.workspaceId
   const workspaceName =
@@ -851,6 +867,9 @@ function summarizeLog(
       ? { firstUserMessage: firstUserText.slice(0, 120) }
       : {}),
     ...(label ? { label } : {}),
+    ...(selectedModel || toolCardMode
+      ? { preferences: { ...(selectedModel ? { selectedModel } : {}), ...(toolCardMode ? { toolCardMode } : {}) } }
+      : {}),
   }
 }
 
@@ -869,9 +888,22 @@ function latestStringFromMetadata(
   return undefined
 }
 
+function latestToolCardModeFromMetadata(
+  metadata: readonly Record<string, string | undefined>[],
+): 'dots' | 'standard' | undefined {
+  for (let i = metadata.length - 1; i >= 0; i--) {
+    const value = metadata[i]!.toolCardMode
+    if (value === 'dots' || value === 'standard') return value
+  }
+  return undefined
+}
+
 function normalizedPreferences(preferences: SessionPreferences | undefined): SessionPreferences {
   const selectedModel = normalizePreferenceString(preferences?.selectedModel)
-  return selectedModel ? { selectedModel } : {}
+  return {
+    ...(selectedModel ? { selectedModel } : {}),
+    ...(preferences?.toolCardMode ? { toolCardMode: preferences.toolCardMode } : {}),
+  }
 }
 
 function normalizePreferenceString(value: string | undefined): string | undefined {

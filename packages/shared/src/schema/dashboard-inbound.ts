@@ -82,6 +82,7 @@ const RelativePathSchema = z.string().trim().min(1).refine(
 
 export const SessionPreferencesSchema = z.object({
   selectedModel: z.string().trim().optional(),
+  toolCardMode: z.enum(['dots', 'standard']).optional(),
 }) satisfies z.ZodType<SessionPreferences>
 
 // ============================================================================

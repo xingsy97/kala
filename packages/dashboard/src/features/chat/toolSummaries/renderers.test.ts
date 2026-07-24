@@ -40,16 +40,21 @@ describe('tool summary renderers', () => {
   })
 
   it('summarizes replace_in_file and replace_many_in_file as file mutations', () => {
+    const mutationResult = JSON.stringify({
+      ok: true,
+      summary: 'Applied 1 replacement(s) in src/app.ts',
+      files: [{ path: 'src/app.ts', operation: 'modified', additions: 2, deletions: 1 }],
+    })
     const replaceRows = pickRenderer('replace_in_file')({
       calls: [call('replace_in_file', { path: 'src/app.ts' }, 'c1')],
-      results: new Map([['c1', result('c1')]]),
+      results: new Map([['c1', result('c1', true, mutationResult)]]),
     })
     const multiRows = pickRenderer('replace_many_in_file')({
       calls: [call('replace_many_in_file', { path: 'src/app.ts', edits: [{ old_string: 'a', new_string: 'b' }] }, 'c2')],
       results: new Map(),
     })
 
-    expect(replaceRows).toEqual([{ callId: 'c1', primary: 'src/app.ts', secondary: 'edited', ok: true }])
+    expect(replaceRows).toEqual([{ callId: 'c1', primary: 'src/app.ts', secondary: { kind: 'delta', additions: 2, deletions: 1 }, ok: true }])
     expect(multiRows).toEqual([{ callId: 'c2', primary: 'src/app.ts', secondary: '1 edit', ok: true }])
   })
 

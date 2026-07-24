@@ -1,12 +1,17 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createInitialState } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
-import { ChatPanel } from './ChatPanel.js'
+import { ChatPanel as DashboardChatPanel } from './ChatPanel.js'
 import { InlineStatusRow } from './InlineStatusRow.js'
+
+function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Element {
+  return <DashboardChatPanel toolCardMode="standard" {...props} />
+}
 
 describe('ChatPanel', () => {
   it('renders empty state', () => {
@@ -237,15 +242,262 @@ describe('ChatPanel', () => {
     expect(screen.getByText('hello')).toBeTruthy()
     expect(screen.getByText('about to write')).toBeTruthy()
     expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
-    expect(screen.getAllByText('write')).toHaveLength(1)
+    expect(screen.getByText('write')).toBeTruthy()
+    expect(screen.getByText('/tmp/a')).toBeTruthy()
     expect(screen.getByText('Succeeded')).toBeTruthy()
-    expect(screen.getByText(/→ wrote 3 bytes/)).toBeTruthy()
+    expect(screen.queryByText('wrote 3 bytes')).toBeNull()
+    expect(screen.queryByText(/result wrote 3 bytes/)).toBeNull()
     expect(screen.queryByText('Assistant requested tool')).toBeNull()
     expect(screen.queryByText('Tool result')).toBeNull()
-    // Body is collapsed by default — expanding the grouped row reveals it.
-    expect(screen.queryByText('wrote 3 bytes')).toBeNull()
+    // Body is collapsed by default; ordinary success output stays in the expanded detail.
     fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
-    expect(screen.getByText('wrote 3 bytes')).toBeTruthy()
+    expect(screen.getAllByText('wrote 3 bytes').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('uses dots as the default collapsed Tool Card Mode and opens the selected call', () => {
+    render(
+      <DashboardChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'dot-1', name: 'read', input: { path: '/repo/a.ts' } },
+              { type: 'tool_call', callId: 'dot-2', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'dot-1', ok: true, content: 'a' },
+              { type: 'tool_result', callId: 'dot-2', ok: false, content: 'failed' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('tool-card-dots-dot-1')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).toContain('read · /repo/a.ts · succeeded')
+    expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).toContain('bash · pnpm test · failed')
+    fireEvent.click(screen.getByTestId('tool-card-dot-dot-2'))
+    expect(screen.getByTestId('tool-call-group-details-dot-1')).toBeTruthy()
+  })
+
+  it('retains the textual collapsed card in Standard Tool Card Mode', () => {
+    render(
+      <ChatPanel
+        toolCardMode="standard"
+        messages={[
+          { role: 'assistant', content: [{ type: 'tool_call', callId: 'std-1', name: 'read', input: { path: '/repo/a.ts' } }] },
+          { role: 'tool', content: [{ type: 'tool_result', callId: 'std-1', ok: true, content: 'contents' }] },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByTestId('tool-card-dots-std-1')).toBeNull()
+    expect(screen.getByText('/repo/a.ts')).toBeTruthy()
+  })
+
+  it('renders bash result metadata as structured fields instead of raw output text', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'c1',
+                name: 'bash',
+                input: { cmd: 'true' },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              {
+                type: 'tool_result',
+                callId: 'c1',
+                ok: true,
+                content: '--- exit code: 0, duration: 3ms',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByText('exit 0 · 3ms')).toBeNull()
+    expect(container.textContent).not.toContain('result exit 0')
+    fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
+    expect(screen.getByText('exit')).toBeTruthy()
+    expect(screen.getByText('0')).toBeTruthy()
+    expect(screen.getByText('duration')).toBeTruthy()
+    expect(screen.getByText('3ms')).toBeTruthy()
+    expect(container.textContent).not.toContain('--- exit code: 0, duration: 3ms')
+  })
+
+  it('summarizes read_files without leaking raw file separators into the collapsed row', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'c1',
+                name: 'read_files',
+                input: { files: [{ path: '/repo/hello.py' }, { path: '/repo/README.md' }] },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              {
+                type: 'tool_result',
+                callId: 'c1',
+                ok: true,
+                content: '===== /repo/hello.py =====\nprint(1)\n===== /repo/README.md =====\n# Demo',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('read_files')).toBeTruthy()
+    expect(screen.getByText('/repo/hello.py')).toBeTruthy()
+    expect(screen.getByText((_, element) => element?.textContent === '2 files')).toBeTruthy()
+    expect(container.textContent).not.toContain('result 2 files')
+    expect(container.textContent).not.toContain('=====')
+  })
+
+  it('collapses repeated same-name tool activity split across timeline items', () => {
+    const timeline: TimelineEntry[] = [
+      toolCallEntry(1, 'c1', 'write_file', { path: '/repo/a.txt', content: 'a' }),
+      toolResultEntry(2, 'c1', true, JSON.stringify({ files: [{ path: '/repo/a.txt', additions: 1, deletions: 0 }] })),
+      toolCallEntry(3, 'c2', 'write_file', { path: '/repo/b.txt', content: 'b' }),
+      toolResultEntry(4, 'c2', true, JSON.stringify({ files: [{ path: '/repo/b.txt', additions: 1, deletions: 0 }] })),
+      toolCallEntry(5, 'c3', 'write_file', { path: '/repo/c.txt', content: 'c' }),
+      toolResultEntry(6, 'c3', true, JSON.stringify({ files: [{ path: '/repo/c.txt', additions: 1, deletions: 0 }] })),
+    ]
+
+    render(<ChatPanel items={visibleTranscript([], timeline, '')} />)
+
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.getByText('3 ops')).toBeTruthy()
+    expect(screen.getByText(/write_file 3/)).toBeTruthy()
+    expect(screen.getByText('3 Succeeded')).toBeTruthy()
+    expect(screen.queryByText('Tool result')).toBeNull()
+    expect(screen.queryByText('/repo/a.txt')).toBeNull()
+  })
+
+  it('collapses repeated same-name tool calls inside one assistant message', () => {
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'write_file', input: { path: '/repo/a.txt', content: 'a' } },
+              { type: 'tool_call', callId: 'c2', name: 'write_file', input: { path: '/repo/b.txt', content: 'b' } },
+              { type: 'tool_call', callId: 'c3', name: 'write_file', input: { path: '/repo/c.txt', content: 'c' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'c1', ok: true, content: JSON.stringify({ files: [{ path: '/repo/a.txt', additions: 1, deletions: 0 }] }) },
+              { type: 'tool_result', callId: 'c2', ok: true, content: JSON.stringify({ files: [{ path: '/repo/b.txt', additions: 1, deletions: 0 }] }) },
+              { type: 'tool_result', callId: 'c3', ok: true, content: JSON.stringify({ files: [{ path: '/repo/c.txt', additions: 1, deletions: 0 }] }) },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('Tool activity')).toBeTruthy()
+    expect(screen.getByText('3 ops')).toBeTruthy()
+    expect(screen.getByText(/write_file 3/)).toBeTruthy()
+    expect(screen.queryByTestId('grouped-tool-row-c1')).toBeNull()
+  })
+
+  it('renders mutation stats as aligned addition and deletion badges', () => {
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'c1',
+                name: 'replace_many_in_file',
+                input: { path: '/repo/app.ts', edits: [{ old_string: 'a', new_string: 'b' }] },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              {
+                type: 'tool_result',
+                callId: 'c1',
+                ok: true,
+                content: JSON.stringify({ files: [{ path: '/repo/app.ts', additions: 2, deletions: 1 }] }),
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByLabelText('2 additions, 1 deletions')).toBeTruthy()
+    expect(screen.getByLabelText('2 additions, 1 deletions').textContent).toContain('+2')
+    expect(screen.getByLabelText('2 additions, 1 deletions').textContent).toContain('-1')
+  })
+
+  it('formats failed tool errors without duplicated raw prefixes', () => {
+    const { container } = render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'c1',
+                name: 'write_file',
+                input: { path: '/tmp/demo_codex/notes.md', content: 'hello' },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              {
+                type: 'tool_result',
+                callId: 'c1',
+                ok: false,
+                content: 'ERROR: EACCES: EACCES: outside sandbox: /tmp/demo_codex/notes.md',
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('EACCES')).toBeTruthy()
+    expect(screen.getByText('outside sandbox: /tmp/demo_codex/notes.md')).toBeTruthy()
+    expect(container.textContent).not.toContain('ERROR: EACCES: EACCES')
+
+    fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
+    expect(screen.getAllByText('EACCES').length).toBeGreaterThanOrEqual(1)
+    expect(container.textContent).not.toContain('ERROR: EACCES: EACCES')
   })
 
   it('keeps the virtual transcript scroll owner full-width while constraining row content', () => {
@@ -1245,6 +1497,58 @@ describe('ChatPanel', () => {
     expect(screen.getByText('2 ops')).toBeTruthy()
     expect(screen.getByText(/grep 1, read 1/)).toBeTruthy()
     expect(screen.queryByText('Tool result')).toBeNull()
+  })
+
+  it('renders structured tool results by default with a raw toggle', () => {
+    const result = {
+      ok: true,
+      summary: 'Applied 1 replacement(s) in /home/bcmaster/workspace/tmp/demo_codex/config.txt',
+      files: [
+        {
+          path: '/home/bcmaster/workspace/tmp/demo_codex/config.txt',
+          operation: 'modified',
+          additions: 1,
+          deletions: 1,
+          diff: '--- /home/bcmaster/workspace/tmp/demo_codex/config.txt\n+++ /home/bcmaster/workspace/tmp/demo_codex/config.txt\n@@ -1,5 +1,5 @@\n env=prod\n-debug=false\n+debug=true\n port=443\n host=localhost\n',
+          bytes_before: 45,
+          bytes_after: 44,
+          replacements: [{ index: 0, count: 1 }],
+        },
+      ],
+    }
+
+    render(
+      <ChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_call',
+                callId: 'c1',
+                name: 'replace_in_file',
+                input: { path: '/home/bcmaster/workspace/tmp/demo_codex/config.txt', old_string: 'debug=false', new_string: 'debug=true' },
+              },
+            ],
+          },
+          { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: JSON.stringify(result) }] },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('grouped-tool-row-c1'))
+
+    expect(screen.getByText(result.summary)).toBeTruthy()
+    expect(screen.getAllByText('/home/bcmaster/workspace/tmp/demo_codex/config.txt').length).toBeGreaterThan(0)
+    expect(screen.getByText('-debug=false')).toBeTruthy()
+    expect(screen.getByText('+debug=true')).toBeTruthy()
+    expect(screen.getByText('1 replacement')).toBeTruthy()
+    expect(screen.queryByText(/"files"/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Raw result' }))
+
+    expect(screen.getByText(/"files"/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Rendered result' })).toBeTruthy()
   })
 
   it('renders empty state end-to-end for an ephemeral session (system prompt only, no timeline)', () => {

@@ -262,6 +262,19 @@ describe('SessionStore.updatePreferences', () => {
     const cleared = await new SessionStore(dir).load(record.sessionId)
     expect(cleared.preferences.selectedModel).toBeUndefined()
   })
+
+  it('persists Tool Card Mode and exposes it in session summaries', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({ sessionId: 'sess-tool-card-mode', defaultConfig: config })
+
+    await store.updatePreferences(record.sessionId, { toolCardMode: 'standard' })
+
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.metadata.at(-1)?.toolCardMode).toBe('standard')
+    expect((await store.listSummaries()).find((summary) => summary.sessionId === record.sessionId)?.preferences?.toolCardMode).toBe('standard')
+    const reloaded = await new SessionStore(dir).load(record.sessionId)
+    expect(reloaded.preferences.toolCardMode).toBe('standard')
+  })
 })
 
 describe('SessionStore.listSummaries', () => {

@@ -742,7 +742,7 @@ export function createSessionWithAck(
 export function updateSessionPreferences(
   socket: DashboardSocket,
   sessionId: string,
-  preferences: { selectedModel?: string },
+  preferences: import('@agent-kernel/shared').SessionPreferences,
 ): void {
   socket.emit('client:update_preferences', { sessionId, preferences })
 }
@@ -884,6 +884,9 @@ export function useControlPlane(
                   : payload.label !== undefined
                     ? { label: undefined }
                     : {}),
+                ...(payload.preferences !== undefined
+                  ? { preferences: payload.preferences }
+                  : {}),
               }
             : s
         )))
@@ -1098,4 +1101,3 @@ function reprojectContextSnapshotAfterCompaction(
     updatedAt: Date.now(),
   }
 }
-

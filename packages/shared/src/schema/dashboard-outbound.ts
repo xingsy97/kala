@@ -411,6 +411,7 @@ export const SessionSummarySchema = z.object({
   currentCwd: z.string().optional(),
   firstUserMessage: z.string().optional(),
   label: z.string().optional(),
+  preferences: SessionPreferencesSchema.optional(),
 }) satisfies z.ZodType<SessionSummary>
 
 export const ServerSessionsPayloadSchema = z.object({
@@ -878,6 +879,7 @@ export const MetadataEntrySchema = z.object({
   workspaceId: z.string().optional(),
   workspaceName: z.string().optional(),
   selectedModel: z.string().optional(),
+  toolCardMode: z.enum(['dots', 'standard']).optional(),
 }) satisfies z.ZodType<MetadataEntry>
 
 export const RuntimeMetadataEntrySchema = z.object({

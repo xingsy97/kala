@@ -4,10 +4,18 @@ import { CheckCircle2, Wrench, XCircle } from 'lucide-react'
 
 import { cn } from '../../../lib/utils.js'
 
+export type SummaryDelta = {
+  kind: 'delta'
+  additions: number
+  deletions: number
+}
+
+export type SummarySecondary = string | SummaryDelta
+
 export type SummaryRow = {
   callId: string
   primary: string
-  secondary?: string
+  secondary?: SummarySecondary
   ok: boolean
 }
 
@@ -85,20 +93,33 @@ export function GroupSummaryRow({
   onClick: () => void
 }): JSX.Element {
   const { Icon, toneClass } = toolStatusIcon(row.ok)
+  const delta = typeof row.secondary === 'object' && row.secondary.kind === 'delta' ? row.secondary : null
+  const text = typeof row.secondary === 'string' ? row.secondary : null
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group/summary flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-muted"
+      className="group/summary grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
       data-testid={`grouped-tool-row-${row.callId}`}
     >
       <Icon className={cn('h-3 w-3 flex-none', toneClass)} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
+      <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={row.primary}>
         {row.primary}
       </span>
-      {row.secondary ? (
-        <span className="flex-none truncate text-[11px] text-muted-foreground">
-          {row.secondary}
+      {delta ? (
+        <span className="inline-flex h-5 flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[11px] leading-none" aria-label={`${delta.additions} additions, ${delta.deletions} deletions`}>
+          <span className="inline-flex h-5 items-center gap-1 border-r border-border/50 px-1.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+            <span className="text-[10px] text-emerald-600/80 dark:text-emerald-300/80">+</span>
+            {delta.additions}
+          </span>
+          <span className="inline-flex h-5 items-center gap-1 px-1.5 font-mono font-semibold text-rose-700 dark:text-rose-300">
+            <span className="text-[10px] text-rose-600/80 dark:text-rose-300/80">-</span>
+            {delta.deletions}
+          </span>
+        </span>
+      ) : text ? (
+        <span className="inline-flex h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[11px] leading-none text-muted-foreground" title={text}>
+          {text}
         </span>
       ) : null}
     </button>

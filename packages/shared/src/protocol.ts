@@ -94,8 +94,11 @@ export type SessionReadyEvent = {
  * Future candidates: preferred approval mode default, context pressure
  * threshold overrides, editor language, UI density, etc.
  */
+export type ToolCardMode = 'dots' | 'standard'
+
 export type SessionPreferences = {
   selectedModel?: string
+  toolCardMode?: ToolCardMode
 }
 
 export type ClientUpdatePreferences = {
@@ -1165,6 +1168,7 @@ export type SessionSummary = {
    * When unset the dashboard uses `firstUserMessage` as before.
    */
   label?: string
+  preferences?: SessionPreferences
 }
 
 export type ServerSessionsPayload = {
