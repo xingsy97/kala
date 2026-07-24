@@ -66,6 +66,7 @@ import type { SocketAdminConfig } from './socket-admin.js'
 import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
 import { loadPersistedMessageQueue, persistMessageQueueSnapshot } from './message-queue-store.js'
+import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
 
 export type HostServerOptions = {
   port: number
@@ -291,20 +292,29 @@ export async function startHostServer(
     return normalizeModelRef(configured) ?? (fallback.length > 0 ? fallback : undefined)
   }
   const effectiveModelForSession = (sessionId: string): string | undefined => {
-    return store.get(sessionId)?.preferences.selectedModel ?? effectiveDefaultModel()
+    const selected = store.get(sessionId)?.preferences.selectedModel
+    return (selected ? normalizeModelRef(selected) : undefined) ?? effectiveDefaultModel()
   }
   const contextWindowForModel = (model: string | undefined): ContextWindowOverride | undefined => {
     const selected = model?.trim()
     if (!selected) return undefined
     const normalized = normalizeModelRef(selected)
-    if (!normalized) return { model: selected }
+    if (!normalized) {
+      const contextWindow = resolveModelContextWindow(selected, advertisedModels())
+      return {
+        model: selected,
+        modelId: modelIdFromRef(selected),
+        ...(contextWindow ? { contextWindow } : {}),
+      }
+    }
     const info = advertisedModels().find((m) => (m.ref ?? m.id) === normalized)
     if (!info) return { model: selected }
+    const contextWindow = resolveModelContextWindow(normalized, advertisedModels())
     return {
       model: normalized,
       modelId: info.id,
       provider: info.providerId,
-      ...(info.contextWindow ? { contextWindow: info.contextWindow } : {}),
+      ...(contextWindow ? { contextWindow } : {}),
     }
   }
 

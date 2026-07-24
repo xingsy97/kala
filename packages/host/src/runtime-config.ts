@@ -27,6 +27,9 @@ import type { ManualModelInput, ManualProviderInput, ModelInfo, ModelSource, Pro
 
 import { normalizeAgentSystemPromptPreset, type AgentSystemPromptPreset } from './builtin-tools.js'
 import type { HookConfig, HookEvent } from './extensions/hooks.js'
+import { knownContextWindow } from './model-capabilities.js'
+
+export { knownContextWindow } from './model-capabilities.js'
 
 export type ProviderSpec = {
   id: string
@@ -141,13 +144,6 @@ function normalizeDefaultModelRef(defaultModel: string | undefined, models: read
   if (!defaultModel) return undefined
   const exact = models.find((model) => model.ref === defaultModel || model.id === defaultModel)
   return exact?.ref ?? exact?.id ?? defaultModel
-}
-
-export function knownContextWindow(model: string): number | undefined {
-  const normalized = model.toLowerCase()
-  if (normalized.includes('claude-opus-4.7-1m')) return 1_000_000
-  if (normalized.includes('gpt-5.5')) return 400_000
-  return undefined
 }
 
 // ============================================================================

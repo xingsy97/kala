@@ -102,7 +102,7 @@ describe('loadRuntimeConfig', () => {
       expect(cfg.models.at(-1)?.ref).toBe('newapi:gpt-5.5')
       expect(cfg.models.map((m) => m.contextWindow)).toEqual([
         1_000_000,
-        undefined,
+        200_000,
         353_346,
       ])
       expect(cfg.models.map((m) => m.source)).toEqual([
