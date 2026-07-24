@@ -16,7 +16,7 @@
 // `resolved` counts) are preserved via the type parameters. Do not flatten
 // them.
 
-export type BenchmarkKind = 'swe-bench' | 'terminal-bench'
+export type BenchmarkKind = 'swe-bench' | 'terminal-bench' | 'program-bench' | 'swe-marathon'
 
 export type BenchmarkRunLayoutBase = {
   runId: string

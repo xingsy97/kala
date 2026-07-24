@@ -68,6 +68,16 @@ import {
   runTerminalBenchRun,
   terminalBenchRunLayout,
 } from '../eval/terminal-bench/terminal-bench.js'
+import { runTerminalBench21Run } from '../eval/terminal-bench/terminal-bench-2_1.js'
+import {
+  importProgramBenchResults,
+  programBenchRunLayout,
+  runProgramBenchRun,
+} from '../eval/programbench/programbench.js'
+import {
+  importSweMarathonResults,
+  runSweMarathonRun,
+} from '../eval/swe-marathon/swe-marathon.js'
 import { mineBadCases } from '../eval/badcases/badcase-mining.js'
 import { readSweBenchRunRegistry } from '../eval/core/run-registry.js'
 import { exportForRL, exportForSFT } from '../eval/badcases/badcase-export.js'
@@ -292,6 +302,7 @@ type EnhancementActionRequest = {
   skipCompleted?: boolean
   tasksJsonl?: string
   tasksContent?: string
+  tasksDir?: string
   taskIds?: readonly string[] | string
   label?: string
   note?: string
@@ -1482,6 +1493,129 @@ async function runEnhancementAction(
     const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
     if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
     const summary = await importTerminalBenchResults({ rootDir, runId })
+    return {
+      action,
+      runId,
+      total: summary.total,
+      resolved: summary.resolved,
+      unresolved: summary.unresolved,
+      errored: summary.errored,
+      accuracy: summary.accuracy,
+    }
+  }
+  if (action === 'terminal-bench-2_1-run') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run terminal-bench 2.1')
+    const datasetDir = requiredString(body.tasksDir, 'tasksDir')
+    const taskIds = listInput(body.taskIds)
+    const limit = positiveInteger(body.limit, 'limit')
+    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+    const started = Date.now()
+    const { summary } = await runTerminalBench21Run({
+      rootDir,
+      runId,
+      datasetDir,
+      agent: cleanString(body.agentCommand) === 'none' ? 'none' : 'solution',
+      ...(taskIds ? { taskIds } : {}),
+      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
+      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    })
+    return {
+      action,
+      runId,
+      total: summary.total,
+      resolved: summary.resolved,
+      unresolved: summary.unresolved,
+      errored: summary.errored,
+      accuracy: summary.accuracy,
+      durationMs: Date.now() - started,
+    }
+  }
+  if (action === 'program-bench-run-agent') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run program-bench')
+    const layout = programBenchRunLayout(rootDir, runId)
+    const limit = positiveInteger(body.limit, 'limit')
+    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
+    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+    const started = Date.now()
+    const result = await runProgramBenchRun({
+      rootDir,
+      runId,
+      tasksJsonl: cleanString(body.tasksJsonl) ?? layout.tasksJsonl,
+      ...(cleanString(body.tasksContent) ? { inlineTasksContent: cleanString(body.tasksContent) } : {}),
+      ...(cleanString(body.agentCommand) ? { agentCommand: cleanString(body.agentCommand) } : {}),
+      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
+      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    })
+    return {
+      action,
+      runId,
+      total: result.summary.total,
+      resolved: result.summary.resolved,
+      unresolved: result.summary.unresolved,
+      errored: result.summary.errored,
+      accuracy: result.summary.accuracy,
+      durationMs: Date.now() - started,
+    }
+  }
+  if (action === 'program-bench-import-results') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const summary = await importProgramBenchResults({ rootDir, runId })
+    return {
+      action,
+      runId,
+      total: summary.total,
+      resolved: summary.resolved,
+      unresolved: summary.unresolved,
+      errored: summary.errored,
+      accuracy: summary.accuracy,
+    }
+  }
+  if (action === 'swe-marathon-run-agent') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run swe-marathon')
+    const tasksDir = requiredString(body.tasksDir, 'tasksDir')
+    const taskIds = listInput(body.taskIds)
+    const limit = positiveInteger(body.limit, 'limit')
+    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
+    const started = Date.now()
+    const result = await runSweMarathonRun({
+      rootDir,
+      runId,
+      tasksDir,
+      ...(taskIds ? { taskIds } : {}),
+      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
+      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    })
+    return {
+      action,
+      runId,
+      total: result.summary.total,
+      resolved: result.summary.resolved,
+      unresolved: result.summary.unresolved,
+      errored: result.summary.errored,
+      accuracy: result.summary.accuracy,
+      durationMs: Date.now() - started,
+    }
+  }
+  if (action === 'swe-marathon-import-results') {
+    const runId = requiredString(body.runId, 'runId')
+    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const summary = await importSweMarathonResults({ rootDir, runId })
     return {
       action,
       runId,

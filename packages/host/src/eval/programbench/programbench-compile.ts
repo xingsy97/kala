@@ -43,6 +43,11 @@ export async function runProgramBenchCompileProbe(
   const command = options.dockerImage
     ? [
         'docker', 'run', '--rm', '--network', 'none',
+        // SECURITY hardening for untrusted compile.sh:
+        '--cpus', '2', '--memory', '2g', '--pids-limit', '512',
+        '--security-opt', 'no-new-privileges',
+        '--cap-drop', 'NET_RAW', '--cap-drop', 'SYS_ADMIN', '--cap-drop', 'SYS_PTRACE',
+        '--cap-drop', 'SYS_MODULE', '--cap-drop', 'MKNOD',
         '-v', `${options.workspaceRoot}:/workspace`,
         '-w', '/workspace',
         options.dockerImage,

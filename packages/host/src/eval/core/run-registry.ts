@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-export type BenchmarkRunKind = 'swebench' | 'terminal-bench'
+export type BenchmarkRunKind = 'swebench' | 'terminal-bench' | 'program-bench' | 'swe-marathon'
 
 export type SweBenchRunRegistryEntry = {
   runId: string

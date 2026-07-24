@@ -6,10 +6,16 @@ export function RunLauncherPanel({
   run,
   onLaunchSwebench,
   onLaunchTerminalBench,
+  onLaunchProgramBench,
+  onLaunchSweMarathon,
+  onLaunchTerminalBench21,
 }: {
   run: BenchmarkRunSummary | null
   onLaunchSwebench(): void
   onLaunchTerminalBench(): void
+  onLaunchProgramBench(): void
+  onLaunchSweMarathon(): void
+  onLaunchTerminalBench21(): void
 }): JSX.Element {
   const { t } = useTranslation()
   const nextStep = run ? nextStepFor(run) : null
@@ -57,6 +63,39 @@ export function RunLauncherPanel({
             <div className="text-sm font-medium">{t('benchmarks.launcher.startTerminalBench')}</div>
             <div className="mt-1 text-xs text-muted-foreground">
               {t('benchmarks.launcher.startTerminalBenchHint')}
+            </div>
+          </button>
+          <button
+            type="button"
+            className="rounded border border-border bg-card p-3 text-left hover:bg-accent/40"
+            onClick={onLaunchTerminalBench21}
+            data-testid="benchmarks-launcher-terminal-bench-2_1"
+          >
+            <div className="text-sm font-medium">{t('benchmarks.launcher.startTerminalBench21')}</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {t('benchmarks.launcher.startTerminalBench21Hint')}
+            </div>
+          </button>
+          <button
+            type="button"
+            className="rounded border border-border bg-card p-3 text-left hover:bg-accent/40"
+            onClick={onLaunchProgramBench}
+            data-testid="benchmarks-launcher-program-bench"
+          >
+            <div className="text-sm font-medium">{t('benchmarks.launcher.startProgramBench')}</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {t('benchmarks.launcher.startProgramBenchHint')}
+            </div>
+          </button>
+          <button
+            type="button"
+            className="rounded border border-border bg-card p-3 text-left hover:bg-accent/40"
+            onClick={onLaunchSweMarathon}
+            data-testid="benchmarks-launcher-swe-marathon"
+          >
+            <div className="text-sm font-medium">{t('benchmarks.launcher.startSweMarathon')}</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {t('benchmarks.launcher.startSweMarathonHint')}
             </div>
           </button>
         </div>
