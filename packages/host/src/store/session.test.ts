@@ -152,6 +152,30 @@ describe('SessionStore.ensure', () => {
     // No second file was created.
     expect(readdirSync(dir).length).toBe(1)
   })
+
+  it('uses the current runtime tool catalog when loading an old session log', async () => {
+    const sessionId = 'sess-runtime-tools'
+    const oldRead = { name: 'read', description: 'old read', inputSchema: { type: 'object' }, requiresApproval: false }
+    const newReadFile = { name: 'read_file', description: 'new read', inputSchema: { type: 'object' }, requiresApproval: false }
+    const oldConfig = createConfig({ tools: [oldRead], systemPrompt: 'sys' })
+    const newConfig = createConfig({ tools: [newReadFile], systemPrompt: 'sys' })
+
+    const writer = new SessionStore(dir)
+    const created = await writer.create({ sessionId, config: oldConfig })
+    const persisted = await readSessionLog(created.logPath)
+    expect(persisted.header.config.tools.map((tool) => tool.name)).toEqual(['read'])
+
+    const reader = new SessionStore(dir, { runtimeConfig: newConfig })
+    const loaded = await reader.load(sessionId)
+    expect(loaded.config.tools.map((tool) => tool.name)).toEqual(['read_file'])
+
+    const { effects } = step(loaded.state, { kind: 'user_message', text: 'what tools are available?' }, loaded.config)
+    expect(effects).toHaveLength(1)
+    expect(effects[0]).toMatchObject({ kind: 'call_llm' })
+    if (effects[0]?.kind === 'call_llm') {
+      expect(effects[0].tools.map((tool) => tool.name)).toEqual(['read_file'])
+    }
+  })
 })
 
 describe('SessionStore.rename', () => {

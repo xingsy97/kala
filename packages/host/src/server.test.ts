@@ -19,6 +19,7 @@ import type {
   ServerExecutorChangedPayload,
   ServerExecutorsPayload,
   ServerHistoryPayload,
+  ServerMessageQueueEvent,
   ServerSettingsPayload,
   ServerSessionsPayload,
   ServerSubAgentFinishedEvent,
@@ -1322,6 +1323,62 @@ describe('wire protocol', () => {
     expect(payload.contextSnapshot.model.id).toBe('claude-session')
     expect(payload.contextSnapshot.model.provider).toBe('anthropic')
     expect(payload.contextSnapshot.contextWindow).toEqual({ tokens: 1_000_000, source: 'model_registry' })
+    dashboard.close()
+  })
+
+  it('uses the host default model as the effective session model when no preference is set', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const seenModels: Array<string | undefined> = []
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      models: [
+        { ref: 'anthropic:first-model', id: 'first-model', label: 'First Model', provider: 'anthropic', providerId: 'anthropic', contextWindow: 200_000 },
+        { ref: 'openai:gpt-default', id: 'gpt-default', label: 'GPT Default', provider: 'openai', providerId: 'openai', contextWindow: 400_000 },
+      ],
+      defaultModel: 'openai:gpt-default',
+      llm: {
+        async call(p) {
+          seenModels.push(p.model)
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+            usage: { inputTokens: 1, outputTokens: 1 },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    const sessionId = 'wire-effective-default-model'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    const ready = await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    expect(ready.selectedModel).toBe('openai:gpt-default')
+    expect(ready.contextSnapshot.model.ref).toBe('openai:gpt-default')
+    expect(ready.contextSnapshot.contextWindow).toEqual({ tokens: 400_000, source: 'model_registry' })
+
+    const done = new Promise<DashboardServerToClientEvents['state:changed']>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('state:changed never emitted')), 1000)
+      dashboard.on('state:changed', (payload) => {
+        if (payload.state.status === 'done') {
+          clearTimeout(timer)
+          resolve(payload)
+        }
+      })
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'hello' })
+    const payload = await done
+    expect(seenModels).toEqual(['openai:gpt-default'])
+    expect(payload.contextSnapshot.model.ref).toBe('openai:gpt-default')
+    expect(payload.contextSnapshot.contextWindow).toEqual({ tokens: 400_000, source: 'model_registry' })
     dashboard.close()
   })
 
@@ -3453,6 +3510,84 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('captures the effective default model on queued messages', async () => {
+    const sessionId = 'wire-message-queue-default-model'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenModels: Array<string | undefined> = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      models: [
+        { ref: 'provider:first-model', id: 'first-model', label: 'First Model', provider: 'provider', providerId: 'provider' },
+        { ref: 'provider:model-default', id: 'model-default', label: 'Default Model', provider: 'provider', providerId: 'provider' },
+        { ref: 'provider:model-later', id: 'model-later', label: 'Later Model', provider: 'provider', providerId: 'provider' },
+      ],
+      defaultModel: 'provider:model-default',
+      llm: {
+        name: 'queue-default-model-test',
+        async call(p) {
+          seenModels.push(p.model)
+          if (seenModels.length === 1) await firstRelease
+          return {
+            message: { role: 'assistant', content: [{ type: 'text', text: `answer ${seenModels.length}` }] },
+            usage: { inputTokens: 10, outputTokens: 1 },
+          }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const finalDone = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('queued turn never finished')), 4000)
+      dashboard.on('state:changed', (p) => {
+        if (p.state.status === 'done' && p.state.messages.length >= 5) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    })
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenModels.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    const modelChanged = new Promise<void>((resolve) => dashboard.on('server:control_update', (payload) => {
+      if (payload.kind === 'session_meta_changed' && payload.sessionId === sessionId && payload.preferences?.selectedModel === 'provider:model-later') {
+        resolve()
+      }
+    }))
+    dashboard.emit('client:update_preferences', { sessionId, preferences: { selectedModel: 'provider:model-later' } })
+    await modelChanged
+    releaseFirst()
+    await finalDone
+
+    expect(seenModels).toEqual(['provider:model-default', 'provider:model-default'])
+    dashboard.close()
+  })
+
   it('lets dashboard reorder, edit, and delete queued user messages before drain', async () => {
     const sessionId = 'wire-message-queue-edit'
     await server.close()
@@ -3550,6 +3685,123 @@ describe('wire protocol', () => {
 
     expect(seenPrompts).toEqual(['first', 'first|third edited', 'first|third edited|second'])
 
+    dashboard.close()
+  })
+
+  it('persists queued user messages across host restart and syncs them to dashboards', async () => {
+    const sessionId = 'wire-message-queue-restart'
+    await server.close()
+    let http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    let port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-restart-test-1',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          await firstRelease
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'first done' }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    let dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    let latestQueue: ServerMessageQueueEvent | undefined
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) latestQueue = p
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const waitForQueue = async (count: number): Promise<ServerMessageQueueEvent> => {
+      const deadline = Date.now() + 2000
+      while (Date.now() < deadline) {
+        if (latestQueue?.pending === count) return latestQueue
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      throw new Error(`queue did not reach ${count}`)
+    }
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    expect((await waitForQueue(1)).items[0]?.text).toBe('second')
+    dashboard.close()
+    await server.close()
+    releaseFirst()
+
+    http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    port = (http.address() as AddressInfo).port
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-restart-test-2',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'second done' }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    latestQueue = undefined
+    dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) latestQueue = p
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const restoredSnapshot = latestQueue
+    expect(restoredSnapshot?.items[0]?.text ?? 'second').toBe('second')
+    const deadline = Date.now() + 4000
+    while (Date.now() < deadline && seenPrompts.length < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(seenPrompts).toEqual(['first', 'first|second'])
+    const emptyDeadline = Date.now() + 2000
+    while (Date.now() < emptyDeadline && latestQueue?.pending !== 0) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(latestQueue?.pending).toBe(0)
+
+    const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
+    expect(parsed.runtimeMetadata.some((entry) => entry.action === 'message_queue_snapshot')).toBe(true)
     dashboard.close()
   })
 

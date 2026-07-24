@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { writeTool } from './write.js'
+import { writeFileTool } from './write-file.js'
 import { makeCtx } from './_test-helpers.js'
 
-describe('write', () => {
+describe('write_file', () => {
   let root: string
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'ak-write-'))
@@ -15,22 +15,22 @@ describe('write', () => {
 
   it('creates a new file and reports bytes', async () => {
     const p = join(root, 'sub', 'new.txt')
-    const out = await writeTool.run(
+    const out = await writeFileTool.run(
       { path: p, content: 'hello' },
       makeCtx(root),
     )
-    expect(out).toContain('Created')
+    expect(JSON.parse(out)).toMatchObject({ ok: true, files: [{ operation: 'created' }] })
     expect(readFileSync(p, 'utf8')).toBe('hello')
   })
 
   it('overwrites an existing file', async () => {
     const p = join(root, 'x.txt')
     writeFileSync(p, 'old')
-    const out = await writeTool.run(
+    const out = await writeFileTool.run(
       { path: p, content: 'new' },
       makeCtx(root),
     )
-    expect(out).toContain('Wrote')
+    expect(JSON.parse(out)).toMatchObject({ ok: true, files: [{ operation: 'modified' }] })
     expect(readFileSync(p, 'utf8')).toBe('new')
   })
 
@@ -38,7 +38,7 @@ describe('write', () => {
     const outside = mkdtempSync(join(tmpdir(), 'ak-write-out-'))
     try {
       await expect(
-        writeTool.run(
+        writeFileTool.run(
           { path: join(outside, 'nope.txt'), content: 'x' },
           makeCtx(root),
         ),
@@ -54,7 +54,7 @@ describe('write', () => {
     ctrl.abort()
     const p = join(root, 'guard.txt')
     await expect(
-      writeTool.run({ path: p, content: 'x' }, makeCtx(root, ctrl.signal)),
+      writeFileTool.run({ path: p, content: 'x' }, makeCtx(root, ctrl.signal)),
     ).rejects.toThrow(/ECANCELED/)
     expect(existsSync(p)).toBe(false)
   })
@@ -65,7 +65,7 @@ describe('write', () => {
     const p = join(root, 'keep.txt')
     writeFileSync(p, 'ORIGINAL')
     await expect(
-      writeTool.run({ path: p, content: 'REPLACED' }, makeCtx(root, ctrl.signal)),
+      writeFileTool.run({ path: p, content: 'REPLACED' }, makeCtx(root, ctrl.signal)),
     ).rejects.toThrow(/ECANCELED/)
     expect(readFileSync(p, 'utf8')).toBe('ORIGINAL')
   })

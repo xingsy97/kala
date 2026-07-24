@@ -72,6 +72,7 @@ export async function workspaceExec(
 }
 
 export type WorkspaceReadBinaryOptions = {
+  cwd?: string
   maxBytes?: number
   ackTimeoutMs?: number
 }
@@ -87,6 +88,7 @@ export async function workspaceReadBinary(
     requestId,
     workspaceId,
     path,
+    ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.maxBytes ? { maxBytes: options.maxBytes } : {}),
   }
   const ackTimeout = options.ackTimeoutMs ?? 12_000

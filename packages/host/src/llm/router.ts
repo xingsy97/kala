@@ -36,6 +36,8 @@ export type RouterDecision = {
   selectedProvider?: string
   selectedAdapter?: string
   selectedModel?: string
+  requestedModelRef?: string
+  routedModelId?: string
 }
 
 export type MutableRouter = LLMAdapter & {
@@ -83,6 +85,8 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
             provider: nameOf(target.adapter),
             adapterName: target.adapter.name,
             ...(params.model ? { model: params.model } : {}),
+            ...(params.model ? { requestedModelRef: params.model } : {}),
+            ...(routedParams.model ? { routedModelId: routedParams.model } : {}),
             durationMs: Date.now() - started,
             retryCount: i,
           }
@@ -101,6 +105,8 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
             selectedProvider: attempt.provider,
             selectedAdapter: target.adapter.name,
             ...(params.model ? { selectedModel: params.model } : {}),
+            ...(params.model ? { requestedModelRef: params.model } : {}),
+            ...(routedParams.model ? { routedModelId: routedParams.model } : {}),
           }
           opts.onDecision?.(lastDecision)
           return response
@@ -110,6 +116,8 @@ export function routerAdapter(opts: RouterOptions): MutableRouter {
             provider: nameOf(target.adapter),
             adapterName: target.adapter.name,
             ...(params.model ? { model: params.model } : {}),
+            ...(params.model ? { requestedModelRef: params.model } : {}),
+            ...(routedParams.model ? { routedModelId: routedParams.model } : {}),
             label,
             durationMs: Date.now() - started,
             retryCount: i,
@@ -217,5 +225,7 @@ export function toFallbackArtifact(
     ...(decision.selectedProvider ? { selectedProvider: decision.selectedProvider } : {}),
     ...(decision.selectedAdapter ? { selectedAdapter: decision.selectedAdapter } : {}),
     ...(decision.selectedModel ? { selectedModel: decision.selectedModel } : {}),
+    ...(decision.requestedModelRef ? { requestedModelRef: decision.requestedModelRef } : {}),
+    ...(decision.routedModelId ? { routedModelId: decision.routedModelId } : {}),
   }
 }

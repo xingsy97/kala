@@ -99,6 +99,18 @@ describe('workspaceReadBinary', () => {
     expect(res.mime).toBe('text/plain')
   })
 
+  it('resolves relative reads against the supplied cwd', async () => {
+    mkdirSync(join(root, 'pkg'), { recursive: true })
+    writeFileSync(join(root, 'pkg', 'local.md'), '# local\n')
+    const sandbox = createSandbox({ roots: [root] })
+    const res = await workspaceReadBinary(
+      { requestId: 'r1-cwd', workspaceId: 'w', path: 'local.md', cwd: join(root, 'pkg') },
+      sandbox,
+    )
+    expect(res.error).toBeUndefined()
+    expect(Buffer.from(res.base64, 'base64').toString()).toBe('# local\n')
+  })
+
   it('detects PNG magic bytes', async () => {
     const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0])
     writeFileSync(join(root, 'a.png'), buf)

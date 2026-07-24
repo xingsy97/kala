@@ -117,15 +117,25 @@ const filesystemToolset: ToolsetPlugin = {
   label: 'Filesystem',
   provideTools() {
     return [
-      tool('read', 'executor', 'read', false, 'read', {
-        purpose: 'Read a UTF-8 text file. Returns cat -n style output with tab-separated line numbers.',
-        whenToUse: ['Inspect source files, configs, logs, or docs before making decisions.', 'Read targeted ranges when the file is large.'],
+      tool('read_file', 'executor', 'read', false, 'read_file', {
+        purpose: 'Read one UTF-8 text file. Returns batcat-style line-numbered output.',
+        whenToUse: ['Inspect one source file, config, log, or doc before making decisions.', 'Read targeted ranges when the file is large.'],
         constraints: ['Use absolute paths.', 'Do not read secrets unless required for the user task.'],
       }, {
         type: 'object', required: ['path'], properties: {
           path: { type: 'string', description: 'Absolute path to the file.' },
           offset: { type: 'integer', minimum: 0, description: '0-indexed line to start from.' },
           limit: { type: 'integer', minimum: 1, description: 'Maximum lines to return.' },
+        },
+      }),
+      tool('read_files', 'executor', 'read', false, 'read_files', {
+        purpose: 'Read multiple UTF-8 text files in one call. Returns batcat-style sections with file headers and line numbers.',
+        whenToUse: ['Inspect related implementation, interface, and test files together.', 'Reduce repeated file-read tool calls when the exact files are already known.'],
+        constraints: ['Use absolute paths.', 'Keep the file list focused; use search_files or find_files before broad reads.'],
+      }, {
+        type: 'object', required: ['files'], properties: {
+          files: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1 } } } },
+          max_bytes: { type: 'integer', minimum: 1, maximum: 1000000, description: 'Maximum combined output bytes.' },
         },
       }),
       tool('ls', 'executor', 'read', false, 'ls', {
@@ -143,16 +153,26 @@ const filesystemToolset: ToolsetPlugin = {
         whenToUse: ['Search code symbols, error strings, config keys, or behavior references.', 'Use before reading many files.'],
         constraints: ['Scope by path or glob when possible.', 'Use case_insensitive only when needed.'],
       }, { type: 'object', required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string', description: 'Filter files by glob.' }, output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'] }, case_insensitive: { type: 'boolean' } } }),
-      tool('write', 'executor', 'write', true, 'write', {
-        purpose: 'Write UTF-8 content to a file, creating parent directories as needed.',
+      tool('write_file', 'executor', 'write', true, 'write_file', {
+        purpose: 'Create or fully overwrite one UTF-8 text file, creating parent directories as needed.',
         whenToUse: ['Create new files or fully replace generated files.'],
-        constraints: ['Avoid overwriting user changes unintentionally.', 'Prefer edit for small source changes.'],
+        constraints: ['Avoid overwriting user changes unintentionally.', 'Prefer replace_in_file or replace_many_in_file for focused source changes.'],
       }, { type: 'object', required: ['path', 'content'], properties: { path: { type: 'string' }, content: { type: 'string' } } }),
-      tool('edit', 'executor', 'write', true, 'edit', {
-        purpose: 'Exact string replacement. Fails if old_string is missing or ambiguous unless replace_all is true.',
-        whenToUse: ['Apply focused source edits.', 'Preserve surrounding file content exactly.'],
-        constraints: ['Read the target context first.', 'Use replace_all only when every occurrence should change.'],
+      tool('replace_in_file', 'executor', 'write', true, 'replace_in_file', {
+        purpose: 'Replace one exact string in one text file. Fails if old_string is missing or ambiguous unless replace_all is true.',
+        whenToUse: ['Apply one focused source edit when exact context is known.', 'Preserve surrounding file content exactly.'],
+        constraints: ['Read the target context first.', 'Do not include line numbers in old_string.', 'Use replace_all only when every occurrence should change.'],
       }, { type: 'object', required: ['path', 'old_string', 'new_string'], properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } } }),
+      tool('replace_many_in_file', 'executor', 'write', true, 'replace_many_in_file', {
+        purpose: 'Apply multiple exact string replacements to one text file in order, then commit once only if every replacement succeeds.',
+        whenToUse: ['Make several coordinated edits in the same file.', 'Avoid multiple separate replace_in_file calls on one file.'],
+        constraints: ['Read the target context first.', 'Each old_string must match the current file content at its step.', 'Use apply_file_patch for complex line-level changes.'],
+      }, { type: 'object', required: ['path', 'edits'], properties: { path: { type: 'string' }, edits: { type: 'array', minItems: 1, items: { type: 'object', required: ['old_string', 'new_string'], properties: { old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } } } } } }),
+      tool('apply_file_patch', 'executor', 'write', true, 'apply_file_patch', {
+        purpose: 'Apply a patch-format file mutation. Supports add, update, delete, and move operations; a patch may touch one file or many files.',
+        whenToUse: ['Apply complex line-level changes.', 'Create, delete, move, or update files from one patch-format description.'],
+        constraints: ['Patch context must match exactly.', 'Prefer replace_in_file for one small exact replacement.', 'Use the Agent RunLab patch format beginning with *** Begin Patch and ending with *** End Patch.'],
+      }, { type: 'object', required: ['patch'], properties: { patch: { type: 'string', description: 'Patch text beginning with *** Begin Patch and ending with *** End Patch.' } } }),
     ]
   },
 }

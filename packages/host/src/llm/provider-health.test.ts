@@ -134,6 +134,12 @@ describe('routerAdapter fallback', () => {
     await router.call({ messages: [], tools: [], model: 'newapi:gpt-5.5' })
     expect(seenModels).toEqual(['gpt-5.5'])
     expect(router.lastDecision()?.selectedModel).toBe('newapi:gpt-5.5')
+    expect(router.lastDecision()?.requestedModelRef).toBe('newapi:gpt-5.5')
+    expect(router.lastDecision()?.routedModelId).toBe('gpt-5.5')
+    expect(router.lastDecision()?.attempts[0]).toMatchObject({
+      requestedModelRef: 'newapi:gpt-5.5',
+      routedModelId: 'gpt-5.5',
+    })
   })
 })
 
@@ -145,11 +151,15 @@ describe('writeFallbackArtifact', () => {
         attempts: [{ provider: 'openai', retryCount: 0 }],
         finalOutcome: 'success',
         selectedProvider: 'openai',
+        requestedModelRef: 'newapi:gpt-5.5',
+        routedModelId: 'gpt-5.5',
       })
       const path = await writeFallbackArtifact({ rootDir: dir, sessionId: 'session-1', eventSeq: 3, artifact })
       const raw = await readFile(path, 'utf8')
-      const parsed = JSON.parse(raw) as { finalOutcome: string }
+      const parsed = JSON.parse(raw) as { finalOutcome: string; requestedModelRef?: string; routedModelId?: string }
       expect(parsed.finalOutcome).toBe('success')
+      expect(parsed.requestedModelRef).toBe('newapi:gpt-5.5')
+      expect(parsed.routedModelId).toBe('gpt-5.5')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

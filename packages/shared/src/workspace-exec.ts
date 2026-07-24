@@ -35,6 +35,7 @@ export type WorkspaceReadBinaryRequest = {
   requestId: string
   workspaceId: string
   path: string
+  cwd?: string
   maxBytes?: number
 }
 

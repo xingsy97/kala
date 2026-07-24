@@ -97,6 +97,9 @@ The host must build a replacement that preserves provider protocol invariants:
 - Keep the initial durable setup message when applicable.
 - Replace an old compactable range with a summary message.
 - Preserve recent tail messages needed for current task continuity.
+- Preserve recent raw user turns only within a context-aware budget; a single
+  oversized old user turn is summarized instead of copied verbatim back into
+  the transcript.
 - Do not drop an assistant `tool_call` while retaining its corresponding
   `tool_result`.
 - Do not replace a range that intersects unresolved pending tool calls.
@@ -128,7 +131,8 @@ The replacement written back to the transcript is:
 ```
 [ leading system prompt (sticky),
   user: SUMMARY_PREFIX + "\n\n" + <summary body>,
-  ...most recent raw user turns from the compacted region (≤ 20k tokens),
+  ...most recent raw user turns from the compacted region (context-aware cap,
+     max 20k tokens),
   ...preservedTail ]
 ```
 
@@ -145,22 +149,22 @@ when any of the following hold:
 
 - `validation.ok === false` (schema-invalid: missing or empty required sections).
 - `summary.length < 400` characters.
-- `tokensBefore / summaryTokensApprox > 200` (pathological compression, e.g.
-  the box regression where 427k tokens collapsed to a 50-character reply).
 - A conservative conversational-reply heuristic fires
   (`looksLikeConversationalReply`).
+- The proposed replacement would still leave a normal-size context window above
+  the post-compact hard budget (`post_compaction_still_over_budget`).
 
 Failed attempts write `runtime_metadata { action: 'compaction_skipped',
-reason: 'summary_schema_invalid' | 'summary_too_short' | 'summary_too_lossy' |
-'summary_conversational' | ... }` and never dispatch a `messages_replaced`
-event. The prior behaviour (persist validation only as an artifact, always
-dispatch) is retired.
+reason: 'summary_schema_invalid' | 'summary_too_short' |
+'summary_conversational' | ... }` or `action: 'compaction_rejected'` and never
+dispatch a `messages_replaced` event. The prior behaviour (persist validation
+only as an artifact, always dispatch) is retired.
 
 ### Applied metadata payload
 
 Successful `compaction_applied` entries carry, in addition to the previous
 fields, `compressionRatio`, `previousSummaryChars`, `recentRawUsersCount`,
-and `validationReasonCodes` for observability.
+`recentRawUserTokenBudget`, and `validationReasonCodes` for observability.
 
 ## Replay, Resume, and Fork
 

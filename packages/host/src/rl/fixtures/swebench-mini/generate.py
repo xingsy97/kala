@@ -24,7 +24,7 @@ PROMPT_TEMPLATE = (
     "You are working in a git repository. Your task:\n\n"
     "{problem}\n\n"
     "You may only modify source files. Tests are pinned and must not be modified.\n"
-    "Use tools: read, ls, glob, grep, write, edit, bash.\n"
+    "Use tools: read_file, read_files, ls, glob, grep, write_file, replace_in_file, replace_many_in_file, apply_file_patch, bash.\n"
     "When you believe your fix is complete, run the test suite with bash."
 )
 

@@ -585,7 +585,6 @@ async function maybeWriteMessageAssemblyArtifact(
       `router-decisions/${sessionId}/${record?.state.cursor ?? 'unknown'}.json`,
       createRouterDecisionArtifact({
         requestedModel: model,
-        selectedModel: model,
         adapterName: deps.llm.name,
         maxInputTokens: contextLimit,
         tools: effect.tools,

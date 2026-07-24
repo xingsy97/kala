@@ -32,15 +32,24 @@ describe('dashboard context pressure policy', () => {
     expect(contextPressureLabel(pressure)).toBe('high · 82%')
   })
 
-  it('uses fallback limits without mutating snapshot semantics', () => {
+  it('does not override a host snapshot with client fallback limits', () => {
     const pressure = evaluateDashboardContextPressure({
       snapshot: snapshot(500, null),
       fallbackModelContextWindow: 1_000,
     })
 
-    expect(pressure.limitTokens).toBe(1_000)
-    expect(pressure.limitSource).toBe('policy_fallback')
+    expect(pressure.limitTokens).toBe(null)
+    expect(pressure.limitSource).toBe('unknown')
     expect(pressure.sourceLabel).toBe('unknown')
+  })
+
+  it('labels the client fallback source when no host snapshot exists yet', () => {
+    const pressure = evaluateDashboardContextPressure({
+      snapshot: null,
+      fallbackModelContextWindow: 1_000,
+    })
+
+    expect(pressure.sourceLabel).toBe('model_registry')
   })
 
   it('maps pressure levels to dashboard tones', () => {

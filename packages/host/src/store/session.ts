@@ -79,6 +79,10 @@ export type CreateSessionParams = {
   preferences?: SessionPreferences
 }
 
+export type SessionStoreOptions = {
+  runtimeConfig?: AgentConfig | (() => AgentConfig)
+}
+
 export class SessionStore {
   private readonly records = new Map<string, SessionRecord>()
   private readonly summaryCache = new Map<string, CachedSessionSummary>()
@@ -91,7 +95,7 @@ export class SessionStore {
    */
   private readonly inFlight = new Map<string, Promise<SessionRecord>>()
 
-  constructor(private readonly sessionsDir: string) {
+  constructor(private readonly sessionsDir: string, private readonly options: SessionStoreOptions = {}) {
     mkdirSync(this.sessionsDir, { recursive: true })
   }
 
@@ -220,20 +224,27 @@ export class SessionStore {
     return next
   }
 
-  async load(sessionId: string, options: { recoverDangling?: boolean } = {}): Promise<SessionRecord> {
+  async load(sessionId: string, options: { recoverDangling?: boolean; runtimeConfig?: AgentConfig } = {}): Promise<SessionRecord> {
     const recoverDangling = options.recoverDangling !== false
     const cached = this.records.get(sessionId)
-    if (cached) return cached
+    if (cached) {
+      this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(options.runtimeConfig))
+      return cached
+    }
     const inflight = recoverDangling ? this.inFlight.get(sessionId) : undefined
-    if (inflight) return inflight
-    const promise = this.loadInner(sessionId, { recoverDangling }).finally(() => {
+    if (inflight) {
+      const record = await inflight
+      this.applyRuntimeConfig(record, this.resolveRuntimeConfig(options.runtimeConfig))
+      return record
+    }
+    const promise = this.loadInner(sessionId, { recoverDangling, runtimeConfig: this.resolveRuntimeConfig(options.runtimeConfig) }).finally(() => {
       this.inFlight.delete(sessionId)
     })
     if (recoverDangling) this.inFlight.set(sessionId, promise)
     return promise
   }
 
-  private async loadInner(sessionId: string, options: { recoverDangling: boolean }): Promise<SessionRecord> {
+  private async loadInner(sessionId: string, options: { recoverDangling: boolean; runtimeConfig?: AgentConfig }): Promise<SessionRecord> {
     const path = this.pathFor(sessionId)
     if (!existsSync(path)) {
       const found = this.findLogByPrefix(sessionId)
@@ -274,15 +285,18 @@ export class SessionStore {
     workspaceId?: string
     workspaceName?: string
     initialCwd?: string
+    runtimeConfig?: AgentConfig
   }): Promise<{ record: SessionRecord; created: boolean }> {
     const cached = this.records.get(params.sessionId)
     if (cached) {
+      this.applyRuntimeConfig(cached, this.resolveRuntimeConfig(params.runtimeConfig ?? params.defaultConfig))
       await this.applyMissingCreateMetadata(cached, params)
       return { record: cached, created: false }
     }
     const inflight = this.inFlight.get(params.sessionId)
     if (inflight) {
       const record = await inflight
+      this.applyRuntimeConfig(record, this.resolveRuntimeConfig(params.runtimeConfig ?? params.defaultConfig))
       await this.applyMissingCreateMetadata(record, params)
       return { record, created: false }
     }
@@ -293,6 +307,7 @@ export class SessionStore {
       params.workspaceId,
       params.workspaceName,
       params.initialCwd,
+      this.resolveRuntimeConfig(params.runtimeConfig) ?? params.defaultConfig,
       () => { created = true },
     ).finally(() => {
       this.inFlight.delete(params.sessionId)
@@ -308,10 +323,11 @@ export class SessionStore {
     workspaceId: string | undefined,
     workspaceName: string | undefined,
     initialCwd: string | undefined,
+    runtimeConfig: AgentConfig,
     markCreated: () => void,
   ): Promise<SessionRecord> {
     try {
-      const record = await this.loadInner(sessionId, { recoverDangling: true })
+      const record = await this.loadInner(sessionId, { recoverDangling: true, runtimeConfig })
       await this.applyMissingCreateMetadata(record, {
         sessionId,
         defaultConfig,
@@ -334,6 +350,18 @@ export class SessionStore {
         ...(initialCwd !== undefined ? { initialCwd } : {}),
       })
     }
+  }
+
+  private applyRuntimeConfig(record: SessionRecord, runtimeConfig: AgentConfig | undefined): void {
+    if (!runtimeConfig) return
+    ;(record as { config: AgentConfig }).config = runtimeConfig
+  }
+
+  private resolveRuntimeConfig(override?: AgentConfig): AgentConfig | undefined {
+    if (override) return override
+    const configured = this.options.runtimeConfig
+    if (!configured) return undefined
+    return typeof configured === 'function' ? configured() : configured
   }
 
   private async applyMissingCreateMetadata(
@@ -540,7 +568,7 @@ export class SessionStore {
   private async loadFromFile(
     sessionId: string,
     path: string,
-    options: { recoverDangling: boolean } = { recoverDangling: true },
+    options: { recoverDangling: boolean; runtimeConfig?: AgentConfig } = { recoverDangling: true },
   ): Promise<SessionRecord> {
     const parsed = await readSessionLog(path)
     const events = parsed.events.map((e) => e.event)
@@ -659,7 +687,7 @@ export class SessionStore {
       sessionId,
       logPath: path,
       createdAt: parsed.header.ts,
-      config: parsed.header.config,
+      config: options.runtimeConfig ?? parsed.header.config,
       preferences,
       ...(parsed.events.length > 0
         ? { lastEventAt: parsed.events[parsed.events.length - 1]!.ts }

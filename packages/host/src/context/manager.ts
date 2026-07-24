@@ -22,8 +22,9 @@ export function contextSnapshot(
   record: SessionRecord,
   messages: readonly Message[] = record.state.messages,
   override?: ContextWindowOverride,
+  selectedModel: string | undefined = record.preferences?.selectedModel,
 ): ContextUsageSnapshot {
-  return snapshotFromConfig(record.config, messages, override, record.preferences?.selectedModel)
+  return snapshotFromConfig(record.config, messages, override, selectedModel)
 }
 
 export function snapshotFromConfig(

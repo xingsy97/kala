@@ -60,6 +60,7 @@ export function WorkspaceFileViewDialog({
   socket,
   workspaceId,
   sessionId,
+  cwd,
   path,
   target,
 }: {
@@ -68,6 +69,7 @@ export function WorkspaceFileViewDialog({
   socket: DashboardSocket | null
   workspaceId?: string
   sessionId?: string
+  cwd?: string
   path?: string | null
   target?: WorkspaceFileTarget | null
 }): JSX.Element {
@@ -84,9 +86,9 @@ export function WorkspaceFileViewDialog({
   const viewFile = useCallback(async (): Promise<void> => {
     if (!open || !socket || !workspaceId || !viewPath) return
     setViewer({ kind: 'loading', path: viewPath })
-    const result = await requestFile(socket, workspaceId, sessionId, viewPath)
+    const result = await requestFile(socket, workspaceId, sessionId, viewPath, { cwd })
     setViewer(fileResultToViewState(result))
-  }, [open, sessionId, socket, viewPath, workspaceId])
+  }, [cwd, open, sessionId, socket, viewPath, workspaceId])
 
   useEffect(() => {
     if (!open) return
@@ -112,11 +114,11 @@ export function WorkspaceFileViewDialog({
     if (!targetPath || !socket || !workspaceId) return
     setDownloading(true)
     try {
-      await downloadWorkspaceFile(socket, workspaceId, sessionId, targetPath, viewer)
+      await downloadWorkspaceFile(socket, workspaceId, sessionId, targetPath, viewer, cwd)
     } finally {
       setDownloading(false)
     }
-  }, [sessionId, socket, viewPath, viewer, workspaceId])
+  }, [cwd, sessionId, socket, viewPath, viewer, workspaceId])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -240,20 +242,20 @@ function SessionFilesPanelImpl({
       return
     }
     setViewer({ kind: 'loading', path: node.path })
-    const result = await requestFile(socket, workspaceId, sessionId ?? undefined, node.path)
+    const result = await requestFile(socket, workspaceId, sessionId ?? undefined, node.path, { cwd })
     setViewer(fileResultToViewState(result))
-  }, [loadDir, mode, sessionId, socket, workspaceId])
+  }, [cwd, loadDir, mode, sessionId, socket, workspaceId])
 
   const downloadNode = useCallback(async (node: FileNode): Promise<void> => {
     if (node.type !== 'file' || !socket || !workspaceId) return
     setDownloadingPath(node.path)
     try {
       const cachedViewer = viewerPath(viewer) === node.path ? viewer : undefined
-      await downloadWorkspaceFile(socket, workspaceId, sessionId ?? undefined, node.path, cachedViewer)
+      await downloadWorkspaceFile(socket, workspaceId, sessionId ?? undefined, node.path, cachedViewer, cwd)
     } finally {
       setDownloadingPath((current) => current === node.path ? null : current)
     }
-  }, [sessionId, socket, viewer, workspaceId])
+  }, [cwd, sessionId, socket, viewer, workspaceId])
 
   if (mode === 'sidebar') {
     return (
@@ -277,6 +279,7 @@ function SessionFilesPanelImpl({
           socket={socket}
           workspaceId={workspaceId}
           sessionId={sessionId ?? undefined}
+          cwd={cwd}
           path={selected?.type === 'file' ? selected.path : undefined}
         />
       </div>
@@ -514,14 +517,14 @@ function copyableViewerContent(viewer: FileViewState): string | undefined {
   return undefined
 }
 
-async function downloadWorkspaceFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, cachedViewer?: FileViewState): Promise<void> {
+async function downloadWorkspaceFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, cachedViewer?: FileViewState, cwd?: string): Promise<void> {
   const cached = cachedViewer && viewerPath(cachedViewer) === path ? downloadableBlob(cachedViewer) : undefined
   if (cached) {
     saveBlob(cached.blob, downloadFilename(path))
     notify.success('Download started', { description: path, id: `file-download:${path}` })
     return
   }
-  const result = await requestFile(socket, workspaceId, sessionId, path, { download: true, maxBytes: FILE_DOWNLOAD_MAX_BYTES, timeoutMs: 120_000 })
+  const result = await requestFile(socket, workspaceId, sessionId, path, { cwd, download: true, maxBytes: FILE_DOWNLOAD_MAX_BYTES, timeoutMs: 120_000 })
   const viewer = fileResultToViewState(result)
   const downloadable = downloadableBlob(viewer)
   if (!downloadable || result.truncated || result.kind === 'too_large') {
@@ -718,7 +721,7 @@ async function requestDir(socket: DashboardSocket, workspaceId: string, sessionI
   })
 }
 
-async function requestFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, options: { maxBytes?: number; download?: boolean; timeoutMs?: number } = {}): Promise<FileContentsResult> {
+async function requestFile(socket: DashboardSocket, workspaceId: string, sessionId: string | undefined, path: string, options: { cwd?: string; maxBytes?: number; download?: boolean; timeoutMs?: number } = {}): Promise<FileContentsResult> {
   // Uses the generic workspace:read_binary channel introduced by the
   // workspace-exec refactor (docs/planning/roadmap-notes/workspace-exec-
   // refactor.md). We keep returning FileContentsResult so the surrounding
@@ -727,6 +730,7 @@ async function requestFile(socket: DashboardSocket, workspaceId: string, session
   const requestId = crypto.randomUUID()
   void sessionId
   const res = await workspaceReadBinary(socket, workspaceId, path, {
+    ...(options.cwd ? { cwd: options.cwd } : {}),
     maxBytes: options.maxBytes ?? FILE_PREVIEW_MAX_BYTES,
     ackTimeoutMs: options.timeoutMs ?? 8000,
   })

@@ -278,6 +278,45 @@ describe('compaction extension', () => {
     expect(replaced[1]?.replaceRange).toEqual({ start: 1, end: 2 })
   })
 
+  it('does not treat an anchored summary as the recent-tail pivot when new history is huge', async () => {
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'summary-plus-huge-tail-mock',
+      async call() {
+        call += 1
+        if (call === 1) return summaryReply(`${OK_SUMMARY}\n\nUpdated huge-tail pass.`)
+        return turnReply('ok')
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    const rec = store.get(sessionId)!
+    const hugeText = '0123456789abcdef'.repeat(2_000)
+
+    rec.state = {
+      ...rec.state,
+      status: 'done',
+      messages: [
+        rec.state.messages[0]!,
+        { role: 'user', content: [{ type: 'text', text: `${SUMMARY_PREFIX}\n\n${OK_SUMMARY}\n\nPrevious pass.` }] },
+        { role: 'user', content: [{ type: 'text', text: 'old post-summary task' }] },
+        { role: 'assistant', content: [{ type: 'text', text: hugeText }] },
+        { role: 'user', content: [{ type: 'text', text: 'newest post-summary task' }] },
+        { role: 'assistant', content: [{ type: 'text', text: hugeText }] },
+      ],
+    }
+
+    await loop.compact(sessionId, 'manual')
+
+    const parsed = await readSessionLog(rec.logPath)
+    const replaced = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
+    expect(replaced?.replaceRange).toEqual({ start: 1, end: 4 })
+    expect(replaced?.replacementMessages).toHaveLength(2)
+    expect(store.get(sessionId)!.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user', 'user', 'assistant'])
+    const meta = parsed.runtimeMetadata.find((entry) => entry.action === 'compaction_applied')
+    expect(meta?.payload.previousSummaryChars).toBeGreaterThan(0)
+    expect(meta?.payload.recentRawUsersCount).toBe(1)
+  })
+
   it('successful compaction writes a cmp_ attemptId in runtime metadata', async () => {
     let call = 0
     const llm: LLMAdapter = {
@@ -390,13 +429,154 @@ describe('compaction extension', () => {
 
     await loop.compact(sessionId, 'auto')
 
-    // One skip event, not four (one per rung). All 4 ladder attempts were
-    // made (call is 5: 1 turn + 4 rungs), but the failure counter got a
-    // single increment.
+    // One skip event, not one per rung. All ladder attempts are made, but the
+    // failure counter gets a single increment.
     const rec = store.get(sessionId)!
     const skips = await readSkipEvents(rec.logPath)
     expect(skips.filter((s) => s.payload.reason === 'summarizer_failed')).toHaveLength(1)
-    expect(call).toBe(5)
+    expect(call).toBeGreaterThan(5)
+  })
+
+  it('summarizer prompt preserves language and opaque identifiers while redacting secrets', async () => {
+    let call = 0
+    const seen: LLMCallParams[] = []
+    const llm: LLMAdapter = {
+      name: 'prompt-guard-mock',
+      async call(p) {
+        call += 1
+        seen.push(p)
+        if (call === 1) return turnReply()
+        return summaryReply()
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    await loop.compact(sessionId)
+
+    const prompt = seen[1]!.systemPrompt ?? ''
+    expect(prompt).toContain('Preserve opaque identifiers exactly as written')
+    expect(prompt).toContain('primary language used by the conversation')
+    expect(prompt).toContain('redact the secret value')
+  })
+
+  it('budget-plans oversized summarizer input before calling the provider', async () => {
+    const seen: LLMCallParams[] = []
+    const llm: LLMAdapter = {
+      name: 'budget-plan-mock',
+      async call(p) {
+        seen.push(p)
+        return summaryReply()
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+      models: {
+        get: () => 'tiny-context-model',
+        contextWindow: () => 16_000,
+      },
+    })
+    const rec = store.get(sessionId)!
+    rec.config = { ...rec.config, contextLimit: 16_000 }
+    rec.state = {
+      ...rec.state,
+      status: 'done',
+      messages: [
+        rec.state.messages[0]!,
+        { role: 'user', content: [{ type: 'text', text: `old ${'a'.repeat(70_000)}` }] },
+        { role: 'assistant', content: [{ type: 'text', text: `old answer ${'b'.repeat(70_000)}` }] },
+        { role: 'user', content: [{ type: 'text', text: 'new request' }] },
+      ],
+    }
+
+    await loop.compact(sessionId, 'manual')
+
+    const summarizerInput = seen[0]!.messages[0]!.content[0]
+    expect(summarizerInput.type).toBe('text')
+    expect(summarizerInput.text.length).toBeLessThan(80_000)
+    expect(summarizerInput.text).toContain('chars omitted from old text before compaction')
+    expect(store.get(sessionId)!.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
+  })
+
+  it('does not preserve a single oversized raw user turn after compaction', async () => {
+    const llm: LLMAdapter = {
+      name: 'oversized-user-tail-mock',
+      async call() {
+        return summaryReply()
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+      models: {
+        get: () => 'normal-context-model',
+        contextWindow: () => 128_000,
+      },
+    })
+    const rec = store.get(sessionId)!
+    rec.config = { ...rec.config, contextLimit: 128_000 }
+    rec.state = {
+      ...rec.state,
+      status: 'done',
+      messages: [
+        rec.state.messages[0]!,
+        { role: 'user', content: [{ type: 'text', text: `huge old request ${'a'.repeat(120_000)}` }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+        { role: 'user', content: [{ type: 'text', text: 'small latest request' }] },
+      ],
+    }
+
+    await loop.compact(sessionId, 'manual')
+
+    const messages = store.get(sessionId)!.state.messages
+    expect(messages.map((m) => m.role)).toEqual(['system', 'user', 'user'])
+    expect((messages[1]!.content[0] as { text: string }).text).toContain(SUMMARY_PREFIX)
+    expect((messages[2]!.content[0] as { text: string }).text).toBe('small latest request')
+    expect(JSON.stringify(messages)).not.toContain('huge old request')
+  })
+
+  it('rejects compaction that still leaves the session over the post-compact budget', async () => {
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'post-budget-mock',
+      async call() {
+        call += 1
+        return summaryReply()
+      },
+    }
+    const loop = runHostLoop({
+      store,
+      llm,
+      tools: nullTools(),
+      broadcast: silentBroadcast(),
+      models: {
+        get: () => 'tiny-context-model',
+        contextWindow: () => 16_000,
+      },
+    })
+    const rec = store.get(sessionId)!
+    rec.config = { ...rec.config, contextLimit: 16_000 }
+    rec.state = {
+      ...rec.state,
+      status: 'done',
+      messages: [
+        rec.state.messages[0]!,
+        { role: 'user', content: [{ type: 'text', text: 'old task' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+        { role: 'user', content: [{ type: 'text', text: 'new request' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(80_000) }] },
+      ],
+    }
+
+    await expect(loop.compact(sessionId, 'manual')).rejects.toThrow(/post_compaction_still_over_budget/)
+
+    const parsed = await readSessionLog(rec.logPath)
+    expect(parsed.events.some((e) => e.event.kind === 'messages_replaced')).toBe(false)
+    expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_rejected' && e.payload.reason === 'post_compaction_still_over_budget')).toBe(true)
   })
 
   it('non-PTL error bubbles out of the ladder without retrying', async () => {

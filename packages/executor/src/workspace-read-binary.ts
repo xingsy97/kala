@@ -35,7 +35,7 @@ export async function workspaceReadBinary(
 
   let absolute: string
   try {
-    absolute = await sandbox.resolve(req.path)
+    absolute = await sandbox.resolve(req.path, req.cwd ? { cwd: req.cwd } : undefined)
   } catch (err) {
     if (err instanceof SandboxError) return errorResponse(requestId, 'EACCES', err.message)
     return errorResponse(requestId, 'EINVAL', err instanceof Error ? err.message : String(err))

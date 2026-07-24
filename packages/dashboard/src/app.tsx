@@ -347,6 +347,7 @@ export function App(): JSX.Element {
     () => resolveModelKey(models, session.selectedModel) || session.selectedModel || '',
     [models, session.selectedModel],
   )
+  const composerModel = selectedModelKey || resolveModelKey(models, defaultModel) || defaultModel || modelKey(models[0])
   const control = useControlPlane(controlSocket)
   const controlSessionsRef = useRef<readonly SessionSummary[]>([])
   controlSessionsRef.current = control.sessions
@@ -473,10 +474,7 @@ export function App(): JSX.Element {
       return
     }
     if (remoteCompact.kind === 'skipped') {
-      // "skipped" carries a reason code (e.g. summary_schema_invalid,
-      // back_off_same_batch). Surface it verbatim in the inline row so
-      // the user can decide whether to retry or ignore.
-      setCompactStatus({ kind: 'error', message: remoteCompact.message ?? remoteCompact.reason })
+      setCompactStatus({ kind: 'error', message: remoteCompact.message ?? compactReasonMessage(remoteCompact.reason) })
       scheduleCompactIdle(6000)
       return
     }
@@ -523,21 +521,6 @@ export function App(): JSX.Element {
     }
     if (compactStatus.kind === 'queued') setCompactStatus({ kind: 'idle' })
   }, [session.contextSnapshot, session.config?.hardThreshold, session.state?.status, compactStatus.kind])
-
-  useEffect(() => {
-    if (session.status !== 'ready' || !session.socket || config.sessionId === null) return
-    const normalizedSessionModel = resolveModelKey(models, session.selectedModel)
-    if (normalizedSessionModel && normalizedSessionModel !== session.selectedModel) {
-      updateSessionPreferences(session.socket, config.sessionId, { selectedModel: normalizedSessionModel })
-      return
-    }
-  }, [
-    session.status,
-    session.socket,
-    session.selectedModel,
-    models,
-    config.sessionId,
-  ])
 
   const onModelChange = (model: string): void => {
     setStoredModel(model)
@@ -1279,7 +1262,7 @@ export function App(): JSX.Element {
       if (!socket || !workspaceId) return { error: 'no active workspace' }
       // Uses the generic workspace:read_binary channel; decode the base64 as
       // UTF-8 for the caller (Composer @-mention preview / etc.).
-      const res = await workspaceReadBinary(socket, workspaceId, path, { ackTimeoutMs: 5000 })
+      const res = await workspaceReadBinary(socket, workspaceId, path, { cwd: currentCwd, ackTimeoutMs: 5000 })
       if (res.error) return { error: res.error.message }
       try {
         const binary = atob(res.base64)
@@ -1290,7 +1273,7 @@ export function App(): JSX.Element {
         return { error: err instanceof Error ? err.message : String(err) }
       }
     },
-    [session.socket, currentSession?.workspaceId],
+    [session.socket, currentSession?.workspaceId, currentCwd],
   )
 
   const readOverflow = useCallback(
@@ -1660,7 +1643,7 @@ export function App(): JSX.Element {
                         front={
                           <Composer
                           disabled={session.status !== 'ready' || sessionWorkspaceKnownOffline}
-                          model={selectedModelKey || preferredModel}
+                          model={composerModel}
                           models={models}
                           onModelChange={onModelChange}
                           approvalMode={session.state?.approvalMode ?? 'auto'}
@@ -1763,20 +1746,6 @@ export function App(): JSX.Element {
                               ...(content ? { content } : {}),
                             })
                             if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
-                            if (effectiveOptimisticMode === 'steer' && shouldCompactContext(session.contextSnapshot, {}, { triggerRatio: session.config?.hardThreshold ?? 0.92 }).shouldCompact) {
-                              if (compactResetTimer.current !== null) {
-                                window.clearTimeout(compactResetTimer.current)
-                                compactResetTimer.current = null
-                              }
-                              const startSeq = session.timeline.at(-1)?.seq ?? 0
-                              compactStartSeq.current = startSeq
-                              inferredCompactSeq.current = startSeq
-                              setCompactStatus({
-                                kind: 'running',
-                                startedAt: Date.now(),
-                                tokensBefore: session.state?.usage.inputTokens ?? 0,
-                              })
-                            }
                             setAwaitingAck(true)
                             // Sending is an explicit "I'm at the end" signal:
                             // re-pin and force a jump even if the user had
@@ -2025,6 +1994,7 @@ export function App(): JSX.Element {
           socket={session.socket}
           workspaceId={fileExplorerWorkspaceId}
           sessionId={hasSelectedSession ? activeSessionId ?? undefined : undefined}
+          cwd={currentCwd}
           target={workspaceFileViewTarget}
         />
       </Suspense>
@@ -2086,7 +2056,29 @@ function isCompactionSuccess(event: { kind: string; reason?: string }): boolean 
 }
 
 function compactFailureMessage(event: { kind: string; reason?: string }): string {
-  return 'compact failed'
+  if (event.reason) return compactReasonMessage(event.reason)
+  return 'Compaction failed.'
+}
+
+function compactReasonMessage(reason: string): string {
+  switch (reason) {
+    case 'summary_schema_invalid':
+      return 'Compaction summary was missing required sections.'
+    case 'summary_too_short':
+      return 'Compaction summary was too short to be useful.'
+    case 'summary_conversational':
+      return 'Compaction summary looked conversational instead of structured.'
+    case 'post_compaction_still_over_budget':
+      return 'Compaction did not reduce context enough.'
+    case 'circuit_breaker_open':
+      return 'Auto compaction is paused after repeated failures.'
+    case 'session_busy':
+      return 'Compaction skipped while the session is busy.'
+    case 'empty':
+      return 'Nothing to compact yet.'
+    default:
+      return reason.replace(/_/g, ' ')
+  }
 }
 
 function sessionActivityStatus({

@@ -14,7 +14,7 @@
     "deploy:remote": "node scripts/deploy/deploy-remote.mjs",
     "verify:release-assets": "node scripts/release/verify-release-assets.mjs",
     "verify:release-install": "node scripts/release/verify-release-install.mjs",
-    "test": "pnpm -r --parallel run test",
+    "test": "pnpm -r --workspace-concurrency=1 run test",
     "typecheck": "pnpm -r --parallel run typecheck",
     "lint:style": "pnpm --filter @agent-kernel/dashboard lint:style",
     "dev:all": "pnpm -r --parallel run dev",

@@ -30,7 +30,7 @@ function scriptedLlm(targetPath: string): LLMAdapter {
         {
           type: 'tool_call' as const,
           callId: 'c1',
-          name: 'write',
+          name: 'write_file',
           input: { path: targetPath, content: 'from-llm' },
         },
       ],
@@ -57,7 +57,7 @@ function scriptedMessages(messages: Message[]): LLMAdapter {
 }
 
 const WRITE_SCHEMA = {
-  name: 'write',
+  name: 'write_file',
   description: 'write a file',
   inputSchema: { type: 'object' },
   requiresApproval: false,
