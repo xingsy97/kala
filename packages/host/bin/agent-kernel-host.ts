@@ -76,6 +76,7 @@ import { createAuditLogger } from '../src/audit-log.js'
 import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench/swebench-cli.js'
+import { parseEvalBenchCli, runEvalBenchCli } from '../src/eval/core/eval-bench-cli.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
@@ -110,6 +111,9 @@ function printHelp(): void {
 Usage:
   bundle-dashboard-with-runtime.cjs [options]
   bundle-dashboard-with-runtime.cjs eval swebench <command> [options]
+  bundle-dashboard-with-runtime.cjs eval program-bench <run|import> [options]
+  bundle-dashboard-with-runtime.cjs eval swe-marathon <run|import> [options]
+  bundle-dashboard-with-runtime.cjs eval terminal-bench-2_1 run [options]
   bundle-dashboard-with-runtime.cjs enhancement <area> <command> [options]
 
 Options:
@@ -162,6 +166,9 @@ async function main(): Promise<void> {
 
   const sweBenchCommand = parseSweBenchCli(argv)
   if (await runSweBenchCli(sweBenchCommand)) return
+
+  const evalBenchCommand = parseEvalBenchCli(argv)
+  if (await runEvalBenchCli(evalBenchCommand)) return
 
   // Default `AK_ALLOW_ALL_OK` to "1" so the dashboard can flip a session into
   // `allow_all` approval mode without extra env plumbing. Operators who want

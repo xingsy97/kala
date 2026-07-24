@@ -91,4 +91,57 @@ describe('RunTerminalBenchWizard', () => {
     fireEvent.click(screen.getByTestId('terminalbench-wizard-next-tasks'))
     await waitFor(() => expect(screen.getByTestId('terminalbench-wizard-error')).toBeTruthy())
   })
+
+  it('terminal-bench-2_1 variant uses a tasks dir + single run action and finishes without an import step', async () => {
+    fetchMock.mockImplementation(async (_url, init) => {
+      const body = JSON.parse((init?.body as string) ?? '{}') as { action: string; tasksDir?: string; agentCommand?: string }
+      if (body.action === 'terminal-bench-2_1-run') {
+        expect(body.tasksDir).toBe('/data/tb/original-tasks')
+        expect(body.agentCommand).toBe('solution')
+        return jsonRes({ action: body.action, runId: 'tb21-1', total: 1, resolved: 1, unresolved: 0, errored: 0, accuracy: 1, durationMs: 5 })
+      }
+      return jsonRes({ error: 'unexpected' }, 400)
+    })
+
+    const onRunRegistered = vi.fn()
+    render(<RunTerminalBenchWizard open variant="terminal-bench-2_1" onOpenChange={() => {}} onRunRegistered={onRunRegistered} />)
+    // No import step for this variant.
+    expect(screen.queryByTestId('terminalbench-wizard-step-label-import')).toBeNull()
+    fireEvent.change(screen.getByTestId('terminalbench-wizard-runid'), { target: { value: 'tb21-1' } })
+    fireEvent.change(screen.getByTestId('terminalbench-wizard-tasksdir'), { target: { value: '/data/tb/original-tasks' } })
+    fireEvent.click(screen.getByTestId('terminalbench-wizard-next-tasks'))
+    await waitFor(() => expect(screen.getByTestId('terminalbench-wizard-run-agent')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('terminalbench-wizard-run-agent'))
+    await waitFor(() => expect(onRunRegistered).toHaveBeenCalledWith('tb21-1'))
+
+    const actions = fetchMock.mock.calls.map((c) => JSON.parse((c[1] as RequestInit).body as string).action)
+    expect(actions).toContain('terminal-bench-2_1-run')
+    expect(actions).not.toContain('terminal-bench-2_1-import-results')
+  })
+
+  it('program-bench variant runs then imports (JSONL source, no resolve action)', async () => {
+    fetchMock.mockImplementation(async (_url, init) => {
+      const body = JSON.parse((init?.body as string) ?? '{}') as { action: string }
+      if (body.action === 'program-bench-run-agent') {
+        return jsonRes({ action: body.action, runId: 'pb-1', total: 2, resolved: 1, unresolved: 1, errored: 0, accuracy: 0.5, durationMs: 5 })
+      }
+      if (body.action === 'program-bench-import-results') {
+        return jsonRes({ action: body.action, runId: 'pb-1', total: 2, resolved: 1, unresolved: 1, errored: 0 })
+      }
+      return jsonRes({ error: 'unexpected' }, 400)
+    })
+    const onRunRegistered = vi.fn()
+    render(<RunTerminalBenchWizard open variant="program-bench" onOpenChange={() => {}} onRunRegistered={onRunRegistered} />)
+    fireEvent.change(screen.getByTestId('terminalbench-wizard-runid'), { target: { value: 'pb-1' } })
+    fireEvent.change(screen.getByTestId('terminalbench-wizard-tasks'), { target: { value: '{"instanceId":"a","workspaceRoot":"/w"}' } })
+    fireEvent.click(screen.getByTestId('terminalbench-wizard-next-tasks'))
+    await waitFor(() => expect(screen.getByTestId('terminalbench-wizard-run-agent')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('terminalbench-wizard-run-agent'))
+    await waitFor(() => expect(screen.getByTestId('terminalbench-wizard-import')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('terminalbench-wizard-import'))
+    await waitFor(() => expect(onRunRegistered).toHaveBeenCalledWith('pb-1'))
+    const actions = fetchMock.mock.calls.map((c) => JSON.parse((c[1] as RequestInit).body as string).action)
+    expect(actions).toContain('program-bench-run-agent')
+    expect(actions).toContain('program-bench-import-results')
+  })
 })

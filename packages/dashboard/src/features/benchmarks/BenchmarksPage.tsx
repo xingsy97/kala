@@ -18,6 +18,7 @@ export function BenchmarksPage({
   const queryClient = useQueryClient()
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [terminalWizardOpen, setTerminalWizardOpen] = useState(false)
+  const [wizardVariant, setWizardVariant] = useState<'terminal-bench' | 'program-bench' | 'swe-marathon' | 'terminal-bench-2_1'>('terminal-bench')
   const [wizardModalOpen, setWizardModalOpen] = useState(false)
 
   const runsQuery = useQuery({
@@ -97,7 +98,10 @@ export function BenchmarksPage({
             <RunLauncherPanel
               run={selectedRun}
               onLaunchSwebench={openWizardModal}
-              onLaunchTerminalBench={() => setTerminalWizardOpen(true)}
+              onLaunchTerminalBench={() => { setWizardVariant('terminal-bench'); setTerminalWizardOpen(true) }}
+              onLaunchTerminalBench21={() => { setWizardVariant('terminal-bench-2_1'); setTerminalWizardOpen(true) }}
+              onLaunchProgramBench={() => { setWizardVariant('program-bench'); setTerminalWizardOpen(true) }}
+              onLaunchSweMarathon={() => { setWizardVariant('swe-marathon'); setTerminalWizardOpen(true) }}
             />
           </div>
         </div>
@@ -105,6 +109,7 @@ export function BenchmarksPage({
       <RunTerminalBenchWizard
         open={terminalWizardOpen}
         onOpenChange={setTerminalWizardOpen}
+        variant={wizardVariant}
         onRunRegistered={(runId) => {
           setSelectedRunId(runId)
           loadRuns()

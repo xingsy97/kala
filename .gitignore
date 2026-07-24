@@ -64,3 +64,4 @@ experiments/**/workspaces/
 
 # Per-package scratch directories (local debug/probe scripts, not committed)
 packages/*/scratch/
+tmp/

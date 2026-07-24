@@ -23,7 +23,13 @@ export function RunDetailPanel({ run }: { run: BenchmarkRunSummary | null }): JS
   // Per docs/meta/principles.md A3: only surface `resolved` after import is done
   // (i.e., summary contains resolved+total). Before that, we deliberately
   // show status only — no invented metrics.
-  const officialTerm = run.kind === 'terminal-bench' ? 'resolved (Terminal-Bench parser)' : 'resolved'
+  const officialTerm = run.kind === 'terminal-bench'
+    ? 'resolved (Terminal-Bench parser)'
+    : run.kind === 'program-bench'
+      ? 'resolved (ProgramBench compile.sh → executable)'
+      : run.kind === 'swe-marathon'
+        ? 'reward == 1 (SWE-Marathon verifier)'
+        : 'resolved'
   const hasScore = typeof run.resolved === 'number' && typeof run.totalInstances === 'number' && run.status === 'complete'
   const accuracyPct = hasScore && run.totalInstances! > 0
     ? Number(((run.resolved! / run.totalInstances!) * 100).toFixed(1))
@@ -172,7 +178,13 @@ function lifecycleStep(run: BenchmarkRunSummary): 'plan' | 'infer' | 'grade' | '
 }
 
 function artifactHintsFor(run: BenchmarkRunSummary): string[] {
-  const root = run.kind === 'terminal-bench' ? `runs/terminal-bench/${run.runId}` : `runs/swebench/${run.runId}`
+  const root = run.kind === 'terminal-bench'
+    ? `runs/terminal-bench/${run.runId}`
+    : run.kind === 'program-bench'
+      ? `program-bench/runs/${run.runId}`
+      : run.kind === 'swe-marathon'
+        ? `swe-marathon/runs/${run.runId}`
+        : `runs/swebench/${run.runId}`
   return [
     `${root}/summary.json`,
     `${root}/progress.json`,

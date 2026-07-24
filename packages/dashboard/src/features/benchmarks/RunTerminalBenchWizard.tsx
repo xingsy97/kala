@@ -48,22 +48,96 @@ type ProgressResponse = {
   lastUpdatedAt: string | null
 }
 
-const DEFAULT_AGENT_COMMAND = 'true'
+// A benchmark wizard variant. `terminal-bench` keeps the original 3-step
+// resolve/agent/import flow (JSONL tasks). The container-backed benchmarks
+// (program-bench, swe-marathon, terminal-bench 2.1) run in one step: they take
+// a task source and a run action that both executes and scores, then optionally
+// re-import. This single component drives all of them so CLI, HTTP, and Web
+// stay in lockstep.
+export type BenchmarkWizardVariant =
+  | 'terminal-bench'
+  | 'program-bench'
+  | 'swe-marathon'
+  | 'terminal-bench-2_1'
+
+type VariantConfig = {
+  titleKey: string
+  descriptionKey: string
+  /** How tasks are supplied: inline JSONL content, or a server-side directory. */
+  taskSource: 'jsonl' | 'dir'
+  resolveAction?: string
+  runAction: string
+  importAction?: string
+  progressAction?: string
+  /** Field name for the run action's task input. */
+  taskField: 'tasksContent' | 'tasksJsonl' | 'tasksDir'
+  /** Whether the run action accepts an agentCommand. */
+  usesAgentCommand: boolean
+  defaultAgentCommand: string
+}
+
+const VARIANTS: Record<BenchmarkWizardVariant, VariantConfig> = {
+  'terminal-bench': {
+    titleKey: 'benchmarks.terminalWizard.title',
+    descriptionKey: 'benchmarks.terminalWizard.description',
+    taskSource: 'jsonl',
+    resolveAction: 'terminal-bench-resolve-tasks',
+    runAction: 'terminal-bench-run-agent',
+    importAction: 'terminal-bench-import-results',
+    progressAction: 'terminal-bench-read-progress',
+    taskField: 'tasksContent',
+    usesAgentCommand: true,
+    defaultAgentCommand: 'true',
+  },
+  'program-bench': {
+    titleKey: 'benchmarks.programWizard.title',
+    descriptionKey: 'benchmarks.programWizard.description',
+    taskSource: 'jsonl',
+    runAction: 'program-bench-run-agent',
+    importAction: 'program-bench-import-results',
+    taskField: 'tasksContent',
+    usesAgentCommand: true,
+    defaultAgentCommand: 'true',
+  },
+  'swe-marathon': {
+    titleKey: 'benchmarks.marathonWizard.title',
+    descriptionKey: 'benchmarks.marathonWizard.description',
+    taskSource: 'dir',
+    runAction: 'swe-marathon-run-agent',
+    importAction: 'swe-marathon-import-results',
+    taskField: 'tasksDir',
+    usesAgentCommand: false,
+    defaultAgentCommand: '',
+  },
+  'terminal-bench-2_1': {
+    titleKey: 'benchmarks.terminal21Wizard.title',
+    descriptionKey: 'benchmarks.terminal21Wizard.description',
+    taskSource: 'dir',
+    runAction: 'terminal-bench-2_1-run',
+    taskField: 'tasksDir',
+    usesAgentCommand: true,
+    defaultAgentCommand: 'solution',
+  },
+}
 
 export function RunTerminalBenchWizard({
   open,
   onOpenChange,
   onRunRegistered,
+  variant = 'terminal-bench',
 }: {
   open: boolean
   onOpenChange(open: boolean): void
   onRunRegistered(runId: string): void
+  variant?: BenchmarkWizardVariant
 }): JSX.Element {
+  const cfg = VARIANTS[variant]
   const { t } = useTranslation()
   const [step, setStep] = useState<WizardStep>('tasks')
   const [runId, setRunId] = useState('')
   const [tasksContent, setTasksContent] = useState('')
-  const [agentCommand, setAgentCommand] = useState(DEFAULT_AGENT_COMMAND)
+  const [tasksDir, setTasksDir] = useState('')
+  const [agentCommand, setAgentCommand] = useState(cfg.defaultAgentCommand)
   const [tasksResolved, setTasksResolved] = useState<number | null>(null)
   const [agentSummary, setAgentSummary] = useState<RunAgentResponse | null>(null)
   const [importSummary, setImportSummary] = useState<ImportResultsResponse | null>(null)
@@ -86,12 +160,18 @@ export function RunTerminalBenchWizard({
     setError(null)
     setBusy(true)
     try {
-      const result = await callAction<ResolveTasksResponse>({
-        action: 'terminal-bench-resolve-tasks',
-        runId: runId.trim(),
-        tasksContent,
-      })
-      setTasksResolved(result.taskCount)
+      // Variants without a dedicated resolve action skip straight to the run
+      // step; we still validate the task source is present.
+      if (cfg.resolveAction) {
+        const result = await callAction<ResolveTasksResponse>({
+          action: cfg.resolveAction,
+          runId: runId.trim(),
+          tasksContent,
+        })
+        setTasksResolved(result.taskCount)
+      } else {
+        setTasksResolved(0)
+      }
       setStep('agent')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -100,38 +180,43 @@ export function RunTerminalBenchWizard({
     }
   }
 
+  function runTaskPayload(): Record<string, unknown> {
+    const payload: Record<string, unknown> = { action: cfg.runAction, runId: runId.trim() }
+    if (cfg.taskField === 'tasksContent') payload.tasksContent = tasksContent
+    else if (cfg.taskField === 'tasksJsonl') payload.tasksJsonl = tasksContent.trim()
+    else payload.tasksDir = tasksDir.trim()
+    if (cfg.usesAgentCommand) payload.agentCommand = agentCommand.trim() || cfg.defaultAgentCommand
+    return payload
+  }
+
   async function runAgent(): Promise<void> {
     setError(null)
     setBusy(true)
     try {
-      // Kick off the run; poll progress every 500ms while it runs so the
-      // user gets B4-compliant "current / total" feedback within 3 seconds.
       let stopped = false
       const poll = async (): Promise<void> => {
+        if (!cfg.progressAction) return
         while (!stopped) {
           try {
-            const p = await callAction<ProgressResponse>({
-              action: 'terminal-bench-read-progress',
-              runId: runId.trim(),
-            })
+            const p = await callAction<ProgressResponse>({ action: cfg.progressAction, runId: runId.trim() })
             setProgress(p)
           } catch {
-            // Progress read may 404 until the runner has written the first
-            // snapshot; keep polling.
+            // Progress read may 404 until the first snapshot; keep polling.
           }
           await new Promise((r) => setTimeout(r, 500))
         }
       }
       const pollPromise = poll()
-      const result = await callAction<RunAgentResponse>({
-        action: 'terminal-bench-run-agent',
-        runId: runId.trim(),
-        agentCommand: agentCommand.trim() || DEFAULT_AGENT_COMMAND,
-      })
+      const result = await callAction<RunAgentResponse>(runTaskPayload())
       stopped = true
       await pollPromise
       setAgentSummary(result)
-      setStep('import')
+      // Variants without a separate import action are complete after the run.
+      if (cfg.importAction) {
+        setStep('import')
+      } else {
+        onRunRegistered(runId.trim())
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -140,13 +225,11 @@ export function RunTerminalBenchWizard({
   }
 
   async function importResults(): Promise<void> {
+    if (!cfg.importAction) return
     setError(null)
     setBusy(true)
     try {
-      const result = await callAction<ImportResultsResponse>({
-        action: 'terminal-bench-import-results',
-        runId: runId.trim(),
-      })
+      const result = await callAction<ImportResultsResponse>({ action: cfg.importAction, runId: runId.trim() })
       setImportSummary(result)
       onRunRegistered(runId.trim())
     } catch (err) {
@@ -156,20 +239,22 @@ export function RunTerminalBenchWizard({
     }
   }
 
-  const canResolve = runId.trim().length > 0 && tasksContent.trim().length > 0 && !busy
+  const taskSourceReady = cfg.taskSource === 'jsonl' ? tasksContent.trim().length > 0 : tasksDir.trim().length > 0
+  const canResolve = runId.trim().length > 0 && taskSourceReady && !busy
   const canRunAgent = tasksResolved !== null && !busy
   const canImport = agentSummary !== null && !busy
+  const visibleSteps = cfg.importAction ? STEPS : STEPS.filter((s) => s !== 'import')
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl" data-testid="terminalbench-wizard">
         <DialogHeader>
-          <DialogTitle>{t('benchmarks.terminalWizard.title')}</DialogTitle>
-          <DialogDescription>{t('benchmarks.terminalWizard.description')}</DialogDescription>
+          <DialogTitle>{t(cfg.titleKey)}</DialogTitle>
+          <DialogDescription>{t(cfg.descriptionKey)}</DialogDescription>
         </DialogHeader>
 
         <ol className="flex items-center gap-2 text-xs" data-testid="terminalbench-wizard-steps">
-          {STEPS.map((id, i) => (
+          {visibleSteps.map((id, i) => (
             <li key={id} className="flex items-center gap-1">
               <span
                 className={cn(
@@ -180,9 +265,7 @@ export function RunTerminalBenchWizard({
                 {i + 1}
               </span>
               <span
-                className={cn(
-                  step === id ? 'font-semibold text-foreground' : 'text-muted-foreground',
-                )}
+                className={cn(step === id ? 'font-semibold text-foreground' : 'text-muted-foreground')}
                 data-testid={`terminalbench-wizard-step-label-${id}`}
               >
                 {t(`benchmarks.terminalWizard.steps.${id === 'tasks' ? 'chooseTasks' : id === 'agent' ? 'runAgent' : 'importResults'}`)}
@@ -210,30 +293,46 @@ export function RunTerminalBenchWizard({
                 data-testid="terminalbench-wizard-runid"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="text-muted-foreground">{t('benchmarks.terminalWizard.tasksLabel')}</span>
-              <textarea
-                className="min-h-[120px] rounded border border-border bg-background p-2 font-mono text-xs"
-                placeholder={t('benchmarks.terminalWizard.tasksPlaceholder')}
-                value={tasksContent}
-                onChange={(e) => setTasksContent(e.target.value)}
-                data-testid="terminalbench-wizard-tasks"
-              />
-            </label>
-            <input
-              type="file"
-              accept=".jsonl,.json,.txt"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (!file) return
-                const text = await file.text()
-                setTasksContent(text)
-              }}
-              data-testid="terminalbench-wizard-upload"
-              className="text-xs"
-              aria-label={t('benchmarks.terminalWizard.tasksUpload')}
-            />
-            {tasksResolved !== null ? (
+            {cfg.taskSource === 'jsonl' ? (
+              <>
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-muted-foreground">{t('benchmarks.terminalWizard.tasksLabel')}</span>
+                  <textarea
+                    className="min-h-[120px] rounded border border-border bg-background p-2 font-mono text-xs"
+                    placeholder={t('benchmarks.terminalWizard.tasksPlaceholder')}
+                    value={tasksContent}
+                    onChange={(e) => setTasksContent(e.target.value)}
+                    data-testid="terminalbench-wizard-tasks"
+                  />
+                </label>
+                <input
+                  type="file"
+                  accept=".jsonl,.json,.txt"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const text = await file.text()
+                    setTasksContent(text)
+                  }}
+                  data-testid="terminalbench-wizard-upload"
+                  className="text-xs"
+                  aria-label={t('benchmarks.terminalWizard.tasksUpload')}
+                />
+              </>
+            ) : (
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-muted-foreground">{t('benchmarks.terminalWizard.tasksDirLabel')}</span>
+                <input
+                  type="text"
+                  className="rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+                  placeholder={t('benchmarks.terminalWizard.tasksDirPlaceholder')}
+                  value={tasksDir}
+                  onChange={(e) => setTasksDir(e.target.value)}
+                  data-testid="terminalbench-wizard-tasksdir"
+                />
+              </label>
+            )}
+            {tasksResolved !== null && cfg.resolveAction ? (
               <div className="text-xs text-emerald-600" data-testid="terminalbench-wizard-tasks-resolved">
                 {t('benchmarks.terminalWizard.tasksResolved', { count: tasksResolved })}
               </div>
@@ -254,32 +353,28 @@ export function RunTerminalBenchWizard({
 
         {step === 'agent' ? (
           <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="text-muted-foreground">{t('benchmarks.terminalWizard.agentCommandLabel')}</span>
-              <input
-                type="text"
-                className="rounded border border-border bg-background px-2 py-1 text-sm font-mono"
-                placeholder={t('benchmarks.terminalWizard.agentCommandPlaceholder')}
-                value={agentCommand}
-                onChange={(e) => setAgentCommand(e.target.value)}
-                data-testid="terminalbench-wizard-agent-command"
-              />
-              <span className="text-[10px] text-muted-foreground">{t('benchmarks.terminalWizard.agentCommandHint')}</span>
-            </label>
+            {cfg.usesAgentCommand ? (
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-muted-foreground">{t('benchmarks.terminalWizard.agentCommandLabel')}</span>
+                <input
+                  type="text"
+                  className="rounded border border-border bg-background px-2 py-1 text-sm font-mono"
+                  placeholder={t('benchmarks.terminalWizard.agentCommandPlaceholder')}
+                  value={agentCommand}
+                  onChange={(e) => setAgentCommand(e.target.value)}
+                  data-testid="terminalbench-wizard-agent-command"
+                />
+                <span className="text-[10px] text-muted-foreground">{t('benchmarks.terminalWizard.agentCommandHint')}</span>
+              </label>
+            ) : null}
             {progress ? (
               <div className="text-xs text-muted-foreground" data-testid="terminalbench-wizard-progress">
-                {t('benchmarks.terminalWizard.runAgentProgress', {
-                  completed: progress.completed,
-                  total: progress.total,
-                })}
+                {t('benchmarks.terminalWizard.runAgentProgress', { completed: progress.completed, total: progress.total })}
               </div>
             ) : null}
             {agentSummary ? (
               <div className="text-xs text-emerald-600" data-testid="terminalbench-wizard-agent-done">
-                {t('benchmarks.terminalWizard.runAgentDone', {
-                  completed: agentSummary.total,
-                  total: agentSummary.total,
-                })}
+                {t('benchmarks.terminalWizard.runAgentDone', { completed: agentSummary.total, total: agentSummary.total })}
               </div>
             ) : null}
             <div className="flex justify-between gap-2">
@@ -299,19 +394,14 @@ export function RunTerminalBenchWizard({
           </div>
         ) : null}
 
-        {step === 'import' ? (
+        {step === 'import' && cfg.importAction ? (
           <div className="flex flex-col gap-3">
             {importSummary ? (
               <div className="text-sm text-emerald-600" data-testid="terminalbench-wizard-import-done">
-                {t('benchmarks.terminalWizard.importDone', {
-                  resolved: importSummary.resolved,
-                  total: importSummary.total,
-                })}
+                {t('benchmarks.terminalWizard.importDone', { resolved: importSummary.resolved, total: importSummary.total })}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                {t('benchmarks.terminalWizard.importHint')}
-              </p>
+              <p className="text-xs text-muted-foreground">{t('benchmarks.terminalWizard.importHint')}</p>
             )}
             <div className="flex justify-between gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => setStep('agent')} data-testid="terminalbench-wizard-back-import">

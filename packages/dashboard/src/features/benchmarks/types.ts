@@ -1,4 +1,4 @@
-export type BenchmarkRunKind = 'swebench' | 'swe-bench' | 'terminal-bench'
+export type BenchmarkRunKind = 'swebench' | 'swe-bench' | 'terminal-bench' | 'program-bench' | 'swe-marathon'
 
 export type BenchmarkRunStatus = 'running' | 'complete' | 'failed' | 'pending'
 

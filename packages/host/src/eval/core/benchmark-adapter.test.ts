@@ -5,13 +5,15 @@ import { swebenchAdapter } from '../swebench/swebench-adapter.js'
 import { terminalBenchAdapter } from '../terminal-bench/terminal-bench-adapter.js'
 
 describe('BenchmarkAdapter registry', () => {
-  it('lists both concrete adapters', () => {
-    expect(listAdapters().slice().sort()).toEqual(['swe-bench', 'terminal-bench'])
+  it('lists all concrete adapters', () => {
+    expect(listAdapters().slice().sort()).toEqual(['program-bench', 'swe-bench', 'swe-marathon', 'terminal-bench'])
   })
 
   it('looks up each adapter by kind and kind field matches registry key', () => {
     expect(getAdapter('swe-bench').kind).toBe('swe-bench')
     expect(getAdapter('terminal-bench').kind).toBe('terminal-bench')
+    expect(getAdapter('program-bench').kind).toBe('program-bench')
+    expect(getAdapter('swe-marathon').kind).toBe('swe-marathon')
   })
 
   it('throws for unknown kind', () => {
