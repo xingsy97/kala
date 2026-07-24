@@ -1,6 +1,6 @@
 import type { ToolCallContent, ToolResultContent } from '@agent-kernel/kernel'
 import type { LucideIcon } from 'lucide-react'
-import { CheckCircle2, Wrench, XCircle } from 'lucide-react'
+import { CheckCircle2, Clock3, LoaderCircle, Wrench, XCircle } from 'lucide-react'
 
 import { cn } from '../../../lib/utils.js'
 
@@ -123,6 +123,56 @@ export function GroupSummaryRow({
         </span>
       ) : null}
     </button>
+  )
+}
+
+export function GroupSummaryPreview({
+  row,
+  status,
+}: {
+  row: SummaryRow
+  status: 'succeeded' | 'failed' | 'approval' | 'running'
+}): JSX.Element {
+  const fallback = toolStatusIcon(row.ok)
+  const Icon = status === 'running'
+    ? LoaderCircle
+    : status === 'approval'
+      ? Clock3
+      : fallback.Icon
+  const toneClass = status === 'running'
+    ? 'animate-spin text-muted-foreground'
+    : status === 'approval'
+      ? 'animate-pulse text-amber-600 dark:text-amber-400'
+      : fallback.toneClass
+  const delta = typeof row.secondary === 'object' && row.secondary.kind === 'delta' ? row.secondary : null
+  const secondaryText = typeof row.secondary === 'string' ? row.secondary : null
+
+  return (
+    <div
+      className="ak-expand-in grid min-h-7 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-muted/40 px-2 py-1 text-left text-xs"
+      data-testid={`tool-card-preview-${row.callId}`}
+    >
+      <Icon className={cn('h-3 w-3 flex-none', toneClass)} aria-hidden="true" />
+      <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={row.primary}>
+        {row.primary}
+      </span>
+      {delta ? (
+        <span className="inline-flex h-5 flex-none items-center overflow-hidden rounded border border-border/50 bg-background/70 text-[11px] leading-none" aria-label={`${delta.additions} additions, ${delta.deletions} deletions`}>
+          <span className="inline-flex h-5 items-center gap-1 border-r border-border/50 px-1.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+            <span className="text-[10px] text-emerald-600/80 dark:text-emerald-300/80">+</span>
+            {delta.additions}
+          </span>
+          <span className="inline-flex h-5 items-center gap-1 px-1.5 font-mono font-semibold text-rose-700 dark:text-rose-300">
+            <span className="text-[10px] text-rose-600/80 dark:text-rose-300/80">-</span>
+            {delta.deletions}
+          </span>
+        </span>
+      ) : secondaryText ? (
+        <span className="inline-flex h-5 max-w-36 flex-none items-center truncate rounded bg-background/70 px-1.5 text-[11px] leading-none text-muted-foreground" title={secondaryText}>
+          {secondaryText}
+        </span>
+      ) : null}
+    </div>
   )
 }
 

@@ -254,7 +254,7 @@ describe('ChatPanel', () => {
     expect(screen.getAllByText('wrote 3 bytes').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('uses dots as the default collapsed Tool Card Mode and opens the selected call', () => {
+  it('previews dots on hover or click and reserves full expansion for the arrow', () => {
     render(
       <DashboardChatPanel
         messages={[
@@ -285,8 +285,64 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-activity-direction')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).toContain('read · /repo/a.ts · succeeded')
     expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).toContain('bash · pnpm test · failed')
-    fireEvent.click(screen.getByTestId('tool-card-dot-dot-2'))
+
+    const firstDot = screen.getByTestId('tool-card-dot-dot-1')
+    const secondDot = screen.getByTestId('tool-card-dot-dot-2')
+    fireEvent.mouseEnter(firstDot)
+    expect(screen.getByTestId('tool-card-preview-dot-1')).toBeTruthy()
+    expect(screen.queryByTestId('tool-call-group-details-dot-1')).toBeNull()
+    fireEvent.mouseLeave(firstDot)
+    expect(screen.queryByTestId('tool-card-preview-dot-1')).toBeNull()
+
+    fireEvent.click(secondDot)
+    expect(secondDot.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('tool-card-preview-dot-2')).toBeTruthy()
+    expect(screen.queryByTestId('tool-call-group-details-dot-1')).toBeNull()
+
+    fireEvent.mouseEnter(firstDot)
+    expect(screen.getByTestId('tool-card-preview-dot-1')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-preview-dot-2')).toBeNull()
+    fireEvent.mouseLeave(firstDot)
+    expect(screen.getByTestId('tool-card-preview-dot-2')).toBeTruthy()
+
+    fireEvent.click(secondDot)
+    expect(secondDot.getAttribute('aria-pressed')).toBe('false')
+    expect(screen.queryByTestId('tool-card-preview-dot-2')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('tool-activity-direction'))
     expect(screen.getByTestId('tool-call-group-details-dot-1')).toBeTruthy()
+  })
+
+  it('shows the latest visible running dot with the same compact preview by default', () => {
+    render(
+      <DashboardChatPanel
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'done', name: 'read', input: { path: '/repo/a.ts' } },
+              { type: 'tool_call', callId: 'running', name: 'bash', input: { command: 'pnpm test' } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              { type: 'tool_result', callId: 'done', ok: true, content: 'a' },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('tool-card-preview-running')).toBeTruthy()
+    expect(screen.queryByTestId('tool-call-group-details-done')).toBeNull()
+
+    const doneDot = screen.getByTestId('tool-card-dot-done')
+    fireEvent.click(doneDot)
+    expect(screen.getByTestId('tool-card-preview-done')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-preview-running')).toBeNull()
+    fireEvent.click(doneDot)
+    expect(screen.getByTestId('tool-card-preview-running')).toBeTruthy()
   })
 
   it('retains the textual collapsed card in Standard Tool Card Mode', () => {

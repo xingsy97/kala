@@ -77,7 +77,7 @@ import {
   makeToolCallGroup,
 } from './grouping.js'
 import { SubAgentCard } from './SubAgentCard.js'
-import { GroupSummaryRow, firstLine, pickRenderer, truncate, type SummaryDelta, type SummaryRow } from './toolSummaries/index.js'
+import { GroupSummaryPreview, GroupSummaryRow, firstLine, pickRenderer, truncate, type SummaryDelta, type SummaryRow } from './toolSummaries/index.js'
 import type { DashboardSocket } from '../../session.js'
 import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
@@ -479,7 +479,7 @@ export function ChatPanel({
                 // Align with the assistant-message content column: avatar (w-7) +
                 // gap-3 = 2.5rem left inset, so the running/status/approval rows sit
                 // flush under the message body above them instead of the full column.
-                <div className="pl-0 pt-4 sm:pl-10">{footerSlot}</div>
+                <div className="pl-0 pt-1 sm:pl-10">{footerSlot}</div>
               ) : null
             }
             itemClassName="ak-chat-container ak-chat-item mx-auto w-full min-w-0 overflow-x-hidden py-2 sm:py-3"
@@ -2754,6 +2754,8 @@ function ToolCallGroupBlock({
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
+  const [hoveredCallId, setHoveredCallId] = useState<string | null>(null)
+  const [pinnedCallId, setPinnedCallId] = useState<string | null>(null)
   const rows = summarizeToolActivityRows(group)
   const anyPending = group.calls.some((c) => approvalByCallId.has(c.callId))
   const singleCall = group.calls.length === 1 ? group.calls[0]! : null
@@ -2785,12 +2787,22 @@ function ToolCallGroupBlock({
     : []
   const autoRevealTail = group.mixed && unresolvedTailCallIds.length > 0
   const visibleTailCallIds = autoRevealTail ? new Set(unresolvedTailCallIds) : null
-  const showRows = open || anyPending || autoRevealTail
   const dots = toolActivityDots(group, rows, approvalByCallId)
   const visibleDots = prioritizedToolActivityDots(dots, 7)
   const collapsedDots = toolCardMode === 'dots' && !open
+  const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
+  const runningCallId = [...visibleDots].reverse().find((dot) => dot.status === 'running')?.callId ?? null
+  const previewCallId = hoveredCallId ?? pinnedCallId ?? (anyPending ? null : runningCallId)
+  const previewRow = previewCallId
+    ? rows.find((row) => row.callId === previewCallId) ?? null
+    : null
+  const previewStatus = previewCallId
+    ? dots.find((dot) => dot.callId === previewCallId)?.status ?? null
+    : null
 
   const toggleOpen = (): void => {
+    setHoveredCallId(null)
+    setPinnedCallId(null)
     setOpen((v) => {
       const next = !v
       if (singleCall) setExpandedCallId(next ? singleCall.callId : null)
@@ -2832,10 +2844,15 @@ function ToolCallGroupBlock({
                   type="button"
                   title={dot.title}
                   aria-label={dot.title}
+                  aria-pressed={pinnedCallId === dot.callId}
                   data-testid={`tool-card-dot-${dot.callId}`}
+                  onMouseEnter={() => setHoveredCallId(dot.callId)}
+                  onMouseLeave={() => setHoveredCallId(null)}
+                  onFocus={() => setHoveredCallId(dot.callId)}
+                  onBlur={() => setHoveredCallId(null)}
                   onClick={() => {
-                    setOpen(true)
-                    setExpandedCallId(dot.callId)
+                    setHoveredCallId(null)
+                    setPinnedCallId((current) => current === dot.callId ? null : dot.callId)
                   }}
                   className="group/dot flex h-6 w-5 flex-none items-center justify-center rounded-full ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-5 sm:w-4"
                 >
@@ -2854,15 +2871,13 @@ function ToolCallGroupBlock({
             {dots.length > visibleDots.length ? (
               <>
                 <span className="h-px w-2 bg-border/70 sm:w-3" aria-hidden="true" />
-                <button
-                  type="button"
-                  onClick={toggleOpen}
-                  className="flex h-6 w-5 flex-none items-center justify-center rounded-full ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-5 sm:w-4"
+                <span
+                  className="flex h-6 w-5 flex-none items-center justify-center rounded-full sm:h-5 sm:w-4"
                   title={`${dots.length - visibleDots.length} additional tool calls`}
                   aria-label={`${dots.length - visibleDots.length} additional tool calls`}
                 >
-                  <span className="h-2.5 w-2.5 rounded-full bg-background ring-1 ring-inset ring-muted-foreground/70 transition-transform hover:scale-125" />
-                </button>
+                  <span className="h-2.5 w-2.5 rounded-full bg-background ring-1 ring-inset ring-muted-foreground/70" />
+                </span>
               </>
             ) : null}
           </div>
@@ -2959,6 +2974,11 @@ function ToolCallGroupBlock({
         </span>
       </button>
       )}
+      {collapsedDots && previewRow && previewStatus ? (
+        <div className="mt-0.5 max-w-xl min-w-0 pr-1">
+          <GroupSummaryPreview row={previewRow} status={previewStatus} />
+        </div>
+      ) : null}
       {showRows ? (
         <div
           className="ak-expand-in flex min-w-0 max-w-full flex-col gap-0.5 overflow-hidden border-t border-border/40 px-3 pb-2 pt-1"

@@ -4,6 +4,7 @@ export {
   firstLine,
   genericRenderer,
   GroupHeaderIcon,
+  GroupSummaryPreview,
   GroupSummaryRow,
   previewValue,
   toolStatusIcon,
