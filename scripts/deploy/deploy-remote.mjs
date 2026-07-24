@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { buildDeployPlan, sh } from './deploy-plan.mjs'
+import { buildDeployPlan, rsyncUploadArgs, sh } from './deploy-plan.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const rawArgs = process.argv.slice(2)
@@ -25,14 +24,13 @@ const {
   sshTarget,
   hostUrl,
   remoteBin,
-  remoteBinShell,
   restartMode,
   restartTimeoutMs,
   statusTimeoutMs,
   pollMs,
   files,
   uploadDir,
-  uploadDirShell,
+  seedCommand,
   installCommand,
 } = plan
 
@@ -42,9 +40,9 @@ console.log(`host url: ${hostUrl}`)
 console.log(`upload dir: ${uploadDir}`)
 if (asyncMode) console.log('async mode: restart is fire-and-forget (no wait for completed)')
 
-remote(`mkdir -p ${remoteBinShell} ${uploadDirShell}`)
-run('scp', ['-q', ...files.map((file) => join(releaseDir, file)), `${sshTarget}:${uploadDir}/`])
-remote(installCommand)
+stage('prepare incremental upload', () => remote(seedCommand))
+stage('transfer release assets', transferReleaseAssets)
+stage('install release assets', () => remote(installCommand))
 
 const before = restartStatus()
 const beforePid = Number(before?.pid ?? 0)
@@ -116,6 +114,33 @@ function remoteJson(command) {
 
 function remote(command) {
   run('ssh', [sshTarget, command])
+}
+
+function transferReleaseAssets() {
+  const args = rsyncUploadArgs({ releaseDir, files, sshTarget, uploadDir })
+  const maxAttempts = 3
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      run('rsync', args)
+      return
+    } catch (error) {
+      if (attempt === maxAttempts) throw error
+      console.warn(`transfer attempt ${attempt}/${maxAttempts} failed; retrying the partial upload in 2s`)
+      sleep(2000)
+    }
+  }
+}
+
+function stage(label, action) {
+  const startedAt = Date.now()
+  console.log(`${label}...`)
+  action()
+  console.log(`${label}: completed in ${formatDuration(Date.now() - startedAt)}`)
+}
+
+function formatDuration(ms) {
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
 }
 
 function run(command, args, options = {}) {
