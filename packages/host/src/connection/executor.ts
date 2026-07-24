@@ -243,6 +243,13 @@ export function createExecutorRegistry(
     return undefined
   }
 
+  function allPendingBinds(): Iterable<Bind> {
+    return (function* () {
+      yield* byExecutor.values()
+      for (const entry of detaching.values()) yield entry.bind
+    })()
+  }
+
   function defaultDirList(
     requestId: string,
     workspaceId: string,
@@ -511,10 +518,11 @@ export function createExecutorRegistry(
       })
     },
     cancelPending(sessionId) {
-      // Iterate every bind and cancel any pending call attached to this
-      // session. With sticky routing gone there's no single "owner"
-      // executor — but calls are still scoped per-session inside each bind.
-      for (const bind of byExecutor.values()) {
+      // Detached binds retain calls during the reconnect grace window. They
+      // must remain cancellable or a cancelled call can be redispatched when
+      // the executor returns. Emitting to a disconnected socket is harmless;
+      // resolving/removing the pending entry is the authoritative action.
+      for (const bind of allPendingBinds()) {
         for (const p of [...bind.pending.values()]) {
           if (p.sessionId !== sessionId) continue
           bind.socket.emit('tool:cancel', { sessionId, callId: p.callId })
@@ -526,7 +534,7 @@ export function createExecutorRegistry(
     },
     activeSessions() {
       const out = new Set<string>()
-      for (const bind of byExecutor.values()) {
+      for (const bind of allPendingBinds()) {
         for (const p of bind.pending.values()) out.add(p.sessionId)
       }
       return [...out]

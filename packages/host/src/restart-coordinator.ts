@@ -16,6 +16,13 @@ import { ulid } from 'ulid'
 import type { LoopHandle } from './loop-types.js'
 import type { SessionStore } from './store/session.js'
 import { buildRestartSessionPlans } from './restart/restart-planner.js'
+import {
+  transitionRestartWorkflow,
+  type RestartWorkflowCommand,
+  type RestartWorkflowEvent,
+  type RestartWorkflowState,
+} from './restart/restart-workflow.js'
+import { SerializedActor } from './workflows/serialized-actor.js'
 
 export type RestartCoordinatorOptions = {
   store: SessionStore
@@ -35,38 +42,54 @@ export type RestartRequest = {
 }
 
 export class RestartCoordinator {
-  private current: HostRestartAttempt | null = null
-  private last: HostRestartAttempt | null = null
   private readonly startedAt: string
   private readonly command: readonly string[]
-  private timer: NodeJS.Timeout | null = null
+  private readonly actor: SerializedActor<RestartWorkflowState, RestartWorkflowEvent, RestartWorkflowCommand>
+  private timer: { attemptId: string; handle: NodeJS.Timeout } | null = null
 
   constructor(private readonly options: RestartCoordinatorOptions) {
     this.startedAt = options.startedAt ?? new Date().toISOString()
     this.command = options.command ?? [process.execPath, ...process.argv.slice(1)]
-    this.last = readRestartState(options.statePath)
-    if (this.last && this.last.phase === 'restarting') {
-      this.last = {
-        ...this.last,
+    let last = readRestartState(options.statePath)
+    if (last?.phase === 'restarting') {
+      last = {
+        ...last,
         phase: 'completed',
         updatedAt: new Date().toISOString(),
         newPid: process.pid,
       }
-      writeRestartState(this.options.statePath, this.last)
+      writeRestartState(this.options.statePath, last)
     }
+    this.actor = new SerializedActor({
+      initialState: { current: null, last },
+      transition: transitionRestartWorkflow,
+      run: (command, context) => this.runCommand(command, context.send),
+      commandFailed: (command, error) => {
+        const attemptId = commandAttemptId(command)
+        return {
+          kind: 'fail',
+          attemptId,
+          updatedAt: new Date().toISOString(),
+          sessions: this.sessionPlansForCurrent(attemptId),
+          error: error instanceof Error ? error.message : String(error),
+        }
+      },
+    })
   }
 
   status(): HostRestartStatus {
+    const state = this.actor.snapshot()
     return {
       pid: process.pid,
       startedAt: this.startedAt,
-      current: this.current,
-      last: this.current ? this.last : this.last,
+      current: state.current,
+      last: state.last,
     }
   }
 
   async request(input: RestartRequest = {}): Promise<HostRestartAttempt> {
-    if (this.current && !terminalPhase(this.current.phase)) return this.current
+    const active = this.actor.snapshot().current
+    if (active) return active
     const now = new Date().toISOString()
     const mode = input.mode ?? 'checkpoint'
     const attempt: HostRestartAttempt = {
@@ -81,96 +104,31 @@ export class RestartCoordinator {
       command: this.command,
       sessions: this.sessionPlans(mode),
     }
-    this.setCurrent(attempt)
-    if (mode === 'force') {
-      void this.restartNow()
-      return this.current!
-    }
-    void this.drain(mode, input.timeoutMs)
-    return this.current!
+    this.actor.send({ kind: 'request', attempt })
+    return this.actor.snapshot().current ?? this.actor.snapshot().last ?? attempt
   }
 
   abort(reason = 'restart aborted'): HostRestartAttempt | null {
-    if (!this.current || terminalPhase(this.current.phase)) return this.current
-    this.clearTimer()
-    this.options.loop.endDrain()
-    this.setCurrent({
-      ...this.current,
-      phase: 'aborted',
+    const current = this.actor.snapshot().current
+    if (!current) return null
+    this.actor.send({
+      kind: 'abort',
+      attemptId: current.attemptId,
       updatedAt: new Date().toISOString(),
       error: reason,
-      sessions: this.sessionPlans(this.current.mode),
+      sessions: this.sessionPlans(current.mode),
     })
-    this.last = this.current
-    this.current = null
-    return this.last
+    return this.actor.snapshot().last
   }
 
   async resumeMarkedSessions(): Promise<void> {
-    const marker = this.last
+    const marker = this.actor.snapshot().last
     if (!marker || marker.phase !== 'completed') return
     for (const plan of marker.sessions) {
       if (plan.resumeAction === 'continue_turn') {
         await this.options.loop.resumeSession(plan.sessionId).catch(() => false)
       }
     }
-  }
-
-  private async drain(mode: HostRestartMode, timeoutMs: number | undefined): Promise<void> {
-    if (!this.current) return
-    this.options.loop.beginDrain(mode === 'when_idle' ? 'idle' : 'checkpoint')
-    this.setCurrent({ ...this.current, phase: 'draining', updatedAt: new Date().toISOString(), sessions: this.sessionPlans(mode) })
-    if (timeoutMs && timeoutMs > 0) {
-      this.timer = setTimeout(() => {
-        this.abort(`restart checkpoint timeout after ${timeoutMs}ms`)
-      }, timeoutMs)
-    }
-    try {
-      const plans = this.current.sessions
-      await Promise.all(plans.map((plan) => this.options.loop.waitForCheckpoint(plan.sessionId)))
-      if (!this.current || this.current.phase === 'aborted') return
-      this.clearTimer()
-      this.setCurrent({ ...this.current, phase: 'checkpoint_reached', updatedAt: new Date().toISOString(), sessions: this.sessionPlans(mode) })
-      await this.restartNow()
-    } catch (err) {
-      this.fail(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  private async restartNow(): Promise<void> {
-    if (!this.current) return
-    this.clearTimer()
-    const restarting: HostRestartAttempt = { ...this.current, phase: 'restarting', updatedAt: new Date().toISOString(), sessions: this.sessionPlans(this.current.mode) }
-    this.setCurrent(restarting)
-    writeRestartState(this.options.statePath, restarting)
-    const [cmd, ...args] = this.command
-    if (!cmd) {
-      this.fail('restart command is empty')
-      return
-    }
-    await this.options.closeServer()
-    const child = spawn(cmd, args, {
-      detached: true,
-      stdio: 'ignore',
-      env: process.env,
-    })
-    child.unref()
-    this.options.exitProcess?.(0) ?? process.exit(0)
-  }
-
-  private fail(message: string): void {
-    if (!this.current) return
-    this.clearTimer()
-    this.options.loop.endDrain()
-    this.setCurrent({ ...this.current, phase: 'failed', updatedAt: new Date().toISOString(), error: message, sessions: this.sessionPlans(this.current.mode) })
-    this.last = this.current
-    this.current = null
-  }
-
-  private setCurrent(attempt: HostRestartAttempt): void {
-    this.current = attempt
-    writeRestartState(this.options.statePath, attempt)
-    this.options.emit(attempt)
   }
 
   private sessionPlans(mode: HostRestartMode): readonly HostRestartSessionPlan[] {
@@ -181,14 +139,109 @@ export class RestartCoordinator {
     })
   }
 
-  private clearTimer(): void {
-    if (this.timer) clearTimeout(this.timer)
+  private sessionPlansForCurrent(attemptId: string): readonly HostRestartSessionPlan[] {
+    const current = this.actor.snapshot().current
+    return current?.attemptId === attemptId ? this.sessionPlans(current.mode) : []
+  }
+
+  private clearTimer(attemptId: string): void {
+    if (!this.timer || this.timer.attemptId !== attemptId) return
+    clearTimeout(this.timer.handle)
     this.timer = null
   }
-}
 
-function terminalPhase(phase: HostRestartAttempt['phase']): boolean {
-  return phase === 'completed' || phase === 'aborted' || phase === 'failed'
+  private runCommand(command: RestartWorkflowCommand, send: (event: RestartWorkflowEvent) => void): void | Promise<void> {
+    if (command.kind === 'publish') {
+      writeRestartState(this.options.statePath, command.attempt)
+      this.options.emit(command.attempt)
+      return
+    }
+
+    if (command.kind === 'begin_drain') {
+      this.options.loop.beginDrain(command.mode === 'when_idle' ? 'idle' : 'checkpoint')
+      send({
+        kind: 'drain_started',
+        attemptId: command.attemptId,
+        updatedAt: new Date().toISOString(),
+        sessions: this.sessionPlans(command.mode),
+      })
+      return
+    }
+
+    if (command.kind === 'wait_for_checkpoints') {
+      return Promise.all(command.sessionIds.map((sessionId) => this.options.loop.waitForCheckpoint(sessionId)))
+        .then(() => {
+          const current = this.actor.snapshot().current
+          if (!current || current.attemptId !== command.attemptId) return
+          send({
+            kind: 'checkpoints_reached',
+            attemptId: command.attemptId,
+            updatedAt: new Date().toISOString(),
+            sessions: this.sessionPlans(current.mode),
+          })
+        })
+    }
+
+    if (command.kind === 'schedule_timeout') {
+      this.clearTimer(command.attemptId)
+      const handle = setTimeout(() => {
+        const current = this.actor.snapshot().current
+        if (!current || current.attemptId !== command.attemptId) return
+        send({
+          kind: 'abort',
+          attemptId: command.attemptId,
+          updatedAt: new Date().toISOString(),
+          sessions: this.sessionPlans(current.mode),
+          error: `restart checkpoint timeout after ${command.timeoutMs}ms`,
+        })
+      }, command.timeoutMs)
+      this.timer = { attemptId: command.attemptId, handle }
+      return
+    }
+
+    if (command.kind === 'clear_timeout') {
+      this.clearTimer(command.attemptId)
+      return
+    }
+
+    if (command.kind === 'end_drain') {
+      this.options.loop.endDrain()
+      return
+    }
+
+    if (command.kind === 'start_restart') {
+      const current = this.actor.snapshot().current
+      if (!current || current.attemptId !== command.attemptId) return
+      send({
+        kind: 'restart_started',
+        attemptId: command.attemptId,
+        updatedAt: new Date().toISOString(),
+        sessions: this.sessionPlans(current.mode),
+      })
+      return
+    }
+
+    const [cmd, ...args] = this.command
+    if (!cmd) throw new Error('restart command is empty')
+    return this.options.closeServer().then(() => {
+      if (this.actor.snapshot().current?.attemptId !== command.attemptId) return
+      const child = spawn(cmd, args, {
+        detached: true,
+        stdio: 'ignore',
+        env: process.env,
+      })
+      return new Promise<void>((resolve, reject) => {
+        child.once('error', reject)
+        child.once('spawn', () => {
+          child.removeListener('error', reject)
+          child.unref()
+          resolve()
+        })
+      }).then(() => {
+        this.options.exitProcess?.(0) ?? process.exit(0)
+      })
+    })
+  }
 }
 
 function readRestartState(path: string): HostRestartAttempt | null {
@@ -203,6 +256,13 @@ function readRestartState(path: string): HostRestartAttempt | null {
 function writeRestartState(path: string, attempt: HostRestartAttempt): void {
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(attempt, null, 2)}\n`, { mode: 0o600 })
+}
+
+function commandAttemptId(command: RestartWorkflowCommand): string {
+  // A failed terminal publication reports another failure event, but the
+  // reducer ignores it because no current attempt remains. This avoids a
+  // retry loop while keeping persistence/emit failures observable in state.
+  return command.kind === 'publish' ? command.attempt.attemptId : command.attemptId
 }
 
 export function defaultRestartStatePath(sessionsDir: string): string {

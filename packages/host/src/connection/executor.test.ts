@@ -366,6 +366,29 @@ describe('ExecutorRegistry', () => {
     ])
   })
 
+  it('cancels pending calls during detach grace and does not redispatch them', async () => {
+    const reg = createExecutorRegistry(
+      fakeIo() as never,
+      makeResolver({ 'sess-grace-cancel': 'ws-default' }),
+      5_000,
+      undefined,
+      10_000,
+    )
+    const oldSock = makeFakeSocket('grace-cancel-old')
+    reg.attach(oldSock as never, announceOf('e-grace-cancel'))
+    const pending = reg.callTool('sess-grace-cancel', callEffect('c1'))
+
+    reg.detach(oldSock as never)
+    expect(reg.activeSessions()).toEqual(['sess-grace-cancel'])
+    reg.cancelPending('sess-grace-cancel')
+    await expect(pending).resolves.toEqual({ ok: false, content: 'cancelled by user' })
+    expect(reg.activeSessions()).toEqual([])
+
+    const newSock = makeFakeSocket('grace-cancel-new')
+    reg.attach(newSock as never, announceOf('e-grace-cancel'))
+    expect(newSock.emitted.filter((entry) => entry.event === 'tool:call')).toHaveLength(0)
+  })
+
   it('routes two different sessions to the same executor (1:N)', async () => {
     const reg = createExecutorRegistry(
       fakeIo() as never,

@@ -8,7 +8,7 @@
  */
 
 import { step } from './core.js'
-import type { AgentConfig, AgentEvent, AgentState, Effect } from './types.js'
+import type { AgentConfig, AgentEvent, AgentState, Effect, TransitionDisposition } from './types.js'
 
 export function fold(
   initial: AgentState,
@@ -27,6 +27,7 @@ export type TraceEntry = {
   event: AgentEvent
   state: AgentState
   effects: readonly Effect[]
+  transition: TransitionDisposition
 }
 
 export function foldWithTrace(
@@ -44,6 +45,7 @@ export function foldWithTrace(
       event: ev,
       state,
       effects: result.effects,
+      transition: result.transition,
     })
   }
   return { final: state, trace }

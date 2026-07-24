@@ -220,11 +220,9 @@ export type ApprovalMode = 'auto' | 'ask' | 'deny' | 'allow_all'
 
 export const DEFAULT_APPROVAL_MODE: ApprovalMode = 'auto'
 
-export type AgentState = {
+export type AgentStateCommon = {
   readonly sessionId: string
   readonly messages: readonly Message[]
-  readonly pendingCalls: readonly PendingToolCall[]
-  readonly status: AgentStatus
   readonly usage: UsageTotal
   readonly cursor: number // monotonic event counter, for replay positioning
   readonly cwd?: string
@@ -233,8 +231,17 @@ export type AgentState = {
    * the `approval_mode_changed` event.
    */
   readonly approvalMode: ApprovalMode
-  readonly error?: string
 }
+
+export type AgentStatePhase =
+  | { readonly status: 'idle'; readonly pendingCalls: readonly []; readonly error?: never }
+  | { readonly status: 'thinking'; readonly pendingCalls: readonly []; readonly error?: never }
+  | { readonly status: 'done'; readonly pendingCalls: readonly []; readonly error?: never }
+  | { readonly status: 'awaiting_approval'; readonly pendingCalls: readonly PendingToolCall[]; readonly error?: never }
+  | { readonly status: 'executing_tools'; readonly pendingCalls: readonly PendingToolCall[]; readonly error?: never }
+  | { readonly status: 'error'; readonly pendingCalls: readonly []; readonly error: string }
+
+export type AgentState = AgentStateCommon & AgentStatePhase
 
 // ============================================================================
 // Events (inputs to the reducer)
@@ -394,4 +401,18 @@ export type Effect =
 export type StepResult = {
   next: AgentState
   effects: readonly Effect[]
+  transition: TransitionDisposition
+}
+
+export type TransitionDisposition = {
+  outcome: 'applied' | 'ignored' | 'rejected'
+  from: AgentStatus
+  to: AgentStatus
+  event: AgentEvent['kind']
+  reason?: 'event_not_legal_in_state' | 'invalid_event_payload' | 'invariant_violation'
+}
+
+/** Internal handler result before `step` attaches transition diagnostics. */
+export type HandlerResult = Omit<StepResult, 'transition'> & {
+  rejectionReason?: 'invalid_event_payload'
 }

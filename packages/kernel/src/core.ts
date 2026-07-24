@@ -31,6 +31,7 @@ import type {
   AgentEvent,
   AgentState,
   AgentStatus,
+  HandlerResult,
   StepResult,
 } from './types.js'
 import { noop } from './helpers.js'
@@ -54,7 +55,7 @@ type Handler<K extends AgentEvent['kind']> = (
   state: AgentState,
   event: EventOfKind<K>,
   config: AgentConfig,
-) => StepResult
+) => HandlerResult
 
 type TransitionRow = {
   [K in AgentEvent['kind']]?: Handler<K>
@@ -107,13 +108,90 @@ const transitions: Record<AgentStatus, TransitionRow> = {
   },
 }
 
+export const legalTransitions: Readonly<Record<AgentStatus, readonly AgentEvent['kind'][]>> = {
+  idle: Object.keys(transitions.idle) as AgentEvent['kind'][],
+  thinking: Object.keys(transitions.thinking) as AgentEvent['kind'][],
+  awaiting_approval: Object.keys(transitions.awaiting_approval) as AgentEvent['kind'][],
+  executing_tools: Object.keys(transitions.executing_tools) as AgentEvent['kind'][],
+  done: Object.keys(transitions.done) as AgentEvent['kind'][],
+  error: Object.keys(transitions.error) as AgentEvent['kind'][],
+}
+
 export function step(
   state: AgentState,
   event: AgentEvent,
   config: AgentConfig,
 ): StepResult {
+  const from = state.status
+  const priorViolation = stateInvariantViolation(state)
   const advanced: AgentState = { ...state, cursor: state.cursor + 1 }
   const row = transitions[advanced.status]
   const handler = row[event.kind] as Handler<typeof event.kind> | undefined
-  return handler ? handler(advanced, event, config) : noop(advanced)
+  if (!handler) {
+    const result = noop(advanced)
+    return {
+      ...result,
+      transition: {
+        outcome: 'ignored',
+        from,
+        to: result.next.status,
+        event: event.kind,
+        reason: 'event_not_legal_in_state',
+      },
+    }
+  }
+
+  const result = handler(advanced, event, config)
+  if (result.rejectionReason) {
+    return {
+      next: result.next,
+      effects: result.effects,
+      transition: {
+        outcome: 'rejected',
+        from,
+        to: result.next.status,
+        event: event.kind,
+        reason: result.rejectionReason,
+      },
+    }
+  }
+  const violation = stateInvariantViolation(result.next)
+  if (!priorViolation && violation) {
+    return {
+      next: advanced,
+      effects: [],
+      transition: {
+        outcome: 'rejected',
+        from,
+        to: advanced.status,
+        event: event.kind,
+        reason: 'invariant_violation',
+      },
+    }
+  }
+  return {
+    ...result,
+    transition: { outcome: 'applied', from, to: result.next.status, event: event.kind },
+  }
+}
+
+export function stateInvariantViolation(state: AgentState): string | undefined {
+  const runtimeError = (state as { error?: unknown }).error
+  if (state.status === 'awaiting_approval') {
+    if (!state.pendingCalls.some((call) => call.status === 'awaiting_approval')) {
+      return 'awaiting_approval requires an awaiting call'
+    }
+  } else if (state.status === 'executing_tools') {
+    if (state.pendingCalls.length === 0 || state.pendingCalls.some((call) => call.status !== 'dispatched')) {
+      return 'executing_tools requires dispatched calls only'
+    }
+  } else if (state.pendingCalls.length > 0) {
+    return `${state.status} cannot retain pending calls`
+  }
+  if (state.status === 'error') {
+    if (!state.error?.trim()) return 'error state requires an error message'
+  } else if (runtimeError !== undefined) {
+    return `${state.status} cannot retain an error message`
+  }
+  return undefined
 }

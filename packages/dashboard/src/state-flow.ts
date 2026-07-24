@@ -14,7 +14,7 @@ export function stateFlow(timeline: readonly TimelineEntry[]): readonly StateFlo
   let status: AgentStatus = 'idle'
   return timeline.map((entry) => {
     const from = status
-    const to = nextStatus(from, entry)
+    const to = projectStatusFromEntry(from, entry)
     status = to
     return {
       seq: entry.seq,
@@ -26,7 +26,7 @@ export function stateFlow(timeline: readonly TimelineEntry[]): readonly StateFlo
   })
 }
 
-function nextStatus(from: AgentStatus, entry: TimelineEntry): AgentStatus {
+export function projectStatusFromEntry(from: AgentStatus, entry: TimelineEntry): AgentStatus {
   const event = entry.event
   if (event.kind === 'llm_error') return 'error'
   if (event.kind === 'clear') return 'idle'

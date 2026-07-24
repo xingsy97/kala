@@ -264,6 +264,7 @@ export async function runCompact(
 
   inFlight.add(sessionId)
   try {
+    const baselineCursor = record.state.cursor
     const contextLimit = deps.models?.contextWindow?.(sessionId) ?? record.config.contextLimit
     const beforeSnapshot = contextSnapshot(record, record.state.messages, contextWindowOverrideForSession(deps, sessionId))
     const tokensBefore = beforeSnapshot.usage.inputTokens
@@ -292,6 +293,20 @@ export async function runCompact(
       await recordFailure(deps, sessionId, trigger, attemptId, rt, err, aborts)
       if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
       if (trigger === 'manual') throw err
+      return false
+    }
+
+    // The summarizer runs outside the per-session dispatch queue. A user or
+    // another host workflow may legitimately advance the session while that
+    // request is in flight. A summary and replace range derived from the old
+    // transcript must never be applied to the new one. Record identity also
+    // rejects delete-and-recreate races where the cursor happens to match.
+    const currentRecord = deps.store.get(sessionId)
+    if (currentRecord !== record || currentRecord.state.cursor !== baselineCursor) {
+      await dispatchRejected(deps, sessionId, trigger, attemptId, 'session_changed', {
+        baselineCursor,
+        currentCursor: currentRecord?.state.cursor ?? null,
+      })
       return false
     }
 
@@ -522,7 +537,7 @@ async function dispatchRejected(
   sessionId: string,
   trigger: CompactTrigger,
   attemptId: string,
-  reason: 'pending_call_orphaned' | 'invalid_replace_range' | 'post_compaction_still_over_budget',
+  reason: 'pending_call_orphaned' | 'invalid_replace_range' | 'post_compaction_still_over_budget' | 'session_changed',
   extra: Record<string, unknown>,
 ): Promise<void> {
   await appendCompactionMetadata(deps, sessionId, 'compaction_rejected', {

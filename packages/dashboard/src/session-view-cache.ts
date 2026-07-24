@@ -2,7 +2,7 @@ import type { AgentConfig, AgentState } from '@agent-kernel/kernel'
 import type { ContextUsageSnapshot, QueuedMessagePreview, SessionErrorEvent } from '@agent-kernel/shared'
 
 import { DASHBOARD_PREFERENCES } from './lib/prefs.js'
-import type { ConnectionStatus, TimelineEntry } from './session.js'
+import type { ConnectionStatus, TimelineEntry } from './session-projection.js'
 
 export const DEFAULT_SESSION_VIEW_CACHE_MAX_MB = DASHBOARD_PREFERENCES.sessionViewCacheMaxMb.defaultValue
 export const PREF_SESSION_VIEW_CACHE_MAX_MB = DASHBOARD_PREFERENCES.sessionViewCacheMaxMb.key

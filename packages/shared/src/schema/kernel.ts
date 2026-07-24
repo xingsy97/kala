@@ -192,17 +192,38 @@ export const UsageDeltaSchema: z.ZodType<UsageDelta> = z.object({
   cacheReadTokens: z.number().int().nonnegative().optional(),
 })
 
-export const AgentStateSchema: z.ZodType<AgentState> = z.object({
+const AgentStateCommonSchema = z.object({
   sessionId: z.string(),
   messages: z.array(MessageSchema),
-  pendingCalls: z.array(PendingToolCallSchema),
-  status: AgentStatusSchema,
   usage: UsageTotalSchema,
   cursor: z.number().int().nonnegative(),
   cwd: z.string().optional(),
   approvalMode: ApprovalModeSchema,
-  error: z.string().optional(),
-})
+}).strict()
+
+const EmptyPendingCallsSchema = z.custom<readonly[]>(
+  (value) => Array.isArray(value) && value.length === 0,
+  'pendingCalls must be empty in this phase',
+)
+
+export const AgentStateSchema: z.ZodType<AgentState> = z.discriminatedUnion('status', [
+  AgentStateCommonSchema.extend({ status: z.literal('idle'), pendingCalls: EmptyPendingCallsSchema }),
+  AgentStateCommonSchema.extend({ status: z.literal('thinking'), pendingCalls: EmptyPendingCallsSchema }),
+  AgentStateCommonSchema.extend({ status: z.literal('done'), pendingCalls: EmptyPendingCallsSchema }),
+  AgentStateCommonSchema.extend({
+    status: z.literal('awaiting_approval'),
+    pendingCalls: z.array(PendingToolCallSchema),
+  }),
+  AgentStateCommonSchema.extend({
+    status: z.literal('executing_tools'),
+    pendingCalls: z.array(PendingToolCallSchema),
+  }),
+  AgentStateCommonSchema.extend({
+    status: z.literal('error'),
+    pendingCalls: EmptyPendingCallsSchema,
+    error: z.string().trim().min(1),
+  }),
+])
 
 // ============================================================================
 // AgentEvent — every kind

@@ -17,14 +17,19 @@ import type {
   Message,
   MessageContent,
   PendingToolCall,
-  StepResult,
+  HandlerResult,
   ToolCallContent,
   UsageDelta,
   UsageTotal,
 } from './types.js'
+import { transitionAgentState } from './state.js'
 
-export function noop(state: AgentState): StepResult {
+export function noop(state: AgentState): HandlerResult {
   return { next: state, effects: [] }
+}
+
+export function rejectInvalidEvent(state: AgentState): HandlerResult {
+  return { next: state, effects: [], rejectionReason: 'invalid_event_payload' }
 }
 
 export function extractToolCalls(
@@ -49,25 +54,23 @@ export function afterPendingSettled(
   messages: readonly Message[],
   pendingCalls: readonly PendingToolCall[],
   config: AgentConfig,
-): StepResult {
+): HandlerResult {
   if (pendingCalls.length > 0) {
     const stillAwaiting = pendingCalls.some((c) => c.status === 'awaiting_approval')
     return {
-      next: {
-        ...state,
-        messages,
-        pendingCalls,
-        status: stillAwaiting ? 'awaiting_approval' : 'executing_tools',
-      },
+      next: transitionAgentState(
+        state,
+        { status: stillAwaiting ? 'awaiting_approval' : 'executing_tools', pendingCalls },
+        { messages },
+      ),
       effects: [],
     }
   }
-  const next: AgentState = {
-    ...state,
-    messages,
-    pendingCalls: [],
-    status: 'thinking',
-  }
+  const next = transitionAgentState(
+    state,
+    { status: 'thinking', pendingCalls: [] },
+    { messages },
+  )
   return {
     next,
     effects: [{ kind: 'call_llm', messages: next.messages, tools: config.tools }],

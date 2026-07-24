@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentModuleMetadata, AgentState, Message, ToolSchema } from './types.js'
+import type { AgentConfig, AgentModuleMetadata, AgentState, AgentStateCommon, AgentStatePhase, Message, ToolSchema } from './types.js'
 import { DEFAULT_APPROVAL_MODE } from './types.js'
 
 export function createInitialState(params: {
@@ -22,6 +22,15 @@ export function createInitialState(params: {
     cursor: 0,
     approvalMode: DEFAULT_APPROVAL_MODE,
   }
+}
+
+export function transitionAgentState(
+  state: AgentState,
+  phase: AgentStatePhase,
+  patch: Partial<AgentStateCommon> = {},
+): AgentState {
+  const { status: _status, pendingCalls: _pendingCalls, error: _error, ...common } = state
+  return { ...common, ...patch, ...phase }
 }
 
 export function createConfig(params: {
