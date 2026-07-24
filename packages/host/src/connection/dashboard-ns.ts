@@ -1167,8 +1167,19 @@ async function handleUserMessage(
     return
   }
   if (!isRestingStatus(record.state.status)) {
-    if (record.state.status === 'thinking') deps.loop.cancelStream(p.sessionId)
+    // Enqueue the steer at the front *before* aborting the in-flight turn.
+    // Ordering matters: cancelStream() triggers an async abort that settles the
+    // FSM into a resting status and emits a state broadcast. The server's
+    // turn-completion hook only re-drains the queue when it observes a resting
+    // status *with* a pending message. If we cancelled first and enqueued
+    // second, that broadcast could fire while the queue was still empty, and
+    // the steer message would sit in the queue forever (never dispatched).
     await deps.messageQueues.enqueue(p.sessionId, queued, 'front')
+    if (record.state.status === 'thinking') deps.loop.cancelStream(p.sessionId)
+    // Also kick a drain directly: if the abort settles synchronously (or the
+    // turn had already reached a resting status between our load and here) the
+    // completion hook may not fire, so we must not rely on it alone.
+    await deps.messageQueues.drain(p.sessionId)
     return
   }
   await deps.loop.dispatch(p.sessionId, {

@@ -351,10 +351,18 @@ export async function startHostServer(
   let loop: LoopHandle
   const queueSnapshot = (sessionId: string): ServerMessageQueueEvent => {
     const queue = queuedMessages.get(sessionId) ?? []
+    // The dock represents user-visible *queued follow-ups* only. A `steer`
+    // message is a transient interrupt: it is placed at the front of the
+    // internal queue purely to preserve dispatch ordering across the async
+    // turn-abort, then drained on the very next tick. Surfacing it as a
+    // "pending" dock item makes a steer look like it got stuck in the queue
+    // (and flickers in/out within a round-trip), so exclude steer items from
+    // what the dashboard renders and counts.
+    const visible = queue.filter((item) => item.mode !== 'steer')
     return {
       sessionId,
-      pending: queue.length,
-      items: queue.map((item) => ({
+      pending: visible.length,
+      items: visible.map((item) => ({
         id: item.id,
         text: item.text,
         mode: item.mode,

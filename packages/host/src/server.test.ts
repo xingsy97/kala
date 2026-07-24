@@ -3876,6 +3876,82 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('steer while a turn is running interrupts and dispatches without surfacing as a queued dock item', async () => {
+    const sessionId = 'wire-steer-while-running'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'steer-while-running-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          // Block the first turn until the steer message aborts it.
+          if (seenPrompts.length === 1) await firstRelease
+          return { message: { role: 'assistant', content: [{ type: 'text', text: `answer ${seenPrompts.length}` }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    const queueEvents: Array<{ pending: number; text?: string; mode?: string }> = []
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) {
+        queueEvents.push({ pending: p.pending, text: p.items[0]?.text, mode: p.items[0]?.mode })
+      }
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    // Start a turn and wait until the LLM call is in flight (blocked).
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+
+    // Steer while the turn is running: this must interrupt the active turn and
+    // be delivered — never linger in the queue dock as a stuck "queued" item.
+    dashboard.emit('client:user_message', { sessionId, text: 'steered', mode: 'steer' })
+    // Release the blocked first call so the abort/redispatch chain can settle.
+    releaseFirst()
+
+    const deadline = Date.now() + 4000
+    while (Date.now() < deadline && !seenPrompts.some((prompt) => prompt.includes('steered'))) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    // Bug 2: the steer message must actually be dispatched, not stuck forever.
+    expect(seenPrompts.some((prompt) => prompt.includes('steered'))).toBe(true)
+    // Bug 1: a steer must never be surfaced to the dock as a queued message.
+    expect(queueEvents.some((e) => e.text === 'steered' && e.mode === 'steer' && e.pending > 0)).toBe(false)
+
+    dashboard.close()
+  })
+
   it('fires session_start and session_end lifecycle hooks around create/delete', async () => {
     const sessionId = 'wire-lifecycle-hooks'
     await server.close()
