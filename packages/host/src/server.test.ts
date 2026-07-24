@@ -1268,6 +1268,77 @@ describe('wire protocol', () => {
     reconnected.close()
   })
 
+  it('uses the current default when a persisted selected model has left the catalog', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      models: [
+        { ref: 'anthropic:claude-opus-4.8', id: 'claude-opus-4.8', label: 'Claude Opus 4.8', provider: 'anthropic', providerId: 'anthropic' },
+      ],
+      defaultModel: 'anthropic:claude-opus-4.8',
+    })
+    url = `http://localhost:${server.port}`
+
+    const sessionId = 'wire-historical-model-context'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    await server.store.updatePreferences(sessionId, { selectedModel: 'anthropic:claude-opus-4.7-1m-internal' })
+
+    const dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    const ready = await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    expect(ready.selectedModel).toBe('anthropic:claude-opus-4.8')
+    expect(ready.contextSnapshot.model).toMatchObject({
+      ref: 'anthropic:claude-opus-4.8',
+      id: 'claude-opus-4.8',
+      provider: 'anthropic',
+    })
+    expect(ready.contextSnapshot.contextWindow).toEqual({ tokens: 1_000_000, source: 'model_registry' })
+    dashboard.close()
+  })
+
+  it('shares known context metadata across providers exposing the same model id', async () => {
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    server = await startHostServer({
+      port: (http.address() as AddressInfo).port,
+      sessionsDir: dir,
+      llm: scriptedLlm(),
+      defaultConfig: config,
+      httpServer: http,
+      models: [
+        { ref: 'primary:gpt-shared', id: 'gpt-shared', label: 'Shared Primary', provider: 'primary', providerId: 'primary', contextWindow: 353_346 },
+        { ref: 'secondary:gpt-shared', id: 'gpt-shared', label: 'Shared Secondary', provider: 'secondary', providerId: 'secondary' },
+      ],
+      defaultModel: 'primary:gpt-shared',
+    })
+    url = `http://localhost:${server.port}`
+
+    const sessionId = 'wire-shared-model-context'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    await server.store.updatePreferences(sessionId, { selectedModel: 'secondary:gpt-shared' })
+    const dashboard = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    const ready = await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    expect(ready.selectedModel).toBe('secondary:gpt-shared')
+    expect(ready.contextSnapshot.contextWindow).toEqual({ tokens: 353_346, source: 'model_registry' })
+    dashboard.close()
+  })
+
   it('uses persisted session model preferences over the host default model', async () => {
     await server.close()
     const http = createServer()
