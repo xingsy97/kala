@@ -278,6 +278,18 @@ export function App(): JSX.Element {
   const [chatSideSpace] = useNumberPref(PREF_CHAT_SIDE_SPACE, DEFAULT_CHAT_SIDE_SPACE, { min: 0, max: 2 })
   const [chatLineHeight] = useNumberPref(PREF_CHAT_LINE_HEIGHT, DEFAULT_CHAT_LINE_HEIGHT, { min: 0, max: 2 })
   const [chatMathScale] = useNumberPref(PREF_CHAT_MATH_SCALE, DEFAULT_CHAT_MATH_SCALE, { min: 0, max: 4 })
+  // Stable display-prefs object shared by ChatPanel and Composer so streaming
+  // re-renders don't hand them a fresh object identity every frame.
+  const chatDisplayPrefs = useMemo(
+    () => ({
+      fontSize: chatFontSize,
+      contentWidth: chatContentWidth,
+      sideSpace: chatSideSpace,
+      lineHeight: chatLineHeight,
+      mathScale: chatMathScale,
+    }),
+    [chatFontSize, chatContentWidth, chatSideSpace, chatLineHeight, chatMathScale],
+  )
   const [sessionViewCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
   const [durableSessionCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
   const [appBadgeEnabled] = useBooleanPref(PREF_APP_BADGE_ENABLED, true)
@@ -1662,13 +1674,7 @@ export function App(): JSX.Element {
                         compactStatus={compactStatus}
                         liveToolActivityTailCount={liveToolActivityTailCount}
                         toolCardMode={currentSession?.preferences?.toolCardMode ?? 'dots'}
-                        displayPrefs={{
-                          fontSize: chatFontSize,
-                          contentWidth: chatContentWidth,
-                          sideSpace: chatSideSpace,
-                          lineHeight: chatLineHeight,
-                          mathScale: chatMathScale,
-                        }}
+                        displayPrefs={chatDisplayPrefs}
                         loading={selectedHistorySessionLoading}
                         onDismissCompactStatus={() => setCompactStatus({ kind: 'idle' })}
                         pendingApprovals={session.pendingApprovals}
@@ -1788,13 +1794,7 @@ export function App(): JSX.Element {
                           humanAttention={session.humanAttention}
                           queuedMessages={visibleQueuedMessages}
                           timeline={session.timeline}
-                          displayPrefs={{
-                            fontSize: chatFontSize,
-                            contentWidth: chatContentWidth,
-                            sideSpace: chatSideSpace,
-                            lineHeight: chatLineHeight,
-                            mathScale: chatMathScale,
-                          }}
+                          displayPrefs={chatDisplayPrefs}
                           onQueuedReorder={(id, beforeId) => {
                             if (session.socket && activeSessionId !== null) reorderQueuedMessage(session.socket, activeSessionId, id, beforeId)
                           }}
