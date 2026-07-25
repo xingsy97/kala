@@ -1006,8 +1006,12 @@ describe('ChatPanel', () => {
     const textBlocks = container.querySelectorAll('.ak-chat-text')
     expect(textBlocks).toHaveLength(2)
     expect(textBlocks[0]?.classList.contains('ak-streaming-markdown')).toBe(false)
-    expect(textBlocks[1]?.classList.contains('ak-streaming-markdown')).toBe(true)
-    expect(screen.getByTestId('streaming-cursor').parentElement?.tagName).toBe('P')
+    // The actively-streaming prose tail now renders through the persistent
+    // per-character fade tail (plain text, outside ReactMarkdown) so its fade
+    // spans don't remount every token. The cursor sits at the end of that tail.
+    const cursorParent = screen.getByTestId('streaming-cursor').parentElement
+    expect(cursorParent?.classList.contains('ak-streaming-tail')).toBe(true)
+    expect(cursorParent?.textContent).toContain('still generating')
   })
 
   it('does not show assistant message actions while the draft is streaming', () => {
@@ -1042,7 +1046,9 @@ describe('ChatPanel', () => {
 
     const listCursor = screen.getByTestId('streaming-cursor')
     expect(screen.getAllByTestId('streaming-cursor')).toHaveLength(1)
-    expect(listCursor.parentElement?.tagName).toBe('LI')
+    // Actively-streaming list tail renders as the plain-text fade tail; the
+    // cursor sits at its end with the latest text.
+    expect(listCursor.parentElement?.classList.contains('ak-streaming-tail')).toBe(true)
     expect(listCursor.parentElement?.textContent).toContain('second')
 
     rerender(

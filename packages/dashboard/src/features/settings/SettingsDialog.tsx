@@ -68,6 +68,7 @@ import {
   PREF_DURABLE_SESSION_CACHE_ENABLED,
   PREF_APP_BADGE_ENABLED,
   PREF_KEEP_SCREEN_AWAKE,
+  PREF_SMOOTH_STREAMING_TEXT,
   useBooleanPref,
   useNumberPref,
 } from '../../lib/prefs.js'
@@ -1619,6 +1620,7 @@ function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessionViewC
   const [sessionCacheMaxMb, setSessionCacheMaxMb] = useNumberPref(PREF_SESSION_VIEW_CACHE_MAX_MB, DEFAULT_SESSION_VIEW_CACHE_MAX_MB, { min: 0, max: 4096 })
   const [durableCacheEnabled, setDurableCacheEnabled] = useBooleanPref(PREF_DURABLE_SESSION_CACHE_ENABLED, true)
   const [keepScreenAwake, setKeepScreenAwake] = useBooleanPref(PREF_KEEP_SCREEN_AWAKE, false)
+  const [smoothStreamingText, setSmoothStreamingText] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
   const [theme, , setTheme, effectiveTheme] = useTheme()
   const [storedVSCodeTheme, setStoredVSCodeTheme] = useState<StoredVSCodeTheme | null>(() => readStoredVSCodeTheme())
   const currentThemeLabel = storedVSCodeTheme?.label ?? builtinThemeForScheme(effectiveTheme).label
@@ -1838,6 +1840,13 @@ function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessionViewC
           checked={inspectorOpen}
           onChange={setInspectorOpen}
           testId="settings-toggle-inspector-open"
+        />
+        <InterfaceToggle
+          label={t('settings.interface.smoothStreamingText')}
+          description={t('settings.interface.smoothStreamingTextDesc')}
+          checked={smoothStreamingText}
+          onChange={setSmoothStreamingText}
+          testId="settings-toggle-smooth-streaming-text"
         />
         <InterfaceToggle
           label={t('settings.interface.topbarOpen')}

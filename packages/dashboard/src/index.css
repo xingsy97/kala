@@ -47,6 +47,26 @@
     46%, 100% { opacity: 0; }
   }
 
+  /* Per-character streaming fade-in (see docs/design/smooth-streaming-text.md).
+     Opacity only; bounded to a small trailing window by ChatPanel, so the count
+     of animating spans never grows with reply length. */
+  .ak-char-in {
+    display: inline;
+    animation: ak-char-in 340ms ease-in both;
+  }
+
+  @keyframes ak-char-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ak-char-in {
+      animation: none;
+      opacity: 1;
+    }
+  }
+
   @media (min-width: 640px) {
     .ak-chat-container {
       padding-left: var(--ak-chat-side-space-sm, 2rem);
