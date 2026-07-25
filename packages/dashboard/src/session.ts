@@ -152,9 +152,28 @@ export function useSession({
     }
     let resetHistoryBaseOnNextReplay = false
 
+    // Throttle React commits to ~15fps. The rAF loop previously called
+    // setStreamingText on every frame (~60fps), which re-rendered the whole
+    // App subtree (transcript + composer + chrome) 60x/sec during streaming —
+    // the main cause of typing lag in the composer while the agent is
+    // thinking/streaming, and of general jank on mobile/PWA. Committing at most
+    // once per ~66ms keeps streaming visually smooth (humans can't read faster)
+    // while cutting streaming-driven re-renders ~4x.
+    const MIN_COMMIT_MS = 66
+    let lastCommitMs = 0
+    let pendingCommit = ''
+    const commitPending = (): void => {
+      if (pendingCommit.length === 0) return
+      const chunk = pendingCommit
+      pendingCommit = ''
+      lastCommitMs = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      setStreamingText((prev) => prev + chunk)
+    }
     const drainStreamBuffer = (): void => {
       const buf = streamBufferRef.current
       if (buf.length === 0) {
+        // Flush whatever hasn't been committed yet, then stop the loop.
+        commitPending()
         streamRafRef.current = null
         return
       }
@@ -167,7 +186,9 @@ export function useSession({
       )
       const chunk = buf.slice(0, chunkSize)
       streamBufferRef.current = buf.slice(chunkSize)
-      setStreamingText((prev) => prev + chunk)
+      pendingCommit += chunk
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      if (now - lastCommitMs >= MIN_COMMIT_MS) commitPending()
       streamRafRef.current = requestAnimationFrame(drainStreamBuffer)
     }
 
@@ -180,6 +201,7 @@ export function useSession({
 
     const resetStream = (): void => {
       streamBufferRef.current = ''
+      pendingCommit = ''
       if (streamRafRef.current !== null) {
         cancelAnimationFrame(streamRafRef.current)
         streamRafRef.current = null
