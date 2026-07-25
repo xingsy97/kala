@@ -28,7 +28,7 @@ import type {
   MessageContent,
   ToolSchema,
 } from '@agent-kernel/kernel'
-import { redactLlmTrace, type HumanAttentionTimeline, type LLMTrace, type ServerHistoryPayload, type ServerLogArtifactPayload } from '@agent-kernel/shared'
+import { type HumanAttentionTimeline, type LLMTrace, type ServerHistoryPayload, type ServerLogArtifactPayload } from '@agent-kernel/shared'
 import type { ContextUsageSnapshot } from '@agent-kernel/shared/context-usage'
 import { useTranslation } from 'react-i18next'
 
@@ -75,6 +75,12 @@ import {
   type StateDiffSummaryGroup,
   type StateDiffSummaryItem,
 } from './debugger-model.js'
+import { TRACE_CATEGORY_ORDER, type DetailSelection, type PriorCallLlm, type StatusTopologyNode, type SubAgentRelationSummary, type ToolCallLifecycle, type TraceCategory } from './trace-types.js'
+import { detailDescription, detailTitle, isSkillTool, statusTopology, subAgentRelationSummary } from './detail-model.js'
+import { useHistoryTimeline, type HistoryTimelineState } from './use-history-timeline.js'
+import { adapterTransformSummary, apiAdapterLabel, compactCardSummary, compactModelLabel, compactNameCounts, compactPath, diffSummaryTone, formatTraceDuration, healthTone, messageRoleTone, minimapTone, shortHealthLabel, shortStatus, shortTopologyValue, statusTone, summarizeTextForCard, topologyTone } from './presentation.js'
+import { effectTarget, eventCategories, inboundOf, primaryCategory, roleCounts, summarizeContent, summarizeContentForCard, toolInputSummary, buildToolCalls, entryMatchesFilter, eventSummary, findPriorCallLlm, messageIndexFor, teachingText, mergeArtifactEntry, mergeTimelineArtifacts } from './timeline-model.js'
+import { describeSystemInjection, llmCallModel, llmCallProvider, llmResponseCardSummary, llmResponseSummary, modelFromTrace, providerArrayLength, providerFromModel, providerFromTrace, redactedApiRequest, toolLifecycleSummary, toolResultLabel } from './llm-model.js'
 import {
   buildLlmCalls,
   contextProportions,
@@ -104,127 +110,16 @@ type RuntimeView = 'state' | 'tools' | 'memory'
 type InspectorView = 'trace' | 'llm' | 'tools' | 'status'
 type TraceMode = 'list' | 'flow' | 'compare'
 type LlmDetailView = 'assembler' | 'api'
-type TraceCategory = 'user' | 'llm' | 'tool' | 'approval' | 'system'
-type DetailSelection =
-  | { kind: 'event'; entry: TimelineEntry; priorCallLlm: PriorCallLlm | null; flow?: StateFlowStep }
-  | { kind: 'llm'; call: LlmCall }
-  | { kind: 'tool'; call: ToolCallLifecycle }
-  | null
 
-type PriorCallLlm = { seq: number; effect: CallLlmEffect }
 
-type ToolCallLifecycle = {
-  callId: string
-  name: string
-  input: Record<string, unknown>
-  requestedSeq?: number
-  approvedSeq?: number
-  rejectedSeq?: number
-  dispatchedSeq?: number
-  resultSeq?: number
-  result?: Extract<AgentEvent, { kind: 'tool_result' }>
-}
 
-function mergeArtifactEntry(
-  current: readonly TimelineEntry[],
-  base: TimelineEntry,
-  payload: ServerLogArtifactPayload,
-): readonly TimelineEntry[] {
-  const hydrated = hydrateTimelineEntry(base, payload)
-  const without = current.filter((entry) => entry.seq !== hydrated.seq)
-  return [...without, hydrated].sort((a, b) => a.seq - b.seq)
-}
 
-function mergeTimelineArtifacts(
-  timeline: readonly TimelineEntry[],
-  artifacts: readonly TimelineEntry[],
-): readonly TimelineEntry[] {
-  if (artifacts.length === 0) return timeline
-  const bySeq = new Map(artifacts.map((entry) => [entry.seq, entry]))
-  return timeline.map((entry) => {
-    const hydrated = bySeq.get(entry.seq)
-    if (!hydrated) return entry
-    return {
-      ...entry,
-      effects: hydrated.effects,
-      ...(hydrated.llmTrace ? { llmTrace: hydrated.llmTrace } : {}),
-      hasEffectsArtifact: false,
-      hasLlmTraceArtifact: hydrated.llmTrace ? false : entry.hasLlmTraceArtifact,
-    }
-  })
-}
 
-function hydrateTimelineEntry(entry: TimelineEntry, payload: ServerLogArtifactPayload): TimelineEntry {
-  return {
-    ...entry,
-    ...(payload.effects ? { effects: payload.effects } : {}),
-    ...(payload.llmTrace ? { llmTrace: payload.llmTrace } : {}),
-    hasEffectsArtifact: payload.effects ? false : entry.hasEffectsArtifact,
-    hasLlmTraceArtifact: payload.llmTrace ? false : entry.hasLlmTraceArtifact,
-  }
-}
 
-type SubAgentRelationSummary = {
-  parentSessionId: string | null
-  parentCursor: number | null
-  total: number
-  completed: number
-  failed: number
-  running: number
-}
-
-type StatusTopologyNode = {
-  id: string
-  label: string
-  value: string
-  status: 'ok' | 'warn' | 'error' | 'unknown'
-}
-
-function subAgentRelationSummary(
-  parentSessionId: string | null,
-  parentCursor: number | null,
-  toolCalls: readonly ToolCallLifecycle[],
-): SubAgentRelationSummary {
-  const agentCalls = toolCalls.filter((call) => call.name === 'agent')
-  return {
-    parentSessionId,
-    parentCursor,
-    total: agentCalls.length,
-    completed: agentCalls.filter((call) => call.result?.ok === true).length,
-    failed: agentCalls.filter((call) => call.result?.ok === false).length,
-    running: agentCalls.filter((call) => !call.result).length,
-  }
-}
-
-function statusTopology(socket: DashboardSocket | null, state: AgentState | null, llmCalls: readonly LlmCall[]): readonly StatusTopologyNode[] {
-  const lastLlm = llmCalls.at(-1) ?? null
-  return [
-    { id: 'dashboard', label: 'Dashboard', value: 'browser UI', status: 'ok' },
-    {
-      id: 'host',
-      label: 'Host',
-      value: socket ? (socket.connected ? 'socket connected' : 'socket disconnected') : 'no socket',
-      status: socket ? (socket.connected ? 'ok' : 'error') : 'unknown',
-    },
-    {
-      id: 'executor',
-      label: 'Executor',
-      value: state?.cwd ? state.cwd : 'cwd not reported',
-      status: state?.cwd ? 'ok' : 'unknown',
-    },
-    {
-      id: 'llm',
-      label: 'LLM',
-      value: lastLlm ? `${llmCallProvider(lastLlm)} / ${llmCallModel(lastLlm)}` : 'not called yet',
-      status: lastLlm ? (lastLlm.error ? 'error' : lastLlm.trace ? 'ok' : 'warn') : 'unknown',
-    },
-  ]
-}
 
 const traceListItemClass =
   'group relative min-w-0 overflow-hidden rounded-md border border-border/55 bg-card/45 px-2 py-1 text-xs shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-colors dark:bg-card/35'
 
-const TRACE_CATEGORY_ORDER = ['user', 'llm', 'tool', 'approval', 'system'] as const
 
 const TRACE_CATEGORY_LABEL: Record<TraceCategory, string> = {
   user: 'User',
@@ -548,44 +443,7 @@ function ForkDialogActionLabel(): JSX.Element {
   return <>{t('inspector.fork.action')}</>
 }
 
-type HistoryTimelineState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; timeline: readonly TimelineEntry[] }
-  | { status: 'unavailable' }
 
-function useHistoryTimeline(socket: DashboardSocket | null, sessionId: string | null): HistoryTimelineState {
-  const [state, setState] = useState<HistoryTimelineState>({ status: 'idle' })
-
-  useEffect(() => {
-    if (!socket || !sessionId) {
-      setState({ status: 'idle' })
-      return
-    }
-    setState({ status: 'loading' })
-    const onHistory = (p: ServerHistoryPayload): void => {
-      if (p.sessionId !== sessionId) return
-      const timeline = p.entries.map((e) => ({
-          seq: e.seq,
-          ts: e.ts,
-          event: e.event,
-          effects: e.effects,
-          ...(e.hasEffectsArtifact ? { hasEffectsArtifact: true } : {}),
-          ...(e.hasLlmTraceArtifact ? { hasLlmTraceArtifact: true } : {}),
-          ...(e.llmTrace ? { llmTrace: e.llmTrace } : {}),
-          ...(e.model ? { model: e.model } : {}),
-        }))
-      setState(timeline.length > 0 ? { status: 'ready', timeline } : { status: 'unavailable' })
-    }
-    socket.on('server:history', onHistory)
-    socket.emit('client:load_history', { sessionId })
-    return () => {
-      socket.off('server:history', onHistory)
-    }
-  }, [socket, sessionId])
-
-  return state
-}
 
 function DebuggerHeader({
   state,
@@ -1258,33 +1116,9 @@ function StatusTopology({ nodes }: { nodes: readonly StatusTopologyNode[] }): JS
   )
 }
 
-function shortTopologyValue(node: StatusTopologyNode): string {
-  if (node.id === 'host') return node.value.replace(/^socket /u, '')
-  if (node.id === 'executor') return compactPath(node.value)
-  if (node.id === 'llm') return compactModelLabel(node.value)
-  return node.value
-}
 
-function compactPath(value: string): string {
-  if (!value.startsWith('/')) return value
-  const parts = value.split('/').filter(Boolean)
-  if (parts.length <= 3) return value
-  return `/${parts.slice(-3).join('/')}`
-}
 
-function compactModelLabel(value: string): string {
-  return value
-    .replace('anthropic / ', '')
-    .replace('kernel / ', '')
-    .replace(/-internal$/u, '')
-}
 
-function topologyTone(status: StatusTopologyNode['status']): string {
-  if (status === 'ok') return 'bg-emerald-500 dark:bg-emerald-400'
-  if (status === 'warn') return 'bg-amber-500 dark:bg-amber-400'
-  if (status === 'error') return 'bg-rose-500 dark:bg-rose-400'
-  return 'bg-muted-foreground/50'
-}
 
 function StateRuntime({
   state,
@@ -1436,12 +1270,6 @@ function RunHealthPanel({ items }: { items: readonly RunHealthItem[] }): JSX.Ele
   )
 }
 
-function shortHealthLabel(label: string): string {
-  if (label === 'Missing HTTP traces') return 'Missing traces'
-  if (label === 'Pending approvals') return 'Approvals'
-  if (label === 'Failed tools') return 'Tool failures'
-  return label
-}
 
 function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; toolCalls: readonly ToolCallLifecycle[] }): JSX.Element {
   const { t } = useTranslation()
@@ -1515,9 +1343,6 @@ function ToolsRuntime({ tools, toolCalls }: { tools: readonly ToolSchema[]; tool
   )
 }
 
-function isSkillTool(tool: ToolSchema): boolean {
-  return tool.name === 'skill'
-}
 
 function MemoryRuntime({ state: _state }: { state: AgentState | null }): JSX.Element {
   const { t } = useTranslation()
@@ -1608,26 +1433,7 @@ function DetailDialog({
   )
 }
 
-function detailTitle(selection: DetailSelection): string {
-  if (!selection) return 'Selected Detail'
-  if (selection.kind === 'llm') {
-    if (selection.call.source === 'compact') return `Compaction LLM #${selection.call.requestSeq}`
-    return `LLM Call #${selection.call.requestSeq} → ${selection.call.responseSeq ? `#${selection.call.responseSeq}` : 'pending'}`
-  }
-  if (selection.kind === 'tool') return `Tool Call · ${selection.call.name}`
-  return `Timeline Event #${selection.entry.seq}`
-}
 
-function detailDescription(selection: DetailSelection): string {
-  if (!selection) return 'Select a reducer event, LLM call, or tool call to inspect raw data.'
-  if (selection.kind === 'llm') {
-    return 'Kernel request, provider request/response trace, and parsed kernel response.'
-  }
-  if (selection.kind === 'tool') {
-    return `${selection.call.callId} · ${toolLifecycleSummary(selection.call)}`
-  }
-  return `${selection.entry.event.kind} · reducer input, emitted effects, and raw JSON.`
-}
 
 function EventDetail({ selection }: { selection: Extract<DetailSelection, { kind: 'event' }> }): JSX.Element {
   const rows: readonly (readonly [string, string])[] = [
@@ -2265,159 +2071,12 @@ function KeyValueTable({ rows, compact = false }: { rows: readonly (readonly [st
   )
 }
 
-function buildToolCalls(timeline: readonly TimelineEntry[]): readonly ToolCallLifecycle[] {
-  const byId = new Map<string, ToolCallLifecycle>()
-  const ensure = (callId: string, name: string, input: Record<string, unknown>): ToolCallLifecycle => {
-    const existing = byId.get(callId)
-    if (existing) return existing
-    const next: ToolCallLifecycle = { callId, name, input }
-    byId.set(callId, next)
-    return next
-  }
-  for (const entry of timeline) {
-    for (const effect of entry.effects) {
-      if (effect.kind === 'request_approval') {
-        const call = ensure(effect.callId, effect.name, effect.input)
-        call.requestedSeq = entry.seq
-      } else if (effect.kind === 'call_tool') {
-        const call = ensure(effect.callId, effect.name, effect.input)
-        call.dispatchedSeq = entry.seq
-      }
-    }
-    if (entry.event.kind === 'llm_response') {
-      for (const content of entry.event.message.content) {
-        if (content.type === 'tool_call') {
-          const call = ensure(content.callId, content.name, content.input)
-          call.requestedSeq ??= entry.seq
-        }
-      }
-    } else if (entry.event.kind === 'user_approve') {
-      const call = byId.get(entry.event.callId)
-      if (call) call.approvedSeq = entry.seq
-    } else if (entry.event.kind === 'user_reject') {
-      const call = byId.get(entry.event.callId)
-      if (call) call.rejectedSeq = entry.seq
-    } else if (entry.event.kind === 'tool_result') {
-      const call = byId.get(entry.event.callId) ?? ensure(entry.event.callId, 'unknown', {})
-      call.resultSeq = entry.seq
-      call.result = entry.event
-    }
-  }
-  return [...byId.values()].sort((a, b) => (a.requestedSeq ?? a.dispatchedSeq ?? 0) - (b.requestedSeq ?? b.dispatchedSeq ?? 0))
-}
 
-function findPriorCallLlm(timeline: readonly TimelineEntry[], i: number): PriorCallLlm | null {
-  if (timeline[i]?.event.kind !== 'llm_response') return null
-  for (let j = i - 1; j >= 0; j--) {
-    const entry = timeline[j]!
-    const eff = entry.effects.find((e): e is CallLlmEffect => e.kind === 'call_llm')
-    if (eff) return { seq: entry.seq, effect: eff }
-  }
-  return null
-}
 
-function messageIndexFor(timeline: readonly TimelineEntry[], currentIndex: number, messagesCount: number): number | null {
-  const t = timeline[currentIndex]
-  if (!t) return null
-  const producesMessage = t.event.kind === 'user_message' || t.event.kind === 'llm_response' || t.event.kind === 'tool_result'
-  if (!producesMessage) return null
-  let seen = -1
-  for (let i = 0; i <= currentIndex; i++) {
-    const ev = timeline[i]!.event
-    if (ev.kind === 'user_message' || ev.kind === 'llm_response' || ev.kind === 'tool_result') seen += 1
-  }
-  if (seen < 0 || seen >= messagesCount) return null
-  return seen
-}
 
-function inboundOf(event: AgentEvent): { source: string; tone: string } {
-  switch (event.kind) {
-    case 'user_message':
-    case 'user_approve':
-    case 'approval_mode_changed':
-    case 'cwd_changed':
-      return { source: 'user', tone: 'text-sky-600 dark:text-sky-300' }
-    case 'llm_response':
-      return { source: 'llm', tone: 'text-violet-600 dark:text-violet-300' }
-    case 'llm_error':
-      return { source: 'llm', tone: 'text-rose-600 dark:text-rose-300' }
-    case 'user_reject':
-      return { source: 'user', tone: 'text-rose-600 dark:text-rose-300' }
-    case 'tool_result':
-      return { source: 'executor', tone: event.ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300' }
-    case 'cancel':
-    case 'clear':
-      return { source: 'user', tone: 'text-amber-600 dark:text-amber-300' }
-    case 'messages_replaced':
-      return { source: 'host', tone: 'text-amber-600 dark:text-amber-300' }
-  }
-}
 
-function effectTarget(e: Effect): { target: string; tone: string } {
-  switch (e.kind) {
-    case 'call_llm':
-      return { target: 'llm', tone: 'text-violet-600 dark:text-violet-300' }
-    case 'call_tool':
-      return { target: 'executor', tone: 'text-emerald-600 dark:text-emerald-300' }
-    case 'request_approval':
-      return { target: 'user', tone: 'text-amber-600 dark:text-amber-300' }
-    case 'finish':
-      return { target: 'done', tone: 'text-muted-foreground' }
-    case 'emit_error':
-      return { target: 'error', tone: 'text-rose-600 dark:text-rose-300' }
-  }
-}
 
-function eventCategories(entry: TimelineEntry): Set<TraceCategory> {
-  const categories = new Set<TraceCategory>()
-  switch (entry.event.kind) {
-    case 'user_message':
-      categories.add('user')
-      break
-    case 'user_approve':
-    case 'user_reject':
-      categories.add('user')
-      categories.add('approval')
-      break
-    case 'approval_mode_changed':
-      categories.add('user')
-      categories.add('approval')
-      break
-    case 'cwd_changed':
-    case 'cancel':
-    case 'clear':
-      categories.add('user')
-      break
-    case 'llm_response':
-    case 'llm_error':
-      categories.add('llm')
-      break
-    case 'tool_result':
-      categories.add('tool')
-      break
-    case 'messages_replaced':
-      categories.add('system')
-      break
-  }
-  for (const eff of entry.effects) {
-    if (eff.kind === 'call_llm') categories.add('llm')
-    else if (eff.kind === 'call_tool') categories.add('tool')
-    else if (eff.kind === 'request_approval') categories.add('approval')
-    else if (eff.kind === 'finish' || eff.kind === 'emit_error') categories.add('system')
-  }
-  return categories
-}
 
-function entryMatchesFilter(
-  entry: TimelineEntry,
-  filter: ReadonlySet<TraceCategory>,
-): boolean {
-  if (filter.size === 0) return true
-  for (const cat of eventCategories(entry)) {
-    if (filter.has(cat)) return true
-  }
-  return false
-}
 
 function TraceToolbar({
   filter,
@@ -2636,12 +2295,6 @@ function DiffSummaryItem({ item }: { item: StateDiffSummaryItem }): JSX.Element 
   )
 }
 
-function diffSummaryTone(tone: StateDiffSummaryItem['tone']): string {
-  if (tone === 'added') return 'text-emerald-700 dark:text-emerald-300'
-  if (tone === 'removed') return 'text-rose-700 dark:text-rose-300'
-  if (tone === 'changed') return 'text-amber-700 dark:text-amber-300'
-  return 'text-muted-foreground'
-}
 
 function DiffRow({ item }: { item: StateDiff }): JSX.Element {
   return (
@@ -2679,272 +2332,36 @@ function TimelineMinimap({ entries, selectedSeq, onSelect }: { entries: readonly
 }
 
 
-function eventSummary(event: AgentEvent, priorCallLlm: PriorCallLlm | null): string {
-  switch (event.kind) {
-    case 'user_message':
-      return event.text ? summarizeTextForCard(event.text) : summarizeContentForCard(event.content ?? [])
-    case 'llm_response':
-      return `${summarizeContentForCard(event.message.content)}${priorCallLlm ? ` · response to call_llm #${priorCallLlm.seq}` : ''}`
-    case 'tool_result':
-      return `${event.ok ? 'ok' : 'error'} · ${event.content.length} chars`
-    case 'user_approve':
-      return `approved ${event.callId}`
-    case 'user_reject':
-      return `rejected ${event.callId}${event.reason ? ` · ${event.reason}` : ''}`
-    case 'llm_error':
-      return event.error
-    case 'messages_replaced':
-      return event.reason === 'compaction'
-        ? `compaction · ${event.replaceRange.start} → ${event.replaceRange.end} · ${event.replacementMessages.length} replacement message(s)`
-        : `messages replaced · ${event.reason}`
-    case 'approval_mode_changed':
-      return `approval mode ${event.mode}`
-    case 'cwd_changed':
-      return event.cwd
-    case 'cancel':
-      return 'cancel requested'
-    case 'clear':
-      return 'session context cleared'
-  }
-}
-
-function summarizeContent(content: readonly MessageContent[]): string {
-  if (content.length === 0) return 'empty message'
-  return content.map((c) => {
-    if (c.type === 'text') return c.text.slice(0, 120)
-    if (c.type === 'tool_call') return `tool_call ${c.name}`
-    if (c.type === 'tool_result') return `tool_result ${c.ok ? 'ok' : 'error'} ${c.content.slice(0, 80)}`
-    if (c.type === 'image') return `image ${c.source.kind}`
-    if (c.type === 'thinking') return 'thinking block'
-    return 'content'
-  }).join(' · ')
-}
-
-function summarizeContentForCard(content: readonly MessageContent[]): string {
-  if (content.length === 0) return 'empty message'
-  const textChars = content
-    .filter((c): c is Extract<MessageContent, { type: 'text' }> => c.type === 'text')
-    .reduce((sum, c) => sum + c.text.replace(/\s+/g, ' ').trim().length, 0)
-  const toolCalls = content.filter((c): c is Extract<MessageContent, { type: 'tool_call' }> => c.type === 'tool_call')
-  const toolResults = content.filter((c): c is Extract<MessageContent, { type: 'tool_result' }> => c.type === 'tool_result')
-  const images = content.filter((c) => c.type === 'image').length
-  const thinking = content.filter((c) => c.type === 'thinking').length
-
-  const parts: string[] = []
-  if (textChars > 0) parts.push(`text ${textChars} chars`)
-  if (toolCalls.length > 0) parts.push(`tool calls ${toolCalls.length}: ${compactNameCounts(toolCalls.map((c) => c.name), 2)}`)
-  if (toolResults.length > 0) {
-    const ok = toolResults.filter((c) => c.ok).length
-    const err = toolResults.length - ok
-    parts.push(`tool results ${toolResults.length}${err > 0 ? ` (${err} error)` : ''}`)
-  }
-  if (images > 0) parts.push(`images ${images}`)
-  if (thinking > 0) parts.push(`thinking ${thinking}`)
-  return compactCardSummary(parts.join(' · ') || `${content.length} content blocks`)
-}
-
-function summarizeTextForCard(text: string): string {
-  const compact = text.replace(/\s+/g, ' ').trim()
-  if (!compact) return 'empty text'
-  return compact.length > 48 ? `text ${compact.length} chars` : compactCardSummary(compact)
-}
-
-function compactNameCounts(names: readonly string[], limit: number): string {
-  const counts = new Map<string, number>()
-  for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1)
-  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-  const shown = entries.slice(0, limit).map(([name, count]) => count > 1 ? `${name} x${count}` : name)
-  const remaining = entries.length - shown.length
-  return remaining > 0 ? `${shown.join(', ')} +${remaining}` : shown.join(', ')
-}
-
-function compactCardSummary(value: string): string {
-  const compact = value.replace(/\s+/g, ' ').trim()
-  return compact.length > 72 ? `${compact.slice(0, 69)}...` : compact
-}
-
-function messageRoleTone(role: Message['role']): string {
-  if (role === 'user') return 'text-sky-600 dark:text-sky-300'
-  if (role === 'assistant') return 'text-violet-600 dark:text-violet-300'
-  if (role === 'tool') return 'text-emerald-600 dark:text-emerald-300'
-  return 'text-amber-600 dark:text-amber-300'
-}
-
-function roleCounts(messages: readonly Message[]): string {
-  const counts = new Map<Message['role'], number>()
-  for (const message of messages) counts.set(message.role, (counts.get(message.role) ?? 0) + 1)
-  return [...counts.entries()].map(([role, count]) => `${role} ${count}`).join(', ') || 'none'
-}
-
-function describeSystemInjection(call: LlmCall): string {
-  const provider = call.trace ? providerFromTrace(call.trace) : 'unknown'
-  const firstSystem = call.effect.messages.find((message) => message.role === 'system')
-  const hasProviderSystem = call.trace ? providerBodyHasKey(call.trace.request.body, 'system') : false
-  if (provider === 'anthropic' && hasProviderSystem) {
-    return firstSystem
-      ? 'system message or config prompt is folded into Anthropic top-level body.system'
-      : 'config prompt is sent as Anthropic top-level body.system'
-  }
-  if (provider === 'openai') {
-    return 'system prompt is sent as an OpenAI-compatible system message when configured'
-  }
-  if (firstSystem) return 'kernel request includes at least one system message'
-  return 'no system prompt visible in captured request data'
-}
-
-function adapterTransformSummary(provider: string): string {
-  if (provider === 'anthropic') {
-    return 'systemPrompt -> body.system; messages -> body.messages; tool_call -> tool_use; tool_result -> tool_result; ToolSchema[] -> body.tools'
-  }
-  if (provider === 'openai') {
-    return 'systemPrompt -> system message; messages -> body.messages; tool_call/tool_result -> OpenAI-compatible tool messages; ToolSchema[] -> tools'
-  }
-  return 'HTTP trace captured; exact adapter output is shown in API Request'
-}
-
-function apiAdapterLabel(provider: string): string {
-  if (provider === 'anthropic') return 'Anthropic Messages API'
-  if (provider === 'openai') return 'OpenAI-compatible Chat API'
-  if (provider === 'kernel') return 'not captured'
-  return provider
-}
-
-function redactedApiRequest(trace: LLMTrace): LLMTrace['request'] {
-  return redactLlmTrace(trace).request
-}
 
 
-function providerArrayLength(body: unknown, key: string): string {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'not present'
-  const value = (body as Record<string, unknown>)[key]
-  return Array.isArray(value) ? String(value.length) : 'not present'
-}
 
-function llmResponseSummary(call: LlmCall): string {
-  if (call.error) return call.error.error
-  if (!call.response) return 'pending'
-  return summarizeContent(call.response.message.content)
-}
 
-function llmResponseCardSummary(call: LlmCall): string {
-  if (call.error) return `error ${call.error.error.length} chars`
-  if (!call.response) return 'pending'
-  return summarizeContentForCard(call.response.message.content)
-}
 
-function formatTraceDuration(value: unknown): string {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'not captured'
-  if (value < 1000) return `${Math.round(value)}ms`
-  if (value < 60_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}s`
-  const minutes = Math.floor(value / 60_000)
-  const seconds = Math.round((value % 60_000) / 1000)
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
-}
 
-function toolResultLabel(call: ToolCallLifecycle): string {
-  if (!call.result) return call.rejectedSeq ? 'rejected' : 'pending'
-  return `${call.result.ok ? 'ok' : 'error'} · ${call.result.content.length} bytes`
-}
 
-function toolLifecycleSummary(call: ToolCallLifecycle): string {
-  const parts: string[] = []
-  if (call.requestedSeq) parts.push(`requested #${call.requestedSeq}`)
-  if (call.approvedSeq) parts.push(`approved #${call.approvedSeq}`)
-  if (call.rejectedSeq) parts.push(`rejected #${call.rejectedSeq}`)
-  if (call.resultSeq) parts.push(`result #${call.resultSeq}`)
-  return parts.join(' · ') || 'lifecycle not recorded'
-}
 
-function toolInputSummary(input: Record<string, unknown>): string {
-  const path = typeof input.path === 'string' ? `path ${input.path}` : null
-  const cmd = typeof input.cmd === 'string' ? `cmd ${input.cmd}` : null
-  const query = typeof input.query === 'string' ? `query ${input.query}` : null
-  return path ?? cmd ?? query ?? JSON.stringify(input).slice(0, 140)
-}
 
-function shortStatus(status: AgentState['status'] | undefined): string {
-  if (!status) return 'none'
-  if (status === 'executing_tools') return 'executing'
-  if (status === 'awaiting_approval') return 'approval'
-  return status
-}
 
-function statusTone(status: AgentState['status'] | undefined): string | undefined {
-  if (status === 'error') return 'text-rose-600 dark:text-rose-300'
-  if (status === 'awaiting_approval') return 'text-amber-600 dark:text-amber-300'
-  if (status === 'executing_tools') return 'text-emerald-600 dark:text-emerald-300'
-  if (status === 'thinking') return 'text-violet-600 dark:text-violet-300'
-  return undefined
-}
 
-function healthTone(tone: RunHealthItem['tone']): string {
-  if (tone === 'ok') return 'text-emerald-600 dark:text-emerald-300'
-  if (tone === 'warn') return 'text-amber-600 dark:text-amber-300'
-  if (tone === 'error') return 'text-rose-600 dark:text-rose-300'
-  return 'text-muted-foreground'
-}
 
-function primaryCategory(entry: TimelineEntry): TraceCategory {
-  const cats = eventCategories(entry)
-  return TRACE_CATEGORY_ORDER.find((cat) => cats.has(cat)) ?? 'system'
-}
 
-function minimapTone(cat: TraceCategory): string {
-  if (cat === 'user') return 'bg-sky-500/70 hover:bg-sky-500'
-  if (cat === 'llm') return 'bg-violet-500/70 hover:bg-violet-500'
-  if (cat === 'tool') return 'bg-emerald-500/70 hover:bg-emerald-500'
-  if (cat === 'approval') return 'bg-amber-500/70 hover:bg-amber-500'
-  return 'bg-muted-foreground/50 hover:bg-muted-foreground'
-}
 
-function teachingText(entry: TimelineEntry, flow?: StateFlowStep): string {
-  const inbound = inboundOf(entry.event)
-  const effects = entry.effects.length > 0
-    ? entry.effects.map((effect) => `${effect.kind} -> ${effectTarget(effect).target}`).join(', ')
-    : 'no external effects'
-  const transition = flow ? `${flow.from} -> ${flow.to}` : 'state transition not classified'
-  return `${inbound.source} sends ${entry.event.kind}; state machine moves ${transition}; output actions: ${effects}.`
-}
 
-function llmCallModel(call: LlmCall): string {
-  return modelFromTrace(call.trace) ?? call.model ?? 'model unknown'
-}
 
-function llmCallProvider(call: LlmCall): string {
-  if (!call.trace) return providerFromModel(llmCallModel(call)) ?? 'kernel'
-  return providerFromTrace(call.trace)
-}
 
-function modelFromTrace(trace: LLMTrace | undefined): string | null {
-  if (!trace) return null
-  if (typeof trace.model === 'string' && trace.model.length > 0) return trace.model
-  const body = trace.request.body
-  if (body && typeof body === 'object' && !Array.isArray(body)) {
-    const model = (body as Record<string, unknown>).model
-    if (typeof model === 'string' && model.length > 0) return model
-  }
-  return null
-}
 
-function providerFromTrace(trace: LLMTrace): string {
-  const provider = trace.provider
-  if (provider && provider !== 'unknown') return provider
-  const model = modelFromTrace(trace)
-  const fromModel = providerFromModel(model ?? undefined)
-  if (fromModel) return fromModel
-  const url = trace.request.url.toLowerCase()
-  if (url.includes('anthropic')) return 'anthropic'
-  if (url.includes('openai')) return 'openai'
-  return 'unknown'
-}
 
-function providerFromModel(model: string | undefined): string | null {
-  if (!model) return null
-  const normalized = model.toLowerCase()
-  if (normalized.includes('claude')) return 'anthropic'
-  if (normalized.includes('gpt')) return 'openai'
-  return null
-}
+
+
+
+
+
+
+
+
+
+
+
 
 function MemoryEntryRow({ entry }: { entry: { key: string; content: string; updatedAt: string } }): JSX.Element {
   return (
