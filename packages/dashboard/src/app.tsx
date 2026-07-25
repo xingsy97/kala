@@ -23,7 +23,18 @@ import type {
 } from '@agent-kernel/shared'
 import { deriveSessionState, isSessionResting, isSessionRunning } from '@agent-kernel/shared'
 
-import { Button } from './components/ui/button.js'
+import { Button, buttonVariants } from './components/ui/button.js'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './components/ui/alert-dialog.js'
+import { cn } from './lib/utils.js'
 import {
   Dialog,
   DialogContent,
@@ -92,7 +103,6 @@ import {
 import { backgroundTerminalTasks } from './background-terminal.js'
 import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.js'
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
-import { cn } from './lib/utils.js'
 import { withViewTransition } from './lib/viewTransition.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
@@ -149,6 +159,11 @@ import {
 
 type LowerExplorerTab = 'files' | 'git'
 type MobileExplorerTab = 'sessions' | 'files' | 'git'
+type SlashDeleteState = {
+  sessionId: string
+  step: 'scope' | 'confirm'
+  cascade: boolean
+}
 
 const SESSION_EXPLORER_FONT_SIZE_PX = [11, 12, 13, 14, 15] as const
 const FILE_EXPLORER_FONT_SIZE_PX = [10, 11, 12, 13, 14] as const
@@ -232,6 +247,8 @@ export function App(): JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [metadataSessionId, setMetadataSessionId] = useState<string | null>(null)
+  const [slashDelete, setSlashDelete] = useState<SlashDeleteState | null>(null)
+  const [slashDeletePhrase, setSlashDeletePhrase] = useState('')
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [workspaceInfoId, setWorkspaceInfoId] = useState<string | null>(null)
   const [workspaceFileViewTarget, setWorkspaceFileViewTarget] = useState<WorkspaceFileTarget | null>(null)
@@ -405,6 +422,51 @@ export function App(): JSX.Element {
     window.addEventListener('pagehide', flushCache)
     return () => window.removeEventListener('pagehide', flushCache)
   }, [sessionViewCache])
+
+  // Reliable queued-message delivery on close. A `queue` message is emitted
+  // over the WebSocket, which can be lost if the browser/PWA is hard-killed
+  // before the frame flushes — the user then sees the message "stuck" until
+  // they reopen the app. On pagehide/hidden we re-send any queued messages the
+  // host hasn't yet confirmed via navigator.sendBeacon, which the browser
+  // delivers even during unload. The host enqueues + drains them with no live
+  // socket required. Duplicate suppression is not needed: if the socket emit
+  // already landed, this is a rare double at worst; queued follow-ups are
+  // idempotent enough that reliability wins over that edge.
+  const pendingBeaconRef = useRef<{ sessionId: string | null; texts: readonly string[]; url: string; token?: string }>({
+    sessionId: null,
+    texts: [],
+    url: hostEndpoint.url,
+  })
+  useEffect(() => {
+    pendingBeaconRef.current = {
+      sessionId: activeSessionId,
+      texts: optimisticQueuedMessages.map((m) => m.text).filter((t) => t.trim().length > 0),
+      url: hostEndpoint.url,
+      ...(config.token !== undefined ? { token: config.token } : {}),
+    }
+  }, [activeSessionId, optimisticQueuedMessages, hostEndpoint.url, config.token])
+  useEffect(() => {
+    const flush = (): void => {
+      const { sessionId, texts, url, token } = pendingBeaconRef.current
+      if (!sessionId || texts.length === 0 || typeof navigator.sendBeacon !== 'function') return
+      const endpoint = `${url.replace(/\/$/, '')}/enhancement/action`
+      for (const text of texts) {
+        try {
+          const payload = JSON.stringify({ action: 'enqueue-user-message', sessionId, text, ...(token ? { token } : {}) })
+          navigator.sendBeacon(endpoint, new Blob([payload], { type: 'application/json' }))
+        } catch {
+          // Best-effort; nothing else we can do while the page is unloading.
+        }
+      }
+    }
+    const onHide = (): void => { if (document.visibilityState === 'hidden') flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onHide)
+    }
+  }, [])
 
   useEffect(() => {
     if (!control.sessionsLoaded) return
@@ -766,6 +828,23 @@ export function App(): JSX.Element {
     setMetadataSessionId(sessionId)
     setMetadataOpen(true)
   }, [])
+  const renameCurrentSessionFromSlash = useCallback((label: string | null): void => {
+    if (activeSessionId === null) return
+    if (label === null) {
+      openSessionInfoDialog(activeSessionId)
+      return
+    }
+    renameSessionAt(activeSessionId, label)
+  }, [activeSessionId, openSessionInfoDialog, renameSessionAt])
+  const requestSlashDeleteCurrentSession = useCallback((): void => {
+    if (activeSessionId === null) return
+    setSlashDelete({ sessionId: activeSessionId, step: 'scope', cascade: false })
+    setSlashDeletePhrase('')
+  }, [activeSessionId])
+  const resetSlashDelete = useCallback((): void => {
+    setSlashDelete(null)
+    setSlashDeletePhrase('')
+  }, [])
   const openExplorerDrawerSessionInfo = useCallback((sessionId: string): void => {
     setExplorerDrawerOpen(false)
     setMetadataSessionId(sessionId)
@@ -853,6 +932,12 @@ export function App(): JSX.Element {
   }, [workspaceInfoExists, workspaceInfoId])
 
   useEffect(() => {
+    if (slashDelete === null) return
+    if (control.sessions.some((s) => s.sessionId === slashDelete.sessionId)) return
+    resetSlashDelete()
+  }, [control.sessions, resetSlashDelete, slashDelete])
+
+  useEffect(() => {
     if (config.sessionId === null) return
     if (suppressNextAutoSessionSelection.current) {
       suppressNextAutoSessionSelection.current = false
@@ -874,18 +959,16 @@ export function App(): JSX.Element {
   const currentCwd = sessionHydrated
     ? session.state?.cwd ?? currentSession?.currentCwd ?? ''
     : currentSession?.currentCwd ?? ''
-  const overrideLabel = currentSession?.label?.trim()
-  const firstMsg = currentSession?.firstUserMessage
-  const sessionLabel =
-    overrideLabel && overrideLabel.length > 0
-      ? overrideLabel.length > 40
-        ? `${overrideLabel.slice(0, 40)}…`
-        : overrideLabel
-      : firstMsg
-        ? firstMsg.length > 40
-          ? `${firstMsg.slice(0, 40)}…`
-          : firstMsg
-        : t('app.newSession')
+  const sessionLabel = sessionDisplayLabel(currentSession, t('app.newSession'))
+  const slashDeleteTarget = slashDelete
+    ? control.sessions.find((s) => s.sessionId === slashDelete.sessionId)
+    : undefined
+  const slashDeleteDescendantCount = slashDelete
+    ? Math.max(0, sessionIdsForCacheInvalidation(control.sessions, slashDelete.sessionId, true).length - 1)
+    : 0
+  const slashDeleteShortId = slashDelete?.sessionId.slice(0, 8) ?? ''
+  const slashDeleteRequiredPhrase = slashDelete ? `DELETE ${slashDeleteShortId}` : ''
+  const slashDeleteConfirmed = slashDeletePhrase.trim() === slashDeleteRequiredPhrase
   const chatMessages = visibleMessages(
     session.state?.messages ?? [],
     session.timeline,
@@ -1727,6 +1810,8 @@ export function App(): JSX.Element {
                             if (!session.socket || activeSessionId === null) return
                             cancelSession(session.socket, activeSessionId)
                           }}
+                          onRenameSession={renameCurrentSessionFromSlash}
+                          onDeleteSession={requestSlashDeleteCurrentSession}
                           onConsolidateMemory={runConsolidateMemory}
                           workspaceOnline={sessionWorkspaceOnline}
                           onListFiles={listWorkspaceFiles}
@@ -1966,6 +2051,114 @@ export function App(): JSX.Element {
           </div>
         </DialogContent>
       </Dialog>
+      <AlertDialog
+        open={slashDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) resetSlashDelete()
+        }}
+      >
+        <AlertDialogContent className="max-w-[min(92vw,34rem)]">
+          {slashDelete?.step === 'scope' ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t('app.slashDelete.title')}</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-3">
+                    <p>{t('app.slashDelete.description')}</p>
+                    <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground">
+                      <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {t('app.slashDelete.target')}
+                      </div>
+                      <div className="mt-1 truncate font-medium" title={sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}>
+                        {sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? '')}
+                      </div>
+                      <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                        {slashDelete?.sessionId}
+                      </div>
+                    </div>
+                    {slashDeleteDescendantCount > 0 ? (
+                      <p className="text-amber-700 dark:text-amber-300">
+                        {t('app.slashDelete.children', { count: slashDeleteDescendantCount })}
+                      </p>
+                    ) : null}
+                    <p>{t('app.slashDelete.chooseScope')}</p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="gap-2 sm:space-x-0">
+                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                {slashDeleteDescendantCount > 0 ? (
+                  <button
+                    type="button"
+                    className={buttonVariants({ variant: 'destructive' })}
+                    onClick={() => {
+                      setSlashDelete((prev) => prev ? { ...prev, step: 'confirm', cascade: true } : prev)
+                      setSlashDeletePhrase('')
+                    }}
+                    data-testid="slash-delete-cascade-scope"
+                  >
+                    {t('app.slashDelete.deleteWithChildren', { count: slashDeleteDescendantCount })}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={buttonVariants({ variant: 'destructive' })}
+                  onClick={() => {
+                    setSlashDelete((prev) => prev ? { ...prev, step: 'confirm', cascade: false } : prev)
+                    setSlashDeletePhrase('')
+                  }}
+                  data-testid="slash-delete-only-scope"
+                >
+                  {slashDeleteDescendantCount > 0 ? t('app.slashDelete.deleteOnly') : t('app.slashDelete.continue')}
+                </button>
+              </AlertDialogFooter>
+            </>
+          ) : (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t('app.slashDelete.confirmTitle')}</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-3">
+                    <p>
+                      {t('app.slashDelete.confirmDescription', {
+                        phrase: slashDeleteRequiredPhrase,
+                        label: sessionDisplayLabel(slashDeleteTarget, slashDelete?.sessionId ?? ''),
+                      })}
+                    </p>
+                    <label className="block text-xs font-medium text-muted-foreground">
+                      {t('app.slashDelete.phraseLabel')}
+                      <input
+                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground"
+                        value={slashDeletePhrase}
+                        onChange={(event) => setSlashDeletePhrase(event.target.value)}
+                        placeholder={slashDeleteRequiredPhrase}
+                        data-testid="slash-delete-confirm-input"
+                      />
+                    </label>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={!slashDeleteConfirmed}
+                  onClick={(event) => {
+                    if (!slashDelete || !slashDeleteConfirmed) {
+                      event.preventDefault()
+                      return
+                    }
+                    deleteSessionAt(slashDelete.sessionId, { cascade: slashDelete.cascade })
+                    resetSlashDelete()
+                  }}
+                  data-testid="slash-delete-confirm-button"
+                >
+                  {t('app.slashDelete.confirmDelete')}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
       <ChangeCwdDialog
         open={cwdDialogOpen}
         socket={session.socket}
@@ -2224,6 +2417,11 @@ export function sessionExists(
   sessionId: string | null | undefined,
 ): boolean {
   return Boolean(sessionId && sessions.some((s) => s.sessionId === sessionId))
+}
+
+function sessionDisplayLabel(session: SessionSummary | undefined, fallback: string): string {
+  const label = session?.label?.trim() || session?.firstUserMessage?.trim() || fallback
+  return label.length > 40 ? `${label.slice(0, 40)}…` : label
 }
 
 export function sessionIdsForCacheInvalidation(

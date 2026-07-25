@@ -3952,6 +3952,141 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('drains a queued message after the turn completes even if the dashboard disconnected', async () => {
+    const sessionId = 'wire-queue-drain-after-disconnect'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-drain-after-disconnect-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return { message: { role: 'assistant', content: [{ type: 'text', text: `answer ${seenPrompts.length}` }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    // Start a turn; wait until the first LLM call is in flight (blocked).
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+
+    // Queue a follow-up while the turn is running, then DISCONNECT the dashboard
+    // (simulating the user closing the browser / PWA) before the turn finishes.
+    dashboard.emit('client:user_message', { sessionId, text: 'queued', mode: 'queue' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    dashboard.close()
+
+    // Now let the first turn complete. With no dashboard connected, the queued
+    // message must still be drained automatically by the turn-completion hook.
+    releaseFirst()
+    const deadline = Date.now() + 4000
+    while (Date.now() < deadline && !seenPrompts.some((prompt) => prompt.includes('queued'))) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(seenPrompts.some((prompt) => prompt.includes('queued'))).toBe(true)
+  })
+
+  it('enqueues a user message over HTTP (pagehide beacon path) and drains it with no socket', async () => {
+    const sessionId = 'wire-http-enqueue-beacon'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'http-enqueue-beacon-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return { message: { role: 'assistant', content: [{ type: 'text', text: `answer ${seenPrompts.length}` }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+    // Simulate the browser closing: the socket is gone, and the queued message
+    // arrives only via the HTTP beacon endpoint.
+    dashboard.close()
+    const res = await fetch(`${url}/enhancement/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'enqueue-user-message', sessionId, text: 'beaconed' }),
+    })
+    expect(res.ok).toBe(true)
+    const body = (await res.json()) as { queued?: boolean }
+    expect(body.queued).toBe(true)
+
+    releaseFirst()
+    const deadline = Date.now() + 4000
+    while (Date.now() < deadline && !seenPrompts.some((prompt) => prompt.includes('beaconed'))) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(seenPrompts.some((prompt) => prompt.includes('beaconed'))).toBe(true)
+  })
+
   it('fires session_start and session_end lifecycle hooks around create/delete', async () => {
     const sessionId = 'wire-lifecycle-hooks'
     await server.close()

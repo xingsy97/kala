@@ -25,6 +25,7 @@ import type {
 } from '@agent-kernel/kernel'
 import { Server as IOServer } from 'socket.io'
 import { instrument } from '@socket.io/admin-ui'
+import { ulid } from 'ulid'
 
 import type { LLMAdapter } from './llm/adapter.js'
 import type { LoopBroadcast, LoopHandle } from './loop.js'
@@ -272,6 +273,17 @@ export async function startHostServer(
       return restart.request(input)
     },
     abortRestart: () => restart?.abort() ?? null,
+    enqueueUserMessage: async ({ sessionId, text }) => {
+      // Persist as a queued follow-up and drain immediately. Delivered as soon
+      // as any in-flight turn finishes; no live socket required.
+      await messageQueues.enqueue(sessionId, {
+        id: ulid(),
+        text,
+        mode: 'queue',
+        createdAt: new Date().toISOString(),
+      })
+      void messageQueues.drain(sessionId)
+    },
   })
 
   const advertisedModels = (): readonly ModelInfo[] => typeof options.models === 'function'

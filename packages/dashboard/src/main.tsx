@@ -12,6 +12,9 @@ import { initializeTheme } from './lib/theme.js'
 
 const root = document.getElementById('root')
 if (!root) throw new Error('missing #root')
+// Remove the pure-CSS splash (index.html) before mounting so React's
+// createRoot() starts from an empty container.
+document.getElementById('ak-splash')?.remove()
 const demo = new URLSearchParams(window.location.search).get('demo')
 
 initializeTheme()

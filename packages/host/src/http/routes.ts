@@ -174,6 +174,7 @@ type EnhancementActionRequest = {
   action?: string
   rootDir?: string
   sessionId?: string
+  text?: string
   sessionLogPath?: string
   sessionLogPaths?: readonly string[] | string
   workspaceRoot?: string
@@ -352,6 +353,12 @@ export function attachJsonRoutes(
     abortRestart?: () => HostRestartAttempt | null
     auth?: AuthConfig
     audit?: AuditLogger
+    /**
+     * Minimal queue access for the reliable "queue a message even if the
+     * browser is closing" beacon path. Lets the HTTP layer enqueue+drain a
+     * user message without a live socket.
+     */
+    enqueueUserMessage?: (input: { sessionId: string; text: string }) => Promise<void>
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
@@ -858,9 +865,21 @@ async function runEnhancementAction(
     artifactRootDir?: string | false
     sessions?: SessionStore
     executorsSnapshot?: () => readonly AttachedExecutor[]
+    enqueueUserMessage?: (input: { sessionId: string; text: string }) => Promise<void>
   },
 ): Promise<unknown> {
   const action = requiredString(body.action, 'action')
+  if (action === 'enqueue-user-message') {
+    // Reliable queue path used by the dashboard's pagehide beacon: enqueue a
+    // follow-up message even when the WebSocket is gone because the browser is
+    // closing. Enqueue + drain so it is delivered as soon as the current turn
+    // finishes, with no live socket required.
+    if (!payloads.enqueueUserMessage) throw new HttpRouteError(503, 'queue is not available')
+    const sessionId = requiredString(body.sessionId, 'sessionId')
+    const text = requiredString(body.text, 'text')
+    await payloads.enqueueUserMessage({ sessionId, text })
+    return { action, sessionId, queued: true }
+  }
   if (action === 'swebench-grade-command') {
     const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
     const instanceIds = listInput(body.instanceIds)
