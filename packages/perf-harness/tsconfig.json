@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@agent-kernel/host": ["../host/src/index.ts"],
+      "@agent-kernel/executor": ["../executor/src/index.ts"],
+      "@agent-kernel/shared": ["../shared/src/index.ts"],
+      "@agent-kernel/kernel": ["../kernel/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "bin/**/*", "tests/**/*"],
+  "exclude": ["node_modules"]
+}
