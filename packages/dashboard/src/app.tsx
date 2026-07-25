@@ -147,6 +147,7 @@ import { useInterventionDesktopNotifications } from './lib/desktop-notifications
 import { useRunningTitleIndicator } from './lib/running-title.js'
 import { useTheme, type Theme } from './lib/theme.js'
 import { useVisualViewportHeight } from './lib/useVisualViewportHeight.js'
+import { useEdgeSwipe } from './lib/useEdgeSwipe.js'
 import { deriveAppBadgeCount, updateAppBadge } from './lib/app-badge.js'
 import { useScreenWakeLock } from './lib/wake-lock.js'
 import { useDeferredDispose } from './lib/use-deferred-dispose.js'
@@ -1112,6 +1113,15 @@ export function App(): JSX.Element {
   }
 
   const [section, setSection] = useAppSection()
+  // Mobile edge-swipe: a right-swipe from the left screen edge opens the
+  // session explorer drawer; a left-swipe closes it. Only in the chat section
+  // on narrow layouts (the drawer doesn't exist on wide/desktop, where the
+  // explorer is a docked panel).
+  useEdgeSwipe({
+    enabled: !wideLayout && section === 'agent',
+    onOpen: () => setExplorerDrawerOpen(true),
+    ...(explorerDrawerOpen ? { onClose: () => setExplorerDrawerOpen(false) } : {}),
+  })
   const handleSectionSelect = (next: AppSection): void => {
     setSection(next)
     // Benchmarks, Operations, Artifacts, Pipeline & Docs are all real pages — rendered inline below.
@@ -1462,19 +1472,6 @@ export function App(): JSX.Element {
         onExpand={() => setTopbarOpen(true)}
       />
       <PwaUpdateGlobalBanner />
-      {!topbarOpen ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setTopbarOpen(true)}
-          title={t('app.expandTopbar')}
-          aria-label={t('app.expandTopbar')}
-          data-testid="topbar-floating-toggle"
-          className="fixed right-2 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 h-8 w-8 border border-border/60 bg-background/70 text-muted-foreground opacity-55 shadow-sm backdrop-blur transition hover:bg-background/95 hover:text-foreground hover:opacity-100 focus-visible:opacity-100 sm:h-7 sm:w-7"
-        >
-          <ChevronDown className="h-4 w-4" />
-        </Button>
-      ) : null}
       <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'benchmarks' ? (
