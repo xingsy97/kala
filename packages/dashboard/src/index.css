@@ -344,6 +344,18 @@ body {
   height: 100%;
   min-height: 100%;
   background: hsl(var(--background));
+  /*
+   * Prevent the whole page from being dragged / rubber-banded on iOS PWA and
+   * mobile browsers. `.ak-app-shell` is a position:fixed overlay pinned to the
+   * visualViewport, so the document itself never needs to scroll. We stop the
+   * "entire UI can be pushed around" effect with overscroll-behavior:none (no
+   * rubber-band scroll-chaining to the browser chrome) plus overflow:hidden so
+   * the document has no scrollable overflow. We deliberately do NOT set
+   * position:fixed on body here: #root must stay in normal flow so iOS can
+   * still scroll a focused input into view during keyboard transitions.
+   */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 #root {
   /*

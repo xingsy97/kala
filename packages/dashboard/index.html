@@ -29,9 +29,71 @@
         document.documentElement.classList.add('dark')
       }
     </script>
+    <style>
+      /* Pure-CSS splash shown from the first paint until React replaces
+         #root. No JS, no bundle dependency, no extra network request — this
+         is what fixes the blank screen on mobile / PWA cold starts where the
+         12MB bundle takes a moment to download and parse. React's
+         createRoot().render() clears #root, so the splash disappears
+         automatically once the app mounts. */
+      #ak-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #ffffff;
+        color: #0b0b0f;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        z-index: 2147483647;
+      }
+      html.dark #ak-splash {
+        background: #0b0b0f;
+        color: #f4f4f5;
+      }
+      #ak-splash .ak-splash-logo {
+        width: 56px;
+        height: 56px;
+        animation: ak-splash-pulse 1.6s ease-in-out infinite;
+      }
+      #ak-splash .ak-splash-spinner {
+        width: 26px;
+        height: 26px;
+        border: 3px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        opacity: 0.55;
+        animation: ak-splash-spin 0.8s linear infinite;
+      }
+      #ak-splash .ak-splash-name {
+        font: 600 15px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        letter-spacing: 0.02em;
+        opacity: 0.75;
+      }
+      @keyframes ak-splash-spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes ak-splash-pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(0.92); opacity: 0.7; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #ak-splash .ak-splash-logo,
+        #ak-splash .ak-splash-spinner { animation: none; }
+      }
+    </style>
   </head>
   <body class="bg-background text-foreground">
-    <div id="root"></div>
+    <div id="root">
+      <div id="ak-splash" role="status" aria-label="Loading Agent RunLab">
+        <img class="ak-splash-logo" src="/favicon.svg" alt="" width="56" height="56" />
+        <div class="ak-splash-spinner"></div>
+        <div class="ak-splash-name">Agent RunLab</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
