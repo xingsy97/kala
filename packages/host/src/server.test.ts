@@ -3952,6 +3952,100 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('steer during tool execution interrupts the running turn and dispatches instead of stalling in the queue', async () => {
+    // Regression: a steer submitted while the agent is mid-tool-execution (not
+    // streaming an LLM response) used to be front-enqueued but never delivered
+    // — `cancelStream` is a no-op during tool execution, so the steer sat at
+    // the front of the queue across the entire autonomous think→tool→think
+    // loop and only drained once the agent voluntarily stopped. The handler
+    // now issues a real `cancel` for non-`thinking` running states.
+    await server.close()
+    const sessionId = 'wire-steer-during-tools'
+    let call = 0
+    const seenPrompts: string[] = []
+    const llm: LLMAdapter = {
+      name: 'steer-during-tools-test',
+      async call(params) {
+        call += 1
+        const userText = params.messages
+          .filter((m) => m.role === 'user')
+          .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+          .join('|')
+        seenPrompts.push(userText)
+        if (call === 1) {
+          // Parent's first turn: spawn a sub-agent so the parent parks in
+          // `executing_tools` (host tool) while the child runs.
+          return {
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'tool_call', callId: 'agent-steer-1', name: 'agent', input: { prompt: 'long child task' } },
+              ],
+            },
+          }
+        }
+        if (userText.includes('long child task')) {
+          // Child LLM call: block until the parent's `cancel` aborts us.
+          await new Promise<void>((_resolve, reject) => {
+            const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            if (params.signal?.aborted) abort()
+            params.signal?.addEventListener('abort', abort, { once: true })
+          })
+        }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: `answer ${call}` }] } }
+      },
+    }
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const agentConfig = createConfig({ tools: [AGENT], systemPrompt: 'sys' })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      llm,
+      defaultConfig: agentConfig,
+      httpServer: http,
+      toolTimeoutMs: 5000,
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: agentConfig })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    const queueEvents: Array<{ pending: number; text?: string; mode?: string }> = []
+    dashboard.on('server:message_queue', (p) => {
+      if (p.sessionId === sessionId) queueEvents.push({ pending: p.pending, text: p.items[0]?.text, mode: p.items[0]?.mode })
+    })
+    const childStarted = new Promise<void>((resolve) => {
+      dashboard.on('server:control_update', (payload) => {
+        if (payload.kind === 'sub_agent_started') resolve()
+      })
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    // Wait until the parent is parked in `executing_tools` (child agent running).
+    await childStarted
+    // Give the child LLM call a beat to actually start streaming/blocking.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Steer while a tool is executing: must interrupt and deliver.
+    dashboard.emit('client:user_message', { sessionId, text: 'steered', mode: 'steer' })
+
+    const deadline = Date.now() + 8000
+    while (Date.now() < deadline && !seenPrompts.some((prompt) => prompt.includes('steered'))) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(seenPrompts.some((prompt) => prompt.includes('steered'))).toBe(true)
+    // Never surfaced to the dock as a stuck queued item.
+    expect(queueEvents.some((e) => e.text === 'steered' && e.mode === 'steer' && e.pending > 0)).toBe(false)
+
+    dashboard.close()
+  }, 15000)
+
   it('drains a queued message after the turn completes even if the dashboard disconnected', async () => {
     const sessionId = 'wire-queue-drain-after-disconnect'
     await server.close()
@@ -4018,6 +4112,83 @@ describe('wire protocol', () => {
     }
     expect(seenPrompts.some((prompt) => prompt.includes('queued'))).toBe(true)
   })
+
+  it('drains MANY queued messages in order after all browsers close mid-turn', async () => {
+    // User scenario: session is running, the user queues several follow-ups,
+    // then closes every browser/PWA. With no client connected, the host must
+    // still drain the whole queue — one message per turn — in FIFO order.
+    const sessionId = 'wire-queue-drain-many-after-disconnect'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    const seenPrompts: string[] = []
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-drain-many-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await firstRelease
+          return { message: { role: 'assistant', content: [{ type: 'text', text: `answer ${seenPrompts.length}` }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    // Start a turn; wait until the first LLM call is in flight (blocked).
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    await new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (seenPrompts.length === 1) {
+          clearInterval(poll)
+          resolve()
+        }
+      }, 10)
+    })
+
+    // Queue THREE follow-ups while the turn is running, then close the browser.
+    dashboard.emit('client:user_message', { sessionId, text: 'q-one', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'q-two', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'q-three', mode: 'queue' })
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    dashboard.close()
+
+    // Release the blocked first turn. All three queued messages must drain
+    // automatically, in FIFO order, with no client connected.
+    releaseFirst()
+    const deadline = Date.now() + 6000
+    const delivered = (): boolean =>
+      ['q-one', 'q-two', 'q-three'].every((t) => seenPrompts.some((p) => p.includes(t)))
+    while (Date.now() < deadline && !delivered()) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(delivered()).toBe(true)
+    // FIFO: the turn index where each first appears must be increasing.
+    const firstIndex = (t: string): number => seenPrompts.findIndex((p) => p.includes(t))
+    expect(firstIndex('q-one')).toBeLessThan(firstIndex('q-two'))
+    expect(firstIndex('q-two')).toBeLessThan(firstIndex('q-three'))
+  }, 15000)
 
   it('enqueues a user message over HTTP (pagehide beacon path) and drains it with no socket', async () => {
     const sessionId = 'wire-http-enqueue-beacon'

@@ -158,6 +158,22 @@
     animation: ak-fade-in 120ms ease-out;
   }
 
+  .ak-motion-fade {
+    animation: ak-fade-in 160ms ease-out both;
+  }
+
+  .ak-motion-slide-right {
+    animation: ak-slide-in-right 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .ak-motion-slide-left {
+    animation: ak-slide-in-left 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .ak-motion-scale-in {
+    animation: ak-scale-in 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
 
   .ak-chat-item {
     animation: ak-chat-item-in 160ms ease-out both;
@@ -291,11 +307,35 @@
   55%, 100% { transform: translateX(100%); }
 }
 
+@keyframes ak-pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.62; }
+}
+
+@keyframes ak-slide-in-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes ak-slide-in-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes ak-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ak-motion-overlay,
   .ak-motion-dialog,
   .ak-motion-popover,
   .ak-motion-tab-panel,
+  .ak-motion-fade,
+  .ak-motion-slide-right,
+  .ak-motion-slide-left,
+  .ak-motion-scale-in,
   .ak-chat-item,
   .ak-expand-in,
   .ak-status-pulse,
@@ -412,12 +452,13 @@ body {
 /**
  * iOS Safari auto-zooms the page whenever the user focuses a form
  * control whose computed font-size is below 16px, so the zoomed input
- * stays legible. In a tightly designed app that zoom leaves half the
- * chrome off-screen and the user has to manually pinch back out. Rather
- * than add maximum-scale=1 to the viewport meta (which also disables
- * pinch-to-zoom for accessibility) we clamp the minimum font-size only
- * on true touch devices (`pointer: coarse` + `hover: none`), and only
- * on form controls. Desktop / trackpad renders unchanged.
+ * stays legible. The font-size clamp below is the first line of defence
+ * (it keeps controls legible even where scaling is allowed). We *also*
+ * pin the viewport to maximum-scale=1 / user-scalable=no in index.html:
+ * the font-size clamp alone did not reliably suppress the focus-zoom for
+ * contenteditable composers on iOS, and the resulting zoom left half the
+ * chrome off-screen. Accessibility text scaling still works via the app's
+ * own font-size control.
  */
 @media (pointer: coarse) and (hover: none) {
   input:not([type='checkbox']):not([type='radio']):not([type='range']),

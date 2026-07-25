@@ -34,6 +34,23 @@ describe('ContextManager', () => {
     expect(hard.usage.inputTokens).toBe(hard.breakdown.transcript + hard.breakdown.tools + hard.breakdown.system)
   })
 
+  it('splits the transcript breakdown by message role (user / assistant / tool)', () => {
+    const config = createConfig({ tools: [], contextLimit: 100_000 })
+    const snap = snapshotFromConfig(config, [
+      { role: 'user', content: [{ type: 'text', text: 'u'.repeat(400) }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'a'.repeat(800) }] },
+      { role: 'tool', content: [{ type: 'tool_result', callId: 'c1', ok: true, content: 't'.repeat(1200) }] },
+    ])
+
+    const b = snap.breakdown.transcriptBreakdown
+    expect(b).toBeDefined()
+    expect(b!.userMessages).toBeGreaterThan(0)
+    expect(b!.assistantMessages).toBeGreaterThan(b!.userMessages)
+    expect(b!.toolResults).toBeGreaterThan(b!.assistantMessages)
+    // The three role buckets together approximate the flat transcript total.
+    expect(b!.userMessages + b!.assistantMessages + b!.toolResults).toBe(snap.breakdown.transcript)
+  })
+
   it('uses selected model context override ahead of the session config limit', () => {
     const config = createConfig({ tools: [], contextLimit: 400_000 })
     const snap = snapshotFromConfig(config, [baseMessage], {

@@ -27,6 +27,17 @@ export type ContextUsageSnapshot = {
     memory: number
     attachments: number
     pendingUserInput: number
+    /**
+     * Optional second-level split of `transcript` by message role. When
+     * present, `userMessages + assistantMessages + toolResults` approximates
+     * `transcript` (they use the same estimator over role-partitioned
+     * messages). Consumers must treat this as optional for backwards compat.
+     */
+    transcriptBreakdown?: {
+      userMessages: number
+      assistantMessages: number
+      toolResults: number
+    }
   }
   estimator: {
     total: {

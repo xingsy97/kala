@@ -18,6 +18,11 @@ function contextSnapshot(inputTokens: number, contextWindow: number | null, sour
       memory: 0,
       attachments: 0,
       pendingUserInput: 0,
+      transcriptBreakdown: {
+        userMessages: 300,
+        assistantMessages: 500,
+        toolResults: Math.max(0, inputTokens - 200 - 800),
+      },
     },
     estimator: {
       total: { kind: 'heuristic', confidence: 'rough' },
@@ -81,7 +86,11 @@ describe('RuntimeMetrics', () => {
 
     fireEvent.click(indicator)
     const popover = screen.getByTestId('context-pressure-popover')
-    expect(popover.textContent ?? '').toContain('Session Info')
+    // The popover focuses purely on context-window usage now — the generic
+    // "Session Info" heading and the "Session Cost" row moved to the session
+    // metadata dialog (this popover is not about cost).
+    expect(popover.textContent ?? '').not.toContain('Session Info')
+    expect(popover.textContent ?? '').not.toContain('Session Cost')
     expect(popover.textContent ?? '').toContain('Context Window')
     // With stacked segments the legend now says "Reserved" (without the
     // "for response" tail) and lives inline with the other categories.
@@ -92,6 +101,10 @@ describe('RuntimeMetrics', () => {
     expect(popover.textContent ?? '').toContain('System / reserve')
     expect(popover.textContent ?? '').toContain('Tool Definitions')
     expect(popover.textContent ?? '').toContain('Messages')
+    // Second-level split of the transcript by role.
+    expect(popover.textContent ?? '').toContain('User messages')
+    expect(popover.textContent ?? '').toContain('Assistant messages')
+    expect(popover.textContent ?? '').toContain('Tool call results')
     expect(popover.textContent ?? '').toContain('Memory')
 
     fireEvent.click(screen.getByTestId('context-compact-conversation'))
@@ -141,5 +154,26 @@ describe('RuntimeMetrics', () => {
     fireEvent.click(indicator)
     const popover = screen.getByTestId('context-pressure-popover')
     expect(popover.textContent ?? '').toContain('unknown')
+  })
+
+  it('hides the precise usage percentage in simple density (keeps ring + tooltip + popover)', () => {
+    render(
+      <RuntimeMetrics
+        state={createInitialState({ sessionId: 'sess-simple' })}
+        config={{ contextLimit: 4_000, hardThreshold: 0.8 }}
+        contextSnapshot={contextSnapshot(1_200, 4_000)}
+        modelInfo={{ id: 'gpt-test', label: 'gpt-test', provider: 'openai', contextWindow: 8_000 }}
+        queuedMessages={0}
+        density="simple"
+      />,
+    )
+
+    const indicator = screen.getByTestId('context-usage-indicator')
+    // No inline percentage number in the composer chrome...
+    expect(indicator.textContent ?? '').not.toContain('%')
+    // ...but the exact figure is still reachable via the tooltip and popover.
+    expect(indicator.getAttribute('title') ?? '').toContain('30%')
+    fireEvent.click(indicator)
+    expect(screen.getByTestId('context-pressure-popover').textContent ?? '').toContain('30%')
   })
 })

@@ -34,6 +34,10 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
     }
     let cancelled = false
     highlightToHtml(code, lang).then((result) => {
+      // Keep the previous highlighted HTML visible until the new result is
+      // ready (we never reset to null here), so a streaming code block updates
+      // in place instead of flickering back to an un-highlighted state on every
+      // ~15fps token commit.
       if (!cancelled) setHtml(result)
     })
     return () => {
@@ -41,17 +45,25 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, className, traili
     }
   }, [code, lang])
 
-  if (html && !trailingSlot) {
+  if (html) {
+    // Once we have highlighted HTML we keep showing it even while streaming
+    // (trailingSlot present). Previously any trailingSlot forced the raw <pre>
+    // branch, so a streaming block rendered un-highlighted the whole time and
+    // then snapped to highlighted when the cursor disappeared — a visible
+    // flash. The streaming cursor is now layered after the highlighted block.
     return (
-      <div
-        data-testid="code-block-highlighted"
-        data-lang={lang}
-        className={cn('shiki-host my-3 max-w-full overflow-x-auto rounded-lg', className)}
-        // shiki produces trusted HTML from the input code text; browsers
-        // won't execute anything, but the surrounding wrapper still handles
-        // scroll/overflow so we don't leak layout.
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <div className="relative">
+        <div
+          data-testid="code-block-highlighted"
+          data-lang={lang}
+          className={cn('shiki-host my-3 max-w-full overflow-x-auto rounded-lg', className)}
+          // shiki produces trusted HTML from the input code text; browsers
+          // won't execute anything, but the surrounding wrapper still handles
+          // scroll/overflow so we don't leak layout.
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        {trailingSlot ? <span className="pointer-events-none absolute bottom-3 right-3">{trailingSlot}</span> : null}
+      </div>
     )
   }
 

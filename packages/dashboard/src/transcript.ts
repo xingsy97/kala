@@ -116,6 +116,25 @@ export function visibleTranscript(
   queuedMessages: readonly QueuedMessagePreview[] = [],
   options: { includeStatePrefix?: boolean } = {},
 ): readonly TranscriptItem[] {
+  const base = transcriptBaseItems(stateMessages, timeline, options)
+  return appendLiveTranscriptItems(base, stateMessages, timeline, streamingText, pendingUserMessages, queuedMessages)
+}
+
+/**
+ * The stable, timeline-derived portion of the transcript — everything that
+ * does *not* change while the agent is streaming a response or while the user
+ * has optimistic pending/queued messages in flight. Splitting this out lets
+ * callers memoize the expensive full-timeline iteration on stable inputs and
+ * only re-run the cheap live-tail append (streaming text, pending) on every
+ * ~15fps streaming commit. Rebuilding the whole array each frame was a primary
+ * cause of main-thread jank on long sessions (dropped clicks / stuck cursor
+ * while the agent runs).
+ */
+export function transcriptBaseItems(
+  stateMessages: readonly Message[],
+  timeline: readonly TimelineEntry[],
+  options: { includeStatePrefix?: boolean } = {},
+): readonly TranscriptItem[] {
   const out: TranscriptItem[] = options.includeStatePrefix
     ? inheritedStatePrefix(stateMessages, timeline).map((message) => ({ kind: 'message' as const, message }))
     : []
@@ -166,6 +185,25 @@ export function visibleTranscript(
       })
     }
   }
+  return out
+}
+
+/**
+ * Append the cheap "live tail" (streaming assistant text + optimistic pending
+ * user messages) to a memoized {@link transcriptBaseItems} result. Preserves
+ * the historical ordering (streaming before pending) and the empty-timeline
+ * fallback to raw state messages.
+ */
+export function appendLiveTranscriptItems(
+  base: readonly TranscriptItem[],
+  stateMessages: readonly Message[],
+  timeline: readonly TimelineEntry[],
+  streamingText: string,
+  pendingUserMessages: readonly PendingUserTranscriptMessage[] = [],
+  queuedMessages: readonly QueuedMessagePreview[] = [],
+): readonly TranscriptItem[] {
+  const hasLiveTail = streamingText.length > 0 || pendingUserMessages.length > 0
+  const out: TranscriptItem[] = hasLiveTail ? [...base] : (base as TranscriptItem[])
 
   if (streamingText.length > 0) {
     out.push({

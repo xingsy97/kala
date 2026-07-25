@@ -154,27 +154,23 @@ export function RuntimeMetrics({
             strokeDashoffset={ringOffset}
           />
         </svg>
-        <span className={cn(
-          'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
-          evaluation.tone === 'ok' && 'hidden sm:inline',
-        )}>
-          {percent !== null ? `${percent}%` : '?'}
-        </span>
+        {isSimple ? null : (
+          <span className={cn(
+            'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
+            evaluation.tone === 'ok' && 'hidden sm:inline',
+          )}>
+            {percent !== null ? `${percent}%` : '?'}
+          </span>
+        )}
       </button>
       {open ? (
         <div
-          className="fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(24rem,calc(100vw-1rem))]"
+          className="ak-motion-popover fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(24rem,calc(100vw-1rem))]"
           data-testid="context-pressure-popover"
         >
-          <div className="text-lg font-semibold tracking-tight text-foreground">Session Info</div>
+          <div className="text-lg font-semibold tracking-tight text-foreground">Context Window</div>
 
-          <div className="mt-3 flex items-center justify-between gap-3 text-xs">
-            <span className="text-muted-foreground">Session Cost</span>
-            <span className="font-medium text-foreground">—</span>
-          </div>
-
-          <SectionTitle>Context Window</SectionTitle>
-          <div className="mt-2 flex items-baseline justify-between gap-3">
+          <div className="mt-3 flex items-baseline justify-between gap-3">
             <span className="text-sm text-foreground">
               {contextSnapshot?.estimator.total.confidence === 'exact' ? '' : '~'}{formatTokens(contextTokens)} / {userContextWindow ? formatTokens(userContextWindow) : t('chat.runtimeMetrics.unknown')} tokens
             </span>
@@ -261,6 +257,13 @@ export function RuntimeMetrics({
 
               <SectionTitle>User Context</SectionTitle>
               <MetricRow label="Messages" value={formatTokens(contextSnapshot?.breakdown.transcript ?? 0)} />
+              {contextSnapshot?.breakdown.transcriptBreakdown ? (
+                <div className="mt-1 border-l border-border/50 pl-3">
+                  <MetricRow label="User messages" value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.userMessages)} muted />
+                  <MetricRow label="Assistant messages" value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.assistantMessages)} muted />
+                  <MetricRow label="Tool call results" value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.toolResults)} muted />
+                </div>
+              ) : null}
               <MetricRow label="Memory" value={formatTokens(contextSnapshot?.breakdown.memory ?? 0)} />
               <MetricRow label="Attachments" value={formatTokens(contextSnapshot?.breakdown.attachments ?? 0)} />
               <MetricRow label="Pending input" value={formatTokens(contextSnapshot?.breakdown.pendingUserInput ?? 0)} />
@@ -314,10 +317,10 @@ function SectionTitle({ children }: { children: ReactNode }): JSX.Element {
   return <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</div>
 }
 
-function MetricRow({ label, value }: { label: string; value: string }): JSX.Element {
+function MetricRow({ label, value, muted }: { label: string; value: string; muted?: boolean }): JSX.Element {
   return (
-    <div className="mt-2 flex items-center justify-between gap-3 text-xs">
-      <span className="min-w-0 truncate text-foreground/90">{label}</span>
+    <div className={cn('flex items-center justify-between gap-3', muted ? 'mt-1 text-[11px]' : 'mt-2 text-xs')}>
+      <span className={cn('min-w-0 truncate', muted ? 'text-muted-foreground' : 'text-foreground/90')}>{label}</span>
       <span className="flex-none font-mono text-muted-foreground">{value}</span>
     </div>
   )
