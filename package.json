@@ -35,7 +35,9 @@
     "publish:kernel": "pnpm --filter @agent-kernel/kernel run publish:npm",
     "publish:host": "pnpm --filter @agent-kernel/host run publish:npm",
     "publish:executor": "pnpm --filter @agent-kernel/executor run publish:npm",
-    "publish:all": "pnpm run publish:kernel && pnpm run publish:host && pnpm run publish:executor"
+    "publish:all": "pnpm run publish:kernel && pnpm run publish:host && pnpm run publish:executor",
+    "perf:scenario": "pnpm --filter @agent-kernel/perf-harness scenario",
+    "perf:regression": "pnpm --filter @agent-kernel/perf-harness perf"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

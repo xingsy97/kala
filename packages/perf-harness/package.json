@@ -1,0 +1,31 @@
+{
+  "name": "@agent-kernel/perf-harness",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Reusable front-end performance & rendering diagnostics for the dashboard: an in-process local stack (host + executor + served dashboard), programmable LLM load scenarios, and browser probes (DOM churn, frame timing, source-mapped CPU profiling, layout overflow). Not published.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures/index.ts",
+    "./probes": "./src/probes/index.ts",
+    "./scenarios": "./src/scenarios/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "scenario": "tsx bin/run-scenario.ts",
+    "perf": "vitest run",
+    "perf:watch": "vitest"
+  },
+  "dependencies": {
+    "@agent-kernel/executor": "workspace:*",
+    "@agent-kernel/host": "workspace:*",
+    "@agent-kernel/shared": "workspace:*",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.3.0",
+    "source-map": "^0.8.0",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.5"
+  }
+}

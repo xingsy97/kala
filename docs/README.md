@@ -80,6 +80,13 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | Three processes and one full turn end-to-end |
 
+### Design
+
+| File | Purpose |
+|---|---|
+| [design/human-attention-score.md](design/human-attention-score.md) | Session-scoped human attention indicator and draft risk-matched LLM evaluator |
+| [design/session-slash-commands.md](design/session-slash-commands.md) | Session slash command semantics for `/clear`, `/rename`, `/stop`, and `/delete` |
+
 ### Capabilities
 
 | File | Purpose |

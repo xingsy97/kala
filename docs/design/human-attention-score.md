@@ -244,6 +244,195 @@ for the semantic dimensions. It must be explicitly instructed not to judge tone,
 personality, or politeness. The deterministic scorer still combines semantic
 quality with risk exposure and review staleness.
 
+## Draft: Risk-Matched LLM Evaluation
+
+The current regex-based evaluator is useful as a deterministic baseline, but it
+should not remain the long-term source of truth for semantic judgement. Keyword
+matches cannot reliably distinguish "do not deploy", "did you deploy?", and
+"deploy now after tests pass". The next design should measure a simpler and more
+operational idea:
+
+> Attention score is the quality of current human supervision relative to the
+> risk the agent has already taken or is about to take in this session.
+
+### Formula
+
+The final score remains deterministic:
+
+```text
+score = clamp(H - M - S - D, 0, 100)
+```
+
+- `H`: effective human supervision quality.
+- `M`: risk mismatch penalty.
+- `S`: stale supervision penalty.
+- `D`: repeated delegation penalty.
+
+The LLM only estimates semantic quality for a new human message. It does not
+walk the full timeline, compute tool risk, apply decay, or produce the final
+score.
+
+### Effective Human Supervision Quality
+
+For each new human message, the host evaluates a fixed-size evidence packet and
+stores a quality result. The packet includes the new human message, a bounded
+summary of recent agent activity, the latest risk summary, and a small number of
+recent human messages. It must not include the full transcript.
+
+The quality result is a `0..100` score using this rubric:
+
+- `0..20`: low-information permission such as "continue", "ok", or "do it".
+- `20..40`: broad instruction with little scope, context, or verification.
+- `40..60`: clear target that is sufficient for low-risk exploration.
+- `60..75`: concrete feedback based on visible output, logs, errors, UI state,
+  or recent agent behavior.
+- `75..90`: clear target plus constraints, ordering, or verification criteria.
+- `90..100`: strong supervision that corrects an agent mistake and states risk
+  boundaries or acceptance criteria.
+
+The current effective value is:
+
+```text
+H = max(Q_latest, Q_carried)
+Q_carried = Q_last_meaningful * 0.92 ^ work_since_then
+```
+
+`work_since_then` is deterministic progress after the last meaningful human
+message:
+
+- read-only tool call: `0.25`
+- code edit: `1`
+- build, test, or typecheck: `1`
+- git operation: `1.5`
+- deploy, restart, delete, migration, schema, credential, or permission change:
+  `3`
+- failed tool result followed by more work: additional `1`
+
+This keeps a strong instruction alive while the agent is still operating inside
+its scope, but it naturally decays as the agent continues to make consequential
+progress.
+
+### Risk Mismatch Penalty
+
+Agent risk is deterministic and session-local. Recent risk events are accumulated
+and capped to `0..100`:
+
+- read-only file/search commands: `1`
+- ordinary side-effect-free tooling: `2`
+- code edit: `8`
+- build, test, or typecheck: `6`
+- git commit, merge, rebase, or branch mutation: `12`
+- ssh, scp, or rsync: `14`
+- restart or deploy: `18`
+- delete, migration, schema, credential, or permission change: `22`
+- failed tool call: additional `4`
+- approval mode loosened: additional `20`
+
+The mismatch penalty is:
+
+```text
+M = R * (1 - H / 100) * 0.45
+```
+
+Low-risk exploration therefore stays calm even with moderate supervision quality,
+while high-risk work requires sharper human review, constraints, or correction.
+
+### Stale Supervision Penalty
+
+Supervision expires by meaningful work, not wall-clock time:
+
+```text
+S = min(25, max(0, work_since_then - allowance) * 3)
+```
+
+`allowance` is based on supervision quality:
+
+- `H < 40`: `2`
+- `40 <= H < 60`: `4`
+- `60 <= H < 80`: `7`
+- `H >= 80`: `10`
+
+If the agent is in one uninterrupted run and the human has had no approval,
+idle, or input opportunity, stale growth should pause. The indicator should not
+punish the operator for a period where the product gave them no intervention
+point.
+
+### Repeated Delegation Penalty
+
+The evaluator separately tracks consecutive low-information human messages such
+as "continue", "ok", or "do it". A high-risk command with little detail, such as
+"deploy", counts as low-information supervision and also raises deterministic
+risk.
+
+```text
+D = min(25, streak ^ 2 * 4 * risk_factor)
+```
+
+`risk_factor` is:
+
+- `0.4` when `R < 15`
+- `0.8` when `15 <= R < 40`
+- `1.2` when `R >= 40`
+
+This avoids alarming on one low-risk "continue" during read-only exploration,
+but quickly flags repeated broad delegation during edits, deploys, or restarts.
+
+### Cost And Complexity
+
+LLM evaluation must be incremental and persistent:
+
+```text
+cache key = sessionId + userMessageSeq + textHash + evaluatorVersion
+```
+
+Each human message is evaluated at most once per evaluator version. Tool events,
+streaming updates, dashboard reconnects, and session view renders only recompute
+the deterministic score from cached quality results and risk state.
+
+For a session with `U` human messages and `N` total timeline events:
+
+```text
+LLM calls = O(U)
+single LLM input size = O(1)
+deterministic score update = O(delta events) or cached O(1) latest update
+```
+
+The design explicitly rejects rescoring the whole transcript on every render,
+which would create unnecessary cost and could degrade toward `O(N^2)` behavior.
+
+### Execution Model
+
+The LLM evaluator runs in the host, not the dashboard. API keys stay server-side,
+multiple dashboard tabs share one persisted result, and failures do not block the
+agent loop.
+
+```text
+event appended: user_message
+  -> enqueue semantic evaluation
+  -> build fixed-size evidence packet
+  -> store HumanAttentionQualityResult
+  -> deterministic scorer updates latest points
+  -> dashboard receives derived attention timeline
+```
+
+If the LLM call fails or is disabled, the existing deterministic heuristic is the
+fallback semantic evaluator. The UI must show lower confidence for fallback
+points but keep the indicator available.
+
+### Acceptance Checks
+
+- A fresh "inspect this project" request followed by read-only tools should not
+  show a low-attention warning.
+- Repeated "continue" during broad edits should degrade rapidly.
+- "Deploy" without constraints should not be treated as ordinary continuation;
+  it is low-detail supervision combined with high deterministic risk.
+- A specific correction of the agent's environment, assumptions, or output should
+  recover the score quickly.
+- Opening another dashboard tab or reconnecting must not trigger new LLM calls
+  for already evaluated user messages.
+- Changing `evaluatorVersion` may schedule background reevaluation, but it must
+  not block session interaction.
+
 ## Simulated Behavior Checks
 
 - Strong constraints plus periodic correction should stay `engaged` even during
