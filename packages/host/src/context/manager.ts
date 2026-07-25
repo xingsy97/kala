@@ -34,6 +34,14 @@ export function snapshotFromConfig(
   selectedModel?: string,
 ): ContextUsageSnapshot {
   const transcriptTokens = estimateMessageTokens(messages)
+  const userMessages = messages.filter((m) => m.role === 'user')
+  const assistantMessages = messages.filter((m) => m.role === 'assistant')
+  const toolMessages = messages.filter((m) => m.role === 'tool')
+  const transcriptBreakdown = {
+    userMessages: estimateMessageTokens(userMessages),
+    assistantMessages: estimateMessageTokens(assistantMessages),
+    toolResults: estimateMessageTokens(toolMessages),
+  }
   const toolTokens = estimateToolSchemaTokens(config.tools)
   const reserveTokens = reserveForContext(override?.contextTokens ?? override?.contextWindow ?? config.contextLimit)
   const inputTokens = transcriptTokens + toolTokens + reserveTokens
@@ -57,6 +65,7 @@ export function snapshotFromConfig(
       memory: 0,
       attachments: 0,
       pendingUserInput: 0,
+      transcriptBreakdown,
     },
     estimator: {
       total: { kind: 'heuristic', confidence: 'rough' },

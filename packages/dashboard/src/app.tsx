@@ -5,7 +5,7 @@ import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { shouldCompactContext } from '@agent-kernel/shared/context-policy'
 
-import type { MessageContent } from '@agent-kernel/kernel'
+import type { Message, MessageContent } from '@agent-kernel/kernel'
 
 import type {
   ConsolidateMemoryResult,
@@ -105,7 +105,7 @@ import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
 import { withViewTransition } from './lib/viewTransition.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
-import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
+import { appendLiveTranscriptItems, reconcilePendingUserMessages, transcriptBaseItems } from './transcript.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
 import type { DashboardSocket, TimelineEntry } from './session.js'
 import {
@@ -160,6 +160,11 @@ import {
 
 type LowerExplorerTab = 'files' | 'git'
 type MobileExplorerTab = 'sessions' | 'files' | 'git'
+
+// Stable empty-message reference so the memoized transcript base is not
+// invalidated every render while a session's state is momentarily null.
+const EMPTY_MESSAGES: readonly Message[] = []
+
 type SlashDeleteState = {
   sessionId: string
   step: 'scope' | 'confirm'
@@ -982,25 +987,44 @@ export function App(): JSX.Element {
   const slashDeleteShortId = slashDelete?.sessionId.slice(0, 8) ?? ''
   const slashDeleteRequiredPhrase = slashDelete ? `DELETE ${slashDeleteShortId}` : ''
   const slashDeleteConfirmed = slashDeletePhrase.trim() === slashDeleteRequiredPhrase
-  const chatMessages = visibleMessages(
-    session.state?.messages ?? [],
-    session.timeline,
-    session.streamingText,
-    { includeStatePrefix: session.parentSessionId !== null },
-  )
   const visibleQueuedMessages = useMemo(
     () => mergeOptimisticQueuedMessages(session.queuedMessages, optimisticQueuedMessages),
     [session.queuedMessages, optimisticQueuedMessages],
   )
-  const chatItems = visibleTranscript(
-    session.state?.messages ?? [],
-    session.timeline,
-    session.streamingText,
-    pendingUserMessages,
-    visibleQueuedMessages,
-    { includeStatePrefix: session.parentSessionId !== null },
+  // Split the transcript into a memoized, timeline-derived base (recomputed
+  // only when the timeline / state messages actually change) and a cheap live
+  // tail (streaming text + optimistic pending messages) appended on top. This
+  // avoids iterating the entire timeline on every ~15fps streaming commit,
+  // which was saturating the main thread on long sessions and dropping button
+  // clicks / freezing the hover cursor while the agent ran.
+  const stateMessages = session.state?.messages ?? EMPTY_MESSAGES
+  const includeStatePrefix = session.parentSessionId !== null
+  const transcriptBase = useMemo(
+    () => transcriptBaseItems(stateMessages, session.timeline, { includeStatePrefix }),
+    [stateMessages, session.timeline, includeStatePrefix],
   )
-  const backgroundTasks = backgroundTerminalTasks(session.timeline)
+  const chatItems = useMemo(
+    () =>
+      appendLiveTranscriptItems(
+        transcriptBase,
+        stateMessages,
+        session.timeline,
+        session.streamingText,
+        pendingUserMessages,
+        visibleQueuedMessages,
+      ),
+    [transcriptBase, stateMessages, session.timeline, session.streamingText, pendingUserMessages, visibleQueuedMessages],
+  )
+  // The header only needs the *count* of visible messages; derive it from the
+  // already-built transcript instead of building a second full transcript.
+  const chatMessagesCount = useMemo(
+    () => chatItems.filter((item) => item.kind === 'message').length,
+    [chatItems],
+  )
+  const backgroundTasks = useMemo(
+    () => backgroundTerminalTasks(session.timeline),
+    [session.timeline],
+  )
   const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
   const activeSessionStatus = sessionActivityStatus({
     status: session.state?.status ?? currentSession?.status,
@@ -1914,7 +1938,7 @@ export function App(): JSX.Element {
                         config={session.config}
                         contextSnapshot={session.contextSnapshot}
                         timeline={session.timeline}
-                        visibleMessagesCount={chatMessages.length}
+                        visibleMessagesCount={chatMessagesCount}
                         socket={session.socket}
                         parentSessionId={session.parentSessionId}
                         parentCursor={session.parentCursor}
@@ -2026,7 +2050,7 @@ export function App(): JSX.Element {
               config={session.config}
               contextSnapshot={session.contextSnapshot}
               timeline={session.timeline}
-              visibleMessagesCount={chatMessages.length}
+              visibleMessagesCount={chatMessagesCount}
               socket={session.socket}
               parentSessionId={session.parentSessionId}
               parentCursor={session.parentCursor}

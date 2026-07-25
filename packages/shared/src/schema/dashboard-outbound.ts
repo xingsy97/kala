@@ -158,6 +158,11 @@ export const ContextUsageSnapshotSchema = z.object({
     memory: z.number().int().nonnegative(),
     attachments: z.number().int().nonnegative(),
     pendingUserInput: z.number().int().nonnegative(),
+    transcriptBreakdown: z.object({
+      userMessages: z.number().int().nonnegative(),
+      assistantMessages: z.number().int().nonnegative(),
+      toolResults: z.number().int().nonnegative(),
+    }).optional(),
   }),
   estimator: z.object({
     total: z.object({

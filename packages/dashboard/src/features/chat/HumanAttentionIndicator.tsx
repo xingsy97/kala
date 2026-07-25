@@ -70,18 +70,20 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
         onClick={() => setOpen((value) => !value)}
       >
         <Activity className="h-4 w-4 flex-none" aria-hidden="true" />
-        <span className={cn(
-          'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
-          latest && (latest.level === 'engaged' || latest.level === 'watching') && 'hidden sm:inline',
-        )}>
-          {scoreText}
-        </span>
+        {isSimple ? null : (
+          <span className={cn(
+            'flex-none whitespace-nowrap font-mono text-[10px] leading-none text-foreground',
+            latest && (latest.level === 'engaged' || latest.level === 'watching') && 'hidden sm:inline',
+          )}>
+            {scoreText}
+          </span>
+        )}
       </button>
       {open ? (
         <div
           role="dialog"
           aria-label="Human Attention"
-          className="fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(26rem,calc(100vw-1rem))]"
+          className="ak-motion-popover fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(26rem,calc(100vw-1rem))]"
           data-testid="human-attention-popover"
         >
           <div className="flex items-start justify-between gap-4">

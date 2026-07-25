@@ -549,7 +549,12 @@ function PendingUserMessageRow({
   const statusLabel = t('chat.transcript.sendingMessage')
   return (
     <div className="group relative flex min-w-0 max-w-full justify-end" data-testid={`pending-user-message-${item.id}`} data-status={item.status}>
-      <div className="relative min-w-0 max-w-[92%] overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm sm:max-w-[85%]">
+      <div
+        className="relative min-w-0 max-w-[92%] overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm motion-safe:animate-[ak-pending-pulse_1.6s_ease-in-out_infinite] sm:max-w-[85%]"
+        title={statusLabel}
+        aria-label={statusLabel}
+        data-testid={`pending-user-message-status-${item.id}`}
+      >
         <InlineTimestamp
           ts={item.createdAt}
           className="absolute right-full top-1/2 mr-2 -translate-y-1/2 text-muted-foreground"
@@ -566,12 +571,6 @@ function PendingUserMessageRow({
             />
           ))}
         </div>
-        <span
-          className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-primary-foreground ring-2 ring-primary motion-safe:animate-pulse"
-          title={statusLabel}
-          aria-label={statusLabel}
-          data-testid={`pending-user-message-status-${item.id}`}
-        />
       </div>
     </div>
   )

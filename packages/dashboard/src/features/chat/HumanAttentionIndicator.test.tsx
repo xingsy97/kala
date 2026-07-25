@@ -36,6 +36,18 @@ describe('HumanAttentionIndicator', () => {
     expect(screen.getByTestId('human-attention-reasons').textContent ?? '').toContain('Recent human input includes specific intent or scope.')
   })
 
+  it('hides the precise attention score in simple density (keeps icon + tooltip + popover)', () => {
+    render(<HumanAttentionIndicator timeline={attentionTimeline()} density="simple" />)
+
+    const trigger = screen.getByTestId('human-attention-indicator')
+    // No inline score number in the composer chrome...
+    expect(trigger.textContent ?? '').not.toContain('82')
+    // ...but the exact score is still reachable via the tooltip and popover.
+    expect(trigger.getAttribute('title') ?? '').toContain('Attention 82')
+    fireEvent.click(trigger)
+    expect(screen.getByTestId('human-attention-popover').textContent ?? '').toContain('82')
+  })
+
   it('flags low-attention placeholder only when absent has risk or repeated delegation evidence', () => {
     expect(shouldShowLowAttentionHint(attentionTimeline())).toBe(false)
     expect(shouldShowLowAttentionHint(attentionTimeline(18, 'absent'))).toBe(false)

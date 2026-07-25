@@ -1175,7 +1175,22 @@ async function handleUserMessage(
     // second, that broadcast could fire while the queue was still empty, and
     // the steer message would sit in the queue forever (never dispatched).
     await deps.messageQueues.enqueue(p.sessionId, queued, 'front')
-    if (record.state.status === 'thinking') deps.loop.cancelStream(p.sessionId)
+    if (record.state.status === 'thinking') {
+      // Streaming an LLM response: aborting the fetch settles the FSM into a
+      // resting status (an `[cancelled]` llm_response is dispatched) and emits
+      // a state broadcast, so the completion hook drains the front steer.
+      deps.loop.cancelStream(p.sessionId)
+    } else {
+      // The turn is mid-tool-execution (or otherwise running without a live
+      // LLM stream). `cancelStream` is a no-op in that case, so the steer
+      // would sit at the front of the queue until the agent *voluntarily*
+      // stopped — across an arbitrarily long autonomous think→tool→think
+      // loop the user sees their "steer" hang as a stuck queued item that
+      // never sends. A proper `cancel` event aborts in-flight tools + LLM and
+      // settles the FSM to a resting status, so the front steer drains as the
+      // next user turn. This is the same primitive `client:cancel` uses.
+      await safeDispatch(deps, p.sessionId, { kind: 'cancel' })
+    }
     // Also kick a drain directly: if the abort settles synchronously (or the
     // turn had already reached a resting status between our load and here) the
     // completion hook may not fire, so we must not rely on it alone.

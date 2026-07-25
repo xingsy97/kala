@@ -545,7 +545,7 @@ export function Composer({
               rows={1}
               disabled={disabled}
               placeholder={placeholderText}
-              className="max-h-56 min-h-[40px] w-full resize-none border-0 bg-transparent px-4 py-2.5 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
+              className="max-h-56 min-h-[40px] w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-4 py-2.5 text-base leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
               data-testid="composer-input"
               onPaste={(e) => {
                 void handlePaste(e)

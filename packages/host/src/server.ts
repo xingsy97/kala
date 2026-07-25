@@ -526,14 +526,51 @@ export async function startHostServer(
     },
   }
 
+  // Coalesce `server:sessions` broadcasts. The loop's onEvent fires once per
+  // appended event, and during a tool-heavy turn that is dozens of events per
+  // second — each one previously ran store.listSummaries() and pushed the full
+  // session list to every dashboard, which re-rendered the sidebar and every
+  // sessions-derived memo and starved the main thread (the "everything janks
+  // while a tool runs" report). Session summaries barely change within a turn
+  // (only lastEventAt / status), so we push a leading-edge update immediately
+  // and then coalesce the rest to at most one per SESSIONS_BROADCAST_MIN_MS,
+  // with a trailing flush so the final state is never missed.
+  const SESSIONS_BROADCAST_MIN_MS = 600
+  let sessionsBroadcastTimer: ReturnType<typeof setTimeout> | null = null
+  let sessionsBroadcastLastMs = 0
+  let sessionsBroadcastPending = false
+  const flushSessionsBroadcast = (): void => {
+    sessionsBroadcastLastMs = Date.now()
+    sessionsBroadcastPending = false
+    void store.listSummaries()
+      .then((sessions) => io.of('/dashboard').emit('server:sessions', { sessions }))
+      .catch(() => {})
+  }
+  const scheduleSessionsBroadcast = (): void => {
+    const now = Date.now()
+    const elapsed = now - sessionsBroadcastLastMs
+    if (elapsed >= SESSIONS_BROADCAST_MIN_MS && sessionsBroadcastTimer === null) {
+      // Leading edge: fire immediately when we haven't broadcast recently.
+      flushSessionsBroadcast()
+      return
+    }
+    // Within the throttle window: coalesce into a single trailing broadcast.
+    sessionsBroadcastPending = true
+    if (sessionsBroadcastTimer === null) {
+      const delay = Math.max(0, SESSIONS_BROADCAST_MIN_MS - elapsed)
+      sessionsBroadcastTimer = setTimeout(() => {
+        sessionsBroadcastTimer = null
+        if (sessionsBroadcastPending) flushSessionsBroadcast()
+      }, delay)
+    }
+  }
+
   const broadcast: LoopBroadcast = {
     onEvent(sessionId, seq, event, effects, state, llmTrace, model, extras) {
       const room = sessionRoom(sessionId)
       const slimEffects = effects.map(slimEffect)
       const hasEffectsArtifact = effects.some((effect) => effect.kind === 'call_llm')
-      void store.listSummaries()
-        .then((sessions) => io.of('/dashboard').emit('server:sessions', { sessions }))
-        .catch(() => {})
+      scheduleSessionsBroadcast()
       io.of('/dashboard').to(room).emit('event:appended', {
         sessionId,
         seq,

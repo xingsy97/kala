@@ -151,6 +151,7 @@ export function SessionMetadataDialog({
               value={`${state.usage.inputTokens.toLocaleString()} / ${state.usage.outputTokens.toLocaleString()}`}
             />
           ) : null}
+          <ReadOnlyRow label={t('dialogs.sessionCost')} value="—" />
         </div>
 
         <div className="border-t border-border/50 pt-3" />
