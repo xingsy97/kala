@@ -19,6 +19,8 @@ function renderComposer(props?: {
   onCompact?: () => void
   onCancel?: () => void
   onClearSession?: () => void
+  onRenameSession?: (label: string | null) => void
+  onDeleteSession?: () => void
   onListFiles?: (query: string) => Promise<readonly FileListEntry[]>
   onReadFile?: (path: string) => Promise<{ content?: string; error?: string }>
   queuedMessages?: React.ComponentProps<typeof Composer>['queuedMessages']
@@ -47,6 +49,8 @@ function renderComposer(props?: {
       onCompact={props?.onCompact ?? (() => {})}
       {...(props?.onCancel ? { onCancel: props.onCancel } : {})}
       {...(props?.onClearSession ? { onClearSession: props.onClearSession } : {})}
+      {...(props?.onRenameSession ? { onRenameSession: props.onRenameSession } : {})}
+      {...(props?.onDeleteSession ? { onDeleteSession: props.onDeleteSession } : {})}
       {...(props?.onListFiles ? { onListFiles: props.onListFiles } : {})}
       {...(props?.onReadFile ? { onReadFile: props.onReadFile } : {})}
       awaitingAck={props?.awaitingAck}
@@ -97,7 +101,7 @@ describe('Composer', () => {
     renderComposer({ displayPrefs: { fontSize: 3, contentWidth: 2, sideSpace: 1, lineHeight: 1 } })
 
     const composer = screen.getByTestId('composer')
-    expect(composer.style.getPropertyValue('--ak-chat-content-width')).toBe('84rem')
+    expect(composer.style.getPropertyValue('--ak-chat-content-width')).toBe('104rem')
     expect(composer.querySelector('.ak-chat-container')).toBeTruthy()
   })
 
@@ -148,6 +152,88 @@ describe('Composer', () => {
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(onSubmit).not.toHaveBeenCalled()
     expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
+  })
+
+  it('runs /stop as the stop-turn slash command', () => {
+    const onSubmit = vi.fn()
+    const onCancel = vi.fn()
+    renderComposer({ onSubmit, onCancel })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/stop' },
+    })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('renames the current session from slash command args', () => {
+    const onSubmit = vi.fn()
+    const onRenameSession = vi.fn()
+    renderComposer({ onSubmit, onRenameSession })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/rename Better label' },
+    })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    expect(onRenameSession).toHaveBeenCalledWith('Better label')
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('opens rename UI when /rename has no args and clears labels with --clear', () => {
+    const onRenameSession = vi.fn()
+    renderComposer({ onRenameSession })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/rename' },
+    })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+    expect(onRenameSession).toHaveBeenLastCalledWith(null)
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/rename --clear' },
+    })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+    expect(onRenameSession).toHaveBeenLastCalledWith('')
+  })
+
+  it('requires an exact /delete command before invoking delete', () => {
+    const onSubmit = vi.fn()
+    const onDeleteSession = vi.fn()
+    renderComposer({ onSubmit, onDeleteSession })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/del' },
+    })
+    expect(screen.getByTestId('slash-command-menu')).toBeTruthy()
+    expect(screen.getByText('/delete')).toBeTruthy()
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    expect(onDeleteSession).not.toHaveBeenCalled()
+    expect(onSubmit).toHaveBeenCalledWith('/del', 'steer', undefined, undefined)
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/delete' },
+    })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+    expect(onDeleteSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not run /delete with trailing arguments', async () => {
+    const onSubmit = vi.fn()
+    const onDeleteSession = vi.fn()
+    renderComposer({ onSubmit, onDeleteSession })
+
+    fireEvent.change(screen.getByTestId('composer-input'), {
+      target: { value: '/delete now' },
+    })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    expect(onDeleteSession).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect((await screen.findByTestId('composer-toast')).textContent).toContain('/delete does not accept extra text.')
   })
 
   it('uses the send button position for stop only while running with empty input', () => {
@@ -230,6 +316,24 @@ describe('Composer', () => {
     fireEvent.click(screen.getByTestId('composer-send'))
 
     expect(onSubmit).toHaveBeenCalledWith('later from simple', 'queue', undefined, undefined)
+  })
+
+  it('supports slash commands in simple mode', () => {
+    const onCompact = vi.fn()
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer({ onCompact })
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const input = screen.getByTestId('composer-input-simple')
+    input.textContent = '/co'
+    fireEvent.input(input)
+
+    expect(screen.getByTestId('slash-command-menu')).toBeTruthy()
+    expect(screen.getByText('/compact')).toBeTruthy()
+    fireEvent.click(screen.getByText('/compact'))
+    expect(onCompact).toHaveBeenCalledTimes(1)
   })
 
   it('keeps simple mode placeholder visual-only and replaces it on paste', () => {

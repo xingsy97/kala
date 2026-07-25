@@ -981,9 +981,9 @@ function ExecutorAccessSection(): JSX.Element {
   return (
     <div>
       <SectionHeader title={t('settings.sections.executorAccess.label')} subtitle={t('settings.executorAccess.subtitle')} />
-      <form onSubmit={submit} className="mb-4 min-w-0 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-          <label className="text-xs font-medium text-muted-foreground">
+      <form onSubmit={submit} className="mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <div className="grid min-w-0 gap-2 lg:grid-cols-2">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.executorAccess.label')}
             <input
               className="mt-1 h-9 w-full rounded-md border-0 bg-background px-2 text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50"
@@ -993,7 +993,7 @@ function ExecutorAccessSection(): JSX.Element {
               disabled={busy}
             />
           </label>
-          <label className="text-xs font-medium text-muted-foreground">
+          <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.executorAccess.workspaceId')}
             <input
               className="mt-1 h-9 w-full rounded-md border-0 bg-background px-2 font-mono text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50"
@@ -1003,11 +1003,11 @@ function ExecutorAccessSection(): JSX.Element {
               disabled={busy}
             />
           </label>
-          <div className="flex items-end">
-            <Button type="submit" className="h-9 w-full lg:w-auto" disabled={busy}>
-              <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.executorAccess.create')}
-            </Button>
-          </div>
+        </div>
+        <div className="mt-3 flex min-w-0 justify-end">
+          <Button type="submit" className="h-9 w-full sm:w-auto" disabled={busy}>
+            <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.executorAccess.create')}
+          </Button>
         </div>
         {error ? <div className="mt-2 text-xs text-destructive">{error}</div> : null}
       </form>
@@ -1269,8 +1269,8 @@ function ModelsSection({
         title={t('settings.sections.models.label')}
         subtitle={t('settings.models.subtitle')}
       />
-      <form onSubmit={submitProvider} className="mb-4 min-w-0 space-y-3 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
-        <div className="grid gap-3 lg:grid-cols-3">
+      <form onSubmit={submitProvider} className="mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <div className="grid min-w-0 gap-3 lg:grid-cols-3">
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.providerId')}
             <input
@@ -1307,7 +1307,7 @@ function ModelsSection({
             </select>
           </label>
         </div>
-        <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1.5fr)_minmax(14rem,1fr)_auto]">
+        <div className="mt-3 grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.baseUrl')}
             <input
@@ -1331,15 +1331,15 @@ function ModelsSection({
               data-testid="settings-provider-api-key-input"
             />
           </label>
-          <div className="flex items-end">
-            <Button type="submit" className="h-9 w-full lg:w-auto" disabled={busy || newProviderId.trim().length === 0 || newProviderBaseUrl.trim().length === 0 || newProviderApiKey.length === 0}>
-              <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.models.addProvider')}
-            </Button>
-          </div>
+        </div>
+        <div className="mt-3 flex min-w-0 justify-end">
+          <Button type="submit" className="h-9 w-full sm:w-auto" disabled={busy || newProviderId.trim().length === 0 || newProviderBaseUrl.trim().length === 0 || newProviderApiKey.length === 0}>
+            <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.models.addProvider')}
+          </Button>
         </div>
       </form>
-      <form onSubmit={submit} className="mb-4 min-w-0 space-y-3 rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
-        <div className="grid gap-3 lg:grid-cols-[minmax(14rem,1fr)_minmax(14rem,1fr)_minmax(11rem,0.8fr)]">
+      <form onSubmit={submit} className="mb-4 max-w-full min-w-0 overflow-hidden rounded-md bg-muted/30 p-3 ring-1 ring-border/50">
+        <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)]">
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.provider')}
             <select
@@ -1378,7 +1378,7 @@ function ModelsSection({
             />
           </label>
         </div>
-        <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1fr)_auto]">
+        <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)]">
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.models.label')}
             <input
@@ -1389,8 +1389,8 @@ function ModelsSection({
               disabled={payload.providers.length === 0 || busy}
             />
           </label>
-          <div className="flex items-end">
-            <Button type="submit" className="h-9 w-full lg:w-auto" disabled={payload.providers.length === 0 || busy || modelId.trim().length === 0} data-testid="settings-model-add-button">
+          <div className="flex min-w-0 justify-end">
+            <Button type="submit" className="h-9 w-full sm:w-auto" disabled={payload.providers.length === 0 || busy || modelId.trim().length === 0} data-testid="settings-model-add-button">
               <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> {t('settings.models.add')}
             </Button>
           </div>
@@ -1409,12 +1409,12 @@ function ModelsSection({
           {payload.providers.map((p) => (
             <div
               key={p.id}
-              className="min-w-0 rounded-md bg-card/60 p-3 ring-1 ring-border/50 sm:p-4"
+              className="max-w-full min-w-0 overflow-hidden rounded-md bg-card/60 p-3 ring-1 ring-border/50 sm:p-4"
               data-testid={`settings-provider-${p.id}`}
             >
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-medium">{p.label}</div>
+              <div className="mb-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                <div className="min-w-0 overflow-hidden">
+                  <div className="truncate font-medium" title={p.label}>{p.label}</div>
                   <div className="min-w-0 break-words text-xs text-muted-foreground">
                     <span className="font-mono">{p.wire}</span>
                     {' · '}
@@ -1427,22 +1427,24 @@ function ModelsSection({
                     ) : null}
                   </div>
                 </div>
-                {p.models.some((m) => modelKey(m) === payload.defaultModel || m.id === payload.defaultModel) ? (
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground ring-1 ring-primary/40">
-                    {t('settings.models.defaultProvider')}
-                  </span>
-                ) : null}
-                {p.source === 'manual' ? (
-                  <button
-                    type="button"
-                    onClick={() => { deleteManualProvider(p.id) }}
-                    className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    aria-label={t('settings.models.deleteProvider', { provider: p.id })}
-                    disabled={busy}
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                ) : null}
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                  {p.models.some((m) => modelKey(m) === payload.defaultModel || m.id === payload.defaultModel) ? (
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground ring-1 ring-primary/40">
+                      {t('settings.models.defaultProvider')}
+                    </span>
+                  ) : null}
+                  {p.source === 'manual' ? (
+                    <button
+                      type="button"
+                      onClick={() => { deleteManualProvider(p.id) }}
+                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      aria-label={t('settings.models.deleteProvider', { provider: p.id })}
+                      disabled={busy}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
               </div>
               {p.models.length === 0 ? (
                 <div className="text-xs text-muted-foreground">
@@ -1453,10 +1455,10 @@ function ModelsSection({
                   {p.models.map((m) => (
                     <li
                       key={m.id}
-                      className="flex flex-col gap-2 rounded bg-muted/40 px-2.5 py-1.5 text-xs ring-1 ring-border/50 sm:flex-row sm:items-center sm:justify-between"
+                      className="grid min-w-0 gap-2 rounded bg-muted/40 px-2.5 py-1.5 text-xs ring-1 ring-border/50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                     >
                       <span className="min-w-0 break-all font-mono" title={m.id}>{m.id}</span>
-                      <span className="flex flex-wrap items-center gap-2 sm:flex-none sm:justify-end">
+                      <span className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
                         <SourceBadge source={m.source ?? p.source ?? 'unknown'} />
                         {m.contextWindow ? (
                           <span className="font-mono text-[10px] text-muted-foreground">{m.contextWindow.toLocaleString()}</span>

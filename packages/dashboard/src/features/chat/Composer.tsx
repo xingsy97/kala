@@ -40,6 +40,8 @@ type Props = {
   onCancel?(): void
   onClearSession?(): void
   onConsolidateMemory?(): void
+  onRenameSession?(label: string | null): void
+  onDeleteSession?(): void
   model: string
   models: readonly ModelInfo[]
   onModelChange(model: string): void
@@ -152,6 +154,8 @@ export function Composer({
   onCancel,
   onClearSession,
   onConsolidateMemory,
+  onRenameSession,
+  onDeleteSession,
   model,
   models,
   onModelChange,
@@ -220,6 +224,13 @@ export function Composer({
       ]
       if (onCancel) {
         commands.push({
+          command: '/stop',
+          icon: Square,
+          label: t('composer.slash.stop'),
+          description: t('composer.slash.stopDesc'),
+          run: onCancel,
+        })
+        commands.push({
           command: '/cancel',
           icon: Square,
           label: t('composer.slash.cancel'),
@@ -236,6 +247,38 @@ export function Composer({
           run: onClearSession,
         })
       }
+      if (onRenameSession) {
+        commands.push({
+          command: '/rename',
+          icon: Pencil,
+          label: t('composer.slash.rename'),
+          description: t('composer.slash.renameDesc'),
+          acceptsArgs: true,
+          run: ({ args }) => {
+            const label = args.trim()
+            if (label === '--clear') {
+              onRenameSession('')
+              return
+            }
+            onRenameSession(label.length > 0 ? label : null)
+          },
+        })
+      }
+      if (onDeleteSession) {
+        commands.push({
+          command: '/delete',
+          icon: Trash2,
+          label: t('composer.slash.delete'),
+          description: t('composer.slash.deleteDesc'),
+          run: ({ args }) => {
+            if (args.trim().length > 0) {
+              setPendingToast(t('composer.slash.noArgs', { command: '/delete' }))
+              return
+            }
+            onDeleteSession()
+          },
+        })
+      }
       if (onConsolidateMemory) {
         commands.push({
           command: '/consolidate-memory',
@@ -247,7 +290,7 @@ export function Composer({
       }
       return commands
     },
-    [onCompact, onCancel, onClearSession, onConsolidateMemory, t],
+    [onCompact, onCancel, onClearSession, onRenameSession, onDeleteSession, onConsolidateMemory, t],
   )
   const matchingCommands = slashQuery
     ? slashCommands.filter((c) => c.command.startsWith(slashQuery))
@@ -316,11 +359,16 @@ export function Composer({
   const submit = async (): Promise<void> => {
     const trimmed = text.trim()
     if (trimmed.length === 0 && pastedImages.length === 0) return
-    const command = slashCommands.find(
-      (c) => c.command === trimmed || (trimmed.startsWith('/') && c.command.startsWith(trimmed)),
-    )
+    const parsedCommand = parseSlashCommand(trimmed)
+    const command = parsedCommand
+      ? slashCommands.find((c) => c.command === parsedCommand.name)
+      : undefined
     if (command && pastedImages.length === 0) {
-      command.run()
+      if (!command.acceptsArgs && parsedCommand!.args.trim().length > 0) {
+        setPendingToast(t('composer.slash.noArgs', { command: command.command }))
+        return
+      }
+      command.run({ args: parsedCommand!.args })
       setText('')
       return
     }
@@ -464,6 +512,15 @@ export function Composer({
         </button>
         {mode === 'simple' ? (
           <div className="relative flex items-center gap-2" data-testid="composer-simple-shell">
+            <SlashCommandMenu
+              commands={matchingCommands}
+              disabled={disabled}
+              onRun={(cmd) => {
+                cmd.run({ args: '' })
+                setText('')
+              }}
+              className="absolute inset-x-0 bottom-full z-20 mb-2"
+            />
             <div className="min-w-0 flex-1">
               <SimpleComposerInput
                 text={text}
@@ -582,37 +639,15 @@ export function Composer({
                 }
               }}
             />
-            {matchingCommands.length > 0 && !disabled ? (
-              <div
-                className="absolute inset-x-2 bottom-2 z-10 overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
-                data-testid="slash-command-menu"
-              >
-                {matchingCommands.map((cmd, index) => {
-                  const Icon = cmd.icon
-                  return (
-                  <button
-                    key={cmd.command}
-                    type="button"
-                    className="flex w-full items-start gap-3 px-3 py-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      cmd.run()
-                      setText('')
-                    }}
-                    data-testid={`slash-command-option-${index}`}
-                  >
-                    <Icon className="mt-0.5 h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="font-mono text-primary">{cmd.command}</span>
-                        <span className="truncate text-foreground">{cmd.label}</span>
-                      </span>
-                      <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{cmd.description}</span>
-                    </span>
-                  </button>
-                )})}
-              </div>
-            ) : null}
+            <SlashCommandMenu
+              commands={matchingCommands}
+              disabled={disabled}
+              onRun={(cmd) => {
+                cmd.run({ args: '' })
+                setText('')
+              }}
+              className="absolute inset-x-2 bottom-2 z-10"
+            />
             {mentionState && !disabled && onListFiles ? (
               <div
                 className="absolute inset-x-2 bottom-2 z-10 max-h-[min(16rem,40vh)] overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
@@ -1301,7 +1336,58 @@ type SlashCommand = {
   icon: LucideIcon
   label: string
   description: string
-  run(): void
+  acceptsArgs?: boolean
+  run(input: { args: string }): void
+}
+
+function parseSlashCommand(text: string): { name: string; args: string } | null {
+  if (!text.startsWith('/')) return null
+  const match = text.match(/^(\/\S+)(?:\s+([\s\S]*))?$/)
+  if (!match) return null
+  return { name: match[1]!, args: match[2] ?? '' }
+}
+
+function SlashCommandMenu({
+  commands,
+  disabled,
+  className,
+  onRun,
+}: {
+  commands: readonly SlashCommand[]
+  disabled?: boolean
+  className?: string
+  onRun(cmd: SlashCommand): void
+}): JSX.Element | null {
+  if (disabled || commands.length === 0) return null
+  return (
+    <div
+      className={cn('overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg', className)}
+      data-testid="slash-command-menu"
+    >
+      {commands.map((cmd, index) => {
+        const Icon = cmd.icon
+        return (
+          <button
+            key={cmd.command}
+            type="button"
+            className="flex w-full items-start gap-3 px-3 py-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onRun(cmd)}
+            data-testid={`slash-command-option-${index}`}
+          >
+            <Icon className="mt-0.5 h-3.5 w-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="font-mono text-primary">{cmd.command}</span>
+                <span className="truncate text-foreground">{cmd.label}</span>
+              </span>
+              <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{cmd.description}</span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function HighlightText({ text, query }: { text: string; query: string }): JSX.Element {

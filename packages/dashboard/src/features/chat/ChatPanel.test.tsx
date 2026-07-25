@@ -108,7 +108,7 @@ describe('ChatPanel', () => {
     const root = container.querySelector('[style*="--ak-chat-font-size"]') as HTMLElement | null
 
     expect(root?.style.getPropertyValue('--ak-chat-font-size')).toBe('20px')
-    expect(root?.style.getPropertyValue('--ak-chat-content-width')).toBe('84rem')
+    expect(root?.style.getPropertyValue('--ak-chat-content-width')).toBe('104rem')
     expect(root?.style.getPropertyValue('--ak-chat-line-height')).toBe('1.95')
     expect(root?.style.getPropertyValue('--ak-chat-math-scale')).toBe('3em')
   })
