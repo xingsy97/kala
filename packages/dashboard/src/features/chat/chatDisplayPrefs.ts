@@ -10,7 +10,7 @@ export type ChatDisplayPrefs = {
 
 export const CHAT_FONT_SIZE_PX = [12, 13, 14, 15, 16, 18, 20] as const
 export const CHAT_LINE_HEIGHT = [1.45, 1.7, 1.95] as const
-export const CHAT_CONTENT_WIDTH_REM = [54, 68, 84] as const
+export const CHAT_CONTENT_WIDTH_REM = [64, 84, 104] as const
 export const CHAT_MATH_SCALE_EM = [1.25, 1.5, 2, 2.5, 3] as const
 export const CHAT_SIDE_SPACE = [
   { base: '0.75rem', sm: '1.5rem', lg: '2rem' },
