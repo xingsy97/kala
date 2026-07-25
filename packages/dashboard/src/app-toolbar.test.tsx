@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NoSessionArea, WorkbenchToolbar, coarseStatusForIndicator } from './app.js'
+import { NoSessionArea, WorkbenchToolbar } from './app.js'
+import { coarseStatusForIndicator } from './app-logic/session-activity.js'
 
 function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]> = {}): void {
   render(

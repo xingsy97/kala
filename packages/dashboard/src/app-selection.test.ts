@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { SessionSummary } from '@agent-kernel/shared'
 
-import { nextSessionSelection, reconcileOptimisticQueuedMessages, removedSessionIds, sessionExists, sessionIdsForCacheInvalidation } from './app.js'
+import { nextSessionSelection, reconcileOptimisticQueuedMessages, removedSessionIds, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
 import type { TimelineEntry } from './session.js'
 
 function session(id: string, eventCount: number): SessionSummary {

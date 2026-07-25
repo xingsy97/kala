@@ -105,6 +105,12 @@ import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { appendLiveTranscriptItems, reconcilePendingUserMessages, transcriptBaseItems } from './transcript.js'
+import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent } from './app-logic/compaction.js'
+import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
+import { coarseStatusForIndicator, isRunningSessionActivity, isWaitingForUserInput, sessionActivityStatus } from './app-logic/session-activity.js'
+import { modelKey, resolveModelKey } from './app-logic/model-key.js'
+import { useModels } from './app-logic/use-models.js'
+import { useIsMobile, useMinWidth } from './app-logic/use-viewport.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
 import type { DashboardSocket, TimelineEntry } from './session.js'
 import {
@@ -180,54 +186,10 @@ const SIMPLE_CHAT_TOOLS: readonly string[] = ['todowrite', 'agent', 'websearch',
  * `~/.claude/settings.json` and `~/.codex/config.toml`; hardcoding a list here
  * would drift away from what the host actually accepts.
  */
-function useModels(): { models: readonly ModelInfo[]; defaultModel: string; reload(): void } {
-  const client = useQueryClient()
-  const query = useQuery({
-    queryKey: ['models'],
-    queryFn: async (): Promise<ServerModelsPayload | null> => {
-      const r = await fetch('/models', { cache: 'no-store' })
-      if (!r.ok) return null
-      return (await r.json()) as ServerModelsPayload
-    },
-    staleTime: 60_000,
-  })
-  return {
-    models: query.data?.models ?? [],
-    defaultModel: query.data?.defaultModel ?? '',
-    reload: () => {
-      void client.invalidateQueries({ queryKey: ['models'] })
-    },
-  }
-}
 
-function modelKey(model: ModelInfo | null | undefined): string {
-  return model?.ref ?? model?.id ?? ''
-}
 
-function resolveModelKey(models: readonly ModelInfo[], value: string | null | undefined): string {
-  if (!value) return ''
-  const exact = models.find((model) => modelKey(model) === value)
-  if (exact) return modelKey(exact)
-  const byId = models.filter((model) => model.id === value)
-  return byId.length === 1 ? modelKey(byId[0]) : ''
-}
 
-function useMinWidth(px: number): boolean {
-  const query = `(min-width: ${px}px)`
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
-  useEffect(() => {
-    const media = window.matchMedia(query)
-    const onChange = (): void => setMatches(media.matches)
-    onChange()
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
-  }, [query])
-  return matches
-}
 
-function useIsMobile(): boolean {
-  return !useMinWidth(640)
-}
 
 export function App(): JSX.Element {
   const { t } = useTranslation()
@@ -2321,10 +2283,6 @@ export function App(): JSX.Element {
   )
 }
 
-function hasCompactableContent(state: import('@agent-kernel/kernel').AgentState | null): boolean {
-  return state?.messages.some((m, index) => !(index === 0 && m.role === 'system')) ?? false
-}
-
 function isEditable(el: HTMLElement): boolean {
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return true
   if (el.isContentEditable) return true
@@ -2335,59 +2293,7 @@ function isResting(status: import('@agent-kernel/kernel').AgentState['status']):
   return isSessionResting({ status })
 }
 
-function isCompactTerminalEvent(kind: string): boolean {
-  return kind === 'messages_replaced'
-}
 
-function isCompactionSuccess(event: { kind: string; reason?: string }): boolean {
-  return event.kind === 'messages_replaced' && event.reason === 'compaction'
-}
-
-function compactFailureMessage(event: { kind: string; reason?: string }): string {
-  if (event.reason) return compactReasonMessage(event.reason)
-  return 'Compaction failed.'
-}
-
-function compactReasonMessage(reason: string): string {
-  switch (reason) {
-    case 'summary_schema_invalid':
-      return 'Compaction summary was missing required sections.'
-    case 'summary_too_short':
-      return 'Compaction summary was too short to be useful.'
-    case 'summary_conversational':
-      return 'Compaction summary looked conversational instead of structured.'
-    case 'post_compaction_still_over_budget':
-      return 'Compaction did not reduce context enough.'
-    case 'circuit_breaker_open':
-      return 'Auto compaction is paused after repeated failures.'
-    case 'session_busy':
-      return 'Compaction skipped while the session is busy.'
-    case 'empty':
-      return 'Nothing to compact yet.'
-    default:
-      return reason.replace(/_/g, ' ')
-  }
-}
-
-function sessionActivityStatus({
-  status,
-  streamingActive,
-  awaitingAck,
-  compactRunning,
-}: {
-  status: import('@agent-kernel/kernel').AgentState['status'] | undefined
-  streamingActive: boolean
-  awaitingAck: boolean
-  compactRunning: boolean
-}): SessionActivityStatus | undefined {
-  if (awaitingAck || streamingActive || compactRunning) return 'loading'
-  if (!status) return undefined
-  return status
-}
-
-function isRunningSessionActivity(status: SessionActivityStatus | undefined): boolean {
-  return isSessionRunning({ status })
-}
 
 /**
  * Collapse every "running" activity (thinking / executing_tools / the
@@ -2399,137 +2305,15 @@ function isRunningSessionActivity(status: SessionActivityStatus | undefined): bo
  * flip, re-rendering the whole Explorer and restarting the spinner animation
  * (the reported jank). Non-running statuses pass through unchanged.
  */
-export function coarseStatusForIndicator(status: SessionActivityStatus | undefined): SessionActivityStatus | undefined {
-  if (status === undefined) return undefined
-  return isRunningSessionActivity(status) ? 'loading' : status
-}
 
-function isWaitingForUserInput({
-  status,
-  streamingActive,
-  awaitingAck,
-  pendingApprovalsCount,
-}: {
-  status: import('@agent-kernel/kernel').AgentState['status'] | undefined
-  streamingActive: boolean
-  awaitingAck: boolean
-  pendingApprovalsCount: number
-}): boolean {
-  if (awaitingAck || streamingActive || pendingApprovalsCount > 0) return false
-  return deriveSessionState({ status }).canAcceptUserMessage
-}
 
-function mergeOptimisticQueuedMessages(
-  serverMessages: readonly QueuedMessagePreview[],
-  optimisticMessages: readonly QueuedMessagePreview[],
-): readonly QueuedMessagePreview[] {
-  if (optimisticMessages.length === 0) return serverMessages
-  const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
-  return [
-    ...serverMessages,
-    ...optimisticMessages.filter((item) => !serverKeys.has(queuedMessageKey(item))),
-  ]
-}
 
-export function reconcileOptimisticQueuedMessages(
-  optimisticMessages: readonly QueuedMessagePreview[],
-  serverMessages: readonly QueuedMessagePreview[],
-  timeline: readonly TimelineEntry[] = [],
-): readonly QueuedMessagePreview[] {
-  if (optimisticMessages.length === 0) return optimisticMessages
-  const serverKeys = new Set(serverMessages.map((item) => queuedMessageKey(item)))
-  const ackedUserTexts = new Map<string, number[]>()
-  for (const entry of timeline) {
-    if (entry.event.kind !== 'user_message') continue
-    const text = entry.event.text ?? entry.event.content?.map((part) => part.type === 'text' ? part.text : '').join('') ?? ''
-    const ts = Date.parse(entry.ts)
-    const bucket = ackedUserTexts.get(text) ?? []
-    bucket.push(Number.isFinite(ts) ? ts : Number.POSITIVE_INFINITY)
-    ackedUserTexts.set(text, bucket)
-  }
-  const next = optimisticMessages.filter((item) => {
-    if (serverKeys.has(queuedMessageKey(item))) return false
-    const bucket = ackedUserTexts.get(item.text)
-    if (!bucket || bucket.length === 0) return true
-    const createdAt = Date.parse(item.createdAt)
-    const minTs = Number.isFinite(createdAt) ? createdAt : Number.NEGATIVE_INFINITY
-    const index = bucket.findIndex((ts) => ts >= minTs)
-    if (index === -1) return true
-    bucket.splice(index, 1)
-    return false
-  })
-  return next.length === optimisticMessages.length ? optimisticMessages : next
-}
 
-function queuedMessageKey(item: QueuedMessagePreview): string {
-  return `${item.mode}\u0000${item.text}`
-}
 
-export function sessionExists(
-  sessions: readonly SessionSummary[],
-  sessionId: string | null | undefined,
-): boolean {
-  return Boolean(sessionId && sessions.some((s) => s.sessionId === sessionId))
-}
 
-function sessionDisplayLabel(session: SessionSummary | undefined, fallback: string): string {
-  const label = session?.label?.trim() || session?.firstUserMessage?.trim() || fallback
-  return label.length > 40 ? `${label.slice(0, 40)}…` : label
-}
 
-export function sessionIdsForCacheInvalidation(
-  sessions: readonly SessionSummary[],
-  rootSessionId: string,
-  cascade: boolean,
-): readonly string[] {
-  if (!cascade) return [rootSessionId]
-  const childrenByParent = new Map<string, string[]>()
-  for (const session of sessions) {
-    if (!session.parentSessionId) continue
-    const children = childrenByParent.get(session.parentSessionId) ?? []
-    children.push(session.sessionId)
-    childrenByParent.set(session.parentSessionId, children)
-  }
-  const out: string[] = []
-  const seen = new Set<string>()
-  const queue = [rootSessionId]
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    if (seen.has(id)) continue
-    seen.add(id)
-    out.push(id)
-    queue.push(...(childrenByParent.get(id) ?? []))
-  }
-  return out
-}
 
-export function removedSessionIds(
-  previousIds: ReadonlySet<string>,
-  nextIds: ReadonlySet<string>,
-): readonly string[] {
-  const removed: string[] = []
-  for (const id of previousIds) {
-    if (!nextIds.has(id)) removed.push(id)
-  }
-  return removed
-}
 
-export function nextSessionSelection({
-  sessions,
-  currentSessionId,
-  explicit,
-}: {
-  sessions: readonly SessionSummary[]
-  currentSessionId: string | null
-  explicit: boolean
-}): SessionSummary | null {
-  if (sessions.length === 0) return null
-  if (currentSessionId === null) return null
-  const currentExists = sessionExists(sessions, currentSessionId)
-  if (explicit && currentExists) return null
-  const candidates = currentExists ? sessions : sessions.filter((s) => s.sessionId !== currentSessionId)
-  return candidates.find((s) => s.eventCount > 0) ?? candidates[0] ?? null
-}
 
 type Config = {
   sessionId: string | null
