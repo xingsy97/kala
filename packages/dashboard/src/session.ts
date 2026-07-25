@@ -40,6 +40,7 @@ import {
   reduceSessionProjection,
   timelineEntry,
   type ConnectionStatus,
+  type SessionProjectionEvent,
   type TimelineEntry,
 } from './session-projection.js'
 import type { CachedSessionView, SessionViewCache } from './session-view-cache.js'
@@ -152,6 +153,37 @@ export function useSession({
     }
     let resetHistoryBaseOnNextReplay = false
 
+    // Coalesce the two high-frequency projection channels (`event:appended`
+    // and `state:changed`) to at most one React commit per animation frame.
+    // socket.io delivers each wire message in its own macrotask, so React 18's
+    // automatic batching does NOT merge them — during a tool-heavy turn that is
+    // dozens of independent re-renders of the whole App per second, which
+    // starves the main thread (buttons feel dead, the hover cursor stops
+    // updating). We buffer these deltas and flush them in insertion order once
+    // per frame. Discrete, order-sensitive events (ready/history/queue/error/
+    // model) flush the buffer synchronously first so ordering is never broken.
+    let projectionQueue: SessionProjectionEvent[] = []
+    let projectionRaf: number | null = null
+    const flushProjectionQueue = (): void => {
+      if (projectionRaf !== null) {
+        cancelAnimationFrame(projectionRaf)
+        projectionRaf = null
+      }
+      if (projectionQueue.length === 0) return
+      const batch = projectionQueue
+      projectionQueue = []
+      for (const evt of batch) dispatchProjection(evt)
+    }
+    const enqueueProjection = (evt: SessionProjectionEvent): void => {
+      projectionQueue.push(evt)
+      if (projectionRaf === null) {
+        projectionRaf = requestAnimationFrame(() => {
+          projectionRaf = null
+          flushProjectionQueue()
+        })
+      }
+    }
+
     // Throttle React commits to ~15fps. The rAF loop previously called
     // setStreamingText on every frame (~60fps), which re-rendered the whole
     // App subtree (transcript + composer + chrome) 60x/sec during streaming —
@@ -256,6 +288,7 @@ export function useSession({
         return
       }
       if (p.sessionId !== sessionId) return
+      flushProjectionQueue()
       dispatchProjection({ kind: 'ready', generation, sessionId, payload: p })
       // Timeline was cleared for a fresh connect; ask the host to replay
       // the log so a page reload doesn't leave the user staring at an
@@ -281,6 +314,7 @@ export function useSession({
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       const reset = resetHistoryBaseOnNextReplay
       resetHistoryBaseOnNextReplay = false
+      flushProjectionQueue()
       dispatchProjection({ kind: 'history', generation, sessionId, entries: p.entries.map(timelineEntry), reset })
     })
     socket.on('state:changed', (p) => {
@@ -290,15 +324,26 @@ export function useSession({
       // via kernel step()). This handler runs if a wire event lands
       // out-of-order or if the host pushes a mid-stream correction; in
       // both cases the server-computed state wins.
-      dispatchProjection({ kind: 'authoritative', generation, sessionId, payload: p })
+      //
+      // Coalesced to one commit per frame (see enqueueProjection): during a
+      // tool-heavy turn state:changed fires very frequently and each one used
+      // to re-render the whole App synchronously.
+      enqueueProjection({ kind: 'authoritative', generation, sessionId, payload: p })
       if (p.state.status !== 'thinking') resetStream()
     })
     socket.on('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
+        // Turn-boundary events: flush any buffered deltas first so ordering is
+        // preserved, then reset the streaming tail and apply immediately.
         resetStream()
+        flushProjectionQueue()
+        dispatchProjection({ kind: 'appended', generation, sessionId, payload: p })
+        return
       }
-      dispatchProjection({ kind: 'appended', generation, sessionId, payload: p })
+      // High-frequency mid-turn events (tool_call / tool_result): coalesce to
+      // one React commit per animation frame.
+      enqueueProjection({ kind: 'appended', generation, sessionId, payload: p })
     })
     socket.on('approval:required', () => {
       // Best-effort: the reducer's next state:changed already carries the
@@ -317,6 +362,7 @@ export function useSession({
     socket.on('session:error', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       resetStream()
+      flushProjectionQueue()
       dispatchProjection({ kind: 'error', generation, sessionId, error: p })
     })
     socket.on('session:token_delta', (p) => {
@@ -375,6 +421,14 @@ export function useSession({
         cancelAnimationFrame(streamRafRef.current)
         streamRafRef.current = null
       }
+      if (projectionRaf !== null) {
+        cancelAnimationFrame(projectionRaf)
+        projectionRaf = null
+      }
+      // Drop any buffered projection deltas: this socket/session is being torn
+      // down (session switch or reconnect), and the fresh connection replays
+      // an authoritative baseline via session:ready + history.
+      projectionQueue = []
       streamBufferRef.current = ''
       socket?.close()
       if (socketRef.current === socket) socketRef.current = null

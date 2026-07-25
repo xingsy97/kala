@@ -53,9 +53,16 @@ export function SessionHoverPreview({ anchor, getCachedSessionView, onHoverChang
   if (!anchor || !cached) return null
 
   const position = previewPosition(anchor.rect)
-  const items = visibleTranscript(cached.state?.messages ?? [], cached.timeline, '', [], cached.queuedMessages, {
+  const allItems = visibleTranscript(cached.state?.messages ?? [], cached.timeline, '', [], cached.queuedMessages, {
     includeStatePrefix: cached.parentSessionId !== null,
   })
+  // A hover preview only needs to show the tail of the conversation. Rendering
+  // the *entire* transcript (every message's markdown + code highlighting)
+  // just to peek at a session is a heavy render that competes with the main
+  // pane — especially on long, previously-opened sessions. Cap it to the last
+  // slice; the preview is a glance, not the full view.
+  const PREVIEW_TAIL = 12
+  const items = allItems.length > PREVIEW_TAIL ? allItems.slice(-PREVIEW_TAIL) : allItems
 
   return createPortal(
     <div
