@@ -4,9 +4,6 @@ import {
   EvalRunsView as EvalRunsViewInternal,
   ArtifactContentDialog,
   fetchArtifactContent,
-  mergeEvalRuns,
-  trialStableId,
-  trialInstanceId,
   type ArtifactDetailRequest,
   type EvalComparisonRow,
   type EvalJudgeRow,
@@ -24,6 +21,7 @@ import {
   type EvalWorkerPlan,
   type EvalWorkerPlanRow,
 } from './shared/internals.js'
+import { mergeEvalRuns, trialInstanceId, trialStableId } from './artifact-model.js'
 import { useArtifactManifest } from './shared/useArtifactManifest.js'
 
 export function EvalRunsView({
