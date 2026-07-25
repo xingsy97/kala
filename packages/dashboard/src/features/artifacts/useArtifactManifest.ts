@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
-import type { ArtifactManifest } from './internals.js'
+import type { ArtifactManifest } from './artifact-views.js'
 
 export type ManifestState = {
   manifest: ArtifactManifest | null

@@ -13,7 +13,7 @@ import type {
   TrialArtifactCategory,
   TrialArtifactGroup,
   TrialArtifactItem,
-} from './shared/internals.js'
+} from './artifact-views.js'
 
 const trialArtifactCategoryOrder: readonly TrialArtifactCategory[] = ['patch', 'trace', 'harness', 'log', 'prompt', 'metadata', 'other']
 

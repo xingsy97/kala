@@ -3,19 +3,19 @@ import { CheckCircle2, Dices, FileText, RefreshCw, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
-import { Button } from '../../../components/ui/button.js'
-import { Input } from '../../../components/ui/input.js'
+import { Button } from '../../components/ui/button.js'
+import { Input } from '../../components/ui/input.js'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '../../../components/ui/dialog.js'
-import { ScrollArea } from '../../../components/ui/scroll-area.js'
-import { JsonBlock } from '../../../components/ui/json-block.js'
-import { cn } from '../../../lib/utils.js'
-import { arrayField, arrayLength, asRecord, booleanField, formatBytes, formatBytesMetric, formatConfidence, formatDeltaValue, formatDuration, formatDurationMetric, formatInteger, formatPercent, groupTrialArtifacts, numberField, stringField, trialArtifactCategoryLabelKey, trialInstanceId, trialStableId } from '../artifact-model.js'
+} from '../../components/ui/dialog.js'
+import { ScrollArea } from '../../components/ui/scroll-area.js'
+import { JsonBlock } from '../../components/ui/json-block.js'
+import { cn } from '../../lib/utils.js'
+import { arrayField, arrayLength, asRecord, booleanField, formatBytes, formatBytesMetric, formatConfidence, formatDeltaValue, formatDuration, formatDurationMetric, formatInteger, formatPercent, groupTrialArtifacts, numberField, stringField, trialArtifactCategoryLabelKey, trialInstanceId, trialStableId } from './artifact-model.js'
 
 export type ArtifactManifestEntry = {
   path: string

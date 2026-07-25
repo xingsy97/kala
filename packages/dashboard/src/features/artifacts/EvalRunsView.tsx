@@ -20,9 +20,9 @@ import {
   type EvalTrialRow,
   type EvalWorkerPlan,
   type EvalWorkerPlanRow,
-} from './shared/internals.js'
+} from './artifact-views.js'
 import { mergeEvalRuns, trialInstanceId, trialStableId } from './artifact-model.js'
-import { useArtifactManifest } from './shared/useArtifactManifest.js'
+import { useArtifactManifest } from './useArtifactManifest.js'
 
 export function EvalRunsView({
   onOpenSession,
