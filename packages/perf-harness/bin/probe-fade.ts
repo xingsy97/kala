@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     const med = (a: number[]): number => {
       if (a.length === 0) return 0
       const s = [...a].sort((x, y) => x - y)
-      return Math.round(s[Math.floor(s.length / 2)])
+      return Math.round(s[Math.floor(s.length / 2)]!)
     }
 
     const report = {
