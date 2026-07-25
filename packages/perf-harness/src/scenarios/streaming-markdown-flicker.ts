@@ -30,10 +30,18 @@ export type StreamingMarkdownMetrics = {
   blocksAdded: number
   /** Changes to the earlier (non-tail) region — the true "flicker" signal. */
   earlyRegionChanges: number
+  /** Peak number of per-character fade spans seen at any instant (must stay bounded). */
+  maxFadeSpans: number
 }
 
 /** Suggested threshold: the already-rendered region must stay near-stable. */
 const EARLY_REGION_CHANGES_MAX = 8
+/**
+ * The per-character fade window is bounded (REVEAL_FADE_WINDOW_CHARS in the
+ * dashboard text-reveal module). Sampling can catch a couple of in-flight
+ * leaves, so allow a small multiple; the point is it must NOT grow with length.
+ */
+const MAX_FADE_SPANS_CEILING = 160
 
 export async function runStreamingMarkdownFlicker(
   ctx: ScenarioContext,
@@ -45,6 +53,21 @@ export async function runStreamingMarkdownFlicker(
   const BLOCK_SELECTOR = 'p, pre, li, table, ul, ol, h1, h2, h3, h4, blockquote'
   const STREAM_CONTAINER = '.ak-streaming-markdown'
 
+  // Poll the live count of per-character fade spans while streaming, tracking the
+  // peak. Bounded peak => the fade window is capped regardless of reply length.
+  let maxFadeSpans = 0
+  let polling = true
+  const pollFade = async (): Promise<void> => {
+    while (polling) {
+      const n = await session.page
+        .evaluate(() => document.querySelectorAll('.ak-char-in').length)
+        .catch(() => 0)
+      if (n > maxFadeSpans) maxFadeSpans = n
+      await waitMs(120)
+    }
+  }
+  const fadePoll = pollFade()
+
   // Two overlapping observers in one run: total block churn and early-region
   // churn. We start the stream once and observe both windows concurrently.
   let churn = { removed: 0, added: 0, totalMutations: 0 }
@@ -54,18 +77,21 @@ export async function runStreamingMarkdownFlicker(
       await waitMs(observeMs)
     })
   })
+  polling = false
+  await fadePoll
 
   const metrics: StreamingMarkdownMetrics = {
     blocksRemoved: churn.removed,
     blocksAdded: churn.added,
     earlyRegionChanges: early.earlyRegionChanges,
+    maxFadeSpans,
   }
-  const pass = metrics.earlyRegionChanges <= EARLY_REGION_CHANGES_MAX
+  const pass = metrics.earlyRegionChanges <= EARLY_REGION_CHANGES_MAX && metrics.maxFadeSpans <= MAX_FADE_SPANS_CEILING
   return {
     name: 'streaming-markdown-flicker',
     reproduces: 'Already-rendered markdown blocks flicker while later content streams in.',
     metrics,
     pass,
-    notes: `earlyRegionChanges ${metrics.earlyRegionChanges} (threshold ≤ ${EARLY_REGION_CHANGES_MAX}); blockChurn removed=${metrics.blocksRemoved} added=${metrics.blocksAdded}. Only the trailing block should update.`,
+    notes: `earlyRegionChanges ${metrics.earlyRegionChanges} (threshold ≤ ${EARLY_REGION_CHANGES_MAX}); blockChurn removed=${metrics.blocksRemoved} added=${metrics.blocksAdded}; maxFadeSpans ${metrics.maxFadeSpans} (bounded ≤ ${MAX_FADE_SPANS_CEILING}). Only the trailing block should update, and the per-character fade window must stay bounded.`,
   }
 }

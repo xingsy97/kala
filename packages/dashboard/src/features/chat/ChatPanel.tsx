@@ -63,7 +63,7 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
 import { formatTokens } from '../../lib/format.js'
-import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT } from '../../lib/prefs.js'
+import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, PREF_SMOOTH_STREAMING_TEXT, useBooleanPref } from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
@@ -79,6 +79,7 @@ import {
 import { SubAgentCard } from './SubAgentCard.js'
 import { GroupSummaryPreview, GroupSummaryRow, firstLine, pickRenderer, truncate, type SummaryDelta, type SummaryRow } from './toolSummaries/index.js'
 import type { DashboardSocket } from '../../session.js'
+import { RevealCursor, RevealTail, canFadeRevealTail } from './text-reveal/index.js'
 import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 
@@ -1745,21 +1746,35 @@ export function splitStableMarkdown(text: string): { stable: string; tail: strin
 }
 
 const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
+  const [smoothFade] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
   // While streaming, render every completed block as its own memoized unit so a
   // new token only re-renders the trailing block; finished blocks never rebuild.
   if (streaming) {
     const { blocks, tail } = splitMarkdownBlocks(text)
+    // While a trailing block is actively streaming, render it as plain text with a
+    // persistent per-character fade tail (RevealTail) instead of through
+    // ReactMarkdown. ReactMarkdown re-parses the tail every token, which remounts
+    // any nested fade spans and restarts their animation each frame (invisible
+    // fade + flashing). Completed blocks above keep full markdown + memoization.
+    // The trailing block loses live markdown styling for the brief moment before
+    // it settles into a completed block — an accepted tradeoff for a stable fade.
+    const useFadeTail = smoothFade && canFadeRevealTail(tail)
+    const body = useFadeTail ? (
+      <RevealTail text={tail} />
+    ) : (
+      <MarkdownBody text={tail} streaming />
+    )
     if (blocks.length > 0) {
       return (
         <>
           {blocks.map((block, index) => (
             <MarkdownBlock key={index} text={block} />
           ))}
-          <MarkdownBody text={tail} streaming />
+          {body}
         </>
       )
     }
-    return <MarkdownBody text={text} streaming />
+    return body
   }
   return <MarkdownBody text={text} streaming={false} />
 })
@@ -1774,7 +1789,14 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
   const onOpenWorkspaceFile = useContext(WorkspaceFileLinkContext)
   const cursorTarget = streaming ? findStreamingCursorTarget(text) : null
   const cursorEndOffset = text.trimEnd().length
-  const cursor = <StreamingCursor />
+  const cursor = <RevealCursor />
+  // The streaming cursor is placed at the active leaf. Per-character fade is NOT
+  // done here: spans nested inside ReactMarkdown remount on every token (the AST
+  // is re-parsed), which restarts their CSS animation every frame — so the fade
+  // was invisible and already-shown text flashed. The fade now lives in
+  // <RevealTail>, a persistent sibling that ReactMarkdown never re-parses.
+  const placeTextCursor = (children: React.ReactNode): React.ReactNode =>
+    appendCursor(children, cursor)
   return (
     <div
       className={cn(
@@ -1821,35 +1843,35 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
             )
           },
           p({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'p', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'p', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <p {...rest}>{withCursor}</p>
           },
           li({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'li', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'li', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <li {...rest}>{withCursor}</li>
           },
           h1({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h1', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h1', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <h1 {...rest}>{withCursor}</h1>
           },
           h2({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h2', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h2', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <h2 {...rest}>{withCursor}</h2>
           },
           h3({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h3', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h3', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <h3 {...rest}>{withCursor}</h3>
           },
           h4({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h4', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'h4', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <h4 {...rest}>{withCursor}</h4>
           },
           td({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'td', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'td', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <td {...rest}>{withCursor}</td>
           },
           th({ children, node: _node, ...rest }) {
-            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'th', _node, cursorEndOffset) ? appendCursor(children, cursor) : children
+            const withCursor = shouldPlaceStreamingCursor(cursorTarget, 'th', _node, cursorEndOffset) ? placeTextCursor(children) : children
             return <th {...rest}>{withCursor}</th>
           },
           a({ href, children, ...rest }) {
@@ -1889,10 +1911,6 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
 })
 
 type StreamingCursorTarget = 'p' | 'li' | 'code' | 'h1' | 'h2' | 'h3' | 'h4' | 'td' | 'th'
-
-function StreamingCursor(): JSX.Element {
-  return <span className="ak-streaming-cursor" aria-hidden="true" data-testid="streaming-cursor" />
-}
 
 function appendCursor(children: React.ReactNode, cursor: JSX.Element): React.ReactNode {
   return <>{children}{cursor}</>

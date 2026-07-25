@@ -44,6 +44,7 @@ import {
   type TimelineEntry,
 } from './session-projection.js'
 import type { CachedSessionView, SessionViewCache } from './session-view-cache.js'
+import { readBooleanPref, PREF_SMOOTH_STREAMING_TEXT } from './lib/prefs.js'
 
 export type { ConnectionStatus, TimelineEntry } from './session-projection.js'
 
@@ -100,6 +101,13 @@ export type UseSessionOptions = {
 }
 
 const CONTROL_SOCKET_SESSION_ID = '__agent-kernel-control__'
+
+/**
+ * Text-reveal pacing lives in the text-reveal feature module (presentation
+ * concern, see docs/design/smooth-streaming-text.md). The session drain loop
+ * consumes the pure rate model to pace how received tokens are revealed.
+ */
+import { computeReveal } from './features/chat/text-reveal/rate.js'
 
 export function useSession({
   host,
@@ -184,49 +192,83 @@ export function useSession({
       }
     }
 
-    // Throttle React commits to ~15fps. The rAF loop previously called
-    // setStreamingText on every frame (~60fps), which re-rendered the whole
-    // App subtree (transcript + composer + chrome) 60x/sec during streaming —
-    // the main cause of typing lag in the composer while the agent is
-    // thinking/streaming, and of general jank on mobile/PWA. Committing at most
-    // once per ~66ms keeps streaming visually smooth (humans can't read faster)
-    // while cutting streaming-driven re-renders ~4x.
+    // Streaming reveal. token_delta events land in `streamBufferRef`; a rAF
+    // loop releases characters into React state (`setStreamingText`). Two modes:
+    //
+    //  - Smooth (setting on, default): release characters at an EVEN rate
+    //    (REVEAL_BASE_CPS), speeding up to REVEAL_MAX_CPS only enough to never
+    //    lag the incoming data by more than REVEAL_MAX_LAG_SECONDS. Characters
+    //    flow one/few at a time instead of bursting; the tail fade-in
+    //    (ChatPanel) makes each character appear softly.
+    //  - Batched (setting off): the previous behavior — release ~10% of the
+    //    backlog per frame, committing at most once per MIN_COMMIT_MS (~15fps).
+    //
+    // Either way the completed-block memoization means only the tail re-renders.
+    const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const smoothEnabled = readBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
+
     const MIN_COMMIT_MS = 66
     let lastCommitMs = 0
     let pendingCommit = ''
+    let carry = 0 // fractional characters owed, carried across frames (smooth mode)
+    let lastFrameMs = 0
     const commitPending = (): void => {
       if (pendingCommit.length === 0) return
       const chunk = pendingCommit
       pendingCommit = ''
-      lastCommitMs = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+      lastCommitMs = now()
       setStreamingText((prev) => prev + chunk)
     }
-    const drainStreamBuffer = (): void => {
+
+    const drainSmooth = (): void => {
       const buf = streamBufferRef.current
       if (buf.length === 0) {
-        // Flush whatever hasn't been committed yet, then stop the loop.
+        streamRafRef.current = null
+        lastFrameMs = 0
+        return
+      }
+      const t = now()
+      const dt = lastFrameMs === 0 ? 1 / 60 : Math.min(0.1, (t - lastFrameMs) / 1000)
+      lastFrameMs = t
+      const release = computeReveal(buf.length, dt, carry)
+      carry = release.carry
+      const count = release.count
+      if (count <= 0) {
+        streamRafRef.current = requestAnimationFrame(drainSmooth)
+        return
+      }
+      const chunk = buf.slice(0, count)
+      streamBufferRef.current = buf.slice(count)
+      // Smooth mode commits every frame it releases characters (cheap: only the
+      // tail re-renders) so the reveal is per-frame even, not batched.
+      setStreamingText((prev) => prev + chunk)
+      streamRafRef.current = requestAnimationFrame(drainSmooth)
+    }
+
+    const drainBatched = (): void => {
+      const buf = streamBufferRef.current
+      if (buf.length === 0) {
         commitPending()
         streamRafRef.current = null
         return
       }
-      // Adaptive rate: 1-2 chars per frame when idle-ish; 10% of backlog when
-      // catching up so we don't fall arbitrarily behind on long bursts. Cap by
-      // buffer length so we never read past the end.
-      const chunkSize = Math.min(
-        buf.length,
-        Math.max(2, Math.ceil(buf.length / 10)),
-      )
+      const chunkSize = Math.min(buf.length, Math.max(2, Math.ceil(buf.length / 10)))
       const chunk = buf.slice(0, chunkSize)
       streamBufferRef.current = buf.slice(chunkSize)
       pendingCommit += chunk
-      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
-      if (now - lastCommitMs >= MIN_COMMIT_MS) commitPending()
-      streamRafRef.current = requestAnimationFrame(drainStreamBuffer)
+      if (now() - lastCommitMs >= MIN_COMMIT_MS) commitPending()
+      streamRafRef.current = requestAnimationFrame(drainBatched)
+    }
+
+    const drainStreamBuffer = (): void => {
+      if (smoothEnabled) drainSmooth()
+      else drainBatched()
     }
 
     const pushStreamDelta = (text: string): void => {
       streamBufferRef.current += text
       if (streamRafRef.current === null) {
+        lastFrameMs = 0
         streamRafRef.current = requestAnimationFrame(drainStreamBuffer)
       }
     }
@@ -234,6 +276,8 @@ export function useSession({
     const resetStream = (): void => {
       streamBufferRef.current = ''
       pendingCommit = ''
+      carry = 0
+      lastFrameMs = 0
       if (streamRafRef.current !== null) {
         cancelAnimationFrame(streamRafRef.current)
         streamRafRef.current = null

@@ -60,6 +60,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   durableSessionCacheEnabled: { key: 'ak-durable-session-cache-enabled', type: 'boolean', defaultValue: true },
   appBadgeEnabled: { key: 'ak-app-badge-enabled', type: 'boolean', defaultValue: true },
   keepScreenAwake: { key: 'ak-keep-screen-awake', type: 'boolean', defaultValue: false },
+  smoothStreamingText: { key: 'ak-smooth-streaming-text', type: 'boolean', defaultValue: true },
   desktopNotificationsEnabled: { key: 'ak-desktop-notifications-enabled', type: 'boolean', defaultValue: false },
   desktopNotificationApproval: { key: 'ak-desktop-notification-approval-required', type: 'boolean', defaultValue: true },
   desktopNotificationWaiting: { key: 'ak-desktop-notification-waiting-for-user', type: 'boolean', defaultValue: true },
@@ -112,6 +113,17 @@ function writeRaw(key: string, value: string | null): void {
  * against the same key stay in sync via a same-tab custom event and the
  * cross-tab `storage` event.
  */
+/**
+ * Read a boolean preference imperatively (no React). Used by non-component code
+ * such as the streaming loop in session.ts that needs the current value without
+ * subscribing. Falls back to `defaultValue` when unset/unparseable.
+ */
+export function readBooleanPref(key: string, defaultValue: boolean): boolean {
+  const raw = readRaw(key)
+  if (raw === null) return defaultValue
+  return raw === '1' || raw === 'true'
+}
+
 export function useBooleanPref(
   key: string,
   defaultValue: boolean,
@@ -218,6 +230,7 @@ export const PREF_CHAT_MATH_SCALE = DASHBOARD_PREFERENCES.chatMathScale.key
 export const PREF_DURABLE_SESSION_CACHE_ENABLED = DASHBOARD_PREFERENCES.durableSessionCacheEnabled.key
 export const PREF_APP_BADGE_ENABLED = DASHBOARD_PREFERENCES.appBadgeEnabled.key
 export const PREF_KEEP_SCREEN_AWAKE = DASHBOARD_PREFERENCES.keepScreenAwake.key
+export const PREF_SMOOTH_STREAMING_TEXT = DASHBOARD_PREFERENCES.smoothStreamingText.key
 export const PREF_MODEL = DASHBOARD_PREFERENCES.model.key
 export const PREF_HOST_ENDPOINT = DASHBOARD_PREFERENCES.hostEndpoint.key
 export const PREF_THEME = DASHBOARD_PREFERENCES.theme.key
