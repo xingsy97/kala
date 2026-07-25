@@ -7,9 +7,9 @@ import {
   type ArtifactDetailRequest,
   type OpsArtifactKind,
   type OpsArtifactRow,
-} from './shared/internals.js'
+} from './artifact-views.js'
 import { asRecord, isOpsArtifactKind, opsKindOrder } from './artifact-model.js'
-import { useArtifactManifest } from './shared/useArtifactManifest.js'
+import { useArtifactManifest } from './useArtifactManifest.js'
 
 export function OpsView(): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()

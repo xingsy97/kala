@@ -1,1 +1,1 @@
-export { RunBenchmarkWizard } from './shared/internals.js'
+export { RunBenchmarkWizard } from './artifact-views.js'

@@ -5,8 +5,8 @@ import {
   fetchArtifactContent,
   type ProfileRow,
   type SessionProfile,
-} from './shared/internals.js'
-import { useArtifactManifest } from './shared/useArtifactManifest.js'
+} from './artifact-views.js'
+import { useArtifactManifest } from './useArtifactManifest.js'
 
 export function ProfilesView(): JSX.Element {
   const { manifest, loading, error, reload, reloadToken } = useArtifactManifest()

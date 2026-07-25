@@ -8,7 +8,7 @@ import { MemoryView } from './MemoryView.js'
 import { OpsView } from './OpsView.js'
 import { ProfilesView } from './ProfilesView.js'
 import { RunBenchmarkWizard } from './RunBenchmarkWizard.js'
-import type { ArtifactManifest } from './shared/internals.js'
+import type { ArtifactManifest } from './artifact-views.js'
 
 type ArtifactMode = 'artifacts' | 'eval' | 'profiles' | 'memory' | 'ops'
 
