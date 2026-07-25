@@ -216,6 +216,19 @@ function ExplorerImpl({
     }, 80)
   }, [])
 
+  // Tear the hover preview down once a session actually becomes selected. Doing
+  // this here (reacting to the committed selection) rather than in the row's
+  // mousedown handler is important: mutating this state during mousedown
+  // re-renders the react-arborist tree mid-click and swallows the activation,
+  // which made previously-opened (preview-eligible) sessions require two
+  // clicks to load. This keeps the click path untouched while still ensuring
+  // the heavy full-ChatPanel preview never lingers over the switching pane.
+  useEffect(() => {
+    if (selectedSessionId === null) return
+    previewHoveringRef.current = false
+    setPreviewAnchor((current) => (current === null ? current : null))
+  }, [selectedSessionId])
+
   const activate = (node: NodeApi<TreeNode>): void => {
     if (node.data.kind === 'session') onSelect(node.data.sessionId)
   }
@@ -1009,6 +1022,12 @@ function SessionRow({
         // Suppress the second `click` in a native double-click sequence so it
         // doesn't reach the react-arborist row handler and re-activate the
         // session (which unmounts our rename input mid-edit).
+        //
+        // NOTE: do NOT tear the hover preview down here. Mutating Explorer
+        // state during mousedown re-renders the react-arborist tree between
+        // mousedown and click and swallows the activation, so the session only
+        // loads on the *second* click. Preview teardown is handled by an effect
+        // that watches the selected session id instead (see ExplorerImpl).
         if (e.detail >= 2) e.preventDefault()
       }}
       onDoubleClick={(e) => {

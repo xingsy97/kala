@@ -103,7 +103,6 @@ import {
 import { backgroundTerminalTasks } from './background-terminal.js'
 import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.js'
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
-import { withViewTransition } from './lib/viewTransition.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
 import { appendLiveTranscriptItems, reconcilePendingUserMessages, transcriptBaseItems } from './transcript.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
@@ -734,18 +733,30 @@ export function App(): JSX.Element {
   }, [session.socket, config.sessionId])
 
   const selectSession = useCallback((sessionId: string): void => {
-    withViewTransition(() => setConfig((prev) => ({ ...prev, sessionId, explicit: true })))
+    // Do NOT wrap this in withViewTransition: that forces a flushSync of the
+    // entire App (2900-line tree + a fresh useSession socket connect + history
+    // hydration) inside the browser's view-transition screenshot window, which
+    // freezes the page for the whole synchronous commit — the visible "card
+    // goes white, page hangs, then the chat suddenly swaps" jank. Instead we
+    // let React render the sessionId change normally (non-blocking) and give
+    // the chat pane its own lightweight per-session cross-fade (keyed on the
+    // active session id) plus the existing loading skeleton for the hydration
+    // gap. No frozen frame, and the right pane animates on every switch.
+    setConfig((prev) => ({ ...prev, sessionId, explicit: true }))
   }, [])
   const clearSessionSelection = useCallback((): void => {
     suppressNextAutoSessionSelection.current = true
     setMetadataOpen(false)
     setMetadataSessionId(null)
     setCwdDialogOpen(false)
-    withViewTransition(() => setConfig((prev) => ({
+    // Same rationale as selectSession: avoid a flushSync of the whole App. The
+    // no-session placeholder already scale-fades in and the chat pane is keyed
+    // on the active session id, so clearing gets a lightweight cross-fade too.
+    setConfig((prev) => ({
       ...prev,
       sessionId: null,
       explicit: false,
-    })))
+    }))
   }, [])
   const newSession = useCallback((workspaceId?: string): void => {
     setWorkspacePickError(null)
@@ -1683,7 +1694,8 @@ export function App(): JSX.Element {
                   ) : null}
                   <div className="relative grid flex-1 min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden">
                     <div
-                      className="flex min-h-0 min-w-0 flex-col bg-background overflow-hidden"
+                      key={activeSessionId ?? 'no-session'}
+                      className="ak-motion-session-swap flex min-h-0 min-w-0 flex-col bg-background overflow-hidden"
                       data-testid="chat-panel"
                     >
                       <ChatPanel
@@ -1932,7 +1944,7 @@ export function App(): JSX.Element {
                 <>
                   <ResizableHandle withHandle />
                   <ResizablePanel defaultSize={26} minSize={22} maxSize={36} className="bg-card text-card-foreground" data-testid="inspector-panel">
-                    <div className="h-full min-h-0 overflow-hidden" data-testid="inspector-drawer">
+                    <div className="ak-motion-fade h-full min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <InspectorPanel
                         state={session.state}
                         config={session.config}
@@ -1967,7 +1979,7 @@ export function App(): JSX.Element {
       )}
       <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
-          className="left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:w-96 sm:rounded-none"
+          className="ak-motion-slide-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:w-96 sm:rounded-none"
           data-testid="explorer-drawer"
         >
           <DialogHeader className="sr-only">
@@ -2037,7 +2049,7 @@ export function App(): JSX.Element {
       </Dialog>
       <Dialog open={inspectorDrawerOpen && !wideLayout && hasSelectedSession} onOpenChange={setInspectorDrawerOpen}>
         <DialogContent
-          className="right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] sm:w-[26rem] sm:rounded-none"
+          className="ak-motion-slide-right right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] sm:w-[26rem] sm:rounded-none"
           data-testid="inspector-drawer-mobile"
         >
           <DialogHeader className="sr-only">
@@ -2533,7 +2545,7 @@ export function NoSessionArea({
       className="flex-1 min-h-0 flex items-center justify-center bg-background"
       data-testid="no-session-placeholder"
     >
-      <div className="flex max-w-md flex-col items-center gap-4 px-6 text-center">
+      <div className="ak-motion-scale-in flex max-w-md flex-col items-center gap-4 px-6 text-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted/60">
           <Sparkles className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
