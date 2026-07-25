@@ -4,13 +4,11 @@ import {
   OpsView as OpsViewInternal,
   ArtifactContentDialog,
   fetchArtifactContent,
-  isOpsArtifactKind,
-  opsKindOrder,
-  asRecord,
   type ArtifactDetailRequest,
   type OpsArtifactKind,
   type OpsArtifactRow,
 } from './shared/internals.js'
+import { asRecord, isOpsArtifactKind, opsKindOrder } from './artifact-model.js'
 import { useArtifactManifest } from './shared/useArtifactManifest.js'
 
 export function OpsView(): JSX.Element {
