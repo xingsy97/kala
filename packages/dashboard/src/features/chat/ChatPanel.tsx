@@ -68,7 +68,7 @@ import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
 import { CodeBlock } from './CodeBlock.js'
-import { CompactFeedbackRow, type CompactStatus } from './InlineStatusRow.js'
+import { CompactFeedbackRow, useElapsedSeconds, type CompactStatus } from './InlineStatusRow.js'
 import {
   type GroupedContentItem,
   type ToolCallGroup,
@@ -114,6 +114,7 @@ type Props = {
   /** UI-level compaction operation status rendered inline at transcript tail. */
   compactStatus?: CompactStatus
   liveToolActivityTailCount?: number
+  toolExecutionStartedAt?: number | null
   toolCardMode?: ToolCardMode
   displayPrefs?: ChatDisplayPrefs
   onDismissCompactStatus?: () => void
@@ -193,6 +194,7 @@ export function ChatPanel({
   scrollToBottomToken,
   compactStatus,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  toolExecutionStartedAt,
   toolCardMode = 'dots',
   displayPrefs,
   onDismissCompactStatus,
@@ -368,6 +370,7 @@ export function ChatPanel({
             approvalByCallId={approvalByCallId}
             onApprovalDecision={onApprovalDecision}
             liveToolActivityTailCount={liveToolActivityTailCount}
+            toolExecutionStartedAt={toolExecutionStartedAt}
             toolCardMode={toolCardMode}
           />
         )
@@ -417,6 +420,7 @@ export function ChatPanel({
       socket,
       onDismissCompactStatus,
       liveToolActivityTailCount,
+      toolExecutionStartedAt,
       toolCardMode,
     ],
   )
@@ -808,6 +812,7 @@ function ToolActivityTranscriptRow({
   approvalByCallId,
   onApprovalDecision,
   liveToolActivityTailCount,
+  toolExecutionStartedAt,
   toolCardMode,
 }: {
   item: Extract<RenderTranscriptItem, { kind: 'tool_activity' }>
@@ -816,6 +821,7 @@ function ToolActivityTranscriptRow({
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   liveToolActivityTailCount: number
+  toolExecutionStartedAt?: number | null
   toolCardMode: ToolCardMode
 }): JSX.Element {
   if (toolCardMode === 'dots') {
@@ -853,6 +859,7 @@ function ToolActivityTranscriptRow({
             approvalByCallId={approvalByCallId}
             onApprovalDecision={onApprovalDecision}
             liveToolActivityTailCount={liveToolActivityTailCount}
+            toolExecutionStartedAt={toolExecutionStartedAt}
             toolCardMode={toolCardMode}
           />
         </div>
@@ -894,6 +901,7 @@ function ToolActivityTranscriptRow({
           approvalByCallId={approvalByCallId}
           onApprovalDecision={onApprovalDecision}
           liveToolActivityTailCount={liveToolActivityTailCount}
+          toolExecutionStartedAt={toolExecutionStartedAt}
           toolCardMode={toolCardMode}
         />
       </div>
@@ -1700,7 +1708,69 @@ function ThinkingBlock({
   )
 }
 
+/**
+ * Split streaming markdown into completed blocks (everything up to safe block
+ * boundaries) plus a trailing block still being written. Rendering each
+ * completed block as its own memoized component means a new token only ever
+ * appends/updates the LAST block — every earlier block is byte-identical and
+ * skips re-render entirely, eliminating the flicker where already-rendered
+ * paragraphs/code/tables were torn down and rebuilt on every token. A boundary
+ * is a blank line (`\n\n`) that is NOT inside a fenced code block.
+ */
+export function splitMarkdownBlocks(text: string): { blocks: readonly string[]; tail: string } {
+  const boundaries: number[] = []
+  let insideFence = false
+  for (let i = 0; i < text.length; i += 1) {
+    if ((i === 0 || text[i - 1] === '\n') && text.startsWith('```', i)) {
+      insideFence = !insideFence
+      continue
+    }
+    if (!insideFence && text[i] === '\n' && text[i + 1] === '\n') {
+      boundaries.push(i + 2) // include the blank line with the completed block
+    }
+  }
+  const blocks: string[] = []
+  let start = 0
+  for (const end of boundaries) {
+    blocks.push(text.slice(start, end))
+    start = end
+  }
+  return { blocks, tail: text.slice(start) }
+}
+
+/** Back-compat: previous prefix/tail split, expressed via the block split. */
+export function splitStableMarkdown(text: string): { stable: string; tail: string } {
+  const { blocks, tail } = splitMarkdownBlocks(text)
+  return { stable: blocks.join(''), tail }
+}
+
 const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
+  // While streaming, render every completed block as its own memoized unit so a
+  // new token only re-renders the trailing block; finished blocks never rebuild.
+  if (streaming) {
+    const { blocks, tail } = splitMarkdownBlocks(text)
+    if (blocks.length > 0) {
+      return (
+        <>
+          {blocks.map((block, index) => (
+            <MarkdownBlock key={index} text={block} />
+          ))}
+          <MarkdownBody text={tail} streaming />
+        </>
+      )
+    }
+    return <MarkdownBody text={text} streaming />
+  }
+  return <MarkdownBody text={text} streaming={false} />
+})
+
+// One completed markdown block, memoized on its exact text. During streaming
+// the earlier blocks keep the same text and therefore skip re-rendering.
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }): JSX.Element {
+  return <MarkdownBody text={text} streaming={false} />
+})
+
+const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
   const onOpenWorkspaceFile = useContext(WorkspaceFileLinkContext)
   const cursorTarget = streaming ? findStreamingCursorTarget(text) : null
   const cursorEndOffset = text.trimEnd().length
@@ -2742,6 +2812,7 @@ function ToolCallGroupBlock({
   approvalByCallId,
   onApprovalDecision,
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  toolExecutionStartedAt,
   toolCardMode = 'dots',
 }: {
   group: ToolCallGroup
@@ -2749,6 +2820,7 @@ function ToolCallGroupBlock({
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   liveToolActivityTailCount?: number
+  toolExecutionStartedAt?: number | null
   toolCardMode?: ToolCardMode
 }): JSX.Element {
   const [open, setOpen] = useState(false)
@@ -2791,6 +2863,12 @@ function ToolCallGroupBlock({
   const collapsedDots = toolCardMode === 'dots' && !open
   const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
   const runningCallId = [...visibleDots].reverse().find((dot) => dot.status === 'running')?.callId ?? null
+  // Live running state for this group: any dispatched call without a result and
+  // not waiting on approval. When running, this card itself carries the dynamic
+  // affordances that used to live in a second, redundant inline status card
+  // (spinning wrench, elapsed timer, pulsing badge, breathing beam).
+  const isRunning = dots.some((dot) => dot.status === 'running')
+  const runningElapsed = useElapsedSeconds(isRunning, toolExecutionStartedAt)
   const previewCallId = hoveredCallId ?? pinnedCallId ?? (anyPending ? null : runningCallId)
   const previewRow = previewCallId
     ? rows.find((row) => row.callId === previewCallId) ?? null
@@ -2819,8 +2897,11 @@ function ToolCallGroupBlock({
           : 'overflow-hidden rounded-lg',
         !collapsedDots && (anyPending
           ? 'bg-amber-50/60 ring-1 ring-amber-400/60 dark:bg-amber-950/20 dark:ring-amber-500/40'
-          : 'bg-muted/40'),
+          : isRunning
+            ? 'ak-tool-running bg-violet-50/50 ring-1 ring-violet-300/70 dark:bg-violet-950/20 dark:ring-violet-800/70'
+            : 'bg-muted/40'),
       )}
+      data-running={isRunning ? 'true' : undefined}
       data-testid={`tool-call-group-${group.firstCallId}`}
     >
       {collapsedDots ? (
@@ -2911,7 +2992,9 @@ function ToolCallGroupBlock({
             'h-3.5 w-3.5 flex-none',
             anyPending
               ? 'text-amber-600 dark:text-amber-400'
-              : 'text-muted-foreground',
+              : isRunning
+                ? 'text-violet-600 animate-[spin_2s_linear_infinite] dark:text-violet-300'
+                : 'text-muted-foreground',
           )}
         />
         <span className="flex min-w-0 items-center gap-1.5">
@@ -2955,11 +3038,17 @@ function ToolCallGroupBlock({
             </span>
           ) : null}
           {!singleCall ? <ToolLifecycleSummaryBadges summary={groupLifecycle} /> : null}
+          {isRunning ? (
+            <span className="flex-none whitespace-nowrap font-mono text-[10px] tabular-nums text-violet-700/80 dark:text-violet-300/80" data-testid="tool-running-elapsed">
+              ↳ {runningElapsed.toFixed(1)}s
+            </span>
+          ) : null}
           {singleStatus ? (
             <span
               className={cn(
                 'inline-flex h-5 flex-none items-center rounded px-1.5 text-[10px] font-medium uppercase leading-none tracking-wider',
                 singleStatus.className,
+                isRunning && 'motion-safe:animate-pulse',
               )}
             >
               {singleStatus.label}
@@ -3131,7 +3220,7 @@ function toolLifecycleBadge(kind: ToolLifecycleKind): { label: string; className
     return { label: 'Needs approval', className: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' }
   }
   if (kind === 'running') {
-    return { label: 'Running', className: 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300' }
+    return { label: 'Running', className: 'bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300' }
   }
   if (kind === 'failed') {
     return { label: 'Failed', className: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' }

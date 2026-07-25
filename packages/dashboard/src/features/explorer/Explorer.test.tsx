@@ -253,6 +253,32 @@ describe('Explorer', () => {
     expect(localStorage.getItem(HIDDEN_WORKSPACES_STORAGE_KEY)).toBeNull()
   })
 
+  it('keeps the same status-indicator DOM node when a running session flips thinking↔executing_tools', () => {
+    const runningSummary = { ...sessionSummary, status: 'thinking' as const }
+    // Stable callbacks so areExplorerPropsEqual isn't tripped by callback
+    // identity (in the real app these are useCallback-stable); this isolates
+    // the status flip as the only changing input.
+    const noop = () => {}
+    const props = {
+      executors: [executor],
+      selectedSessionId: runningSummary.sessionId,
+      onSelect: noop,
+      onNewSession: noop,
+      onConnectWorkspace: noop,
+      onDelete: noop,
+      onRename: noop,
+    }
+    const { rerender } = render(<Explorer {...props} sessions={[runningSummary]} />)
+    const before = screen.getByTestId('session-status-indicator')
+
+    // A tool-step flip: same session moves to executing_tools. The sidebar
+    // renders an identical spinner for both, so the indicator node must NOT be
+    // torn down and rebuilt (which would restart the spin animation).
+    rerender(<Explorer {...props} sessions={[{ ...runningSummary, status: 'executing_tools' as const }]} />)
+    const after = screen.getByTestId('session-status-indicator')
+    expect(after).toBe(before)
+  })
+
   it('does not offer hide for the unassigned workspace bucket', () => {
     render(
       <Explorer

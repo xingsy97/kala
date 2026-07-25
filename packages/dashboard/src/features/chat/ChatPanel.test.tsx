@@ -6,8 +6,8 @@ import { createInitialState } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
-import { ChatPanel as DashboardChatPanel } from './ChatPanel.js'
-import { InlineStatusRow } from './InlineStatusRow.js'
+import { ChatPanel as DashboardChatPanel, splitMarkdownBlocks } from './ChatPanel.js'
+import { InlineStatusRow, useElapsedSeconds } from './InlineStatusRow.js'
 
 function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Element {
   return <DashboardChatPanel toolCardMode="standard" {...props} />
@@ -69,23 +69,41 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('inline-status-thinking')).toBeTruthy()
   })
 
-  it('uses the persisted tool execution start time after reload', () => {
+  it('shows a live elapsed timer on the running tool card (not a separate inline status card)', () => {
+    render(
+      <DashboardChatPanel
+        toolCardMode="full"
+        toolExecutionStartedAt={Date.parse('2026-07-20T12:00:00.000Z')}
+        messages={[
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_call', callId: 'c1', name: 'bash', input: { command: 'sleep 30' } },
+            ],
+          },
+        ]}
+      />,
+    )
+
+    // The running tool is shown by its own transcript card, which now carries
+    // the live elapsed timer (spinning wrench / pulsing RUNNING badge live
+    // alongside it). There must be no second, redundant inline status card.
+    expect(screen.getByTestId('tool-call-group-c1')).toBeTruthy()
+    const elapsed = screen.getByTestId('tool-running-elapsed')
+    expect(elapsed.textContent ?? '').toMatch(/↳ \d+\.\d+s/)
+    expect(screen.queryByTestId('inline-status-tools')).toBeNull()
+  })
+
+  it('useElapsedSeconds counts from the persisted start time, not mount time', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-20T12:00:12.500Z'))
     try {
-      render(
-        <InlineStatusRow
-          state={{
-            ...createInitialState({}),
-            status: 'executing_tools',
-            pendingCalls: [{ callId: 'c1', name: 'bash', input: { command: 'sleep 30' }, status: 'dispatched' }],
-          }}
-          streamingActive={false}
-          toolExecutionStartedAt={Date.parse('2026-07-20T12:00:00.000Z')}
-        />,
-      )
-
-      expect(screen.getByTestId('inline-status-tools').textContent ?? '').toContain('12.5s')
+      function Probe(): JSX.Element {
+        const s = useElapsedSeconds(true, Date.parse('2026-07-20T12:00:00.000Z'))
+        return <span data-testid="probe">{s.toFixed(1)}s</span>
+      }
+      render(<Probe />)
+      expect(screen.getByTestId('probe').textContent).toBe('12.5s')
     } finally {
       vi.useRealTimers()
     }
@@ -1807,3 +1825,26 @@ function toolResultEntry(
     effects: [],
   }
 }
+
+describe('splitMarkdownBlocks', () => {
+  it('splits completed blocks from the trailing block being written', () => {
+    const { blocks, tail } = splitMarkdownBlocks('# Title\n\nfirst para\n\nsecond par')
+    expect(blocks).toEqual(['# Title\n\n', 'first para\n\n'])
+    expect(tail).toBe('second par')
+    // Joining the completed blocks plus the tail must reproduce the input.
+    expect(blocks.join('') + tail).toBe('# Title\n\nfirst para\n\nsecond par')
+  })
+
+  it('does not treat a blank line inside a fenced code block as a boundary', () => {
+    const text = '```ts\nconst a = 1\n\nconst b = 2\n```\n\nafter'
+    const { blocks, tail } = splitMarkdownBlocks(text)
+    // The blank line inside the fence stays in one block; only the boundary
+    // after the closing fence splits.
+    expect(blocks).toEqual(['```ts\nconst a = 1\n\nconst b = 2\n```\n\n'])
+    expect(tail).toBe('after')
+  })
+
+  it('returns no completed blocks until the first boundary appears', () => {
+    expect(splitMarkdownBlocks('just one line still typing')).toEqual({ blocks: [], tail: 'just one line still typing' })
+  })
+})

@@ -113,6 +113,27 @@ describe('human attention evaluator', () => {
     expect(timeline.latest?.score).toBeGreaterThanOrEqual(60)
     expect(timeline.latest?.dimensions.correctionQuality).toBeGreaterThanOrEqual(60)
   })
+
+  it('still flags high risk for a huge tool input (keyword up front) without stringifying the whole blob', () => {
+    // A tool whose risk keyword ("deploy") is at the front but whose input also
+    // carries a multi-KB content blob. Risk must still register, and the
+    // evaluation must not depend on serializing the whole payload (regression:
+    // JSON.stringify of large inputs was a main-thread hot spot).
+    const bigContent = 'x'.repeat(200_000)
+    const riskyBig: HumanAttentionTimelineEntry = {
+      seq: 2,
+      ts: '2026-07-23T00:00:02.000Z',
+      event: { kind: 'llm_response', message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'c2', name: 'bash', input: { command: 'deploy prod', content: bigContent } }] } },
+      effects: [{ kind: 'call_tool', callId: 'c2', name: 'bash', input: { command: 'deploy prod', content: bigContent } }],
+    }
+    const started = Date.now()
+    const timeline = buildHumanAttentionTimeline('s1', [user(1, '做一下。'), riskyBig], fixedNow())
+    const elapsed = Date.now() - started
+    // Risk exposure should be non-trivial (deploy => very-high weight), and the
+    // whole evaluation should be fast even with a 200KB payload.
+    expect(timeline.latest?.dimensions.riskExposure ?? 0).toBeGreaterThan(0)
+    expect(elapsed).toBeLessThan(150)
+  })
 })
 
 function fixedNow() {

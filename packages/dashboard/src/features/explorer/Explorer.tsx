@@ -1191,7 +1191,7 @@ function SessionRow({
   )
 }
 
-export function SessionStatusIndicator({
+export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   status,
 }: {
   status: SessionActivityStatus | undefined
@@ -1210,7 +1210,7 @@ export function SessionStatusIndicator({
         title={label}
       >
         <LoaderCircle
-          className="h-3 w-3 animate-spin text-sky-500 dark:text-sky-400"
+          className="h-3 w-3 animate-spin text-sky-500 [transform:translateZ(0)] [will-change:transform] dark:text-sky-400"
           strokeWidth={2.4}
         />
       </span>
@@ -1285,7 +1285,7 @@ export function SessionStatusIndicator({
       <span className="h-2 w-2 rounded-full bg-muted-foreground/50" />
     </span>
   )
-}
+})
 
 function statusIndicatorLabel(status: SessionActivityStatus | undefined, t: ReturnType<typeof useTranslation>['t']): string {
   switch (status) {
@@ -1515,7 +1515,13 @@ function sameSessionListForExplorer(prev: readonly SessionSummary[], next: reado
       a.parentSessionId !== b.parentSessionId ||
       a.workspaceId !== b.workspaceId ||
       a.workspaceName !== b.workspaceName ||
-      a.status !== b.status ||
+      // Compare status coarsely: the raw status flips thinking↔executing_tools
+      // many times during a tool-heavy turn, and although server:sessions is
+      // throttled, each throttled push still carried a different raw status and
+      // re-rendered the whole Explorer (re-running every row + restarting the
+      // status spinner). The sidebar only distinguishes "running" vs the rest,
+      // so treat all running states as equal here.
+      coarseSummaryStatus(a.status) !== coarseSummaryStatus(b.status) ||
       a.currentCwd !== b.currentCwd ||
       a.firstUserMessage !== b.firstUserMessage ||
       a.label !== b.label) {
@@ -1523,6 +1529,12 @@ function sameSessionListForExplorer(prev: readonly SessionSummary[], next: reado
     }
   }
   return true
+}
+
+/** Collapse running session-summary statuses so tool-step flips don't churn. */
+function coarseSummaryStatus(status: SessionSummary['status'] | undefined): string {
+  if (status === 'thinking' || status === 'executing_tools') return 'running'
+  return status ?? 'unknown'
 }
 
 function sameSessionStatusMap(

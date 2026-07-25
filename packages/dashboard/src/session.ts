@@ -458,9 +458,21 @@ export function useSession({
     [state, timeline],
   )
 
+  // Human-attention scoring walks the whole (growing) timeline prefix and is
+  // relatively expensive; recomputing it on every timeline delta froze the main
+  // thread during tool-heavy turns (hundreds of ms per recompute). It is not
+  // real-time-critical — it only drives the attention indicator — so debounce
+  // it: recompute only after the timeline has been quiet for a moment. During
+  // an active turn the timeline changes constantly, so this collapses dozens of
+  // full recomputes into (at most) one per quiet window.
+  const [attentionTimeline, setAttentionTimeline] = useState<readonly TimelineEntry[]>(timeline)
+  useEffect(() => {
+    const handle = window.setTimeout(() => setAttentionTimeline(timeline), 400)
+    return () => window.clearTimeout(handle)
+  }, [timeline])
   const humanAttention = useMemo(
-    () => deriveHumanAttentionTimeline(sessionId, timeline),
-    [sessionId, timeline],
+    () => deriveHumanAttentionTimeline(sessionId, attentionTimeline),
+    [sessionId, attentionTimeline],
   )
 
   return useMemo(

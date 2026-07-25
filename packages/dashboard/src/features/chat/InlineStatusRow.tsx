@@ -15,10 +15,10 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, Loader2, TriangleAlert, Wrench } from 'lucide-react'
+import { Loader2, TriangleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { AgentState, PendingToolCall } from '@agent-kernel/kernel'
+import type { AgentState } from '@agent-kernel/kernel'
 
 import { cn } from '../../lib/utils.js'
 
@@ -46,7 +46,13 @@ export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolEx
         if (streamingActive) return null
         return <ThinkingRow />
       case 'executing_tools':
-        return <ToolsRow calls={state?.pendingCalls ?? []} startedAt={toolExecutionStartedAt} />
+        // The running tool is already shown by its own tool-call card in the
+        // transcript (ToolCallGroupBlock), which now carries the live running
+        // affordances — spinning wrench, elapsed timer, animated RUNNING badge
+        // and a beam. Rendering ToolsRow here too produced a second, redundant
+        // card for the same tool (the user's complaint), so we no longer emit a
+        // separate inline row for tool execution.
+        return null
       case 'awaiting_approval':
         return <AwaitingApprovalRow />
     }
@@ -71,74 +77,6 @@ function ThinkingRow(): JSX.Element {
         <span className="relative h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_10px_hsl(var(--primary)/0.55)]" />
       </span>
       <span className="relative z-[1] font-medium">{t('chatStatus.thinking')}</span>
-    </div>
-  )
-}
-
-function ToolsRow({
-  calls,
-  startedAt,
-}: {
-  calls: readonly PendingToolCall[]
-  startedAt?: number | null
-}): JSX.Element {
-  const { t } = useTranslation()
-  const elapsed = useElapsedSeconds(true, startedAt)
-  const active = calls.filter((c) => c.status === 'dispatched' || c.status === 'approved')
-  const list = active.length > 0 ? active : calls
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const toggle = (callId: string): void => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(callId)) next.delete(callId)
-      else next.add(callId)
-      return next
-    })
-  }
-  const summary = list.length === 1
-    ? t('chatStatus.runningTool', { name: list[0]!.name, args: summariseArgs(list[0]!, t) })
-    : t('chatStatus.runningTools', { count: list.length, names: list.map((c) => c.name).join(', ') })
-  return (
-    <div
-      className="rounded-md border border-violet-200 bg-violet-50/70 px-3 py-2 text-xs text-violet-800 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200"
-      data-testid="inline-status-tools"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="flex items-center gap-2">
-        <Wrench className="h-3.5 w-3.5 flex-none animate-[spin_2s_linear_infinite]" />
-        <span className="font-medium truncate">{summary}</span>
-        <span className="ml-auto flex items-center gap-2">
-          <span className="tabular-nums text-violet-700/70 dark:text-violet-300/70">↳ {elapsed.toFixed(1)}s</span>
-        </span>
-      </div>
-      <ul className="mt-1.5 flex flex-col gap-1">
-        {list.map((call) => (
-          <li key={call.callId}>
-            <button
-              type="button"
-              onClick={() => toggle(call.callId)}
-              className="flex w-full items-start gap-1.5 rounded px-1 py-0.5 text-left font-mono text-[11px] hover:bg-violet-100/60 dark:hover:bg-violet-900/30"
-              data-testid={`inline-status-tool-${call.name}`}
-            >
-              {expanded.has(call.callId) ? (
-                <ChevronDown className="mt-0.5 h-3 w-3 flex-none" />
-              ) : (
-                <ChevronRight className="mt-0.5 h-3 w-3 flex-none" />
-              )}
-              <span className="flex-1 truncate">
-                <span className="font-semibold">{call.name}</span>
-                <span className="text-violet-700/70 dark:text-violet-300/70"> · {summariseArgs(call, t)}</span>
-              </span>
-            </button>
-            {expanded.has(call.callId) ? (
-              <pre className="mt-1 ml-4 overflow-x-auto rounded border border-violet-200/60 bg-violet-100/40 px-2 py-1 font-mono text-[11px] text-violet-900 dark:border-violet-900/60 dark:bg-violet-950/50 dark:text-violet-100">
-                {formatArgs(call.input)}
-              </pre>
-            ) : null}
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }
@@ -238,13 +176,6 @@ export function CompactFeedbackRow({
   )
 }
 
-function summariseArgs(call: PendingToolCall, t: ReturnType<typeof useTranslation>['t']): string {
-  const input = call.input ?? {}
-  const primary = pickPrimaryArg(call.name, input)
-  if (primary === null) return t('chatStatus.noArgs')
-  const truncated = primary.length > 80 ? primary.slice(0, 77) + '...' : primary
-  return truncated
-}
 
 export function pickPrimaryArg(name: string, input: Record<string, unknown>): string | null {
   const specialized = pickSpecializedPrimaryArg(name, input)
@@ -295,13 +226,6 @@ const ARG_PRIORITY: Record<string, readonly string[]> = {
   ls: ['path'],
 }
 
-function formatArgs(input: Record<string, unknown>): string {
-  try {
-    return JSON.stringify(input, null, 2)
-  } catch {
-    return String(input)
-  }
-}
 
 function formatTokensShort(tokens: number): string {
   if (tokens < 1000) return `${tokens} tokens`
@@ -309,7 +233,7 @@ function formatTokensShort(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(1)}m tokens`
 }
 
-function useElapsedSeconds(active: boolean, startedAt?: number | null): number {
+export function useElapsedSeconds(active: boolean, startedAt?: number | null): number {
   const [fallbackStart] = useState(() => Date.now())
   const [now, setNow] = useState(fallbackStart)
   useEffect(() => {
