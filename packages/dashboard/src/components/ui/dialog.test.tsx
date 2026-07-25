@@ -14,7 +14,7 @@ describe('Dialog motion classes', () => {
     )
 
     expect(screen.getByTestId('dialog-content').className).toContain('ak-motion-dialog')
-    const overlay = document.querySelector('.ak-motion-overlay')
-    expect(overlay?.className ?? '').toContain('ak-motion-overlay')
+    const overlay = document.querySelector('.ak-drawer-overlay')
+    expect(overlay?.className ?? '').toContain('ak-drawer-overlay')
   })
 })

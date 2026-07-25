@@ -14,7 +14,7 @@ export const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn('ak-motion-overlay fixed inset-0 z-50 bg-black/70 backdrop-blur-sm', className)}
+    className={cn('ak-drawer-overlay fixed inset-0 z-50 bg-black/70 backdrop-blur-sm', className)}
     {...props}
   />
 ))

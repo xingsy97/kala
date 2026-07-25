@@ -256,11 +256,38 @@ function riskExposure(entries: readonly HumanAttentionTimelineEntry[], sinceSeq:
 }
 
 function toolRiskWeight(name: string, input: unknown): number {
-  const text = `${name} ${JSON.stringify(input)}`
+  // Read-only classification only needs the tool name.
   if (READ_ONLY_TOOL.test(name)) return 0.3
+  // Risk keywords (deploy/git/rm/... ) live in the command/path/args, which
+  // sit at the front of the serialized input. Serializing a whole large input
+  // (e.g. a multi-KB file `content`) on every risk check was an O(n·size) hot
+  // spot: buildHumanAttentionTimeline re-evaluates the growing prefix on every
+  // timeline change, so a tool-heavy turn with big tool payloads spent
+  // hundreds of ms per recompute stringifying the same blobs — freezing the
+  // main thread (and every animation) on weaker devices. Cap the serialized
+  // slice; the keywords we match are always near the start.
+  const text = `${name} ${riskProbeString(input)}`
   if (VERY_HIGH_RISK.test(text)) return 14
   if (HIGH_RISK_TOOL.test(text)) return 8
   return 4
+}
+
+const RISK_PROBE_MAX_CHARS = 2048
+
+function riskProbeString(input: unknown): string {
+  if (input == null) return ''
+  if (typeof input === 'string') return input.slice(0, RISK_PROBE_MAX_CHARS)
+  if (typeof input !== 'object') return String(input).slice(0, RISK_PROBE_MAX_CHARS)
+  // Join the shallow string/scalar values (command, path, url, args...) rather
+  // than JSON.stringify-ing arbitrarily large nested content.
+  let out = ''
+  for (const value of Object.values(input as Record<string, unknown>)) {
+    if (out.length >= RISK_PROBE_MAX_CHARS) break
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      out += ` ${value}`
+    }
+  }
+  return out.slice(0, RISK_PROBE_MAX_CHARS)
 }
 
 function reasonsFor(input: {

@@ -174,8 +174,39 @@
     animation: ak-slide-in-left 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* Radix drawers: animate BOTH entrance and exit, driven by data-state so the
+   * panel slides out (and the overlay fades out) instead of vanishing. Radix
+   * keeps the element mounted while data-state="closed" until the CSS
+   * animation finishes. */
+  .ak-drawer-left[data-state='open'] {
+    animation: ak-drawer-in-left 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .ak-drawer-left[data-state='closed'] {
+    animation: ak-drawer-out-left 220ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  .ak-drawer-right[data-state='open'] {
+    animation: ak-drawer-in-right 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .ak-drawer-right[data-state='closed'] {
+    animation: ak-drawer-out-right 220ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  .ak-drawer-overlay[data-state='open'] {
+    animation: ak-fade-in 200ms ease-out both;
+  }
+  .ak-drawer-overlay[data-state='closed'] {
+    animation: ak-fade-out 200ms ease-in both;
+  }
+
   .ak-motion-scale-in {
     animation: ak-scale-in 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Running tool-call card: a soft violet halo that breathes so the card
+   * itself signals live activity (replacing the old second inline card). The
+   * ring color is provided by Tailwind's `ring-violet-*`; here we only animate
+   * an outer glow. */
+  .ak-tool-running {
+    animation: ak-tool-running-glow 2.4s ease-in-out infinite;
   }
 
 
@@ -326,6 +357,29 @@
   to { opacity: 1; transform: translateX(0); }
 }
 
+/* Full-width drawer slides: travel from fully off-screen so the panel reads as
+ * a sliding drawer (the 12px variants above are for small popovers). */
+@keyframes ak-drawer-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes ak-drawer-out-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+@keyframes ak-drawer-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes ak-drawer-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+@keyframes ak-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 @keyframes ak-scale-in {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
@@ -334,6 +388,11 @@
 @keyframes ak-session-swap {
   from { opacity: 0; transform: translateY(6px) scale(0.995); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ak-tool-running-glow {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(263 70% 60% / 0); }
+  50% { box-shadow: 0 0 0 3px hsl(263 70% 60% / 0.18); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -346,6 +405,10 @@
   .ak-motion-slide-right,
   .ak-motion-slide-left,
   .ak-motion-scale-in,
+  .ak-drawer-left,
+  .ak-drawer-right,
+  .ak-drawer-overlay,
+  .ak-tool-running,
   .ak-chat-item,
   .ak-expand-in,
   .ak-status-pulse,

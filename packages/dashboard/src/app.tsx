@@ -1044,7 +1044,11 @@ export function App(): JSX.Element {
     compactRunning: compactStatus.kind === 'running',
   })
   useRunningTitleIndicator(isRunningSessionActivity(activeSessionStatus))
-  const sidebarActiveSessionStatus = sessionHydrated ? activeSessionStatus : undefined
+  // Coarse status for the indicators (sidebar + title): collapses the rapid
+  // thinking↔executing_tools flips within a running turn so those indicators
+  // (and the memoized Explorer) don't re-render on every tool step.
+  const indicatorActiveSessionStatus = coarseStatusForIndicator(activeSessionStatus)
+  const sidebarActiveSessionStatus = sessionHydrated ? indicatorActiveSessionStatus : undefined
   const sessionStatusesRef = useRef<{ signature: string; value: ReadonlyMap<string, SessionActivityStatus> }>({
     signature: '',
     value: new Map(),
@@ -1052,7 +1056,7 @@ export function App(): JSX.Element {
   const sessionStatuses = useMemo(() => {
     const entries: Array<[string, SessionActivityStatus]> = []
     for (const summary of control.sessions) {
-      if (summary.status && isRunningSessionActivity(summary.status)) entries.push([summary.sessionId, summary.status])
+      if (summary.status && isRunningSessionActivity(summary.status)) entries.push([summary.sessionId, coarseStatusForIndicator(summary.status) ?? 'loading'])
     }
     if (activeSessionId !== null && sidebarActiveSessionStatus) {
       const existing = entries.findIndex(([sessionId]) => sessionId === activeSessionId)
@@ -1644,7 +1648,7 @@ export function App(): JSX.Element {
           <div className="h-full flex min-h-0 min-w-0 flex-col" data-testid="workbench">
             <WorkbenchToolbar
               sessionLabel={sessionLabel}
-              sessionActivityStatus={activeSessionStatus}
+              sessionActivityStatus={indicatorActiveSessionStatus}
               cwd={currentCwd}
               onOpenTopbar={() => setTopbarOpen(true)}
               topbarAvailable={!topbarOpen}
@@ -1706,6 +1710,7 @@ export function App(): JSX.Element {
                         scrollToBottomToken={chatScrollToBottomToken}
                         compactStatus={compactStatus}
                         liveToolActivityTailCount={liveToolActivityTailCount}
+                        toolExecutionStartedAt={session.toolExecutionStartedAt}
                         toolCardMode={currentSession?.preferences?.toolCardMode ?? 'dots'}
                         displayPrefs={chatDisplayPrefs}
                         loading={selectedHistorySessionLoading}
@@ -1979,7 +1984,7 @@ export function App(): JSX.Element {
       )}
       <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
-          className="ak-motion-slide-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:w-96 sm:rounded-none"
+          className="ak-drawer-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:w-96 sm:rounded-none"
           data-testid="explorer-drawer"
         >
           <DialogHeader className="sr-only">
@@ -2049,7 +2054,7 @@ export function App(): JSX.Element {
       </Dialog>
       <Dialog open={inspectorDrawerOpen && !wideLayout && hasSelectedSession} onOpenChange={setInspectorDrawerOpen}>
         <DialogContent
-          className="ak-motion-slide-right right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto !translate-x-0 !translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] sm:w-[26rem] sm:rounded-none"
+          className="ak-drawer-right right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto translate-x-0 translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] sm:w-[26rem] sm:rounded-none"
           data-testid="inspector-drawer-mobile"
         >
           <DialogHeader className="sr-only">
@@ -2382,6 +2387,21 @@ function sessionActivityStatus({
 
 function isRunningSessionActivity(status: SessionActivityStatus | undefined): boolean {
   return isSessionRunning({ status })
+}
+
+/**
+ * Collapse every "running" activity (thinking / executing_tools / the
+ * client-side `loading` bridge) into a single stable value for the status
+ * indicators. The sidebar + title indicators render an identical spinner for
+ * all of these, so distinguishing them only churns identity: during a
+ * tool-heavy turn the kernel status flips thinking↔executing_tools many times a
+ * second, and without this the sessionStatuses map signature changes on every
+ * flip, re-rendering the whole Explorer and restarting the spinner animation
+ * (the reported jank). Non-running statuses pass through unchanged.
+ */
+export function coarseStatusForIndicator(status: SessionActivityStatus | undefined): SessionActivityStatus | undefined {
+  if (status === undefined) return undefined
+  return isRunningSessionActivity(status) ? 'loading' : status
 }
 
 function isWaitingForUserInput({

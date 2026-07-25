@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NoSessionArea, WorkbenchToolbar } from './app.js'
+import { NoSessionArea, WorkbenchToolbar, coarseStatusForIndicator } from './app.js'
 
 function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]> = {}): void {
   render(
@@ -53,5 +53,25 @@ describe('NoSessionArea', () => {
 
     expect(onNewSession).toHaveBeenCalledTimes(1)
     expect(onNewSession).toHaveBeenCalledWith()
+  })
+})
+
+describe('coarseStatusForIndicator', () => {
+  it('collapses every running activity to a single stable value', () => {
+    // thinking ⇄ executing_tools flips many times during a tool-heavy turn;
+    // both (and the client `loading` bridge) must map to the same value so the
+    // status-indicator identity is stable and the spinner/Explorer do not
+    // re-render on every flip.
+    expect(coarseStatusForIndicator('thinking')).toBe('loading')
+    expect(coarseStatusForIndicator('executing_tools')).toBe('loading')
+    expect(coarseStatusForIndicator('loading')).toBe('loading')
+  })
+
+  it('passes non-running statuses through unchanged', () => {
+    expect(coarseStatusForIndicator('idle')).toBe('idle')
+    expect(coarseStatusForIndicator('done')).toBe('done')
+    expect(coarseStatusForIndicator('awaiting_approval')).toBe('awaiting_approval')
+    expect(coarseStatusForIndicator('error')).toBe('error')
+    expect(coarseStatusForIndicator(undefined)).toBeUndefined()
   })
 })
