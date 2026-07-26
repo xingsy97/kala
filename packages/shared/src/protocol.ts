@@ -1161,6 +1161,13 @@ export type SessionSummary = {
    */
   workspaceName?: string
   status?: AgentState['status']
+  /**
+   * Number of user messages queued for this session that have not yet been
+   * dispatched. When >0, a transient `done`/`idle` status is NOT a real turn end
+   * — a queued message will re-drive the session — so notifications must not
+   * treat it as "finished / ready for you". Absent/0 means the queue is empty.
+   */
+  queuedCount?: number
   currentCwd?: string
   firstUserMessage?: string
   /**

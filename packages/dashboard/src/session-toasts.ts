@@ -151,6 +151,15 @@ export function useInactiveSessionSummaryToasts({
   activeSessionId: string | null
 }): void {
   const previous = useRef<Map<string, SessionSummary['status'] | undefined>>(new Map())
+  // Pending "session finished" toasts, keyed by sessionId. A completion toast is
+  // DEBOUNCED (not fired immediately): during a single autonomous turn the kernel
+  // status can briefly flip to `done`/`idle` between steps (e.g. a tool-less LLM
+  // response, or right before a queued message re-drives the session), then go
+  // back to running. Firing on that transient flip produces the false
+  // "turn finished / you can step in" notification while the session is actually
+  // still working. We hold the completion toast for a short window; if the
+  // session goes back to running (or changes) before it elapses, we cancel it.
+  const finishTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   useEffect(() => {
     const prev = previous.current
@@ -159,16 +168,32 @@ export function useInactiveSessionSummaryToasts({
     for (const session of sessions) {
       next.set(session.sessionId, session.status)
       const before = prev.get(session.sessionId)
+
+      // If a completion toast was pending for this session and it is no longer in
+      // a terminal-completed state, the earlier `done` was a transient mid-turn
+      // flip — cancel the pending toast.
+      const pendingFinish = finishTimers.current.get(session.sessionId)
+      if (pendingFinish !== undefined) {
+        const stillResting = session.status === 'idle' || session.status === 'done'
+        const hasQueue = (session.queuedCount ?? 0) > 0
+        if (!stillResting || hasQueue) {
+          clearTimeout(pendingFinish)
+          finishTimers.current.delete(session.sessionId)
+        }
+      }
+
       const decision = decideInactiveSummaryNotification({
         previousStatus: before,
         nextStatus: session.status,
         focusedSessionId: activeSessionId,
         eventSessionId: session.sessionId,
+        queuedCount: session.queuedCount,
       })
       if (!decision.notify) continue
 
       const label = sessionSummaryLabel(session)
       if (decision.reason === 'approval_required') {
+        // Approval + error are stable, actionable states — fire immediately.
         notify.info(`Approval requested — ${label}`, {
           id: `inactive-session-approval-${session.sessionId}`,
           duration: 8000,
@@ -179,16 +204,40 @@ export function useInactiveSessionSummaryToasts({
           duration: 10000,
         })
       } else if (decision.reason === 'background_session_completed') {
-        notify.success(`Session finished — ${label}`, {
-          id: `inactive-session-finished-${session.sessionId}`,
-          duration: 6000,
-        })
+        // Debounce: only fire if the session is still finished after the window.
+        const existing = finishTimers.current.get(session.sessionId)
+        if (existing !== undefined) clearTimeout(existing)
+        const timer = setTimeout(() => {
+          finishTimers.current.delete(session.sessionId)
+          notify.success(`Session finished — ${label}`, {
+            id: `inactive-session-finished-${session.sessionId}`,
+            duration: 6000,
+          })
+        }, FINISH_NOTIFY_DEBOUNCE_MS)
+        finishTimers.current.set(session.sessionId, timer)
       }
     }
 
     previous.current = next
   }, [activeSessionId, sessions])
+
+  useEffect(() => {
+    const timers = finishTimers.current
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
 }
+
+/**
+ * How long to wait before firing a background "session finished" toast, to ride
+ * out transient mid-turn `done`/`idle` flips. Long enough to cover the gap
+ * between a turn's terminal status and a queued message re-driving the session,
+ * short enough to still feel prompt.
+ */
+const FINISH_NOTIFY_DEBOUNCE_MS = 1500
+
 
 /**
  * Watches sub-agent lifecycle events on the socket and toasts on
