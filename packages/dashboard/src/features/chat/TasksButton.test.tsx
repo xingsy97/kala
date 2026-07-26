@@ -20,7 +20,7 @@ describe('TasksButton', () => {
 
     expect(screen.getByTestId('tasks-popover').textContent).toContain('a-long-unbroken-token')
     expect(screen.getByTestId('tasks-popover').querySelector('[data-radix-scroll-area-viewport]')).toBeTruthy()
-    expect(screen.getByTestId('tasks-popover-scroll').className).toContain('h-[min(60vh,24rem)]')
+    expect(screen.getByTestId('tasks-popover-scroll').className).toContain('max-h-[min(50vh,22rem)]')
     expect(screen.getByTestId('tasks-popover-item').querySelector('span:last-child')?.className).toContain('[overflow-wrap:anywhere]')
   })
 })
