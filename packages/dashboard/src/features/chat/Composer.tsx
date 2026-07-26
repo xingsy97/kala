@@ -24,7 +24,7 @@ import {
 } from '../../components/ui/select.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { cn } from '../../lib/utils.js'
-import { PREF_COMPOSER_SEND_MODE_PREFIX } from '../../lib/prefs.js'
+import { PREF_COMPOSER_DRAFT_PREFIX, PREF_COMPOSER_SEND_MODE_PREFIX } from '../../lib/prefs.js'
 import { RuntimeMetrics } from './RuntimeMetrics.js'
 import { HumanAttentionIndicator, shouldShowLowAttentionHint } from './HumanAttentionIndicator.js'
 import type { TimelineEntry } from '../../session.js'
@@ -127,6 +127,29 @@ function writeStoredSendMode(sessionId: string | null, mode: SendMode): void {
   }
 }
 
+const DRAFT_STORAGE_PREFIX = PREF_COMPOSER_DRAFT_PREFIX
+
+/** Read the saved, unsent composer draft for a session (empty when none). */
+function readStoredDraft(sessionId: string | null): string {
+  if (!sessionId || typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(`${DRAFT_STORAGE_PREFIX}${sessionId}`) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** Persist (or, on empty, clear) the composer draft for a session. */
+function writeStoredDraft(sessionId: string | null, text: string): void {
+  if (!sessionId || typeof window === 'undefined') return
+  try {
+    if (text.length > 0) window.localStorage.setItem(`${DRAFT_STORAGE_PREFIX}${sessionId}`, text)
+    else window.localStorage.removeItem(`${DRAFT_STORAGE_PREFIX}${sessionId}`)
+  } catch {
+    // Storage can be unavailable in private mode or quota-exceeded states.
+  }
+}
+
 function isActiveTurnStatus(status: AgentState['status'] | undefined): boolean {
   return status === 'thinking' || status === 'executing_tools' || status === 'awaiting_approval'
 }
@@ -192,7 +215,22 @@ export function Composer({
   const { mode, toggle: toggleMode } = useComposerMode()
   const displayStyle = chatDisplayStyle(displayPrefs)
   const sessionId = state?.sessionId ?? null
-  const [text, setText] = useState('')
+  const [text, setText] = useState<string>(() => readStoredDraft(sessionId))
+  // Per-session draft persistence. Switching sessions must show that session's
+  // own unsent draft, not whatever was typed in the previous one. We reload the
+  // draft when the session changes and persist edits under the session they were
+  // made in. `loadedDraftSession` guards the persist effect so it never writes
+  // the outgoing session's text into the newly-selected session between the
+  // session change and the reload.
+  const loadedDraftSession = useRef<string | null>(sessionId)
+  useEffect(() => {
+    loadedDraftSession.current = sessionId
+    setText(readStoredDraft(sessionId))
+  }, [sessionId])
+  useEffect(() => {
+    if (loadedDraftSession.current !== sessionId) return
+    writeStoredDraft(sessionId, text)
+  }, [text, sessionId])
   const [sendMode, setSendMode] = useState<SendMode>(() => readStoredSendMode(sessionId))
   useEffect(() => {
     setSendMode(readStoredSendMode(sessionId))

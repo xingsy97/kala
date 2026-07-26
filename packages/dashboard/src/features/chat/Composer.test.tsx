@@ -704,6 +704,46 @@ describe('Composer', () => {
     expect(onReadFile).toHaveBeenCalledWith('b.ts')
     await screen.findByTestId('composer-toast')
   })
+
+  it('persists the unsent draft per session and restores it on switch', () => {
+    const s1 = { ...createInitialState({}), sessionId: 'draft-a' }
+    const s2 = { ...createInitialState({}), sessionId: 'draft-b' }
+    window.localStorage.removeItem('agent-kernel:composer:draft:draft-a')
+    window.localStorage.removeItem('agent-kernel:composer:draft:draft-b')
+
+    const { rerender } = renderComposer({ state: s1 })
+    const input = () => screen.getByTestId('composer-input') as HTMLTextAreaElement
+
+    // Type a draft in session A.
+    fireEvent.change(input(), { target: { value: 'draft for A' } })
+    expect(input().value).toBe('draft for A')
+
+    // Switch to session B — the composer must be empty (B has no draft), not A's.
+    rerender(
+      <Composer
+        model="" models={[]} onModelChange={() => {}} approvalMode="auto" onApprovalModeChange={() => {}}
+        state={s2} config={null} humanAttention={EMPTY_HUMAN_ATTENTION} queuedMessages={[]}
+        onSubmit={() => {}} onCompact={() => {}}
+      />,
+    )
+    expect(input().value).toBe('')
+
+    // Type a different draft in B.
+    fireEvent.change(input(), { target: { value: 'draft for B' } })
+
+    // Switch back to A — A's draft is restored.
+    rerender(
+      <Composer
+        model="" models={[]} onModelChange={() => {}} approvalMode="auto" onApprovalModeChange={() => {}}
+        state={s1} config={null} humanAttention={EMPTY_HUMAN_ATTENTION} queuedMessages={[]}
+        onSubmit={() => {}} onCompact={() => {}}
+      />,
+    )
+    expect(input().value).toBe('draft for A')
+
+    window.localStorage.removeItem('agent-kernel:composer:draft:draft-a')
+    window.localStorage.removeItem('agent-kernel:composer:draft:draft-b')
+  })
 })
 
 function dataTransferFor(id: string): DataTransfer {
