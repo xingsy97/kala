@@ -1511,7 +1511,7 @@ export function App(): JSX.Element {
                   className="min-w-[240px] bg-sidebar text-sidebar-foreground"
                   data-testid="explorer-panel"
                 >
-                  <div className="flex h-full min-h-0 flex-col">
+                  <div className="ak-motion-slide-left flex h-full min-h-0 flex-col">
                     <div className="flex h-10 flex-none items-center border-b border-sidebar-border px-1.5">
                       <button
                         type="button"
@@ -1914,7 +1914,7 @@ export function App(): JSX.Element {
                 <>
                   <ResizableHandle withHandle />
                   <ResizablePanel defaultSize={26} minSize={22} maxSize={36} className="bg-card text-card-foreground" data-testid="inspector-panel">
-                    <div className="ak-motion-fade h-full min-h-0 overflow-hidden" data-testid="inspector-drawer">
+                    <div className="ak-motion-slide-right h-full min-h-0 overflow-hidden" data-testid="inspector-drawer">
                       <InspectorPanel
                         state={session.state}
                         config={session.config}
