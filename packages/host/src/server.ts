@@ -614,12 +614,15 @@ export async function startHostServer(
           void messageQueues.drain(sessionId)
         }, 0)
       }
-      // Web Push: fire once when a session transitions from running to done.
-      // The dashboard already surfaces waiting_for_user via foreground
-      // Notification API; this catches the case where the tab is closed.
+      // Web Push: fire once when a session transitions from running to done —
+      // but only if the queue is empty. During an autonomous turn the status
+      // briefly hits `done` between steps, and a queued message re-drives the
+      // session immediately after. Firing on that transient `done` produced a
+      // false "the turn finished, step in" push while work was still ongoing.
+      // Requiring an empty queue makes this fire only on a real turn end.
       const prev = lastSessionStatus.get(sessionId)
       lastSessionStatus.set(sessionId, state.status)
-      if (prev && prev !== 'done' && state.status === 'done') {
+      if (prev && prev !== 'done' && state.status === 'done' && messageQueues.pending(sessionId) === 0) {
         void pushDispatcher.send({
           kind: 'waiting_for_user',
           sessionId,

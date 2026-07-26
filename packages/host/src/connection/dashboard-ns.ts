@@ -62,6 +62,7 @@ import type {
 } from '@agent-kernel/shared'
 import { isCompatibleVersion, schema } from '@agent-kernel/shared'
 import type { RuntimeMetadataEntry } from '@agent-kernel/shared'
+import type { SessionSummary } from '@agent-kernel/shared'
 import type {
   WorkspaceExecRequest,
   WorkspaceReadBinaryRequest,
@@ -229,7 +230,7 @@ export function configureDashboardNamespace(
 
     socket.on('client:list_sessions', async (raw: ClientListSessions) => {
       if (!vparse(schema.ClientListSessionsSchema, raw, 'client:list_sessions')) return
-      const sessions = await deps.store.listSummaries()
+      const sessions = withQueuedCounts(deps, await deps.store.listSummaries())
       socket.emit('server:sessions', { sessions })
     })
 
@@ -1285,8 +1286,20 @@ async function validateDirectoryExists(
 }
 
 async function broadcastSessionList(deps: DashboardDeps): Promise<void> {
-  const sessions = await deps.store.listSummaries()
+  const sessions = withQueuedCounts(deps, await deps.store.listSummaries())
   deps.dashboardNs.emit('server:sessions', { sessions })
+}
+
+/**
+ * Annotate each summary with its pending queue depth so the dashboard can tell
+ * a real turn end from a transient mid-turn `done` that a queued message will
+ * immediately re-drive (see SessionSummary.queuedCount).
+ */
+function withQueuedCounts(deps: DashboardDeps, sessions: readonly SessionSummary[]): SessionSummary[] {
+  return sessions.map((s) => {
+    const queuedCount = deps.messageQueues.pending(s.sessionId)
+    return queuedCount > 0 ? { ...s, queuedCount } : s
+  })
 }
 
 function collectSessionDescendants(

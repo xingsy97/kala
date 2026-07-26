@@ -27,6 +27,8 @@ export function decideInactiveSummaryNotification(input: {
   focusedSessionId: string | null
   eventSessionId: string
   eventKind?: SessionNotificationEventKind
+  /** Pending queued messages for the session; >0 means a `done` is not a real end. */
+  queuedCount?: number
 }): NotificationDecision {
   if (input.eventSessionId === input.focusedSessionId) return no('focused_session')
   if (input.eventKind === 'user_message_sent') return no('user_initiated')
@@ -38,7 +40,11 @@ export function decideInactiveSummaryNotification(input: {
   if (next.isRunning) return no('still_running')
   if (next.isWaitingForUser) return { notify: true, level: 'toast', reason: 'approval_required' }
   if (next.activity === 'failed') return { notify: true, level: 'toast', reason: 'error' }
-  if (next.activity === 'idle' || next.activity === 'done') return { notify: true, level: 'toast', reason: 'background_session_completed' }
+  if (next.activity === 'idle' || next.activity === 'done') {
+    // A queued message will re-drive the session — this is not a real turn end.
+    if ((input.queuedCount ?? 0) > 0) return no('still_running')
+    return { notify: true, level: 'toast', reason: 'background_session_completed' }
+  }
   return no('no_material_change')
 }
 

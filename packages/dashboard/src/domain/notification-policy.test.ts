@@ -38,4 +38,18 @@ describe('notification-policy', () => {
       reason: 'not_previously_running',
     })
   })
+
+  it('notifies on a real turn end (running -> done) with an empty queue', () => {
+    expect(decideInactiveSummaryNotification({ previousStatus: 'executing_tools', nextStatus: 'done', focusedSessionId: 'active', eventSessionId: 's' })).toMatchObject({
+      notify: true,
+      reason: 'background_session_completed',
+    })
+  })
+
+  it('does NOT notify a transient done while messages are still queued (root cause)', () => {
+    expect(decideInactiveSummaryNotification({ previousStatus: 'executing_tools', nextStatus: 'done', focusedSessionId: 'active', eventSessionId: 's', queuedCount: 2 })).toMatchObject({
+      notify: false,
+      reason: 'still_running',
+    })
+  })
 })

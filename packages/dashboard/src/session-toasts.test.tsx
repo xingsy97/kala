@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import type React from 'react'
@@ -284,24 +284,74 @@ describe('useInactiveSessionSummaryToasts', () => {
     expect(mockedNotify.info).not.toHaveBeenCalled()
   })
 
-  it('toasts when an inactive running session finishes', () => {
-    const { rerender } = render(
-      <InactiveSummaryHarness
-        activeSessionId="a"
-        sessions={[summary('a', 'idle'), summary('b', 'thinking', 'background task')]}
-      />,
-    )
+  it('toasts when an inactive running session finishes (after the debounce window)', () => {
+    vi.useFakeTimers()
+    try {
+      const { rerender } = render(
+        <InactiveSummaryHarness
+          activeSessionId="a"
+          sessions={[summary('a', 'idle'), summary('b', 'thinking', 'background task')]}
+        />,
+      )
 
-    rerender(
-      <InactiveSummaryHarness
-        activeSessionId="a"
-        sessions={[summary('a', 'idle'), summary('b', 'done', 'background task')]}
-      />,
-    )
+      rerender(
+        <InactiveSummaryHarness
+          activeSessionId="a"
+          sessions={[summary('a', 'idle'), summary('b', 'done', 'background task')]}
+        />,
+      )
 
-    expect(mockedNotify.success).toHaveBeenCalledTimes(1)
-    expect(mockedNotify.success.mock.calls[0][0]).toBe('Session finished — background task')
-    expect(mockedNotify.success.mock.calls[0][1].id).toBe('inactive-session-finished-b')
+      // Debounced: nothing yet.
+      expect(mockedNotify.success).not.toHaveBeenCalled()
+
+      act(() => {
+        vi.advanceTimersByTime(1600)
+      })
+
+      expect(mockedNotify.success).toHaveBeenCalledTimes(1)
+      expect(mockedNotify.success.mock.calls[0][0]).toBe('Session finished — background task')
+      expect(mockedNotify.success.mock.calls[0][1].id).toBe('inactive-session-finished-b')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does NOT toast on a transient mid-turn done→running flip', () => {
+    vi.useFakeTimers()
+    try {
+      const { rerender } = render(
+        <InactiveSummaryHarness
+          activeSessionId="a"
+          sessions={[summary('a', 'idle'), summary('b', 'thinking', 'background task')]}
+        />,
+      )
+
+      // Turn flips briefly to done...
+      rerender(
+        <InactiveSummaryHarness
+          activeSessionId="a"
+          sessions={[summary('a', 'idle'), summary('b', 'done', 'background task')]}
+        />,
+      )
+      // ...then a queued message re-drives it back to running before the window.
+      act(() => {
+        vi.advanceTimersByTime(800)
+      })
+      rerender(
+        <InactiveSummaryHarness
+          activeSessionId="a"
+          sessions={[summary('a', 'idle'), summary('b', 'thinking', 'background task')]}
+        />,
+      )
+      act(() => {
+        vi.advanceTimersByTime(2000)
+      })
+
+      // The transient done must not have produced a "finished" toast.
+      expect(mockedNotify.success).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not toast the active session summary transition', () => {
