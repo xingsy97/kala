@@ -35,7 +35,8 @@
          is what fixes the blank screen on mobile / PWA cold starts where the
          12MB bundle takes a moment to download and parse. React's
          createRoot().render() clears #root, so the splash disappears
-         automatically once the app mounts. */
+         automatically once the app mounts. Theme-aware (light/dark) and
+         reduced-motion aware. */
       #ak-splash {
         position: fixed;
         inset: 0;
@@ -43,54 +44,136 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 18px;
-        background: #ffffff;
+        gap: 22px;
         color: #0b0b0f;
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
         z-index: 2147483647;
+        overflow: hidden;
+        /* Soft radial wash + a very subtle drifting aurora, light theme. */
+        background:
+          radial-gradient(120% 120% at 50% 18%, #ffffff 0%, #f6f7fb 55%, #eef0f7 100%);
+        animation: ak-splash-in 320ms ease-out both;
       }
       html.dark #ak-splash {
-        background: #0b0b0f;
         color: #f4f4f5;
+        background:
+          radial-gradient(120% 120% at 50% 18%, #14151d 0%, #0d0e14 55%, #08080c 100%);
+      }
+      /* Drifting glow blobs behind the logo (theme-tinted). */
+      #ak-splash::before,
+      #ak-splash::after {
+        content: "";
+        position: absolute;
+        width: 46vmax;
+        height: 46vmax;
+        border-radius: 50%;
+        filter: blur(60px);
+        opacity: 0.5;
+        pointer-events: none;
+        will-change: transform;
+      }
+      #ak-splash::before {
+        top: -14vmax; left: -10vmax;
+        background: radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.55), transparent 70%);
+        animation: ak-splash-drift-a 9s ease-in-out infinite;
+      }
+      #ak-splash::after {
+        bottom: -16vmax; right: -12vmax;
+        background: radial-gradient(circle at 50% 50%, rgba(56, 189, 248, 0.45), transparent 70%);
+        animation: ak-splash-drift-b 11s ease-in-out infinite;
+      }
+      html:not(.dark) #ak-splash::before { opacity: 0.35; }
+      html:not(.dark) #ak-splash::after { opacity: 0.30; }
+
+      #ak-splash .ak-splash-badge {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 96px;
+        height: 96px;
+      }
+      /* Orbiting conic ring around the logo. */
+      #ak-splash .ak-splash-badge::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        padding: 3px;
+        background: conic-gradient(from 0deg, transparent 0deg, #6366f1 90deg, #38bdf8 200deg, transparent 300deg);
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+        animation: ak-splash-spin 1.5s linear infinite;
+      }
+      /* Soft halo glow that breathes. */
+      #ak-splash .ak-splash-badge::after {
+        content: "";
+        position: absolute;
+        inset: 8px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 45%, rgba(99, 102, 241, 0.35), transparent 65%);
+        filter: blur(8px);
+        animation: ak-splash-pulse 1.8s ease-in-out infinite;
       }
       #ak-splash .ak-splash-logo {
-        width: 56px;
-        height: 56px;
-        animation: ak-splash-pulse 1.6s ease-in-out infinite;
-      }
-      #ak-splash .ak-splash-spinner {
-        width: 26px;
-        height: 26px;
-        border: 3px solid currentColor;
-        border-right-color: transparent;
-        border-radius: 50%;
-        opacity: 0.55;
-        animation: ak-splash-spin 0.8s linear infinite;
+        position: relative;
+        width: 52px;
+        height: 52px;
+        z-index: 1;
+        animation: ak-splash-pulse 1.8s ease-in-out infinite;
       }
       #ak-splash .ak-splash-name {
-        font: 600 15px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        letter-spacing: 0.02em;
-        opacity: 0.75;
+        position: relative;
+        font: 650 16px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        letter-spacing: 0.04em;
+        background: linear-gradient(90deg, currentColor 0%, #818cf8 40%, #38bdf8 60%, currentColor 100%);
+        background-size: 220% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: ak-splash-shimmer 2.6s ease-in-out infinite;
+      }
+      @keyframes ak-splash-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
       }
       @keyframes ak-splash-spin {
         to { transform: rotate(360deg); }
       }
       @keyframes ak-splash-pulse {
         0%, 100% { transform: scale(1); opacity: 1; }
-        50% { transform: scale(0.92); opacity: 0.7; }
+        50% { transform: scale(0.94); opacity: 0.82; }
+      }
+      @keyframes ak-splash-shimmer {
+        0%, 100% { background-position: 120% 0; }
+        50% { background-position: -20% 0; }
+      }
+      @keyframes ak-splash-drift-a {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50% { transform: translate(8vmax, 6vmax) scale(1.12); }
+      }
+      @keyframes ak-splash-drift-b {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50% { transform: translate(-7vmax, -5vmax) scale(1.1); }
       }
       @media (prefers-reduced-motion: reduce) {
+        #ak-splash,
+        #ak-splash::before,
+        #ak-splash::after,
+        #ak-splash .ak-splash-badge::before,
+        #ak-splash .ak-splash-badge::after,
         #ak-splash .ak-splash-logo,
-        #ak-splash .ak-splash-spinner { animation: none; }
+        #ak-splash .ak-splash-name { animation: none !important; }
+        #ak-splash .ak-splash-name { color: currentColor; -webkit-text-fill-color: currentColor; }
       }
     </style>
   </head>
   <body class="bg-background text-foreground">
     <div id="root">
       <div id="ak-splash" role="status" aria-label="Loading Agent RunLab">
-        <img class="ak-splash-logo" src="/favicon.svg" alt="" width="56" height="56" />
-        <div class="ak-splash-spinner"></div>
+        <div class="ak-splash-badge">
+          <img class="ak-splash-logo" src="/favicon.svg" alt="" width="52" height="52" />
+        </div>
         <div class="ak-splash-name">Agent RunLab</div>
       </div>
     </div>

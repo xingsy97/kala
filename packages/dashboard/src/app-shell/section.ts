@@ -43,3 +43,39 @@ export function useAppSection(): [AppSection, (next: AppSection) => void] {
   }
   return [section, go]
 }
+
+/**
+ * Extract a session id from a `#/sessions/<id>` deep-link hash, or null.
+ * Used by notification deep-links (Web Push URL `/#/sessions/<id>`), both for a
+ * cold-start (openWindow with the hash) and a focused tab (the SW posts
+ * PUSH_NAVIGATE which sets the hash → hashchange).
+ */
+export function parseSessionDeepLink(hash: string): string | null {
+  const cleaned = hash.replace(/^#\/?/, '')
+  const parts = cleaned.split('/')
+  if (parts[0]?.toLowerCase() !== 'sessions') return null
+  const id = parts[1]
+  return id && id.length > 0 ? decodeURIComponent(id) : null
+}
+
+/**
+ * Route a `#/sessions/<id>` deep-link to the given session selector on load and
+ * on hashchange, then normalise the hash to `#/agent` so the same link doesn't
+ * re-fire and so the section router settles on the agent surface.
+ */
+export function useSessionDeepLink(onSelect: (sessionId: string) => void): void {
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const apply = (): void => {
+      const sessionId = parseSessionDeepLink(window.location.hash)
+      if (!sessionId) return
+      onSelect(sessionId)
+      // Replace the hash without adding a history entry or re-triggering us.
+      const url = `${window.location.pathname}${window.location.search}#/agent`
+      window.history.replaceState(null, '', url)
+    }
+    apply()
+    window.addEventListener('hashchange', apply)
+    return () => window.removeEventListener('hashchange', apply)
+  }, [onSelect])
+}
