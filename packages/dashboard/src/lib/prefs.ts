@@ -76,6 +76,7 @@ export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   model: { key: 'ak-model', type: 'string', defaultValue: '' },
   composerMode: { key: 'ak-composer-mode', type: 'string', defaultValue: 'full' },
   composerSendModePrefix: { key: 'agent-kernel:composer:send-mode:', type: 'string', defaultValue: '' },
+  composerDraftPrefix: { key: 'agent-kernel:composer:draft:', type: 'string', defaultValue: '' },
   hiddenWorkspaces: { key: 'ak-hidden-workspaces', type: 'json' },
   workspaceOrder: { key: 'agent-kernel:explorer:workspace-order:v1', type: 'json' },
   sessionOrder: { key: 'agent-kernel:explorer:session-order:v1', type: 'json' },
@@ -240,6 +241,7 @@ export const PREF_VSCODE_THEME = DASHBOARD_PREFERENCES.vscodeTheme.key
 export const PREF_DASHBOARD_LANGUAGE = DASHBOARD_PREFERENCES.dashboardLanguage.key
 export const PREF_COMPOSER_MODE = DASHBOARD_PREFERENCES.composerMode.key
 export const PREF_COMPOSER_SEND_MODE_PREFIX = DASHBOARD_PREFERENCES.composerSendModePrefix.key
+export const PREF_COMPOSER_DRAFT_PREFIX = DASHBOARD_PREFERENCES.composerDraftPrefix.key
 export const PREF_HIDDEN_WORKSPACES = DASHBOARD_PREFERENCES.hiddenWorkspaces.key
 export const PREF_WORKSPACE_ORDER = DASHBOARD_PREFERENCES.workspaceOrder.key
 export const PREF_SESSION_ORDER = DASHBOARD_PREFERENCES.sessionOrder.key
