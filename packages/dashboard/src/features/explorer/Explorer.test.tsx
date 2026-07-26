@@ -384,8 +384,10 @@ describe('Explorer', () => {
     expect(screen.getByTestId('session-status-indicator').getAttribute('title')).toBe('Done')
     expect(screen.getByTestId('session-status-indicator').querySelector('span')?.className).toContain('h-2.5 w-2.5')
     expect(screen.getByTestId('session-drag-handle').querySelector('svg')?.className.baseVal).not.toContain('opacity-0')
-    expect(screen.getByTestId('session-row-cwd').textContent).toContain('/tmp')
-    expect(screen.getByTestId('session-row-cwd').textContent).not.toContain('cwd')
+    // The working directory is no longer a persistent second line — it is shown
+    // on hover via the session name's title tooltip (keeps the card single-line).
+    expect(sessionRow.querySelector('[title="/tmp"]')).not.toBeNull()
+    expect(screen.queryByTestId('session-row-cwd')).toBeNull()
   })
 
   it('overrides the selected session row with the live working status', () => {
@@ -718,6 +720,70 @@ describe('Explorer', () => {
       sessionSummary.sessionId,
       'renamed from button',
     )
+  })
+
+  it('never selects the session when clicking any row action button', () => {
+    const onSelect = vi.fn()
+    const onDelete = vi.fn()
+    const onOpenSessionInfo = vi.fn()
+    const onHideSession = vi.fn()
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={undefined}
+        onSelect={onSelect}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={onDelete}
+        onRename={() => {}}
+        onOpenSessionInfo={onOpenSessionInfo}
+        onHideSession={onHideSession}
+      />,
+    )
+
+    // Clicking action buttons must run their own handler only, never select.
+    fireEvent.click(screen.getByTestId('session-info-button'))
+    fireEvent.click(screen.getByTestId('session-rename-button'))
+
+    expect(onOpenSessionInfo).toHaveBeenCalledWith(sessionSummary.sessionId)
+    // The rename button entered edit mode rather than activating the row.
+    expect(screen.getByTestId('session-rename-input')).toHaveProperty('tagName', 'INPUT')
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('does not let the hidden date layer intercept clicks over the action buttons', () => {
+    // Regression: the date layer and the action-button overlay share the same
+    // grid cell (col-start-4 row-start-1). When the date layer stays clickable
+    // while faded out on hover, it sits on top of the buttons and swallows the
+    // click, so pressing rename/hide/delete only switched sessions. The hidden
+    // layer must be pointer-events:none and the action overlay must re-enable
+    // pointer events on hover.
+    render(
+      <Explorer
+        executors={[executor]}
+        sessions={[sessionSummary]}
+        selectedSessionId={undefined}
+        onSelect={() => {}}
+        onNewSession={() => {}}
+        onConnectWorkspace={() => {}}
+        onDelete={() => {}}
+        onRename={() => {}}
+        onOpenSessionInfo={() => {}}
+        onHideSession={() => {}}
+      />,
+    )
+
+    const actionOverlay = screen
+      .getByTestId('session-rename-button')
+      .closest('[data-row-action]') as HTMLElement
+    expect(actionOverlay.className).toContain('pointer-events-none')
+    expect(actionOverlay.className).toContain('group-hover:pointer-events-auto')
+
+    const dateLayer = screen
+      .getByTestId('session-row')
+      .querySelector('.ak-touch-hide') as HTMLElement
+    expect(dateLayer.className).toContain('pointer-events-none')
   })
 
   it('renders active running statuses with the same row-local spinner', () => {

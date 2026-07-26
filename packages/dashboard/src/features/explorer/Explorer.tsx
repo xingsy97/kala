@@ -22,7 +22,6 @@ import {
   Circle,
   Clock3,
   EyeOff,
-  Folder,
   GripVertical,
   GitFork,
   Info,
@@ -72,6 +71,7 @@ import {
   toStructuralSessionSummary,
 } from './tree-model.js'
 import { useHiddenWorkspaces } from './useHiddenWorkspaces.js'
+import { useHiddenSessions } from './useHiddenSessions.js'
 import { SessionHoverPreview, type SessionPreviewAnchor } from './SessionHoverPreview.js'
 import type { CachedSessionView } from '../../session-view-cache.js'
 import type {
@@ -104,7 +104,7 @@ type Props = {
   getCachedSessionView?: (sessionId: string) => CachedSessionView | null
 }
 
-const SESSION_ROW_HEIGHT = 60
+const SESSION_ROW_HEIGHT = 44
 const WORKSPACE_ROW_HEIGHT = 34
 const EXPLORER_ROW_GRID = 'grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] gap-x-2'
 const WORKSPACE_ROW_GRID = 'grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2'
@@ -167,9 +167,28 @@ function ExplorerImpl({
     () => applyManualSessionOrder(structuralSessions, manualSessionOrder),
     [structuralSessions, manualSessionOrder],
   )
+  const hiddenSessions = useHiddenSessions()
+  // Hidden sessions are filtered out of the tree entirely (a local UI filter,
+  // like hidden workspaces). Forked children of a hidden session re-parent to
+  // the workspace root via buildTree's missing-parent handling.
+  const visibleOrderedSessions = useMemo(
+    () => orderedSessions.filter((s) => !hiddenSessions.isHidden(s.sessionId)),
+    [orderedSessions, hiddenSessions],
+  )
+  // Hidden session id → display label, for the "hidden sessions" unhide bar.
+  const hiddenSessionEntries = useMemo(
+    () =>
+      sessions
+        .filter((s) => hiddenSessions.isHidden(s.sessionId))
+        .map((s) => ({
+          sessionId: s.sessionId,
+          label: (s.label?.trim() || s.firstUserMessage?.trim() || s.sessionId),
+        })),
+    [sessions, hiddenSessions],
+  )
   const treeData = useMemo(
-    () => buildTree(executors, orderedSessions),
-    [executors, orderedSessions],
+    () => buildTree(executors, visibleOrderedSessions),
+    [executors, visibleOrderedSessions],
   )
   useEffect(() => {
     setManualWorkspaceOrder((prev) => syncWorkspaceOrder(prev, treeData))
@@ -361,6 +380,7 @@ function ExplorerImpl({
                   }
                 }}
                 onOpenSessionInfo={onOpenSessionInfo}
+                onHideSession={hiddenSessions.hide}
                 onWorkspaceInfo={onWorkspaceInfo}
                 onHideWorkspace={hiddenWorkspaces.hide}
                 editingWorkspaceId={editingWorkspaceId}
@@ -398,6 +418,12 @@ function ExplorerImpl({
           workspaces={hiddenWorkspaceRows}
           hiddenIds={hiddenWorkspaces.hiddenIds}
           onUnhide={hiddenWorkspaces.unhide}
+        />
+      ) : null}
+      {hiddenSessions.count > 0 ? (
+        <HiddenSessionsBar
+          entries={hiddenSessionEntries}
+          onUnhide={hiddenSessions.unhide}
         />
       ) : null}
 
@@ -457,13 +483,33 @@ function ExplorerImpl({
 
 export const Explorer = memo(ExplorerImpl, areExplorerPropsEqual)
 
+/**
+ * Returns true when the event originated inside an interactive control (button,
+ * link, form field) or an element explicitly opted out of row activation via
+ * `data-row-action`. Such clicks must run their own handler only and never
+ * trigger react-arborist row selection/activation (which would switch session).
+ */
+function isRowActionTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return Boolean(
+    target.closest(
+      'button, a, input, textarea, select, [role="button"], [data-row-action]',
+    ),
+  )
+}
+
 function TreeRow({ node, attrs, innerRef, children }: RowRendererProps<TreeNode>): ReactElement {
   return (
     <div
       {...attrs}
       ref={innerRef as RefCallback<HTMLDivElement>}
       onFocus={(e) => e.stopPropagation()}
-      onClick={node.handleClick}
+      onClick={(e) => {
+        // Guard: clicks on row action controls (rename/info/hide/delete, etc.)
+        // must not activate the row and switch the selected session.
+        if (isRowActionTarget(e.target)) return
+        node.handleClick(e)
+      }}
       className={cn(attrs.className, 'min-w-0 max-w-full overflow-hidden')}
       style={{ ...attrs.style, minWidth: 0, width: '100%' }}
     >
@@ -575,6 +621,74 @@ function HiddenWorkspaceItem({
     </div>
   )
 }
+
+function HiddenSessionsBar({
+  entries,
+  onUnhide,
+}: {
+  entries: readonly { sessionId: string; label: string }[]
+  onUnhide(sessionId: string): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex-none border-t border-sidebar-border bg-sidebar px-1.5 py-1" data-testid="hidden-sessions-bar">
+      <button
+        type="button"
+        className="flex h-6 w-full min-w-0 items-center gap-1 rounded px-1 text-left text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        onClick={() => setOpen((value) => !value)}
+        data-testid="hidden-sessions-toggle"
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown className="h-3 w-3 flex-none" aria-hidden="true" /> : <ChevronRight className="h-3 w-3 flex-none" aria-hidden="true" />}
+        <EyeOff className="h-3 w-3 flex-none" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">
+          {t('explorer.hiddenSessions', { count: entries.length })}
+        </span>
+      </button>
+      {open ? (
+        <div className="mt-0.5 space-y-px" data-testid="hidden-sessions-list">
+          {entries.map((entry) => (
+            <HiddenSessionItem
+              key={entry.sessionId}
+              sessionId={entry.sessionId}
+              label={entry.label}
+              onUnhide={onUnhide}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function HiddenSessionItem({
+  sessionId,
+  label,
+  onUnhide,
+}: {
+  sessionId: string
+  label: string
+  onUnhide(sessionId: string): void
+}): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground" data-testid="hidden-session-item">
+      <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
+      <button
+        type="button"
+        className="flex-none rounded p-0.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        onClick={() => onUnhide(sessionId)}
+        data-testid={`session-unhide-${sessionId}`}
+        title={t('explorer.unhideSession')}
+        aria-label={t('explorer.unhideSessionAria', { sessionId })}
+      >
+        <RotateCcw className="h-3 w-3" aria-hidden="true" />
+      </button>
+    </div>
+  )
+}
+
 
 function rowHeightFor(node: NodeApi<TreeNode>): number {
   if (node.data.kind === 'workspace') return WORKSPACE_ROW_HEIGHT
@@ -706,6 +820,7 @@ function Row({
   onOpenSessionInfo,
   onWorkspaceInfo,
   onHideWorkspace,
+  onHideSession,
   editingWorkspaceId,
   onStartWorkspaceEdit,
   onCancelWorkspaceEdit,
@@ -730,6 +845,7 @@ function Row({
   onOpenSessionInfo?(sessionId: string): void
   onWorkspaceInfo?(workspaceId: string): void
   onHideWorkspace(workspaceId: string): void
+  onHideSession(sessionId: string): void
   editingWorkspaceId: string | null
   onStartWorkspaceEdit(workspace: WorkspaceNode): void
   onCancelWorkspaceEdit(): void
@@ -772,6 +888,7 @@ function Row({
       onCancelEdit={onCancelEdit}
       onSubmitEdit={onSubmitEdit}
       onOpenSessionInfo={onOpenSessionInfo}
+      onHideSession={onHideSession}
       query={query}
       activeStatus={sessionStatuses?.get((node.data as SessionNode).sessionId)}
       runtimeMeta={sessionRuntimeById.get((node.data as SessionNode).sessionId)}
@@ -893,7 +1010,7 @@ function WorkspaceRow({
           </span>
         </div>
       )}
-      <div className="flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:opacity-100">
+      <div data-row-action className="ak-touch-reveal pointer-events-none flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:pointer-events-auto group-hover/ws:opacity-100">
         {canRename && !editing ? (
           <button
             type="button"
@@ -971,6 +1088,7 @@ function SessionRow({
   onCancelEdit,
   onSubmitEdit,
   onOpenSessionInfo,
+  onHideSession,
   query,
   activeStatus,
   runtimeMeta,
@@ -988,6 +1106,7 @@ function SessionRow({
   onCancelEdit(): void
   onSubmitEdit(sess: SessionNode, label: string): void
   onOpenSessionInfo?(sessionId: string): void
+  onHideSession(sessionId: string): void
   query: string
   activeStatus?: SessionActivityStatus
   runtimeMeta?: SessionRuntimeMeta
@@ -1008,7 +1127,7 @@ function SessionRow({
       data-testid="session-row"
       data-session-id={s.sessionId}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden px-3 py-2 transition-colors',
+        'group relative min-w-0 cursor-pointer overflow-hidden px-3 py-1.5 transition-colors',
         'hover:bg-accent',
         selected && 'bg-accent',
         EXPLORER_ROW_GRID,
@@ -1106,13 +1225,13 @@ function SessionRow({
             selected ? 'text-foreground' : 'text-foreground/90',
           )}
           style={{ fontSize: fontSizePx }}
-          title={t('explorer.doubleClickRename')}
+          title={currentCwd || t('explorer.doubleClickRename')}
         >
           <HighlightText text={s.label} query={query} />
         </div>
       )}
       {editing ? null : (
-        <div className="flex min-w-0 items-start justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div data-row-action className="ak-touch-reveal pointer-events-none col-start-4 row-start-1 flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
           <Button
             variant="ghost"
             size="icon"
@@ -1158,6 +1277,23 @@ function SessionRow({
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
+              onHideSession(s.sessionId)
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            data-testid="session-hide-button"
+            title={t('explorer.hideSession')}
+            aria-label={t('explorer.hideSessionAria', { sessionId: s.sessionId })}
+            className="h-9 w-9 rounded-md text-muted-foreground hover:bg-accent-foreground/10 hover:text-foreground sm:h-7 sm:w-7"
+          >
+            <EyeOff className="h-3.5 w-3.5" strokeWidth={2.2} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
               onDeleteRequest(s)
             }}
             onDoubleClick={(e) => e.stopPropagation()}
@@ -1170,14 +1306,8 @@ function SessionRow({
           </Button>
         </div>
       )}
-      <div className="col-start-2 flex h-4 w-4 items-center justify-center text-muted-foreground">
-        {currentCwd ? <Folder className="h-3 w-3 opacity-70" aria-hidden="true" /> : null}
-      </div>
-      <div className="col-start-3 min-w-0 truncate font-mono text-[11px] leading-4 text-muted-foreground" title={currentCwd} data-testid="session-row-cwd">
-        {currentCwd ? <HighlightText text={currentCwd} query={query} /> : null}
-      </div>
-      <div className="col-start-4 row-start-2 flex min-w-0 justify-end text-[11px] leading-4 text-muted-foreground">
-        <span className="inline-flex flex-none items-center gap-1 tabular-nums opacity-70">
+      <div className="ak-touch-hide pointer-events-none col-start-4 row-start-1 flex flex-none items-center justify-end whitespace-nowrap text-[11px] leading-4 text-muted-foreground group-hover:opacity-0">
+        <span className="inline-flex flex-none items-center gap-1 whitespace-nowrap tabular-nums opacity-70">
           <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
           {formatWhen(lastActivityIso, t)}
         </span>
