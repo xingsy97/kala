@@ -655,6 +655,26 @@ export const ModelInfoSchema = z.object({
   providerId: z.string(),
   source: ModelSourceSchema.optional(),
   contextWindow: z.number().int().positive().optional(),
+  limits: z.object({
+    context: z.number().int().positive(),
+    input: z.number().int().positive().optional(),
+    output: z.number().int().positive().optional(),
+  }).optional(),
+  metadataSource: z.enum([
+    'manual',
+    'provider',
+    'models.dev-live',
+    'models.dev-cache',
+    'models.dev-seed',
+    'unknown',
+  ]).optional(),
+  metadataMatch: z.enum([
+    'provider-model-exact',
+    'canonical-model-exact',
+    'model-id-consensus',
+    'none',
+  ]).optional(),
+  catalogUpdatedAt: z.string().optional(),
 }) satisfies z.ZodType<ModelInfo>
 
 export const ServerModelsPayloadSchema = z.object({

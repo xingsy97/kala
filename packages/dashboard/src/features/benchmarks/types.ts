@@ -15,4 +15,21 @@ export type BenchmarkRunSummary = {
   updatedAt: string
   totalInstances?: number
   resolved?: number
+  evidenceLevel?: 'official' | 'native' | 'predictions_only' | 'smoke' | 'legacy_official'
+  orchestrated?: boolean
+  legacy?: boolean
+  badCaseCount?: number
+  comparison?: { agentRunLabResolved?: number; claudeCodeResolved?: number }
+  backends?: Array<{
+    key: string
+    backendId: 'agent-runlab' | 'claude-code' | 'custom-command' | 'smoke'
+    model: string
+    state: string
+    total?: number
+    completed?: number
+    resolved?: number
+    failed?: number
+    timedOut?: number
+    error?: string
+  }>
 }

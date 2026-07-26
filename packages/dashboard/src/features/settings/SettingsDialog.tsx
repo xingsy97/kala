@@ -136,7 +136,7 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
               ) : section === 'socketAdmin' ? (
                 <SocketAdminSection payload={payload} onPayloadChange={applyPayload} />
               ) : section === 'executorAccess' ? (
-                <ExecutorAccessSection />
+                <ExecutorAccessSection executors={executors} />
               ) : section === 'approvals' ? (
                 <ApprovalsSection />
               ) : section === 'hooks' ? (

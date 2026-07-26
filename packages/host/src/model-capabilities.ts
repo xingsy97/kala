@@ -37,12 +37,13 @@ export function resolveModelContextWindow(
   if (!selected) return undefined
 
   const exact = models.find((model) => (model.ref ?? model.id) === selected)
+  if (exact?.limits?.context) return exact.limits.context
   if (exact?.contextWindow) return exact.contextWindow
 
   const modelId = exact?.id ?? modelIdFromRef(selected)
   const catalogWindows = models
-    .filter((model) => model.id === modelId && model.contextWindow !== undefined)
-    .map((model) => model.contextWindow!)
+    .filter((model) => model.id === modelId && (model.limits?.context ?? model.contextWindow) !== undefined)
+    .map((model) => (model.limits?.context ?? model.contextWindow)!)
   if (catalogWindows.length > 0) return Math.min(...catalogWindows)
 
   return knownContextWindow(modelId)

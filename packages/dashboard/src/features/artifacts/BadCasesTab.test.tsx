@@ -59,6 +59,24 @@ describe('BadCasesTab', () => {
     expect(screen.getByTestId('badcases-row-inst-b')).toBeTruthy()
   })
 
+  it('acts as a master-detail explorer with searchable readable details', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(listResponse), { status: 200 }))
+    render(<BadCasesTab initialRunId="run-1" />)
+    fireEvent.click(screen.getByTestId('badcases-load'))
+    await waitFor(() => expect(screen.getByTestId('badcases-explorer')).toBeTruthy())
+    expect(screen.getByTestId('badcases-detail').textContent).toContain('What happened')
+    expect(screen.getByTestId('badcases-detail').textContent).toContain('What the agent changed')
+    expect(screen.getByTestId('badcases-detail').textContent).toContain('Why the official check still failed')
+    expect(screen.getByTestId('badcases-detail').textContent).toContain('diff did not apply')
+    expect(screen.getByTestId('badcases-detail').textContent).toContain('head-line-a')
+    expect(screen.getByText('Technical evidence (for engineers)').closest('details')?.open).toBe(false)
+    fireEvent.click(screen.getByTestId('badcases-row-inst-b').querySelector('button')!)
+    expect(screen.getByTestId('badcases-detail').textContent).toContain('inst-b')
+    fireEvent.change(screen.getByTestId('badcases-search'), { target: { value: 'diff did not apply' } })
+    expect(screen.getByTestId('badcases-row-inst-a')).toBeTruthy()
+    expect(screen.queryByTestId('badcases-row-inst-b')).toBeNull()
+  })
+
   it('sends annotate request when label changes', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(listResponse), { status: 200 }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ updatedAt: '2026-07-11T00:00:00Z' }), { status: 200 }))
@@ -86,6 +104,7 @@ describe('BadCasesTab', () => {
     fireEvent.click(screen.getByTestId('badcases-load'))
     await waitFor(() => screen.getByTestId('badcases-check-inst-a'))
     fireEvent.click(screen.getByTestId('badcases-check-inst-a'))
+    fireEvent.click(screen.getByTestId('badcases-export-open'))
     fireEvent.click(screen.getByTestId('badcases-export'))
     await waitFor(() => {
       expect(createObjectURL).toHaveBeenCalled()
@@ -112,6 +131,7 @@ describe('BadCasesTab', () => {
     const revokeObjectURL = vi.fn()
     vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL })
     render(<BadCasesTab initialRunId="run-9" />)
+    fireEvent.click(screen.getByTestId('badcases-export-open'))
     fireEvent.change(screen.getByTestId('rollouts-status-filter'), { target: { value: 'completed, resolved' } })
     fireEvent.click(screen.getByTestId('rollouts-export-button'))
     await waitFor(() => {

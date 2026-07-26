@@ -28,6 +28,12 @@ export const resources = {
         settings: 'Settings',
         yes: 'Yes',
       },
+      pwa: { updateAvailable: 'New dashboard version available.', reloading: 'Reloading…', dismissUpdate: 'Dismiss update notice', offline: 'Offline — showing the cached dashboard shell. Live data will resume when the connection returns.' },
+      banners: { hideMore_one: 'Hide {{count}} more notice', hideMore_other: 'Hide {{count}} more notices', more_one: '{{count}} more notice', more_other: '{{count}} more notices' },
+      humanAttention: {
+        heading: 'Human Attention', title: 'Attention {{score}} · {{level}}', unavailable: 'Attention unavailable', sessionEstimate: 'Session-scoped estimate', noData: 'No data', cursor: 'Cursor {{cursor}}', confidence: 'Confidence {{percent}}%', hideReasons: 'Hide reasons', showReasons_one: 'Show {{count}} reason', showReasons_other: 'Show {{count}} reasons', empty: 'No human messages have been evaluated yet.', timeline: 'Attention score timeline', messageCursor: 'Message cursor',
+        levels: { engaged: 'Engaged', watching: 'Watching', drifting: 'Drifting', absent: 'Low' }, dimensions: { inputQuality: 'Input', reviewDepth: 'Review', correctionQuality: 'Corrections', riskAwareness: 'Risk awareness', continuity: 'Continuity', riskExposure: 'Risk exposure' },
+      },
       appShell: {
         nav: {
           aria: 'Primary navigation',
@@ -73,7 +79,8 @@ export const resources = {
         page: {
           title: 'Benchmarks',
           subtitle: 'Run, score, and inspect benchmark evaluations.',
-          newRun: 'New run',
+          newRun: 'New experiment',
+          benchmarkType: 'Benchmark type',
           emptyRuns: 'No benchmark runs yet. Launch one from the right panel.',
           selectRunHint: 'Select a run on the left to see its details.',
           columns: {
@@ -131,8 +138,9 @@ export const resources = {
           accuracyMetric: 'accuracy: {{value}}%',
           noSummary: 'No official summary yet — run has not been imported.',
           tabs: {
-            overview: 'Overview',
-            artifacts: 'Artifacts',
+            overview: 'Results',
+            backends: 'Backend comparison',
+            artifacts: 'Advanced artifacts',
             badcases: 'Bad Cases',
           },
           overview: {
@@ -143,6 +151,8 @@ export const resources = {
             selected: 'Selected tasks',
             status: 'Status',
           },
+          backends: { title: 'Backend results', description: 'These are different agents evaluated inside this experiment, not separate run IDs.', empty: 'This experiment has no backend comparison data.', summary: '{{completed}}/{{total}} completed · {{failed}} failed · {{timedOut}} timeout' },
+          comparison: { title: 'Historical backend comparison', agentRunLab: 'Agent RunLab resolved', claudeCode: 'Claude Code resolved', badcasesLabel: 'Bad cases', badcases_one: '{{count}} annotated bad case', badcases_other: '{{count}} annotated bad cases' },
           lifecycle: {
             title: 'Run lifecycle',
             steps: {
@@ -156,6 +166,7 @@ export const resources = {
           artifacts: {
             description: 'Canonical artifacts for this run. Open the Artifacts page for raw file browsing and content previews.',
           },
+          delete: { button: 'Delete experiment', title: 'Permanently delete experiment?', description: 'This is not a soft delete. Experiment outputs, traces, patches, scores, annotations, and registry references in the listed directories will be removed from disk.', impact: '{{files}} files ({{bytes}}) will be permanently deleted.', confirm: 'Type {{runId}} to confirm:', confirmButton: 'Delete permanently', deleting: 'Deleting…' },
         },
         actions: {
           title: 'Next step',
@@ -194,6 +205,7 @@ export const resources = {
         },
         terminalWizard: {
           title: 'Run Terminal-Bench',
+          recipes: { default: 'Benchmark default', custom: 'Custom command' },
           description: 'Terminal-Bench pipeline: choose, run, import.',
           steps: {
             chooseTasks: 'Choose Tasks',
@@ -412,6 +424,7 @@ export const resources = {
         title: 'Settings',
         description: 'Runtime config, provider sources, hooks, and manually managed model ids.',
         loadFailed: 'Failed to load settings: {{error}}',
+        connection: { title: 'Host endpoint', subtitle: 'Where this dashboard connects for Socket.IO, models, and settings.', current: 'Currently used', none: '(none)', source: 'Source: {{source}}', priority: 'Priority: URL ?host= > saved in browser > build-time env > same origin.', override: 'Override host endpoint', crossOriginPrefix: 'Leave empty to use the default. Cross-origin endpoints require the host to set', testing: 'Testing…', test: 'Test connection', reset: 'Reset to default', reachable: 'reachable', unreachable: 'unreachable', sources: { query: 'URL ?host= parameter (temporary override)', settings: 'Saved in this browser', build: 'Set at build time (VITE_AGENT_KERNEL_HOST)', default: 'Same origin (default)' } },
         sectionsLabel: 'Settings sections',
         sections: {
           runtime: { label: 'Runtime', hint: 'Host paths and sessions' },
@@ -1120,7 +1133,7 @@ export const resources = {
           failed: 'failed',
         },
         runtimeMetrics: {
-          contextPressure: 'Context pressure',
+          contextPressure: 'Context pressure', contextWindow: 'Context Window', tokens: 'tokens', effectiveModel: 'Effective {{effective}} / model {{model}}', reserved: 'Reserved', reservedForResponse: 'Reserved for response', hideBreakdown: 'Hide token breakdown', showBreakdown: 'Show token breakdown', system: 'System', systemReserve: 'System / reserve', toolDefinitions: 'Tool Definitions', userContext: 'User Context', messages: 'Messages', userMessages: 'User messages', assistantMessages: 'Assistant messages', toolResults: 'Tool call results', memory: 'Memory', attachments: 'Attachments', pendingInput: 'Pending input', diagnostics: 'Diagnostics', modelContext: 'Model context', source: 'Source', totalEstimator: 'Total estimator', breakdownEstimator: 'Breakdown estimator', compactConversation: 'Compact Conversation',
           contributorNote: 'Contributor numbers are estimates from current runtime counters and captured request metadata when available.',
           title: 'Context window: {{input}} of {{userWindow}} user tokens ({{percent}}%). Total model context window: {{totalWindow}} tokens. User context window: {{userWindow}} tokens.',
           unavailableTitle: 'Context window usage unavailable. Input tokens seen: {{input}}.',
@@ -1329,10 +1342,15 @@ export const resources = {
             reviewPlan: 'Plan',
             reviewPredictions: 'Predictions',
             reviewGrading: 'Grading',
-            agentRecipe: 'Agent recipe',
-            recipeDefault: 'Smoke-test recipe (empty patch — verifies pipeline only)',
+            agentRecipe: 'Agent backend',
+            recipeAgentRunLab: 'Agent RunLab (real Host loop and tools)',
+            recipeClaudeCode: 'Claude Code SDK',
+            recipeDefault: 'Pipeline smoke test (empty patch — not benchmark evidence)',
             recipeCustom: 'Custom shell command',
             customCommand: 'Custom command',
+            customCommandPlaceholder: 'agent-cli --prompt-file "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"',
+            maxTurns: 'Maximum turns',
+            smokeWarning: 'Development check only: this produces an empty patch and cannot be treated as a benchmark result.',
             customCommandHelp: 'Shell command run per instance. Env vars: $AGENT_KERNEL_SWEBENCH_PROMPT_FILE, $AGENT_KERNEL_SWEBENCH_SESSION_LOG.',
             runPredictions: 'Run predictions',
             running: 'Running...',
@@ -1648,7 +1666,22 @@ export const resources = {
           annotationSaved: 'Saved',
           note: 'Note',
           notePlaceholder: 'why did this fail?',
+          currentExperiment: 'Current experiment',
+          currentExperimentHint: 'Bad cases below are locked to the selected experiment.',
+          plainSummary: 'What happened',
+          whatChanged: 'What the agent changed',
+          whyFailed: 'Why the official check still failed',
+          nextCheck: 'What should be checked next',
+          technicalDetails: 'Technical evidence (for engineers)',
+          explanation: { summary: 'The attempted fix was incomplete. {{changed}} The official check still reported: {{failed}}', changedUnknown: 'The exact code change was not summarized.', failedUnknown: 'The official verifier did not provide a plain failure reason.', nextUnknown: 'Reproduce the official failing test and inspect the unhandled behavior.' },
+          searchPlaceholder: 'Search instance, category, verifier, or error…',
+          selectCase: 'Select a bad case to inspect.',
+          annotation: 'Analysis and annotation',
+          minimalRepro: 'Minimal reproduction',
           selectAll: 'Select all',
+          export: 'Export',
+          exportTitle: 'Export bad cases and rollouts',
+          exportDescription: 'Choose an export format or create a training rollout file.',
           exportSelected: 'Export selected',
           formatLabel: 'Format',
           categories: {
@@ -1869,6 +1902,12 @@ export const resources = {
         settings: '设置',
         yes: '是',
       },
+      pwa: { updateAvailable: '发现新版 Dashboard。', reloading: '正在重新加载…', dismissUpdate: '关闭更新提示', offline: '当前离线，正在显示缓存的 Dashboard。连接恢复后将继续加载实时数据。' },
+      banners: { hideMore_one: '收起另外 {{count}} 条通知', hideMore_other: '收起另外 {{count}} 条通知', more_one: '另外 {{count}} 条通知', more_other: '另外 {{count}} 条通知' },
+      humanAttention: {
+        heading: '人工关注度', title: '关注度 {{score}} · {{level}}', unavailable: '关注度数据不可用', sessionEstimate: '当前会话估算', noData: '暂无数据', cursor: '消息位置 {{cursor}}', confidence: '置信度 {{percent}}%', hideReasons: '收起原因', showReasons_one: '查看 {{count}} 条原因', showReasons_other: '查看 {{count}} 条原因', empty: '尚未评估任何用户消息。', timeline: '关注度得分时间线', messageCursor: '消息位置',
+        levels: { engaged: '积极参与', watching: '持续关注', drifting: '注意力下降', absent: '较低' }, dimensions: { inputQuality: '输入质量', reviewDepth: '检查深度', correctionQuality: '纠正质量', riskAwareness: '风险意识', continuity: '连续性', riskExposure: '风险暴露' },
+      },
       appShell: {
         nav: {
           aria: '主导航',
@@ -1914,7 +1953,8 @@ export const resources = {
         page: {
           title: '评测',
           subtitle: '运行、评分并检查 benchmark evaluations。',
-          newRun: '新建运行',
+          newRun: '新建实验',
+          benchmarkType: '评测类型',
           emptyRuns: '暂无评测运行。请在右侧启动新的运行。',
           selectRunHint: '在左侧选择一个运行以查看详情。',
           columns: {
@@ -1972,8 +2012,9 @@ export const resources = {
           accuracyMetric: '准确率：{{value}}%',
           noSummary: '尚无官方汇总——尚未导入结果。',
           tabs: {
-            overview: '概览',
-            artifacts: '产物',
+            overview: '结果概览',
+            backends: 'Backend 对比',
+            artifacts: '高级产物',
             badcases: '失败样本',
           },
           overview: {
@@ -1984,6 +2025,8 @@ export const resources = {
             selected: '选中的任务数',
             status: '状态',
           },
+          backends: { title: 'Backend 结果', description: '这些是在同一个实验中被评测的不同 Agent，不是多个 Run ID。', empty: '这个实验没有 Backend 对比数据。', summary: '{{completed}}/{{total}} 已完成 · {{failed}} 失败 · {{timedOut}} 超时' },
+          comparison: { title: '历史后端对比', agentRunLab: 'Agent RunLab resolved', claudeCode: 'Claude Code resolved', badcasesLabel: '失败样本', badcases_one: '{{count}} 个已标注失败样本', badcases_other: '{{count}} 个已标注失败样本' },
           lifecycle: {
             title: '运行生命周期',
             steps: {
@@ -1997,6 +2040,7 @@ export const resources = {
           artifacts: {
             description: '当前 run 的标准产物位置。需要浏览原始文件和内容预览时，请打开 Artifacts 页。',
           },
+          delete: { button: '删除实验', title: '永久删除这个实验？', description: '这不是软删除。所列目录中的实验输出、Trace、Patch、评分、标注和 Registry 引用都会从磁盘永久删除。', impact: '将永久删除 {{files}} 个文件（{{bytes}}）。', confirm: '输入 {{runId}} 以再次确认：', confirmButton: '永久删除', deleting: '正在删除…' },
         },
         actions: {
           title: '下一步',
@@ -2035,6 +2079,7 @@ export const resources = {
         },
         terminalWizard: {
           title: '运行 Terminal-Bench',
+          recipes: { default: 'Benchmark 默认方案', custom: '自定义命令' },
           description: 'Terminal-Bench 流程：选择、运行、导入。',
           steps: {
             chooseTasks: '选择任务',
@@ -2253,6 +2298,7 @@ export const resources = {
         title: '设置',
         description: '运行时配置、provider 来源、hooks 和手动管理的模型 id。',
         loadFailed: '加载设置失败：{{error}}',
+        connection: { title: 'Host 地址', subtitle: 'Dashboard 连接 Socket.IO、模型和设置接口时使用的地址。', current: '当前使用', none: '（无）', source: '来源：{{source}}', priority: '优先级：URL ?host= > 浏览器保存值 > 构建环境变量 > 同源地址。', override: '覆盖 Host 地址', crossOriginPrefix: '留空则使用默认值。跨域地址要求 Host 设置', testing: '测试中…', test: '测试连接', reset: '恢复默认值', reachable: '可访问', unreachable: '无法访问', sources: { query: 'URL ?host= 参数（临时覆盖）', settings: '保存在此浏览器中', build: '构建时设置（VITE_AGENT_KERNEL_HOST）', default: '同源地址（默认）' } },
         sectionsLabel: '设置分区',
         sections: {
           runtime: { label: '运行时', hint: 'Host 路径和会话' },
@@ -2961,7 +3007,7 @@ export const resources = {
           failed: '失败',
         },
         runtimeMetrics: {
-          contextPressure: '上下文压力',
+          contextPressure: '上下文压力', contextWindow: '上下文窗口', tokens: 'tokens', effectiveModel: '有效窗口 {{effective}} / 模型窗口 {{model}}', reserved: '预留', reservedForResponse: '为回复预留', hideBreakdown: '收起 token 明细', showBreakdown: '查看 token 明细', system: '系统', systemReserve: '系统 / 预留', toolDefinitions: '工具定义', userContext: '用户上下文', messages: '消息', userMessages: '用户消息', assistantMessages: 'Assistant 消息', toolResults: '工具调用结果', memory: '记忆', attachments: '附件', pendingInput: '待处理输入', diagnostics: '诊断信息', modelContext: '模型上下文', source: '来源', totalEstimator: '总量估算器', breakdownEstimator: '明细估算器', compactConversation: '压缩会话',
           contributorNote: '贡献项数字来自当前运行时计数器和已捕获 request metadata，可用时为估算值。',
           title: '上下文窗口：{{input}} / {{userWindow}} user tokens（{{percent}}%）。总模型上下文窗口：{{totalWindow}} tokens。用户上下文窗口：{{userWindow}} tokens。',
           unavailableTitle: '上下文窗口用量不可用。已看到 input tokens：{{input}}。',
@@ -3170,10 +3216,15 @@ export const resources = {
             reviewPlan: 'Plan',
             reviewPredictions: 'Predictions',
             reviewGrading: 'Grading',
-            agentRecipe: 'Agent 方案',
-            recipeDefault: '冒烟测试 recipe（空 patch — 仅打通全流程）',
+            agentRecipe: 'Agent 后端',
+            recipeAgentRunLab: 'Agent RunLab（真实 Host loop 和工具）',
+            recipeClaudeCode: 'Claude Code SDK',
+            recipeDefault: '流程冒烟测试（空 patch，不属于 benchmark 证据）',
             recipeCustom: '自定义 shell 命令',
             customCommand: '自定义命令',
+            customCommandPlaceholder: 'agent-cli --prompt-file "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE"',
+            maxTurns: '最大轮数',
+            smokeWarning: '仅用于开发检查：此模式会产生空 patch，不能作为 benchmark 结果。',
             customCommandHelp: '按 instance 执行的 shell 命令。环境变量：$AGENT_KERNEL_SWEBENCH_PROMPT_FILE、$AGENT_KERNEL_SWEBENCH_SESSION_LOG。',
             runPredictions: '开始运行',
             running: '运行中...',
@@ -3489,7 +3540,22 @@ export const resources = {
           annotationSaved: '已保存',
           note: '备注',
           notePlaceholder: '失败原因是什么？',
+          currentExperiment: '当前实验',
+          currentExperimentHint: '下面的失败样本已经固定为当前选中的实验。',
+          plainSummary: '发生了什么',
+          whatChanged: 'Agent 改了什么',
+          whyFailed: '为什么官方检查仍未通过',
+          nextCheck: '下一步应该检查什么',
+          technicalDetails: '技术证据（工程人员查看）',
+          explanation: { summary: '这次修复只解决了部分问题。{{changed}} 官方检查仍然报告：{{failed}}', changedUnknown: '系统没有提取到明确的代码修改摘要。', failedUnknown: '官方检查没有提供清晰的失败原因。', nextUnknown: '应先复现官方失败测试，再检查仍未处理的行为。' },
+          searchPlaceholder: '搜索实例、类别、判定或错误…',
+          selectCase: '选择一个坏案例查看详情。',
+          annotation: '分析与标注',
+          minimalRepro: '最小复现',
           selectAll: '全选',
+          export: '导出',
+          exportTitle: '导出失败样本与 Rollouts',
+          exportDescription: '选择失败样本格式，或生成训练用 rollout 文件。',
           exportSelected: '导出选中项',
           formatLabel: '格式',
           categories: {

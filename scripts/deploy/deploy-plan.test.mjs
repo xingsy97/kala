@@ -11,7 +11,7 @@ import {
 } from './deploy-plan.mjs'
 
 const ROOT = '/repo'
-const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'bundle-dashboard-with-runtime.cjs']
+const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'agent-runlab-swebench-runner.cjs', 'claude-code-swebench-runner.cjs', 'bundle-dashboard-with-runtime.cjs']
 
 function fakeFs(names) {
   return {
@@ -28,11 +28,14 @@ function fakeFs(names) {
 
 describe('deploy plan', () => {
   it('discovers only deployable release assets in stable order', () => {
-    const fs = fakeFs(['z.tmp', 'run.sh', ...REQUIRED, 'manifest.json'])
+    const fs = fakeFs(['z.tmp', 'run.sh', ...REQUIRED, 'manifest.json', 'agent-runlab-model-catalog-seed.json'])
     expect(releaseFiles(`${ROOT}/release`, fs)).toEqual([
       'SHA256SUMS',
       'agent-kernel-executor.cjs',
+      'agent-runlab-model-catalog-seed.json',
+      'agent-runlab-swebench-runner.cjs',
       'bundle-dashboard-with-runtime.cjs',
+      'claude-code-swebench-runner.cjs',
       'manifest.json',
       'run.sh',
     ])
@@ -78,12 +81,13 @@ describe('deploy plan', () => {
   })
 
   it('builds an install script that backs up and chmods executable assets', () => {
-    const script = installScript('~/bin', '~/bin/.upload', ['agent-kernel-executor.cjs', 'manifest.json', 'run.sh'])
+    const script = installScript('~/bin', '~/bin/.upload', ['agent-kernel-executor.cjs', 'agent-runlab-model-catalog-seed.json', 'manifest.json', 'run.sh'])
     expect(script).toContain('BACKUP_DIR="$REMOTE_BIN/.agent-kernel-backup-$(date +%Y%m%d%H%M%S)"')
     expect(script).toContain('cp -p "$REMOTE_BIN/manifest.json" "$BACKUP_DIR/manifest.json"')
     expect(script).toContain('chmod +x "$REMOTE_BIN/agent-kernel-executor.cjs"')
     expect(script).toContain('chmod +x "$REMOTE_BIN/run.sh"')
     expect(script).not.toContain('chmod +x "$REMOTE_BIN/manifest.json"')
+    expect(script).toContain('cp -p "$REMOTE_BIN/agent-runlab-model-catalog-seed.json" "$MODEL_CATALOG_DIR/models-dev-seed.json"')
   })
 
   it('seeds the upload directory from installed assets for incremental transfer', () => {
@@ -106,7 +110,9 @@ describe('deploy plan', () => {
     })
     expect(args).toContain('--checksum')
     expect(args).toContain('--compress')
+    expect(args).toContain('--no-whole-file')
     expect(args).toContain('--partial')
+    expect(args).toContain('--inplace')
     expect(args).toContain('--timeout=120')
     expect(args).toContain('--rsh=ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3')
     expect(args).toContain('/repo/release/bundle-dashboard-with-runtime.cjs')

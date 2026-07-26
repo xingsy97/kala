@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   registerSweBenchRun,
   readSweBenchRunRegistry,
+  unregisterSweBenchRun,
   sweBenchRunRegistryPath,
   type SweBenchRunRegistry,
 } from '../core/run-registry.js'
@@ -119,5 +120,12 @@ describe('SWE-bench run registry', () => {
     const registry = await readSweBenchRunRegistry(dir)
     expect(registry.schemaVersion).toBe(1)
     expect(registry.entries).toEqual([])
+  })
+
+  it('permanently unregisters an existing run', async () => {
+    await registerSweBenchRun({ rootDir: dir, runId: 'remove-me', dataset: 'ds', model: 'agent', runDir: join(dir, 'remove-me'), selectedCount: 1, maxWorkers: 1, shardCount: 1 })
+    const result = await unregisterSweBenchRun(dir, 'remove-me')
+    expect(result.removed?.runId).toBe('remove-me')
+    expect((await readSweBenchRunRegistry(dir)).entries).toEqual([])
   })
 })

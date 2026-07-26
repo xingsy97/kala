@@ -91,3 +91,18 @@ export async function registerSweBenchRun(
   await writeFile(path, `${JSON.stringify(registry, null, 2)}\n`, 'utf8')
   return { path, registry, entry }
 }
+
+export async function unregisterSweBenchRun(rootDir: string, runId: string): Promise<{ removed: SweBenchRunRegistryEntry | null }> {
+  const existing = await readSweBenchRunRegistry(rootDir)
+  const removed = existing.entries.find((entry) => entry.runId === runId) ?? null
+  if (!removed) return { removed: null }
+  const registry: SweBenchRunRegistry = {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    entries: existing.entries.filter((entry) => entry.runId !== runId),
+  }
+  const path = sweBenchRunRegistryPath(rootDir)
+  await mkdir(join(rootDir, 'registry'), { recursive: true })
+  await writeFile(path, `${JSON.stringify(registry, null, 2)}\n`, 'utf8')
+  return { removed }
+}

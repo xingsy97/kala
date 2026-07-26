@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
-import { fileURLToPath } from 'node:url'
 
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 
@@ -23,7 +22,7 @@ type Args = {
 }
 
 const logger = createRuntimeLogger('swebench-claude-code')
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
+const REPO_ROOT = resolve(process.env.AGENT_RUNLAB_REPO_ROOT?.trim() || process.cwd())
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))

@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
-import { fileURLToPath } from 'node:url'
 
 import type { CallToolEffect } from '@agent-kernel/kernel'
 import type { ModelInfo } from '@agent-kernel/shared'
@@ -46,7 +45,7 @@ type Args = {
 }
 
 const logger = createRuntimeLogger('swebench-agent-runlab')
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
+const REPO_ROOT = resolve(process.env.AGENT_RUNLAB_REPO_ROOT?.trim() || process.cwd())
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))

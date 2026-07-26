@@ -15,6 +15,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { RefreshCw, WifiOff, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { BannerSlot } from './BannerStack.js'
 import { initPwa, type PwaController } from '../../lib/pwa.js'
@@ -86,6 +87,7 @@ export function PwaLifecycleHost({ children }: { children: ReactNode }): JSX.Ele
  * hard-reloads the page.
  */
 export function PwaUpdateGlobalBanner(): JSX.Element | null {
+  const { t } = useTranslation()
   const { state, controller, dismiss } = useContext(PwaLifecycleContext)
   const [reloading, setReloading] = useState(false)
 
@@ -109,7 +111,7 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
     >
       <div className="flex min-w-0 items-center gap-2">
         <RefreshCw className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-        <span className="min-w-0 truncate font-medium">New dashboard version available.</span>
+        <span className="min-w-0 truncate font-medium">{t('pwa.updateAvailable')}</span>
       </div>
       <div className="flex flex-none items-center gap-1">
         <button
@@ -119,12 +121,12 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
           className="rounded-md border border-sky-400/60 bg-sky-500 px-3 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-sky-600 disabled:cursor-progress disabled:opacity-60 dark:border-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500"
           data-testid="pwa-update-reload"
         >
-          {reloading ? 'Reloading…' : 'Reload'}
+          {reloading ? t('pwa.reloading') : t('common.reload')}
         </button>
         <button
           type="button"
           onClick={dismiss}
-          aria-label="Dismiss update notice"
+          aria-label={t('pwa.dismissUpdate')}
           className="rounded p-0.5 text-sky-800 hover:bg-sky-100 dark:text-sky-200 dark:hover:bg-sky-900"
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -135,6 +137,7 @@ export function PwaUpdateGlobalBanner(): JSX.Element | null {
 }
 
 export function OfflineBanner(): JSX.Element | null {
+  const { t } = useTranslation()
   const { online } = useOnlineStatus()
   if (online) return null
   return (
@@ -145,7 +148,7 @@ export function OfflineBanner(): JSX.Element | null {
       >
         <WifiOff className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
         <span className="truncate">
-          Offline — showing cached dashboard shell. Live data will resume when connection returns.
+          {t('pwa.offline')}
         </span>
       </div>
     </BannerSlot>

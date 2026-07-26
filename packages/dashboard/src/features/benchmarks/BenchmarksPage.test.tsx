@@ -61,7 +61,7 @@ describe('BenchmarksPage', () => {
     void i18n.changeLanguage('en')
   })
 
-  it('loads runs and renders three columns', async () => {
+  it('loads experiments and renders a focused two-column explorer', async () => {
     render(<BenchmarksPage />)
     await waitFor(() => {
       expect(screen.getByTestId('benchmarks-run-row-run-tb-1')).toBeTruthy()
@@ -69,7 +69,8 @@ describe('BenchmarksPage', () => {
     expect(screen.getByTestId('benchmarks-page')).toBeTruthy()
     expect(screen.getByTestId('benchmarks-run-list')).toBeTruthy()
     expect(screen.getByTestId('benchmarks-detail-empty')).toBeTruthy()
-    expect(screen.getByTestId('benchmarks-launcher')).toBeTruthy()
+    expect(screen.queryByTestId('benchmarks-launcher')).toBeNull()
+    expect(screen.getByTestId('benchmarks-page-kind')).toBeTruthy()
     // Grouped by kind
     expect(screen.getByTestId('benchmarks-run-group-terminal-bench')).toBeTruthy()
     expect(screen.getByTestId('benchmarks-run-group-swe-bench')).toBeTruthy()
@@ -86,15 +87,27 @@ describe('BenchmarksPage', () => {
     expect(screen.getByTestId('benchmarks-detail-accuracy').textContent).toContain('66.7')
   })
 
-  it('launcher swebench opens wizard-only modal and terminal-bench opens its wizard', async () => {
+  it('shows legacy comparison data in the backend comparison tab', async () => {
+    const legacy = { ...runsResponse.runs[0], runId: 'legacy:historical-30', label: 'Historical SWE-bench', totalInstances: 30, resolved: 23, comparison: { agentRunLabResolved: 23, claudeCodeResolved: 19 }, badCaseCount: 7 }
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ runs: [legacy] }), { status: 200 }))
     render(<BenchmarksPage />)
-    await waitFor(() => expect(screen.getByTestId('benchmarks-launcher')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('benchmarks-launcher-swebench'))
+    await waitFor(() => expect(screen.getByTestId('benchmarks-run-row-legacy:historical-30')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('benchmarks-run-row-legacy:historical-30'))
+    expect(screen.getByTestId('benchmarks-detail-comparison').textContent).toContain('23')
+    fireEvent.click(screen.getByTestId('benchmarks-detail-tab-backends'))
+    expect(screen.getByTestId('benchmarks-detail-backends').textContent).toContain('23 / 30')
+    expect(screen.getByTestId('benchmarks-detail-backends').textContent).toContain('19 / 30')
+  })
+
+  it('opens the selected benchmark wizard from the single top action', async () => {
+    render(<BenchmarksPage />)
+    fireEvent.click(screen.getByTestId('benchmarks-page-new-run'))
     await waitFor(() => expect(screen.getByTestId('run-benchmark-wizard-modal')).toBeTruthy())
     // Modal should contain the wizard (via toggle) but NOT the full eval inline panel
     expect(screen.getByTestId('run-benchmark-wizard-modal').querySelector('[data-testid="run-benchmark-wizard-toggle"]')).toBeTruthy()
     expect(screen.getByTestId('run-benchmark-wizard-modal').querySelector('[data-testid="eval-inline-panel"]')).toBeNull()
-    fireEvent.click(screen.getByTestId('benchmarks-launcher-terminal-bench'))
+    fireEvent.change(screen.getByTestId('benchmarks-page-kind'), { target: { value: 'terminal-bench' } })
+    fireEvent.click(screen.getByTestId('benchmarks-page-new-run'))
     await waitFor(() => expect(screen.getByTestId('terminalbench-wizard')).toBeTruthy())
   })
 
@@ -122,11 +135,10 @@ describe('BenchmarksPage', () => {
     await i18n.changeLanguage('zh')
     render(<BenchmarksPage />)
     await waitFor(() => expect(screen.getByTestId('benchmarks-page-title').textContent).toContain('评测'))
-    expect(screen.getByTestId('benchmarks-launcher').textContent).toContain('启动新的评测')
-    expect(screen.getByTestId('benchmarks-launcher-swebench').textContent).toContain('SWE-bench')
-    expect(screen.getByTestId('benchmarks-launcher-terminal-bench').textContent).toContain('Terminal-Bench')
+    expect(screen.getByTestId('benchmarks-page-new-run').textContent).toContain('新建实验')
+    expect(screen.getByTestId('benchmarks-page-kind').textContent).toContain('SWE-bench')
 
-    fireEvent.click(screen.getByTestId('benchmarks-launcher-swebench'))
+    fireEvent.click(screen.getByTestId('benchmarks-page-new-run'))
     await waitFor(() => expect(screen.getByTestId('run-benchmark-wizard-modal')).toBeTruthy())
     expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行评测向导')
     expect(screen.getByTestId('run-benchmark-wizard-modal').textContent).toContain('运行 Benchmark（引导式）')

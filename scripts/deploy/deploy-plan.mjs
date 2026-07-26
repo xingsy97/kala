@@ -5,6 +5,9 @@ export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
   'bundle-dashboard-with-runtime.cjs',
   'agent-kernel-executor.cjs',
   'agent-kernel-dashboard-dist.tar.gz',
+  'agent-runlab-model-catalog-seed.json',
+  'agent-runlab-swebench-runner.cjs',
+  'claude-code-swebench-runner.cjs',
   'run.sh',
   'manifest.json',
   'RELEASE_NOTES.md',
@@ -14,6 +17,8 @@ export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
 export const REQUIRED_RELEASE_ASSETS = Object.freeze([
   'bundle-dashboard-with-runtime.cjs',
   'agent-kernel-executor.cjs',
+  'agent-runlab-swebench-runner.cjs',
+  'claude-code-swebench-runner.cjs',
   'SHA256SUMS',
 ])
 
@@ -73,18 +78,24 @@ export function releaseFiles(releaseDir, { exists = existsSync, readDir = readdi
 }
 
 export function installScript(remoteBinDir, remoteUploadDir, names) {
+  const catalogSeed = 'agent-runlab-model-catalog-seed.json'
   const lines = [
     'set -euo pipefail',
     `REMOTE_BIN=${remotePathForShell(remoteBinDir)}`,
     `UPLOAD_DIR=${remotePathForShell(remoteUploadDir)}`,
     'BACKUP_DIR="$REMOTE_BIN/.agent-kernel-backup-$(date +%Y%m%d%H%M%S)"',
     'mkdir -p "$REMOTE_BIN" "$BACKUP_DIR"',
+    'MODEL_CATALOG_DIR="$HOME/.local/share/agent-runlab/model-catalog"',
   ]
   for (const name of names) {
     lines.push(`if [ -e "$REMOTE_BIN/${name}" ]; then cp -p "$REMOTE_BIN/${name}" "$BACKUP_DIR/${name}"; fi`)
   }
   for (const name of names) {
     lines.push(`mv "$UPLOAD_DIR/${name}" "$REMOTE_BIN/${name}"`)
+  }
+  if (names.includes(catalogSeed)) {
+    lines.push('mkdir -p "$MODEL_CATALOG_DIR"')
+    lines.push(`cp -p "$REMOTE_BIN/${catalogSeed}" "$MODEL_CATALOG_DIR/models-dev-seed.json"`)
   }
   for (const name of names.filter((name) => name.endsWith('.cjs') || name === 'run.sh')) {
     lines.push(`chmod +x "$REMOTE_BIN/${name}"`)
@@ -114,8 +125,10 @@ export function rsyncUploadArgs({ releaseDir, files, sshTarget, uploadDir }) {
     '--archive',
     '--checksum',
     '--compress',
+    '--no-whole-file',
     '--human-readable',
     '--partial',
+    '--inplace',
     '--timeout=120',
     '--info=progress2,stats2',
     '--rsh=ssh -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3',

@@ -96,17 +96,17 @@ export function RuntimeMetrics({
     const window = userContextWindow ?? 0
     if (!b || window <= 0) return []
     const raw: ReadonlyArray<Omit<BreakdownSegment, 'percent'>> = [
-      { key: 'system', label: 'System / reserve', tokens: b.system, className: 'bg-sky-500' },
-      { key: 'tools', label: 'Tool definitions', tokens: b.tools, className: 'bg-indigo-500' },
-      { key: 'transcript', label: 'Messages', tokens: b.transcript, className: 'bg-emerald-500' },
-      { key: 'memory', label: 'Memory', tokens: b.memory, className: 'bg-teal-500' },
-      { key: 'attachments', label: 'Attachments', tokens: b.attachments, className: 'bg-amber-500' },
-      { key: 'pendingUserInput', label: 'Pending input', tokens: b.pendingUserInput, className: 'bg-rose-500' },
+      { key: 'system', label: t('chat.runtimeMetrics.systemReserve'), tokens: b.system, className: 'bg-sky-500' },
+      { key: 'tools', label: t('chat.runtimeMetrics.toolDefinitions'), tokens: b.tools, className: 'bg-indigo-500' },
+      { key: 'transcript', label: t('chat.runtimeMetrics.messages'), tokens: b.transcript, className: 'bg-emerald-500' },
+      { key: 'memory', label: t('chat.runtimeMetrics.memory'), tokens: b.memory, className: 'bg-teal-500' },
+      { key: 'attachments', label: t('chat.runtimeMetrics.attachments'), tokens: b.attachments, className: 'bg-amber-500' },
+      { key: 'pendingUserInput', label: t('chat.runtimeMetrics.pendingInput'), tokens: b.pendingUserInput, className: 'bg-rose-500' },
     ]
     return raw
       .filter((seg) => seg.tokens > 0)
       .map((seg) => ({ ...seg, percent: (seg.tokens / window) * 100 }))
-  }, [contextSnapshot, userContextWindow])
+  }, [contextSnapshot, t, userContextWindow])
 
   return (
     <div className="relative flex-none" ref={ref}>
@@ -168,17 +168,17 @@ export function RuntimeMetrics({
           className="ak-motion-popover fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(24rem,calc(100vw-1rem))]"
           data-testid="context-pressure-popover"
         >
-          <div className="text-lg font-semibold tracking-tight text-foreground">Context Window</div>
+          <div className="text-lg font-semibold tracking-tight text-foreground">{t('chat.runtimeMetrics.contextWindow')}</div>
 
           <div className="mt-3 flex items-baseline justify-between gap-3">
             <span className="text-sm text-foreground">
-              {contextSnapshot?.estimator.total.confidence === 'exact' ? '' : '~'}{formatTokens(contextTokens)} / {userContextWindow ? formatTokens(userContextWindow) : t('chat.runtimeMetrics.unknown')} tokens
+              {contextSnapshot?.estimator.total.confidence === 'exact' ? '' : '~'}{formatTokens(contextTokens)} / {userContextWindow ? formatTokens(userContextWindow) : t('chat.runtimeMetrics.unknown')} {t('chat.runtimeMetrics.tokens')}
             </span>
             <span className={cn('text-sm font-medium', tone)}>{percent !== null ? `${percent}%` : '?'}</span>
           </div>
           {totalContextWindow && userContextWindow && totalContextWindow !== userContextWindow ? (
             <div className="mt-2 text-xs text-muted-foreground">
-              Effective {formatTokens(userContextWindow)} / model {formatTokens(totalContextWindow)}
+              {t('chat.runtimeMetrics.effectiveModel', { effective: formatTokens(userContextWindow), model: formatTokens(totalContextWindow) })}
             </div>
           ) : null}
           <div className="relative mt-3 h-2 overflow-hidden rounded-full border border-border bg-muted">
@@ -221,7 +221,7 @@ export function RuntimeMetrics({
                   style={{ backgroundImage: 'repeating-linear-gradient(135deg, currentColor 0 3px, transparent 3px 6px)' }}
                   aria-hidden="true"
                 />
-                <span>Reserved</span>
+                <span>{t('chat.runtimeMetrics.reserved')}</span>
               </span>
             </div>
           ) : (
@@ -231,7 +231,7 @@ export function RuntimeMetrics({
                 style={{ backgroundImage: 'repeating-linear-gradient(135deg, currentColor 0 4px, transparent 4px 8px)' }}
                 aria-hidden="true"
               />
-              <span>Reserved for response</span>
+              <span>{t('chat.runtimeMetrics.reservedForResponse')}</span>
             </div>
           )}
 
@@ -242,7 +242,7 @@ export function RuntimeMetrics({
             data-testid="context-breakdown-toggle"
             className="mt-4 flex w-full items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <span>{breakdownExpanded ? 'Hide token breakdown' : 'Show token breakdown'}</span>
+            <span>{breakdownExpanded ? t('chat.runtimeMetrics.hideBreakdown') : t('chat.runtimeMetrics.showBreakdown')}</span>
             {breakdownExpanded ? (
               <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
             ) : (
@@ -251,41 +251,41 @@ export function RuntimeMetrics({
           </button>
           {breakdownExpanded ? (
             <div data-testid="context-breakdown-details">
-              <SectionTitle>System</SectionTitle>
-              <MetricRow label="System / reserve" value={formatTokens(contextSnapshot?.breakdown.system ?? 0)} />
-              <MetricRow label="Tool Definitions" value={formatTokens(contextSnapshot?.breakdown.tools ?? 0)} />
+              <SectionTitle>{t('chat.runtimeMetrics.system')}</SectionTitle>
+              <MetricRow label={t('chat.runtimeMetrics.systemReserve')} value={formatTokens(contextSnapshot?.breakdown.system ?? 0)} />
+              <MetricRow label={t('chat.runtimeMetrics.toolDefinitions')} value={formatTokens(contextSnapshot?.breakdown.tools ?? 0)} />
 
-              <SectionTitle>User Context</SectionTitle>
-              <MetricRow label="Messages" value={formatTokens(contextSnapshot?.breakdown.transcript ?? 0)} />
+              <SectionTitle>{t('chat.runtimeMetrics.userContext')}</SectionTitle>
+              <MetricRow label={t('chat.runtimeMetrics.messages')} value={formatTokens(contextSnapshot?.breakdown.transcript ?? 0)} />
               {contextSnapshot?.breakdown.transcriptBreakdown ? (
                 <div className="mt-1 border-l border-border/50 pl-3">
-                  <MetricRow label="User messages" value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.userMessages)} muted />
-                  <MetricRow label="Assistant messages" value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.assistantMessages)} muted />
-                  <MetricRow label="Tool call results" value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.toolResults)} muted />
+                  <MetricRow label={t('chat.runtimeMetrics.userMessages')} value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.userMessages)} muted />
+                  <MetricRow label={t('chat.runtimeMetrics.assistantMessages')} value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.assistantMessages)} muted />
+                  <MetricRow label={t('chat.runtimeMetrics.toolResults')} value={formatTokens(contextSnapshot.breakdown.transcriptBreakdown.toolResults)} muted />
                 </div>
               ) : null}
-              <MetricRow label="Memory" value={formatTokens(contextSnapshot?.breakdown.memory ?? 0)} />
-              <MetricRow label="Attachments" value={formatTokens(contextSnapshot?.breakdown.attachments ?? 0)} />
-              <MetricRow label="Pending input" value={formatTokens(contextSnapshot?.breakdown.pendingUserInput ?? 0)} />
+              <MetricRow label={t('chat.runtimeMetrics.memory')} value={formatTokens(contextSnapshot?.breakdown.memory ?? 0)} />
+              <MetricRow label={t('chat.runtimeMetrics.attachments')} value={formatTokens(contextSnapshot?.breakdown.attachments ?? 0)} />
+              <MetricRow label={t('chat.runtimeMetrics.pendingInput')} value={formatTokens(contextSnapshot?.breakdown.pendingUserInput ?? 0)} />
 
               {totalContextWindow || contextSnapshot ? (
                 <>
-                  <SectionTitle>Diagnostics</SectionTitle>
+                  <SectionTitle>{t('chat.runtimeMetrics.diagnostics')}</SectionTitle>
                   {totalContextWindow ? (
-                    <MetricRow label="Model context" value={formatTokens(totalContextWindow)} />
+                    <MetricRow label={t('chat.runtimeMetrics.modelContext')} value={formatTokens(totalContextWindow)} />
                   ) : null}
                   <MetricRow
-                    label="Source"
+                    label={t('chat.runtimeMetrics.source')}
                     value={`${contextSource}${contextSnapshot?.model.ref ? ` (${contextSnapshot.model.ref})` : ''}`}
                   />
                   {contextSnapshot ? (
                     <>
                       <MetricRow
-                        label="Total estimator"
+                        label={t('chat.runtimeMetrics.totalEstimator')}
                         value={`${contextSnapshot.estimator.total.kind} / ${contextSnapshot.estimator.total.confidence}`}
                       />
                       <MetricRow
-                        label="Breakdown estimator"
+                        label={t('chat.runtimeMetrics.breakdownEstimator')}
                         value={`${contextSnapshot.estimator.breakdown.kind} / ${contextSnapshot.estimator.breakdown.confidence}`}
                       />
                     </>
@@ -305,7 +305,7 @@ export function RuntimeMetrics({
             }}
             data-testid="context-compact-conversation"
           >
-            Compact Conversation
+            {t('chat.runtimeMetrics.compactConversation')}
           </button>
         </div>
       ) : null}

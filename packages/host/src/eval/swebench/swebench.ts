@@ -269,6 +269,7 @@ export type RunSweBenchAgentPatchInput = {
   skipCompleted?: boolean
   memoryPolicy?: EvalMemoryPolicy
   sessionLogsDir?: string
+  signal?: AbortSignal
 }
 
 export type SweBenchWorkerPlanInput = {
@@ -657,10 +658,11 @@ async function runSingleSweBenchAgentInstance({
   const promptFilePath = resolve(join(layout.rootDir, 'artifacts', instance.instance_id, 'prompt.txt'))
   await mkdir(sessionLogsDir, { recursive: true })
 
-  if (!setupError) {
+  if (!setupError && !input.signal?.aborted) {
     const command = await runShellCommand(input.agentCommand, {
       cwd: workspaceDir,
       timeoutMs: input.timeoutMs,
+      signal: input.signal,
       env: {
         AGENT_KERNEL_SWEBENCH_INSTANCE_ID: instance.instance_id,
         AGENT_KERNEL_SWEBENCH_REPO: workspaceDir,
@@ -810,6 +812,7 @@ async function runShellCommand(command: string, options: {
   cwd: string
   timeoutMs?: number
   env?: Record<string, string>
+  signal?: AbortSignal
 }): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
   return await runProcess(process.platform === 'win32' ? 'cmd.exe' : 'sh', process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-lc', command], options)
 }
@@ -818,6 +821,7 @@ async function runProcess(command: string, args: readonly string[], options: {
   cwd: string
   timeoutMs?: number
   env?: Record<string, string>
+  signal?: AbortSignal
 }): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -828,6 +832,9 @@ async function runProcess(command: string, args: readonly string[], options: {
     let stdout = ''
     let stderr = ''
     let timedOut = false
+    const abort = (): void => { child.kill('SIGTERM') }
+    if (options.signal?.aborted) abort()
+    else options.signal?.addEventListener('abort', abort, { once: true })
     const timer = options.timeoutMs
       ? setTimeout(() => {
           timedOut = true
@@ -841,6 +848,7 @@ async function runProcess(command: string, args: readonly string[], options: {
     child.on('error', reject)
     child.on('close', (exitCode) => {
       if (timer) clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
       resolve({ exitCode, stdout, stderr, timedOut })
     })
   })
@@ -1081,7 +1089,29 @@ async function readSweBenchResultRows(resultsDir: string): Promise<SweBenchInges
   }
   if (existsSync(instanceJson)) return parseResultRows(JSON.parse(await readFile(instanceJson, 'utf8')) as unknown)
   if (existsSync(resultsJson)) return parseResultRows(JSON.parse(await readFile(resultsJson, 'utf8')) as unknown)
+  const aggregateFiles = (await readdir(resultsDir)).filter((name) => name.endsWith('.json')).sort()
+  for (const name of aggregateFiles) {
+    const raw = JSON.parse(await readFile(join(resultsDir, name), 'utf8')) as unknown
+    const rows = parseOfficialAggregateRows(raw)
+    if (rows) return rows
+  }
   throw new Error(`no SWE-bench result file found in ${resultsDir}`)
+}
+
+function parseOfficialAggregateRows(raw: unknown): SweBenchIngestedResult[] | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
+  const record = raw as Record<string, unknown>
+  const submitted = Array.isArray(record.submitted_ids) ? record.submitted_ids.filter((value): value is string => typeof value === 'string') : []
+  if (submitted.length === 0) return
+  const resolved = new Set(Array.isArray(record.resolved_ids) ? record.resolved_ids.filter((value): value is string => typeof value === 'string') : [])
+  const empty = new Set(Array.isArray(record.empty_patch_ids) ? record.empty_patch_ids.filter((value): value is string => typeof value === 'string') : [])
+  const errors = new Set(Array.isArray(record.error_ids) ? record.error_ids.filter((value): value is string => typeof value === 'string') : [])
+  return submitted.map((instanceId) => ({
+    instanceId,
+    resolved: resolved.has(instanceId),
+    failureLabel: resolved.has(instanceId) ? 'resolved' : empty.has(instanceId) ? 'patch_apply_failed' : errors.has(instanceId) ? 'harness_error' : 'test_failed',
+    raw: { instance_id: instanceId, resolved: resolved.has(instanceId), aggregate: record },
+  }))
 }
 
 function parseResultRows(raw: unknown): SweBenchIngestedResult[] {
