@@ -67,7 +67,7 @@ import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
 import { AppShellNav } from './app-shell/AppShellNav.js'
-import { useAppSection, type AppSection } from './app-shell/section.js'
+import { useAppSection, useSessionDeepLink, type AppSection } from './app-shell/section.js'
 // Page-level lazy loading: the app boots into the "agent" section by default,
 // so the five other top-level pages plus SettingsDialog are pulled in only
 // when their tab (or the settings icon) is opened. Each import() becomes its
@@ -1114,6 +1114,9 @@ export function App(): JSX.Element {
   }
 
   const [section, setSection] = useAppSection()
+  // Notification deep-links: `#/sessions/<id>` selects that session (works both
+  // on cold-start openWindow and the focused-tab PUSH_NAVIGATE path).
+  useSessionDeepLink(selectSession)
   // Mobile edge-swipe: a right-swipe from the left screen edge opens the
   // session explorer drawer; a left-swipe closes it. Only in the chat section
   // on narrow layouts (the drawer doesn't exist on wide/desktop, where the
