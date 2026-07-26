@@ -3952,17 +3952,21 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
-  it('steer during tool execution interrupts the running turn and dispatches instead of stalling in the queue', async () => {
-    // Regression: a steer submitted while the agent is mid-tool-execution (not
-    // streaming an LLM response) used to be front-enqueued but never delivered
-    // — `cancelStream` is a no-op during tool execution, so the steer sat at
-    // the front of the queue across the entire autonomous think→tool→think
-    // loop and only drained once the agent voluntarily stopped. The handler
-    // now issues a real `cancel` for non-`thinking` running states.
+  it('steer during tool execution waits for the running tool to finish, then dispatches (no truncation)', async () => {
+    // Steer semantics (spec A): a steer submitted while the agent is
+    // mid-tool-execution must NOT abort the running tool/sub-agent. It waits for
+    // the current tool to finish naturally, stops the autonomous loop before the
+    // next think, and then dispatches the front-queued steer as the next turn.
+    // Here the child sub-agent completes on its own after the steer arrives; the
+    // steer must be delivered *after* that completion, never by truncating it.
     await server.close()
     const sessionId = 'wire-steer-during-tools'
     let call = 0
     const seenPrompts: string[] = []
+    let releaseChild!: () => void
+    const childGate = new Promise<void>((resolve) => {
+      releaseChild = resolve
+    })
     const llm: LLMAdapter = {
       name: 'steer-during-tools-test',
       async call(params) {
@@ -3985,12 +3989,10 @@ describe('wire protocol', () => {
           }
         }
         if (userText.includes('long child task')) {
-          // Child LLM call: block until the parent's `cancel` aborts us.
-          await new Promise<void>((_resolve, reject) => {
-            const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
-            if (params.signal?.aborted) abort()
-            params.signal?.addEventListener('abort', abort, { once: true })
-          })
+          // Child LLM call: run until the test releases it (simulating a tool
+          // that finishes on its own AFTER the steer has been submitted). It must
+          // NOT be aborted by the steer — spec A waits for it to complete.
+          await childGate
         }
         return { message: { role: 'assistant', content: [{ type: 'text', text: `answer ${call}` }] } }
       },
@@ -4029,17 +4031,25 @@ describe('wire protocol', () => {
     dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
     // Wait until the parent is parked in `executing_tools` (child agent running).
     await childStarted
-    // Give the child LLM call a beat to actually start streaming/blocking.
+    // Give the child LLM call a beat to actually start running (blocked on gate).
     await new Promise((resolve) => setTimeout(resolve, 50))
 
-    // Steer while a tool is executing: must interrupt and deliver.
+    // Steer while a tool is executing. Spec A: this must NOT abort the child.
     dashboard.emit('client:user_message', { sessionId, text: 'steered', mode: 'steer' })
+    // Give the steer a beat to be enqueued + flag the session for a boundary stop
+    // while the tool is still running, then let the child finish on its own.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    releaseChild()
 
     const deadline = Date.now() + 8000
     while (Date.now() < deadline && !seenPrompts.some((prompt) => prompt.includes('steered'))) {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
+    // The steer is delivered — but only AFTER the child tool completed naturally.
     expect(seenPrompts.some((prompt) => prompt.includes('steered'))).toBe(true)
+    // Proof the tool ran to completion rather than being truncated: the child
+    // produced its own answer before the steer turn ran.
+    expect(seenPrompts.some((prompt) => prompt.includes('long child task'))).toBe(true)
     // Never surfaced to the dock as a stuck queued item.
     expect(queueEvents.some((e) => e.text === 'steered' && e.mode === 'steer' && e.pending > 0)).toBe(false)
 

@@ -151,6 +151,16 @@ export type LoopHandle = {
    * dangling call. No-op when nothing is streaming.
    */
   cancelStream(sessionId: string): void
+  /**
+   * Politely stop a session's autonomous turn at the next safe boundary WITHOUT
+   * aborting the in-flight LLM response or tool call. The current LLM step /
+   * running tool finishes naturally; the loop then settles to a resting status
+   * instead of continuing think→tool→think. Used by `steer`: the user's message
+   * is queued at the front and dispatched once the session reaches rest, so a
+   * steer never truncates an in-progress response or tool. The flag self-clears
+   * when the session settles. No-op if the session is already resting.
+   */
+  requestStopAtBoundary(sessionId: string): void
 }
 
 export type LoopDrainMode = 'none' | 'checkpoint' | 'idle'
@@ -178,6 +188,8 @@ export type LoopRuntime = {
   loopGuard: Map<string, PostCompactionLoopGuard>
   model?: string
   drain?: () => LoopDrainMode
+  /** Per-session steer stop: halt the autonomous loop before the next think. */
+  steerStop?: () => boolean
   toolStarted?(sessionId: string, callId: string): void
   toolSettled?(sessionId: string, callId: string): void
 }
