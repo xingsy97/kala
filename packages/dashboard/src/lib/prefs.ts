@@ -44,6 +44,7 @@ function definePreferenceRegistry<const T extends PreferenceRegistry>(registry: 
 export const DASHBOARD_PREFERENCES = definePreferenceRegistry({
   showToolCallTab: { key: 'ak-show-tool-call-tab', type: 'boolean', defaultValue: true },
   liveToolActivityTailCount: { key: 'ak-live-tool-activity-tail-count', type: 'number', defaultValue: 3, min: 0, max: 50 },
+  toolActivityIconScale: { key: 'ak-tool-activity-icon-scale', type: 'number', defaultValue: 150, min: 100, max: 200 },
   explorerOpen: { key: 'ak-explorer-open', type: 'boolean', defaultValue: true },
   sessionExplorerSectionOpen: { key: 'ak-session-explorer-section-open', type: 'boolean', defaultValue: true },
   inspectorOpen: { key: 'ak-inspector-open', type: 'boolean', defaultValue: true },
@@ -215,6 +216,7 @@ export function useNumberPref(
 
 export const PREF_SHOW_TOOL_CALL_TAB = DASHBOARD_PREFERENCES.showToolCallTab.key
 export const PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveToolActivityTailCount.key
+export const PREF_TOOL_ACTIVITY_ICON_SCALE = DASHBOARD_PREFERENCES.toolActivityIconScale.key
 export const PREF_EXPLORER_OPEN = DASHBOARD_PREFERENCES.explorerOpen.key
 export const PREF_SESSION_EXPLORER_SECTION_OPEN = DASHBOARD_PREFERENCES.sessionExplorerSectionOpen.key
 export const PREF_INSPECTOR_OPEN = DASHBOARD_PREFERENCES.inspectorOpen.key
@@ -244,6 +246,7 @@ export const PREF_SESSION_ORDER = DASHBOARD_PREFERENCES.sessionOrder.key
 export const PREF_WORKSPACE_OPEN = DASHBOARD_PREFERENCES.workspaceOpen.key
 export const PREF_SESSION_CHILDREN_OPEN = DASHBOARD_PREFERENCES.sessionChildrenOpen.key
 export const DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT = DASHBOARD_PREFERENCES.liveToolActivityTailCount.defaultValue
+export const DEFAULT_TOOL_ACTIVITY_ICON_SCALE = DASHBOARD_PREFERENCES.toolActivityIconScale.defaultValue
 export const DEFAULT_CHAT_FONT_SIZE = DASHBOARD_PREFERENCES.chatFontSize.defaultValue
 export const DEFAULT_SESSION_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.sessionExplorerFontSize.defaultValue
 export const DEFAULT_FILE_EXPLORER_FONT_SIZE = DASHBOARD_PREFERENCES.fileExplorerFontSize.defaultValue
