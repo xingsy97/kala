@@ -4,8 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { RunListPanel } from './RunListPanel.js'
 import { RunDetailPanel } from './RunDetailPanel.js'
-import { RunLauncherPanel } from './RunLauncherPanel.js'
-import { RunTerminalBenchWizard } from './RunTerminalBenchWizard.js'
+import { RunTerminalBenchWizard, type BenchmarkWizardVariant } from './RunTerminalBenchWizard.js'
 import { RunBenchmarkWizardModal } from './RunBenchmarkWizardModal.js'
 import type { BenchmarkRunSummary } from './types.js'
 
@@ -17,8 +16,8 @@ export function BenchmarksPage({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [benchmarkKind, setBenchmarkKind] = useState<'swebench' | BenchmarkWizardVariant>('swebench')
   const [terminalWizardOpen, setTerminalWizardOpen] = useState(false)
-  const [wizardVariant, setWizardVariant] = useState<'terminal-bench' | 'program-bench' | 'swe-marathon' | 'terminal-bench-2_1'>('terminal-bench')
   const [wizardModalOpen, setWizardModalOpen] = useState(false)
 
   const runsQuery = useQuery({
@@ -48,8 +47,9 @@ export function BenchmarksPage({
   const selectedRun = runs.find((r) => r.runId === selectedRunId) ?? null
 
   const openWizardModal = useCallback((): void => {
-    setWizardModalOpen(true)
-  }, [])
+    if (benchmarkKind === 'swebench') setWizardModalOpen(true)
+    else setTerminalWizardOpen(true)
+  }, [benchmarkKind])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-testid="benchmarks-page">
@@ -61,6 +61,9 @@ export function BenchmarksPage({
           <p className="text-xs text-muted-foreground">{t('benchmarks.page.subtitle')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <select className="h-8 rounded border border-border bg-background px-2 text-xs" value={benchmarkKind} onChange={(event) => setBenchmarkKind(event.target.value as typeof benchmarkKind)} aria-label={t('benchmarks.page.benchmarkType')} data-testid="benchmarks-page-kind">
+            <option value="swebench">SWE-bench</option><option value="terminal-bench">Terminal-Bench</option><option value="terminal-bench-2_1">Terminal-Bench 2.1</option><option value="program-bench">ProgramBench</option><option value="swe-marathon">SWE-Marathon</option>
+          </select>
           <button
             type="button"
             className="h-7 rounded border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -80,7 +83,7 @@ export function BenchmarksPage({
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-hidden">
-        <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden md:grid-cols-[minmax(220px,0.85fr)_minmax(0,2.4fr)] xl:grid-cols-[minmax(240px,0.85fr)_minmax(0,2.2fr)_minmax(260px,0.8fr)]">
+        <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden md:grid-cols-[minmax(260px,0.7fr)_minmax(0,2.3fr)]">
           <div className="min-h-0 border-b border-border/50 md:border-b-0 md:border-r">
             <RunListPanel
               runs={runs}
@@ -92,29 +95,11 @@ export function BenchmarksPage({
             />
           </div>
           <div className="min-h-0 min-w-0 overflow-hidden">
-            <RunDetailPanel run={selectedRun} />
-          </div>
-          <div className="min-h-0 border-t border-border/50 md:hidden xl:block xl:border-l xl:border-t-0">
-            <RunLauncherPanel
-              run={selectedRun}
-              onLaunchSwebench={openWizardModal}
-              onLaunchTerminalBench={() => { setWizardVariant('terminal-bench'); setTerminalWizardOpen(true) }}
-              onLaunchTerminalBench21={() => { setWizardVariant('terminal-bench-2_1'); setTerminalWizardOpen(true) }}
-              onLaunchProgramBench={() => { setWizardVariant('program-bench'); setTerminalWizardOpen(true) }}
-              onLaunchSweMarathon={() => { setWizardVariant('swe-marathon'); setTerminalWizardOpen(true) }}
-            />
+            <RunDetailPanel run={selectedRun} onDeleted={() => { setSelectedRunId(null); loadRuns() }} />
           </div>
         </div>
       </div>
-      <RunTerminalBenchWizard
-        open={terminalWizardOpen}
-        onOpenChange={setTerminalWizardOpen}
-        variant={wizardVariant}
-        onRunRegistered={(runId) => {
-          setSelectedRunId(runId)
-          loadRuns()
-        }}
-      />
+      <RunTerminalBenchWizard open={terminalWizardOpen} onOpenChange={setTerminalWizardOpen} variant={benchmarkKind === 'swebench' ? 'terminal-bench' : benchmarkKind} onRunRegistered={(runId) => { setSelectedRunId(runId); loadRuns() }} />
       <RunBenchmarkWizardModal
         open={wizardModalOpen}
         onOpenChange={setWizardModalOpen}

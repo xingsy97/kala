@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Activity, ChevronDown, ChevronUp } from 'lucide-react'
 import type { HumanAttentionLevel, HumanAttentionTimeline } from '@agent-kernel/shared'
+import { useTranslation } from 'react-i18next'
 
 import { cn } from '../../lib/utils.js'
 
@@ -9,23 +10,11 @@ type Props = {
   density?: 'default' | 'simple'
 }
 
-const LEVEL_LABEL: Record<HumanAttentionLevel, string> = {
-  engaged: 'Engaged',
-  watching: 'Watching',
-  drifting: 'Drifting',
-  absent: 'Low',
-}
-
-const DIMENSION_LABELS: ReadonlyArray<[keyof NonNullable<HumanAttentionTimeline['latest']>['dimensions'], string]> = [
-  ['inputQuality', 'Input'],
-  ['reviewDepth', 'Review'],
-  ['correctionQuality', 'Corrections'],
-  ['riskAwareness', 'Risk awareness'],
-  ['continuity', 'Continuity'],
-  ['riskExposure', 'Risk exposure'],
-]
+const DIMENSIONS: ReadonlyArray<keyof NonNullable<HumanAttentionTimeline['latest']>['dimensions']> =
+  ['inputQuality', 'reviewDepth', 'correctionQuality', 'riskAwareness', 'continuity', 'riskExposure']
 
 export function HumanAttentionIndicator({ timeline, density = 'default' }: Props): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [reasonsExpanded, setReasonsExpanded] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
@@ -33,8 +22,8 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
   const isSimple = density === 'simple'
   const scoreText = latest ? String(latest.score) : '--'
   const title = latest
-    ? `Attention ${latest.score} · ${LEVEL_LABEL[latest.level]}`
-    : 'Attention unavailable'
+    ? t('humanAttention.title', { score: latest.score, level: t(`humanAttention.levels.${latest.level}`) })
+    : t('humanAttention.unavailable')
 
   useEffect(() => {
     if (!open) return
@@ -82,21 +71,21 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
       {open ? (
         <div
           role="dialog"
-          aria-label="Human Attention"
+          aria-label={t('humanAttention.heading')}
           className="ak-motion-popover fixed inset-x-2 bottom-[5.5rem] z-30 max-w-[calc(100vw-1rem)] overflow-x-hidden rounded-lg border border-border/70 bg-popover p-4 text-sm shadow-xl sm:absolute sm:inset-x-auto sm:bottom-full sm:right-0 sm:mb-2 sm:w-[min(26rem,calc(100vw-1rem))]"
           data-testid="human-attention-popover"
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-lg font-semibold tracking-tight text-foreground">Human Attention</div>
-              <div className="mt-1 text-xs text-muted-foreground">Session-scoped estimate</div>
+              <div className="text-lg font-semibold tracking-tight text-foreground">{t('humanAttention.heading')}</div>
+              <div className="mt-1 text-xs text-muted-foreground">{t('humanAttention.sessionEstimate')}</div>
             </div>
             <div className="text-right">
               <div className={cn('font-mono text-2xl leading-none', latest ? scoreTextTone(latest.level) : 'text-muted-foreground')}>
                 {scoreText}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
-                {latest ? LEVEL_LABEL[latest.level] : 'No data'}
+                {latest ? t(`humanAttention.levels.${latest.level}`) : t('humanAttention.noData')}
               </div>
             </div>
           </div>
@@ -105,13 +94,13 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
             <>
               <AttentionChart timeline={timeline} />
               <div className="mt-4 grid gap-2">
-                {DIMENSION_LABELS.map(([key, label]) => (
-                  <DimensionBar key={key} label={label} value={latest.dimensions[key]} reverse={key === 'riskExposure'} />
+                {DIMENSIONS.map((key) => (
+                  <DimensionBar key={key} label={t(`humanAttention.dimensions.${key}`)} value={latest.dimensions[key]} reverse={key === 'riskExposure'} />
                 ))}
               </div>
               <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>Cursor {latest.messageCursor}</span>
-                <span>Confidence {Math.round(latest.confidence * 100)}%</span>
+                <span>{t('humanAttention.cursor', { cursor: latest.messageCursor })}</span>
+                <span>{t('humanAttention.confidence', { percent: Math.round(latest.confidence * 100) })}</span>
               </div>
               {latest.reasons.length > 0 ? (
                 <div className="mt-3">
@@ -122,7 +111,7 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
                     data-testid="human-attention-reasons-toggle"
                     className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   >
-                    <span>{reasonsExpanded ? 'Hide reasons' : `Show ${latest.reasons.length} reason${latest.reasons.length === 1 ? '' : 's'}`}</span>
+                    <span>{reasonsExpanded ? t('humanAttention.hideReasons') : t('humanAttention.showReasons', { count: latest.reasons.length })}</span>
                     {reasonsExpanded ? (
                       <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
                     ) : (
@@ -144,7 +133,7 @@ export function HumanAttentionIndicator({ timeline, density = 'default' }: Props
             </>
           ) : (
             <div className="mt-4 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              No human messages have been evaluated yet.
+              {t('humanAttention.empty')}
             </div>
           )}
         </div>
@@ -164,6 +153,7 @@ export function shouldShowLowAttentionHint(timeline: HumanAttentionTimeline): bo
 }
 
 function AttentionChart({ timeline }: { timeline: HumanAttentionTimeline }): JSX.Element {
+  const { t } = useTranslation()
   const points = timeline.points.slice(-40)
   const width = 320
   const height = 96
@@ -179,7 +169,7 @@ function AttentionChart({ timeline }: { timeline: HumanAttentionTimeline }): JSX
 
   return (
     <div className="mt-4 rounded-md border border-border/60 bg-background/50 p-2" data-testid="human-attention-chart">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-24 w-full text-sky-500" role="img" aria-label="Attention score timeline">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-24 w-full text-sky-500" role="img" aria-label={t('humanAttention.timeline')}>
         <line x1={padding} y1={padding} x2={padding} y2={height - padding} className="stroke-border" strokeWidth="1" />
         <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} className="stroke-border" strokeWidth="1" />
         <line x1={padding} y1={padding + (height - padding * 2) * 0.7} x2={width - padding} y2={padding + (height - padding * 2) * 0.7} className="stroke-rose-300/70 dark:stroke-rose-800/80" strokeDasharray="4 4" strokeWidth="1" />
@@ -192,7 +182,7 @@ function AttentionChart({ timeline }: { timeline: HumanAttentionTimeline }): JSX
       </svg>
       <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
         <span>{minCursor}</span>
-        <span>Message cursor</span>
+        <span>{t('humanAttention.messageCursor')}</span>
         <span>{maxCursor}</span>
       </div>
     </div>

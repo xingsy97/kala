@@ -14,7 +14,7 @@
  */
 
 import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
 import { dirname, extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
@@ -79,7 +79,11 @@ import {
   runSweMarathonRun,
 } from '../eval/swe-marathon/swe-marathon.js'
 import { mineBadCases } from '../eval/badcases/badcase-mining.js'
-import { readSweBenchRunRegistry } from '../eval/core/run-registry.js'
+import { readSweBenchRunRegistry, unregisterSweBenchRun } from '../eval/core/run-registry.js'
+import { getAgentBackend, listAgentBackends } from '../eval/core/agent-backend.js'
+import { importLegacySweBench } from '../eval/core/legacy-swebench-import.js'
+import { BenchmarkRunService } from '../eval/core/benchmark-run-service.js'
+import { AgentBackendIdSchema } from '@agent-kernel/shared'
 import { exportForRL, exportForSFT } from '../eval/badcases/badcase-export.js'
 import { exportRollouts } from '../eval/badcases/rollout-export.js'
 import { annotateBadCase, readBadCaseAnnotations, BAD_CASE_LABELS, type BadCaseLabel } from '../eval/badcases/badcase-annotations.js'
@@ -142,17 +146,17 @@ const MIME: Record<string, string> = {
 }
 
 const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
+const BENCHMARK_RUN_SERVICES = new Map<string, BenchmarkRunService>()
 
-function defaultSweBenchAgentCommand(): string {
-  // Smoke-test recipe: produces an empty patch inside the workspace so the
-  // whole Plan → Infer → Grade → Ingest wizard can complete end-to-end
-  // without a real agent. Real users must supply their own agentCommand
-  // (e.g. Claude Code CLI, aider, or a custom shell script) via the wizard's
-  // "Custom shell command" recipe. This intentionally does NOT invoke
-  // agent-kernel-executor — that binary is a socket.io daemon, not a
-  // standalone agent runner.
-  return 'true'
+function benchmarkRunService(rootDir: string): BenchmarkRunService {
+  const key = resolvePath(rootDir)
+  const existing = BENCHMARK_RUN_SERVICES.get(key)
+  if (existing) return existing
+  const service = new BenchmarkRunService(key)
+  BENCHMARK_RUN_SERVICES.set(key, service)
+  return service
 }
+
 const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
 const MAX_DOC_CONTENT_BYTES = 1024 * 1024
 
@@ -179,6 +183,8 @@ type EnhancementActionRequest = {
   sessionLogPaths?: readonly string[] | string
   workspaceRoot?: string
   runId?: string
+  confirmRunId?: string
+  confirmPermanent?: boolean
   evalInstanceId?: string
   instanceId?: string
   patchPath?: string
@@ -300,6 +306,12 @@ type EnhancementActionRequest = {
   summaryContent?: string
   pricingContent?: string
   agentCommand?: string
+  agentBackend?: string
+  agentBackendConfig?: Record<string, unknown>
+  spec?: unknown
+  after?: number | string
+  sourceDir?: string
+  importId?: string
   skipCompleted?: boolean
   tasksJsonl?: string
   tasksContent?: string
@@ -1228,14 +1240,28 @@ async function runEnhancementAction(
     const skipCompletedFlag = body.skipCompleted
     const skipCompleted = typeof skipCompletedFlag === 'boolean' ? skipCompletedFlag : true
     const started = Date.now()
+    const model = requiredString(body.model, 'model')
+    const backendId = AgentBackendIdSchema.parse(cleanString(body.agentBackend) ?? (cleanString(body.agentCommand) ? 'custom-command' : 'agent-runlab'))
+    const backend = getAgentBackend(backendId)
+    const backendConfig = {
+      id: backendId,
+      model,
+      config: {
+        ...(body.agentBackendConfig ?? {}),
+        ...(cleanString(body.agentCommand) ? { command: cleanString(body.agentCommand) } : {}),
+      },
+    }
+    const validation = backend.validate(backendConfig)
+    if (!backend.descriptor.available) throw new HttpRouteError(400, backend.descriptor.unavailableReason ?? `${backendId} backend is unavailable`)
+    if (!validation.ok) throw new HttpRouteError(400, validation.errors.join('; '))
     const result = await runSweBenchAgentPatchRun({
       rootDir,
       runId,
       dataset: requiredString(body.dataset, 'dataset'),
       ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
-      model: requiredString(body.model, 'model'),
+      model,
       instancesJsonl: cleanString(body.instancesJsonl) ?? layout.instancesPath,
-      agentCommand: cleanString(body.agentCommand) ?? defaultSweBenchAgentCommand(),
+      agentCommand: backend.command(backendConfig),
       ...(instanceIds ? { instanceIds } : {}),
       ...(limit !== undefined ? { limit } : {}),
       ...(maxWorkers !== undefined ? { maxWorkers } : {}),
@@ -1648,6 +1674,22 @@ async function runEnhancementAction(
   if (action === 'badcase-list') {
     const runId = requiredString(body.runId, 'runId')
     const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
+    if (runId.startsWith('legacy:')) {
+      if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+      const name = runId.slice('legacy:'.length)
+      const imported = JSON.parse(await readFile(join(rootDir, 'legacy-imports', name, 'import.json'), 'utf8')) as {
+        failureTaxonomy?: { cases?: Record<string, { category?: string; label?: string; cause?: string; failedTests?: string[]; evidence?: string; lesson?: string }> }
+      }
+      const rows = Object.entries(imported.failureTaxonomy?.cases ?? {}).map(([instanceId, item]) => ({
+        instanceId,
+        failureCategory: item.category === 'regression' ? 'verifier-failure' : 'unresolved-other',
+        traceHead: item.label ? [item.label] : [],
+        traceTail: item.lesson ? [item.lesson] : [],
+        toolCallErrors: [],
+        verifierReason: [item.cause, item.evidence, ...(item.failedTests ?? [])].filter(Boolean).join('\n'),
+      }))
+      return { action, runId, counts: { 'patch-apply-failure': 0, 'test-timeout': 0, 'agent-error': 0, 'infra-error': 0, 'verifier-failure': rows.filter((row) => row.failureCategory === 'verifier-failure').length, 'unresolved-other': rows.filter((row) => row.failureCategory === 'unresolved-other').length }, cases: rows }
+    }
     if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
     const [{ cases, counts }, annotations] = await Promise.all([
       mineBadCases({ rootDir, runId }),
@@ -1730,6 +1772,55 @@ async function runEnhancementAction(
     // No paths in the response — the browser wraps `content` in a Blob.
     return { action, target: rawTarget, rolloutCount, content }
   }
+  if (action === 'agent-backend-list') {
+    return { action, backends: listAgentBackends() }
+  }
+  if (action === 'benchmark-run-create') {
+    const service = benchmarkRunService(rootDir)
+    return { action, run: await service.create(body.spec) }
+  }
+  if (action === 'benchmark-run-list') {
+    const service = benchmarkRunService(rootDir)
+    return { action, runs: await service.list() }
+  }
+  if (action === 'benchmark-run-get') {
+    const service = benchmarkRunService(rootDir)
+    return { action, run: await service.get(requiredString(body.runId, 'runId')) }
+  }
+  if (action === 'benchmark-run-start') {
+    const service = benchmarkRunService(rootDir)
+    return { action, run: await service.start(requiredString(body.runId, 'runId')) }
+  }
+  if (action === 'benchmark-run-grade') {
+    const service = benchmarkRunService(rootDir)
+    return { action, run: await service.grade(requiredString(body.runId, 'runId'), body.dryRun !== true) }
+  }
+  if (action === 'benchmark-run-cancel') {
+    const service = benchmarkRunService(rootDir)
+    return { action, run: await service.cancel(requiredString(body.runId, 'runId')) }
+  }
+  if (action === 'benchmark-run-events') {
+    const service = benchmarkRunService(rootDir)
+    return { action, ...(await service.events(requiredString(body.runId, 'runId'), nonNegativeInteger(body.after, 'after') ?? -1, positiveInteger(body.limit, 'limit') ?? 100)) }
+  }
+  if (action === 'legacy-swebench-import') {
+    const sourceDir = requiredString(body.sourceDir, 'sourceDir')
+    const result = await importLegacySweBench({
+      sourceDir,
+      outputRoot: rootDir,
+      ...(cleanString(body.importId) ? { importId: cleanString(body.importId) } : {}),
+    })
+    const headline = result.imported.headline as { agent_runlab?: { resolved?: number; selected?: number }; claude_code?: { resolved?: number; selected?: number } }
+    const taxonomy = result.imported.failureTaxonomy as { cases?: Record<string, unknown> }
+    return {
+      action,
+      importPath: result.path,
+      source: result.imported.source,
+      agentRunLab: headline.agent_runlab,
+      claudeCode: headline.claude_code,
+      badCaseCount: Object.keys(taxonomy.cases ?? {}).length,
+    }
+  }
   if (action === 'run-registry-list') {
     const kindFilter = cleanString(body.kind)
     const registry = await readSweBenchRunRegistry(rootDir)
@@ -1778,8 +1869,90 @@ async function runEnhancementAction(
         ...(resolved !== undefined ? { resolved } : {}),
       }
     }))
-    runs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
-    return { action, runs }
+    const unified: Array<Record<string, unknown> & { runId: string; updatedAt: string }> = [...runs]
+    for (const record of await benchmarkRunService(rootDir).list()) {
+      const totalInstances = Math.max(0, ...record.status.backends.map((backend) => backend.total ?? 0))
+      const allTrialsFailed = totalInstances > 0 && record.status.backends.every((backend) => (backend.completed ?? 0) === 0 && (backend.failed ?? 0) + (backend.timedOut ?? 0) >= (backend.total ?? 0))
+      const officiallyGraded = record.status.backends.length > 0 && record.status.backends.every((backend) => backend.state === 'completed' && backend.gradingCommand && typeof backend.resolved === 'number')
+      unified.push({
+        runId: record.spec.runId,
+        kind: record.spec.benchmark,
+        label: record.spec.runId,
+        dataset: record.spec.dataset.source,
+        ...(record.spec.dataset.split ? { split: record.spec.dataset.split } : {}),
+        model: record.spec.backends.map((backend) => `${backend.id}:${backend.model || 'none'}`).join(', '),
+        selectedCount: record.spec.dataset.instanceIds?.length ?? record.spec.dataset.limit ?? totalInstances,
+        status: record.status.state === 'failed' || allTrialsFailed ? 'failed' : record.status.state === 'completed' ? 'complete' : record.status.state === 'running' ? 'running' : 'pending',
+        createdAt: record.status.createdAt,
+        updatedAt: record.status.updatedAt,
+        evidenceLevel: record.spec.backends.some((backend) => backend.id === 'smoke') ? 'smoke' : officiallyGraded ? 'official' : 'predictions_only',
+        orchestrated: true,
+        backends: record.status.backends,
+        totalInstances,
+        ...(record.status.state === 'completed' ? { resolved: Math.max(0, ...record.status.backends.map((backend) => backend.resolved ?? 0)) } : {}),
+      })
+    }
+    try {
+      for (const name of await readdir(join(rootDir, 'legacy-imports'))) {
+        try {
+          const imported = JSON.parse(await readFile(join(rootDir, 'legacy-imports', name, 'import.json'), 'utf8')) as {
+            importedAt: string
+            headline?: { agent_runlab?: { run_id?: string; selected?: number; resolved?: number }; claude_code?: { resolved?: number } }
+            failureTaxonomy?: { cases?: Record<string, unknown> }
+          }
+          const agent = imported.headline?.agent_runlab
+          if (!agent?.run_id) continue
+          unified.push({
+            runId: `legacy:${name}`,
+            kind: 'swebench',
+            label: `Historical SWE-bench: ${name}`,
+            dataset: 'princeton-nlp/SWE-bench_Lite',
+            model: 'multiple historical backends/models',
+            selectedCount: agent.selected ?? 0,
+            status: 'complete',
+            createdAt: imported.importedAt,
+            updatedAt: imported.importedAt,
+            totalInstances: agent.selected,
+            resolved: agent.resolved,
+            evidenceLevel: 'legacy_official',
+            legacy: true,
+            badCaseCount: Object.keys(imported.failureTaxonomy?.cases ?? {}).length,
+            comparison: { agentRunLabResolved: agent.resolved, claudeCodeResolved: imported.headline?.claude_code?.resolved },
+          })
+        } catch { /* ignore malformed imports */ }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    const deduped = [...new Map(unified.map((run) => [run.runId, run])).values()]
+    deduped.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+    return { action, runs: deduped }
+  }
+  if (action === 'benchmark-run-delete-impact' || action === 'benchmark-run-delete') {
+    const runId = requiredString(body.runId, 'runId')
+    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
+    const targets: string[] = []
+    const orchestratedDir = join(rootDir, 'benchmark-runs', runId)
+    if (existsSync(orchestratedDir)) targets.push(orchestratedDir)
+    if (runId.startsWith('legacy:')) {
+      const importDir = join(rootDir, 'legacy-imports', runId.slice('legacy:'.length))
+      if (existsSync(importDir)) targets.push(importDir)
+    } else {
+      const registry = await readSweBenchRunRegistry(rootDir)
+      const entry = registry.entries.find((candidate) => candidate.runId === runId)
+      if (entry && isPathInside(rootDir, entry.runDir) && existsSync(entry.runDir)) targets.push(entry.runDir)
+    }
+    const uniqueTargets = [...new Set(targets.map((target) => resolvePath(target)))]
+    let files = 0
+    let bytes = 0
+    for (const target of uniqueTargets) { const impact = await deletionDirectoryImpact(target); files += impact.files; bytes += impact.bytes }
+    if (action === 'benchmark-run-delete-impact') return { action, runId, files, bytes, targets: uniqueTargets.map((target) => target.slice(resolvePath(rootDir).length + 1)) }
+    if (body.confirmRunId !== runId || body.confirmPermanent !== true) throw new HttpRouteError(400, 'permanent deletion confirmation does not match')
+    const service = benchmarkRunService(rootDir)
+    if (existsSync(orchestratedDir)) await service.delete(runId)
+    for (const target of uniqueTargets) if (target !== resolvePath(orchestratedDir)) await rm(target, { recursive: true, force: false })
+    if (!runId.startsWith('legacy:')) await unregisterSweBenchRun(rootDir, runId)
+    return { action, runId, deleted: true, files, bytes }
   }
   if (action === 'artifacts-manifest') {
     const maxHashBytes = positiveInteger(body.maxHashBytes, 'maxHashBytes')
@@ -1981,6 +2154,13 @@ function listInput(value: unknown): readonly string[] | undefined {
     return out.length > 0 ? out : undefined
   }
   return undefined
+}
+
+function nonNegativeInteger(value: unknown, name: string): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isInteger(number) || number < 0) throw new HttpRouteError(400, `${name} must be a non-negative integer`)
+  return number
 }
 
 function positiveInteger(value: unknown, name: string): number | undefined {
@@ -2511,6 +2691,24 @@ function serveEmbeddedReleaseAsset(
     return
   }
   res.end(body)
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const normalizedRoot = resolvePath(root)
+  const normalizedCandidate = resolvePath(candidate)
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}${sep}`)
+}
+
+async function deletionDirectoryImpact(directory: string): Promise<{ files: number; bytes: number }> {
+  let files = 0
+  let bytes = 0
+  const visit = async (path: string): Promise<void> => {
+    const info = await stat(path)
+    if (!info.isDirectory()) { files += 1; bytes += info.size; return }
+    for (const name of await readdir(path)) await visit(join(path, name))
+  }
+  await visit(directory)
+  return { files, bytes }
 }
 
 async function pickFile(abs: string, root: string): Promise<string | null> {

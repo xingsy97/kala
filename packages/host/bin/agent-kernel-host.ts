@@ -56,7 +56,6 @@ import { AGENT_SYSTEM_PROMPT_PRESETS, normalizeAgentSystemPromptPreset, resolveB
 import { createHookRunner } from '../src/extensions/hooks.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import {
-  knownContextWindow,
   defaultAgentSettingsPath,
   loadAgentRuntimeSettings,
   loadHookConfigs,
@@ -73,10 +72,13 @@ import { loadSocketAdminConfig, type EmbeddedSocketAdminAsset } from '../src/soc
 import { createSocketAdminStore } from '../src/socket-admin-store.js'
 import { authSettings, type AuthConfig } from '../src/auth-control.js'
 import { createAuditLogger } from '../src/audit-log.js'
+import { ModelMetadataService } from '../src/model-metadata/model-metadata-service.js'
+import { resolveModelContextWindow } from '../src/model-capabilities.js'
 import { ExecutorIdentityStore } from '../src/store/executor-identity.js'
 import { discoverSkills } from '../src/extensions/skills.js'
 import { parseSweBenchCli, runSweBenchCli } from '../src/eval/swebench/swebench-cli.js'
 import { parseEvalBenchCli, runEvalBenchCli } from '../src/eval/core/eval-bench-cli.js'
+import { parseBenchmarkCli, runBenchmarkCli } from '../src/eval/core/benchmark-cli.js'
 import { parseEnhancementCli, runEnhancementCli } from '../src/ops-cli.js'
 
 const logger = createRuntimeLogger('agent-kernel-host')
@@ -115,6 +117,7 @@ Usage:
   bundle-dashboard-with-runtime.cjs eval swe-marathon <run|import> [options]
   bundle-dashboard-with-runtime.cjs eval terminal-bench-2_1 run [options]
   bundle-dashboard-with-runtime.cjs enhancement <area> <command> [options]
+  bundle-dashboard-with-runtime.cjs benchmark <backends|run|import-legacy-swebench> [options]
 
 Options:
   -h, --help                 Show this help and exit.
@@ -164,6 +167,9 @@ async function main(): Promise<void> {
   const enhancementCommand = parseEnhancementCli(argv)
   if (await runEnhancementCli(enhancementCommand)) return
 
+  const benchmarkCommand = parseBenchmarkCli(argv)
+  if (await runBenchmarkCli(benchmarkCommand)) return
+
   const sweBenchCommand = parseSweBenchCli(argv)
   if (await runSweBenchCli(sweBenchCommand)) return
 
@@ -199,6 +205,11 @@ async function main(): Promise<void> {
     ...(artifactRootDir ? { artifactRootDir } : {}),
     logger,
   })
+  const modelMetadata = new ModelMetadataService({ logger })
+  const enrichModels = () => modelMetadata.enrichModels(registry.models, registry.providers, registry.manualModels)
+  modelMetadata.setUpdateHandler(enrichModels)
+  await modelMetadata.start(registry.providers)
+  enrichModels()
   const { llm } = registry
 
   const skills = await discoverSkills()
@@ -207,8 +218,8 @@ async function main(): Promise<void> {
   const resolveCurrentAgentModule = () => resolveBuiltinAgentModule({
     skills: skills.skills,
     systemPromptPreset: agentSettings.systemPromptPreset,
-    ...(knownContextWindow(registry.defaultModel)
-      ? { contextLimit: knownContextWindow(registry.defaultModel) }
+    ...(resolveModelContextWindow(registry.defaultModel, registry.models)
+      ? { contextLimit: resolveModelContextWindow(registry.defaultModel, registry.models) }
       : {}),
   })
   let resolvedAgentModule = resolveCurrentAgentModule()
@@ -292,21 +303,27 @@ async function main(): Promise<void> {
     settings: makeSettings,
     addManualModel: (input) => {
       registry.addManual(input)
+      enrichModels()
       writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
       return makeSettings()
     },
     deleteManualModel: (input) => {
       registry.deleteManual(input.providerId, input.id)
+      enrichModels()
       writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
       return makeSettings()
     },
     addManualProvider: (input) => {
       registry.addManualProvider(input)
+      modelMetadata.updateProviders(registry.providers)
+      enrichModels()
       writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
       return makeSettings()
     },
     deleteManualProvider: (input) => {
       registry.deleteManualProvider(input.providerId)
+      modelMetadata.updateProviders(registry.providers)
+      enrichModels()
       writeManualConfig(manualModelsPath, { defaultModel: registry.manualDefaultModel, providers: registry.manualProviders, models: registry.manualModels })
       return makeSettings()
     },
@@ -401,6 +418,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     logger.info('shutting down')
+    modelMetadata.stop()
     await server.close()
     process.exit(0)
   }
@@ -414,8 +432,8 @@ function hashSocketAdminPassword(password: string): string {
 
 type BuildResult = {
   llm: MutableRouter | LLMAdapter
-  providers: readonly ProviderSpec[]
-  models: readonly ModelInfo[]
+  providers: ProviderSpec[]
+  models: ModelInfo[]
   manualProviders: readonly ManualProviderInput[]
   manualModels: readonly ManualModelInput[]
   manualDefaultModel?: string

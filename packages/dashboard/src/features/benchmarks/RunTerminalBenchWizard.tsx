@@ -138,6 +138,7 @@ export function RunTerminalBenchWizard({
   const [tasksContent, setTasksContent] = useState('')
   const [tasksDir, setTasksDir] = useState('')
   const [agentCommand, setAgentCommand] = useState(cfg.defaultAgentCommand)
+  const [agentRecipe, setAgentRecipe] = useState<'default' | 'agent-runlab' | 'claude-code' | 'custom'>('default')
   const [tasksResolved, setTasksResolved] = useState<number | null>(null)
   const [agentSummary, setAgentSummary] = useState<RunAgentResponse | null>(null)
   const [importSummary, setImportSummary] = useState<ImportResultsResponse | null>(null)
@@ -356,14 +357,17 @@ export function RunTerminalBenchWizard({
             {cfg.usesAgentCommand ? (
               <label className="flex flex-col gap-1 text-xs">
                 <span className="text-muted-foreground">{t('benchmarks.terminalWizard.agentCommandLabel')}</span>
-                <input
-                  type="text"
-                  className="rounded border border-border bg-background px-2 py-1 text-sm font-mono"
-                  placeholder={t('benchmarks.terminalWizard.agentCommandPlaceholder')}
-                  value={agentCommand}
-                  onChange={(e) => setAgentCommand(e.target.value)}
-                  data-testid="terminalbench-wizard-agent-command"
-                />
+                <select className="rounded border border-border bg-background px-2 py-1 text-sm" value={agentRecipe} onChange={(event) => {
+                  const recipe = event.target.value as typeof agentRecipe
+                  setAgentRecipe(recipe)
+                  setAgentCommand(recipe === 'default' ? cfg.defaultAgentCommand : recipe === 'agent-runlab' ? 'agent-runlab' : recipe === 'claude-code' ? 'claude-code' : '')
+                }} data-testid="terminalbench-wizard-agent-recipe">
+                  <option value="default">{t('benchmarks.terminalWizard.recipes.default')}</option>
+                  <option value="agent-runlab">Agent RunLab</option>
+                  <option value="claude-code">Claude Code</option>
+                  <option value="custom">{t('benchmarks.terminalWizard.recipes.custom')}</option>
+                </select>
+                {agentRecipe === 'custom' ? <input type="text" className="rounded border border-border bg-background px-2 py-1 text-sm font-mono" placeholder={t('benchmarks.terminalWizard.agentCommandPlaceholder')} value={agentCommand} onChange={(e) => setAgentCommand(e.target.value)} data-testid="terminalbench-wizard-agent-command" /> : null}
                 <span className="text-[10px] text-muted-foreground">{t('benchmarks.terminalWizard.agentCommandHint')}</span>
               </label>
             ) : null}

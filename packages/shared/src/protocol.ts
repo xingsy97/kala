@@ -1209,7 +1209,33 @@ export type ModelInfo = {
   source?: ModelSource
   /** Model context window in tokens, when known by the host. */
   contextWindow?: number
+  /** Structured limits supplied by provider metadata or the external model catalog. */
+  limits?: ModelLimits
+  metadataSource?: ModelMetadataSource
+  metadataMatch?: ModelMetadataMatch
+  /** Timestamp attached to the catalog snapshot used for this metadata. */
+  catalogUpdatedAt?: string
 }
+
+export type ModelLimits = {
+  context: number
+  input?: number
+  output?: number
+}
+
+export type ModelMetadataSource =
+  | 'manual'
+  | 'provider'
+  | 'models.dev-live'
+  | 'models.dev-cache'
+  | 'models.dev-seed'
+  | 'unknown'
+
+export type ModelMetadataMatch =
+  | 'provider-model-exact'
+  | 'canonical-model-exact'
+  | 'model-id-consensus'
+  | 'none'
 
 export type ModelSource = 'claude-settings' | 'codex-config' | 'env' | 'manual'
 export type ProviderWire = 'anthropic' | 'openai'

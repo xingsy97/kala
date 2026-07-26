@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { Button } from '../../../components/ui/button.js'
 import { getStoredHostEndpoint, resolveHostEndpoint, setStoredHostEndpoint } from '../../../host-endpoint.js'
 import { SectionHeader } from '../controls.js'
 
 export function ConnectionSection(): JSX.Element {
+  const { t } = useTranslation()
   const [current, setCurrent] = useState(() => resolveHostEndpoint())
   const [draft, setDraft] = useState<string>(() => getStoredHostEndpoint() ?? '')
   const [testState, setTestState] = useState<{ kind: 'idle' | 'testing' | 'ok' | 'error'; msg?: string }>({ kind: 'idle' })
@@ -20,10 +22,10 @@ export function ConnectionSection(): JSX.Element {
   }, [])
 
   const sourceLabel: Record<typeof current.source, string> = {
-    query: 'URL ?host= param (temporary override)',
-    settings: 'Saved in this browser',
-    build: 'Baked in at build time (VITE_AGENT_KERNEL_HOST)',
-    default: 'Same origin (default)',
+    query: t('settings.connection.sources.query'),
+    settings: t('settings.connection.sources.settings'),
+    build: t('settings.connection.sources.build'),
+    default: t('settings.connection.sources.default'),
   }
 
   const save = () => {
@@ -44,29 +46,29 @@ export function ConnectionSection(): JSX.Element {
         setTestState({ kind: 'error', msg: `HTTP ${res.status}` })
         return
       }
-      setTestState({ kind: 'ok', msg: 'reachable' })
+      setTestState({ kind: 'ok', msg: t('settings.connection.reachable') })
     } catch (err) {
-      setTestState({ kind: 'error', msg: err instanceof Error ? err.message : 'unreachable' })
+      setTestState({ kind: 'error', msg: err instanceof Error ? err.message : t('settings.connection.unreachable') })
     }
   }
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="Host endpoint" subtitle="Where this dashboard connects for Socket.IO, models, and settings." />
+      <SectionHeader title={t('settings.connection.title')} subtitle={t('settings.connection.subtitle')} />
 
       <div className="space-y-3 rounded-md bg-card/60 p-4 text-sm ring-1 ring-border/50">
         <div>
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">Currently used</div>
-          <div className="mt-1 break-all font-mono">{current.url || '(none)'}</div>
-          <div className="mt-1 text-xs text-muted-foreground">Source: {sourceLabel[current.source]}</div>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">{t('settings.connection.current')}</div>
+          <div className="mt-1 break-all font-mono">{current.url || t('settings.connection.none')}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{t('settings.connection.source', { source: sourceLabel[current.source] })}</div>
         </div>
         <div className="text-xs text-muted-foreground">
-          Priority: URL ?host= &gt; saved in browser &gt; build-time env &gt; same origin.
+          {t('settings.connection.priority')}
         </div>
       </div>
 
       <div className="space-y-3">
-        <label className="block text-sm font-medium">Override host endpoint</label>
+        <label className="block text-sm font-medium">{t('settings.connection.override')}</label>
         <input
           type="url"
           className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
@@ -75,15 +77,15 @@ export function ConnectionSection(): JSX.Element {
           onChange={(e) => setDraft(e.target.value)}
         />
         <div className="text-xs text-muted-foreground">
-          Leave empty to fall back to the default. Cross-origin endpoints require the host to set
+          {t('settings.connection.crossOriginPrefix')}
           {' '}<code className="rounded bg-muted px-1">AGENT_KERNEL_ALLOWED_ORIGINS</code>.
         </div>
         <div className="grid gap-2 sm:flex sm:flex-wrap">
-          <Button size="sm" className="w-full sm:w-auto" onClick={save}>Save</Button>
+          <Button size="sm" className="w-full sm:w-auto" onClick={save}>{t('common.save')}</Button>
           <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => void test()} disabled={testState.kind === 'testing'}>
-            {testState.kind === 'testing' ? 'Testing…' : 'Test connection'}
+            {testState.kind === 'testing' ? t('settings.connection.testing') : t('settings.connection.test')}
           </Button>
-          <Button size="sm" variant="ghost" className="w-full sm:w-auto" onClick={reset}>Reset to default</Button>
+          <Button size="sm" variant="ghost" className="w-full sm:w-auto" onClick={reset}>{t('settings.connection.reset')}</Button>
         </div>
         {testState.kind === 'ok' && (
           <div className="text-xs text-emerald-500">✓ {testState.msg}</div>

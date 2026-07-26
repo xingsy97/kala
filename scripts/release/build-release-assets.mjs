@@ -12,6 +12,7 @@ import { build } from 'esbuild'
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
 const dashboardDist = join(root, 'packages/dashboard/dist')
+const modelCatalogSeed = join(root, 'resources', 'model-catalog', 'models-dev-seed.json')
 const socketAdminDist = resolveSocketAdminDist()
 const options = parseOptions(process.argv.slice(2))
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -39,6 +40,10 @@ const allEntries = [
     entry: join(root, 'packages/executor/bin/agent-kernel-executor.ts'),
   },
 ]
+const benchmarkRunnerEntries = [
+  { name: 'agent-runlab-swebench-runner.cjs', entry: join(root, 'packages/host/bin/run-agent-runlab-swebench.ts') },
+  { name: 'claude-code-swebench-runner.cjs', entry: join(root, 'packages/host/bin/run-claude-code-swebench.ts') },
+]
 const entries = allEntries.filter((entry) => component === 'all' || entry.component === component)
 const includeDashboard = component === 'all' || component === 'host' || component === 'dashboard'
 const nativeTargets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']
@@ -46,6 +51,8 @@ const expectedAssets = [
   ...allEntries.map((entry) => cjsAssetName(entry)),
   ...allEntries.flatMap((entry) => nativeTargets.map((target) => nativeAssetName(entry.name, target))),
   'agent-kernel-dashboard-dist.tar.gz',
+  'agent-runlab-model-catalog-seed.json',
+  ...benchmarkRunnerEntries.map((entry) => entry.name),
   'run.sh',
   'RELEASE_NOTES.md',
   'manifest.json',
@@ -121,6 +128,15 @@ for (const item of buildEntries) {
   }
 }
 
+if (!nativeOnly && component !== 'dashboard' && component !== 'executor') {
+  for (const runner of benchmarkRunnerEntries) {
+    const outfile = join(outDir, runner.name)
+    await build({ entryPoints: [runner.entry], outfile, bundle: true, platform: 'node', target: 'node22', format: 'cjs', mainFields: ['module', 'main'], banner: { js: '#!/usr/bin/env node\n' }, sourcemap: false, legalComments: 'none', logLevel: 'info' })
+    writeFileSync(outfile, normalizeNodeShebang(readFileSync(outfile, 'utf8')))
+    chmodSync(outfile, 0o755)
+  }
+}
+
 if (nativeOnly) {
   console.log(`native release assets written to ${outDir} for ${nativeTarget}`)
   for (const item of entries) console.log(` - ${basename(nativeAssetName(item.name, nativeTarget))}`)
@@ -146,6 +162,9 @@ for (const file of [...releaseFiles(), 'SHA256SUMS']) {
 
 function finalizeRelease() {
   const bootstrapAssets = []
+  if (includeDashboard && existsSync(modelCatalogSeed)) {
+    copyFileSync(modelCatalogSeed, join(outDir, 'agent-runlab-model-catalog-seed.json'))
+  }
   if (component !== 'dashboard') {
     const path = join(outDir, 'run.sh')
     writeFileSync(path, unifiedBootstrap({ repo, tag, component }))
@@ -161,7 +180,9 @@ function finalizeRelease() {
     return { ...entry, cjs: exists(cjs) ? cjs : undefined, natives }
   })
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
+    .concat(benchmarkRunnerEntries.map((entry) => entry.name).filter(exists))
     .concat(includeDashboard && exists('agent-kernel-dashboard-dist.tar.gz') ? ['agent-kernel-dashboard-dist.tar.gz'] : [])
+    .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
   const hasNativeAssets = builtEntries.some((entry) => entry.natives.length > 0)
   const manifest = {
@@ -208,6 +229,10 @@ function exists(asset) {
 
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function normalizeNodeShebang(text) {
+  return `#!/usr/bin/env node\n${text.replace(/^#![^\n]*\n/gm, '')}`
 }
 
 function keepSingleShebang(text) {

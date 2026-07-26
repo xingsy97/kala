@@ -22,14 +22,20 @@ import {
   Code2,
   Copy,
   FileText,
+  Globe,
   GripVertical,
   Image,
   Lightbulb,
+  ListChecks,
   Maximize2,
   Pencil,
+  PenLine,
   RotateCcw,
   Sparkles,
   Terminal,
+  Eye,
+  Brain,
+  Bot,
   Wrench,
   X,
   XCircle,
@@ -2877,7 +2883,20 @@ function ToolCallGroupBlock({
   const autoRevealTail = group.mixed && unresolvedTailCallIds.length > 0
   const visibleTailCallIds = autoRevealTail ? new Set(unresolvedTailCallIds) : null
   const dots = toolActivityDots(group, rows, approvalByCallId)
-  const visibleDots = prioritizedToolActivityDots(dots, 7)
+  const [dotRail, setDotRail] = useState<HTMLDivElement | null>(null)
+  const [dotRailWidth, setDotRailWidth] = useState(0)
+  useEffect(() => {
+    if (!dotRail) return
+    const target = dotRail.parentElement ?? dotRail
+    const update = (): void => setDotRailWidth(target.getBoundingClientRect().width)
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(update)
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [dotRail])
+  const visibleDotLimit = dotRailWidth > 0 ? Math.max(3, Math.floor((dotRailWidth * 0.9 - 52) / 28)) : 20
+  const visibleDots = middleTruncatedToolActivityDots(dots, visibleDotLimit)
   const collapsedDots = toolCardMode === 'dots' && !open
   const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
   const runningCallId = [...visibleDots].reverse().find((dot) => dot.status === 'running')?.callId ?? null
@@ -2924,6 +2943,7 @@ function ToolCallGroupBlock({
     >
       {collapsedDots ? (
         <div
+          ref={setDotRail}
           className="flex h-6 w-fit max-w-full min-w-0 items-center sm:h-5"
           data-testid={`tool-card-dots-${group.firstCallId}`}
           aria-label={`${group.calls.length} tool calls`}
@@ -2933,7 +2953,7 @@ function ToolCallGroupBlock({
               <div key={dot.callId} className="flex flex-none items-center">
                 {index > 0 ? (
                   <span
-                    className="h-px w-2 bg-border/70 sm:w-3"
+                    className="h-0.5 w-2 rounded-full bg-muted-foreground/45 shadow-[0_0_3px_hsl(var(--muted-foreground)/0.2)] sm:w-3"
                     data-testid="tool-activity-connector"
                     aria-hidden="true"
                   />
@@ -2954,30 +2974,16 @@ function ToolCallGroupBlock({
                   }}
                   className="group/dot flex h-6 w-5 flex-none items-center justify-center rounded-full ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-5 sm:w-4"
                 >
-                  <span
-                    className={cn(
-                      'h-2 w-2 rounded-full transition-transform group-hover/dot:scale-150',
-                      dot.status === 'succeeded' && 'bg-emerald-500',
-                      dot.status === 'failed' && 'bg-rose-500',
-                      dot.status === 'approval' && 'animate-pulse bg-amber-400 ring-1 ring-amber-500/50',
-                      dot.status === 'running' && 'animate-pulse bg-foreground/20 ring-1 ring-inset ring-foreground/70',
-                    )}
-                  />
+                  <ToolActivityGlyph dot={dot} />
                 </button>
+                {dots.length > visibleDots.length && index === Math.ceil(visibleDots.length / 2) - 1 ? (
+                  <>
+                    <span className="h-0.5 w-2 rounded-full bg-muted-foreground/45 shadow-[0_0_3px_hsl(var(--muted-foreground)/0.2)] sm:w-3" aria-hidden="true" />
+                    <button type="button" onClick={toggleOpen} className="flex h-6 min-w-8 flex-none items-center justify-center rounded-full px-1 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground ring-1 ring-inset ring-border/80 hover:bg-muted hover:text-foreground sm:h-5" title={`${dots.length - visibleDots.length} omitted tool calls`} aria-label={`${dots.length - visibleDots.length} omitted tool calls; expand to inspect`} data-testid="tool-activity-omission">···</button>
+                  </>
+                ) : null}
               </div>
             ))}
-            {dots.length > visibleDots.length ? (
-              <>
-                <span className="h-px w-2 bg-border/70 sm:w-3" aria-hidden="true" />
-                <span
-                  className="flex h-6 w-5 flex-none items-center justify-center rounded-full sm:h-5 sm:w-4"
-                  title={`${dots.length - visibleDots.length} additional tool calls`}
-                  aria-label={`${dots.length - visibleDots.length} additional tool calls`}
-                >
-                  <span className="h-2.5 w-2.5 rounded-full bg-background ring-1 ring-inset ring-muted-foreground/70" />
-                </span>
-              </>
-            ) : null}
           </div>
           <button
             type="button"
@@ -3154,6 +3160,7 @@ function ToolCallGroupBlock({
 type ToolActivityDot = {
   callId: string
   status: 'succeeded' | 'failed' | 'approval' | 'running'
+  kind: 'read' | 'write' | 'shell' | 'web' | 'todo' | 'memory' | 'agent' | 'other'
   title: string
 }
 
@@ -3177,24 +3184,45 @@ function toolActivityDots(
     return {
       callId: call.callId,
       status,
+      kind: toolActivityKind(call.name),
       title: `${call.name}${target} · ${status}${delta}`,
     }
   })
 }
 
-function prioritizedToolActivityDots(dots: readonly ToolActivityDot[], limit: number): ToolActivityDot[] {
-  if (dots.length <= limit) return [...dots]
-  const priority = new Set(
-    dots
-      .filter((dot) => dot.status !== 'succeeded')
-      .slice(0, limit)
-      .map((dot) => dot.callId),
+const READ_TOOLS = new Set(['read', 'read_file', 'read_files', 'ls', 'glob', 'grep'])
+const FILE_MUTATION_TOOLS = new Set(['write', 'write_file', 'edit', 'replace_in_file', 'replace_many_in_file', 'apply_file_patch'])
+const SHELL_TOOLS = new Set(['bash', 'bash_output', 'kill_shell'])
+
+function toolActivityKind(toolName: string): ToolActivityDot['kind'] {
+  if (READ_TOOLS.has(toolName)) return 'read'
+  if (FILE_MUTATION_TOOLS.has(toolName)) return 'write'
+  if (SHELL_TOOLS.has(toolName)) return 'shell'
+  if (toolName === 'websearch' || toolName === 'webfetch') return 'web'
+  if (toolName === 'todowrite') return 'todo'
+  if (toolName === 'memory') return 'memory'
+  if (toolName === 'agent') return 'agent'
+  return 'other'
+}
+
+function ToolActivityGlyph({ dot }: { dot: ToolActivityDot }): JSX.Element {
+  const Icon = dot.kind === 'read' ? Eye : dot.kind === 'write' ? PenLine : dot.kind === 'shell' ? Terminal : dot.kind === 'web' ? Globe : dot.kind === 'todo' ? ListChecks : dot.kind === 'memory' ? Brain : dot.kind === 'agent' ? Bot : Wrench
+  return (
+    <span data-shape={dot.kind} className={cn('relative flex h-4 w-4 items-center justify-center rounded-full transition-transform group-hover/dot:scale-125', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300')}>
+      {dot.status === 'running' ? <span className="absolute inset-[-3px] animate-ping rounded-full bg-violet-500/25" aria-hidden="true" /> : null}
+      {dot.status === 'running' ? <span className="absolute inset-[-2px] animate-pulse rounded-full ring-2 ring-violet-500/70 shadow-[0_0_8px_hsl(263_70%_60%/0.65)]" aria-hidden="true" /> : null}
+      <Icon className={cn('relative h-3.5 w-3.5 stroke-[2.2]', dot.status === 'running' && 'animate-pulse')} aria-hidden="true" />
+      {dot.status === 'failed' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-rose-500 ring-1 ring-background" aria-hidden="true" /> : null}
+      {dot.status === 'approval' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 ring-1 ring-background" aria-hidden="true" /> : null}
+    </span>
   )
-  for (const dot of dots) {
-    if (priority.size >= limit) break
-    priority.add(dot.callId)
-  }
-  return dots.filter((dot) => priority.has(dot.callId))
+}
+
+function middleTruncatedToolActivityDots(dots: readonly ToolActivityDot[], limit: number): ToolActivityDot[] {
+  if (dots.length <= limit) return [...dots]
+  const headCount = Math.ceil(limit / 2)
+  const tailCount = Math.floor(limit / 2)
+  return [...dots.slice(0, headCount), ...dots.slice(-tailCount)]
 }
 
 function summarizeToolActivityRows(group: ToolCallGroup): SummaryRow[] {

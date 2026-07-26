@@ -654,6 +654,8 @@ type WizardShared = {
   resultsDir: string
   maxWorkers: string
   agentCommand: string
+  agentBackend: 'agent-runlab' | 'claude-code' | 'custom-command' | 'smoke'
+  agentMaxTurns: string
 }
 
 function initialWizardShared(): WizardShared {
@@ -668,14 +670,14 @@ function initialWizardShared(): WizardShared {
     resultsDir: '',
     maxWorkers: '1',
     agentCommand: '',
+    agentBackend: 'agent-runlab',
+    agentMaxTurns: '40',
   }
 }
 
 type PlanCounts = { instances: number; shards: number }
 type InferCounts = { total: number; completed: number; failed: number; errored: number }
 type IngestCounts = { total: number; resolved: number }
-
-const DEFAULT_AGENT_COMMAND = 'claude --dangerously-skip-permissions --print "$(cat "$AGENT_KERNEL_SWEBENCH_PROMPT_FILE")"'
 
 const WIZARD_STEPS: readonly { id: WizardStepId }[] = [
   { id: 'plan' },
@@ -776,71 +778,73 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
   }
 
   async function submitInfer(): Promise<void> {
-    const agentCommand = shared.agentCommand.trim()
+    const runId = shared.runId.trim()
+    const maxWorkers = Number(shared.maxWorkers.trim()) || 1
+    const backendConfig: Record<string, unknown> = { maxTurns: Number(shared.agentMaxTurns) || 40 }
+    if (shared.agentBackend === 'custom-command') backendConfig.command = shared.agentCommand.trim()
     setSubmitting(true)
     setError(null)
     setInferProgress({ completed: 0, total: planCounts?.instances ?? 0 })
-    const payload: Record<string, unknown> = {
-      action: 'swebench-run-agent-infer',
-      runId: shared.runId.trim(),
-      dataset: shared.dataset.trim(),
-      model: shared.model.trim(),
-    }
-    if (agentCommand) payload.agentCommand = agentCommand
-    if (shared.split.trim()) payload.split = shared.split.trim()
-    if (shared.maxWorkers.trim()) payload.maxWorkers = Number(shared.maxWorkers.trim())
-    const runId = shared.runId.trim()
-    let cancelled = false
-    async function pollProgress(): Promise<void> {
-      while (!cancelled) {
-        try {
-          const res = await fetch('/enhancement/action', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ action: 'swebench-read-progress', runId }),
-          })
-          if (res.ok) {
-            const parsed = await res.json().catch(() => null) as { total?: number; completed?: number; currentInstance?: string; status?: string } | null
-            if (parsed) {
-              setInferProgress({
-                completed: parsed.completed ?? 0,
-                total: parsed.total ?? planCounts?.instances ?? 0,
-                ...(parsed.currentInstance ? { current: parsed.currentInstance } : {}),
-              })
-              if (parsed.status === 'completed' || parsed.status === 'failed') break
-            }
-          }
-        } catch {
-          // best-effort poll; ignore transient errors
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-      }
-    }
-    const pollTask = pollProgress()
     try {
-      const res = await fetch('/enhancement/action', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
+      const spec = {
+        schemaVersion: 1,
+        runId,
+        benchmark: 'swebench',
+        dataset: {
+          source: shared.dataset.trim(),
+          instancesJsonl: shared.instancesJsonl.trim(),
+          ...(shared.split.trim() ? { split: shared.split.trim() } : {}),
+        },
+        backends: [{ id: shared.agentBackend, model: shared.agentBackend === 'smoke' ? '' : shared.model.trim(), config: backendConfig }],
+        execution: { maxWorkers, maxTurns: Number(shared.agentMaxTurns) || 40, timeoutMs: 30 * 60_000, retryLimit: 0, skipCompleted: true },
+        grading: { mode: 'official' },
+        createdAt: new Date().toISOString(),
+      }
+      const created = await fetch('/enhancement/action', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'benchmark-run-create', spec }),
       })
-      const body = await res.json().catch(() => null) as EnhancementActionResponse | null
-      if (!res.ok) throw new Error(body?.error ?? t('artifacts.eval.wizard.errorPredictionsRunFailed', { status: res.status }))
-      const completed = typeof body?.passed === 'number' ? body.passed : 0
-      const failed = typeof body?.failed === 'number' ? body.failed : 0
-      const errored = typeof body?.errored === 'number' ? body.errored : 0
-      const total = typeof body?.totalInstances === 'number' ? body.totalInstances : completed + failed + errored
-      const predictionsPath = typeof body?.predictionsPath === 'string' ? body.predictionsPath : ''
-      if (predictionsPath) setShared((prev) => ({ ...prev, predictionsPath }))
-      setInferCounts({ total, completed, failed, errored })
-      onArtifactActionComplete()
-      advance('infer', t('artifacts.eval.wizard.inferReady', { completed, failed, errored, total }))
+      const createdBody = await created.json().catch(() => null) as { error?: string } | null
+      if (!created.ok && !createdBody?.error?.includes('already exists')) throw new Error(createdBody?.error ?? `status ${created.status}`)
+      const started = await fetch('/enhancement/action', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'benchmark-run-start', runId }),
+      })
+      if (!started.ok) {
+        const body = await started.json().catch(() => null) as { error?: string } | null
+        throw new Error(body?.error ?? `status ${started.status}`)
+      }
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        const response = await fetch('/enhancement/action', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'benchmark-run-get', runId }),
+        })
+        const body = await response.json().catch(() => null) as {
+          run?: { status?: { state?: string; error?: string; backends?: Array<{ total?: number; completed?: number; failed?: number; timedOut?: number; predictionsPath?: string; error?: string }> } }
+          error?: string
+        } | null
+        if (!response.ok) throw new Error(body?.error ?? `status ${response.status}`)
+        const status = body?.run?.status
+        const backend = status?.backends?.[0]
+        setInferProgress({ completed: backend?.completed ?? 0, total: backend?.total ?? planCounts?.instances ?? 0 })
+        if (status?.state === 'running') continue
+        if (status?.state !== 'predictions_ready') throw new Error(backend?.error ?? status?.error ?? `run ended as ${status?.state ?? 'unknown'}`)
+        const total = backend?.total ?? 0
+        const failed = backend?.failed ?? 0
+        const errored = backend?.timedOut ?? 0
+        const completed = backend?.completed ?? Math.max(0, total - failed - errored)
+        if (backend?.predictionsPath) setShared((prev) => ({ ...prev, predictionsPath: backend.predictionsPath! }))
+        setInferCounts({ total, completed, failed, errored })
+        onArtifactActionComplete()
+        advance('infer', t('artifacts.eval.wizard.inferReady', { completed, failed, errored, total }))
+        break
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
       markStep('infer', { status: 'error', message })
     } finally {
-      cancelled = true
-      await pollTask
       setSubmitting(false)
     }
   }
@@ -888,6 +892,23 @@ function RunBenchmarkWizardImpl({ onArtifactActionComplete }: { onArtifactAction
   async function submitGrade(): Promise<void> {
     setSubmitting(true)
     setError(null)
+    if (!shared.runId.startsWith('legacy:') && shared.predictionsPath.includes('benchmark-runs')) {
+      try {
+        const response = await fetch('/enhancement/action', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'benchmark-run-grade', runId: shared.runId.trim(), dryRun: true }),
+        })
+        const body = await response.json().catch(() => null) as { run?: { status?: { backends?: Array<{ gradingCommand?: string[] }> } }; error?: string } | null
+        const command = body?.run?.status?.backends?.[0]?.gradingCommand
+        if (response.ok && command && command.length > 0) {
+          setGradeCommand(command.join(' '))
+          onArtifactActionComplete()
+          advance('grade', t('artifacts.eval.wizard.gradeReady'))
+          setSubmitting(false)
+          return
+        }
+      } catch { /* fall back to compatibility command below */ }
+    }
     const payload: Record<string, unknown> = {
       action: 'swebench-grade-command',
       runId: shared.runId.trim(),
@@ -1112,6 +1133,14 @@ function WizardPlanStep({
   planCounts: PlanCounts | null
 }): JSX.Element {
   const { t } = useTranslation()
+  const [modelOptions, setModelOptions] = useState<Array<{ value: string; label: string }>>([])
+  const loadModels = (): void => {
+    if (modelOptions.length > 0) return
+    void fetch('/models', { cache: 'no-store' }).then((response) => response.ok ? response.json() : null).then((payload: { models?: Array<{ ref: string; label: string }>; defaultModel?: string } | null) => {
+      setModelOptions((payload?.models ?? []).map((model) => ({ value: model.ref, label: model.label })))
+      if (!shared.model && payload?.defaultModel) setShared((prev) => ({ ...prev, model: payload.defaultModel! }))
+    }).catch(() => {})
+  }
   return (
     <form
       onSubmit={(event) => {
@@ -1127,10 +1156,9 @@ function WizardPlanStep({
       <BenchmarkBoundaryNote />
       <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
         <LabeledRunIdInput label={t('artifacts.eval.wizard.runId')} value={shared.runId} onChange={(value) => setShared((prev) => ({ ...prev, runId: value }))} required placeholder="swebench-smoke" data-testid="run-benchmark-wizard-run-id" generateLabel={t('artifacts.eval.wizard.generateRunId')} />
-        <LabeledInput label={t('artifacts.eval.columns.model')} value={shared.model} onChange={(value) => setShared((prev) => ({ ...prev, model: value }))} required placeholder="gpt-5.5" data-testid="run-benchmark-wizard-model" />
-        <LabeledInput label={t('artifacts.eval.columns.dataset')} value={shared.dataset} onChange={(value) => setShared((prev) => ({ ...prev, dataset: value }))} required data-testid="run-benchmark-wizard-dataset" />
-        <LabeledInput label={t('artifacts.eval.wizard.split')} value={shared.split} onChange={(value) => setShared((prev) => ({ ...prev, split: value }))} data-testid="run-benchmark-wizard-split" />
-        <LabeledInput label={t('artifacts.eval.wizard.maxWorkers')} value={shared.maxWorkers} onChange={(value) => setShared((prev) => ({ ...prev, maxWorkers: value }))} inputMode="numeric" data-testid="run-benchmark-wizard-max-workers" />
+        <LabeledCombobox label={t('artifacts.eval.columns.model')} value={shared.model} onChange={(value) => setShared((prev) => ({ ...prev, model: value }))} onOpen={loadModels} options={modelOptions} data-testid="run-benchmark-wizard-model" />
+        <div className="sr-only"><LabeledCombobox label={t('artifacts.eval.columns.dataset')} value={shared.dataset} onChange={(value) => setShared((prev) => ({ ...prev, dataset: value }))} options={Object.values(DATASET_PRESETS).filter((preset) => preset.repo).map((preset) => ({ value: preset.repo, label: preset.label }))} data-testid="run-benchmark-wizard-dataset" /></div>
+        <LabeledSelect label={t('artifacts.eval.wizard.maxWorkers')} value={shared.maxWorkers} onChange={(value) => setShared((prev) => ({ ...prev, maxWorkers: value }))} options={['1', '2', '4', '8'].map((value) => ({ value, label: value }))} data-testid="run-benchmark-wizard-max-workers" />
       </div>
       <InstancesSourcePanel shared={shared} setShared={setShared} />
       {planCounts ? (
@@ -1286,7 +1314,11 @@ function InstancesSourcePanel({
             <select
               data-testid="instances-dataset-select"
               value={datasetPreset}
-              onChange={(event) => setDatasetPreset(event.target.value as DatasetPreset)}
+              onChange={(event) => {
+                const preset = event.target.value as DatasetPreset
+                setDatasetPreset(preset)
+                if (preset !== 'custom') setShared((prev) => ({ ...prev, dataset: DATASET_PRESETS[preset].repo }))
+              }}
               className="h-8 rounded border border-border bg-background px-2 text-xs"
             >
               {(['lite', 'verified', 'full', 'custom'] as DatasetPreset[]).map((preset) => (
@@ -1295,15 +1327,15 @@ function InstancesSourcePanel({
             </select>
           </label>
           {datasetPreset === 'custom' ? (
-            <LabeledInput label={t('artifacts.eval.wizard.customRepo')} value={customRepo} onChange={setCustomRepo} placeholder="myorg/my-swebench-fork" data-testid="instances-dataset-repo" />
+            <LabeledInput label={t('artifacts.eval.wizard.customRepo')} value={customRepo} onChange={(value) => { setCustomRepo(value); setShared((prev) => ({ ...prev, dataset: value })) }} placeholder="myorg/my-swebench-fork" data-testid="instances-dataset-repo" />
           ) : (
             <div className="grid gap-1 text-xs">
               <span className="text-muted-foreground">{t('artifacts.eval.wizard.repo')}</span>
               <div className="h-8 rounded border border-dashed border-border bg-background/70 px-2 py-1.5 font-mono text-[11px] text-muted-foreground" data-testid="instances-dataset-repo-display">{datasetRepo}</div>
             </div>
           )}
-          <LabeledInput label={t('artifacts.eval.wizard.split')} value={datasetSplit} onChange={setDatasetSplit} placeholder="test" data-testid="instances-dataset-split" />
-          <LabeledInput label={t('artifacts.eval.wizard.limitAll')} value={datasetLimit} onChange={setDatasetLimit} inputMode="numeric" placeholder="5" data-testid="instances-dataset-limit" />
+          <LabeledSelect label={t('artifacts.eval.wizard.split')} value={datasetSplit} onChange={(value) => { setDatasetSplit(value); setShared((prev) => ({ ...prev, split: value })) }} options={['test', 'dev', 'train'].map((value) => ({ value, label: value }))} data-testid="instances-dataset-split" />
+          <LabeledCombobox label={t('artifacts.eval.wizard.limitAll')} value={datasetLimit} onChange={setDatasetLimit} options={['1', '5', '10', '30', '100', '300'].map((value) => ({ value, label: value }))} data-testid="instances-dataset-limit" />
           <label className="col-span-2 grid gap-1 text-xs max-lg:col-span-1">
             <span className="text-muted-foreground">{t('artifacts.eval.wizard.hfToken')}</span>
             <input
@@ -1810,7 +1842,6 @@ function WizardInferStep({
   inferProgress: { completed: number; total: number; current?: string } | null
 }): JSX.Element {
   const { t } = useTranslation()
-  const [useCustomCommand, setUseCustomCommand] = useState(false)
   return (
     <div className="grid gap-2" data-testid="run-benchmark-wizard-infer">
       <div className="text-muted-foreground">
@@ -1827,19 +1858,20 @@ function WizardInferStep({
           <span className="text-[11px] font-medium text-muted-foreground">{t('artifacts.eval.wizard.agentRecipe')}</span>
           <select
             data-testid="run-benchmark-wizard-agent-recipe"
-            value={useCustomCommand ? 'custom' : 'default'}
+            value={shared.agentBackend}
             onChange={(event) => {
-              const next = event.currentTarget.value === 'custom'
-              setUseCustomCommand(next)
-              if (!next) setShared((prev) => ({ ...prev, agentCommand: '' }))
+              const agentBackend = event.currentTarget.value as WizardShared['agentBackend']
+              setShared((prev) => ({ ...prev, agentBackend, ...(agentBackend === 'custom-command' ? {} : { agentCommand: '' }) }))
             }}
             className="rounded border border-border bg-background px-2 py-1 text-xs"
           >
-            <option value="default">{t('artifacts.eval.wizard.recipeDefault')}</option>
-            <option value="custom">{t('artifacts.eval.wizard.recipeCustom')}</option>
+            <option value="agent-runlab">{t('artifacts.eval.wizard.recipeAgentRunLab')}</option>
+            <option value="claude-code">{t('artifacts.eval.wizard.recipeClaudeCode')}</option>
+            <option value="custom-command">{t('artifacts.eval.wizard.recipeCustom')}</option>
+            <option value="smoke">{t('artifacts.eval.wizard.recipeDefault')}</option>
           </select>
         </div>
-        {useCustomCommand ? (
+        {shared.agentBackend === 'custom-command' ? (
           <label className="grid gap-1">
             <span className="text-[11px] font-medium text-muted-foreground">{t('artifacts.eval.wizard.customCommand')}</span>
             <textarea
@@ -1847,11 +1879,24 @@ function WizardInferStep({
               value={shared.agentCommand}
               onChange={(event) => setShared((prev) => ({ ...prev, agentCommand: event.target.value }))}
               rows={3}
-              placeholder={DEFAULT_AGENT_COMMAND}
+              placeholder={t('artifacts.eval.wizard.customCommandPlaceholder')}
               className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px]"
             />
             <span className="text-[10px] text-muted-foreground">{t('artifacts.eval.wizard.customCommandHelp')}</span>
           </label>
+        ) : null}
+        {shared.agentBackend === 'agent-runlab' || shared.agentBackend === 'claude-code' ? (
+          <label className="grid gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">{t('artifacts.eval.wizard.maxTurns')}</span>
+            <select data-testid="run-benchmark-wizard-max-turns" value={shared.agentMaxTurns} onChange={(event) => setShared((prev) => ({ ...prev, agentMaxTurns: event.target.value }))} className="h-8 rounded border border-border bg-background px-2 text-xs">
+              {['10', '20', '40', '80'].map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+        ) : null}
+        {shared.agentBackend === 'smoke' ? (
+          <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+            {t('artifacts.eval.wizard.smokeWarning')}
+          </div>
         ) : null}
         {inferProgress && submitting ? (
           <div className="text-[11px] text-muted-foreground" data-testid="run-benchmark-wizard-infer-progress">
@@ -1918,7 +1963,7 @@ function WizardGradeStep({
       <details className="rounded-md border border-border bg-background/60 px-3 py-2 text-[11px]" data-testid="run-benchmark-wizard-grade-advanced">
         <summary className="cursor-pointer font-medium text-foreground">{t('artifacts.eval.wizard.advanced')}</summary>
         <div className="mt-2 grid grid-cols-2 gap-2 max-lg:grid-cols-1">
-          <LabeledInput label={t('artifacts.eval.wizard.maxWorkers')} value={shared.maxWorkers} onChange={(value) => setShared((prev) => ({ ...prev, maxWorkers: value }))} inputMode="numeric" data-testid="run-benchmark-wizard-grade-max-workers" />
+          <LabeledSelect label={t('artifacts.eval.wizard.maxWorkers')} value={shared.maxWorkers} onChange={(value) => setShared((prev) => ({ ...prev, maxWorkers: value }))} options={['1', '2', '4', '8'].map((value) => ({ value, label: value }))} data-testid="run-benchmark-wizard-grade-max-workers" />
         </div>
       </details>
       {command ? (
@@ -2058,6 +2103,43 @@ function LabeledInput({ label, value, onChange, ...props }: { label: string; val
     <label className="grid gap-1">
       <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
       <Input value={value} onChange={(event) => onChange(event.currentTarget.value)} {...props} />
+    </label>
+  )
+}
+
+function LabeledCombobox({ label, value, onChange, options, onOpen, ...props }: {
+  label: string
+  value: string
+  onChange(value: string): void
+  options: readonly { value: string; label: string }[]
+  onOpen?: () => void
+  'data-testid'?: string
+}): JSX.Element {
+  const id = `choices-${String(props['data-testid'] ?? label).replace(/[^A-Za-z0-9_-]/g, '-')}`
+  return (
+    <label className="grid gap-1">
+      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      <Input list={id} value={value} onFocus={onOpen} onChange={(event) => onChange(event.currentTarget.value)} data-testid={props['data-testid']} />
+      <datalist id={id}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist>
+    </label>
+  )
+}
+
+function LabeledSelect({ label, value, onChange, options, ...props }: {
+  label: string
+  value: string
+  onChange(value: string): void
+  options: readonly { value: string; label: string }[]
+  onOpen?: () => void
+  'data-testid'?: string
+}): JSX.Element {
+  return (
+    <label className="grid gap-1">
+      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      <select className="h-8 rounded border border-input bg-background px-2 text-xs text-foreground" value={value} onFocus={props.onOpen} onMouseDown={props.onOpen} onChange={(event) => onChange(event.currentTarget.value)} data-testid={props['data-testid']}>
+        {!value || !options.some((option) => option.value === value) ? <option value={value}>{value || '—'}</option> : null}
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
     </label>
   )
 }

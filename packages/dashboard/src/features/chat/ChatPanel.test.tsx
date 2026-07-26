@@ -303,6 +303,8 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('tool-activity-direction')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).toContain('read · /repo/a.ts · succeeded')
     expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).toContain('bash · pnpm test · failed')
+    expect(screen.getByTestId('tool-card-dot-dot-1').querySelector('[data-shape="read"]')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dot-dot-2').querySelector('[data-shape="shell"]')).toBeTruthy()
 
     const firstDot = screen.getByTestId('tool-card-dot-dot-1')
     const secondDot = screen.getByTestId('tool-card-dot-dot-2')
@@ -329,6 +331,26 @@ describe('ChatPanel', () => {
 
     fireEvent.click(screen.getByTestId('tool-activity-direction'))
     expect(screen.getByTestId('tool-call-group-details-dot-1')).toBeTruthy()
+  })
+
+  it('uses semantic icons for file mutations', () => {
+    render(<DashboardChatPanel messages={[{ role: 'assistant', content: [{ type: 'tool_call', callId: 'shape-write', name: 'write_file', input: { path: '/repo/a.ts', content: 'x' } }] }, { role: 'tool', content: [{ type: 'tool_result', callId: 'shape-write', ok: true, content: 'ok' }] }]} />)
+    expect(screen.getByTestId('tool-card-dot-shape-write').querySelector('[data-shape="write"]')).toBeTruthy()
+  })
+
+  it('uses a visible middle omission marker for long tool activity rails', () => {
+    const calls = Array.from({ length: 24 }, (_, index) => ({ type: 'tool_call' as const, callId: `many-${index}`, name: 'read', input: { path: `/repo/${index}.ts` } }))
+    const results = calls.map((call) => ({ type: 'tool_result' as const, callId: call.callId, ok: true, content: 'ok' }))
+    render(<DashboardChatPanel messages={[{ role: 'assistant', content: calls }, { role: 'tool', content: results }]} />)
+
+    const omission = screen.getByTestId('tool-activity-omission')
+    expect(omission.textContent).toBe('···')
+    expect(omission.getAttribute('aria-label')).toContain('omitted tool calls')
+    expect(screen.getByTestId('tool-card-dot-many-0')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dot-many-23')).toBeTruthy()
+    expect(screen.queryByTestId('tool-card-dot-many-12')).toBeNull()
+    fireEvent.click(omission)
+    expect(screen.getByTestId('tool-call-group-details-many-0')).toBeTruthy()
   })
 
   it('shows the latest visible running dot with the same compact preview by default', () => {

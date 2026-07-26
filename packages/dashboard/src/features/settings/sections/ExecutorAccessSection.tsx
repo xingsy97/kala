@@ -1,4 +1,4 @@
-import type { ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload } from '@agent-kernel/shared'
+import type { AttachedExecutor, ExecutorInviteSummary, ServerExecutorInvitePayload, ServerExecutorInvitesPayload } from '@agent-kernel/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
@@ -9,7 +9,7 @@ import { cn } from '../../../lib/utils.js'
 import { CopyButton, EmptyRow, SectionHeader } from '../controls.js'
 import { executorSetupCommand, formatDate, meaningfulInviteLabel, responseError } from '../section-utils.js'
 
-export function ExecutorAccessSection(): JSX.Element {
+export function ExecutorAccessSection({ executors = [] }: { executors?: readonly AttachedExecutor[] }): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [label, setLabel] = useState('')
@@ -135,13 +135,10 @@ export function ExecutorAccessSection(): JSX.Element {
           </label>
           <label className="min-w-0 text-xs font-medium text-muted-foreground">
             {t('settings.executorAccess.workspaceId')}
-            <input
-              className="mt-1 h-9 w-full rounded-md border-0 bg-background px-2 font-mono text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50"
-              value={workspaceId}
-              onChange={(event) => setWorkspaceId(event.target.value)}
-              placeholder={t('settings.executorAccess.workspacePlaceholder')}
-              disabled={busy}
-            />
+            <select className="mt-1 h-9 w-full rounded-md border-0 bg-background px-2 font-mono text-sm text-foreground outline-none ring-1 ring-border/50 focus:ring-ring/50" value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={busy}>
+              <option value="">{t('settings.executorAccess.workspacePlaceholder')}</option>
+              {[...new Map(executors.map((executor) => [executor.workspaceId, executor])).values()].map((executor) => <option key={executor.workspaceId} value={executor.workspaceId}>{executor.workspaceName} · {executor.workspaceId}</option>)}
+            </select>
           </label>
         </div>
         <div className="mt-3 flex min-w-0 justify-end">

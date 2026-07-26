@@ -315,17 +315,9 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
               {t('settings.interface.liveToolActivityTailDesc')}
             </p>
           </div>
-          <input
-            type="number"
-            min={0}
-            max={10}
-            step={1}
-            value={liveToolActivityTail}
-            onChange={(event) => setLiveToolActivityTail(Number(event.currentTarget.value))}
-            className="h-8 w-20 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={t('settings.interface.liveToolActivityTail')}
-            data-testid="settings-live-tool-activity-tail"
-          />
+          <select value={liveToolActivityTail} onChange={(event) => setLiveToolActivityTail(Number(event.currentTarget.value))} className="h-8 w-24 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.liveToolActivityTail')} data-testid="settings-live-tool-activity-tail">
+            {[0, 1, 2, 3, 5, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
         </li>
         <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
@@ -335,17 +327,8 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
             </p>
           </div>
           <div className="flex flex-none items-center gap-2">
-            <input
-              type="number"
-              min={0}
-              max={4096}
-              step={50}
-              value={sessionCacheMaxMb}
-              onChange={(event) => setSessionCacheMaxMb(Number(event.currentTarget.value))}
-              className="h-8 w-24 rounded-md bg-background px-2 text-sm ring-1 ring-border/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={t('settings.interface.sessionCacheMaxMb')}
-              data-testid="settings-session-cache-max-mb"
-            />
+            <input list="session-cache-size-presets" type="number" min={0} max={4096} value={sessionCacheMaxMb} onChange={(event) => setSessionCacheMaxMb(Number(event.currentTarget.value))} className="h-8 w-24 rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.sessionCacheMaxMb')} data-testid="settings-session-cache-max-mb" />
+            <datalist id="session-cache-size-presets">{[0, 50, 100, 200, 500, 750, 1024, 2048, 4096].map((value) => <option key={value} value={value} />)}</datalist>
             <span className="text-xs text-muted-foreground">MB</span>
           </div>
         </li>

@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 /**
  * Collapses composer-adjacent banners once 2+ would stack.
@@ -34,6 +35,7 @@ type Ctx = {
 const BannerStackContext = createContext<Ctx | null>(null)
 
 export function BannerStack({ children }: { children: ReactNode }): JSX.Element {
+  const { t } = useTranslation()
   const [entries, setEntries] = useState<BannerEntry[]>([])
   const [expanded, setExpanded] = useState(false)
 
@@ -88,12 +90,12 @@ export function BannerStack({ children }: { children: ReactNode }): JSX.Element 
           {expanded ? (
             <>
               <ChevronUp className="h-3 w-3" aria-hidden="true" />
-              <span>Hide {extraCount} more notice{extraCount === 1 ? '' : 's'}</span>
+              <span>{t('banners.hideMore', { count: extraCount })}</span>
             </>
           ) : (
             <>
               <ChevronDown className="h-3 w-3" aria-hidden="true" />
-              <span>{extraCount} more notice{extraCount === 1 ? '' : 's'}</span>
+              <span>{t('banners.more', { count: extraCount })}</span>
             </>
           )}
         </button>
