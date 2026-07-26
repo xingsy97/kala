@@ -87,12 +87,21 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   const sessionTails = new Map<string, Promise<void>>()
   const loopGuard = new Map<string, PostCompactionLoopGuard>()
   let drainMode: LoopDrainMode = 'none'
+  // Per-session "stop at next safe boundary" flags (steer's polite interrupt).
+  // A flagged session lets its in-flight LLM response + tools finish, then the
+  // loop stops before the next autonomous think and settles to rest, at which
+  // point the flag self-clears and the front-queued steer message dispatches.
+  const steerStopSessions = new Set<string>()
   const checkpointWaiters = new Map<string, Set<(snapshot: LoopDrainSessionSnapshot) => void>>()
 
   const notifyCheckpoint = (sessionId: string): void => {
     const waiters = checkpointWaiters.get(sessionId)
-    if (!waiters || waiters.size === 0) return
     const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, drainMode)
+    // A steer stop self-clears once the session has settled to a safe boundary
+    // (no in-flight LLM/tools), so the next turn — the front-queued steer
+    // message — runs normally.
+    if (snapshot.safe) steerStopSessions.delete(sessionId)
+    if (!waiters || waiters.size === 0) return
     if (!snapshot.safe) return
     checkpointWaiters.delete(sessionId)
     for (const resolve of waiters) resolve(snapshot)
@@ -118,6 +127,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             loopGuard,
             ...(options?.model ? { model: options.model } : {}),
             drain: () => drainMode,
+            steerStop: () => steerStopSessions.has(sessionId),
             toolStarted: markToolStarted,
             toolSettled: markToolSettled,
           }, notifyCheckpoint)
@@ -147,6 +157,11 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       const ctrl = inFlightAborts.get(sessionId)
       if (ctrl) ctrl.abort()
     },
+    requestStopAtBoundary(sessionId) {
+      const snapshot = drainSnapshotFor(deps, sessionId, inFlightAborts, inFlightTools, 'checkpoint')
+      if (snapshot.safe) return
+      steerStopSessions.add(sessionId)
+    },
     hasActiveLlmCall(sessionId) {
       return inFlightAborts.has(sessionId)
     },
@@ -160,6 +175,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
         handle,
         loopGuard,
         drain: () => drainMode,
+        steerStop: () => steerStopSessions.has(sessionId),
         toolStarted: markToolStarted,
         toolSettled: markToolSettled,
       }, notifyCheckpoint)
@@ -323,6 +339,16 @@ export async function dispatchOne(
 
   if (shouldStopForDrain(event, effects, runtime)) {
     onCheckpoint?.(sessionId)
+    // Steer's polite stop reaches this boundary with the in-flight response +
+    // tools already finished and a fresh continuation `call_llm` suppressed, so
+    // the kernel status is a dangling `thinking`. Settle it to a resting status
+    // (via the same terminal `cancel` primitive, which here has nothing in
+    // flight to abort) so the front-queued steer message drains as the next
+    // turn. The restart checkpoint drain does NOT do this — it relies on respawn
+    // + resumeSession to continue, so it must leave the state intact.
+    if (runtime?.steerStop?.() && event.kind !== 'cancel') {
+      void runtime.handle.dispatch(sessionId, { kind: 'cancel' })
+    }
     return
   }
 
@@ -340,6 +366,18 @@ export async function dispatchOne(
 }
 
 function shouldStopForDrain(event: AgentEvent, effects: readonly Effect[], runtime?: LoopRuntime): boolean {
+  // Steer's polite stop: let the in-flight LLM response and any tools it spawned
+  // finish, and stop only when the loop is about to begin a FRESH autonomous
+  // think — i.e. tool results have settled and produced a continuation call_llm.
+  // Unlike the restart checkpoint drain below, it must NOT stop on an
+  // `llm_response` that carries tool calls (that would strand the session in
+  // `executing_tools` with unrun tools, since steer has no respawn to resume
+  // them). Approvals still stop — the user has to act regardless.
+  if (runtime?.steerStop?.()) {
+    if (effects.some((effect) => effect.kind === 'request_approval')) return true
+    if (effects.some((effect) => effect.kind === 'call_llm')) return true
+    return false
+  }
   const mode = runtime?.drain?.() ?? 'none'
   if (mode === 'none') return false
   if (mode === 'idle') return false

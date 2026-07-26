@@ -1168,33 +1168,21 @@ async function handleUserMessage(
     return
   }
   if (!isRestingStatus(record.state.status)) {
-    // Enqueue the steer at the front *before* aborting the in-flight turn.
-    // Ordering matters: cancelStream() triggers an async abort that settles the
-    // FSM into a resting status and emits a state broadcast. The server's
-    // turn-completion hook only re-drains the queue when it observes a resting
-    // status *with* a pending message. If we cancelled first and enqueued
-    // second, that broadcast could fire while the queue was still empty, and
-    // the steer message would sit in the queue forever (never dispatched).
+    // Steer semantics: DON'T truncate the in-flight response or the running tool
+    // call. Queue the message at the front (priority), then ask the loop to stop
+    // at the next safe boundary — it lets the current LLM response and any tools
+    // it spawned finish, then halts before the next autonomous think and settles
+    // the session to a resting status. The turn-completion hook (and the direct
+    // drain below) then dispatch the front-queued steer as the next user turn.
+    //
+    // Front-enqueue BEFORE requesting the stop: the stop settles the FSM to rest
+    // and emits a state broadcast; the completion hook only re-drains when it
+    // sees a resting status *with* a pending message, so the message must already
+    // be queued or the broadcast could fire against an empty queue.
     await deps.messageQueues.enqueue(p.sessionId, queued, 'front')
-    if (record.state.status === 'thinking') {
-      // Streaming an LLM response: aborting the fetch settles the FSM into a
-      // resting status (an `[cancelled]` llm_response is dispatched) and emits
-      // a state broadcast, so the completion hook drains the front steer.
-      deps.loop.cancelStream(p.sessionId)
-    } else {
-      // The turn is mid-tool-execution (or otherwise running without a live
-      // LLM stream). `cancelStream` is a no-op in that case, so the steer
-      // would sit at the front of the queue until the agent *voluntarily*
-      // stopped — across an arbitrarily long autonomous think→tool→think
-      // loop the user sees their "steer" hang as a stuck queued item that
-      // never sends. A proper `cancel` event aborts in-flight tools + LLM and
-      // settles the FSM to a resting status, so the front steer drains as the
-      // next user turn. This is the same primitive `client:cancel` uses.
-      await safeDispatch(deps, p.sessionId, { kind: 'cancel' })
-    }
-    // Also kick a drain directly: if the abort settles synchronously (or the
-    // turn had already reached a resting status between our load and here) the
-    // completion hook may not fire, so we must not rely on it alone.
+    deps.loop.requestStopAtBoundary(p.sessionId)
+    // Also kick a drain directly: if the session had already reached rest between
+    // our load and here, the completion hook may not fire, so don't rely on it.
     await deps.messageQueues.drain(p.sessionId)
     return
   }
