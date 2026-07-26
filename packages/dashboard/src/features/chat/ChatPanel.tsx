@@ -69,7 +69,7 @@ import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { Textarea } from '../../components/ui/textarea.js'
 import { Typewriter } from '../../components/Typewriter.js'
 import { formatTokens } from '../../lib/format.js'
-import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, PREF_SMOOTH_STREAMING_TEXT, useBooleanPref } from '../../lib/prefs.js'
+import { DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, PREF_SMOOTH_STREAMING_TEXT, PREF_TOOL_ACTIVITY_ICON_SCALE, useBooleanPref, useNumberPref } from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
@@ -2883,19 +2883,28 @@ function ToolCallGroupBlock({
   const autoRevealTail = group.mixed && unresolvedTailCallIds.length > 0
   const visibleTailCallIds = autoRevealTail ? new Set(unresolvedTailCallIds) : null
   const dots = toolActivityDots(group, rows, approvalByCallId)
-  const [dotRail, setDotRail] = useState<HTMLDivElement | null>(null)
-  const [dotRailWidth, setDotRailWidth] = useState(0)
+  const [iconScale] = useNumberPref(PREF_TOOL_ACTIVITY_ICON_SCALE, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, { min: 100, max: 200 })
+  const iconPixels = Math.round(14 * iconScale / 100)
+  const nodePixels = iconPixels + 10
+  const [dotBoundary, setDotBoundary] = useState<HTMLDivElement | null>(null)
+  const [dotBoundaryWidth, setDotBoundaryWidth] = useState(0)
   useEffect(() => {
-    if (!dotRail) return
-    const target = dotRail.parentElement ?? dotRail
-    const update = (): void => setDotRailWidth(target.getBoundingClientRect().width)
+    if (!dotBoundary) return
+    const update = (): void => setDotBoundaryWidth(dotBoundary.getBoundingClientRect().width)
     update()
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(update)
-    observer.observe(target)
+    observer.observe(dotBoundary)
     return () => observer.disconnect()
-  }, [dotRail])
-  const visibleDotLimit = dotRailWidth > 0 ? Math.max(3, Math.floor((dotRailWidth * 0.9 - 52) / 28)) : 20
+  }, [dotBoundary])
+  const railBudget = dotBoundaryWidth * 0.9
+  const arrowWidth = 24
+  const gapWidth = 8
+  const omissionWidth = 40
+  const limitWithoutOmission = dotBoundaryWidth > 0 ? Math.max(1, Math.floor((railBudget - arrowWidth + gapWidth) / (nodePixels + gapWidth))) : 20
+  const visibleDotLimit = dots.length > limitWithoutOmission
+    ? Math.max(2, Math.floor((railBudget - arrowWidth - omissionWidth + gapWidth) / (nodePixels + gapWidth)))
+    : limitWithoutOmission
   const visibleDots = middleTruncatedToolActivityDots(dots, visibleDotLimit)
   const collapsedDots = toolCardMode === 'dots' && !open
   const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
@@ -2927,8 +2936,9 @@ function ToolCallGroupBlock({
   return (
     <div
       id={`msg-${messageIndex}-group-${group.firstCallId}`}
+      ref={setDotBoundary}
       className={cn(
-        'min-w-0 max-w-full transition-colors',
+        'w-full min-w-0 max-w-full transition-colors',
         collapsedDots
           ? 'overflow-visible'
           : 'overflow-hidden rounded-lg',
@@ -2943,21 +2953,15 @@ function ToolCallGroupBlock({
     >
       {collapsedDots ? (
         <div
-          ref={setDotRail}
-          className="flex h-6 w-fit max-w-full min-w-0 items-center sm:h-5"
+          className="flex min-h-7 w-fit min-w-0 items-center overflow-hidden"
+          style={{ maxWidth: '90%' }}
           data-testid={`tool-card-dots-${group.firstCallId}`}
           aria-label={`${group.calls.length} tool calls`}
         >
-          <div className="flex min-w-0 flex-none items-center">
+          <div className="relative flex min-w-0 flex-none items-center gap-2 py-1">
+            <span className="pointer-events-none absolute left-2 right-2 top-1/2 z-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/60 shadow-[0_0_4px_hsl(var(--muted-foreground)/0.28)]" data-testid="tool-activity-connector" aria-hidden="true" />
             {visibleDots.map((dot, index) => (
-              <div key={dot.callId} className="flex flex-none items-center">
-                {index > 0 ? (
-                  <span
-                    className="h-0.5 w-2 rounded-full bg-muted-foreground/45 shadow-[0_0_3px_hsl(var(--muted-foreground)/0.2)] sm:w-3"
-                    data-testid="tool-activity-connector"
-                    aria-hidden="true"
-                  />
-                ) : null}
+              <div key={dot.callId} className="relative z-10 flex flex-none items-center">
                 <button
                   type="button"
                   title={dot.title}
@@ -2972,15 +2976,13 @@ function ToolCallGroupBlock({
                     setHoveredCallId(null)
                     setPinnedCallId((current) => current === dot.callId ? null : dot.callId)
                   }}
-                  className="group/dot flex h-6 w-5 flex-none items-center justify-center rounded-full ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-5 sm:w-4"
+                  className="group/dot flex flex-none items-center justify-center rounded-full bg-background ring-offset-1 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  style={{ width: nodePixels, height: nodePixels }}
                 >
-                  <ToolActivityGlyph dot={dot} />
+                  <ToolActivityGlyph dot={dot} size={iconPixels} />
                 </button>
                 {dots.length > visibleDots.length && index === Math.ceil(visibleDots.length / 2) - 1 ? (
-                  <>
-                    <span className="h-0.5 w-2 rounded-full bg-muted-foreground/45 shadow-[0_0_3px_hsl(var(--muted-foreground)/0.2)] sm:w-3" aria-hidden="true" />
-                    <button type="button" onClick={toggleOpen} className="flex h-6 min-w-8 flex-none items-center justify-center rounded-full px-1 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground ring-1 ring-inset ring-border/80 hover:bg-muted hover:text-foreground sm:h-5" title={`${dots.length - visibleDots.length} omitted tool calls`} aria-label={`${dots.length - visibleDots.length} omitted tool calls; expand to inspect`} data-testid="tool-activity-omission">···</button>
-                  </>
+                  <button type="button" onClick={toggleOpen} className="ml-2 flex h-6 min-w-8 flex-none items-center justify-center rounded-full bg-background px-1 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground ring-1 ring-inset ring-border/80 hover:bg-muted hover:text-foreground" title={`${dots.length - visibleDots.length} omitted tool calls`} aria-label={`${dots.length - visibleDots.length} omitted tool calls; expand to inspect`} data-testid="tool-activity-omission">···</button>
                 ) : null}
               </div>
             ))}
@@ -3205,13 +3207,13 @@ function toolActivityKind(toolName: string): ToolActivityDot['kind'] {
   return 'other'
 }
 
-function ToolActivityGlyph({ dot }: { dot: ToolActivityDot }): JSX.Element {
+function ToolActivityGlyph({ dot, size }: { dot: ToolActivityDot; size: number }): JSX.Element {
   const Icon = dot.kind === 'read' ? Eye : dot.kind === 'write' ? PenLine : dot.kind === 'shell' ? Terminal : dot.kind === 'web' ? Globe : dot.kind === 'todo' ? ListChecks : dot.kind === 'memory' ? Brain : dot.kind === 'agent' ? Bot : Wrench
   return (
-    <span data-shape={dot.kind} className={cn('relative flex h-4 w-4 items-center justify-center rounded-full transition-transform group-hover/dot:scale-125', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300')}>
+    <span data-shape={dot.kind} className={cn('relative flex items-center justify-center rounded-full transition-transform group-hover/dot:scale-110', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300')} style={{ width: size, height: size }}>
       {dot.status === 'running' ? <span className="absolute inset-[-3px] animate-ping rounded-full bg-violet-500/25" aria-hidden="true" /> : null}
       {dot.status === 'running' ? <span className="absolute inset-[-2px] animate-pulse rounded-full ring-2 ring-violet-500/70 shadow-[0_0_8px_hsl(263_70%_60%/0.65)]" aria-hidden="true" /> : null}
-      <Icon className={cn('relative h-3.5 w-3.5 stroke-[2.2]', dot.status === 'running' && 'animate-pulse')} aria-hidden="true" />
+      <Icon className={cn('relative stroke-[2.2]', dot.status === 'running' && 'animate-pulse')} style={{ width: size, height: size }} aria-hidden="true" />
       {dot.status === 'failed' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-rose-500 ring-1 ring-background" aria-hidden="true" /> : null}
       {dot.status === 'approval' ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 ring-1 ring-background" aria-hidden="true" /> : null}
     </span>

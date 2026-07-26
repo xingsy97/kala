@@ -295,11 +295,13 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByTestId('tool-card-dots-dot-1')).toBeTruthy()
+    expect(screen.getByTestId('tool-card-dots-dot-1').style.maxWidth).toBe('90%')
     expect(screen.queryByText('Tool activity')).toBeNull()
     expect(screen.queryByText('2')).toBeNull()
     expect(screen.getByLabelText('Assistant')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dots-dot-1').className).not.toMatch(/bg-muted/)
     expect(screen.getAllByTestId('tool-activity-connector')).toHaveLength(1)
+    expect(screen.getByTestId('tool-activity-connector').className).toContain('absolute')
     expect(screen.getByTestId('tool-activity-direction')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dot-dot-1').getAttribute('title')).toContain('read · /repo/a.ts · succeeded')
     expect(screen.getByTestId('tool-card-dot-dot-2').getAttribute('title')).toContain('bash · pnpm test · failed')

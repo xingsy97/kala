@@ -16,6 +16,7 @@ import {
   DEFAULT_FILE_EXPLORER_FONT_SIZE,
   DEFAULT_FILE_VIEW_FONT_SIZE,
   DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  DEFAULT_TOOL_ACTIVITY_ICON_SCALE,
   DEFAULT_SESSION_EXPLORER_FONT_SIZE,
   PREF_CHAT_CONTENT_WIDTH,
   PREF_CHAT_FONT_SIZE,
@@ -29,6 +30,7 @@ import {
   PREF_INSPECTOR_OPEN,
   PREF_KEEP_SCREEN_AWAKE,
   PREF_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
+  PREF_TOOL_ACTIVITY_ICON_SCALE,
   PREF_SESSION_EXPLORER_FONT_SIZE,
   PREF_SHOW_TOOL_CALL_TAB,
   PREF_SMOOTH_STREAMING_TEXT,
@@ -62,6 +64,7 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
     DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
     { min: 0, max: 10 },
   )
+  const [toolActivityIconScale, setToolActivityIconScale] = useNumberPref(PREF_TOOL_ACTIVITY_ICON_SCALE, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, { min: 100, max: 200 })
   const [chatFontSize, setChatFontSize] = useNumberPref(PREF_CHAT_FONT_SIZE, DEFAULT_CHAT_FONT_SIZE, { min: 0, max: 6 })
   const [sessionExplorerFontSize, setSessionExplorerFontSize] = useNumberPref(PREF_SESSION_EXPLORER_FONT_SIZE, DEFAULT_SESSION_EXPLORER_FONT_SIZE, { min: 0, max: 4 })
   const [fileExplorerFontSize, setFileExplorerFontSize] = useNumberPref(PREF_FILE_EXPLORER_FONT_SIZE, DEFAULT_FILE_EXPLORER_FONT_SIZE, { min: 0, max: 4 })
@@ -317,6 +320,12 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
           </div>
           <select value={liveToolActivityTail} onChange={(event) => setLiveToolActivityTail(Number(event.currentTarget.value))} className="h-8 w-24 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.liveToolActivityTail')} data-testid="settings-live-tool-activity-tail">
             {[0, 1, 2, 3, 5, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </li>
+        <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0"><div className="font-medium">{t('settings.interface.toolActivityIconSize')}</div><p className="mt-0.5 text-xs text-muted-foreground">{t('settings.interface.toolActivityIconSizeDesc')}</p></div>
+          <select value={toolActivityIconScale} onChange={(event) => setToolActivityIconScale(Number(event.currentTarget.value))} className="h-8 w-28 flex-none rounded-md bg-background px-2 text-sm ring-1 ring-border/70" aria-label={t('settings.interface.toolActivityIconSize')} data-testid="settings-tool-activity-icon-scale">
+            {[100, 125, 150, 175, 200].map((value) => <option key={value} value={value}>{value}%</option>)}
           </select>
         </li>
         <li className="flex flex-col gap-4 rounded-md border border-border bg-card/60 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">

@@ -561,6 +561,17 @@ describe('SettingsDialog', () => {
     expect(input.value).toBe('5')
   })
 
+  it('stores the tool activity icon scale preference', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    const select = await screen.findByTestId('settings-tool-activity-icon-scale') as HTMLSelectElement
+    expect(select.value).toBe('150')
+    fireEvent.change(select, { target: { value: '175' } })
+    expect(localStorage.getItem('ak-tool-activity-icon-scale')).toBe('175')
+  })
+
   it('stores the session view cache memory limit preference', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
