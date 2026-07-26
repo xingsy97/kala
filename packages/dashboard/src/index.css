@@ -560,6 +560,16 @@ body {
   [contenteditable='true'] {
     font-size: max(16px, 1em);
   }
+  /* Row-action overlays are revealed on hover on desktop; touch devices have no
+     hover, so keep them visible there instead (otherwise rename/hide/delete are
+     unreachable on mobile). */
+  .ak-touch-reveal {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  .ak-touch-hide {
+    display: none !important;
+  }
 }
 
 body {
