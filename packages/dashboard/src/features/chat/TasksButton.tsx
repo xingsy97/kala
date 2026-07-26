@@ -98,7 +98,7 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
               {t('tasks.done', { done, total })}
             </span>
           </div>
-          <ScrollArea className="h-[min(60vh,24rem)]" data-testid="tasks-popover-scroll">
+          <ScrollArea className="max-h-[min(50vh,22rem)]" data-testid="tasks-popover-scroll">
             <ul ref={listRef} className="flex flex-col gap-0.5 px-2 py-2" data-testid="tasks-popover-list">
               {todos.map((todo, i) => (
                 <TaskRow key={i} todo={todo} />
