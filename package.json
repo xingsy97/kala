@@ -45,6 +45,6 @@
     "postject": "1.0.0-alpha.6",
     "puppeteer-core": "^25.3.0",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.5"
+    "vitest": "^3.2.6"
   }
 }
