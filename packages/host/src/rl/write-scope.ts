@@ -43,11 +43,9 @@ export async function detectWriteScopeViolations(workdir: string, snapshot: Writ
     const st = await stat(abs).catch(() => null)
     if (!st) { violations.push(`${entry.path}: deleted`); continue }
     stillPresent.add(entry.path)
-    if (st.mtimeMs !== entry.mtimeMs) {
-      const bytes = await readFile(abs)
-      const sha = createHash('sha256').update(bytes).digest('hex')
-      if (sha !== entry.sha256) violations.push(`${entry.path}: modified`)
-    }
+    const bytes = await readFile(abs)
+    const sha = createHash('sha256').update(bytes).digest('hex')
+    if (sha !== entry.sha256) violations.push(`${entry.path}: modified`)
   }
   for await (const rel of walkFiles(workdir)) {
     if (matchesAny(rel, DEFAULT_TRANSIENT_IGNORE_GLOBS)) continue

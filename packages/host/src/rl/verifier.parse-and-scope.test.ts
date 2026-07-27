@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -64,7 +64,9 @@ describe('runCommandVerifier: parse + scope', () => {
     task.verifier.writeScope = { allowGlobs: ['src/**'], denyGlobs: ['tests/**'] }
     const snapshot = await snapshotWriteScope(cwd, task)
     expect(snapshot).not.toBeNull()
-    await writeFile(join(cwd, 'tests', 'test_a.py'), 'tampered\n')
+    await writeFile(join(cwd, 'tests', 'test_a.py'), 'evil\n')
+    const originalMtime = new Date(snapshot!.files[0]!.mtimeMs)
+    await utimes(join(cwd, 'tests', 'test_a.py'), originalMtime, originalMtime)
     const { reward } = await runCommandVerifier({
       rootDir: dir,
       rolloutId: 'ro-scope',
