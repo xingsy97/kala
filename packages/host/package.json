@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "agent-kernel-host": "./bin/agent-kernel-host.js"
+    "agent-kernel-host": "./dist/bin/agent-kernel-host.js"
   },
   "files": [
     "dist",
