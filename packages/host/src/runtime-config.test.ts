@@ -282,10 +282,11 @@ describe('loadRuntimeConfig', () => {
         'env_key = "AK_TEST_UNSET_KEY"',
       ].join('\n'),
     )
-    // Point claude path at nothing.
+    // Isolate every local config source so the test cannot read operator credentials.
     const cfg = loadRuntimeConfig({
       claudeSettingsPath: join(dir, 'missing.json'),
       codexConfigPath: codexPath,
+      codexAuthPath: join(dir, 'missing-auth.json'),
     })
     expect(cfg.providers).toEqual([])
     expect(cfg.models).toEqual([])
