@@ -79,6 +79,27 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | File | Purpose |
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | Three processes and one full turn end-to-end |
+| [architecture/deployment-mode-contract.md](architecture/deployment-mode-contract.md) | **Normative.** Standalone/SaaS capabilities, identity boundary, Unit isolation, and required release lanes |
+| [architecture/product-hardening-program.md](architecture/product-hardening-program.md) | Current gated implementation order: product foundation, refactors, Docker, Box, quality gate, then LXD |
+| [architecture/hosted-hybrid-enterprise-benchmark-matrix.md](architecture/hosted-hybrid-enterprise-benchmark-matrix.md) | Grafana/GitLab/GitHub/Sentry benchmark matrix and Hosted/Hybrid build-vs-integrate decisions |
+| [architecture/core-agent-invariants-and-fault-model.md](architecture/core-agent-invariants-and-fault-model.md) | Normative cross-component authority map, invariants, fault injections, proofs, and release blockers |
+| [architecture/browser-session-store.md](architecture/browser-session-store.md) | Accepted design for opaque, server-revocable browser Sessions, device lists, refresh, and logout-all |
+| [architecture/observability-contract.md](architecture/observability-contract.md) | Bounded metrics, structured errors, health, SLOs, redaction, alerting, and acceptance |
+| [architecture/data-lifecycle-contract.md](architecture/data-lifecycle-contract.md) | Ownership, deletion, retention, export, quotas, migrations, backup, and recovery semantics |
+| [architecture/strong-isolation-roadmap.md](architecture/strong-isolation-roadmap.md) | Migration from logical Units to worker processes, containers, and remote Runtime pools |
+| [architecture/runtime-naming-migration.md](architecture/runtime-naming-migration.md) | RuntimeIngressGateway/RuntimeHost/RuntimeUnitIngress naming contract and compatibility policy |
+| [architecture/llm-dependency-contract.md](architecture/llm-dependency-contract.md) | Explicit LLM Port/Adapter/Factory/SecretResolver boundaries and lifecycle scopes |
+| [architecture/session-artifact-registry.md](architecture/session-artifact-registry.md) | Durable session-bound `artifact://` image registration and rendering |
+| [testing/core-hardening-baseline-2026-07-31.md](testing/core-hardening-baseline-2026-07-31.md) | Frozen source/runtime/data baseline and evidence rules for the highest-strength core Agent regression program |
+| [testing/core-change-risk-and-coverage-matrix.md](testing/core-change-risk-and-coverage-matrix.md) | Changed-surface to invariant/test mapping, confirmed gaps, severity, and downstream audit ownership |
+| [testing/session-log-integrity-audit.md](testing/session-log-integrity-audit.md) | Session cursor/append/replay atomicity findings, legacy compatibility policy, fixes, and regression evidence |
+| [architecture/tenant-runtime-unit-saas.md](architecture/tenant-runtime-unit-saas.md) | **Accepted architecture and implementation record.** `TenantRuntimeUnit` logical isolation and SaaS composition |
+
+### Operations
+
+| File | Purpose |
+|---|---|
+| [operations/saas-local-runbook.md](operations/saas-local-runbook.md) | Single Docker SaaS stack with mandatory NFS Session storage, bootstrap, verification, backup, upgrade, and rollback |
 
 ### Design
 
@@ -86,6 +107,18 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 |---|---|
 | [design/human-attention-score.md](design/human-attention-score.md) | Session-scoped human attention indicator and draft risk-matched LLM evaluator |
 | [design/session-slash-commands.md](design/session-slash-commands.md) | Session slash command semantics for `/clear`, `/rename`, `/stop`, and `/delete` |
+| [design/authenticated-product-shell.md](design/authenticated-product-shell.md) | SaaS account identity, logout, cache partitioning, and authenticated product-shell behavior |
+| [design/logout-semantics.md](design/logout-semantics.md) | Product logout, logout-all, Provider-wide logout, forced-login, and cross-device behavior |
+| [design/account-center.md](design/account-center.md) | Hosted profile, login Sessions/devices, identity links, data/legal/support, and Settings grouping |
+
+### Testing
+
+| File | Purpose |
+|---|---|
+| [testing/critical-user-action-matrix.md](testing/critical-user-action-matrix.md) | Mode-aware end-to-end acceptance criteria for every critical visible action |
+| [testing/feature-review-ledger.md](testing/feature-review-ledger.md) | Current feature-by-feature implementation evidence, gaps, and remaining release proof |
+| [testing/current-program-baseline.md](testing/current-program-baseline.md) | Frozen LXD boundary, current service snapshot, isolated validation environments, and evidence policy |
+| [testing/product-e2e-harness.md](testing/product-e2e-harness.md) | Normative real-action, side-effect, persistence, failure/recovery, evidence, and cleanup contract |
 
 ### Capabilities
 
@@ -100,6 +133,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [planning/roadmap.md](planning/roadmap.md) | Shipped feature ledger + deferred items |
 | [planning/feature-gaps.md](planning/feature-gaps.md) | Shipped vs. deliberately-out vs. gaps; comparison table (pi / opencode / codex / claude-code) |
 | [planning/production-readiness.md](planning/production-readiness.md) | What still stands between the current build and a production deploy |
+| [planning/roadmap-notes/dashboard-product-readiness.md](planning/roadmap-notes/dashboard-product-readiness.md) | Active coordinating plan for product maturity, phased implementation, and verification evidence |
 | [planning/roadmap-notes/](planning/roadmap-notes/) | Free-form roadmap essays: eval-moat, narrative, streaming, RL, product-polish, what-not-to-do |
 
 ### Meta — principles, testing, releasing, ADRs
@@ -117,11 +151,17 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 
 ## When docs disagree
 
-If two docs contradict each other, the more normative one wins:
+Authority is concern-specific rather than one global linear ranking:
 
-**kernel/spec.md > protocol/\*.md > executor/tools.md > everything else**
+- agent execution semantics: `kernel/spec.md`;
+- cross-process wire messages: `protocol/*.md`;
+- Executor tool contracts: `executor/tools.md`;
+- deployment modes, capabilities, identity ownership, and Unit isolation: `architecture/deployment-mode-contract.md`;
+- verification policy: `meta/testing.md`;
+- user-journey acceptance: `testing/critical-user-action-matrix.md`;
+- runbooks and planning/status ledgers are derived and never override normative contracts.
 
-If you find such a contradiction, please open a PR to fix the lower-tier doc — that's the definition of a doc bug.
+Each cross-cutting document should declare its status and scope. If documents conflict, fix the derived or stale document rather than selecting whichever was edited most recently.
 
 ## When code disagrees with docs
 

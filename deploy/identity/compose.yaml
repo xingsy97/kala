@@ -1,0 +1,205 @@
+name: shared-identity
+
+services:
+  init-volumes:
+    image: alpine:3.22.2
+    user: "0:0"
+    command: [/bin/sh, -ec, "mkdir -p /bootstrap /config && chown -R 1000:1000 /bootstrap /config && chmod 755 /bootstrap && chmod 700 /config"]
+    volumes:
+      - zitadel-bootstrap:/bootstrap
+      - zitadel-config:/config
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    read_only: true
+
+  init-zitadel-config:
+    image: alpine:3.22.2
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        cat > /config/runtime.yaml <<EOF
+        Database:
+          postgres:
+            DSN: "postgresql://zitadel:$$(cat /run/secrets/postgres_password)@postgres:5432/zitadel?sslmode=disable"
+        EOF
+        chown 1000:1000 /config/runtime.yaml
+        chmod 400 /config/runtime.yaml
+    secrets: [postgres_password]
+    volumes:
+      - zitadel-config:/config
+    networks: [identity]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    read_only: true
+
+  postgres:
+    image: postgres:17.10-alpine
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    environment:
+      POSTGRES_DB: zitadel
+      POSTGRES_USER: zitadel
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [identity]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -d zitadel -U zitadel]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    pids_limit: 200
+    mem_limit: 768m
+    cpus: 1.0
+
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v4.16.0
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    command: [start-from-init, --config, /zitadel/config/runtime.yaml, --masterkeyFile, /run/secrets/zitadel_masterkey, --tlsMode, external]
+    environment:
+      ZITADEL_EXTERNALDOMAIN: ${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN in the ignored deployment environment}
+      ZITADEL_EXTERNALPORT: ${IDENTITY_EXTERNAL_PORT:-443}
+      ZITADEL_EXTERNALSECURE: ${IDENTITY_SECURE:-true}
+      ZITADEL_DATABASE_POSTGRES_HOST: postgres
+      ZITADEL_DATABASE_POSTGRES_PORT: 5432
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: zitadel-admin
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "true"
+      ZITADEL_FIRSTINSTANCE_PATPATH: /zitadel/bootstrap/bootstrap.pat
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: runlab-bootstrap
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Shared Identity Bootstrap
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Shared Identity Login Client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+    secrets: [postgres_password, zitadel_masterkey]
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap
+      - zitadel-config:/zitadel/config:ro
+    networks: [identity, edge]
+    depends_on:
+      postgres: { condition: service_healthy }
+      init-volumes: { condition: service_completed_successfully }
+      init-zitadel-config: { condition: service_completed_successfully }
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    pids_limit: 300
+    mem_limit: 768m
+    cpus: 1.0
+
+  zitadel-health:
+    image: curlimages/curl:8.14.1
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    command: [sh, -c, "while sleep 30; do :; done"]
+    networks: [edge]
+    depends_on:
+      zitadel: { condition: service_started }
+    healthcheck:
+      test: [CMD, curl, -fsS, -H, "Host: ${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN in the ignored deployment environment}", http://zitadel:8080/debug/healthz]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    pids_limit: 32
+    mem_limit: 32m
+    cpus: 0.1
+
+  zitadel-login:
+    image: ghcr.io/zitadel/zitadel-login:v4.16.0
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    environment:
+      ZITADEL_API_URL: http://zitadel:8080
+      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
+      CUSTOM_REQUEST_HEADERS: Host:${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN in the ignored deployment environment},X-Forwarded-Proto:https
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap:ro
+    networks: [edge]
+    depends_on:
+      zitadel-health: { condition: service_healthy }
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    pids_limit: 200
+    mem_limit: 512m
+    cpus: 1.0
+
+  identity-proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    command: [caddy, run, --config, /etc/caddy/Caddyfile]
+    environment:
+      IDENTITY_DOMAIN: ${IDENTITY_DOMAIN:?set IDENTITY_DOMAIN in the ignored deployment environment}
+    ports:
+      - ${IDENTITY_LOCAL_BIND:-127.0.0.1:13002}:8080
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./favicon.svg:/srv/identity-assets/favicon.svg:ro
+    networks: [edge]
+    depends_on:
+      zitadel-health: { condition: service_healthy }
+      zitadel-login: { condition: service_started }
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    read_only: true
+    tmpfs:
+      - "/config:rw,noexec,nosuid,size=16m"
+      - "/data:rw,noexec,nosuid,size=16m"
+    pids_limit: 100
+    mem_limit: 128m
+    cpus: 0.5
+
+networks:
+  identity:
+    internal: true
+  edge: {}
+
+volumes:
+  # Preserve and adopt the volumes created by the former combined SaaS stack.
+  postgres-data:
+    external: true
+    name: agent-runlab-saas_postgres-data
+  zitadel-bootstrap:
+    external: true
+    name: agent-runlab-saas_zitadel-bootstrap
+  zitadel-config:
+    external: true
+    name: agent-runlab-saas_zitadel-config
+
+secrets:
+  postgres_password: { file: ./.secrets/postgres_password }
+  zitadel_masterkey: { file: ./.secrets/zitadel_masterkey }

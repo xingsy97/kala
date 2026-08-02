@@ -1,0 +1,24 @@
+:8080 {
+  @favicon path /favicon.ico
+  handle @favicon {
+    root * /srv/identity-assets
+    rewrite * /favicon.svg
+    header Content-Type image/svg+xml
+    file_server
+  }
+  @login path /ui/v2/login*
+  handle @login {
+    reverse_proxy zitadel-login:3000 {
+      lb_try_duration 10s
+      lb_try_interval 250ms
+      header_up Host localhost:13002
+      header_up X-Forwarded-Proto http
+    }
+  }
+  handle {
+    reverse_proxy h2c://zitadel:8080 {
+      header_up Host localhost:13002
+      header_up X-Forwarded-Proto http
+    }
+  }
+}

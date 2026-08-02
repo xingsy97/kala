@@ -1,0 +1,32 @@
+{
+  "name": "@agent-kernel/runtime-ingress-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-runlab-runtime-ingress": "./dist/src/bin/agent-runlab-runtime-ingress.js",
+    "agent-runlab-control-plane-migrate": "./dist/src/bin/migrate-control-plane.js",
+    "agent-runlab-control-plane-import-json": "./dist/src/bin/import-json-control.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate": "node dist/src/bin/migrate-control-plane.js",
+    "import:json": "node dist/src/bin/import-json-control.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "openid-client": "^6.8.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/http-proxy": "^1.17.16",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.20.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "defaultModel": "acceptance:acceptance-model",
+  "providers": [
+    {
+      "id": "acceptance",
+      "label": "Acceptance OpenAI-compatible",
+      "wire": "openai",
+      "baseUrl": "http://mock-llm:8080/v1",
+      "credentialRef": "file:llm_api_key",
+      "models": [
+        { "id": "acceptance-model", "label": "Acceptance model", "contextWindow": 100000 }
+      ]
+    }
+  ]
+}

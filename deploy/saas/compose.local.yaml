@@ -1,0 +1,5 @@
+services:
+  runtime-ingress:
+    environment:
+      INGRESS_PUBLIC_ORIGIN: http://localhost:13001
+      RUNTIME_INGRESS_ALLOW_INSECURE_HTTP: "1"

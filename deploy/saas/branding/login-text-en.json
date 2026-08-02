@@ -1,0 +1,290 @@
+{
+  "selectAccountText": {
+    "title": "Select Account",
+    "description": "Use your account",
+    "titleLinkingProcess": "Select account for user linking",
+    "descriptionLinkingProcess": "Select your account to link with your external user.",
+    "otherUser": "Other User",
+    "sessionStateActive": "active",
+    "sessionStateInactive": "Signed out",
+    "userMustBeMemberOfOrg": "The user must be a member of the {{.OrgName}} organization."
+  },
+  "loginText": {
+    "title": "Sign in to Agent RunLab",
+    "description": "Continue to your private agent workspace.",
+    "titleLinkingProcess": "Login for user linking",
+    "descriptionLinkingProcess": "Enter your login details to link your external user.",
+    "userMustBeMemberOfOrg": "The user must be a member of the {{.OrgName}} organization.",
+    "loginNameLabel": "Username or email",
+    "registerButtonText": "Create an account",
+    "nextButtonText": "Continue",
+    "externalUserDescription": "Login with an external user.",
+    "userNamePlaceholder": "username",
+    "loginNamePlaceholder": "you@example.com"
+  },
+  "passwordText": {
+    "title": "Welcome back",
+    "description": "Enter your password to continue to Agent RunLab.",
+    "passwordLabel": "Password",
+    "resetLinkText": "Reset Password",
+    "backButtonText": "Back",
+    "nextButtonText": "Continue",
+    "minLength": "Must be at least",
+    "hasUppercase": "Must include an uppercase letter.",
+    "hasLowercase": "Must include a lowercase letter.",
+    "hasNumber": "Must include a number.",
+    "hasSymbol": "Must include a symbol.",
+    "confirmation": "Password confirmation matched."
+  },
+  "usernameChangeText": {
+    "title": "Change Username",
+    "description": "Set your new username",
+    "usernameLabel": "Username",
+    "cancelButtonText": "Cancel",
+    "nextButtonText": "Next"
+  },
+  "usernameChangeDoneText": {
+    "title": "Username Changed",
+    "description": "Your username was changed successfully.",
+    "nextButtonText": "Next"
+  },
+  "initPasswordText": {
+    "title": "Set Password",
+    "description": "You have received a code, which you have to enter in the form below, to set your new password.",
+    "codeLabel": "Code",
+    "newPasswordLabel": "New Password",
+    "newPasswordConfirmLabel": "Confirm Password",
+    "nextButtonText": "Next",
+    "resendButtonText": "Resend Code"
+  },
+  "initPasswordDoneText": {
+    "title": "Password Set",
+    "description": "Password successfully set",
+    "nextButtonText": "Next",
+    "cancelButtonText": "Cancel"
+  },
+  "emailVerificationText": {
+    "title": "E-Mail Verification",
+    "description": "We have sent you an email to verify your address. Please enter the code in the form below.",
+    "codeLabel": "Code",
+    "nextButtonText": "Next",
+    "resendButtonText": "Resend Code"
+  },
+  "emailVerificationDoneText": {
+    "title": "E-Mail Verification",
+    "description": "Your email address has been successfully verified.",
+    "nextButtonText": "Next",
+    "cancelButtonText": "Cancel",
+    "loginButtonText": "Login"
+  },
+  "initializeUserText": {
+    "title": "Activate User",
+    "description": "Verify your e-mail with the code below and set your password.",
+    "codeLabel": "Code",
+    "newPasswordLabel": "New Password",
+    "resendButtonText": "Resend Code",
+    "nextButtonText": "Next"
+  },
+  "initializeDoneText": {
+    "title": "User Activated",
+    "description": "Email verified and Password successfully set",
+    "cancelButtonText": "Cancel",
+    "nextButtonText": "Next"
+  },
+  "initMfaPromptText": {
+    "title": "2-Factor Setup",
+    "description": "2-factor authentication gives you an additional security for your user account. This ensures that only you have access to your account.",
+    "otpOption": "Authenticator App (e.g Google/Microsoft Authenticator, Authy)",
+    "u2fOption": "Device dependent (e.g FaceID, Windows Hello, Fingerprint)",
+    "skipButtonText": "Skip",
+    "nextButtonText": "Next"
+  },
+  "initMfaOtpText": {
+    "title": "2-Factor Verification",
+    "description": "Create your 2-factor. Download an authenticator app if you do not already have one.",
+    "descriptionOtp": "Scan the code with your authenticator app (e.g Google/Microsoft Authenticator, Authy) or copy the secret and insert the generated code below.",
+    "secretLabel": "Secret",
+    "codeLabel": "Code",
+    "nextButtonText": "Next",
+    "cancelButtonText": "Cancel"
+  },
+  "initMfaU2fText": {
+    "title": "Add Security Key",
+    "description": "A security key is a verification method that can be built into your phone, use Bluetooth, or plug directly into your computer's USB port.",
+    "tokenNameLabel": "Name of the security key / device",
+    "notSupported": "WebAuthN is not supported by your browser. Please ensure it is up to date or use a different one (e.g. Chrome, Safari, Firefox)",
+    "registerTokenButtonText": "Add security key",
+    "errorRetry": "Retry, create a new challenge or choose a different method."
+  },
+  "initMfaDoneText": {
+    "title": "2-factor Verified",
+    "description": "Awesome! You just successfully set up your 2-factor and made your account way more secure. The Factor has to be entered on each login.",
+    "cancelButtonText": "Cancel",
+    "nextButtonText": "Next"
+  },
+  "mfaProvidersText": {
+    "chooseOther": "or choose another option",
+    "otp": "Authenticator App (e.g Google/Microsoft Authenticator, Authy)",
+    "u2f": "Device dependent (e.g FaceID, Windows Hello, Fingerprint)"
+  },
+  "verifyMfaOtpText": {
+    "title": "Verify 2-Factor",
+    "description": "Verify your second factor",
+    "codeLabel": "Code",
+    "nextButtonText": "Next"
+  },
+  "verifyMfaU2fText": {
+    "title": "2-Factor Verification",
+    "description": "Verify your 2-Factor with the registered device (e.g FaceID, Windows Hello, Fingerprint)",
+    "validateTokenText": "Verify 2-Factor",
+    "notSupported": "WebAuthN is not supported by your browser. Make sure you are using the newest version or change your browser to a supported one (Chrome, Safari, Firefox)",
+    "errorRetry": "Retry, create a new request or choose a other method."
+  },
+  "passwordlessText": {
+    "title": "Login Passwordless",
+    "description": "Login with authentication methods provided by your device like FaceID, Windows Hello or Fingerprint.",
+    "loginWithPwButtonText": "Login with password",
+    "validateTokenButtonText": "Login with passwordless",
+    "notSupported": "WebAuthN is not supported by your browser. Please ensure it is up to date or use a different one (e.g. Chrome, Safari, Firefox)",
+    "errorRetry": "Retry, create a new challenge or choose a different method."
+  },
+  "passwordChangeText": {
+    "title": "Change Password",
+    "description": "Change your password. Enter your old and new password.",
+    "oldPasswordLabel": "Old Password",
+    "newPasswordLabel": "New Password",
+    "newPasswordConfirmLabel": "Password confirmation",
+    "cancelButtonText": "Cancel",
+    "nextButtonText": "Next",
+    "expiredDescription": "You password has expired and has to be changed. Enter your old and new password."
+  },
+  "passwordChangeDoneText": {
+    "title": "Change Password",
+    "description": "Your password was changed successfully.",
+    "nextButtonText": "Next"
+  },
+  "passwordResetDoneText": {
+    "title": "Password Reset Link Sent",
+    "description": "Check your email to reset your password.",
+    "nextButtonText": "Next"
+  },
+  "registrationOptionText": {
+    "title": "Create your Agent RunLab account",
+    "description": "Choose how you want to create your private agent workspace.",
+    "userNameButtonText": "Continue with email and password",
+    "externalLoginDescription": "or register with an external user",
+    "loginButtonText": "Login"
+  },
+  "registrationUserText": {
+    "title": "Create your account",
+    "description": "Set up your private Agent RunLab workspace.",
+    "descriptionOrgRegister": "Enter your Userdata.",
+    "firstnameLabel": "First name",
+    "lastnameLabel": "Last name",
+    "emailLabel": "E-Mail",
+    "usernameLabel": "Username",
+    "languageLabel": "Language",
+    "genderLabel": "Gender",
+    "passwordLabel": "Password",
+    "passwordConfirmLabel": "Password confirmation",
+    "tosAndPrivacyLabel": "Terms and conditions",
+    "tosConfirm": "I accept the",
+    "tosLinkText": "TOS",
+    "privacyConfirm": "I accept the",
+    "privacyLinkText": "privacy policy",
+    "nextButtonText": "Create account",
+    "backButtonText": "Login"
+  },
+  "registrationOrgText": {
+    "title": "Organization Registration",
+    "description": "Enter your organization name and userdata.",
+    "orgnameLabel": "Organization name",
+    "firstnameLabel": "First name",
+    "lastnameLabel": "Last name",
+    "usernameLabel": "Username",
+    "emailLabel": "E-Mail",
+    "passwordLabel": "Password",
+    "passwordConfirmLabel": "Password confirmation",
+    "tosAndPrivacyLabel": "Terms and conditions",
+    "tosConfirm": "I accept the",
+    "tosLinkText": "TOS",
+    "privacyConfirm": "I accept the",
+    "privacyLinkText": "privacy policy",
+    "saveButtonText": "Create organization"
+  },
+  "linkingUserDoneText": {
+    "title": "Linking User",
+    "description": "User linked.",
+    "cancelButtonText": "Cancel",
+    "nextButtonText": "Next"
+  },
+  "externalUserNotFoundText": {
+    "title": "External User Not Found",
+    "description": "External user not found. Do you want to link your user or auto-register a new one?",
+    "linkButtonText": "Link",
+    "autoRegisterButtonText": "Register",
+    "tosAndPrivacyLabel": "Terms and conditions",
+    "tosConfirm": "I accept the",
+    "tosLinkText": "TOS",
+    "privacyLinkText": "privacy policy",
+    "privacyConfirm": "I accept the"
+  },
+  "successLoginText": {
+    "title": "Welcome to Agent RunLab",
+    "autoRedirectDescription": "Opening your private agent workspace…",
+    "redirectedDescription": "You may now close this window.",
+    "nextButtonText": "Next"
+  },
+  "logoutText": {
+    "title": "Logged Out",
+    "description": "You have logged out successfully.",
+    "loginButtonText": "Login"
+  },
+  "footerText": {
+    "tos": "TOS",
+    "privacyPolicy": "Privacy policy",
+    "help": "Help",
+    "supportEmail": "Support E-mail"
+  },
+  "passwordlessPromptText": {
+    "title": "Passwordless Setup",
+    "description": "Would you like to setup passwordless login? (Authentication methods of your device like FaceID, Windows Hello or Fingerprint)",
+    "descriptionInit": "You need to set up passwordless login. Use the link you were given to register your device.",
+    "passwordlessButtonText": "Go passwordless",
+    "nextButtonText": "Next",
+    "skipButtonText": "Skip"
+  },
+  "passwordlessRegistrationText": {
+    "title": "Passwordless Setup",
+    "description": "Add your authentication by providing a name (e.g MyMobilePhone, MacBook, etc) and then clicking on the 'Register passwordless' button below.",
+    "tokenNameLabel": "Name of the device",
+    "notSupported": "WebAuthN is not supported by your browser. Please ensure it is up to date or use a different one (e.g. Chrome, Safari, Firefox)",
+    "registerTokenButtonText": "Register passwordless",
+    "errorRetry": "Retry, create a new challenge or choose a different method."
+  },
+  "passwordlessRegistrationDoneText": {
+    "title": "Passwordless Set Up",
+    "description": "Device for passwordless successfully added.",
+    "nextButtonText": "Next",
+    "cancelButtonText": "Cancel",
+    "descriptionClose": "You may now close this window."
+  },
+  "externalRegistrationUserOverviewText": {
+    "title": "External User Registration",
+    "description": "We have taken your user details from the selected provider. You may now change or complete them.",
+    "emailLabel": "E-Mail",
+    "usernameLabel": "Username",
+    "firstnameLabel": "First name",
+    "lastnameLabel": "Last name",
+    "nicknameLabel": "Nickname",
+    "languageLabel": "Language",
+    "phoneLabel": "Phone number",
+    "tosAndPrivacyLabel": "Terms and conditions",
+    "tosConfirm": "I accept the",
+    "tosLinkText": "TOS",
+    "privacyLinkText": "privacy policy",
+    "backButtonText": "Nack",
+    "nextButtonText": "Save",
+    "privacyConfirm": "I accept the"
+  }
+}

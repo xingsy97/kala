@@ -1,9 +1,12 @@
 # Testing Strategy
 
 **Status**: Normative for what testing looks like at each layer.
-**Tooling**: Vitest [1] throughout (both packages that ship JS and ones that ship a service).
 
-The testing strategy tracks the architecture: pure-function kernel → integration-tested Host → contract-tested Executor → e2e for the full system. The rule of thumb: **push tests as low as possible.** A bug caught by a unit test is orders of magnitude cheaper than one caught by e2e.
+**Tooling**: Vitest [1] for package tests; Puppeteer/Chromium and deployment scripts for browser and system acceptance.
+
+**Deployment contract**: [`../architecture/deployment-mode-contract.md`](../architecture/deployment-mode-contract.md)
+
+The testing strategy tracks the architecture: pure-function Kernel → integration-tested Host → contract-tested Executor → Gateway/identity/Unit isolation → real-browser and full-system acceptance. The rule of thumb: **push tests as low as possible.** A bug caught by a unit test is orders of magnitude cheaper than one caught by e2e.
 
 ---
 
@@ -29,7 +32,8 @@ Approximate share:
 - Host: 70% unit + 30% integration (mocked LLM & socket)
 - Executor: 80% unit + 20% integration (real fs, tmpdir)
 - Dashboard: component tests plus targeted Puppeteer verification scripts for real browser/layout checks
-- Full system: a small handful of e2e tests exercising the golden path
+- SaaS Gateway and Unit routing: identity/session and two-Unit integration tests
+- Full system: mode-specific task-chain acceptance for the critical action matrix
 
 ---
 
@@ -71,7 +75,7 @@ If a kernel test needs any of the above, the kernel has grown IO and violated [A
 
 ### 2.5 Current state
 
-44 tests in `packages/kernel/src/core.test.ts`. See file for concrete examples.
+The Kernel suite is discovered from `packages/kernel/src/**/*.test.ts`; avoid hard-coded test counts because they become stale. See the test files for concrete examples.
 
 ---
 
@@ -243,23 +247,16 @@ Each test file is a hermetic unit — no shared mutable state, no test-order dep
 
 ## 8. CI
 
-GitHub Actions runs on every PR:
+The repository CI workflow is the executable source for current jobs. Required release evidence is broader than fast PR CI and has these lanes:
 
-```yaml
-jobs:
-  test:
-    strategy:
-      matrix: { node: [20, 22] }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm -r typecheck
-      - run: pnpm -r test
-      - run: pnpm -r build
-```
+1. package typecheck, build, and unit/integration tests;
+2. release-asset and Compose security/config validation;
+3. Standalone production-bundle browser acceptance;
+4. SaaS Gateway/identity/two-Unit isolation acceptance;
+5. mode-specific critical user task chains and screenshots;
+6. real provider and real-device checks when affected.
 
-E2e tests run on a separate job with a longer timeout, only on PRs (not every commit).
+If browser or SaaS lanes are not automated in the current GitHub workflow, they remain mandatory release evidence and must be reported as manual—not described as an existing CI job.
 
 ### 8.1 Test time budgets
 
@@ -267,7 +264,8 @@ E2e tests run on a separate job with a longer timeout, only on PRs (not every co
 - Host: < 30s
 - Executor: < 20s
 - Dashboard component: < 15s
-- E2e: < 5 min for the whole suite
+- Focused browser scenario: < 5 min
+- Full Standalone/SaaS release acceptance: separate long-running lane with explicit timeout per task; sub-agent or system verification must not use a blanket 120-second ceiling
 
 If a suite blows through its budget, the PR should split slow tests out into a dedicated slow-tests job or profile and optimize.
 

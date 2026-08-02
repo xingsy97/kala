@@ -1,0 +1,3 @@
+import { describe, expect, it } from 'vitest'
+import { executorVersionAllowed, withinMaintenanceWindow } from './release-policy.js'
+describe('release policy',()=>{it('checks compatibility and maintenance windows',()=>{const policy={channel:'stable' as const,minExecutorVersion:'1.2.0',maxExecutorVersion:'2.0.0',maintenanceWindow:{startHourUtc:2,durationMinutes:60}};expect(executorVersionAllowed(policy,'1.5.0')).toBe(true);expect(executorVersionAllowed(policy,'2.1.0')).toBe(false);expect(withinMaintenanceWindow(policy,new Date('2026-01-01T02:30:00Z'))).toBe(true);expect(withinMaintenanceWindow(policy,new Date('2026-01-01T04:00:00Z'))).toBe(false)})})

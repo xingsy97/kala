@@ -15,6 +15,16 @@ build/
 .env
 .env.local
 .env.*.local
+.env.*
+!*.env.example
+deploy/saas/.secrets/
+deploy/saas/**/.secrets/
+deploy/saas/.tls/
+deploy/saas/backups/
+deploy/identity/.secrets/
+deploy/identity/backups/
+deploy/**/release-manifest.local.json
+deploy/**/deployment.env
 *.pem
 secrets*
 

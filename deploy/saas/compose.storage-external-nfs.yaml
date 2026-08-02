@@ -1,0 +1,7 @@
+volumes:
+  tenant-data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${RUNLAB_EXTERNAL_NFS_ADDRESS:?set RUNLAB_EXTERNAL_NFS_ADDRESS},nfsvers=${RUNLAB_EXTERNAL_NFS_VERSION:-4.2},rw,hard,timeo=600,retrans=2"
+      device: ":${RUNLAB_EXTERNAL_NFS_EXPORT:-/}"

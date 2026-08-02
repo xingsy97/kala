@@ -1,0 +1,7 @@
+services:
+  runtime-ingress:
+    environment:
+      INGRESS_PUBLIC_ORIGIN: ${RUNLAB_PUBLIC_ORIGIN:?set RUNLAB_PUBLIC_ORIGIN in the ignored deployment environment}
+      OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in the ignored deployment environment}
+      OIDC_DISCOVERY_ORIGIN: ${OIDC_DISCOVERY_ORIGIN:?set OIDC_DISCOVERY_ORIGIN in the ignored deployment environment}
+      RUNTIME_INGRESS_ALLOW_INSECURE_HTTP: "0"

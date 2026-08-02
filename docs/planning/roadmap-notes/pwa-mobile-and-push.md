@@ -281,6 +281,19 @@ self.addEventListener('notificationclick', (event) => {
 
 前台窗口存活时，用 `postMessage` 把 push 转成应用内 toast，**不再重复弹系统通知**（去重键：`tag`）。
 
+### 5.4 多设备活跃抑制
+
+默认交付策略是“仅在没有设备正在使用 Agent RunLab 时发送系统 Push”，避免桌面端正在查看运行结果时手机仍然响铃。
+
+“正在使用”必须同时满足：
+
+- 页面处于前台可见状态；
+- 浏览器窗口拥有焦点；
+- 最近 5 分钟内有点击、键盘、触摸或滚动操作；
+- Host 在最近 45 秒内收到该设备的心跳。
+
+Dashboard 每 15 秒发送一次 `/push/activity` 心跳，并在 `visibilitychange`、`focus`、`blur` 和 `pagehide` 时立即更新。Host 只维护带过期时间的内存状态；页面崩溃、断网或设备休眠后会自动恢复 Push。任一设备满足活跃条件时，Host 抑制正常产品 Push，但 Settings 中显式触发的诊断测试 Push 不受影响。Sub-agent 事件仍不产生产品级通知。
+
 ---
 
 ## 6. P3 — iOS / 桌面体验细节
