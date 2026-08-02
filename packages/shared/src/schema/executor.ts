@@ -96,6 +96,7 @@ export const ExecutorAnnounceSchema = z.object({
   workspaceId: WorkspaceIdSchema,
   workspaceName: z.string(),
   tools: z.array(z.string()),
+  toolImplementations: z.record(z.string(), z.object({ version: z.string() })).optional(),
   sandboxRoots: z.array(z.string()).optional(),
   defaultCwd: z.string().optional(),
   workingDir: z.string().optional(),
@@ -191,4 +192,5 @@ export const ToolResultAckSchema = z.object({
   callId: WireIdSchema,
   ok: z.boolean(),
   content: z.string(),
+  failure: z.object({ code: z.string(), category: z.enum(['input','precondition','execution','infrastructure','cancelled']), outcome: z.enum(['blocked','failed','cancelled','timeout','indeterminate']), retryable: z.boolean(), responsibility: z.enum(['model','workspace','provider','user','system']), timeoutStage: z.enum(['queue','acknowledgement','execution','idle_output']).optional() }).optional(),
 }) satisfies z.ZodType<ToolResultAck>

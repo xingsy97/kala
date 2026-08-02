@@ -19,8 +19,8 @@ describe('background task handlers', () => {
 
   it('lists, reads, and kills only tasks owned by the requested session', async () => {
     root = makeTempWorkspace('ak-bg-handlers-')
-    const taskA = await startBackgroundShell({ sessionId: 'session-a', command: 'sleep 5', cwd: root })
-    const taskB = await startBackgroundShell({ sessionId: 'session-b', command: 'sleep 5', cwd: root })
+    const taskA = await startBackgroundShell({ sessionId: 'session-a', command: 'sleep 5', cwd: root, shell: { family: 'sh', executable: '/bin/sh' } })
+    const taskB = await startBackgroundShell({ sessionId: 'session-b', command: 'sleep 5', cwd: root, shell: { family: 'sh', executable: '/bin/sh' } })
 
     const listA = await handleBgList({ requestId: 'list-a', workspaceId: 'ws-1', sessionId: 'session-a' })
     expect(listA.tasks.map((task) => task.taskId)).toEqual([taskA.taskId])

@@ -282,6 +282,7 @@ export const ApprovalRequiredEventSchema = z.object({
   callId: z.string(),
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
+  intent: z.string().optional(),
 }) satisfies z.ZodType<ApprovalRequiredEvent>
 
 export const ServerTokenDeltaEventSchema = z.object({

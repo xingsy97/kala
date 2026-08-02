@@ -81,13 +81,13 @@ const transitions: Record<AgentStatus, TransitionRow> = {
   awaiting_approval: {
     user_approve: (s, e) => onUserApprove(s, e.callId),
     user_reject: (s, e, c) => onUserReject(s, e.callId, e.reason, c),
-    tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
+    tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c, e.failure),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
     approval_mode_changed: (s, e) => onApprovalModeChanged(s, e.mode),
   },
   executing_tools: {
-    tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c),
+    tool_result: (s, e, c) => onToolResult(s, e.callId, e.ok, e.content, c, e.failure),
     cancel: (s) => onCancel(s),
     clear: (s) => onClear(s),
     messages_replaced: (s, e, c) => onMessagesReplaced(s, e, c),

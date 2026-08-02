@@ -245,12 +245,12 @@ describe('websearch tool', () => {
     expect(out).toContain('[filtered 1 suspicious low-quality result(s)]')
   })
 
-  it('throws EHTTP when Serper returns an error', async () => {
+  it('reports provider exhaustion when Serper and fallback both fail', async () => {
     process.env.SERPER_API_KEY = 'test-key'
     globalThis.fetch = vi.fn(async () => new Response('bad key', { status: 401 })) as unknown as typeof fetch
     await expect(
       websearchTool.run({ query: 'x' }, makeCtx('/tmp')),
-    ).rejects.toMatchObject({ code: 'EHTTP' })
+    ).rejects.toMatchObject({ code: 'ESEARCH_UNAVAILABLE' })
   })
 
   it('truncates very long snippets', async () => {

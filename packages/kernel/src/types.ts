@@ -22,6 +22,7 @@ export type ToolCallContent = {
   callId: string
   name: string
   input: Record<string, unknown>
+  intent?: string
 }
 
 export type ToolResultContent = {
@@ -29,6 +30,16 @@ export type ToolResultContent = {
   callId: string
   ok: boolean
   content: string
+  failure?: ToolFailure
+}
+
+export type ToolFailure = {
+  code: string
+  category: 'input' | 'precondition' | 'execution' | 'infrastructure' | 'cancelled'
+  outcome: 'blocked' | 'failed' | 'cancelled' | 'timeout' | 'indeterminate'
+  retryable: boolean
+  responsibility: 'model' | 'workspace' | 'provider' | 'user' | 'system'
+  timeoutStage?: 'queue' | 'acknowledgement' | 'execution' | 'idle_output'
 }
 
 /**
@@ -108,6 +119,8 @@ export type ToolSchema = {
   description: string
   inputSchema: Record<string, unknown> // JSON Schema draft-07 (opaque to kernel)
   requiresApproval: boolean
+  version?: string
+  schemaHash?: string
   toolsetId?: string
   toolsetVersion?: string
   risk?: 'read' | 'write' | 'shell' | 'network' | 'memory' | 'agent'
@@ -177,6 +190,7 @@ export type PendingToolCall = {
   callId: string
   name: string
   input: Record<string, unknown>
+  intent?: string
   status: 'awaiting_approval' | 'approved' | 'rejected' | 'dispatched'
 }
 
@@ -291,6 +305,7 @@ export type ToolResultEvent = {
   callId: string
   ok: boolean
   content: string
+  failure?: ToolFailure
 }
 
 export type CancelEvent = {
@@ -372,6 +387,7 @@ export type CallToolEffect = {
   callId: string
   name: string
   input: Record<string, unknown>
+  intent?: string
   cwd?: string
 }
 
@@ -380,6 +396,7 @@ export type RequestApprovalEffect = {
   callId: string
   name: string
   input: Record<string, unknown>
+  intent?: string
 }
 
 export type FinishEffect = {

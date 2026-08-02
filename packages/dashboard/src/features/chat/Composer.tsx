@@ -537,32 +537,9 @@ export function Composer({
           onUpdate={onQueuedUpdate}
           onDelete={onQueuedDelete}
         />
-        <button
-          type="button"
-          onClick={toggleMode}
-          aria-pressed={mode === 'full'}
-          aria-label={mode === 'simple' ? t('composer.mode.toFull') : t('composer.mode.toSimple')}
-          title={mode === 'simple' ? t('composer.mode.toFull') : t('composer.mode.toSimple')}
-          data-testid="composer-mode-toggle"
-          data-composer-mode={mode}
-          className={cn(
-            // Reserve a shallow row above the composer instead of overlaying
-            // either the input or an adjacent context warning. Keeping this a
-            // narrow handle preserves the full width of the mobile input row.
-            'group mx-auto mb-0.5 flex h-3 w-12 items-center justify-center rounded-full',
-            'text-muted-foreground/70 transition-colors sm:text-muted-foreground/0',
-            'hover:bg-accent/40 hover:text-foreground',
-            'focus-visible:bg-accent/40 focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40',
-          )}
-        >
-          {mode === 'simple' ? (
-            <ChevronUp className="h-3 w-3" aria-hidden="true" />
-          ) : (
-            <ChevronDown className="h-3 w-3" aria-hidden="true" />
-          )}
-        </button>
         {mode === 'simple' ? (
           <div className="relative flex items-center gap-2" data-testid="composer-simple-shell">
+            <ComposerModeToggle mode={mode} onToggle={toggleMode} />
             <SlashCommandMenu
               commands={matchingCommands}
               disabled={disabled}
@@ -608,9 +585,11 @@ export function Composer({
             />
           </div>
         ) : (
+        <div className="flex items-stretch gap-2" data-testid="composer-full-shell">
+          <ComposerModeToggle mode={mode} onToggle={toggleMode} />
         <div
           className={cn(
-            'relative rounded-2xl border border-border/60 bg-background/60 transition-shadow',
+            'min-w-0 flex-1 relative rounded-2xl border border-border/60 bg-background/60 transition-shadow',
             'focus-within:border-border focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/40',
           )}
         >
@@ -847,6 +826,7 @@ export function Composer({
             </div>
           </div>
         </div>
+        </div>
         )}
         {pendingToast ? (
           <div
@@ -858,6 +838,25 @@ export function Composer({
         ) : null}
       </motion.div>
     </form>
+  )
+}
+
+function ComposerModeToggle({ mode, onToggle }: { mode: 'simple' | 'full'; onToggle(): void }): JSX.Element {
+  const { t } = useTranslation()
+  const label = mode === 'simple' ? t('composer.mode.toFull') : t('composer.mode.toSimple')
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={mode === 'full'}
+      aria-label={label}
+      title={label}
+      data-testid="composer-mode-toggle"
+      data-composer-mode={mode}
+      className="flex w-8 flex-none items-center justify-center rounded-xl border border-border/60 bg-background/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40"
+    >
+      {mode === 'simple' ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+    </button>
   )
 }
 

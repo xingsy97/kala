@@ -122,6 +122,7 @@ import type { MemoStore } from '../memo-store.js'
 import { diffToolCatalogs } from '../tool-catalog-diff.js'
 import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
 import type { SessionStore } from '../store/session.js'
+import { compareToolVersions } from '../tool-version.js'
 import { exportSubAgentGraph } from '../subagent-graph.js'
 import { ContentInputError, resolveContentToPath } from './content-inputs.js'
 import {
@@ -369,6 +370,7 @@ export function attachJsonRoutes(
     sessions?: SessionStore
     routerHealth?: () => unknown
     executorsSnapshot?: () => readonly AttachedExecutor[]
+    toolRegistry?: () => readonly import('@agent-kernel/kernel').ToolSchema[]
     restartStatus?: () => HostRestartStatus
     requestRestart?: (input: { mode?: 'checkpoint' | 'when_idle' | 'force'; reason?: 'manual' | 'deploy' | 'settings_changed'; timeoutMs?: number }) => Promise<HostRestartAttempt>
     abortRestart?: () => HostRestartAttempt | null
@@ -434,6 +436,23 @@ export function attachJsonRoutes(
         res.end()
         return
       }
+    }
+    const sessionToolLockMatch = path.match(/^\/runtime\/sessions\/([^/]+)\/tool-lock$/u)
+    if (sessionToolLockMatch && req.method === 'GET' && payloads.sessions) {
+      claimRoute(req)
+      const record = payloads.sessions.get(decodeURIComponent(sessionToolLockMatch[1] ?? ''))
+      if (!record) { sendError(res, 404, 'session not found'); return }
+      sendJson(req, res, { sessionId: record.sessionId, tools: record.toolLock })
+      return
+    }
+    if (path === '/runtime/tool-registry' && req.method === 'GET' && payloads.toolRegistry) {
+      claimRoute(req)
+      const executors = payloads.executorsSnapshot?.() ?? []
+      sendJson(req, res, {
+        generatedAt: new Date().toISOString(),
+        tools: payloads.toolRegistry().map((tool) => { const required = tool.version ?? '0.0.0'; return { name: tool.name, version: required, schemaHash: tool.schemaHash ?? null, source: tool.toolsetId ?? 'unknown', execution: tool.executionKind ?? 'executor', implementations: executors.map((executor) => { const version = executor.toolImplementations?.[tool.executionHandler ?? tool.name]?.version; return { workspaceId: executor.workspaceId, version: version ?? null, status: compareToolVersions(required, version) } }) } }),
+      })
+      return
     }
     if (path === '/runtime/capabilities' && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
@@ -953,6 +972,8 @@ function isProtectedJsonRoute(path: string): boolean {
   return path === '/models' ||
     path === '/settings' ||
     path === '/runtime/capabilities' ||
+    path === '/runtime/tool-registry' ||
+    /^\/runtime\/sessions\/[^/]+\/tool-lock$/u.test(path) ||
     path === '/runtime/restart/status' ||
     path === '/runtime/restart' ||
     path === '/runtime/restart/abort' ||

@@ -338,9 +338,10 @@ describe('ExecutorRegistry', () => {
       reg.attach(sock as never, announceOf('e-to'))
       const p = reg.callTool('sess-7', callEffect('c1'))
       await vi.advanceTimersByTimeAsync(150)
-      await expect(p).resolves.toEqual({
+      await expect(p).resolves.toMatchObject({
         ok: false,
         content: 'tool call ack timed out after 100ms',
+        failure: { code: 'tool_ack_timeout', outcome: 'indeterminate', timeoutStage: 'acknowledgement' },
       })
     } finally {
       vi.useRealTimers()
@@ -476,9 +477,10 @@ describe('ExecutorRegistry', () => {
       5_000,
     )
     const p = reg.callTool('sess-orphan', callEffect('c1'))
-    await expect(p).resolves.toEqual({
+    await expect(p).resolves.toMatchObject({
       ok: false,
       content: 'workspace ws-default is offline — start its executor to run tools',
+      failure: { code: 'workspace_offline', outcome: 'blocked' },
     })
   })
 
@@ -518,9 +520,10 @@ describe('ExecutorRegistry', () => {
       announceOf('e-other', 'ws-other', 'other'),
     )
     const p = reg.callTool('sess-lonely', callEffect('c1'))
-    await expect(p).resolves.toEqual({
+    await expect(p).resolves.toMatchObject({
       ok: false,
       content: 'workspace ws-missing is offline — start its executor to run tools',
+      failure: { code: 'workspace_offline', outcome: 'blocked' },
     })
   })
 

@@ -1,6 +1,6 @@
 import type { Tool } from './registry.js'
 import { ToolError } from './registry.js'
-import { optionalBoolean, requireString } from './schema.js'
+import { optionalBoolean, optionalString, requireString } from './schema.js'
 import { replaceInFileMutation } from '../mutation/engine.js'
 
 export const replaceManyInFileTool: Tool = {
@@ -8,6 +8,8 @@ export const replaceManyInFileTool: Tool = {
   async run(input, ctx) {
     return replaceInFileMutation({
       path: requireString(input, 'path'),
+      expectedRevision: optionalString(input, 'expected_revision') ?? optionalString(input, 'expectedRevision'),
+      noOpMode: optionalString(input, 'no_op_mode') === 'skip_noop' ? 'skip_noop' : 'strict',
       edits: parseEdits(input),
     }, ctx)
   },

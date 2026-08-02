@@ -336,6 +336,7 @@ export async function startHostServer(
     memoStore,
     sessions: store,
     executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
+    toolRegistry: () => (typeof options.defaultConfig === 'function' ? options.defaultConfig() : options.defaultConfig).tools,
     restartStatus: () => restart?.status() ?? {
       pid: process.pid,
       startedAt: new Date(0).toISOString(),

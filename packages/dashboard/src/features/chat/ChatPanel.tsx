@@ -3090,7 +3090,11 @@ function ToolCallGroupBlock({
         />
         <span className="flex min-w-0 items-center gap-1.5">
           <ToolNameChip name={groupTitle} />
-          {singleRow?.primary ? (
+          {singleCall?.intent ? (
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={singleCall.intent} data-testid={`tool-call-intent-${singleCall.callId}`}>
+              {singleCall.intent}
+            </span>
+          ) : singleRow?.primary ? (
             <span className="min-w-0 truncate font-mono text-[11px] text-foreground [overflow-wrap:anywhere]" title={singleRow.primary}>
               {singleRow.primary}
             </span>
@@ -3155,6 +3159,7 @@ function ToolCallGroupBlock({
       )}
       {collapsedDots && previewRow && previewStatus ? (
         <div className="mt-0.5 max-w-xl min-w-0 pr-1">
+          {singleCall?.intent ? <div className="mb-0.5 truncate text-[11px] text-muted-foreground" data-testid={`tool-call-intent-${singleCall.callId}`} title={singleCall.intent}>{singleCall.intent}</div> : null}
           <GroupSummaryPreview row={previewRow} status={previewStatus} />
         </div>
       ) : null}

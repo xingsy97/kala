@@ -73,18 +73,20 @@ if (wantsNativeBuild && nativeTarget !== currentNativeTarget) {
   throw new Error(`native target ${nativeTarget} does not match this runner (${currentNativeTarget}); Node SEA builds are not cross-compiled`)
 }
 
-if (includeDashboard && !skipDashboardBuild) {
-  await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'])
-}
-if (includeDashboard && skipDashboardBuild) {
-  assertDashboardDistReady(dashboardDist)
-}
-
 if (!nativeOnly && !skipPackageBuild) {
   await run('pnpm', ['--filter', '@agent-kernel/kernel', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/shared', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/executor', 'build'])
   await run('pnpm', ['--filter', '@agent-kernel/host', 'build'])
+}
+
+// Dashboard imports generated declarations from kernel/shared. Build those
+// packages first or a clean production build can typecheck against stale dist.
+if (includeDashboard && !skipDashboardBuild) {
+  await run('pnpm', ['--filter', '@agent-kernel/dashboard', 'build'])
+}
+if (includeDashboard && skipDashboardBuild) {
+  assertDashboardDistReady(dashboardDist)
 }
 
 const buildEntries = [...entries].sort((a, b) => {

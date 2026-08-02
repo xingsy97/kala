@@ -113,6 +113,7 @@ export type ToolDispatcher = {
   callTool(sessionId: string, eff: CallToolEffect): Promise<{
     ok: boolean
     content: string
+    failure?: import('@agent-kernel/kernel').ToolFailure
   }>
   cancelPending(sessionId: string): void
 }

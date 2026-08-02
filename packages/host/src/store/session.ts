@@ -28,12 +28,14 @@ import {
   writeHeader,
 } from './log.js'
 import { step } from '@agent-kernel/kernel'
+import { toolLockFor } from '../tool-version.js'
 
 export type SessionRecord = {
   readonly sessionId: string
   readonly logPath: string
   readonly createdAt: string
   readonly config: AgentConfig
+  readonly toolLock: Readonly<Record<string, { version: string; schemaHash: string | null }>>
   readonly parentSessionId?: string
   readonly parentCursor?: number
   readonly parentCallId?: string
@@ -166,6 +168,7 @@ export class SessionStore {
       logPath,
       createdAt: header.ts,
       config: params.config,
+      toolLock: toolLockFor(params.config),
       state: stateWithApproval,
       preferences: normalizedPreferences(params.preferences),
       ...(params.parentSessionId
@@ -730,6 +733,7 @@ export class SessionStore {
       logPath: path,
       createdAt: parsed.header.ts,
       config: options.runtimeConfig ?? parsed.header.config,
+      toolLock: toolLockFor(parsed.header.config),
       preferences,
       ...(parsed.events.length > 0
         ? { lastEventAt: parsed.events[parsed.events.length - 1]!.ts }

@@ -10,6 +10,10 @@ function mkApproval(callId: string, name: string, input: Record<string, unknown>
 }
 
 describe('ApprovalCard', () => {
+  it('shows the natural-language tool intent', () => {
+    render(<ApprovalCard approvals={[{ sessionId: 's', callId: 'c', name: 'shell', input: { command: 'pnpm test' }, intent: 'Run the tests to verify the change.' }]} onDecision={() => {}} />)
+    expect(screen.getByTestId('approval-card-intent').textContent).toBe('Run the tests to verify the change.')
+  })
   it('renders nothing when the list is empty', () => {
     const { container } = render(<ApprovalCard approvals={[]} onDecision={vi.fn()} />)
     expect(container.textContent).toBe('')

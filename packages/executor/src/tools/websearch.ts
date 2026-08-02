@@ -52,9 +52,23 @@ export const websearchTool: Tool = {
     const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
 
     try {
-      const results = process.env.SERPER_API_KEY
-        ? await searchSerper(query, limit, controller.signal)
-        : await searchDuckDuckGo(query, limit, controller.signal)
+      let results: SearchResult[]
+      if (process.env.SERPER_API_KEY) {
+        try {
+          results = await searchSerper(query, limit, controller.signal)
+        } catch (primaryError) {
+          throwIfAborted(ctx)
+          try {
+            results = await searchDuckDuckGo(query, limit, controller.signal)
+          } catch (fallbackError) {
+            const first = primaryError instanceof Error ? primaryError.message : String(primaryError)
+            const second = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+            throw new ToolError('ESEARCH_UNAVAILABLE', `all search providers failed: serper=${first}; duckduckgo=${second}`)
+          }
+        }
+      } else {
+        results = await searchDuckDuckGo(query, limit, controller.signal)
+      }
       const { results: filtered, dropped } = filterLowQualityResults(query, results, limit)
       if (filtered.length === 0) {
         const suffix = dropped.length

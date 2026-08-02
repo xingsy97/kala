@@ -523,6 +523,7 @@ export type ApprovalRequiredEvent = {
   callId: string
   name: string
   input: Record<string, unknown>
+  intent?: string
 }
 
 // ============================================================================
@@ -576,6 +577,7 @@ export type ExecutorAnnounce = {
    */
   workspaceName: string
   tools: string[]
+  toolImplementations?: Record<string, { version: string }>
   /** Optional filesystem jail. Empty/missing = executor trusts whole machine. */
   sandboxRoots?: string[]
   /** Executor startup/default cwd used as a filesystem-picker fallback. */
@@ -1114,6 +1116,7 @@ export type ToolResultAck = {
   callId: string
   ok: boolean
   content: string
+  failure?: import('@agent-kernel/kernel').ToolFailure
 }
 
 // ============================================================================

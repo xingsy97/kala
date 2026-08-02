@@ -34,6 +34,7 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ulid } from 'ulid'
+import { shellArgv, type ShellSpec } from './shell-runtime.js'
 
 const TASK_DIR = join(tmpdir(), '.ak-tasks')
 
@@ -122,16 +123,17 @@ export async function startBackgroundShell(params: {
   command: string
   cwd: string
   env?: NodeJS.ProcessEnv
+  shell: ShellSpec
 }): Promise<BackgroundTaskSummary> {
   await mkdir(TASK_DIR, { recursive: true })
   const taskId = ulid()
   const logPath = join(TASK_DIR, `${taskId}.log`)
   await writeFile(logPath, '', 'utf8')
 
-  const child = spawn('bash', ['-c', params.command], {
+  const child = spawn(params.shell.executable, shellArgv(params.shell, params.command), {
     cwd: params.cwd,
     env: params.env ?? process.env,
-    detached: true,
+    detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
@@ -227,6 +229,10 @@ export async function killBackgroundShell(taskId: string, sessionId: string): Pr
   const task = tasks.get(taskId)
   if (!task || task.sessionId !== sessionId) throw new Error(`unknown background task: ${taskId}`)
   if (task.status !== 'running') return false
+  if (process.platform === 'win32' && task.child.pid !== undefined) {
+    spawn('taskkill', ['/pid', String(task.child.pid), '/T', '/F'], { stdio: 'ignore' })
+    return true
+  }
   return task.child.kill('SIGTERM')
 }
 

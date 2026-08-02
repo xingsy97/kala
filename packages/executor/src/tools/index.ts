@@ -7,7 +7,7 @@ export { writeFileTool } from './write-file.js'
 export { replaceInFileTool } from './replace-in-file.js'
 export { replaceManyInFileTool } from './replace-many-in-file.js'
 export { applyFilePatchTool } from './apply-file-patch.js'
-export { bashTool } from './bash.js'
+export { bashTool, shellTool } from './bash.js'
 export { bashOutputTool } from './bash-output.js'
 export { killShellTool } from './kill-shell.js'
 export { todowriteTool } from './todowrite.js'
@@ -29,7 +29,7 @@ import { writeFileTool } from './write-file.js'
 import { replaceInFileTool } from './replace-in-file.js'
 import { replaceManyInFileTool } from './replace-many-in-file.js'
 import { applyFilePatchTool } from './apply-file-patch.js'
-import { bashTool } from './bash.js'
+import { bashTool, shellTool } from './bash.js'
 import { bashOutputTool } from './bash-output.js'
 import { killShellTool } from './kill-shell.js'
 import { todowriteTool } from './todowrite.js'
@@ -48,6 +48,7 @@ export const allTools: readonly Tool[] = [
   lsTool,
   globTool,
   grepTool,
+  shellTool,
   bashTool,
   bashOutputTool,
   killShellTool,

@@ -20,6 +20,7 @@ export type ToolPrompt = {
 
 export type ToolDefinition = {
   name: string
+  version?: string
   inputSchema: Record<string, unknown>
   requiresApproval: boolean
   prompt: ToolPrompt

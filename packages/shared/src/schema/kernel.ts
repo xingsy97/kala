@@ -74,13 +74,17 @@ export const ToolCallContentSchema = z.object({
   callId: z.string(),
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
+  intent: z.string().optional(),
 })
+
+const ToolFailureSchema = z.object({ code: z.string(), category: z.enum(['input','precondition','execution','infrastructure','cancelled']), outcome: z.enum(['blocked','failed','cancelled','timeout','indeterminate']), retryable: z.boolean(), responsibility: z.enum(['model','workspace','provider','user','system']), timeoutStage: z.enum(['queue','acknowledgement','execution','idle_output']).optional() })
 
 export const ToolResultContentSchema = z.object({
   type: z.literal('tool_result'),
   callId: z.string(),
   ok: z.boolean(),
   content: z.string(),
+  failure: ToolFailureSchema.optional(),
 })
 
 export const ImageSourceSchema: z.ZodType<ImageSource> = z.union([
@@ -130,6 +134,8 @@ export const ToolSchemaSchema: z.ZodType<ToolSchema> = z.object({
   description: z.string(),
   inputSchema: z.record(z.string(), z.unknown()),
   requiresApproval: z.boolean(),
+  version: z.string().optional(),
+  schemaHash: z.string().optional(),
   toolsetId: z.string().optional(),
   toolsetVersion: z.string().optional(),
   risk: z.enum(['read', 'write', 'shell', 'network', 'memory', 'agent']).optional(),
@@ -175,6 +181,7 @@ export const PendingToolCallSchema: z.ZodType<PendingToolCall> = z.object({
   callId: z.string(),
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
+  intent: z.string().optional(),
   status: z.enum(['awaiting_approval', 'approved', 'rejected', 'dispatched']),
 })
 
@@ -264,6 +271,7 @@ const ToolResultEventSchema = z.object({
   callId: z.string(),
   ok: z.boolean(),
   content: z.string(),
+  failure: ToolFailureSchema.optional(),
 })
 
 const CancelEventSchema = z.object({ kind: z.literal('cancel') })
@@ -331,6 +339,7 @@ const CallToolEffectSchema = z.object({
   callId: z.string(),
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
+  intent: z.string().optional(),
   cwd: z.string().optional(),
 })
 
@@ -339,6 +348,7 @@ const RequestApprovalEffectSchema = z.object({
   callId: z.string(),
   name: z.string(),
   input: z.record(z.string(), z.unknown()),
+  intent: z.string().optional(),
 })
 
 const FinishEffectSchema = z.object({ kind: z.literal('finish') })

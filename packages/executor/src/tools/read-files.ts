@@ -35,7 +35,10 @@ export const readFilesTool: Tool = {
       chunks.push(marker)
       break
     }
-    return chunks.join('\n\n')
+    const output = chunks.join('\n\n')
+    if (Buffer.byteLength(output, 'utf8') <= maxBytes) return output
+    const markerBytes = Buffer.byteLength(marker, 'utf8')
+    return `${truncateUtf8(output, Math.max(0, maxBytes - markerBytes - 2))}\n\n${marker}`
   },
 }
 

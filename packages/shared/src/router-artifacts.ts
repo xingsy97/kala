@@ -44,6 +44,7 @@ export type ToolCatalogArtifact = {
   toolCount: number
   tools: Array<{
     name: string
+    version?: string
     requiresApproval: boolean
     kind: 'executor' | 'host' | 'skill_loader' | 'sub_agent' | 'unknown'
     skillBacked: boolean
@@ -183,11 +184,12 @@ export function createToolCatalogArtifact(tools: readonly ToolSchema[]): ToolCat
     toolCount: tools.length,
     tools: tools.map((tool) => ({
       name: tool.name,
+      ...(tool.version ? { version: tool.version } : {}),
       requiresApproval: tool.requiresApproval,
       kind: toolKind(tool.name),
       skillBacked: tool.name === 'skill',
       descriptionChars: tool.description.length,
-      schemaHash: stableId(JSON.stringify(tool.inputSchema), 16),
+      schemaHash: tool.schemaHash ?? `sha256:${stableId(JSON.stringify(tool.inputSchema), 32)}`,
     })),
   }
 }

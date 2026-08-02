@@ -1289,6 +1289,11 @@ describe('ChatPanel', () => {
     expect(screen.queryByTestId('try-again-message-1')).toBeNull()
   })
 
+  it('shows persisted natural-language intent on a tool card', () => {
+    render(<DashboardChatPanel messages={[{ role: 'assistant', content: [{ type: 'tool_call', callId: 'intent-card', name: 'read', input: { path: '/repo/a.ts' }, intent: 'Inspect the current implementation before editing it.' }] }]} />)
+    expect(screen.getByTestId('tool-call-intent-intent-card').textContent).toBe('Inspect the current implementation before editing it.')
+  })
+
   it('flags a pending tool_call but shows no inline approve/reject buttons (they live in the composer flip)', () => {
     render(
       <ChatPanel

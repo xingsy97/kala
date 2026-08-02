@@ -139,6 +139,7 @@ export function DeploymentSection({
                 <SettingsRecordField label={t('settings.deployment.executorProtocol')} mono>{executor.clientVersion ?? '—'}</SettingsRecordField>
                 <SettingsRecordField label={t('settings.deployment.runtime')} mono>{executor.runtime} {executor.runtimeVersion}</SettingsRecordField>
                 <SettingsRecordField label={t('settings.deployment.features')}>{executorCapabilitiesLabel(executor, t)}</SettingsRecordField>
+                <SettingsRecordField label="Tool implementations" mono>{executor.toolImplementations ? Object.entries(executor.toolImplementations).map(([name, value]) => `${name}@${value.version}`).join(', ') : 'not reported'}</SettingsRecordField>
               </SettingsRecord>
             ))}
           </SettingsRecordList>

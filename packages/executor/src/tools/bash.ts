@@ -10,6 +10,7 @@ import {
   requireString,
 } from './schema.js'
 import { startBackgroundShell } from './background-shell.js'
+import { selectShell, shellArgv } from './shell-runtime.js'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_OUTPUT = 1_000_000
@@ -45,15 +46,14 @@ function killTree(child: ReturnType<typeof spawn>): void {
   child.kill('SIGKILL')
 }
 
-export const bashTool: Tool = {
-  name: 'bash',
-  async run(input, ctx) {
+async function runShell(input: Record<string, unknown>, ctx: Parameters<Tool['run']>[1]): Promise<string> {
     const command = requireString(input, 'command')
     if (command.trim().length === 0) {
       throw new ToolError('EINVAL', 'command is empty')
     }
     const cwdInput = optionalString(input, 'cwd')
-    const runInBackground = optionalBoolean(input, 'run_in_background') ?? false
+    const runInBackground = optionalBoolean(input, 'run_in_background') ?? optionalBoolean(input, 'background') ?? false
+    const shell = selectShell(optionalString(input, 'shell'))
     const timeoutMs = bashTimeoutMs(input) ?? DEFAULT_TIMEOUT_MS
 
     const cwd = cwdInput ?? ctx.cwd ?? ctx.sandbox.roots[0] ?? process.cwd()
@@ -74,7 +74,7 @@ export const bashTool: Tool = {
     }
 
     if (runInBackground) {
-      const task = await startBackgroundShell({ sessionId: ctx.sessionId, command, cwd: resolvedCwd, env: ctx.env })
+      const task = await startBackgroundShell({ sessionId: ctx.sessionId, command, cwd: resolvedCwd, env: ctx.env, shell })
       return JSON.stringify({
         taskId: task.taskId,
         note: 'started',
@@ -93,7 +93,7 @@ export const bashTool: Tool = {
 
       let child: ReturnType<typeof spawn>
       try {
-        child = spawn('bash', ['-c', command], {
+        child = spawn(shell.executable, shellArgv(shell, command), {
           cwd: resolvedCwd,
           env: ctx.env ?? process.env,
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -166,8 +166,10 @@ export const bashTool: Tool = {
         settle(`${output}${status}${trailer}`)
       })
     })
-  },
 }
+
+export const shellTool: Tool = { name: 'shell', run: runShell }
+export const bashTool: Tool = { name: 'bash', run: runShell }
 
 function bashTimeoutMs(input: Record<string, unknown>): number | undefined {
   const timeoutSeconds =

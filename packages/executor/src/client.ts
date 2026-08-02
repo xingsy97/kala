@@ -46,6 +46,7 @@ import { createTerminalManager } from './terminal-manager.js'
 import { ExecutionReceiptStore } from './execution-receipts.js'
 import type { RuntimeLogger } from './logger.js'
 import packageJson from '../package.json' with { type: 'json' }
+import { failureForToolError } from './tool-failure.js'
 
 const EXECUTOR_VERSION = packageJson.version
 
@@ -176,6 +177,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     workspaceId,
     workspaceName,
     tools: [...tools.keys()],
+    toolImplementations: Object.fromEntries([...tools.keys()].map((name) => [name, { version: '1.0.0' }])),
     ...(sandboxRoots.length > 0 ? { sandboxRoots: [...sandboxRoots] } : {}),
     defaultCwd: workspaceRoot,
     runtime: 'node',
@@ -476,6 +478,7 @@ async function runOne(
         callId: payload.callId,
         ok: false,
         content: `ERROR: ${err.message}`,
+        failure: failureForToolError(err.code),
       }
     }
     return {

@@ -178,6 +178,7 @@ export function ApprovalCard({ approvals, onDecision }: Props): JSX.Element | nu
       </div>
 
       <div className="flex min-w-0 flex-col gap-2 px-3 py-2.5">
+        {approval.intent ? <p className="text-sm text-amber-950 dark:text-amber-100" data-testid="approval-card-intent">{approval.intent}</p> : null}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="rounded bg-amber-200/70 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-amber-900 dark:bg-amber-500/30 dark:text-amber-100">
             {approval.name}

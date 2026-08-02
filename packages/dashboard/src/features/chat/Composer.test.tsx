@@ -451,14 +451,13 @@ describe('Composer', () => {
     expect(send.className).toContain('h-9')
     expect(sendMode.className).toContain('h-9')
 
-    // The mode handle gets its own shallow row: it must not overlay the input
-    // or expand across the full composer when focused on touch devices.
+    // The mode switch is a visible compact control immediately left of the input.
     const modeToggle = screen.getByTestId('composer-mode-toggle')
     expect(modeToggle).toBeTruthy()
     expect(modeToggle.className).not.toContain('absolute')
-    expect(modeToggle.className).not.toContain('inset-x-0')
-    expect(modeToggle.className).toContain('w-12')
-    expect(modeToggle.compareDocumentPosition(shell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(modeToggle.className).toContain('w-8')
+    expect(shell.contains(modeToggle)).toBe(true)
+    expect(modeToggle.compareDocumentPosition(shell.querySelector('textarea, [contenteditable="true"]') ?? indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(sendMode)
     expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
   })

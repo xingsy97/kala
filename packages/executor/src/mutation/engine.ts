@@ -1,5 +1,6 @@
 import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { createHash } from 'node:crypto'
 
 import type { Sandbox } from '../sandbox.js'
 import { SandboxError } from '../sandbox.js'
@@ -52,20 +53,23 @@ export async function writeFileMutation(input: { path: string; content: string }
 }
 
 export async function replaceInFileMutation(
-  input: { path: string; edits: readonly ExactReplacement[] },
+  input: { path: string; edits: readonly ExactReplacement[]; expectedRevision?: string; noOpMode?: 'strict' | 'skip_noop' },
   ctx: ResolvedMutationContext,
 ): Promise<string> {
   throwIfAborted(ctx as ToolContext)
   const resolved = await resolvePath(ctx.sandbox, input.path, ctx.cwd)
   return await withFileLock(resolved, async () => {
     const source = await loadTextFile(resolved).catch((err) => mapLoadError(err, input.path))
+    if (input.expectedRevision && input.expectedRevision !== revisionOf(source.bytes)) throw new ToolError('ESTALE', `revision mismatch for ${input.path}; expected ${input.expectedRevision}, current ${revisionOf(source.bytes)}; read it again and retry`)
     const bodyLf = normalizeLineEndings(source.body)
     const normalizedEdits = input.edits.map((edit) => ({
       ...edit,
       oldString: normalizeLineEndings(edit.oldString),
       newString: normalizeLineEndings(edit.newString),
     }))
-    const { text: nextBodyLf, counts } = applyExactReplacements(bodyLf, normalizedEdits)
+    const effectiveEdits = input.noOpMode === 'skip_noop' ? normalizedEdits.filter((edit) => edit.oldString !== edit.newString) : normalizedEdits
+    if (effectiveEdits.length === 0) return stringifyMutationResult({ ok: true, summary: `No changes needed in ${resolved}`, files: [] })
+    const { text: nextBodyLf, counts } = applyExactReplacements(bodyLf, effectiveEdits)
     const nextText = serializeTextFile(nextBodyLf, source)
     throwIfAborted(ctx as ToolContext)
     const latest = await loadTextFile(resolved)
@@ -171,6 +175,8 @@ function mapLoadError(err: unknown, userPath: string): never {
   if (code === 'EACCES') throw new ToolError('EACCES', `permission denied: ${userPath}`)
   throw new ToolError(code, `failed to read ${userPath}: ${(err as Error).message}`)
 }
+
+function revisionOf(bytes: Uint8Array): string { return `sha256:${createHash('sha256').update(bytes).digest('hex')}` }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   if (left.length !== right.length) return false

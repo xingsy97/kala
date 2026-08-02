@@ -223,8 +223,10 @@ export async function runAgentTool(
   if (model && isSettableModelResolver(deps.models)) {
     deps.models.set(child.sessionId, model)
   }
+  let timedOut = false
   const timeoutHandle = policy.timeoutMs !== undefined
     ? setTimeout(() => {
+        timedOut = true
         void interruptSubAgent(
           deps,
           aborts,
@@ -275,7 +277,10 @@ export async function runAgentTool(
       finishedAt: finishedAt.toISOString(),
       error,
     })
-    return cancelEnvelope(child.sessionId, agentType, error, turns, durationMs)
+    const partial = final ? finalAssistantText(final) : ''
+    return timedOut
+      ? failEnvelope(child.sessionId, agentType, `timeout: ${error}${partial ? `; partial=${partial.slice(0, 500)}` : ''}`, turns, durationMs)
+      : cancelEnvelope(child.sessionId, agentType, error, turns, durationMs)
   }
 
   if (dispatchError || !final || final.status !== 'done') {
@@ -454,7 +459,7 @@ function pickEffectiveTools(
   const requested = Array.isArray(requestedTools)
     ? (requestedTools as unknown[]).filter((t): t is string => typeof t === 'string')
     : undefined
-  if (policyAllowedTools && policyAllowedTools.length > 0) return policyAllowedTools
+  if (policyAllowedTools !== undefined) return policyAllowedTools
   return requested
 }
 

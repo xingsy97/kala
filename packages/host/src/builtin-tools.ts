@@ -143,7 +143,7 @@ const filesystemToolset: ToolsetPlugin = {
   provideTools() {
     return [
       tool('read_file', 'executor', 'read', false, 'read_file', {
-        purpose: 'Read one UTF-8 text file. Returns batcat-style line-numbered output.',
+        purpose: 'Read one UTF-8 text file. Returns batcat-style line-numbered output plus a content revision for safe follow-up edits.',
         whenToUse: ['Inspect one source file, config, log, or doc before making decisions.', 'Read targeted ranges when the file is large.'],
         constraints: ['Use absolute paths.', 'Do not read secrets unless required for the user task.'],
       }, {
@@ -187,12 +187,12 @@ const filesystemToolset: ToolsetPlugin = {
         purpose: 'Replace one exact string in one text file. Fails if old_string is missing or ambiguous unless replace_all is true.',
         whenToUse: ['Apply one focused source edit when exact context is known.', 'Preserve surrounding file content exactly.'],
         constraints: ['Read the target context first.', 'Do not include line numbers in old_string.', 'Use replace_all only when every occurrence should change.'],
-      }, { type: 'object', required: ['path', 'old_string', 'new_string'], properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } } }),
+      }, { type: 'object', required: ['path', 'old_string', 'new_string'], properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' }, expected_revision: { type: 'string', description: 'Optional sha256 revision returned by read_file.' }, no_op_mode: { type: 'string', enum: ['strict', 'skip_noop'] } } }),
       tool('replace_many_in_file', 'executor', 'write', true, 'replace_many_in_file', {
         purpose: 'Apply multiple exact string replacements to one text file in order, then commit once only if every replacement succeeds.',
         whenToUse: ['Make several coordinated edits in the same file.', 'Avoid multiple separate replace_in_file calls on one file.'],
         constraints: ['Read the target context first.', 'Each old_string must match the current file content at its step.', 'Use apply_file_patch for complex line-level changes.'],
-      }, { type: 'object', required: ['path', 'edits'], properties: { path: { type: 'string' }, edits: { type: 'array', minItems: 1, items: { type: 'object', required: ['old_string', 'new_string'], properties: { old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } } } } } }),
+      }, { type: 'object', required: ['path', 'edits'], properties: { path: { type: 'string' }, expected_revision: { type: 'string', description: 'Optional sha256 revision returned by read_file.' }, no_op_mode: { type: 'string', enum: ['strict', 'skip_noop'] }, edits: { type: 'array', minItems: 1, items: { type: 'object', required: ['old_string', 'new_string'], properties: { old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } } } } } }),
       tool('apply_file_patch', 'executor', 'write', true, 'apply_file_patch', {
         purpose: 'Apply a patch-format file mutation. Supports add, update, delete, and move operations; a patch may touch one file or many files.',
         whenToUse: ['Apply complex line-level changes.', 'Create, delete, move, or update files from one patch-format description.'],
@@ -208,11 +208,11 @@ const shellToolset: ToolsetPlugin = {
   label: 'Shell',
   provideTools() {
     return [
-      tool('bash', 'executor', 'shell', true, 'bash', {
-        purpose: 'Run a bash command inside the executor sandbox. Captures stdout and stderr up to 1MB.',
+      tool('shell', 'executor', 'shell', true, 'bash', {
+        purpose: 'Run a native shell command inside the executor sandbox. Uses PowerShell or cmd on Windows and a POSIX shell on macOS/Linux.',
         whenToUse: ['Run tests, builds, linters, package scripts, or precise shell inspections.', 'Use background mode for long-running commands.'],
-        constraints: ['Avoid destructive commands unless explicitly requested.', 'Set timeout_seconds to the expected command duration for foreground commands.', 'Use run_in_background for long-running commands, servers, experiments, or commands that need polling.'],
-      }, { type: 'object', required: ['command'], properties: { command: { type: 'string' }, timeout_seconds: { type: 'integer', minimum: 1, description: 'Maximum foreground command runtime in seconds. Pick a value appropriate to the command.' }, run_in_background: { type: 'boolean' } } }),
+        constraints: ['Use syntax for the selected Workspace operating system.', 'Avoid destructive commands unless explicitly requested.', 'Set timeout_seconds to the expected command duration for foreground commands.', 'Use run_in_background for long-running commands, servers, experiments, or commands that need polling.'],
+      }, { type: 'object', required: ['command'], properties: { command: { type: 'string' }, shell: { type: 'string', enum: ['auto', 'powershell', 'cmd', 'bash', 'zsh', 'sh'] }, cwd: { type: 'string' }, timeout_seconds: { type: 'integer', minimum: 1, description: 'Maximum foreground command runtime in seconds. Pick a value appropriate to the command.' }, run_in_background: { type: 'boolean' } } }),
       tool('bash_output', 'executor', 'shell', false, 'bash_output', {
         purpose: 'Read output from a background bash task by task_id.',
         whenToUse: ['Poll long-running tests, builds, dev servers, or experiments.'],

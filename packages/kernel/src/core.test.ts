@@ -265,6 +265,13 @@ describe('step: llm_response (plain answer)', () => {
 })
 
 describe('step: llm_response with tool calls', () => {
+  it('extracts intent metadata and removes it from execution input', () => {
+    const s0 = { ...initial(), status: 'thinking' as const }
+    const { next, effects } = step(s0, { kind: 'llm_response', message: asst({ type: 'tool_call', callId: 'intent-1', name: 'read', input: { path: '/tmp/x', _intent: 'Inspect the configuration.' } }) }, CONFIG)
+    expect(next.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool_call', intent: 'Inspect the configuration.', input: { path: '/tmp/x' } })
+    expect(effects[0]).toMatchObject({ kind: 'call_tool', intent: 'Inspect the configuration.', input: { path: '/tmp/x' } })
+  })
+
   it('dispatches non-approval tool directly', () => {
     const s0 = { ...initial(), status: 'thinking' as const }
     const { next, effects } = step(

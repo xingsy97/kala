@@ -20,7 +20,8 @@ describe('read_file', () => {
       { path: join(root, 'file.txt') },
       makeCtx(root),
     )
-    expect(out).toBe('1\talpha\n2\tbeta\n3\tgamma')
+    expect(out).toContain('1\talpha\n2\tbeta\n3\tgamma')
+    expect(out).toContain('revision: sha256:')
   })
 
   it('supports offset and limit', async () => {
@@ -28,7 +29,8 @@ describe('read_file', () => {
       { path: join(root, 'file.txt'), offset: 1, limit: 1 },
       makeCtx(root),
     )
-    expect(out).toBe('2\tbeta')
+    expect(out).toContain('2\tbeta')
+    expect(out).toContain('revision: sha256:')
   })
 
   it('throws ENOENT for missing files', async () => {

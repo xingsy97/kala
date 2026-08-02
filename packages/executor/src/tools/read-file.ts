@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 
 import { SandboxError } from '../sandbox.js'
 import type { Tool } from './registry.js'
@@ -46,7 +47,8 @@ export async function readOneFile(
 
   const bytes = await readFile(resolved)
   if (looksBinary(bytes)) throw new ToolError('EBINARY', `binary file cannot be rendered as text: ${input.path}; use image/file preview or download`)
-  return formatNumberedLines(bytes.toString('utf8'), offset, limit)
+  const content = formatNumberedLines(bytes.toString('utf8'), offset, limit)
+  return `${content}\n\n--- file metadata ---\nrevision: sha256:${createHash('sha256').update(bytes).digest('hex')}\nsize: ${bytes.length}`
 }
 
 function looksBinary(bytes: Buffer): boolean {

@@ -77,7 +77,7 @@ type Pending = {
   name: string
   input: Record<string, unknown>
   cwd?: string
-  resolve: (result: { ok: boolean; content: string }) => void
+  resolve: (result: { ok: boolean; content: string; failure?: import('@agent-kernel/kernel').ToolFailure }) => void
   timer: NodeJS.Timeout
   deadlineAt: number
 }
@@ -235,7 +235,7 @@ export function createExecutorRegistry(
           if (!pending) return
           clearTimeout(pending.timer)
           newBind.pending.delete(ack.callId)
-          pending.resolve({ ok: ack.ok, content: ack.content })
+          pending.resolve({ ok: ack.ok, content: ack.content, ...(ack.failure ? { failure: ack.failure } : {}) })
         },
       )
     }
@@ -479,11 +479,11 @@ export function createExecutorRegistry(
     },
     async callTool(sessionId, eff: CallToolEffect) {
       const picked = pickBindFor(sessionId)
-      if (!picked.ok) return { ok: false, content: picked.reason }
+      if (!picked.ok) return { ok: false, content: picked.reason, failure: { code: 'workspace_offline', category: 'precondition', outcome: 'blocked', retryable: true, responsibility: 'workspace' } }
       const bind = picked.bind
       const ackTimeoutMs = ackTimeoutMsFor(eff.name, eff.input, toolAckTimeoutMs)
       audit?.log({ action: 'tool.dispatch', actor: { kind: 'system' }, target: { sessionId, workspaceId: bind.announcement.workspaceId, callId: eff.callId, toolName: eff.name }, outcome: 'ok', metadata: { cwd: eff.cwd } })
-      return await new Promise<{ ok: boolean; content: string }>((resolve) => {
+      return await new Promise<{ ok: boolean; content: string; failure?: import('@agent-kernel/kernel').ToolFailure }>((resolve) => {
         const deadlineAt = Date.now() + ackTimeoutMs
         const timer = setTimeout(() => {
           if (bind.pending.delete(eff.callId)) {
@@ -491,6 +491,7 @@ export function createExecutorRegistry(
             resolve({
               ok: false,
               content: `tool call ack timed out after ${ackTimeoutMs}ms`,
+              failure: { code: 'tool_ack_timeout', category: 'infrastructure', outcome: 'indeterminate', retryable: true, responsibility: 'system', timeoutStage: 'acknowledgement' },
             })
           }
         }, ackTimeoutMs)
@@ -520,7 +521,7 @@ export function createExecutorRegistry(
             clearTimeout(pending.timer)
             bind.pending.delete(ack.callId)
             audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId, callId: ack.callId, toolName: eff.name }, outcome: ack.ok ? 'ok' : 'error', metadata: { contentBytes: Buffer.byteLength(ack.content, 'utf8') }, ...(ack.ok ? {} : { error: ack.content.slice(0, 200) }) })
-            pending.resolve({ ok: ack.ok, content: ack.content })
+            pending.resolve({ ok: ack.ok, content: ack.content, ...(ack.failure ? { failure: ack.failure } : {}) })
           },
         )
       })

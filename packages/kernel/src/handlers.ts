@@ -89,9 +89,19 @@ export function onLlmResponse(
 ): HandlerResult {
   if (message.role !== 'assistant') return rejectInvalidEvent(state)
 
-  const messages = [...state.messages, message]
+  const sanitizedMessage: Message = {
+    ...message,
+    content: message.content.map((content) => {
+      if (content.type !== 'tool_call') return content
+      const rawIntent = content.input._intent
+      const intent = typeof rawIntent === 'string' && rawIntent.trim().length > 0 ? rawIntent.trim().slice(0, 160) : undefined
+      const { _intent: _discarded, ...executionInput } = content.input
+      return { ...content, input: executionInput, ...(intent ? { intent } : {}) }
+    }),
+  }
+  const messages = [...state.messages, sanitizedMessage]
   const nextUsage = usage ? addUsage(state.usage, usage) : state.usage
-  const toolCalls = extractToolCalls(message.content)
+  const toolCalls = extractToolCalls(sanitizedMessage.content)
 
   if (toolCalls.length === 0) {
     return {
@@ -131,6 +141,7 @@ export function onLlmResponse(
       callId: d.call.callId,
       name: d.call.name,
       input: d.call.input,
+      ...(d.call.intent ? { intent: d.call.intent } : {}),
       status: d.decision === 'dispatch' ? 'approved' : 'awaiting_approval',
     }))
 
@@ -142,6 +153,7 @@ export function onLlmResponse(
         callId: p.callId,
         name: p.name,
         input: p.input,
+        ...(p.intent ? { intent: p.intent } : {}),
       })
     } else {
       effects.push({
@@ -149,6 +161,7 @@ export function onLlmResponse(
         callId: p.callId,
         name: p.name,
         input: p.input,
+        ...(p.intent ? { intent: p.intent } : {}),
         ...(state.cwd !== undefined ? { cwd: state.cwd } : {}),
       })
     }
@@ -243,6 +256,7 @@ export function onUserApprove(state: AgentState, callId: string): HandlerResult 
     callId,
     name: target.name,
     input: target.input,
+    ...(target.intent ? { intent: target.intent } : {}),
     ...(state.cwd !== undefined ? { cwd: state.cwd } : {}),
   }
 
@@ -290,13 +304,14 @@ export function onToolResult(
   ok: boolean,
   content: string,
   config: AgentConfig,
+  failure?: import('./types.js').ToolFailure,
 ): HandlerResult {
   const target = state.pendingCalls.find((c) => c.callId === callId)
   if (!target || target.status !== 'dispatched') return rejectInvalidEvent(state)
 
   const toolResultMsg: Message = {
     role: 'tool',
-    content: [{ type: 'tool_result', callId, ok, content }],
+    content: [{ type: 'tool_result', callId, ok, content, ...(failure ? { failure } : {}) }],
   }
   const pendingCalls = state.pendingCalls.filter((c) => c.callId !== callId)
   const messages = [...state.messages, toolResultMsg]

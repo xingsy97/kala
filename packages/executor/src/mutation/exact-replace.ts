@@ -34,7 +34,8 @@ export function applyExactReplacements(
     }
     const occurrences = countOccurrences(text, edit.oldString)
     if (occurrences === 0) {
-      throw new ToolError('ENOTFOUND', `edits[${index}].old_string not found. Read the file again and retry with exact indentation and no line numbers.`)
+      const candidates = nearestLineCandidates(text, edit.oldString)
+      throw new ToolError('ENOTFOUND', `edits[${index}].old_string not found.${candidates.length ? ` Similar current line(s): ${candidates.join(', ')}.` : ''} Read the file again and retry with exact indentation and no line numbers.`)
     }
     if (!edit.replaceAll && occurrences > 1) {
       throw new ToolError('EAMBIG', `edits[${index}].old_string matches ${occurrences} times; set replace_all=true or provide more surrounding context`)
@@ -46,6 +47,13 @@ export function applyExactReplacements(
     appliedNewStrings.push(edit.newString)
   })
   return { text, counts }
+}
+
+function nearestLineCandidates(text: string, expected: string): string[] {
+  const needle = expected.split('\n').find((line) => line.trim().length > 0)?.trim() ?? ''
+  if (!needle) return []
+  const needleWords = new Set(needle.toLowerCase().split(/\W+/u).filter(Boolean))
+  return text.split('\n').map((line, index) => { const words = new Set(line.toLowerCase().split(/\W+/u).filter(Boolean)); const overlap = [...needleWords].filter((word) => words.has(word)).length; return { line: index + 1, overlap } }).filter((item) => item.overlap > 0).sort((a, b) => b.overlap - a.overlap).slice(0, 3).map((item) => `line ${item.line}`)
 }
 
 function replaceFirst(text: string, oldString: string, newString: string): string {

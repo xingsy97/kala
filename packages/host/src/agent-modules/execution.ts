@@ -8,6 +8,7 @@ import type { HostLoopDeps } from '../loop-types.js'
 export type ToolExecutionResult = {
   ok: boolean
   content: string
+  failure?: import('@agent-kernel/kernel').ToolFailure
 }
 
 export async function dispatchConfiguredTool(
@@ -19,7 +20,10 @@ export async function dispatchConfiguredTool(
   const record = deps.store.get(sessionId)
   const schema = record?.config.tools.find((tool) => tool.name === effect.name)
   const executionKind = schema?.executionKind ?? 'executor'
-  if (executionKind === 'executor') return await deps.tools.callTool(sessionId, effect)
+  if (executionKind === 'executor') {
+    const handler = schema?.executionHandler ?? effect.name
+    return await deps.tools.callTool(sessionId, handler === effect.name ? effect : { ...effect, name: handler })
+  }
 
   const handler = schema?.executionHandler ?? effect.name
   switch (handler) {

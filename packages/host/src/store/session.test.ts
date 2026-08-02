@@ -24,6 +24,13 @@ describe('SessionStore.ensure', () => {
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
+  it('locks observable tool versions and schema hashes at session creation', async () => {
+    const store = new SessionStore(dir)
+    const versioned = createConfig({ tools: [{ name: 'read', description: 'read', inputSchema: { type: 'object' }, requiresApproval: false, version: '2.1.0', schemaHash: 'sha256:test' }] })
+    const record = await store.create({ sessionId: 'tool-lock', config: versioned })
+    expect(record.toolLock).toEqual({ read: { version: '2.1.0', schemaHash: 'sha256:test' } })
+  })
+
   it('returns the same record for concurrent callers and writes ONE log file', async () => {
     // The race: dashboard + executor sockets arrive in the same tick, both
     // find no cached record, both fail to load, both call create() with a

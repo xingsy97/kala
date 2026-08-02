@@ -74,6 +74,13 @@ describe('configured tool execution', () => {
     expect(result).toEqual({ ok: true, content: 'executor result' })
   })
 
+  it('maps a model-facing executor tool name to its wire handler', async () => {
+    const record = await store.create({ sessionId: 'sess-alias', config: createConfig({ tools: [{ name: 'shell', description: 'shell', inputSchema: { type: 'object' }, requiresApproval: false, executionKind: 'executor', executionHandler: 'bash' }] }) })
+    let dispatched = ''
+    await dispatchConfiguredTool(deps(store, { async callTool(_sessionId, eff) { dispatched = eff.name; return { ok: true, content: 'ok' } }, cancelPending() {} }), record.sessionId, effect('shell'), new Map())
+    expect(dispatched).toBe('bash')
+  })
+
   it('runs the skill host handler without calling the executor', async () => {
     const skillsRoot = join(dir, 'skills-root')
     const skillDir = join(skillsRoot, 'demo-skill')

@@ -408,6 +408,9 @@ async function commitTransition(
     if (event.kind !== 'cancel' && isSkillManager(deps.skills)) await deps.skills.refreshConfig(record)
     const prior = record.state
     const { next, effects } = step(prior, event, record.config)
+    const committedEvent: AgentEvent = event.kind === 'llm_response'
+      ? { ...event, message: next.messages.at(-1) ?? event.message }
+      : event
     const safeLlmTrace = llmTrace ? redactLlmTrace(llmTrace) : undefined
     const usageChanged =
       next.usage.inputTokens !== prior.usage.inputTokens ||
@@ -415,11 +418,11 @@ async function commitTransition(
       next.usage.cacheCreationTokens !== prior.usage.cacheCreationTokens ||
       next.usage.cacheReadTokens !== prior.usage.cacheReadTokens
     await deps.store.record(
-      sessionId, event, effects, next, usageChanged ? next.usage : undefined,
+      sessionId, committedEvent, effects, next, usageChanged ? next.usage : undefined,
       safeLlmTrace, model,
     )
     safeBroadcast(() =>
-      deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, safeLlmTrace, model, extras),
+      deps.broadcast.onEvent(sessionId, next.cursor, committedEvent, effects, next, safeLlmTrace, model, extras),
     )
     committed = { record, next, effects }
   })
@@ -958,6 +961,7 @@ async function performCallTool(
       aborts,
       runtime,
       resultQueue,
+      res.failure,
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -985,6 +989,7 @@ async function dispatchToolResult(
   aborts: Map<string, AbortController>,
   runtime?: LoopRuntime,
   resultQueue?: SerialQueue,
+  failure?: import('@agent-kernel/kernel').ToolFailure,
 ): Promise<void> {
   const write = async (): Promise<void> => {
     const record = deps.store.get(sessionId)
@@ -997,6 +1002,7 @@ async function dispatchToolResult(
         callId,
         ok,
         content: capped,
+        ...(failure ? { failure } : {}),
       },
       aborts,
       undefined,
