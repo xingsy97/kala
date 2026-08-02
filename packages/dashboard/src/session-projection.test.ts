@@ -106,4 +106,20 @@ describe('session projection reducer', () => {
     expect(next.timeline.map((entry) => entry.event.kind)).toEqual(['user_message', 'user_message'])
     expect(next.timeline.map((entry) => entry.seq)).toEqual([1, 2])
   })
+
+  it('authoritative history reset replaces conflicting cached/live entries', () => {
+    const current = reduceSessionProjection(selected('session-a'), {
+      kind: 'appended', generation: 1, sessionId: 'session-a', payload: appended('session-a', 1, 'stale live'),
+    })
+    const authoritative = { ...appended('session-a', 1, 'server'), event: { kind: 'llm_error' as const, error: 'server truth' } }
+    const next = reduceSessionProjection(current, {
+      kind: 'history', generation: 1, sessionId: 'session-a', reset: true,
+      entries: [
+        { seq: authoritative.seq, ts: authoritative.ts, event: authoritative.event, effects: [] },
+        { seq: authoritative.seq, ts: authoritative.ts, event: { kind: 'cancel' }, effects: [] },
+      ],
+    })
+    expect(next.timeline).toHaveLength(1)
+    expect(next.timeline[0]?.event).toEqual({ kind: 'llm_error', error: 'server truth' })
+  })
 })

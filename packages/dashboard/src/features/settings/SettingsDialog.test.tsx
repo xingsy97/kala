@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AttachedExecutor, ServerSettingsPayload } from '@agent-kernel/shared'
 
 import { SettingsDialog } from './SettingsDialog.js'
+import { i18n } from '../../i18n/index.js'
 
 const payload: ServerSettingsPayload = {
   providers: [
@@ -59,7 +60,9 @@ const payload: ServerSettingsPayload = {
     presets: [
       { id: 'codex', label: 'Codex', description: 'Direct coding-agent prompt.' },
       { id: 'claude-code', label: 'Claude Code', description: 'Concise pair-programming prompt.' },
+      { id: 'custom', label: 'Custom', description: 'Editable prompt.' },
     ],
+    customPrompt: 'Codex prompt\n\nWhen referencing a file, use [filename](path/to/this/file).',
     configPath: '<home>/.config/agent-kernel/agent.json',
   },
   paths: {
@@ -121,6 +124,27 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Override host endpoint')).toBeTruthy()
   })
 
+  it('executes connection test, save, failure, and reset states', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 503 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    const endpoint = screen.getByTestId('settings-connection-endpoint') as HTMLInputElement
+    fireEvent.change(endpoint, { target: { value: 'http://example.test:4000' } })
+    fireEvent.click(screen.getByTestId('settings-connection-test'))
+    await waitFor(() => expect(screen.getByTestId('settings-connection-result').textContent).toContain('reachable'))
+    fireEvent.click(screen.getByTestId('settings-connection-save'))
+    expect(localStorage.getItem('agent-kernel:host-endpoint')).toBe('http://example.test:4000')
+    fireEvent.change(endpoint, { target: { value: 'http://broken.test:4000' } })
+    fireEvent.click(screen.getByTestId('settings-connection-test'))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 503'))
+    fireEvent.click(screen.getByTestId('settings-connection-reset'))
+    expect(localStorage.getItem('agent-kernel:host-endpoint')).toBeNull()
+    expect(endpoint.value).toBe('')
+  })
+
   it('keeps section content width-bounded instead of relying on horizontal scrolling', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
@@ -141,8 +165,20 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
-    expect(screen.getByTestId('settings-dialog').className).toContain('h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-0.5rem)]')
-    expect(screen.getByTestId('settings-tab-connection').className).toContain('w-32')
+    const dialog = screen.getByTestId('settings-dialog')
+    expect(dialog.className).toContain('!bottom-0')
+    expect(dialog.className).toContain('max-h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-0.5rem)]')
+    expect(dialog.className).toContain('w-screen')
+    expect(dialog.className).toContain('rounded-t-2xl')
+    expect(dialog.className).toContain('sm:max-w-4xl')
+    expect(screen.getByTestId('settings-dialog-close').className).toContain('h-11')
+    const mobileSelect = screen.getByTestId('settings-mobile-section-select') as HTMLSelectElement
+    expect(mobileSelect.className).toContain('opacity-0')
+    expect(screen.getByTestId('settings-mobile-section-picker').textContent).toContain('Connection')
+    expect(mobileSelect.value).toBe('connection')
+    fireEvent.change(mobileSelect, { target: { value: 'approvals' } })
+    expect(await screen.findByRole('heading', { name: 'Approvals' })).toBeTruthy()
+    expect(screen.getByTestId('settings-tab-connection').className).toContain('md:w-full')
   })
 
   it('shows current Socket.IO connection audit counts in deployment settings', async () => {
@@ -282,6 +318,35 @@ describe('SettingsDialog', () => {
     })
     await waitFor(() => {
       expect(screen.getByTestId('settings-agent-preset-claude-code').getAttribute('aria-pressed')).toBe('true')
+    })
+  })
+
+  it('edits and saves the custom system prompt', async () => {
+    const customPayload: ServerSettingsPayload = {
+      ...payload,
+      agentPrompt: payload.agentPrompt ? { ...payload.agentPrompt, selectedPreset: 'custom' } : undefined,
+    }
+    const savedPayload: ServerSettingsPayload = {
+      ...customPayload,
+      agentPrompt: customPayload.agentPrompt ? { ...customPayload.agentPrompt, customPrompt: 'My custom prompt' } : undefined,
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(customPayload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(savedPayload), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(savedPayload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-agent'))
+    const editor = await screen.findByTestId('settings-agent-custom-prompt')
+    fireEvent.change(editor, { target: { value: 'My custom prompt' } })
+    fireEvent.click(screen.getByTestId('settings-agent-custom-prompt-save'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/settings/agent-prompt', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ preset: 'custom', customPrompt: 'My custom prompt' }),
+      }))
     })
   })
 
@@ -462,7 +527,7 @@ describe('SettingsDialog', () => {
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-notifications'))
-    await screen.findByText('Browser notifications and local sound for session events that need attention.')
+    await screen.findByText(/System notifications are automatically paused while Agent RunLab is actively being used on any device\./)
     expect(screen.getByTestId('desktop-notification-permission').textContent).toContain('not requested')
 
     fireEvent.click(screen.getByTestId('settings-toggle-desktop-notifications'))
@@ -478,13 +543,43 @@ describe('SettingsDialog', () => {
     expect(localStorage.getItem('ak-desktop-notification-session-error')).toBe('0')
   })
 
-  it('keeps notifications as the final settings tab', async () => {
+  it('presents one product-level system notification control without Web Push implementation terms', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    const NotificationMock = vi.fn()
+    Object.assign(NotificationMock, { permission: 'granted', requestPermission: vi.fn() })
+    vi.stubGlobal('Notification', NotificationMock)
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+
+    fireEvent.click(screen.getByTestId('settings-tab-notifications'))
+    expect(await screen.findByText('System notifications')).toBeTruthy()
+    expect(screen.queryByText(/Desktop notifications/i)).toBeNull()
+    expect(screen.queryByText(/Web Push/i)).toBeNull()
+    expect(screen.queryByText(/VAPID/i)).toBeNull()
+    expect(screen.getByText('Notify me about')).toBeTruthy()
+    expect(screen.getByText('On this device')).toBeTruthy()
+  })
+
+  it('moves language selection into Interface settings', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+    render(<SettingsDialog open onOpenChange={() => {}} />)
+    await waitForSettingsLoaded()
+    fireEvent.click(screen.getByTestId('settings-tab-interface'))
+    const language = await screen.findByTestId('settings-language') as HTMLSelectElement
+    expect(language.value).toBe('en')
+    fireEvent.change(language, { target: { value: 'zh' } })
+    await waitFor(() => expect(i18n.resolvedLanguage).toBe('zh'))
+  })
+
+  it('groups personal, workspace, agent, and administration settings', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
     render(<SettingsDialog open onOpenChange={() => {}} />)
     await waitForSettingsLoaded()
 
-    const tabs = screen.getAllByTestId(/^settings-tab-/)
-    expect(tabs.at(-1)?.getAttribute('data-testid')).toBe('settings-tab-notifications')
+    for (const group of ['personal', 'workspace', 'agent', 'administration']) expect(screen.getByTestId(`settings-group-${group}`)).toBeTruthy()
+    expect(screen.getByTestId('settings-group-personal').textContent).toContain('Notifications')
+    expect(screen.getByTestId('settings-group-workspace').textContent).toContain('Executor access')
+    expect(screen.getByTestId('settings-group-administration').textContent).toContain('Connection')
   })
 
   it('offers follow system as a theme preference', async () => {
@@ -637,7 +732,7 @@ describe('SettingsDialog', () => {
     await waitForSettingsLoaded()
 
     fireEvent.click(screen.getByTestId('settings-tab-notifications'))
-    await screen.findByText('Browser notifications and local sound for session events that need attention.')
+    await screen.findByText(/System notifications are automatically paused while Agent RunLab is actively being used on any device\./)
     const toggle = screen.getByTestId('settings-toggle-desktop-notifications') as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
     expect(screen.getByText(/Notifications are blocked/i)).toBeTruthy()
@@ -652,6 +747,7 @@ describe('SettingsDialog', () => {
             id: 'invite-alpha-0001',
             label: 'Connect Workspace',
             createdAt: '2026-07-15T00:00:00.000Z',
+            expiresAt: '2099-07-22T00:00:00.000Z',
             revoked: false,
           },
           {
@@ -659,6 +755,7 @@ describe('SettingsDialog', () => {
             label: 'Connect Workspace',
             workspaceId: 'ws-bound',
             createdAt: '2026-07-15T01:00:00.000Z',
+            expiresAt: '2099-07-22T01:00:00.000Z',
             lastUsedAt: '2026-07-15T02:00:00.000Z',
             revoked: false,
           },

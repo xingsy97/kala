@@ -42,15 +42,9 @@ describe('ConnectWorkspaceDialog', () => {
 
     const text = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
     expect(text).toContain('downloads and verifies the executor from this host')
-    expect(text).toContain('run.sh')
-    expect(text).toContain('HOST_URL=')
-    expect(text).toContain('COMPONENT=executor')
-    expect(text).toContain('AGENT_KERNEL_RELEASE_BASE_URL=')
-    expect(text).toContain('SANDBOX_ROOTS="$HOME"')
-    expect(text).not.toContain('SANDBOX_ROOTS="$PWD"')
-    expect(text).toContain('EXECUTOR_INVITE=')
-    expect(text).toContain('ak_invite_test')
-    expect(text).toContain('http://localhost:3000/release-assets')
+    expect(text).toContain('/install')
+    expect(text).toContain('curl -fsSL')
+    expect(text).toContain('http://localhost:3000/install')
     expect(text).not.toContain('github.com/')
     expect(text).toContain('Mac/Linux')
     expect(text).not.toContain('WORKSPACE_NAME')
@@ -70,8 +64,8 @@ describe('ConnectWorkspaceDialog', () => {
     await screen.findByText(/Invite ready/i)
 
     const text = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
-    expect(text).toContain('http://192.0.2.11:3000/release-assets/run.sh')
-    expect(text).not.toContain('http://localhost:3000/release-assets/run.sh')
+    expect(text).toContain('http://192.0.2.11:3000/install')
+    expect(text).not.toContain('http://localhost:3000/install')
   })
 
   it('copies the selected wget command', async () => {
@@ -83,12 +77,9 @@ describe('ConnectWorkspaceDialog', () => {
     fireEvent.click(screen.getByTestId('copy-executor-command'))
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
-    expect(writeText.mock.calls[0]?.[0]).toContain('wget -O-')
-    expect(writeText.mock.calls[0]?.[0]).toContain('run.sh')
-    expect(writeText.mock.calls[0]?.[0]).toContain('COMPONENT=executor')
-    expect(writeText.mock.calls[0]?.[0]).toContain('AGENT_KERNEL_RELEASE_BASE_URL=')
-    expect(writeText.mock.calls[0]?.[0]).toContain('EXECUTOR_INVITE=')
-    expect(writeText.mock.calls[0]?.[0]).not.toContain('WORKSPACE_NAME')
+    expect(writeText.mock.calls[0]?.[0]).toContain('curl -fsSL')
+    expect(writeText.mock.calls[0]?.[0]).toContain('/install')
+    expect(writeText.mock.calls[0]?.[0]).not.toContain('\n')
   })
 
   it('switches command by operating system tab', async () => {
@@ -98,23 +89,15 @@ describe('ConnectWorkspaceDialog', () => {
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-windows'))
     const windowsText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
-    expect(windowsText).toContain('iwr')
-    expect(windowsText).toContain('agent-kernel-executor.cjs')
-    expect(windowsText).toContain('http://localhost:3000/release-assets')
-    expect(windowsText).toContain('Get-FileHash')
-    expect(windowsText).toContain('$env:HOST_URL=')
-    expect(windowsText).toContain('$env:EXECUTOR_INVITE=')
-    expect(windowsText).toContain('$env:SANDBOX_ROOTS=$env:USERPROFILE')
-    expect(windowsText).not.toContain('(Get-Location).Path')
-    expect(windowsText).not.toContain('wget -qO-')
-    expect(windowsText).not.toContain('COMPONENT=executor')
+    expect(windowsText).toContain('iex (irm')
+    expect(windowsText).toContain('http://localhost:3000/install.ps1')
+    expect(windowsText).not.toContain('\n')
 
     fireEvent.click(screen.getByTestId('connect-workspace-tab-unix'))
     const unixText = screen.getByTestId('connect-workspace-dialog').textContent ?? ''
-    expect(unixText).toContain('wget -O-')
-    expect(unixText).toContain('run.sh')
-    expect(unixText).not.toContain('iwr')
-    expect(unixText).not.toContain('curl')
+    expect(unixText).toContain('curl -fsSL')
+    expect(unixText).toContain('/install')
+    expect(unixText).not.toContain('iex')
     expect(unixText).not.toContain('run-executor.sh')
   })
 })

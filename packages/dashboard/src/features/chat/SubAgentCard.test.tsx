@@ -128,6 +128,40 @@ describe('SubAgentCard', () => {
     expect(row.getAttribute('data-sub-agent-status')).toBe('completed')
   })
 
+  it('renders a completed sub-agent as a compact node in dots mode and expands it', () => {
+    const call = makeCall('c-dot', { prompt: 'inspect', agent_type: 'Explore' })
+    const result: ToolResultContent = {
+      type: 'tool_result',
+      callId: 'c-dot',
+      content: [
+        '<sub_agent',
+        '  session_id="child-dot"',
+        '  agent_type="Explore"',
+        '  status="completed"',
+        '  turns="2"',
+        '  duration_ms="100"',
+        '>',
+        '<result>done</result>',
+        '</sub_agent>',
+      ].join('\n'),
+      isError: false,
+    }
+    render(
+      <SubAgentCard
+        parentSessionId="parent-1"
+        socket={null}
+        group={makeGroup([call], [['c-dot', result]])}
+        approvalByCallId={new Map()}
+        toolCardMode="dots"
+      />,
+    )
+
+    expect(screen.getByTestId('sub-agent-dot-c-dot')).toBeTruthy()
+    expect(screen.queryByTestId('sub-agent-status-badge')).toBeNull()
+    fireEvent.click(screen.getByTestId('sub-agent-dot-c-dot'))
+    expect(screen.getByTestId('sub-agent-status-badge').textContent).toContain('Completed')
+  })
+
   it('renders the failed state and shows the error body', () => {
     const call = makeCall('c1', { prompt: 'noop' })
     const envelope = [

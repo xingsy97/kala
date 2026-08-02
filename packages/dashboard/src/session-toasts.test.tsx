@@ -1,6 +1,5 @@
 import { act, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { EventEmitter } from 'events'
 import type React from 'react'
 
 vi.mock('./notify.js', () => ({
@@ -15,14 +14,12 @@ vi.mock('./notify.js', () => ({
 
 import type { BackgroundTerminalTask } from './background-terminal.js'
 import { notify } from './notify.js'
-import type { DashboardSocket } from './session.js'
 import {
   commandHead,
   formatDuration,
   useBackgroundShellToasts,
   useInactiveSessionSummaryToasts,
   useSessionToasts,
-  useSubAgentToasts,
 } from './session-toasts.js'
 
 const mockedNotify = notify as unknown as Record<
@@ -372,6 +369,42 @@ describe('useInactiveSessionSummaryToasts', () => {
     expect(mockedNotify.success).not.toHaveBeenCalled()
   })
 
+  it('never treats sub-agent sessions as independent application notifications', () => {
+    vi.useFakeTimers()
+    try {
+      const childThinking = { ...summary('child', 'thinking', 'delegated task'), parentSessionId: 'parent' }
+      const { rerender } = render(
+        <InactiveSummaryHarness activeSessionId="parent" sessions={[childThinking]} />,
+      )
+
+      rerender(
+        <InactiveSummaryHarness
+          activeSessionId="parent"
+          sessions={[{ ...childThinking, status: 'done' }]}
+        />,
+      )
+      act(() => { vi.advanceTimersByTime(2000) })
+      rerender(
+        <InactiveSummaryHarness
+          activeSessionId="parent"
+          sessions={[{ ...childThinking, status: 'error' }]}
+        />,
+      )
+      rerender(
+        <InactiveSummaryHarness
+          activeSessionId="parent"
+          sessions={[{ ...childThinking, status: 'awaiting_approval' }]}
+        />,
+      )
+
+      expect(mockedNotify.success).not.toHaveBeenCalled()
+      expect(mockedNotify.error).not.toHaveBeenCalled()
+      expect(mockedNotify.info).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('toasts inactive error and approval transitions', () => {
     const { rerender } = render(
       <InactiveSummaryHarness
@@ -408,73 +441,6 @@ function summary(
     status,
   }
 }
-
-function SubAgentHarness({ socket }: { socket: DashboardSocket | null }): React.ReactElement {
-  useSubAgentToasts(socket)
-  return <div />
-}
-
-describe('useSubAgentToasts', () => {
-  it('fires success toast on _finished with status completed', () => {
-    const emitter = new EventEmitter()
-    const fakeSocket = emitter as unknown as DashboardSocket
-    render(<SubAgentHarness socket={fakeSocket} />)
-    emitter.emit('server:control_update', { kind: 'sub_agent_started', childSessionId: 'c1', agentType: 'general-purpose' })
-    emitter.emit('server:control_update', {
-      kind: 'sub_agent_finished',
-      childSessionId: 'c1',
-      status: 'completed',
-      durationMs: 12_000,
-    })
-    expect(mockedNotify.success).toHaveBeenCalledTimes(1)
-    expect(mockedNotify.success.mock.calls[0][0]).toBe('Sub-agent done — general-purpose')
-    expect(mockedNotify.success.mock.calls[0][1].description).toBe('Finished in 12s')
-  })
-
-  it('fires error toast on _finished with status failed', () => {
-    const emitter = new EventEmitter()
-    const fakeSocket = emitter as unknown as DashboardSocket
-    render(<SubAgentHarness socket={fakeSocket} />)
-    emitter.emit('server:control_update', { kind: 'sub_agent_started', childSessionId: 'c1', agentType: 'code-reviewer' })
-    emitter.emit('server:control_update', {
-      kind: 'sub_agent_finished',
-      childSessionId: 'c1',
-      status: 'failed',
-      durationMs: 500,
-      error: 'nope',
-    })
-    expect(mockedNotify.error).toHaveBeenCalledTimes(1)
-    const [msg, opts] = mockedNotify.error.mock.calls[0]!
-    expect(msg).toBe('Sub-agent failed — code-reviewer')
-    expect(opts.description).toBe('nope')
-  })
-
-  it('deduplicates repeated _finished for the same childSessionId', () => {
-    const emitter = new EventEmitter()
-    const fakeSocket = emitter as unknown as DashboardSocket
-    render(<SubAgentHarness socket={fakeSocket} />)
-    emitter.emit('server:control_update', { kind: 'sub_agent_started', childSessionId: 'c1', agentType: 'x' })
-    emitter.emit('server:control_update', {
-      kind: 'sub_agent_finished',
-      childSessionId: 'c1',
-      status: 'completed',
-      durationMs: 1000,
-    })
-    emitter.emit('server:control_update', {
-      kind: 'sub_agent_finished',
-      childSessionId: 'c1',
-      status: 'completed',
-      durationMs: 1000,
-    })
-    expect(mockedNotify.success).toHaveBeenCalledTimes(1)
-  })
-
-  it('is inert when socket is null', () => {
-    const { unmount } = render(<SubAgentHarness socket={null} />)
-    expect(mockedNotify.success).not.toHaveBeenCalled()
-    expect(() => unmount()).not.toThrow()
-  })
-})
 
 function BgShellHarness({
   tasks,

@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import type { AgentState } from '@agent-kernel/kernel'
 
 import { cn } from '../../lib/utils.js'
+import type { AgentProgress } from './agent-progress.js'
 
 export type CompactStatus =
   | { kind: 'idle' }
@@ -36,22 +37,20 @@ type Props = {
   streamingActive: boolean
   toolExecutionStartedAt?: number | null
   awaitingAck?: boolean
+  progress?: AgentProgress
 }
 
-export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolExecutionStartedAt, awaitingAck }: Props): JSX.Element | null {
+export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolExecutionStartedAt, awaitingAck, progress }: Props): JSX.Element | null {
   const status = state?.status ?? fallbackStatus
   if (status) {
     switch (status) {
       case 'thinking':
         if (streamingActive) return null
-        return <ThinkingRow />
+        return <ThinkingRow progress={progress} />
       case 'executing_tools':
-        // The running tool is already shown by its own tool-call card in the
-        // transcript (ToolCallGroupBlock), which now carries the live running
-        // affordances — spinning wrench, elapsed timer, animated RUNNING badge
-        // and a beam. Rendering ToolsRow here too produced a second, redundant
-        // card for the same tool (the user's complaint), so we no longer emit a
-        // separate inline row for tool execution.
+        // The current Tool Card already communicates live execution. A second
+        // full-width status row duplicated that information and previously mixed
+        // in lifetime call counts, producing labels such as "+4833 earlier".
         return null
       case 'awaiting_approval':
         return <AwaitingApprovalRow />
@@ -59,11 +58,11 @@ export function InlineStatusRow({ state, fallbackStatus, streamingActive, toolEx
   }
   // Bridge the socket round-trip between user submit and the kernel's first
   // `thinking` status push — otherwise the transcript looks frozen.
-  if (awaitingAck && !streamingActive) return <ThinkingRow />
+  if (awaitingAck && !streamingActive) return <ThinkingRow progress={progress} />
   return null
 }
 
-function ThinkingRow(): JSX.Element {
+function ThinkingRow({ progress }: { progress?: AgentProgress }): JSX.Element {
   const { t } = useTranslation()
   return (
     <div
@@ -76,7 +75,7 @@ function ThinkingRow(): JSX.Element {
         <span className="absolute h-3 w-3 rounded-full bg-current opacity-20 ak-thinking-dot" />
         <span className="relative h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_10px_hsl(var(--primary)/0.55)]" />
       </span>
-      <span className="relative z-[1] font-medium">{t('chatStatus.thinking')}</span>
+      <span className="relative z-[1] font-medium">{progress?.label ?? t('chatStatus.thinking')}</span>
     </div>
   )
 }
@@ -141,7 +140,7 @@ export function CompactFeedbackRow({
         <span className="font-medium">{t('chatStatus.compacting')}</span>
         <span className="ml-auto tabular-nums text-amber-700/70 dark:text-amber-300/70">
           ↳ {(elapsedMs / 1000).toFixed(1)}s
-          {typeof tokensBefore === 'number' ? ` · ↑ ${formatTokensShort(tokensBefore)}` : ''}
+          {typeof tokensBefore === 'number' ? ` · context ${formatTokensShort(tokensBefore)}` : ''}
         </span>
       </div>
     )
@@ -227,7 +226,7 @@ const ARG_PRIORITY: Record<string, readonly string[]> = {
 }
 
 
-function formatTokensShort(tokens: number): string {
+export function formatTokensShort(tokens: number): string {
   if (tokens < 1000) return `${tokens} tokens`
   if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k tokens`
   return `${(tokens / 1_000_000).toFixed(1)}m tokens`

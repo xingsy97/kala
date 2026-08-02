@@ -1,49 +1,78 @@
-import type { AgentState } from '@agent-kernel/kernel'
-import { deriveSessionState, isSessionRunning } from '@agent-kernel/shared'
+import type { AgentState, PendingToolCall } from '@agent-kernel/kernel'
+import { deriveSessionState, type SessionDerivedState } from '@agent-kernel/shared'
 
 import type { SessionActivityStatus } from '../features/explorer/Explorer.js'
 
 /**
- * Pure derivations of a session's coarse activity status for the status
- * indicators + composer gating. Extracted from app.tsx for unit testing.
+ * One selected-session presentation projection shared by the title, Sidebar,
+ * wake lock, Composer gating, and intervention notifications. Live state is
+ * accepted only when it belongs to the current selection; otherwise the Host
+ * summary is the only safe projection during hydration.
  */
+export type SelectedSessionActivity = {
+  derived: SessionDerivedState
+  status: SessionActivityStatus | undefined
+  indicatorStatus: SessionActivityStatus | undefined
+  usesLiveProjection: boolean
+}
 
-export function sessionActivityStatus({
-  status,
+export function deriveSelectedSessionActivity({
+  selectedSessionId,
+  hydratedSessionId,
+  summaryStatus,
+  liveStatus,
+  pendingCalls,
   streamingActive,
   awaitingAck,
   compactRunning,
+  lastError,
 }: {
-  status: AgentState['status'] | undefined
+  selectedSessionId: string | null
+  hydratedSessionId: string | null
+  summaryStatus: AgentState['status'] | undefined
+  liveStatus: AgentState['status'] | undefined
+  pendingCalls?: readonly Pick<PendingToolCall, 'status'>[]
   streamingActive: boolean
   awaitingAck: boolean
   compactRunning: boolean
-}): SessionActivityStatus | undefined {
-  if (awaitingAck || streamingActive || compactRunning) return 'loading'
-  if (!status) return undefined
-  return status
+  lastError?: string | null
+}): SelectedSessionActivity {
+  const usesLiveProjection = selectedSessionId !== null && hydratedSessionId === selectedSessionId
+  const status = usesLiveProjection ? liveStatus : summaryStatus
+  const liveSignals = usesLiveProjection
+    ? {
+        pendingCalls,
+        streamingActive,
+        awaitingAck,
+        compactRunning,
+        lastError,
+      }
+    : {}
+  const derived = deriveSessionState({ status, ...liveSignals })
+  const activityStatus: SessionActivityStatus | undefined =
+    derived.activity === 'failed'
+      ? 'error'
+      : derived.isRunning && (streamingActive || awaitingAck || compactRunning) && usesLiveProjection
+        ? 'loading'
+        : status
+
+  return {
+    derived,
+    status: activityStatus,
+    indicatorStatus: activityStatus === undefined
+      ? undefined
+      : derived.isRunning
+        ? 'loading'
+        : activityStatus,
+    usesLiveProjection,
+  }
 }
 
 export function isRunningSessionActivity(status: SessionActivityStatus | undefined): boolean {
-  return isSessionRunning({ status })
+  return deriveSessionState({ status }).isRunning
 }
 
 export function coarseStatusForIndicator(status: SessionActivityStatus | undefined): SessionActivityStatus | undefined {
   if (status === undefined) return undefined
   return isRunningSessionActivity(status) ? 'loading' : status
-}
-
-export function isWaitingForUserInput({
-  status,
-  streamingActive,
-  awaitingAck,
-  pendingApprovalsCount,
-}: {
-  status: AgentState['status'] | undefined
-  streamingActive: boolean
-  awaitingAck: boolean
-  pendingApprovalsCount: number
-}): boolean {
-  if (awaitingAck || streamingActive || pendingApprovalsCount > 0) return false
-  return deriveSessionState({ status }).canAcceptUserMessage
 }

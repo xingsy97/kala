@@ -49,7 +49,12 @@ export function reconcileOptimisticQueuedMessages(
 }
 
 export function queuedMessageKey(item: QueuedMessagePreview): string {
-  return `${item.mode}\u0000${item.text}`
+  const attachments = item.content?.map((part) => part.type === 'image'
+    ? `image:${JSON.stringify(part.source)}`
+    : part.type === 'text'
+      ? `text:${part.text}`
+      : part.type).join('|') ?? ''
+  return `${item.mode}\u0000${item.text}\u0000${attachments}`
 }
 
 export function sessionExists(
@@ -105,13 +110,16 @@ export function nextSessionSelection({
   sessions,
   currentSessionId,
   explicit,
+  pendingSessionId = null,
 }: {
   sessions: readonly SessionSummary[]
   currentSessionId: string | null
   explicit: boolean
+  pendingSessionId?: string | null
 }): SessionSummary | null {
   if (sessions.length === 0) return null
   if (currentSessionId === null) return null
+  if (currentSessionId === pendingSessionId) return null
   const currentExists = sessionExists(sessions, currentSessionId)
   if (explicit && currentExists) return null
   const candidates = currentExists ? sessions : sessions.filter((s) => s.sessionId !== currentSessionId)

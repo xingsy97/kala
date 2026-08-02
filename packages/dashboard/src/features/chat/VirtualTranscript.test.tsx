@@ -47,7 +47,7 @@ describe('VirtualTranscript', () => {
     expect(screen.getByTestId('footer')).toBeTruthy()
   })
 
-  it('scrolls to the real bottom when footerSlot appears while pinned', () => {
+  it('lets Virtuoso own footer height compensation without duplicate imperative scrolling', () => {
     const scrollTo = (globalThis as typeof globalThis & {
       __virtuosoScrollToMock?: ReturnType<typeof vi.fn>
     }).__virtuosoScrollToMock
@@ -75,7 +75,7 @@ describe('VirtualTranscript', () => {
       />,
     )
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+    expect(scrollTo).not.toHaveBeenCalled()
   })
 
   it('does not force-scroll to the bottom after the user scrolls up during live output', () => {
@@ -105,13 +105,59 @@ describe('VirtualTranscript', () => {
     }
 
     render(<Harness />)
-    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
+    expect(scrollTo).not.toHaveBeenCalled()
 
     scrollTo?.mockClear()
     fireEvent.wheel(screen.getByTestId('virtuoso-scroller'), { deltaY: -48 })
     fireEvent.click(screen.getByTestId('update-footer'))
 
     expect(scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('ignores a stale atBottom=true after explicit user unpin', () => {
+    const onPinnedChange = vi.fn()
+    render(
+      <VirtualTranscript<Item>
+        items={makeItems(20)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom
+        onPinnedChange={onPinnedChange}
+      />,
+    )
+    fireEvent.wheel(screen.getByTestId('virtuoso-scroller'), { deltaY: -48 })
+    expect(onPinnedChange).toHaveBeenCalledWith(false)
+    onPinnedChange.mockClear()
+    const bridge = globalThis as typeof globalThis & {
+      __virtuosoAtBottomStateChange?: (atBottom: boolean) => void
+      __virtuosoFollowOutput?: (isAtBottom: boolean) => boolean | 'auto' | 'smooth'
+    }
+    bridge.__virtuosoAtBottomStateChange?.(true)
+    expect(onPinnedChange).not.toHaveBeenCalled()
+    expect(bridge.__virtuosoFollowOutput?.(true)).toBe(false)
+  })
+
+  it('unpins for scrollbar/pointer upward movement but not internal resize compensation', () => {
+    const onPinnedChange = vi.fn()
+    render(
+      <VirtualTranscript<Item>
+        items={makeItems(20)}
+        renderItem={(it) => <span>{it.label}</span>}
+        keyFor={(it) => it.id}
+        pinnedToBottom
+        onPinnedChange={onPinnedChange}
+      />,
+    )
+    const scroller = screen.getByTestId('virtuoso-scroller')
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, writable: true, value: 300 })
+    fireEvent.scroll(scroller)
+    scroller.scrollTop = 250
+    fireEvent.scroll(scroller)
+    expect(onPinnedChange).not.toHaveBeenCalled()
+    fireEvent.pointerDown(scroller)
+    scroller.scrollTop = 180
+    fireEvent.scroll(scroller)
+    expect(onPinnedChange).toHaveBeenCalledWith(false)
   })
 
   it('scrollToBottom on the imperative handle jumps to the last item', () => {

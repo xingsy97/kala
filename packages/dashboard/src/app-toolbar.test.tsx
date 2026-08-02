@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { NoSessionArea, WorkbenchToolbar } from './app.js'
-import { coarseStatusForIndicator } from './app-logic/session-activity.js'
+import { NoSessionArea, WorkbenchToolbar, sessionDirectoryIsLoading } from './app.js'
+import { coarseStatusForIndicator, deriveSelectedSessionActivity } from './app-logic/session-activity.js'
 
 function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]> = {}): void {
   render(
@@ -21,6 +21,17 @@ function renderToolbar(overrides: Partial<Parameters<typeof WorkbenchToolbar>[0]
     />,
   )
 }
+
+describe('session directory loading', () => {
+  it('does not wait for an executor snapshot when SaaS workspace support is disabled', () => {
+    expect(sessionDirectoryIsLoading(false, true, false)).toBe(false)
+  })
+
+  it('still waits for both snapshots in Standalone workspace mode', () => {
+    expect(sessionDirectoryIsLoading(true, true, false)).toBe(true)
+    expect(sessionDirectoryIsLoading(true, true, true)).toBe(false)
+  })
+})
 
 describe('WorkbenchToolbar', () => {
   it('shows loading instead of no session selected while sessions are loading', () => {
@@ -43,6 +54,17 @@ describe('WorkbenchToolbar', () => {
 
     expect(screen.getByTestId('session-label').textContent).toBe('Loaded session')
   })
+
+  it('uses the dedicated transform owner for the title activity spinner', () => {
+    renderToolbar({ sessionSelected: true, sessionActivityStatus: 'loading', onChangeCwd: vi.fn() })
+
+    const indicator = screen.getByTestId('session-status-indicator')
+    const spinner = screen.getByTestId('session-status-spinner')
+    const icon = indicator.querySelector('svg')
+    expect(spinner.className).toContain('ak-session-status-spinner')
+    expect(icon?.className.baseVal).not.toContain('animate-spin')
+    expect(icon?.className.baseVal).not.toContain('translateZ')
+  })
 })
 
 describe('NoSessionArea', () => {
@@ -54,6 +76,40 @@ describe('NoSessionArea', () => {
 
     expect(onNewSession).toHaveBeenCalledTimes(1)
     expect(onNewSession).toHaveBeenCalledWith()
+  })
+})
+
+describe('deriveSelectedSessionActivity', () => {
+  it('does not leak the previous session live state during a selection switch', () => {
+    const activity = deriveSelectedSessionActivity({
+      selectedSessionId: 'session-b',
+      hydratedSessionId: 'session-a',
+      summaryStatus: 'idle',
+      liveStatus: 'executing_tools',
+      streamingActive: true,
+      awaitingAck: true,
+      compactRunning: true,
+    })
+
+    expect(activity.status).toBe('idle')
+    expect(activity.derived.isRunning).toBe(false)
+    expect(activity.usesLiveProjection).toBe(false)
+  })
+
+  it('uses live state only after the selected session projection is hydrated', () => {
+    const activity = deriveSelectedSessionActivity({
+      selectedSessionId: 'session-b',
+      hydratedSessionId: 'session-b',
+      summaryStatus: 'idle',
+      liveStatus: 'thinking',
+      streamingActive: false,
+      awaitingAck: false,
+      compactRunning: false,
+    })
+
+    expect(activity.status).toBe('thinking')
+    expect(activity.indicatorStatus).toBe('loading')
+    expect(activity.derived.isRunning).toBe(true)
   })
 })
 

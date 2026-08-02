@@ -40,17 +40,10 @@ export type VirtualTranscriptHandle = {
   scrollToBottom: () => void
 }
 
-function scrollVirtuosoToBottom(handle: VirtuosoHandle | null, itemCount: number): void {
+function scrollVirtuosoToBottom(handle: VirtuosoHandle | null): void {
   if (!handle) return
-  handle.scrollToIndex({
-    index: Math.max(itemCount - 1, 0),
-    align: 'end',
-    behavior: 'auto',
-  })
-  // The live status row ("Assistant is thinking", approvals, etc.) is a
-  // Virtuoso Footer, not part of totalCount. scrollToIndex lands on the last
-  // transcript item, so explicitly jump to the scroll container end as well;
-  // otherwise footer-only changes can remain partially hidden.
+  // One command is enough. Combining scrollToIndex with scrollTo made two
+  // independent Virtuoso measurements fight during live row/footer resizing.
   handle.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
 }
 
@@ -96,8 +89,15 @@ function VirtualTranscriptInner<Item>(
 ): JSX.Element {
   const virtuoso = useRef<VirtuosoHandle | null>(null)
   const pinnedRef = useRef(pinnedToBottom)
+  const userUnpinnedRef = useRef(!pinnedToBottom)
+  const previousPinnedProp = useRef(pinnedToBottom)
   const touchStartY = useRef<number | null>(null)
+  const lastScrollTop = useRef(0)
+  const pointerScrollActive = useRef(false)
+  const userScrollingTowardBottom = useRef(false)
   pinnedRef.current = pinnedToBottom
+  if (!previousPinnedProp.current && pinnedToBottom) userUnpinnedRef.current = false
+  previousPinnedProp.current = pinnedToBottom
 
   useImperativeHandle(
     ref,
@@ -110,10 +110,13 @@ function VirtualTranscriptInner<Item>(
         })
       },
       scrollToBottom: () => {
-        scrollVirtuosoToBottom(virtuoso.current, items.length)
+        userUnpinnedRef.current = false
+        pinnedRef.current = true
+        onPinnedChange(true)
+        scrollVirtuosoToBottom(virtuoso.current)
       },
     }),
-    [items.length],
+    [onPinnedChange],
   )
 
   // Two-way pin: virtuoso reports `atBottom`, we forward it. When the
@@ -121,6 +124,10 @@ function VirtualTranscriptInner<Item>(
   // we don't.
   const handleAtBottomChange = useCallback(
     (atBottom: boolean) => {
+      // A ResizeObserver pass can report a stale `true` immediately after the
+      // user starts scrolling upward. Never let that overwrite explicit user
+      // intent; only a real downward scroll reaching the bottom clears the lock.
+      if (atBottom && userUnpinnedRef.current) return
       pinnedRef.current = atBottom
       onPinnedChange(atBottom)
     },
@@ -128,6 +135,8 @@ function VirtualTranscriptInner<Item>(
   )
 
   const unpinFromUserScroll = useCallback(() => {
+    userUnpinnedRef.current = true
+    userScrollingTowardBottom.current = false
     if (!pinnedRef.current) return
     pinnedRef.current = false
     onPinnedChange(false)
@@ -135,6 +144,7 @@ function VirtualTranscriptInner<Item>(
 
   const handleWheel = useCallback(
     (event: WheelEvent<HTMLDivElement>) => {
+      userScrollingTowardBottom.current = event.deltaY > 0
       if (event.deltaY < 0) unpinFromUserScroll()
     },
     [unpinFromUserScroll],
@@ -149,17 +159,36 @@ function VirtualTranscriptInner<Item>(
       const startY = touchStartY.current
       const currentY = event.touches[0]?.clientY
       if (startY == null || currentY == null) return
+      userScrollingTowardBottom.current = currentY < startY - 8
       if (currentY - startY > 8) unpinFromUserScroll()
     },
     [unpinFromUserScroll],
   )
 
+  const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const scroller = event.currentTarget
+    const next = scroller.scrollTop
+    const distanceFromBottom = scroller.scrollHeight - scroller.clientHeight - next
+    if (pointerScrollActive.current && next < lastScrollTop.current - 1) unpinFromUserScroll()
+    if (userUnpinnedRef.current && userScrollingTowardBottom.current && distanceFromBottom <= 8) {
+      userUnpinnedRef.current = false
+      pinnedRef.current = true
+      userScrollingTowardBottom.current = false
+      onPinnedChange(true)
+    }
+    lastScrollTop.current = next
+  }, [onPinnedChange, unpinFromUserScroll])
+
   const followOutput = useCallback(
-    (isAtBottom: boolean): 'smooth' | false => {
-      if (pinnedToBottom && isAtBottom) return 'smooth'
+    (isAtBottom: boolean): 'auto' | false => {
+      // Read the ref rather than the render-time prop: wheel/touch/scrollbar
+      // input unpins synchronously, before React commits the parent update.
+      // `auto` also avoids a queue of smooth-scroll animations fighting the
+      // user while high-frequency streaming updates resize the live tail.
+      if (pinnedRef.current && isAtBottom) return 'auto'
       return false
     },
-    [pinnedToBottom],
+    [],
   )
 
   // Scroll to highlightIndex when it changes. Guard against out-of-range.
@@ -175,29 +204,6 @@ function VirtualTranscriptInner<Item>(
       behavior: 'smooth',
     })
   }, [highlightIndex, items.length])
-
-  useEffect(() => {
-    if (!footerSlot || !pinnedToBottom) return
-    const scrollIfPinned = () => {
-      if (!pinnedRef.current) return
-      scrollVirtuosoToBottom(virtuoso.current, items.length)
-    }
-    scrollIfPinned()
-    let raf2 = 0
-    const raf1 = requestAnimationFrame(() => {
-      scrollIfPinned()
-      raf2 = requestAnimationFrame(scrollIfPinned)
-    })
-    const timeouts = [
-      window.setTimeout(scrollIfPinned, 60),
-      window.setTimeout(scrollIfPinned, 180),
-    ]
-    return () => {
-      cancelAnimationFrame(raf1)
-      cancelAnimationFrame(raf2)
-      for (const timeout of timeouts) window.clearTimeout(timeout)
-    }
-  }, [footerSlot, items.length, pinnedToBottom])
 
   const totalCount = items.length
   const itemContent = useCallback(
@@ -222,6 +228,22 @@ function VirtualTranscriptInner<Item>(
             ref={scrollerRef}
             className={cn(props.className, 'virtual-transcript-scroller overflow-x-hidden')}
             data-virtuoso-scroller="true"
+            onPointerDown={(event) => {
+              props.onPointerDown?.(event)
+              pointerScrollActive.current = true
+            }}
+            onPointerUp={(event) => {
+              props.onPointerUp?.(event)
+              pointerScrollActive.current = false
+            }}
+            onPointerCancel={(event) => {
+              props.onPointerCancel?.(event)
+              pointerScrollActive.current = false
+            }}
+            onScroll={(event) => {
+              props.onScroll?.(event)
+              handleScroll(event)
+            }}
             onTouchMove={(event) => {
               props.onTouchMove?.(event)
               handleTouchMove(event)
@@ -243,7 +265,7 @@ function VirtualTranscriptInner<Item>(
         return slot ? <div className={footerClassName}>{slot}</div> : null
       },
     }),
-    [handleTouchMove, handleTouchStart, handleWheel],
+    [handleScroll, handleTouchMove, handleTouchStart, handleWheel],
   )
 
   const footerContext = useMemo(
@@ -265,7 +287,7 @@ function VirtualTranscriptInner<Item>(
         }}
         atBottomStateChange={handleAtBottomChange}
         followOutput={followOutput}
-        atBottomThreshold={64}
+        atBottomThreshold={8}
         defaultItemHeight={defaultItemHeight}
         components={components}
         context={footerContext}

@@ -57,10 +57,10 @@ export function SectionHeader({
   subtitle?: string
 }): JSX.Element {
   return (
-    <div className="mb-6 min-w-0 border-b border-border pb-5">
-      <h3 className="text-2xl font-semibold text-foreground">{title}</h3>
+    <div className="mb-5 min-w-0 md:mb-6 md:border-b md:border-border md:pb-5">
+      <h3 className="sr-only text-xl font-semibold text-foreground md:not-sr-only md:text-2xl">{title}</h3>
       {subtitle ? (
-        <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-muted-foreground">{subtitle}</p>
+        <p className="max-w-3xl break-words text-sm leading-5 text-muted-foreground md:mt-2 md:leading-6">{subtitle}</p>
       ) : null}
     </div>
   )

@@ -54,6 +54,7 @@ import {
   PREF_WORKSPACE_ORDER,
 } from '../../lib/prefs.js'
 import { cn } from '../../lib/utils.js'
+import { useMinuteClock } from '../../lib/minute-clock.js'
 import {
   applyManualSessionOrder,
   applyManualWorkspaceOrder,
@@ -64,7 +65,6 @@ import {
   isRootDropParent,
   reorderSessionIds,
   reorderWorkspaceIds,
-  runtimeMetaFor,
   sessionStructureKeyFor,
   syncSessionOrder,
   syncWorkspaceOrder,
@@ -76,12 +76,12 @@ import { SessionHoverPreview, type SessionPreviewAnchor } from './SessionHoverPr
 import type { CachedSessionView } from '../../session-view-cache.js'
 import type {
   SessionNode,
-  SessionRuntimeMeta,
   TreeNode,
   WorkspaceNode,
 } from './tree-model.js'
 import { readStoredSessionChildrenOpenState, readStoredSessionOrder, readStoredWorkspaceOpenState, readStoredWorkspaceOrder, writeStoredSessionChildrenOpenState, writeStoredSessionOrder, writeStoredWorkspaceOpenState, writeStoredWorkspaceOrder } from './persistence.js'
 import { coarseSummaryStatus, isSessionWorkspaceOnline, sameExecutorListForExplorer, sameSessionListForExplorer, sameSessionStatusMap } from './comparators.js'
+import { SessionRuntimeStore, useSessionRuntime } from './session-runtime-store.js'
 
 type Props = {
   executors: readonly AttachedExecutor[]
@@ -153,10 +153,12 @@ function ExplorerImpl({
     () => sessions.map(toStructuralSessionSummary),
     [sessionStructureKey],
   )
-  const sessionRuntimeById = useMemo(
-    () => new Map(sessions.map((session) => [session.sessionId, runtimeMetaFor(session)])),
-    [sessions],
-  )
+  const sessionRuntimeStoreRef = useRef<SessionRuntimeStore | null>(null)
+  if (sessionRuntimeStoreRef.current === null) sessionRuntimeStoreRef.current = new SessionRuntimeStore()
+  const sessionRuntimeStore = sessionRuntimeStoreRef.current
+  // Sync before rows render so useSyncExternalStore snapshots always match this
+  // render. Only listeners for session IDs whose volatile snapshot changed fire.
+  sessionRuntimeStore.sync(sessions, sessionStatuses)
   useEffect(() => {
     setManualSessionOrder((prev) => syncSessionOrder(prev, structuralSessions))
   }, [structuralSessions])
@@ -394,8 +396,7 @@ function ExplorerImpl({
                 }}
                 onNewSession={onNewSession}
                 query={query}
-                sessionStatuses={sessionStatuses}
-                sessionRuntimeById={sessionRuntimeById}
+                sessionRuntimeStore={sessionRuntimeStore}
                 onlineWorkspaceIds={onlineWorkspaceIds}
                 fontSizePx={fontSizePx}
                 onPreviewAnchorChange={setPreviewAnchor}
@@ -732,7 +733,7 @@ function Header({
           variant="ghost"
           size="icon"
           onClick={onConnectWorkspace}
-          data-testid="new-session-button"
+          data-testid="connect-workspace-button"
           title={t('explorer.connectWorkspace')}
           aria-label={t('explorer.connectWorkspace')}
           className="h-7 w-7 flex-none"
@@ -766,7 +767,7 @@ function Header({
             variant="ghost"
             size="sm"
             onClick={onConnectWorkspace}
-            data-testid="new-session-button"
+            data-testid="connect-workspace-button"
             title={t('explorer.connectWorkspace')}
             className="h-7 gap-1 rounded-full px-2.5 text-xs"
           >
@@ -827,8 +828,7 @@ function Row({
   onSubmitWorkspaceEdit,
   onNewSession,
   query,
-  sessionStatuses,
-  sessionRuntimeById,
+  sessionRuntimeStore,
   onlineWorkspaceIds,
   fontSizePx,
   onPreviewAnchorChange,
@@ -852,8 +852,7 @@ function Row({
   onSubmitWorkspaceEdit(workspace: WorkspaceNode, label: string): void
   onNewSession(workspaceId?: string): void
   query: string
-  sessionStatuses?: ReadonlyMap<string, SessionActivityStatus>
-  sessionRuntimeById: ReadonlyMap<string, SessionRuntimeMeta>
+  sessionRuntimeStore: SessionRuntimeStore
   onlineWorkspaceIds: ReadonlySet<string>
   fontSizePx: number
   onPreviewAnchorChange(anchor: SessionPreviewAnchor | null): void
@@ -890,8 +889,7 @@ function Row({
       onOpenSessionInfo={onOpenSessionInfo}
       onHideSession={onHideSession}
       query={query}
-      activeStatus={sessionStatuses?.get((node.data as SessionNode).sessionId)}
-      runtimeMeta={sessionRuntimeById.get((node.data as SessionNode).sessionId)}
+      runtimeStore={sessionRuntimeStore}
       renameDisabled={!isSessionWorkspaceOnline(node.data as SessionNode, onlineWorkspaceIds)}
       fontSizePx={fontSizePx}
       onPreviewAnchorChange={onPreviewAnchorChange}
@@ -1090,8 +1088,7 @@ function SessionRow({
   onOpenSessionInfo,
   onHideSession,
   query,
-  activeStatus,
-  runtimeMeta,
+  runtimeStore,
   renameDisabled,
   fontSizePx,
   onPreviewAnchorChange,
@@ -1108,8 +1105,7 @@ function SessionRow({
   onOpenSessionInfo?(sessionId: string): void
   onHideSession(sessionId: string): void
   query: string
-  activeStatus?: SessionActivityStatus
-  runtimeMeta?: SessionRuntimeMeta
+  runtimeStore: SessionRuntimeStore
   renameDisabled?: boolean
   fontSizePx: number
   onPreviewAnchorChange(anchor: SessionPreviewAnchor | null): void
@@ -1118,9 +1114,11 @@ function SessionRow({
   const { t } = useTranslation()
   const s = node.data
   const selected = node.isSelected
-  const status = activeStatus ?? runtimeMeta?.status ?? s.status
-  const currentCwd = runtimeMeta ? runtimeMeta.currentCwd : s.currentCwd
-  const lastActivityIso = runtimeMeta?.lastActivityIso ?? s.lastActivityIso
+  const runtime = useSessionRuntime(runtimeStore, s.sessionId)
+  const status = runtime?.status ?? s.status
+  const currentCwd = runtime?.currentCwd ?? s.currentCwd
+  const lastActivityIso = runtime?.lastActivityIso ?? s.lastActivityIso
+  const minuteNow = useMinuteClock()
   return (
     <div
       style={style}
@@ -1309,7 +1307,7 @@ function SessionRow({
       <div className="ak-touch-hide pointer-events-none col-start-4 row-start-1 flex flex-none items-center justify-end whitespace-nowrap text-[11px] leading-4 text-muted-foreground group-hover:opacity-0">
         <span className="inline-flex flex-none items-center gap-1 whitespace-nowrap tabular-nums opacity-70">
           <Clock3 className="h-3 w-3 opacity-70" aria-hidden="true" />
-          {formatWhen(lastActivityIso, t)}
+          {formatWhen(lastActivityIso, t, minuteNow * 60_000)}
         </span>
       </div>
     </div>
@@ -1334,10 +1332,12 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
         aria-label={label}
         title={label}
       >
-        <LoaderCircle
-          className="h-3 w-3 animate-spin text-sky-500 [transform:translateZ(0)] [will-change:transform] dark:text-sky-400"
-          strokeWidth={2.4}
-        />
+        <span className="ak-session-status-spinner" data-testid="session-status-spinner" aria-hidden="true">
+          <LoaderCircle
+            className="h-3 w-3 text-sky-500 dark:text-sky-400"
+            strokeWidth={2.4}
+          />
+        </span>
       </span>
     )
   }
@@ -1433,10 +1433,10 @@ function statusIndicatorLabel(status: SessionActivityStatus | undefined, t: Retu
   }
 }
 
-function formatWhen(iso: string, t: ReturnType<typeof useTranslation>['t']): string {
+function formatWhen(iso: string, t: ReturnType<typeof useTranslation>['t'], now = Date.now()): string {
   try {
     const d = new Date(iso)
-    const delta = Date.now() - d.getTime()
+    const delta = now - d.getTime()
     if (delta < 60_000) return t('explorer.time.justNow')
     if (delta < 3_600_000) return t('explorer.time.minutesAgo', { count: Math.floor(delta / 60_000) })
     if (delta < 86_400_000) return t('explorer.time.hoursAgo', { count: Math.floor(delta / 3_600_000) })

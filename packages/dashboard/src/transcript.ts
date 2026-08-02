@@ -188,6 +188,23 @@ export function transcriptBaseItems(
   return out
 }
 
+/** Append-only fast path. Returns null when history was replaced or reordered. */
+export function appendTranscriptBaseItems(
+  previousItems: readonly TranscriptItem[],
+  previousTimeline: readonly TimelineEntry[],
+  timeline: readonly TimelineEntry[],
+): readonly TranscriptItem[] | null {
+  if (timeline.length < previousTimeline.length) return null
+  for (let index = 0; index < previousTimeline.length; index++) {
+    const previous = previousTimeline[index]
+    const current = timeline[index]
+    if (!previous || !current || previous.seq !== current.seq || previous.event !== current.event) return null
+  }
+  if (timeline.length === previousTimeline.length) return previousItems
+  const tail = transcriptBaseItems([], timeline.slice(previousTimeline.length))
+  return tail.length === 0 ? previousItems : [...previousItems, ...tail]
+}
+
 /**
  * Append the cheap "live tail" (streaming assistant text + optimistic pending
  * user messages) to a memoized {@link transcriptBaseItems} result. Preserves

@@ -9,6 +9,10 @@ import { Check, ChevronDown, ChevronRight, Copy, Download, File, Folder, Loader2
 import { Tree, type NodeApi } from 'react-arborist'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
+import { MermaidBlock } from '../chat/MermaidBlock.js'
 import type { Socket } from 'socket.io-client'
 
 import type {
@@ -198,12 +202,15 @@ function SessionFilesPanelImpl({
   mode?: 'dialog' | 'sidebar'
   fontSizePx?: number
 }): JSX.Element {
+  const resourceKey = `${workspaceId ?? 'offline'}\0${cwd ?? ''}`
   const [nodes, setNodes] = useState<FileNode[]>([])
   const [loadingPath, setLoadingPath] = useState<string | null>(null)
   const [selected, setSelected] = useState<FileNode | null>(null)
   const [viewer, setViewer] = useState<FileViewState>({ kind: 'empty' })
   const [viewOpen, setViewOpen] = useState(false)
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null)
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
   const online = Boolean(socket && workspaceId)
   const [treeHostRef, treeSize] = useElementSize<HTMLDivElement>()
 
@@ -211,7 +218,7 @@ function SessionFilesPanelImpl({
     if (!socket || !workspaceId) return
     const targetPath = path ?? cwd
     setLoadingPath(targetPath ?? '__root__')
-    const result = await requestDir(socket, workspaceId, sessionId ?? undefined, targetPath)
+    const result = await requestDir(socket, workspaceId, sessionIdRef.current ?? undefined, targetPath)
     setLoadingPath(null)
     if (result.error) {
       setViewer({ kind: 'error', message: result.error })
@@ -223,14 +230,14 @@ function SessionFilesPanelImpl({
       return
     }
     setNodes((prev) => updateNodeChildren(prev, path, next))
-  }, [cwd, sessionId, socket, workspaceId])
+  }, [cwd, resourceKey, socket, workspaceId])
 
   useEffect(() => {
     setNodes([])
     setSelected(null)
     setViewer({ kind: 'empty' })
     if (online) void loadDir()
-  }, [online, loadDir, sessionId])
+  }, [online, resourceKey])
 
   const openNode = useCallback(async (node: FileNode): Promise<void> => {
     setSelected(node)
@@ -437,7 +444,7 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
     <ViewerShell title={viewer.path} meta={`${viewer.size !== undefined ? formatBytes(viewer.size) : ''}${viewer.truncated ? ' · view truncated' : ''}`} chrome={chrome}>
       {viewer.truncated ? <div className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Large file view is capped. Full content was not loaded.</div> : null}
       {language === 'markdown' && markdownMode === 'preview' ? (
-        <MarkdownFileView content={viewer.content} />
+        <MarkdownFileView content={viewer.content} fontSize={fontSize} />
       ) : (
         <Editor
           value={viewer.content}
@@ -456,10 +463,10 @@ function FileView({ viewer, selected, path, target, chrome = true, wordWrap = tr
   )
 }
 
-function MarkdownFileView({ content }: { content: string }): JSX.Element {
+function MarkdownFileView({ content, fontSize }: { content: string; fontSize: number }): JSX.Element {
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background px-4 py-4 text-sm leading-6 sm:px-6 sm:py-5" data-testid="session-file-markdown-preview">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+    <div className="h-full min-h-0 overflow-auto bg-background px-4 py-4 leading-[1.65] sm:px-6 sm:py-5" style={{ fontSize }} data-testid="session-file-markdown-preview">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{
         h1: ({ children }) => <h1 className="mb-3 mt-0 text-xl font-semibold leading-tight sm:text-2xl">{children}</h1>,
         h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-semibold leading-tight sm:text-xl">{children}</h2>,
         h3: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold leading-tight">{children}</h3>,
@@ -468,7 +475,7 @@ function MarkdownFileView({ content }: { content: string }): JSX.Element {
         ol: ({ children }) => <ol className="my-2 list-decimal pl-5">{children}</ol>,
         li: ({ children }) => <li className="my-1">{children}</li>,
         a: ({ children, href }) => <a className="text-primary underline underline-offset-2" href={href} target="_blank" rel="noreferrer">{children}</a>,
-        code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]">{children}</code>,
+        code: ({ className, children }) => className?.includes('language-mermaid') ? <MermaidBlock code={String(children).replace(/\n$/u, '')} /> : <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]">{children}</code>,
         pre: ({ children }) => <pre className="my-3 overflow-auto rounded bg-muted p-3 font-mono text-xs leading-5">{children}</pre>,
         blockquote: ({ children }) => <blockquote className="my-3 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
         table: ({ children }) => <div className="my-3 overflow-auto"><table className="w-full border-collapse text-left text-xs">{children}</table></div>,

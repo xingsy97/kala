@@ -415,6 +415,28 @@
   50% { box-shadow: 0 0 0 3px hsl(263 70% 60% / 0.18); }
 }
 
+/*
+ * Keep the long-lived session activity animation on a wrapper that owns its
+ * transform exclusively. The previous SVG combined Tailwind's animate-spin
+ * (which animates transform) with an arbitrary transform:translateZ(0)
+ * utility. Both rules targeted the same property, so cascade/compositor
+ * behavior could leave the icon permanently at its first frame. A dedicated
+ * keyframe also keeps this indicator independent from Tailwind's generated
+ * `spin` rule and stable while React preserves it across status updates.
+ */
+.ak-session-status-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+  animation: ak-session-status-spin 900ms linear infinite;
+  will-change: transform;
+}
+
+@keyframes ak-session-status-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ak-motion-overlay,
   .ak-motion-dialog,

@@ -15,68 +15,58 @@
 import { memo, useEffect, useState, type ReactNode } from 'react'
 
 import { cn } from '../../lib/utils.js'
-import { highlightToHtml } from '../../lib/shiki.js'
+import { scheduleDeferredWork } from '../../lib/deferred-work.js'
 
 type Props = {
   code: string
   lang?: string
   className?: string
   trailingSlot?: ReactNode
+  /** Keep the live fence as stable raw text; enhance only after it is complete. */
+  deferEnhancement?: boolean
 }
 
-export const CodeBlock = memo(function CodeBlock({ code, lang, className, trailingSlot }: Props): JSX.Element {
+function extractHighlightedCodeHtml(html: string): string {
+  const match = html.match(/<code[^>]*>([\s\S]*)<\/code>/iu)
+  return match?.[1] ?? html
+}
+
+export const CodeBlock = memo(function CodeBlock({ code, lang, className, trailingSlot, deferEnhancement = false }: Props): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!lang) {
+    if (!lang || deferEnhancement) {
       setHtml(null)
       return
     }
     let cancelled = false
-    highlightToHtml(code, lang).then((result) => {
-      // Keep the previous highlighted HTML visible until the new result is
-      // ready (we never reset to null here), so a streaming code block updates
-      // in place instead of flickering back to an un-highlighted state on every
-      // ~15fps token commit.
-      if (!cancelled) setHtml(result)
+    const deferred = scheduleDeferredWork(() => {
+      // Keep the mounted <pre> stable. Shiki HTML is applied inside it rather
+      // than swapping a raw <pre> for a wrapper subtree; the old swap was a
+      // visible remount immediately after a streamed fence committed.
+      void import('../../lib/shiki.js').then(({ highlightToHtml }) => highlightToHtml(code, lang)).then((result) => {
+        if (!cancelled) setHtml(result)
+      })
     })
     return () => {
       cancelled = true
+      deferred.cancel()
     }
-  }, [code, lang])
-
-  if (html) {
-    // Once we have highlighted HTML we keep showing it even while streaming
-    // (trailingSlot present). Previously any trailingSlot forced the raw <pre>
-    // branch, so a streaming block rendered un-highlighted the whole time and
-    // then snapped to highlighted when the cursor disappeared — a visible
-    // flash. The streaming cursor is now layered after the highlighted block.
-    return (
-      <div className="relative">
-        <div
-          data-testid="code-block-highlighted"
-          data-lang={lang}
-          className={cn('shiki-host my-3 max-w-full overflow-x-auto rounded-lg', className)}
-          // shiki produces trusted HTML from the input code text; browsers
-          // won't execute anything, but the surrounding wrapper still handles
-          // scroll/overflow so we don't leak layout.
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
-        {trailingSlot ? <span className="pointer-events-none absolute bottom-3 right-3">{trailingSlot}</span> : null}
-      </div>
-    )
-  }
+  }, [code, deferEnhancement, lang])
 
   return (
     <pre
-      data-testid="code-block-raw"
+      data-testid={html ? 'code-block-highlighted' : 'code-block-raw'}
       data-lang={lang ?? ''}
       className={cn(
         'my-3 max-w-full overflow-x-auto rounded-lg bg-muted/60 px-3 py-2 text-xs text-foreground',
+        html && 'shiki-host',
         className,
       )}
-  >
-      <code>{code}{trailingSlot}</code>
+    >
+      {html
+        ? <code dangerouslySetInnerHTML={{ __html: extractHighlightedCodeHtml(html) }} />
+        : <code>{code}{trailingSlot}</code>}
     </pre>
   )
 })

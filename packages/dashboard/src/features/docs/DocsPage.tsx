@@ -2,7 +2,7 @@ import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useS
 import useMeasure from 'react-use-measure'
 import { NodeApi, Tree } from 'react-arborist'
 import type { RowRendererProps, TreeApi } from 'react-arborist'
-import { BookOpen, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, Folder, RefreshCw, Search } from 'lucide-react'
+import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, Folder, RefreshCw, Search } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
@@ -55,6 +55,7 @@ export function DocsPage(): JSX.Element {
   const queryClient = useQueryClient()
   const wideLayout = useMinWidth(768)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [mobileReading, setMobileReading] = useState(false)
   const [query, setQuery] = useState('')
   const [allExpanded, setAllExpanded] = useState(true)
   const arboristRef = useRef<TreeApi<DocTreeNode> | null>(null)
@@ -111,8 +112,10 @@ export function DocsPage(): JSX.Element {
   const treeWidth = treeBounds.width > 0 ? treeBounds.width : 280
 
   const activate = (node: NodeApi<DocTreeNode>): void => {
-    if (node.data.kind === 'file') setSelectedPath(node.data.path)
-    else node.toggle()
+    if (node.data.kind === 'file') {
+      setSelectedPath(node.data.path)
+      setMobileReading(true)
+    } else node.toggle()
   }
   const toggleAll = (): void => {
     const tree = arboristRef.current
@@ -132,6 +135,7 @@ export function DocsPage(): JSX.Element {
         <label className="flex h-8 items-center gap-2 rounded border border-border/70 bg-background px-2 text-xs text-muted-foreground">
           <Search className="h-3.5 w-3.5" aria-hidden />
           <input
+            aria-label={t('docs.page.search')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t('docs.page.search')}
@@ -155,7 +159,7 @@ export function DocsPage(): JSX.Element {
       </div>
       <div ref={treeRef} className="h-[calc(100%-84px)] min-h-0 overflow-hidden p-1.5" data-testid="docs-list" data-scroll-owner="react-arborist">
         {loadingIndex && docs.length === 0 ? (
-          <div className="px-2 py-1 text-xs text-muted-foreground">{t('docs.page.loading')}</div>
+          <div className="px-2 py-1 text-xs text-muted-foreground" role="status" aria-live="polite">{t('docs.page.loading')}</div>
         ) : null}
         {!loadingIndex && !filteredEmpty ? (
           <Tree<DocTreeNode>
@@ -181,7 +185,14 @@ export function DocsPage(): JSX.Element {
           </Tree>
         ) : null}
         {filteredEmpty || (!loadingIndex && docs.length === 0) ? (
-          <div className="px-2 py-1 text-xs text-muted-foreground">{t('docs.page.empty')}</div>
+          <div className="px-2 py-1 text-xs text-muted-foreground">
+            <p>{t('docs.page.empty')}</p>
+            {query ? (
+              <button type="button" className="mt-2 underline underline-offset-2" onClick={() => setQuery('')}>
+                {t('docs.page.clearSearch')}
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </aside>
@@ -190,12 +201,12 @@ export function DocsPage(): JSX.Element {
   const contentView = (
     <main className="h-full min-h-0 overflow-auto" data-testid="docs-content">
       {error ? (
-        <div className="m-4 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+        <div className="m-4 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300" role="alert">
           {t('docs.page.error', { message: error })}
         </div>
       ) : null}
       {!content && !error ? (
-        <div className="p-4 text-xs text-muted-foreground">{loadingContent ? t('docs.page.loading') : t('docs.page.select')}</div>
+        <div className="p-4 text-xs text-muted-foreground" role={loadingContent ? 'status' : undefined} aria-live={loadingContent ? 'polite' : undefined}>{loadingContent ? t('docs.page.loading') : t('docs.page.select')}</div>
       ) : null}
       {content ? (
         <article className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-5">
@@ -246,12 +257,16 @@ export function DocsPage(): JSX.Element {
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-rows-[minmax(11rem,38%)_minmax(0,1fr)] overflow-hidden" data-testid="docs-mobile-layout">
-          <div className="min-w-0 overflow-hidden border-b border-border/60 bg-muted/20" data-testid="docs-sidebar-panel">
+        <div className="min-h-0 flex-1 overflow-hidden" data-testid="docs-mobile-layout">
+          <div className={cn('h-full min-w-0 overflow-hidden bg-muted/20', mobileReading && 'hidden')} data-testid="docs-sidebar-panel">
             {sidebar}
           </div>
-          <div className="min-w-0 overflow-hidden" data-testid="docs-content-panel">
-            {contentView}
+          <div className={cn('h-full min-w-0 overflow-hidden', !mobileReading && 'hidden')} data-testid="docs-content-panel">
+            <button type="button" className="flex h-11 w-full items-center gap-2 border-b border-border/60 px-4 text-sm text-muted-foreground" onClick={() => setMobileReading(false)} data-testid="docs-mobile-back">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              {t('common.back')}
+            </button>
+            <div className="h-[calc(100%-2.75rem)]">{contentView}</div>
           </div>
         </div>
       )}

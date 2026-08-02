@@ -11,6 +11,7 @@ import type {
   AgentState,
   ApprovalMode,
   ImageContent,
+  MessageContent,
   TextContent,
 } from '@agent-kernel/kernel'
 
@@ -35,7 +36,7 @@ import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
 
 type Props = {
   disabled?: boolean
-  onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void
+  onSubmit(text: string, mode: SendMode, images?: readonly ImageContent[], extraBlocks?: readonly TextContent[]): void | Promise<void>
   onCompact(): void
   onCancel?(): void
   onClearSession?(): void
@@ -54,9 +55,9 @@ type Props = {
   queuedMessages: readonly QueuedMessagePreview[]
   timeline?: readonly TimelineEntry[]
   displayPrefs?: ChatDisplayPrefs
-  onQueuedReorder?(id: string, beforeId?: string | null): void
-  onQueuedUpdate?(id: string, text: string): void
-  onQueuedDelete?(id: string): void
+  onQueuedReorder?(id: string, beforeId?: string | null): Promise<void>
+  onQueuedUpdate?(id: string, text: string, content?: readonly MessageContent[]): Promise<void>
+  onQueuedDelete?(id: string): Promise<void>
   workspaceOnline?: boolean
   onListFiles?(query: string): Promise<readonly FileListEntry[]>
   onReadFile?(path: string): Promise<{ content?: string; error?: string }>
@@ -438,16 +439,30 @@ export function Composer({
         }
       }
     }
-    onSubmit(
-      trimmed,
-      sendMode,
-      images.length > 0 ? images : undefined,
-      extraBlocks.length > 0 ? extraBlocks : undefined,
-    )
+    const submittedText = text
+    const submittedImages = pastedImages
+    // Clear optimistically as soon as the operator submits. The Host ACK means
+    // reliable acceptance, but an idle-session dispatch may not resolve until
+    // the Agent turn completes. Keeping the submitted draft visible for that
+    // whole period makes a successful send look broken and invites duplicates.
     setText('')
     setPastedImages([])
     setMentionState(null)
     setMentionFiles([])
+    try {
+      await onSubmit(
+        trimmed,
+        sendMode,
+        images.length > 0 ? images : undefined,
+        extraBlocks.length > 0 ? extraBlocks : undefined,
+      )
+    } catch (error) {
+      // Restore only into an untouched composer. Never overwrite text or images
+      // the operator added while the acknowledgement was pending.
+      setText((current) => current.length === 0 ? submittedText : current)
+      setPastedImages((current) => current.length === 0 ? submittedImages : current)
+      setPendingToast(error instanceof Error ? error.message : String(error))
+    }
   }
 
   async function extractImagesFromClipboardData(data: DataTransfer | null): Promise<PastedImage[]> {
@@ -495,7 +510,7 @@ export function Composer({
     void submit()
   }
 
-  const canSubmit = !disabled && (text.trim().length > 0 || pastedImages.length > 0)
+  const canSubmit = !disabled && workspaceOnline !== false && (text.trim().length > 0 || pastedImages.length > 0)
   const canStop = typeof onCancel === 'function' && (awaitingAck || isActiveTurnStatus(state?.status))
   const showStopButton = !canSubmit && canStop
 
@@ -504,14 +519,12 @@ export function Composer({
       onSubmit={handleSubmit}
       className={cn(
         'bg-card px-3 sm:px-6 lg:px-8',
-        // Include env(safe-area-inset-bottom) so the composer's bg-card
-        // extends all the way to the physical bottom of the screen on iOS
-        // PWA (home indicator area). Without this the safe-area strip
-        // paints in the parent bg-background, leaving a black band below
-        // the composer.
+        // Split the difference between the original full iOS safe-area shelf
+        // and the too-tight fixed padding: half the safe area plus half the
+        // compact baseline (2px simple / 4px full).
         mode === 'simple'
-          ? 'pt-1 pb-[max(env(safe-area-inset-bottom),0.375rem)] sm:pt-1.5 sm:pb-[max(env(safe-area-inset-bottom),0.5rem)]'
-          : 'pt-1.5 pb-[max(env(safe-area-inset-bottom),0.625rem)] sm:pt-2 sm:pb-[max(env(safe-area-inset-bottom),1rem)]',
+          ? 'pt-1 pb-[calc(env(safe-area-inset-bottom)/2+0.0625rem)] sm:pt-1.5 sm:pb-2'
+          : 'pt-1.5 pb-[calc(env(safe-area-inset-bottom)/2+0.125rem)] sm:pt-2 sm:pb-4',
       )}
       style={displayStyle}
       data-testid="composer"
@@ -533,13 +546,13 @@ export function Composer({
           data-testid="composer-mode-toggle"
           data-composer-mode={mode}
           className={cn(
-            // Hidden on mobile — touch devices can't hover so the invisible
-            // handle would be hard to discover and easy to tap accidentally.
-            'group absolute inset-x-0 -top-2 z-10 hidden h-3 items-center justify-center rounded-t-lg sm:flex',
-            'border border-b-0 border-transparent -mb-px',
-            'text-muted-foreground/0 transition-colors',
-            'hover:border-border/60 hover:bg-accent/40 hover:text-foreground',
-            'focus-visible:border-border/60 focus-visible:bg-accent/40 focus-visible:text-foreground focus-visible:outline-none',
+            // Reserve a shallow row above the composer instead of overlaying
+            // either the input or an adjacent context warning. Keeping this a
+            // narrow handle preserves the full width of the mobile input row.
+            'group mx-auto mb-0.5 flex h-3 w-12 items-center justify-center rounded-full',
+            'text-muted-foreground/70 transition-colors sm:text-muted-foreground/0',
+            'hover:bg-accent/40 hover:text-foreground',
+            'focus-visible:bg-accent/40 focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40',
           )}
         >
           {mode === 'simple' ? (
@@ -583,7 +596,9 @@ export function Composer({
               onCompact={onCompact}
               compactDisabled={disabled}
             />
-            <HumanAttentionIndicator timeline={humanAttention} density="simple" />
+            <span className="hidden sm:inline-flex">
+              <HumanAttentionIndicator timeline={humanAttention} density="simple" />
+            </span>
             <SendButton
               disabled={!canSubmit}
               sendMode={sendMode}
@@ -1175,6 +1190,15 @@ function ComposerConfigButton({
   )
 }
 
+export function queuedMessageSummary(item: QueuedMessagePreview, translate?: TFunction): string {
+  const text = item.text.trim()
+  const imageCount = item.content?.filter((part) => part.type === 'image').length ?? 0
+  const imageTokens = Array.from({ length: imageCount }, (_, index) => translate
+    ? translate('composer.queued.imageToken', { index: index + 1 })
+    : `[Image #${index + 1}]`)
+  return [text, ...imageTokens].filter(Boolean).join(' ') || (translate ? translate('composer.queued.empty') : '(empty queued message)')
+}
+
 function QueuedMessagesDock({
   items,
   onReorder,
@@ -1182,25 +1206,45 @@ function QueuedMessagesDock({
   onDelete,
 }: {
   items: readonly QueuedMessagePreview[]
-  onReorder?(id: string, beforeId?: string | null): void
-  onUpdate?(id: string, text: string): void
-  onDelete?(id: string): void
+  onReorder?(id: string, beforeId?: string | null): Promise<void>
+  onUpdate?(id: string, text: string, content?: readonly MessageContent[]): Promise<void>
+  onDelete?(id: string): Promise<void>
 }): JSX.Element | null {
   const { t } = useTranslation()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [operationError, setOperationError] = useState<{ id: string; message: string; retry(): Promise<void> } | null>(null)
   if (items.length === 0) return null
   const beginEdit = (item: QueuedMessagePreview): void => {
     setEditingId(item.id)
     setDraft(item.text)
   }
+  const runMutation = async (id: string, operation: () => Promise<void>): Promise<void> => {
+    setPendingId(id)
+    setOperationError(null)
+    try {
+      await operation()
+    } catch (error) {
+      setOperationError({ id, message: error instanceof Error ? error.message : String(error), retry: operation })
+      throw error
+    } finally {
+      setPendingId(null)
+    }
+  }
   const commitEdit = (): void => {
     if (!editingId) return
     const trimmed = draft.trim()
-    if (trimmed.length > 0) onUpdate?.(editingId, trimmed)
-    setEditingId(null)
-    setDraft('')
+    const item = items.find((candidate) => candidate.id === editingId)
+    const hasImages = item?.content?.some((part) => part.type === 'image') ?? false
+    if ((trimmed.length > 0 || hasImages) && onUpdate) {
+      const id = editingId
+      void runMutation(id, () => onUpdate(id, trimmed, item?.content)).then(() => {
+        setEditingId(null)
+        setDraft('')
+      }).catch(() => undefined)
+    }
   }
   const cancelEdit = (): void => {
     setEditingId(null)
@@ -1211,10 +1255,10 @@ function QueuedMessagesDock({
     if (!item) return
     if (direction < 0) {
       const before = items[index - 1]
-      if (before) onReorder?.(item.id, before.id)
+      if (before && onReorder) void runMutation(item.id, () => onReorder(item.id, before.id)).catch(() => undefined)
     } else {
       const afterNext = items[index + 2]
-      onReorder?.(item.id, afterNext?.id ?? null)
+      if (onReorder) void runMutation(item.id, () => onReorder(item.id, afterNext?.id ?? null)).catch(() => undefined)
     }
   }
   return (
@@ -1243,7 +1287,7 @@ function QueuedMessagesDock({
               key={item.id}
               className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg border border-border/50 bg-background px-2 py-1.5"
               data-testid="queued-message-row"
-              title={item.text}
+              title={queuedMessageSummary(item, t)}
               draggable={Boolean(onReorder)}
               onDragStart={(e) => {
                 setDraggingId(item.id)
@@ -1259,7 +1303,7 @@ function QueuedMessagesDock({
                 if (!onReorder) return
                 e.preventDefault()
                 const id = e.dataTransfer.getData('text/plain') || draggingId
-                if (id && id !== item.id) onReorder(id, item.id)
+                if (id && id !== item.id) void runMutation(id, () => onReorder(id, item.id)).catch(() => undefined)
                 setDraggingId(null)
               }}
               onDragEnd={() => setDraggingId(null)}
@@ -1271,9 +1315,10 @@ function QueuedMessagesDock({
               <span className="min-w-0">
                 <span className="mb-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
                   <CornerDownRight className="h-3 w-3" aria-hidden="true" />
-                  {item.mode === 'steer' ? 'Steering update' : 'Queued follow-up'}
+                  {item.mode === 'steer' ? t('composer.queued.steerLabel') : t('composer.queued.queueLabel')}
                 </span>
                 {editingId === item.id ? (
+                  <span className="flex min-w-0 flex-col gap-1">
                   <input
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -1283,15 +1328,22 @@ function QueuedMessagesDock({
                     }}
                     className="h-6 w-full rounded border border-border/50 bg-background px-2 text-xs outline-none focus:border-ring"
                     data-testid="queued-message-edit-input"
+                    placeholder={item.content?.some((part) => part.type === 'image') ? 'Optional message text' : undefined}
                     autoFocus
                   />
+                  {item.content?.some((part) => part.type === 'image') ? (
+                    <span className="truncate font-mono text-[10px] text-muted-foreground" data-testid="queued-message-edit-attachments">
+                      {queuedMessageSummary({ ...item, text: '' }, t)}
+                    </span>
+                  ) : null}
+                  </span>
                 ) : (
                   <span className="block truncate text-foreground">
-                    {item.text.trim().length > 0 ? item.text : '(image attachment)'}
+                    {queuedMessageSummary(item, t)}
                   </span>
                 )}
               </span>
-              <span className="flex items-center gap-0.5">
+              <span className="flex items-center gap-0.5" aria-busy={pendingId === item.id}>
                 {editingId === item.id ? (
                   <>
                     <QueueAction label="save queued message" onClick={commitEdit} testId="queued-message-save">
@@ -1312,7 +1364,7 @@ function QueuedMessagesDock({
                     <QueueAction label="edit queued message" onClick={() => beginEdit(item)} disabled={!onUpdate} testId="queued-message-edit">
                       <Pencil className="h-3 w-3" aria-hidden="true" />
                     </QueueAction>
-                    <QueueAction label="delete queued message" onClick={() => onDelete?.(item.id)} disabled={!onDelete} testId="queued-message-delete">
+                    <QueueAction label="delete queued message" onClick={() => { if (onDelete) void runMutation(item.id, () => onDelete(item.id)).catch(() => undefined) }} disabled={!onDelete || pendingId === item.id} testId="queued-message-delete">
                       <Trash2 className="h-3 w-3" aria-hidden="true" />
                     </QueueAction>
                   </>
@@ -1320,6 +1372,12 @@ function QueuedMessagesDock({
               </span>
             </div>
           ))}
+          {operationError ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-destructive" role="alert" data-testid="queued-message-error">
+              <span>{operationError.message}</span>{' '}
+              <button type="button" className="font-medium underline" onClick={() => { void runMutation(operationError.id, operationError.retry).catch(() => undefined) }}>{t('common.retry')}</button>
+            </div>
+          ) : null}
         </div>
       </ScrollArea>
     </div>

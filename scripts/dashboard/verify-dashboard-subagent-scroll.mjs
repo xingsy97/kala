@@ -67,20 +67,29 @@ try {
     headless: 'new',
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })
-  const page = await browser.newPage()
-  page.setDefaultTimeout(10_000)
-  await page.setViewport({ width: 1920, height: 760, deviceScaleFactor: 1 })
-  await page.goto(`${HOST_URL}/?sessionId=${PARENT_SESSION_ID}`, {
-    waitUntil: 'networkidle2',
-    timeout: 15_000,
-  })
-  await page.waitForSelector('[data-testid="chat-panel"]')
-  await page.waitForSelector('[data-testid="sub-agent-row-agent-call-1"]')
+  for (const viewport of [
+    { name: 'desktop', width: 1920, height: 760, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+    { name: 'mobile', width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+  ]) {
+    const page = await browser.newPage()
+    page.setDefaultTimeout(10_000)
+    await page.setViewport(viewport)
+    if (viewport.isMobile) await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1')
+    await page.goto(`${HOST_URL}/?sessionId=${PARENT_SESSION_ID}`, {
+      waitUntil: 'networkidle2',
+      timeout: 15_000,
+    })
+    await page.waitForSelector('[data-testid="chat-panel"]')
+    await page.waitForSelector('[data-testid="sub-agent-row-agent-call-1"]')
 
-  await verifySubAgentReplayExpansion(page)
-  await verifyChatScrollerGeometry(page)
-  await page.screenshot({ path: SCREENSHOT_PATH, fullPage: false })
-  console.log(`Screenshot written to ${SCREENSHOT_PATH}`)
+    await verifySubAgentDotsGeometry(page, viewport.name)
+    await verifySubAgentReplayExpansion(page, viewport.name)
+    await verifyChatScrollerGeometry(page, viewport.name)
+    const shot = SCREENSHOT_PATH.replace('.png', `-${viewport.name}.png`)
+    await page.screenshot({ path: shot, fullPage: false })
+    console.log(`Screenshot written to ${shot}`)
+    await page.close()
+  }
 } catch (err) {
   check('script completed without uncaught error', false, err?.stack ?? String(err))
 } finally {
@@ -95,8 +104,38 @@ if (failed.length > 0) {
   process.exit(1)
 }
 
-async function verifySubAgentReplayExpansion(page) {
-  await page.click('[data-testid="sub-agent-toggle-agent-call-1"]')
+async function verifySubAgentDotsGeometry(page, name) {
+  const metrics = await page.evaluate(() => {
+    const row = document.querySelector('[data-testid="sub-agent-row-agent-call-1"]')
+    const toggle = document.querySelector('[data-testid="sub-agent-toggle-agent-call-1"], [data-sub-agent-toggle="agent-call-1"]')
+    const dot = document.querySelector('[data-testid="sub-agent-dot-agent-call-1"]')
+    const badge = row?.querySelector('[data-testid="sub-agent-status-badge"]')
+    const rowRect = row?.getBoundingClientRect()
+    const toggleRect = toggle?.getBoundingClientRect()
+    const badgeRect = badge?.getBoundingClientRect()
+    return {
+      row: rowRect ? { left: rowRect.left, right: rowRect.right, width: rowRect.width, height: rowRect.height } : null,
+      toggle: toggleRect ? { left: toggleRect.left, right: toggleRect.right, width: toggleRect.width, height: toggleRect.height } : null,
+      badge: badgeRect ? { left: badgeRect.left, right: badgeRect.right, width: badgeRect.width, height: badgeRect.height } : null,
+      dotVisible: dot instanceof HTMLElement && dot.getClientRects().length > 0,
+      viewportWidth: window.innerWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      text: row?.textContent ?? '',
+      nestedVisible: Boolean(row?.querySelector('[data-testid="nested-transcript"]')),
+    }
+  })
+  check(`${name}: dots-mode sub-agent renders as a compact activity node`, Boolean(metrics.row && metrics.toggle)
+    && metrics.dotVisible
+    && metrics.row.width <= 72
+    && metrics.row.left >= -1 && metrics.row.right <= metrics.viewportWidth + 1
+    && metrics.documentScrollWidth <= metrics.viewportWidth + 1
+    && !metrics.nestedVisible,
+  JSON.stringify(metrics))
+}
+
+async function verifySubAgentReplayExpansion(page, name) {
+  const toggle = await page.$('[data-testid="sub-agent-toggle-agent-call-1"], [data-sub-agent-toggle="agent-call-1"]')
+  await toggle.click()
   await page.waitForSelector('[data-testid="nested-transcript"]', { timeout: 5_000 })
   await page.waitForFunction(
     () => document.body.textContent?.includes('child answer visible in replay'),
@@ -116,13 +155,13 @@ async function verifySubAgentReplayExpansion(page) {
     }
   })
   check(
-    'expanded replayed terminal sub-agent shrinks to its child transcript',
+    `${name}: expanded replayed terminal sub-agent shrinks to its child transcript`,
     metrics.nestedHeight > 40 && metrics.frameHeight < 240 && metrics.frameLayout === 'content' && metrics.virtualized === 'false' && metrics.nestedText.includes('child answer visible in replay'),
     JSON.stringify(metrics),
   )
 }
 
-async function verifyChatScrollerGeometry(page) {
+async function verifyChatScrollerGeometry(page, name) {
   const metrics = await page.evaluate(() => {
     const chat = document.querySelector('[data-testid="chat-panel"]')
     const transcript = document.querySelector('[data-testid="virtual-transcript"]')
@@ -130,7 +169,7 @@ async function verifyChatScrollerGeometry(page) {
       ?? transcript?.querySelector('[data-virtuoso-scroller="true"]')
       ?? transcript?.querySelector('[data-virtuoso-scroller]')
       ?? transcript?.firstElementChild
-    const rowWrapper = document.querySelector('[data-virt-index]')
+    const rowWrapper = document.querySelector('[data-virt-index]')?.firstElementChild
     const rectFor = (el) => {
       const rect = el?.getBoundingClientRect()
       return rect
@@ -148,12 +187,12 @@ async function verifyChatScrollerGeometry(page) {
   })
   const rightDelta = Math.abs((metrics.scroller?.right ?? 0) - (metrics.chat?.right ?? Number.NaN))
   check(
-    'chat virtual scroller spans the chat panel width',
+    `${name}: chat virtual scroller spans the chat panel width`,
     Boolean(metrics.chat && metrics.scroller) && rightDelta <= 4 && metrics.scroller.width >= metrics.chat.width - 4,
     JSON.stringify({ ...metrics, rightDelta }),
   )
   check(
-    'chat row content remains width-constrained inside the full scroller',
+    `${name}: chat row content remains width-constrained inside the full scroller`,
     Boolean(metrics.rowWrapper && metrics.scroller) && metrics.rowWrapper.width < metrics.scroller.width,
     JSON.stringify(metrics),
   )

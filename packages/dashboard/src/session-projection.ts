@@ -88,7 +88,14 @@ export function reduceSessionProjection(
       }
     }
     case 'history':
-      return { ...current, timeline: mergeBySeq(event.reset ? [] : current.timeline, event.entries) }
+      return {
+        ...current,
+        // A reset response is an authoritative server replay, not another live
+        // delta. It must replace conflicting cached/live entries at the same seq.
+        timeline: event.reset
+          ? authoritativeTimeline(event.entries)
+          : mergeBySeq(current.timeline, event.entries),
+      }
     case 'authoritative':
       return { ...current, state: event.payload.state, contextSnapshot: event.payload.contextSnapshot ?? null }
     case 'appended': {
@@ -132,6 +139,15 @@ export function timelineEntry(p: EventAppendedEvent): TimelineEntry {
     ...(p.llmTrace ? { llmTrace: p.llmTrace } : {}), ...(p.model ? { model: p.model } : {}),
     ...(p.compactionMetadata ? { compactionMetadata: p.compactionMetadata } : {}),
   }
+}
+
+function authoritativeTimeline(entries: readonly TimelineEntry[]): readonly TimelineEntry[] {
+  const bySeq = new Map<number, TimelineEntry>()
+  // The Host reader already applies first-durable-entry-wins to legacy duplicate
+  // logs. Preserve that deterministic policy if a malformed history payload is
+  // encountered at the client boundary.
+  for (const entry of entries) if (!bySeq.has(entry.seq)) bySeq.set(entry.seq, entry)
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq)
 }
 
 export function mergeBySeq(prev: readonly TimelineEntry[], add: readonly TimelineEntry[]): readonly TimelineEntry[] {

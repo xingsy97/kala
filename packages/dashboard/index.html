@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Agent RunLab</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="application-name" content="Agent RunLab" />
@@ -19,14 +19,18 @@
     <meta name="apple-mobile-web-app-title" content="RunLab" />
     <meta name="mobile-web-app-capable" content="yes" />
     <script>
-      // Read the persisted theme before React mounts so the initial paint
-      // matches the user's last choice — otherwise the page flashes dark
-      // before hydrating into light mode. Default: dark.
+      // Resolve the effective theme before the first paint. A persisted
+      // `system` preference must follow the OS here just as it does after React
+      // mounts; otherwise dark-system users see a light cold-start splash.
       try {
-        var t = localStorage.getItem('ak-theme') || 'dark'
-        if (t === 'dark') document.documentElement.classList.add('dark')
+        var t = localStorage.getItem('ak-theme') || 'system'
+        var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
       } catch (_) {
-        document.documentElement.classList.add('dark')
+        var fallbackDark = matchMedia('(prefers-color-scheme: dark)').matches
+        document.documentElement.classList.toggle('dark', fallbackDark)
+        document.documentElement.style.colorScheme = fallbackDark ? 'dark' : 'light'
       }
     </script>
     <style>
@@ -44,7 +48,7 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 22px;
+        gap: 26px;
         color: #0b0b0f;
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
@@ -90,8 +94,8 @@
         position: relative;
         display: grid;
         place-items: center;
-        width: 96px;
-        height: 96px;
+        width: 112px;
+        height: 112px;
       }
       /* Orbiting conic ring around the logo. */
       #ak-splash .ak-splash-badge::before {
@@ -117,15 +121,15 @@
       }
       #ak-splash .ak-splash-logo {
         position: relative;
-        width: 52px;
-        height: 52px;
+        width: 64px;
+        height: 64px;
         z-index: 1;
         animation: ak-splash-pulse 1.8s ease-in-out infinite;
       }
       #ak-splash .ak-splash-name {
         position: relative;
-        font: 650 16px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        letter-spacing: 0.04em;
+        font: 700 clamp(22px, 4.8vw, 30px)/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        letter-spacing: 0.025em;
         background: linear-gradient(90deg, currentColor 0%, #818cf8 40%, #38bdf8 60%, currentColor 100%);
         background-size: 220% 100%;
         -webkit-background-clip: text;
@@ -172,7 +176,7 @@
     <div id="root">
       <div id="ak-splash" role="status" aria-label="Loading Agent RunLab">
         <div class="ak-splash-badge">
-          <img class="ak-splash-logo" src="/favicon.svg" alt="" width="52" height="52" />
+          <img class="ak-splash-logo" src="/favicon.svg" alt="" width="64" height="64" />
         </div>
         <div class="ak-splash-name">Agent RunLab</div>
       </div>

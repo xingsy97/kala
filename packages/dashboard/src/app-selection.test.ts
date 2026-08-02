@@ -60,6 +60,19 @@ describe('session selection robustness', () => {
     ).toBe('active')
   })
 
+  it('keeps a newly created session selected while its list update is pending', () => {
+    const sessions = [session('first', 4), session('second', 2)]
+
+    expect(
+      nextSessionSelection({
+        sessions,
+        currentSessionId: 'new-session',
+        explicit: true,
+        pendingSessionId: 'new-session',
+      }),
+    ).toBeNull()
+  })
+
   it('does not invent a fallback when no sessions remain', () => {
     expect(
       nextSessionSelection({

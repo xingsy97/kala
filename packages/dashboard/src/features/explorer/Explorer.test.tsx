@@ -86,7 +86,7 @@ describe('Explorer', () => {
         onRename={() => {}}
       />,
     )
-    fireEvent.click(screen.getByTestId('new-session-button'))
+    fireEvent.click(screen.getByTestId('connect-workspace-button'))
     expect(onConnectWorkspace).toHaveBeenCalled()
   })
 
@@ -270,6 +270,7 @@ describe('Explorer', () => {
     }
     const { rerender } = render(<Explorer {...props} sessions={[runningSummary]} />)
     const before = screen.getByTestId('session-status-indicator')
+    const beforeSpinner = screen.getByTestId('session-status-spinner')
 
     // A tool-step flip: same session moves to executing_tools. The sidebar
     // renders an identical spinner for both, so the indicator node must NOT be
@@ -277,6 +278,7 @@ describe('Explorer', () => {
     rerender(<Explorer {...props} sessions={[{ ...runningSummary, status: 'executing_tools' as const }]} />)
     const after = screen.getByTestId('session-status-indicator')
     expect(after).toBe(before)
+    expect(screen.getByTestId('session-status-spinner')).toBe(beforeSpinner)
   })
 
   it('does not offer hide for the unassigned workspace bucket', () => {
@@ -812,8 +814,11 @@ describe('Explorer', () => {
     const indicators = screen.getAllByTestId('session-status-indicator')
     expect(indicators.map((indicator) => indicator.getAttribute('data-status'))).toEqual(['thinking', 'executing_tools'])
     for (const indicator of indicators) {
+      const spinner = indicator.querySelector('[data-testid="session-status-spinner"]')
       const icon = indicator.querySelector('svg')
-      expect(icon?.className.baseVal).toContain('animate-spin')
+      expect(spinner?.className).toContain('ak-session-status-spinner')
+      expect(icon?.className.baseVal).not.toContain('animate-spin')
+      expect(icon?.className.baseVal).not.toContain('translateZ')
       expect(indicator.querySelector('.animate-pulse')).toBeNull()
     }
   })

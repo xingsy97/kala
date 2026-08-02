@@ -91,6 +91,13 @@ vi.mock('react-virtuoso', async () => {
     const computeItemKey = props.computeItemKey as ((index: number) => React.Key) | undefined
     const components = props.components as { Footer?: React.ComponentType<{ context?: unknown }>; Scroller?: React.ComponentType<React.HTMLAttributes<HTMLDivElement>> } | undefined
     const context = props.context
+    ;(globalThis as typeof globalThis & {
+      __virtuosoAtBottomStateChange?: (atBottom: boolean) => void
+      __virtuosoFollowOutput?: (isAtBottom: boolean) => boolean | 'auto' | 'smooth'
+    }).__virtuosoAtBottomStateChange = props.atBottomStateChange as ((atBottom: boolean) => void) | undefined
+    ;(globalThis as typeof globalThis & {
+      __virtuosoFollowOutput?: (isAtBottom: boolean) => boolean | 'auto' | 'smooth'
+    }).__virtuosoFollowOutput = props.followOutput as ((isAtBottom: boolean) => boolean | 'auto' | 'smooth') | undefined
     const children: React.ReactNode[] = Array.from({ length: totalCount }, (_, index) =>
       React.createElement(
         'div',

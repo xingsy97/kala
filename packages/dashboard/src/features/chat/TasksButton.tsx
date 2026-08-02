@@ -12,7 +12,6 @@ import { useAutoAnimate } from '@formkit/auto-animate/react'
 import { Check, Circle, CircleDashed, ListChecks, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { ScrollArea } from '../../components/ui/scroll-area.js'
 import { cn } from '../../lib/utils.js'
 import type { TaskItem, TaskStatus } from './tasks-from-timeline.js'
 
@@ -88,23 +87,26 @@ export function TasksButton({ todos }: Props): JSX.Element | null {
         <div
           role="dialog"
           aria-label={t('tasks.label')}
-          className="fixed inset-x-2 bottom-[5.5rem] z-20 max-w-[calc(100vw-1rem)] overflow-hidden overflow-x-hidden rounded-lg border border-border/60 bg-popover shadow-lg sm:absolute sm:inset-x-auto sm:bottom-full sm:mb-2 sm:w-[min(22rem,calc(100vw-1rem))] sm:right-auto sm:left-0"
+          className="fixed inset-x-2 bottom-[5.5rem] z-20 flex max-h-[min(60dvh,28rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg sm:absolute sm:inset-x-auto sm:bottom-full sm:mb-2 sm:max-h-[min(60vh,28rem)] sm:w-[min(22rem,calc(100vw-1rem))] sm:right-auto sm:left-0"
           data-testid="tasks-popover"
         >
-          <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2 text-xs">
+          <div className="flex flex-none items-center gap-2 border-b border-border/50 px-3 py-2 text-xs">
             <ListChecks className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <span className="font-medium text-foreground">{t('tasks.label')}</span>
             <span className="text-[11px] text-muted-foreground">
               {t('tasks.done', { done, total })}
             </span>
           </div>
-          <ScrollArea className="max-h-[min(50vh,22rem)]" data-testid="tasks-popover-scroll">
+          <div
+            className="max-h-[calc(min(60dvh,28rem)-2.25rem)] min-h-0 overflow-y-auto overscroll-contain touch-pan-y [scrollbar-gutter:stable] sm:max-h-[calc(min(60vh,28rem)-2.25rem)]"
+            data-testid="tasks-popover-scroll"
+          >
             <ul ref={listRef} className="flex flex-col gap-0.5 px-2 py-2" data-testid="tasks-popover-list">
               {todos.map((todo, i) => (
                 <TaskRow key={i} todo={todo} />
               ))}
             </ul>
-          </ScrollArea>
+          </div>
         </div>
       ) : null}
     </div>

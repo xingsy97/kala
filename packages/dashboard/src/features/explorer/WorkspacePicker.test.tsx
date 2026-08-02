@@ -131,6 +131,48 @@ describe('NewSessionDialog', () => {
     })
   })
 
+  it('uses distinct icons and navigation behavior for folders and files', async () => {
+    const harness = makeSocket()
+    render(
+      <NewSessionDialog
+        open
+        workspaces={[wsA]}
+        socket={harness.socket as never}
+        onCreate={() => {}}
+        onCreateSimpleChat={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    await waitFor(() => expect(harness.lastDirRequest()).toBeTruthy())
+    act(() => {
+      const request = harness.lastDirRequest()
+      harness.emitDirList({
+        requestId: request.requestId,
+        workspaceId: 'ws-a',
+        path: '/tmp/root',
+        roots: ['/tmp/root'],
+        entries: [
+          { name: 'project', path: '/tmp/root/project', type: 'directory' },
+          { name: 'README.md', path: '/tmp/root/README.md', type: 'file', size: 42 },
+        ],
+      })
+    })
+
+    expect(screen.getAllByTestId('finder-folder-icon')).toHaveLength(1)
+    expect(screen.getAllByTestId('finder-file-icon')).toHaveLength(1)
+
+    const callsBeforeFileClick = harness.socket.emit.mock.calls.length
+    fireEvent.click(screen.getByText('README.md'))
+    expect(harness.socket.emit).toHaveBeenCalledTimes(callsBeforeFileClick)
+
+    fireEvent.click(screen.getByText('project'))
+    expect(harness.socket.emit).toHaveBeenLastCalledWith(
+      'client:list_dirs',
+      expect.objectContaining({ workspaceId: 'ws-a', path: '/tmp/root/project' }),
+    )
+  })
+
   it('allows manual cwd entry', () => {
     const onCreate = vi.fn()
     const harness = makeSocket()
@@ -177,7 +219,9 @@ describe('NewSessionDialog', () => {
       'cwd is not a readable directory',
     )
     const button = screen.getByTestId('new-session-create') as HTMLButtonElement
+    const cancel = screen.getByTestId('workspace-picker-cancel') as HTMLButtonElement
     expect(button.disabled).toBe(true)
+    expect(cancel.disabled).toBe(true)
     expect(button.textContent).toContain('Creating')
     fireEvent.click(button)
     expect(onCreate).not.toHaveBeenCalled()

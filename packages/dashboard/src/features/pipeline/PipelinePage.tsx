@@ -1,3 +1,4 @@
+import type { RuntimeCapabilities } from '@agent-kernel/shared'
 import type { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
@@ -19,14 +20,16 @@ type Slide =
   | { kind: 'step'; step: Step; index: number; total: number }
   | { kind: 'principles' }
 
-export function PipelinePage(): JSX.Element {
+export function PipelinePage({ capabilities }: { capabilities: RuntimeCapabilities }): JSX.Element {
   const { t } = useTranslation()
   const [track, setTrack] = useState<TrackKey>('runtime')
   const [cursor, setCursor] = useState(0)
 
   const runtimeSteps = t('pipeline.steps', { returnObjects: true }) as Step[]
   const benchmarkSteps = t('pipeline.benchmarkSteps', { returnObjects: true }) as Step[]
-  const steps = track === 'runtime' ? runtimeSteps : benchmarkSteps
+  const benchmarkEnabled = capabilities.benchmarks && capabilities.evaluations
+  const effectiveTrack = benchmarkEnabled ? track : 'runtime'
+  const steps = effectiveTrack === 'runtime' ? runtimeSteps : benchmarkSteps
 
   const slides = useMemo<Slide[]>(() => {
     const stepSlides: Slide[] = steps.map((step, i) => ({
@@ -64,7 +67,7 @@ export function PipelinePage(): JSX.Element {
         goto(safeCursor - 1)
       } else if (e.key === '1') {
         switchTrack('runtime')
-      } else if (e.key === '2') {
+      } else if (e.key === '2' && benchmarkEnabled) {
         switchTrack('benchmark')
       } else if (e.key === 'Home') {
         goto(0)
@@ -74,9 +77,9 @@ export function PipelinePage(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [goto, safeCursor, switchTrack, total])
+  }, [benchmarkEnabled, goto, safeCursor, switchTrack, total])
 
-  const trackTitle = t(`pipeline.tracks.${track}.title`)
+  const trackTitle = t(`pipeline.tracks.${effectiveTrack}.title`)
   const footerLabel = current.kind === 'step' ? current.step.title : t('pipeline.principlesTitle')
 
   return (
@@ -88,7 +91,7 @@ export function PipelinePage(): JSX.Element {
           <span aria-hidden="true">·</span>
           <span>{trackTitle}</span>
         </div>
-        <div className="inline-flex rounded-md border border-border/60 bg-muted/40 p-0.5" role="tablist">
+        {benchmarkEnabled ? <div className="inline-flex rounded-md border border-border/60 bg-muted/40 p-0.5" role="tablist">
           {(['runtime', 'benchmark'] as const).map((key) => (
             <button
               key={key}
@@ -108,13 +111,13 @@ export function PipelinePage(): JSX.Element {
               <span className="ml-1.5 text-[10px] text-muted-foreground/70">{key === 'runtime' ? '1' : '2'}</span>
             </button>
           ))}
-        </div>
+        </div> : null}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <div className="mx-auto flex h-full max-w-4xl items-center justify-center px-8 py-10">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="pipeline-scroll-body">
+        <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center px-4 py-6 sm:px-8 sm:py-10">
           {current.kind === 'step' ? (
-            <StepSlide step={current.step} index={current.index} total={current.total} track={track} whereToLook={t('pipeline.whereToLook')} />
+            <StepSlide step={current.step} index={current.index} total={current.total} track={effectiveTrack} whereToLook={t('pipeline.whereToLook')} />
           ) : (
             <PrinciplesSlide t={t} />
           )}
@@ -136,18 +139,18 @@ export function PipelinePage(): JSX.Element {
         </Button>
 
         <div className="flex flex-col items-center gap-1.5">
-          <div className="flex items-center gap-1.5" role="tablist" aria-label={t('pipeline.slidesLabel')}>
+          <div className="flex items-center gap-0.5" role="group" aria-label={t('pipeline.slidesLabel')}>
             {slides.map((_, i) => (
               <button
                 key={i}
                 type="button"
                 aria-label={t('pipeline.slideNumber', { index: i + 1 })}
-                aria-selected={i === safeCursor}
+                aria-current={i === safeCursor ? 'step' : undefined}
                 onClick={() => goto(i)}
                 data-testid={`pipeline-dot-${i}`}
                 className={cn(
-                  'h-2 rounded-full transition-all',
-                  i === safeCursor ? 'w-6 bg-primary' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60',
+                  'flex h-11 min-w-8 items-center justify-center rounded-full transition-colors after:block after:h-2 after:rounded-full',
+                  i === safeCursor ? 'after:w-6 after:bg-primary' : 'after:w-2 after:bg-muted-foreground/30 hover:after:bg-muted-foreground/60',
                 )}
               />
             ))}
@@ -198,13 +201,13 @@ function StepSlide({
       data-testid="pipeline-slide-step"
       data-step-index={index}
     >
-      <div className={cn('font-mono text-6xl font-bold leading-none tracking-tight', accent)}>
+      <div className={cn('font-mono text-4xl font-bold leading-none tracking-tight sm:text-6xl', accent)}>
         {String(index + 1).padStart(2, '0')}
         <span className="ml-2 text-2xl text-muted-foreground/60">/ {String(total).padStart(2, '0')}</span>
       </div>
-      <h2 className="mt-6 text-3xl font-semibold tracking-tight text-foreground">{stripLeadingNumber(step.title)}</h2>
-      <p className="mt-2 text-lg text-muted-foreground">{step.subtitle}</p>
-      <p className="mt-6 text-base leading-8 text-foreground/90">{step.detail}</p>
+      <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground sm:mt-6 sm:text-3xl">{stripLeadingNumber(step.title)}</h2>
+      <p className="mt-2 text-base text-muted-foreground sm:text-lg">{step.subtitle}</p>
+      <p className="mt-4 text-sm leading-7 text-foreground/90 sm:mt-6 sm:text-base sm:leading-8">{step.detail}</p>
       <div className="mt-8 rounded-md border-l-2 border-primary/40 bg-muted/30 px-4 py-3">
         <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
           {whereToLook.replace(/[:：]\s*$/, '')}

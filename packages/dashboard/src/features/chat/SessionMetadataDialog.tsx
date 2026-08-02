@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { X } from 'lucide-react'
 
 import type { AgentState } from '@agent-kernel/kernel'
 import type { ApprovalMode } from '@agent-kernel/kernel'
@@ -17,13 +18,17 @@ import type { SessionSummary, ToolCardMode } from '@agent-kernel/shared'
 import { Button } from '../../components/ui/button.js'
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  dialogMobileSheetClassName,
+  dialogTouchCloseClassName,
 } from '../../components/ui/dialog.js'
+import { cn } from '../../lib/utils.js'
 import { Input } from '../../components/ui/input.js'
 import {
   Select,
@@ -102,15 +107,19 @@ export function SessionMetadataDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="session-metadata-dialog"
-        className="max-w-xl"
+        className={cn(dialogMobileSheetClassName, 'grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl')}
       >
-        <DialogHeader>
-          <DialogTitle>{t('dialogs.sessionInfo')}</DialogTitle>
-          <DialogDescription>
+        <DialogHeader className="relative border-b border-border/60 px-4 py-3 pr-14 sm:px-6 sm:py-4 sm:pr-14">
+          <DialogTitle className="text-lg">{t('dialogs.sessionInfo')}</DialogTitle>
+          <DialogDescription className="hidden sm:block">
             {t('dialogs.sessionInfoDescription')}
           </DialogDescription>
+          <DialogClose className={dialogTouchCloseClassName} aria-label={t('common.close')}>
+            <X className="h-5 w-5" aria-hidden="true" />
+          </DialogClose>
         </DialogHeader>
 
+        <DialogBody className="px-4 py-4 sm:px-6" data-testid="session-metadata-body">
         <div className="grid gap-3 text-sm">
           <ReadOnlyRow label={t('dialogs.sessionId')} value={sessionId} mono />
           {summary?.parentSessionId ? (
@@ -160,6 +169,7 @@ export function SessionMetadataDialog({
           <FieldRow label={t('dialogs.label')} htmlFor="session-metadata-label">
             <Input
               id="session-metadata-label"
+              className="text-base sm:text-sm"
               data-testid="session-metadata-label"
               value={labelDraft}
               onChange={(e) => setLabelDraft(e.target.value)}
@@ -203,7 +213,7 @@ export function SessionMetadataDialog({
               value={approvalDraft}
               onValueChange={(v) => setApprovalDraft(v as ApprovalMode)}
             >
-              <SelectTrigger data-testid="session-metadata-approval">
+              <SelectTrigger className="h-11 text-base sm:h-8 sm:text-sm" data-testid="session-metadata-approval">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -217,7 +227,7 @@ export function SessionMetadataDialog({
           </FieldRow>
           <FieldRow label={t('dialogs.toolCardMode')}>
             <Select value={toolCardModeDraft} onValueChange={(value) => setToolCardModeDraft(value as ToolCardMode)}>
-              <SelectTrigger data-testid="session-metadata-tool-card-mode">
+              <SelectTrigger className="h-11 text-base sm:h-8 sm:text-sm" data-testid="session-metadata-tool-card-mode">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -228,7 +238,9 @@ export function SessionMetadataDialog({
           </FieldRow>
         </div>
 
-        <DialogFooter>
+        </DialogBody>
+
+        <DialogFooter className="border-t border-border/60 bg-card px-4 py-3 sm:px-6" data-testid="session-metadata-footer">
           <Button
             type="button"
             onClick={save}

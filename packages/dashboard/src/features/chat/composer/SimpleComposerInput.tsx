@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type PointerEvent } from 'react'
 
 import { cn } from '../../../lib/utils.js'
 
@@ -189,6 +189,16 @@ export function SimpleComposerInput({
     }
   }, [onEnterSubmit])
 
+  const focusWithoutViewportScroll = useCallback((event: PointerEvent<HTMLDivElement>): void => {
+    const el = ref.current
+    if (!el || document.activeElement === el || event.pointerType === 'mouse') return
+    // iOS otherwise scrolls the layout viewport to the contenteditable before
+    // visualViewport resize catches up, producing a visible jump to the top.
+    event.preventDefault()
+    el.focus({ preventScroll: true })
+    placeCaretAtEnd(el)
+  }, [])
+
   const handlePaste = useCallback((e: ClipboardEvent<HTMLDivElement>): void => {
     if (onPaste) {
       onPaste(e)
@@ -230,6 +240,7 @@ export function SimpleComposerInput({
         'min-h-10 max-h-[calc(1.25rem*5+1rem)] overflow-y-auto',
         disabled ? 'cursor-not-allowed opacity-60' : '',
       )}
+      onPointerDown={focusWithoutViewportScroll}
       onInput={handleInput}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}

@@ -3,6 +3,7 @@ import { Check, Eye, Loader2, Monitor, Moon, RefreshCw, Sun } from 'lucide-react
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { i18n, type DashboardLanguage } from '../../../i18n/index.js'
 
 import { Button } from '../../../components/ui/button.js'
 import { useTheme } from '../../../lib/theme.js'
@@ -53,6 +54,28 @@ import { cn } from '../../../lib/utils.js'
 import { InterfaceToggle, SectionHeader, Toggle } from '../controls.js'
 import { formatBytes, responseError } from '../section-utils.js'
 
+function LanguageSetting(): JSX.Element {
+  const language: DashboardLanguage = i18n.resolvedLanguage === 'zh' ? 'zh' : 'en'
+  return (
+    <li className="flex items-start justify-between gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50">
+      <div className="min-w-0">
+        <div className="font-medium">Language</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">Choose the language used throughout the dashboard.</p>
+      </div>
+      <select
+        value={language}
+        onChange={(event) => { void i18n.changeLanguage(event.target.value as DashboardLanguage) }}
+        data-testid="settings-language"
+        aria-label="Language"
+        className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+      >
+        <option value="en">English</option>
+        <option value="zh">简体中文</option>
+      </select>
+    </li>
+  )
+}
+
 export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessionViewCache }): JSX.Element {
   const { t } = useTranslation()
   const [showToolCallTab, setShowToolCallTab] = useBooleanPref(PREF_SHOW_TOOL_CALL_TAB, true)
@@ -99,6 +122,7 @@ export function InterfaceSection({ sessionCache }: { sessionCache?: DurableSessi
         subtitle={t('settings.interface.subtitle')}
       />
       <ul className="space-y-3 text-sm">
+        <LanguageSetting />
         <li className="flex flex-col gap-4 rounded-md bg-card/60 px-4 py-3 ring-1 ring-border/50 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="font-medium">{t('settings.interface.theme.label')}</div>

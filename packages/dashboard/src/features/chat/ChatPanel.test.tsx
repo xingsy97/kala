@@ -6,7 +6,7 @@ import { createInitialState } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from '../../session.js'
 import { visibleTranscript } from '../../transcript.js'
-import { ChatPanel as DashboardChatPanel, splitMarkdownBlocks } from './ChatPanel.js'
+import { AssistantMarkdown, ChatPanel as DashboardChatPanel, splitMarkdownBlocks } from './ChatPanel.js'
 import { InlineStatusRow, useElapsedSeconds } from './InlineStatusRow.js'
 
 function ChatPanel(props: ComponentProps<typeof DashboardChatPanel>): JSX.Element {
@@ -346,8 +346,13 @@ describe('ChatPanel', () => {
     render(<DashboardChatPanel messages={[{ role: 'assistant', content: calls }, { role: 'tool', content: results }]} />)
 
     const omission = screen.getByTestId('tool-activity-omission')
-    expect(omission.textContent).toBe('···')
-    expect(omission.getAttribute('aria-label')).toContain('omitted tool calls')
+    expect(omission.textContent).toMatch(/^\+\d+$/)
+    const omittedCount = Number(omission.textContent?.slice(1))
+    expect(omittedCount).toBeGreaterThan(0)
+    expect(omission.getAttribute('aria-label')).toContain(`${omittedCount} omitted tool calls`)
+    expect(omission.className).toContain('z-20')
+    expect(omission.className).toContain('bg-background')
+    expect(omission.className).toContain('shadow-[0_0_0_4px_hsl(var(--background))]')
     expect(screen.getByTestId('tool-card-dot-many-0')).toBeTruthy()
     expect(screen.getByTestId('tool-card-dot-many-23')).toBeTruthy()
     expect(screen.queryByTestId('tool-card-dot-many-12')).toBeNull()
@@ -628,6 +633,7 @@ describe('ChatPanel', () => {
     const scrollToIndex = (globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
     }).__virtuosoScrollToIndexMock
+    const scrollTo = (globalThis as typeof globalThis & { __virtuosoScrollToMock?: ReturnType<typeof vi.fn> }).__virtuosoScrollToMock
     scrollToIndex?.mockClear()
 
     const { rerender } = render(
@@ -639,11 +645,7 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(scrollToIndex).toHaveBeenCalledWith({
-      index: 0,
-      align: 'end',
-      behavior: 'auto',
-    })
+    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
 
     scrollToIndex?.mockClear()
 
@@ -670,6 +672,7 @@ describe('ChatPanel', () => {
     const scrollToIndex = (globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
     }).__virtuosoScrollToIndexMock
+    const scrollTo = (globalThis as typeof globalThis & { __virtuosoScrollToMock?: ReturnType<typeof vi.fn> }).__virtuosoScrollToMock
     scrollToIndex?.mockClear()
 
     const { rerender } = render(
@@ -692,17 +695,14 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(scrollToIndex).toHaveBeenCalledWith({
-      index: 0,
-      align: 'end',
-      behavior: 'auto',
-    })
+    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
   })
 
   it('jumps to the bottom when an initially empty session finishes loading messages', () => {
     const scrollToIndex = (globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
     }).__virtuosoScrollToIndexMock
+    const scrollTo = (globalThis as typeof globalThis & { __virtuosoScrollToMock?: ReturnType<typeof vi.fn> }).__virtuosoScrollToMock
     scrollToIndex?.mockClear()
 
     const { rerender } = render(
@@ -727,17 +727,14 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(scrollToIndex).toHaveBeenCalledWith({
-      index: 1,
-      align: 'end',
-      behavior: 'auto',
-    })
+    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
   })
 
   it('shows a floating scroll-to-bottom button only when unpinned', () => {
     const scrollToIndex = (globalThis as typeof globalThis & {
       __virtuosoScrollToIndexMock?: ReturnType<typeof vi.fn>
     }).__virtuosoScrollToIndexMock
+    const scrollTo = (globalThis as typeof globalThis & { __virtuosoScrollToMock?: ReturnType<typeof vi.fn> }).__virtuosoScrollToMock
     scrollToIndex?.mockClear()
     const onPinnedChange = vi.fn()
 
@@ -759,12 +756,17 @@ describe('ChatPanel', () => {
     )
 
     fireEvent.click(screen.getByTestId('scroll-to-bottom'))
-    expect(scrollToIndex).toHaveBeenCalledWith({
-      index: 0,
-      align: 'end',
-      behavior: 'auto',
-    })
+    expect(scrollTo).toHaveBeenCalledWith({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' })
     expect(onPinnedChange).toHaveBeenCalledWith(true)
+  })
+
+  it('renders session artifacts as previewable images', () => {
+    render(<ChatPanel sessionId="session-1" messages={[{ role: 'assistant', content: [{ type: 'text', text: '![Concept](artifact://artifact-1)' }] }]} />)
+    const button = screen.getByTestId('artifact-markdown-image')
+    const image = button.querySelector('img')
+    expect(image?.getAttribute('src')).toBe('/session-artifacts/artifact-1?sessionId=session-1')
+    fireEvent.click(button)
+    expect(screen.getAllByAltText('Concept')).toHaveLength(2)
   })
 
   it('renders assistant markdown as HTML (headings, code, lists)', () => {
@@ -879,9 +881,15 @@ describe('ChatPanel', () => {
 
     fireEvent.click(screen.getByTestId('message-image-preview-trigger'))
 
-    expect(screen.getByTestId('message-image-preview-dialog')).toBeTruthy()
+    const dialog = screen.getByTestId('message-image-preview-dialog')
+    expect(dialog.className).toContain('w-screen')
+    expect(dialog.className).toContain('rounded-none')
+    expect(dialog.className).toContain('sm:max-w-[72rem]')
+    expect(screen.getByTestId('message-image-preview-close').className).toContain('h-11')
     const fullImage = screen.getByTestId('message-image-preview-full') as HTMLImageElement
     expect(fullImage.src).toContain('data:image/png;base64,iVBORw0KGgo=')
+    expect(fullImage.className).toContain('max-h-full')
+    expect(fullImage.className).not.toContain('100dvh')
   })
 
   it('highlights the message matching highlightIndex', () => {
@@ -921,6 +929,44 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('compact-boundary')).toBeTruthy()
     expect(screen.getByText('Context compacted')).toBeTruthy()
     expect(screen.getByText(/Manual compact/)).toBeTruthy()
+  })
+
+  it('does not render compacted unpaired tool calls as live work', () => {
+    render(
+      <ChatPanel
+        activeToolCallIds={[]}
+        items={[
+          {
+            kind: 'message',
+            seq: 5,
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_call', callId: 'old-grep', name: 'grep', input: { pattern: 'contextSnapshot' } }],
+            },
+          },
+          {
+            kind: 'compact_boundary',
+            seq: 7,
+            trigger: 'manual',
+            replacedCount: 2,
+            tokensBefore: 851_800,
+            tokensAfter: 71_600,
+            summary: 'summary',
+          },
+          {
+            kind: 'message',
+            seq: 8,
+            message: { role: 'assistant', content: [{ type: 'text', text: 'continued after compact' }] },
+          },
+        ]}
+      />,
+    )
+
+    const group = screen.getByTestId('tool-call-group-old-grep')
+    expect(group.textContent).toContain('Orphaned')
+    expect(group.textContent).not.toContain('Running')
+    expect(group.querySelector('.animate-ping')).toBeNull()
+    expect(screen.getByText('continued after compact')).toBeTruthy()
   })
 
   it('opens a markdown summary modal from compact boundaries', () => {
@@ -1438,6 +1484,13 @@ describe('ChatPanel', () => {
     expect(screen.queryByText(/grep · \/three\//)).toBeNull()
     expect(screen.getByText(/read · \/repo\/four\.ts/)).toBeTruthy()
     expect(screen.getByText(/bash · pnpm test/)).toBeTruthy()
+    const runningRead = screen.getByTestId('grouped-tool-row-c4').querySelector('svg')
+    const runningBash = screen.getByTestId('grouped-tool-row-c5').querySelector('svg')
+    expect(runningRead?.className.baseVal).toContain('animate-spin')
+    expect(runningBash?.className.baseVal).toContain('animate-spin')
+    expect(runningRead?.className.baseVal).not.toContain('text-emerald')
+    expect(screen.getByText('2 Succeeded')).toBeTruthy()
+    expect(screen.getByText('3 Running')).toBeTruthy()
   })
 
   it('keeps collapsed mixed tool activity closed when a tail result arrives', () => {
@@ -1747,6 +1800,10 @@ describe('ChatPanel', () => {
     expect(screen.getByText('Apply the precise edit.')).toBeTruthy()
     expect(screen.getByText('Everything is complete.')).toBeTruthy()
     expect(screen.getAllByLabelText('Assistant')).toHaveLength(1)
+    expect(
+      screen.getByText('Everything is complete.').compareDocumentPosition(rail)
+        & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('renders structured tool results by default with a raw toggle', () => {
@@ -1855,6 +1912,38 @@ function toolResultEntry(
     effects: [],
   }
 }
+
+describe('AssistantMarkdown streaming stability', () => {
+  it('keeps completed markdown block DOM mounted while the tail grows and commits', () => {
+    const { container, rerender } = render(<AssistantMarkdown text={'Stable paragraph.\n\nTail'} streaming />)
+    const stableNode = container.querySelector('.ak-chat-text p')
+    expect(stableNode?.textContent).toBe('Stable paragraph.')
+
+    rerender(<AssistantMarkdown text={'Stable paragraph.\n\nTail grows'} streaming />)
+    expect(container.querySelector('.ak-chat-text p')).toBe(stableNode)
+
+    rerender(<AssistantMarkdown text={'Stable paragraph.\n\nTail grows'} streaming={false} />)
+    expect(container.querySelector('.ak-chat-text p')).toBe(stableNode)
+  })
+
+  it('commits a blank-line-terminated final code block before later text arrives', () => {
+    const code = '```typescript\nconst stable = true\n```\n\n'
+    const { rerender } = render(<AssistantMarkdown text={code} streaming />)
+    const stableCode = screen.getByTestId('code-block-raw')
+    rerender(<AssistantMarkdown text={`${code}later`} streaming />)
+    expect(screen.getByTestId('code-block-raw')).toBe(stableCode)
+  })
+
+  it('keeps a completed code block DOM node mounted when later blocks stream', () => {
+    const code = '```typescript\nconst stable = true\n```\n\n'
+    const { rerender } = render(<AssistantMarkdown text={`${code}later`} streaming />)
+    const stableCode = screen.getByTestId('code-block-raw')
+    rerender(<AssistantMarkdown text={`${code}later text grows`} streaming />)
+    expect(screen.getByTestId('code-block-raw')).toBe(stableCode)
+    rerender(<AssistantMarkdown text={`${code}later text grows`} streaming={false} />)
+    expect(screen.getByTestId('code-block-raw')).toBe(stableCode)
+  })
+})
 
 describe('splitMarkdownBlocks', () => {
   it('splits completed blocks from the trailing block being written', () => {

@@ -783,12 +783,21 @@ describe('ArtifactViews', () => {
     )
   })
 
-  it('surfaces endpoint errors', async () => {
+  it('treats an unconfigured artifact capture directory as an empty manifest', async () => {
     router.setManifest({ error: 'artifact capture is not configured', status: 404 })
 
     render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
 
-    await screen.findByText(/artifact capture is not configured/i)
+    await screen.findByText('0/0')
+    expect(screen.queryByText(/artifact capture is not configured/i)).toBeNull()
+  })
+
+  it('surfaces genuine endpoint errors', async () => {
+    router.setManifest({ error: 'artifact service unavailable', status: 500 })
+
+    render(<ArtifactExplorerDialog open onOpenChange={() => {}} />)
+
+    await screen.findByText(/artifact service unavailable/i)
   })
 
   it('advances the Run Benchmark wizard from plan to predictions after /eval/swebench/plan succeeds', async () => {

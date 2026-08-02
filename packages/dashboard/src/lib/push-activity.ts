@@ -1,0 +1,77 @@
+import { useEffect } from 'react'
+
+const HEARTBEAT_MS = 15_000
+const USER_IDLE_MS = 5 * 60_000
+const DEVICE_ID_KEY = 'agent-kernel.push-device-id'
+
+export function pushDeviceId(): string {
+  const existing = localStorage.getItem(DEVICE_ID_KEY)
+  if (existing) return existing
+  const created = crypto.randomUUID()
+  localStorage.setItem(DEVICE_ID_KEY, created)
+  return created
+}
+
+/**
+ * Reports whether this dashboard is genuinely being used. A connected
+ * background tab is not active: it must be visible, focused, and have seen
+ * user input within five minutes. Missing heartbeats expire on the host.
+ */
+export function usePushActivityHeartbeat(enabled = true): void {
+  useEffect(() => {
+    if (!enabled) return
+    const id = pushDeviceId()
+    let lastInteractionAt = Date.now()
+    let lastReported: boolean | undefined
+
+    const isActive = (): boolean => document.visibilityState === 'visible'
+      && document.hasFocus()
+      && Date.now() - lastInteractionAt <= USER_IDLE_MS
+
+    const report = (force = false): void => {
+      const active = isActive()
+      if (!force && active === lastReported) return
+      lastReported = active
+      void fetch('/push/activity', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deviceId: id, active }),
+        keepalive: true,
+      }).catch(() => {})
+    }
+    const reportEvent = (): void => report()
+    const interact = (): void => {
+      const wasIdle = Date.now() - lastInteractionAt > USER_IDLE_MS
+      lastInteractionAt = Date.now()
+      if (wasIdle) report(true)
+    }
+    const leave = (): void => {
+      lastReported = false
+      const body = JSON.stringify({ deviceId: id, active: false })
+      if (typeof navigator.sendBeacon === 'function') {
+        navigator.sendBeacon('/push/activity', new Blob([body], { type: 'application/json' }))
+      } else {
+        report(true)
+      }
+    }
+
+    const activityEvents: readonly (keyof WindowEventMap)[] = ['pointerdown', 'keydown', 'touchstart', 'scroll']
+    activityEvents.forEach((event) => window.addEventListener(event, interact, { passive: true }))
+    document.addEventListener('visibilitychange', reportEvent)
+    window.addEventListener('focus', reportEvent)
+    window.addEventListener('blur', reportEvent)
+    window.addEventListener('pagehide', leave)
+    report(true)
+    const timer = window.setInterval(() => report(true), HEARTBEAT_MS)
+    return () => {
+      window.clearInterval(timer)
+      activityEvents.forEach((event) => window.removeEventListener(event, interact))
+      document.removeEventListener('visibilitychange', reportEvent)
+      window.removeEventListener('focus', reportEvent)
+      window.removeEventListener('blur', reportEvent)
+      window.removeEventListener('pagehide', leave)
+      leave()
+    }
+  }, [enabled])
+}

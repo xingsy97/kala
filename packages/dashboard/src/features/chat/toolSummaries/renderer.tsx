@@ -87,12 +87,20 @@ export function toolStatusIcon(ok: boolean): ToolIconRenderer {
 
 export function GroupSummaryRow({
   row,
+  status,
   onClick,
 }: {
   row: SummaryRow
+  status?: 'succeeded' | 'failed' | 'approval' | 'running'
   onClick: () => void
 }): JSX.Element {
-  const { Icon, toneClass } = toolStatusIcon(row.ok)
+  const fallback = toolStatusIcon(row.ok)
+  const Icon = status === 'running' ? LoaderCircle : status === 'approval' ? Clock3 : fallback.Icon
+  const toneClass = status === 'running'
+    ? 'animate-spin text-violet-600 dark:text-violet-300'
+    : status === 'approval'
+      ? 'animate-pulse text-amber-600 dark:text-amber-400'
+      : fallback.toneClass
   const delta = typeof row.secondary === 'object' && row.secondary.kind === 'delta' ? row.secondary : null
   const text = typeof row.secondary === 'string' ? row.secondary : null
   return (
@@ -131,7 +139,7 @@ export function GroupSummaryPreview({
   status,
 }: {
   row: SummaryRow
-  status: 'succeeded' | 'failed' | 'approval' | 'running'
+  status: 'succeeded' | 'failed' | 'approval' | 'running' | 'orphaned'
 }): JSX.Element {
   const fallback = toolStatusIcon(row.ok)
   const Icon = status === 'running'
@@ -143,7 +151,9 @@ export function GroupSummaryPreview({
     ? 'animate-spin text-muted-foreground'
     : status === 'approval'
       ? 'animate-pulse text-amber-600 dark:text-amber-400'
-      : fallback.toneClass
+      : status === 'orphaned'
+        ? 'text-muted-foreground/70'
+        : fallback.toneClass
   const delta = typeof row.secondary === 'object' && row.secondary.kind === 'delta' ? row.secondary : null
   const secondaryText = typeof row.secondary === 'string' ? row.secondary : null
 

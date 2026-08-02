@@ -28,7 +28,7 @@ async function fetchArtifactManifest(): Promise<ArtifactManifest | null> {
 }
 
 function isMissingArtifactDirectory(status: number, message: string | undefined): boolean {
-  if (status === 404 && message?.includes('artifact not found')) return true
+  if (status === 404 && (message?.includes('artifact not found') || message?.includes('artifact capture is not configured'))) return true
   if (!message) return false
   return message.includes('ENOENT') && message.includes('scandir')
 }

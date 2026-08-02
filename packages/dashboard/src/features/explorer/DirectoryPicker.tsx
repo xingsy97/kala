@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, Folder, Home, Loader2, RefreshCw, Slash } from 'lucide-react'
+import { ArrowUp, ChevronRight, File, Folder, Home, Loader2, RefreshCw, Slash } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { DirListResult } from '@agent-kernel/shared'
 
@@ -26,6 +26,7 @@ type Props = {
 }
 
 const MANUAL_LOAD_DEBOUNCE_MS = 400
+const DIRECTORY_REQUEST_TIMEOUT_MS = 10_000
 
 export function DirectoryPicker({
   socket,
@@ -42,6 +43,7 @@ export function DirectoryPicker({
   const [rootPath, setRootPath] = useState<string | null>(null)
   const activeRequestIdRef = useRef<string | null>(null)
   const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const requestTimeoutRef = useRef<number | null>(null)
   const finderScrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -53,6 +55,7 @@ export function DirectoryPicker({
       if (result.workspaceId !== workspaceId) return
       if (result.requestId !== activeRequestIdRef.current) return
       setLoadingPath(null)
+      if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
       onChange(result.path)
       if (result.roots.length > 0) setRootPath(result.roots[0]!)
       setColumns((prev) => {
@@ -73,9 +76,11 @@ export function DirectoryPicker({
     socket.on('server:dir_list', onDirList)
     activeRequestIdRef.current = requestDirs(socket, workspaceId, initialPath)
     setLoadingPath(initialPath ?? '')
+    requestTimeoutRef.current = window.setTimeout(() => showDirectoryTimeout(initialPath ?? ''), DIRECTORY_REQUEST_TIMEOUT_MS)
     return () => {
       socket.off('server:dir_list', onDirList)
       if (manualTimerRef.current) clearTimeout(manualTimerRef.current)
+      if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
     }
     // onChange is a plain setter from the parent; excluded intentionally to
     // avoid re-subscribing on every render.
@@ -90,17 +95,24 @@ export function DirectoryPicker({
     el.scrollLeft = el.scrollWidth
   }, [columns.length])
 
+  const showDirectoryTimeout = (path: string): void => {
+    setLoadingPath(null)
+    setColumns([{ path, entries: [], error: 'Directory request timed out. Check that this workspace executor is online and connected to the same Host.' }])
+  }
+
   const loadPath = (path: string): void => {
     if (!socket || !workspaceId) return
     onChange(path)
     setLoadingPath(path)
     activeRequestIdRef.current = requestDirs(socket, workspaceId, path)
+    if (requestTimeoutRef.current) clearTimeout(requestTimeoutRef.current)
+    requestTimeoutRef.current = window.setTimeout(() => showDirectoryTimeout(path), DIRECTORY_REQUEST_TIMEOUT_MS)
   }
 
   const scheduleManualLoad = (path: string): void => {
     if (manualTimerRef.current) clearTimeout(manualTimerRef.current)
     if (!socket || !workspaceId) return
-    if (!path.startsWith('/')) return
+    if (!isAbsoluteWorkspacePath(path)) return
     manualTimerRef.current = setTimeout(() => {
       manualTimerRef.current = null
       setLoadingPath(path)
@@ -132,7 +144,7 @@ export function DirectoryPicker({
       manualTimerRef.current = null
     }
     const trimmed = value.trim()
-    if (trimmed.length === 0 || !trimmed.startsWith('/')) return
+    if (trimmed.length === 0 || !isAbsoluteWorkspacePath(trimmed)) return
     loadPath(trimmed)
   }
 
@@ -300,26 +312,42 @@ function DirectoryColumn({
         <div className="px-3 py-2 text-xs text-muted-foreground">{t('directory.noSubdirectories')}</div>
       ) : (
         <div className="py-1">
-          {column.entries.map((entry) => (
-            <button
-              key={entry.path}
-              type="button"
-              onClick={() => onOpen(entry.path)}
-              data-testid="finder-dir"
-              className={cn(
-                'flex h-8 w-full items-center gap-2 px-2 text-left text-sm hover:bg-secondary transition-colors',
-                cwd === entry.path && 'bg-primary/10 text-foreground',
-              )}
-            >
-              <Folder className="h-4 w-4 flex-none text-sky-600 dark:text-sky-300" />
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-              {loadingPath === entry.path ? (
-                <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
-              )}
-            </button>
-          ))}
+          {column.entries.map((entry) => {
+            // Older executors omitted `type` because the picker originally
+            // returned directories only. Preserve that behavior for them.
+            const isDirectory = entry.type !== 'file'
+            return (
+              <button
+                key={entry.path}
+                type="button"
+                onClick={isDirectory ? () => onOpen(entry.path) : undefined}
+                data-testid={isDirectory ? 'finder-dir' : 'finder-file'}
+                className={cn(
+                  'flex h-8 w-full items-center gap-2 px-2 text-left text-sm transition-colors',
+                  isDirectory ? 'hover:bg-secondary' : 'cursor-default',
+                  cwd === entry.path && 'bg-primary/10 text-foreground',
+                )}
+              >
+                {isDirectory ? (
+                  <Folder
+                    data-testid="finder-folder-icon"
+                    className="h-4 w-4 flex-none text-sky-600 dark:text-sky-300"
+                  />
+                ) : (
+                  <File
+                    data-testid="finder-file-icon"
+                    className="h-4 w-4 flex-none text-muted-foreground"
+                  />
+                )}
+                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                {isDirectory && loadingPath === entry.path ? (
+                  <Loader2 className="h-3.5 w-3.5 flex-none animate-spin text-muted-foreground" />
+                ) : isDirectory ? (
+                  <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                ) : null}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
@@ -337,6 +365,13 @@ function requestDirs(socket: DashboardSocket, workspaceId: string, path: string 
 }
 
 function parentPath(path: string): string | null {
+  if (isWindowsPath(path)) {
+    const normalized = path.replaceAll('/', '\\').replace(/\\+$/u, '')
+    if (/^[a-z]:$/iu.test(normalized)) return null
+    const index = normalized.lastIndexOf('\\')
+    if (index <= 2) return `${normalized.slice(0, 2)}\\`
+    return normalized.slice(0, index)
+  }
   if (!path.startsWith('/')) return null
   if (path === '/') return null
   const segments = path.split('/').filter((s) => s.length > 0)
@@ -346,14 +381,28 @@ function parentPath(path: string): string | null {
 }
 
 function isWithinRoot(path: string, root: string): boolean {
-  if (path === root) return true
-  const normRoot = root.endsWith('/') ? root : `${root}/`
-  return path.startsWith(normRoot)
+  const windows = isWindowsPath(path) || isWindowsPath(root)
+  const normalize = (value: string): string => windows ? value.replaceAll('/', '\\').toLowerCase() : value
+  const candidate = normalize(path)
+  const normalizedRoot = normalize(root)
+  const separator = windows ? '\\' : '/'
+  return candidate === normalizedRoot || candidate.startsWith(normalizedRoot.endsWith(separator) ? normalizedRoot : normalizedRoot + separator)
 }
 
 type Breadcrumb = { label: string; path: string }
 
 function buildBreadcrumbs(path: string, root: string | null): Breadcrumb[] {
+  if (isWindowsPath(path)) {
+    const normalized = path.replaceAll('/', '\\')
+    const drive = normalized.slice(0, 2)
+    const segments = normalized.slice(2).split('\\').filter(Boolean)
+    const crumbs: Breadcrumb[] = [{ label: drive, path: `${drive}\\` }]
+    for (let i = 0; i < segments.length; i += 1) crumbs.push({ label: segments[i]!, path: `${drive}\\${segments.slice(0, i + 1).join('\\')}` })
+    if (!root || !isWithinRoot(path, root)) return crumbs
+    const normalizedRoot = root.replaceAll('/', '\\').replace(/\\+$/u, '').toLowerCase()
+    const rootIndex = crumbs.findIndex((crumb) => crumb.path.replace(/\\+$/u, '').toLowerCase() === normalizedRoot)
+    return rootIndex >= 0 ? crumbs.slice(rootIndex) : crumbs
+  }
   if (!path.startsWith('/')) return []
   const segments = path.split('/').filter((s) => s.length > 0)
   const crumbs: Breadcrumb[] = []
@@ -376,3 +425,6 @@ function buildBreadcrumbs(path: string, root: string | null): Breadcrumb[] {
   }
   return crumbs
 }
+
+function isWindowsPath(path: string): boolean { return /^[a-z]:[\\/]/iu.test(path) }
+function isAbsoluteWorkspacePath(path: string): boolean { return path.startsWith('/') || isWindowsPath(path) }

@@ -74,6 +74,7 @@ import { cn } from '../../lib/utils.js'
 import type { TranscriptItem } from '../../transcript.js'
 import { DiffPreview, hasDiffPreviewForTool } from './DiffPreview.js'
 import { CodeBlock } from './CodeBlock.js'
+import { MermaidBlock } from './MermaidBlock.js'
 import { CompactFeedbackRow, useElapsedSeconds, type CompactStatus } from './InlineStatusRow.js'
 import {
   type GroupedContentItem,
@@ -88,6 +89,7 @@ import type { DashboardSocket } from '../../session.js'
 import { RevealCursor, RevealTail, canFadeRevealTail } from './text-reveal/index.js'
 import { VirtualTranscript, type VirtualTranscriptHandle } from './VirtualTranscript.js'
 import { chatDisplayStyle, type ChatDisplayPrefs } from './chatDisplayPrefs.js'
+import { transcriptItemKey } from './transcript-key.js'
 
 type Props = {
   messages?: readonly Message[]
@@ -96,6 +98,8 @@ type Props = {
   onEditAndRerun?: (seq: number, text: string) => void
   onSuggest?: (text: string) => void
   pendingApprovals?: readonly ApprovalRequiredEvent[]
+  /** Authoritative live calls from AgentState.pendingCalls. */
+  activeToolCallIds?: readonly string[]
   onApprovalDecision?: (callId: string, decision: 'approve' | 'reject') => void
   onReadOverflow?: (callId: string) => Promise<{ content?: string; error?: string }>
   footerSlot?: JSX.Element | null
@@ -107,6 +111,7 @@ type Props = {
    * no socket — degrade to a static replay from the `<sub_agent>` envelope.
    */
   parentSessionId?: string
+  sessionId?: string | null
   socket?: DashboardSocket | null
   /**
    * Two-way pinned-to-bottom binding. `pinned` starts true and flips as the
@@ -136,6 +141,7 @@ export type WorkspaceFileTarget = {
 }
 
 const WorkspaceFileLinkContext = createContext<((target: WorkspaceFileTarget) => void) | null>(null)
+const ArtifactSessionContext = createContext<string | null>(null)
 
 type RenderTranscriptItem = TranscriptItem | {
   kind: 'compact_feedback'
@@ -191,10 +197,12 @@ export function ChatPanel({
   onEditAndRerun,
   onSuggest,
   pendingApprovals,
+  activeToolCallIds,
   onApprovalDecision,
   onReadOverflow,
   footerSlot,
   parentSessionId,
+  sessionId,
   socket,
   pinnedToBottom,
   onPinnedChange,
@@ -240,6 +248,10 @@ export function ChatPanel({
   }
   const approvalByCallId = new Map<string, ApprovalRequiredEvent>()
   for (const a of pendingApprovals ?? []) approvalByCallId.set(a.callId, a)
+  // Null preserves the legacy standalone/demo fallback. The product App always
+  // supplies the authoritative set so an unpaired historical call cannot be
+  // mistaken for live work after compaction, interruption, or recovery.
+  const activeToolCallIdSet = activeToolCallIds === undefined ? null : new Set(activeToolCallIds)
 
   // Drop tool messages whose every tool_result is already rendered inline in a
   // grouped assistant tool-call card. Otherwise MessageRow returns null but
@@ -269,7 +281,10 @@ export function ChatPanel({
         },
       )
       if (transcriptGroup) {
-        for (const entry of transcriptGroup.before) {
+        const narrativeEntries = toolCardMode === 'dots'
+          ? [...transcriptGroup.before, ...transcriptGroup.after]
+          : transcriptGroup.before
+        for (const entry of narrativeEntries) {
           kept.push(entry.item)
           mapping.push(entry.messageIndex)
           hideHeader.push(prevRole === 'assistant')
@@ -286,10 +301,12 @@ export function ChatPanel({
         mapping.push(transcriptGroup.firstMessageIndex)
         hideHeader.push(prevRole === 'assistant')
         prevRole = 'assistant'
-        for (const entry of transcriptGroup.after) {
-          kept.push(entry.item)
-          mapping.push(entry.messageIndex)
-          hideHeader.push(true)
+        if (toolCardMode !== 'dots') {
+          for (const entry of transcriptGroup.after) {
+            kept.push(entry.item)
+            mapping.push(entry.messageIndex)
+            hideHeader.push(true)
+          }
         }
         for (const call of transcriptGroup.group.calls) groupedIds.add(call.callId)
         mi = transcriptGroup.lastMessageIndex
@@ -379,6 +396,7 @@ export function ChatPanel({
             liveToolActivityTailCount={liveToolActivityTailCount}
             toolExecutionStartedAt={toolExecutionStartedAt}
             toolCardMode={toolCardMode}
+            activeToolCallIds={activeToolCallIdSet}
           />
         )
       }
@@ -409,6 +427,7 @@ export function ChatPanel({
           socket={socket ?? null}
           liveToolActivityTailCount={liveToolActivityTailCount}
           toolCardMode={toolCardMode}
+          activeToolCallIds={activeToolCallIdSet}
           assistantRerunTarget={assistantRerunTarget}
         />
       )
@@ -429,6 +448,7 @@ export function ChatPanel({
       liveToolActivityTailCount,
       toolExecutionStartedAt,
       toolCardMode,
+      activeToolCallIdSet,
     ],
   )
 
@@ -440,9 +460,7 @@ export function ChatPanel({
           ? `compact-feedback-${item.status.kind}`
         : item.kind === 'tool_activity'
           ? `tool-activity-${item.group.firstCallId}`
-        : item.kind === 'pending_user_message'
-          ? `pending-${item.id}`
-          : `message-${itemIndex}`,
+        : transcriptItemKey(item, itemIndex),
     [],
   )
 
@@ -463,6 +481,7 @@ export function ChatPanel({
   const displayStyle = chatDisplayStyle(displayPrefs)
 
   return (
+    <ArtifactSessionContext.Provider value={sessionId ?? parentSessionId ?? null}>
     <WorkspaceFileLinkContext.Provider value={onOpenWorkspaceFile ?? null}>
       <OverflowReaderContext.Provider value={onReadOverflow ?? null}>
       <div className="relative flex h-full w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden" style={displayStyle}>
@@ -515,6 +534,7 @@ export function ChatPanel({
       </div>
       </OverflowReaderContext.Provider>
     </WorkspaceFileLinkContext.Provider>
+    </ArtifactSessionContext.Provider>
   )
 }
 
@@ -821,6 +841,7 @@ function ToolActivityTranscriptRow({
   liveToolActivityTailCount,
   toolExecutionStartedAt,
   toolCardMode,
+  activeToolCallIds,
 }: {
   item: Extract<RenderTranscriptItem, { kind: 'tool_activity' }>
   highlighted: boolean
@@ -830,6 +851,7 @@ function ToolActivityTranscriptRow({
   liveToolActivityTailCount: number
   toolExecutionStartedAt?: number | null
   toolCardMode: ToolCardMode
+  activeToolCallIds: ReadonlySet<string> | null
 }): JSX.Element {
   if (toolCardMode === 'dots') {
     return (
@@ -868,6 +890,7 @@ function ToolActivityTranscriptRow({
             liveToolActivityTailCount={liveToolActivityTailCount}
             toolExecutionStartedAt={toolExecutionStartedAt}
             toolCardMode={toolCardMode}
+            activeToolCallIds={activeToolCallIds}
           />
         </div>
       </div>
@@ -910,6 +933,7 @@ function ToolActivityTranscriptRow({
           liveToolActivityTailCount={liveToolActivityTailCount}
           toolExecutionStartedAt={toolExecutionStartedAt}
           toolCardMode={toolCardMode}
+          activeToolCallIds={activeToolCallIds}
         />
       </div>
     </div>
@@ -1176,6 +1200,7 @@ function MessageRow({
   socket,
   liveToolActivityTailCount,
   toolCardMode,
+  activeToolCallIds,
   assistantRerunTarget,
 }: {
   index: number
@@ -1195,6 +1220,7 @@ function MessageRow({
   socket?: DashboardSocket | null
   liveToolActivityTailCount: number
   toolCardMode: ToolCardMode
+  activeToolCallIds: ReadonlySet<string> | null
   assistantRerunTarget?: MessageRerunTarget | null
 }): JSX.Element | null {
   const { t } = useTranslation()
@@ -1379,6 +1405,7 @@ function MessageRow({
                     socket={socket ?? null}
                     group={item}
                     approvalByCallId={approvalByCallId}
+                    toolCardMode={toolCardMode}
                   />
                 )
               }
@@ -1391,6 +1418,7 @@ function MessageRow({
                   onApprovalDecision={onApprovalDecision}
                   liveToolActivityTailCount={liveToolActivityTailCount}
                   toolCardMode={toolCardMode}
+                  activeToolCallIds={activeToolCallIds}
                 />
               )
             }
@@ -1661,16 +1689,26 @@ function ImageBlock({
         </span>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-[min(96vw,72rem)] gap-0 overflow-hidden p-0" data-testid="message-image-preview-dialog">
-          <DialogHeader className="bg-card px-4 py-3">
+        <DialogContent
+          className="h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-screen max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-x-0 bg-black p-0 sm:h-[min(92dvh,56rem)] sm:w-[calc(100vw-2rem)] sm:max-w-[72rem] sm:rounded-lg sm:border-x"
+          data-testid="message-image-preview-dialog"
+        >
+          <DialogHeader className="relative min-h-14 justify-center border-b border-white/10 bg-black/90 px-4 py-2 pr-14 text-white sm:py-3">
             <DialogTitle className="text-base">{t('chat.transcript.imagePreview')}</DialogTitle>
-            <DialogDescription>{t('chat.transcript.imagePreviewDescription')}</DialogDescription>
+            <DialogDescription className="hidden text-white/60 sm:block">{t('chat.transcript.imagePreviewDescription')}</DialogDescription>
+            <DialogClose
+              className="absolute right-2 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              aria-label="Close image preview"
+              data-testid="message-image-preview-close"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </DialogClose>
           </DialogHeader>
-          <div className="flex min-h-0 items-center justify-center bg-background p-3 sm:p-4">
+          <div className="flex min-h-0 min-w-0 touch-pan-x touch-pan-y items-center justify-center overflow-auto overscroll-contain bg-black p-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] sm:p-4">
             <img
               src={src}
               alt=""
-              className="max-h-[calc(100dvh-8rem)] max-w-full rounded-md object-contain shadow-lg"
+              className="block max-h-full max-w-full object-contain sm:rounded-md"
               data-testid="message-image-preview-full"
             />
           </div>
@@ -1751,48 +1789,42 @@ export function splitStableMarkdown(text: string): { stable: string; tail: strin
   return { stable: blocks.join(''), tail }
 }
 
-const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
+export const AssistantMarkdown = memo(function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
   const [smoothFade] = useBooleanPref(PREF_SMOOTH_STREAMING_TEXT, true)
-  // While streaming, render every completed block as its own memoized unit so a
-  // new token only re-renders the trailing block; finished blocks never rebuild.
-  if (streaming) {
-    const { blocks, tail } = splitMarkdownBlocks(text)
-    // While a trailing block is actively streaming, render it as plain text with a
-    // persistent per-character fade tail (RevealTail) instead of through
-    // ReactMarkdown. ReactMarkdown re-parses the tail every token, which remounts
-    // any nested fade spans and restarts their animation each frame (invisible
-    // fade + flashing). Completed blocks above keep full markdown + memoization.
-    // The trailing block loses live markdown styling for the brief moment before
-    // it settles into a completed block — an accepted tradeoff for a stable fade.
-    const useFadeTail = smoothFade && canFadeRevealTail(tail)
-    const body = useFadeTail ? (
-      <RevealTail text={tail} />
-    ) : (
-      <MarkdownBody text={tail} streaming />
-    )
-    if (blocks.length > 0) {
-      return (
-        <>
-          {blocks.map((block, index) => (
-            <MarkdownBlock key={index} text={block} />
-          ))}
-          {body}
-        </>
-      )
-    }
-    return body
-  }
-  return <MarkdownBody text={text} streaming={false} />
+  const { blocks, tail } = splitMarkdownBlocks(text)
+  // Every logical block, including the live tail, keeps one position key for
+  // its whole lifetime. When a blank line completes the tail it changes from
+  // live to committed in place instead of replacing MarkdownBody/CodeBlock.
+  // Replacing that subtree made already-rendered code flash as later text arrived.
+  const parts = tail.length > 0 || blocks.length === 0 ? [...blocks, tail] : blocks
+  return (
+    <>
+      {parts.map((block, index) => (
+        <MarkdownBlock
+          key={index}
+          text={block}
+          // A block ending at a blank-line boundary is already committed even
+          // when it is currently the final block. Treating that block as live
+          // until later text arrived changed its cursor/defer props and caused
+          // ReactMarkdown to remount completed code/diagram DOM.
+          streaming={streaming && tail.length > 0 && index === blocks.length}
+          smoothFade={smoothFade}
+        />
+      ))}
+    </>
+  )
 })
 
-// One completed markdown block, memoized on its exact text. During streaming
-// the earlier blocks keep the same text and therefore skip re-rendering.
-const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }): JSX.Element {
-  return <MarkdownBody text={text} streaming={false} />
+// Earlier blocks retain text/lifecycle values and skip rendering while only the
+// live tail receives tokens.
+const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, smoothFade }: { text: string; streaming: boolean; smoothFade: boolean }): JSX.Element {
+  if (streaming && smoothFade && canFadeRevealTail(text)) return <RevealTail text={text} />
+  return <MarkdownBody text={text} streaming={streaming} />
 })
 
 const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
   const onOpenWorkspaceFile = useContext(WorkspaceFileLinkContext)
+  const artifactSessionId = useContext(ArtifactSessionContext)
   const cursorTarget = streaming ? findStreamingCursorTarget(text) : null
   const cursorEndOffset = text.trimEnd().length
   const cursor = <RevealCursor />
@@ -1830,7 +1862,16 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
+        urlTransform={(url) => url.startsWith('artifact://') ? url : url}
         components={{
+          img({ src, alt }) {
+            const match = typeof src === 'string' ? src.match(/^artifact:\/\/([^/?#]+)/) : null
+            if (match && artifactSessionId) {
+              const resolved = `/session-artifacts/${encodeURIComponent(match[1]!)}?sessionId=${encodeURIComponent(artifactSessionId)}`
+              return <ArtifactMarkdownImage src={resolved} alt={alt ?? 'artifact image'} />
+            }
+            return <img src={src} alt={alt ?? ''} />
+          },
           pre({ children, node: _node }) {
             const trailingSlot = shouldPlaceStreamingCursor(cursorTarget, 'code', _node, cursorEndOffset) ? cursor : undefined
             return <MarkdownPre trailingSlot={trailingSlot}>{children}</MarkdownPre>
@@ -1915,6 +1956,25 @@ const MarkdownBody = memo(function MarkdownBody({ text, streaming = false }: { t
     </div>
   )
 })
+
+function ArtifactMarkdownImage({ src, alt }: { src: string; alt: string }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [failed, setFailed] = useState(false)
+  if (failed) return <span className="text-sm text-destructive" role="alert">Image unavailable: {alt}</span>
+  return (
+    <>
+      <button type="button" className="block max-w-full cursor-zoom-in" onClick={() => setOpen(true)} aria-label={`Open image preview: ${alt}`} data-testid="artifact-markdown-image">
+        <img src={src} alt={alt} onError={() => setFailed(true)} loading="lazy" />
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex h-[calc(var(--ak-viewport-h,100dvh)-1rem)] w-[calc(100vw-1rem)] max-w-none items-center justify-center bg-background/98 p-4 sm:max-w-6xl">
+          <DialogTitle className="sr-only">{alt}</DialogTitle>
+          <img src={src} alt={alt} className="max-h-full max-w-full object-contain" />
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
 
 type StreamingCursorTarget = 'p' | 'li' | 'code' | 'h1' | 'h2' | 'h3' | 'h4' | 'td' | 'th'
 
@@ -2024,9 +2084,11 @@ function MarkdownPre({ children, trailingSlot }: { children?: React.ReactNode; t
     const className = code.props.className
     const match = /language-(\w+)/.exec(className ?? '')
     const raw = reactNodeText(code.props.children).replace(/\n$/, '')
-    return <CodeBlock code={raw} lang={match?.[1]} trailingSlot={trailingSlot} />
+    const lang = match?.[1]?.toLowerCase()
+    if (lang === 'mermaid') return <MermaidBlock code={raw} deferRender={Boolean(trailingSlot)} />
+    return <CodeBlock code={raw} lang={lang} trailingSlot={trailingSlot} deferEnhancement={Boolean(trailingSlot)} />
   }
-  return <CodeBlock code={reactNodeText(children).replace(/\n$/, '')} trailingSlot={trailingSlot} />
+  return <CodeBlock code={reactNodeText(children).replace(/\n$/, '')} trailingSlot={trailingSlot} deferEnhancement={Boolean(trailingSlot)} />
 }
 
 function reactNodeText(node: React.ReactNode): string {
@@ -2838,6 +2900,7 @@ function ToolCallGroupBlock({
   liveToolActivityTailCount = DEFAULT_LIVE_TOOL_ACTIVITY_TAIL_COUNT,
   toolExecutionStartedAt,
   toolCardMode = 'dots',
+  activeToolCallIds,
 }: {
   group: ToolCallGroup
   messageIndex: number
@@ -2846,6 +2909,7 @@ function ToolCallGroupBlock({
   liveToolActivityTailCount?: number
   toolExecutionStartedAt?: number | null
   toolCardMode?: ToolCardMode
+  activeToolCallIds: ReadonlySet<string> | null
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null)
@@ -2867,9 +2931,9 @@ function ToolCallGroupBlock({
         ? toolLifecycleBadge('succeeded')
         : toolLifecycleBadge('failed')
       : singleCall
-        ? toolLifecycleBadge('running')
+        ? toolLifecycleBadge(isActiveToolCall(singleCall.callId, activeToolCallIds) ? 'running' : 'orphaned')
         : null
-  const groupLifecycle = summarizeToolGroupLifecycle(group, approvalByCallId)
+  const groupLifecycle = summarizeToolGroupLifecycle(group, approvalByCallId, activeToolCallIds)
   const toolMix = summarizeToolMix(group.calls)
   const primaryTargets = summarizePrimaryTargets(rows, group.mixed ? 2 : 1)
   const groupTitle = group.mixed ? 'Tool activity' : group.toolName
@@ -2877,12 +2941,12 @@ function ToolCallGroupBlock({
   const unresolvedTailCallIds = liveTailCount > 0
     ? group.calls
         .slice(-liveTailCount)
-        .filter((call) => !group.results.has(call.callId) && !approvalByCallId.has(call.callId))
+        .filter((call) => !group.results.has(call.callId) && !approvalByCallId.has(call.callId) && isActiveToolCall(call.callId, activeToolCallIds))
         .map((call) => call.callId)
     : []
   const autoRevealTail = group.mixed && unresolvedTailCallIds.length > 0
   const visibleTailCallIds = autoRevealTail ? new Set(unresolvedTailCallIds) : null
-  const dots = toolActivityDots(group, rows, approvalByCallId)
+  const dots = toolActivityDots(group, rows, approvalByCallId, activeToolCallIds)
   const [iconScale] = useNumberPref(PREF_TOOL_ACTIVITY_ICON_SCALE, DEFAULT_TOOL_ACTIVITY_ICON_SCALE, { min: 100, max: 200 })
   const iconPixels = Math.round(14 * iconScale / 100)
   const nodePixels = iconPixels + 10
@@ -2906,6 +2970,7 @@ function ToolCallGroupBlock({
     ? Math.max(2, Math.floor((railBudget - arrowWidth - omissionWidth + gapWidth) / (nodePixels + gapWidth)))
     : limitWithoutOmission
   const visibleDots = middleTruncatedToolActivityDots(dots, visibleDotLimit)
+  const omittedDotCount = Math.max(0, dots.length - visibleDots.length)
   const collapsedDots = toolCardMode === 'dots' && !open
   const showRows = open || anyPending || (!collapsedDots && autoRevealTail)
   const runningCallId = [...visibleDots].reverse().find((dot) => dot.status === 'running')?.callId ?? null
@@ -2981,8 +3046,8 @@ function ToolCallGroupBlock({
                 >
                   <ToolActivityGlyph dot={dot} size={iconPixels} />
                 </button>
-                {dots.length > visibleDots.length && index === Math.ceil(visibleDots.length / 2) - 1 ? (
-                  <button type="button" onClick={toggleOpen} className="ml-2 flex h-6 min-w-8 flex-none items-center justify-center rounded-full bg-background px-1 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground ring-1 ring-inset ring-border/80 hover:bg-muted hover:text-foreground" title={`${dots.length - visibleDots.length} omitted tool calls`} aria-label={`${dots.length - visibleDots.length} omitted tool calls; expand to inspect`} data-testid="tool-activity-omission">···</button>
+                {omittedDotCount > 0 && index === Math.ceil(visibleDots.length / 2) - 1 ? (
+                  <button type="button" onClick={toggleOpen} className="relative z-20 ml-2 flex h-6 min-w-9 flex-none items-center justify-center rounded-full bg-background px-1.5 font-mono text-[11px] font-bold tabular-nums text-foreground shadow-[0_0_0_4px_hsl(var(--background))] ring-1 ring-inset ring-foreground/30 hover:bg-muted" title={`${omittedDotCount} omitted tool calls`} aria-label={`${omittedDotCount} omitted tool calls; expand to inspect`} data-testid="tool-activity-omission">+{omittedDotCount}</button>
                 ) : null}
               </div>
             ))}
@@ -3134,6 +3199,11 @@ function ToolCallGroupBlock({
               >
                 <GroupSummaryRow
                   row={row}
+                  status={approvalByCallId.has(row.callId)
+                    ? 'approval'
+                    : group.results.has(row.callId)
+                      ? group.results.get(row.callId)!.ok ? 'succeeded' : 'failed'
+                      : 'running'}
                   onClick={() =>
                     setExpandedCallId((cur) => (cur === row.callId ? null : row.callId))
                   }
@@ -3161,7 +3231,7 @@ function ToolCallGroupBlock({
 
 type ToolActivityDot = {
   callId: string
-  status: 'succeeded' | 'failed' | 'approval' | 'running'
+  status: 'succeeded' | 'failed' | 'approval' | 'running' | 'orphaned'
   kind: 'read' | 'write' | 'shell' | 'web' | 'todo' | 'memory' | 'agent' | 'other'
   title: string
 }
@@ -3170,6 +3240,7 @@ function toolActivityDots(
   group: ToolCallGroup,
   rows: readonly SummaryRow[],
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>,
+  activeToolCallIds: ReadonlySet<string> | null,
 ): ToolActivityDot[] {
   return group.calls.map((call) => {
     const result = group.results.get(call.callId)
@@ -3178,7 +3249,7 @@ function toolActivityDots(
       ? 'approval'
       : result
         ? result.ok ? 'succeeded' : 'failed'
-        : 'running'
+        : isActiveToolCall(call.callId, activeToolCallIds) ? 'running' : 'orphaned'
     const target = row?.primary && row.primary !== call.callId ? ` · ${row.primary}` : ''
     const delta = typeof row?.secondary === 'object' && row.secondary.kind === 'delta'
       ? ` · +${row.secondary.additions} -${row.secondary.deletions}`
@@ -3201,7 +3272,7 @@ function toolActivityKind(toolName: string): ToolActivityDot['kind'] {
   if (FILE_MUTATION_TOOLS.has(toolName)) return 'write'
   if (SHELL_TOOLS.has(toolName)) return 'shell'
   if (toolName === 'websearch' || toolName === 'webfetch') return 'web'
-  if (toolName === 'todowrite') return 'todo'
+  if (toolName === 'todowrite' || toolName === 'todo_graph') return 'todo'
   if (toolName === 'memory') return 'memory'
   if (toolName === 'agent') return 'agent'
   return 'other'
@@ -3210,7 +3281,7 @@ function toolActivityKind(toolName: string): ToolActivityDot['kind'] {
 function ToolActivityGlyph({ dot, size }: { dot: ToolActivityDot; size: number }): JSX.Element {
   const Icon = dot.kind === 'read' ? Eye : dot.kind === 'write' ? PenLine : dot.kind === 'shell' ? Terminal : dot.kind === 'web' ? Globe : dot.kind === 'todo' ? ListChecks : dot.kind === 'memory' ? Brain : dot.kind === 'agent' ? Bot : Wrench
   return (
-    <span data-shape={dot.kind} className={cn('relative flex items-center justify-center rounded-full transition-transform group-hover/dot:scale-110', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300')} style={{ width: size, height: size }}>
+    <span data-shape={dot.kind} className={cn('relative flex items-center justify-center rounded-full transition-transform group-hover/dot:scale-110', dot.status === 'succeeded' && 'text-emerald-600 dark:text-emerald-400', dot.status === 'failed' && 'text-rose-600 dark:text-rose-400', dot.status === 'approval' && 'text-amber-500', dot.status === 'running' && 'text-violet-600 dark:text-violet-300', dot.status === 'orphaned' && 'text-muted-foreground/70')} style={{ width: size, height: size }}>
       {dot.status === 'running' ? <span className="absolute inset-[-3px] animate-ping rounded-full bg-violet-500/25" aria-hidden="true" /> : null}
       {dot.status === 'running' ? <span className="absolute inset-[-2px] animate-pulse rounded-full ring-2 ring-violet-500/70 shadow-[0_0_8px_hsl(263_70%_60%/0.65)]" aria-hidden="true" /> : null}
       <Icon className={cn('relative stroke-[2.2]', dot.status === 'running' && 'animate-pulse')} style={{ width: size, height: size }} aria-hidden="true" />
@@ -3279,9 +3350,14 @@ function toolLifecycleBadge(kind: ToolLifecycleKind): { label: string; className
   return { label: 'Succeeded', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' }
 }
 
+function isActiveToolCall(callId: string, activeToolCallIds: ReadonlySet<string> | null): boolean {
+  return activeToolCallIds === null || activeToolCallIds.has(callId)
+}
+
 function summarizeToolGroupLifecycle(
   group: ToolCallGroup,
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>,
+  activeToolCallIds: ReadonlySet<string> | null,
 ): Partial<Record<ToolLifecycleKind, number>> {
   const summary: Partial<Record<ToolLifecycleKind, number>> = {}
   for (const call of group.calls) {
@@ -3292,7 +3368,7 @@ function summarizeToolGroupLifecycle(
         ? result.ok
           ? 'succeeded'
           : 'failed'
-        : 'running'
+        : isActiveToolCall(call.callId, activeToolCallIds) ? 'running' : 'orphaned'
     summary[kind] = (summary[kind] ?? 0) + 1
   }
   return summary

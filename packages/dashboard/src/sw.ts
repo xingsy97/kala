@@ -80,6 +80,13 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting()
   }
+  if (event.data?.type === 'AUTH_LOGOUT') {
+    event.waitUntil((async () => {
+      const delivered = await self.registration.getNotifications()
+      delivered.forEach((notification) => notification.close())
+      await caches.delete(RUNTIME_ICON_CACHE)
+    })())
+  }
 })
 
 // Kill-switch route: hitting /__sw_kill triggers self-unregistration,
@@ -150,6 +157,11 @@ self.addEventListener('notificationclick', (event) => {
   const target = (event.notification.data as { url?: string } | null)?.url ?? '/'
   event.waitUntil(
     (async () => {
+      // A notification tap means the user has entered the app. Dismiss every
+      // delivered notification from this registration so iOS can recompute its
+      // Home Screen badge instead of retaining stale notification-center count.
+      const delivered = await self.registration.getNotifications()
+      delivered.forEach((notification) => notification.close())
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       // If a dashboard tab is already open, focus it and let the page handle
       // the deep-link via postMessage (avoids a full reload that would drop

@@ -253,6 +253,23 @@ export const todowriteRenderer: GroupedToolRenderer = ({ calls, results }) => {
   })
 }
 
+export const todoGraphRenderer: GroupedToolRenderer = ({ calls, results }) => calls.map((call) => {
+  const result = results.get(call.callId)
+  let primary = 'Update task graph'
+  let secondary: string | undefined
+  if (result?.ok) {
+    try {
+      const snapshot = JSON.parse(result.content) as { summary?: { total?: number; completed?: number; active?: number; ready?: number; blocked?: number } }
+      const summary = snapshot.summary
+      if (summary) {
+        primary = `${summary.total ?? 0} tasks · ${summary.active ?? 0} active`
+        secondary = `${summary.completed ?? 0} done · ${summary.ready ?? 0} ready · ${summary.blocked ?? 0} blocked`
+      }
+    } catch { /* malformed results use the generic label */ }
+  }
+  return { callId: call.callId, primary, ...(secondary ? { secondary } : {}), ok: result ? result.ok : true }
+})
+
 export const lsRenderer: GroupedToolRenderer = ({ calls, results }) => {
   return calls.map((c) => {
     const path = asString(c.input.path ?? '.')
@@ -286,6 +303,7 @@ export const RENDERERS: Record<string, GroupedToolRenderer> = {
   glob: globRenderer,
   ls: lsRenderer,
   todowrite: todowriteRenderer,
+  todo_graph: todoGraphRenderer,
 }
 
 export function pickRenderer(toolName: string): GroupedToolRenderer {

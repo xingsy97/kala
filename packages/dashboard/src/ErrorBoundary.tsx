@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { Trans, useTranslation } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 
-import { ScrollArea } from './components/ui/scroll-area.js'
+import { ProductState } from './components/ui/product-state.js'
 import { Typewriter } from './components/Typewriter.js'
 
 type Props = {
@@ -31,26 +31,17 @@ export class ErrorBoundary extends Component<Props, State> {
 
 function ErrorBoundaryFallback({ message }: { message: string }): JSX.Element {
   const { t } = useTranslation()
+  const diagnostics = `Agent RunLab dashboard render failure\n${message}`
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
-      <div className="flex max-w-lg flex-col gap-3 rounded-lg border border-border bg-card p-5 shadow-sm">
-        <div className="text-sm font-semibold"><Trans i18nKey="errorBoundary.title" /></div>
-        <div className="text-sm text-muted-foreground">
-          <Typewriter text={t('errorBoundary.body')} charMs={20} />
-        </div>
-        <ScrollArea className="max-h-40 rounded bg-muted">
-          <pre className="p-3 text-xs text-muted-foreground">
-            {message}
-          </pre>
-        </ScrollArea>
-        <button
-          type="button"
-          className="self-start rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-          onClick={() => window.location.reload()}
-        >
-          <Trans i18nKey="common.reload" />
-        </button>
-      </div>
-    </div>
+    <main className="grid min-h-screen place-items-center bg-background px-4 text-foreground">
+      <ProductState
+        kind="fatal"
+        title={t('errorBoundary.title')}
+        description={t('errorBoundary.body')}
+        detail={<><Typewriter text={message} charMs={5} /></>}
+        primary={{ label: t('common.reload'), onClick: () => window.location.reload() }}
+        secondary={{ label: 'Copy diagnostics', onClick: () => { void navigator.clipboard?.writeText(diagnostics) } }}
+      />
+    </main>
   )
 }

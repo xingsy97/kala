@@ -1,7 +1,14 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { Dialog, DialogContent, DialogTitle } from './dialog.js'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogTitle,
+  dialogMobileSheetClassName,
+  dialogTouchCloseClassName,
+} from './dialog.js'
 
 describe('Dialog motion classes', () => {
   it('uses shared motion classes for overlay and content', () => {
@@ -16,5 +23,18 @@ describe('Dialog motion classes', () => {
     expect(screen.getByTestId('dialog-content').className).toContain('ak-motion-dialog')
     const overlay = document.querySelector('.ak-drawer-overlay')
     expect(overlay?.className ?? '').toContain('ak-drawer-overlay')
+  })
+
+  it('exports one mobile sheet and touch-close contract for feature dialogs', () => {
+    expect(dialogMobileSheetClassName).toContain('var(--ak-viewport-h,100dvh)')
+    expect(dialogMobileSheetClassName).toContain('env(safe-area-inset-bottom)')
+    expect(dialogMobileSheetClassName).toContain('!bottom-0')
+    expect(dialogTouchCloseClassName).toContain('h-11 w-11')
+  })
+
+  it('provides a dedicated internally scrolling body region', () => {
+    render(<DialogBody data-testid="dialog-body">Body</DialogBody>)
+    expect(screen.getByTestId('dialog-body').className).toContain('overflow-y-auto')
+    expect(screen.getByTestId('dialog-body').className).toContain('min-h-0')
   })
 })

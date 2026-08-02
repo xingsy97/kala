@@ -2,7 +2,7 @@ import type { ModelInfo, ServerModelsPayload } from '@agent-kernel/shared'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 /** Loads the available models from the host, with a manual reload. */
-export function useModels(): { models: readonly ModelInfo[]; defaultModel: string; reload(): void } {
+export function useModels(enabled = true): { models: readonly ModelInfo[]; defaultModel: string; reload(): void } {
   const client = useQueryClient()
   const query = useQuery({
     queryKey: ['models'],
@@ -12,6 +12,8 @@ export function useModels(): { models: readonly ModelInfo[]; defaultModel: strin
       return (await r.json()) as ServerModelsPayload
     },
     staleTime: 60_000,
+    enabled,
+    retry: false,
   })
   return {
     models: query.data?.models ?? [],

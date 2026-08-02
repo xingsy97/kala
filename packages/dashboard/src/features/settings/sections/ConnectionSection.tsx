@@ -53,10 +53,10 @@ export function ConnectionSection(): JSX.Element {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 md:space-y-6">
       <SectionHeader title={t('settings.connection.title')} subtitle={t('settings.connection.subtitle')} />
 
-      <div className="space-y-3 rounded-md bg-card/60 p-4 text-sm ring-1 ring-border/50">
+      <div className="space-y-2.5 rounded-xl bg-card/60 p-4 text-sm ring-1 ring-border/50 md:space-y-3 md:rounded-md">
         <div>
           <div className="text-xs uppercase tracking-wider text-muted-foreground">{t('settings.connection.current')}</div>
           <div className="mt-1 break-all font-mono">{current.url || t('settings.connection.none')}</div>
@@ -67,11 +67,12 @@ export function ConnectionSection(): JSX.Element {
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 rounded-xl bg-card/30 p-4 ring-1 ring-border/40 md:rounded-none md:bg-transparent md:p-0 md:ring-0">
         <label className="block text-sm font-medium">{t('settings.connection.override')}</label>
         <input
           type="url"
-          className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="settings-connection-endpoint"
+          className="h-11 w-full rounded-lg border border-input bg-background px-3 font-mono text-base outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring md:h-auto md:rounded-md md:py-2 md:text-sm"
           placeholder={window.location.origin}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -80,18 +81,18 @@ export function ConnectionSection(): JSX.Element {
           {t('settings.connection.crossOriginPrefix')}
           {' '}<code className="rounded bg-muted px-1">AGENT_KERNEL_ALLOWED_ORIGINS</code>.
         </div>
-        <div className="grid gap-2 sm:flex sm:flex-wrap">
-          <Button size="sm" className="w-full sm:w-auto" onClick={save}>{t('common.save')}</Button>
-          <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => void test()} disabled={testState.kind === 'testing'}>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button data-testid="settings-connection-save" className="h-10 rounded-lg px-5 md:h-7 md:rounded md:px-2" onClick={save}>{t('common.save')}</Button>
+          <Button data-testid="settings-connection-test" variant="outline" className="h-10 rounded-lg px-4 md:h-7 md:rounded md:px-2" onClick={() => void test()} disabled={testState.kind === 'testing'}>
             {testState.kind === 'testing' ? t('settings.connection.testing') : t('settings.connection.test')}
           </Button>
-          <Button size="sm" variant="ghost" className="w-full sm:w-auto" onClick={reset}>{t('settings.connection.reset')}</Button>
+          <Button data-testid="settings-connection-reset" variant="ghost" className="ml-auto h-10 rounded-lg px-3 text-muted-foreground md:ml-0 md:h-7 md:rounded md:px-2" onClick={reset}>{t('settings.connection.reset')}</Button>
         </div>
         {testState.kind === 'ok' && (
-          <div className="text-xs text-emerald-500">✓ {testState.msg}</div>
+          <div className="text-xs text-emerald-500" data-testid="settings-connection-result">✓ {testState.msg}</div>
         )}
         {testState.kind === 'error' && (
-          <div className="text-xs text-red-500">✗ {testState.msg}</div>
+          <div className="text-xs text-red-500" data-testid="settings-connection-result" role="alert">✗ {testState.msg}</div>
         )}
       </div>
     </div>

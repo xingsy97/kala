@@ -3,12 +3,30 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '@agent-kernel/kernel'
 
 import type { TimelineEntry } from './session.js'
-import { reconcilePendingUserMessages, visibleMessages, visibleTranscript } from './transcript.js'
+import { appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, visibleMessages, visibleTranscript } from './transcript.js'
 
 const system: Message = {
   role: 'system',
   content: [{ type: 'text', text: 'sys' }],
 }
+
+describe('appendTranscriptBaseItems', () => {
+  it('preserves historical item identity when timeline only appends', () => {
+    const first: TimelineEntry = { seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'one' }, effects: [] }
+    const second: TimelineEntry = { seq: 2, ts: '2026-01-01T00:00:01Z', event: { kind: 'user_message', text: 'two' }, effects: [] }
+    const base = transcriptBaseItems([], [first])
+    const next = appendTranscriptBaseItems(base, [first], [first, second])
+    expect(next).not.toBeNull()
+    expect(next![0]).toBe(base[0])
+    expect(next).toHaveLength(2)
+  })
+
+  it('falls back when existing history identity changes', () => {
+    const first: TimelineEntry = { seq: 1, ts: '2026-01-01T00:00:00Z', event: { kind: 'user_message', text: 'one' }, effects: [] }
+    const replacement: TimelineEntry = { ...first, event: { kind: 'user_message', text: 'changed' } }
+    expect(appendTranscriptBaseItems(transcriptBaseItems([], [first]), [first], [replacement])).toBeNull()
+  })
+})
 
 describe('visibleMessages', () => {
   it('keeps event-log transcript visible after compacted state messages shrink', () => {

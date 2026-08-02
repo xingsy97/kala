@@ -25,11 +25,12 @@ import {
   Loader2,
   Shield,
   Square,
+  Workflow,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { ToolCallContent } from '@agent-kernel/kernel'
-import type { ApprovalRequiredEvent } from '@agent-kernel/shared'
+import type { ApprovalRequiredEvent, ToolCardMode } from '@agent-kernel/shared'
 
 import { cn } from '../../lib/utils.js'
 import { BorderBeam } from '../../components/ui/border-beam.js'
@@ -49,6 +50,7 @@ type Props = {
   socket: DashboardSocket | null
   group: ToolCallGroup
   approvalByCallId: ReadonlyMap<string, ApprovalRequiredEvent>
+  toolCardMode?: ToolCardMode
 }
 
 export function SubAgentCard(props: Props): JSX.Element {
@@ -68,6 +70,7 @@ export function SubAgentCard(props: Props): JSX.Element {
             socket={props.socket}
             result={props.group.results.get(call.callId) ?? null}
             approval={props.approvalByCallId.get(call.callId) ?? null}
+            dotsMode={props.toolCardMode === 'dots'}
           />
         ))}
       </div>
@@ -83,6 +86,7 @@ export function SubAgentCard(props: Props): JSX.Element {
           socket={props.socket}
           result={props.group.results.get(call.callId) ?? null}
           approval={props.approvalByCallId.get(call.callId) ?? null}
+          dotsMode={props.toolCardMode === 'dots'}
         />
       ))}
     </div>
@@ -102,6 +106,7 @@ type RowProps = {
    * completed rows so a grid of 4 stays readable.
    */
   compact?: boolean
+  dotsMode?: boolean
 }
 
 const SubAgentRow = memo(function SubAgentRow({
@@ -110,6 +115,7 @@ const SubAgentRow = memo(function SubAgentRow({
   socket,
   result,
   compact = false,
+  dotsMode = false,
 }: RowProps): JSX.Element {
   const { t } = useTranslation()
   const envelope = result ? parseSubAgentEnvelope(result.content) : null
@@ -183,6 +189,28 @@ const SubAgentRow = memo(function SubAgentRow({
     if (!compact && (status === 'running' || status === 'failed' || status === 'cancelled')) setOpen(true)
     if (compact && status === 'running') setOpen(true)
   }, [status, compact])
+
+  if (dotsMode && !open && terminal) {
+    const label = `${t('chat.subAgent.label')}${agentType ? ` · ${agentType}` : ''} · ${statusLabel(status, t)}${turns > 0 ? ` · ${t('chat.subAgent.turn', { count: turns })}` : ''}`
+    return (
+      <div className="w-fit" data-testid={`sub-agent-row-${call.callId}`} data-sub-agent-status={status}>
+        <button
+          type="button"
+          onClick={() => withViewTransition(() => setOpen(true))}
+          className={cn(
+            'inline-flex h-8 w-8 items-center justify-center rounded-full bg-background ring-1 ring-border/70 ring-offset-1 ring-offset-background transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            status === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
+          )}
+          title={label}
+          aria-label={label}
+          data-testid={`sub-agent-dot-${call.callId}`}
+          data-sub-agent-toggle={call.callId}
+        >
+          {status === 'completed' ? <Workflow className="h-4 w-4" aria-hidden="true" /> : <AlertCircle className="h-4 w-4" aria-hidden="true" />}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div

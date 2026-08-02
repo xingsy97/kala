@@ -102,7 +102,7 @@ export function NewSessionDialog({
   const initialPath = selectedWorkspace ? initialPathFor(selectedWorkspace) : undefined
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && !submitting) onCancel() }}>
       <DialogContent className="h-[min(90dvh,44rem)] max-w-4xl overflow-hidden p-0 gap-0 grid-rows-[auto_minmax(0,1fr)_auto]" data-testid="new-session-dialog">
         <DialogHeader className="border-b border-border/50 px-4 py-3">
           <DialogTitle>{t('dialogs.newSession')}</DialogTitle>
@@ -195,7 +195,7 @@ export function NewSessionDialog({
           </div>
         ) : null}
         <DialogFooter className="border-t border-border/50 px-4 py-3">
-          <Button variant="outline" onClick={onCancel} data-testid="workspace-picker-cancel">
+          <Button variant="outline" onClick={onCancel} disabled={submitting} data-testid="workspace-picker-cancel">
             {t('common.cancel')}
           </Button>
           <Button

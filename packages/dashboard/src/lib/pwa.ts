@@ -39,6 +39,7 @@ const NOOP_CONTROLLER: PwaController = {
 }
 
 const UPDATE_POLL_INTERVAL_MS = 30 * 60 * 1000
+const UPDATE_DEDUPE_MS = 5_000
 
 export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
   if (typeof window === 'undefined') return NOOP_CONTROLLER
@@ -50,6 +51,16 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
 
   let updateSW: ((reloadPage?: boolean) => Promise<void>) | undefined
   let pollTimer: ReturnType<typeof setInterval> | undefined
+  let lastUpdateCheckAt = 0
+  let updateCheck: Promise<void> | null = null
+  const checkRegistration = (registration: ServiceWorkerRegistration, force = false): Promise<void> => {
+    const now = Date.now()
+    if (updateCheck) return updateCheck
+    if (!force && now - lastUpdateCheckAt < UPDATE_DEDUPE_MS) return Promise.resolve()
+    lastUpdateCheckAt = now
+    updateCheck = registration.update().then(() => undefined, () => undefined).finally(() => { updateCheck = null })
+    return updateCheck
+  }
 
   const load = async (): Promise<void> => {
     try {
@@ -67,7 +78,7 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
             pollTimer = setInterval(() => {
               // Ignore rejections: a transient network failure just means we
               // retry in 30 minutes.
-              registration.update().catch(() => {})
+              void checkRegistration(registration, true)
             }, UPDATE_POLL_INTERVAL_MS)
             // Trigger an immediate update check whenever the tab regains
             // visibility (returning from another app, unlocking the phone,
@@ -76,7 +87,7 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
             // where the user briefly left the app.
             const onVisibility = (): void => {
               if (document.visibilityState !== 'visible') return
-              registration.update().catch(() => {})
+              void checkRegistration(registration)
             }
             document.addEventListener('visibilitychange', onVisibility)
             // Same idea for `focus`, which fires in browsers where
@@ -124,7 +135,7 @@ export function initPwa(handlers: PwaLifecycleHandlers): PwaController {
     },
     checkForUpdate: async () => {
       const registration = await navigator.serviceWorker.getRegistration()
-      if (registration) await registration.update()
+      if (registration) await checkRegistration(registration, true)
     },
   }
 }

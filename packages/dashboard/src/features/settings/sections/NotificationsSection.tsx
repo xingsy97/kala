@@ -1,4 +1,4 @@
-import type { DesktopNotificationKind } from '@agent-kernel/shared/push'
+import type { DesktopNotificationKind, PushDevice } from '@agent-kernel/shared/push'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -18,6 +18,7 @@ import {
   type PushSupport,
 } from '../../../lib/push.js'
 import { PREF_APP_BADGE_ENABLED, useBooleanPref } from '../../../lib/prefs.js'
+import { pushDeviceId } from '../../../lib/push-activity.js'
 import { InterfaceToggle, SectionHeader, Toggle } from '../controls.js'
 
 export function NotificationsSection(): JSX.Element {
@@ -27,14 +28,13 @@ export function NotificationsSection(): JSX.Element {
     <div>
       <SectionHeader
         title={t('settings.sections.notifications.label')}
-        subtitle={t('settings.notifications.subtitle')}
+        subtitle="Choose when this device should alert you. System notifications are automatically paused while Agent RunLab is actively being used on any device."
       />
       <ul className="space-y-3 text-sm">
-        <DesktopNotificationsSettings />
-        <BackgroundPushSettings />
+        <SystemNotificationsSettings />
         <InterfaceToggle
           label="App badge"
-          description={appBadgeSupported() ? 'Show a quiet actionable count on the installed app icon.' : 'App badging is unavailable in this browser.'}
+          description={appBadgeSupported() ? 'Show an actionable count on the installed app icon.' : 'App badging is unavailable in this browser.'}
           checked={appBadgeEnabled && appBadgeSupported()}
           onChange={setAppBadgeEnabled}
           testId="settings-toggle-app-badge"
@@ -45,137 +45,63 @@ export function NotificationsSection(): JSX.Element {
   )
 }
 
-function DesktopNotificationsSettings(): JSX.Element {
+function SystemNotificationsSettings(): JSX.Element {
   const { t } = useTranslation()
   const [enabled, setEnabled] = useBooleanPref(PREF_DESKTOP_NOTIFICATIONS_ENABLED, false)
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => notificationPermission())
-  const [busy, setBusy] = useState(false)
-
-  const setDesktopNotifications = async (next: boolean): Promise<void> => {
-    if (!next) {
-      setEnabled(false)
-      return
-    }
-    const current = notificationPermission()
-    if (current === 'granted') {
-      setPermission(current)
-      setEnabled(true)
-      return
-    }
-    if (current === 'denied' || current === 'unsupported') {
-      setPermission(current)
-      setEnabled(false)
-      return
-    }
-    setBusy(true)
-    try {
-      const result = await requestNotificationPermission()
-      setPermission(result)
-      setEnabled(result === 'granted')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const unavailable = permission === 'denied' || permission === 'unsupported'
-  return (
-    <li className="rounded-md border border-border bg-card/60 px-4 py-3">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="font-medium">{t('settings.interface.desktopNotifications')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t('settings.interface.desktopNotificationsDesc')}
-          </p>
-          <p className="mt-1 text-[11px] text-muted-foreground" data-testid="desktop-notification-permission">
-            {t('settings.interface.permission', { permission: permissionLabel(permission, t) })}
-          </p>
-        </div>
-        <Toggle
-          checked={enabled && permission === 'granted'}
-          onChange={(next) => { void setDesktopNotifications(next) }}
-          ariaLabel={t('settings.interface.enableDesktopNotifications')}
-          testId="settings-toggle-desktop-notifications"
-          disabled={busy || unavailable}
-        />
-      </div>
-      {unavailable ? (
-        <div className="mt-3 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          {permission === 'unsupported'
-            ? t('settings.interface.notificationUnsupported')
-            : t('settings.interface.notificationBlocked')}
-        </div>
-      ) : null}
-      <div className="mt-3 grid gap-2 border-t border-border/50 pt-3">
-        <NotificationKindToggle
-          prefKey={PREF_DESKTOP_NOTIFICATION_SOUND}
-          label={t('settings.interface.sound')}
-          description={t('settings.interface.soundDesc')}
-          disabled={!enabled || permission !== 'granted'}
-        />
-        {DESKTOP_NOTIFICATION_PREFS.map((pref) => (
-          <NotificationKindToggle key={pref.kind} prefKey={pref.key} label={pref.label} description={pref.description} disabled={!enabled || permission !== 'granted'} />
-        ))}
-      </div>
-    </li>
-  )
-}
-
-function BackgroundPushSettings(): JSX.Element {
   const [support] = useState<PushSupport>(() => detectPushSupport())
   const [endpoint, setEndpoint] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [serverStatus, setServerStatus] = useState<{ configured: boolean; subscribers: number } | null>(null)
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [devices, setDevices] = useState<PushDevice[]>([])
+  const currentDeviceId = pushDeviceId()
 
-  const refreshStatus = async (): Promise<void> => {
+  const refreshDevices = async (): Promise<void> => {
     try {
-      const res = await fetch('/push/status', { credentials: 'same-origin', cache: 'no-store' })
-      if (res.ok) setServerStatus(await res.json())
-    } catch {
-      // Non-fatal: status is diagnostic only.
-    }
+      const res = await fetch(`/push/devices?currentDeviceId=${encodeURIComponent(currentDeviceId)}`, { credentials: 'same-origin', cache: 'no-store' })
+      if (res.ok) setDevices(((await res.json()) as { devices?: PushDevice[] }).devices ?? [])
+    } catch {}
   }
 
   useEffect(() => {
     let cancelled = false
-    void currentPushEndpoint().then((ep) => {
-      if (!cancelled) setEndpoint(ep)
+    void currentPushEndpoint().then((value) => {
+      if (!cancelled) setEndpoint(value)
     })
-    void refreshStatus()
+    void refreshDevices()
     return () => { cancelled = true }
   }, [])
 
-  const enable = async (): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try {
-      // Use the same per-kind toggles as foreground notifications — reading
-      // localStorage directly avoids threading N hooks up to this level.
-      const kinds = collectEnabledKinds()
-      const result = await subscribeToPush(kinds)
-      if (result.ok) {
-        setEndpoint(result.endpoint)
-        await refreshStatus()
-      } else {
-        setError(explainPushFailure(result.reason))
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
+  const syncBackgroundDelivery = async (): Promise<void> => {
+    if (!support.supported || permission !== 'granted') return
+    const result = await subscribeToPush(collectEnabledKinds())
+    if (result.ok) setEndpoint(result.endpoint)
   }
 
-  const disable = async (): Promise<void> => {
+  const setSystemNotifications = async (next: boolean): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      await unsubscribeFromPush()
-      setEndpoint(null)
-      await refreshStatus()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (!next) {
+        setEnabled(false)
+        await unsubscribeFromPush()
+        setEndpoint(null)
+        return
+      }
+      let current = notificationPermission()
+      if (current === 'default') current = await requestNotificationPermission()
+      setPermission(current)
+      if (current !== 'granted') {
+        setEnabled(false)
+        return
+      }
+      setEnabled(true)
+      if (support.supported) {
+        const result = await subscribeToPush(collectEnabledKinds())
+        if (result.ok) setEndpoint(result.endpoint)
+        else setError(backgroundDeliveryFailure(result.reason))
+      }
     } finally {
       setBusy(false)
     }
@@ -187,73 +113,154 @@ function BackgroundPushSettings(): JSX.Element {
     setError(null)
     try {
       const res = await fetch('/push/test', { method: 'POST', credentials: 'same-origin' })
-      if (!res.ok) {
-        setTestResult(`HTTP ${res.status}`)
-      } else {
+      if (!res.ok) setTestResult('Test could not be sent.')
+      else {
         const body = (await res.json()) as { delivered?: number }
-        setTestResult(`server dispatched to ${body.delivered ?? 0} subscriber(s) — check for the notification`)
+        setTestResult((body.delivered ?? 0) > 0 ? 'Test notification sent.' : 'No registered device received the test.')
       }
-    } catch (err) {
-      setTestResult(err instanceof Error ? err.message : String(err))
+    } catch {
+      setTestResult('Test could not be sent.')
     } finally {
       setBusy(false)
     }
   }
 
-  const active = endpoint !== null
-
+  const unavailable = permission === 'denied' || permission === 'unsupported'
+  const active = enabled && permission === 'granted'
   return (
-    <li className="rounded-md border border-border bg-card/60 px-4 py-3" data-testid="settings-push-section">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <li className="rounded-lg border border-border bg-card/60 p-4" data-testid="settings-push-section">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="font-medium">Background push (Web Push)</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Deliver approval, waiting, and error notifications even when the dashboard tab is closed.
-            Uses your per-kind toggles above.
+          <div className="font-medium">System notifications</div>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Alert this device when Agent RunLab needs attention, including while the app is in the background or closed.
           </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-[11px] text-muted-foreground" data-testid="desktop-notification-permission">
             {active
-              ? 'Subscribed on this device.'
-              : support.supported
-                ? 'Not subscribed on this device.'
-                : `Unavailable: ${explainSupport(support.reason)}`}
+              ? endpoint ? 'Enabled on this device.' : 'Enabled while this browser is open.'
+              : `Permission: ${permissionLabel(permission, t)}`}
           </p>
-          {serverStatus ? (
-            <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="settings-push-server-status">
-              Host: VAPID {serverStatus.configured ? 'configured' : 'missing'} · {serverStatus.subscribers} subscriber(s) known.
-            </p>
-          ) : null}
         </div>
         <Toggle
           checked={active}
-          onChange={(next) => { void (next ? enable() : disable()) }}
-          ariaLabel="Enable background push"
-          testId="settings-toggle-background-push"
-          disabled={busy || !support.supported}
+          onChange={(next) => { void setSystemNotifications(next) }}
+          ariaLabel="Enable system notifications"
+          testId="settings-toggle-desktop-notifications"
+          disabled={busy || unavailable}
         />
       </div>
-      {active ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            data-testid="settings-push-test"
-            onClick={() => { void sendTest() }}
-            disabled={busy}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-          >
-            Send test push
-          </button>
-          {testResult ? (
-            <span className="text-[11px] text-muted-foreground">{testResult}</span>
-          ) : null}
+
+      {unavailable ? (
+        <div className="mt-3 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {permission === 'unsupported'
+            ? t('settings.interface.notificationUnsupported')
+            : t('settings.interface.notificationBlocked')}
         </div>
       ) : null}
+
+      <div className="mt-4 border-t border-border/60 pt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notify me about</div>
+        <div className="grid gap-2">
+          {DESKTOP_NOTIFICATION_PREFS.map((pref) => (
+            <NotificationKindToggle
+              key={pref.kind}
+              prefKey={pref.key}
+              label={pref.label}
+              description={pref.description}
+              disabled={!active}
+              onChanged={() => { void syncBackgroundDelivery() }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-border/60 pt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Devices</div>
+        <p className="mb-3 text-[11px] leading-4 text-muted-foreground">Control system notifications on every registered browser or installed app.</p>
+        <div className="grid gap-2" data-testid="settings-notification-devices">
+          {devices.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">No devices are registered for background notifications yet.</div>
+          ) : devices.map((device) => (
+            <NotificationDeviceRow key={device.deviceId} device={device} busy={busy} onRefresh={refreshDevices} onTestResult={setTestResult} />
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-border/60 pt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">On this device</div>
+        <NotificationKindToggle
+          prefKey={PREF_DESKTOP_NOTIFICATION_SOUND}
+          label={t('settings.interface.sound')}
+          description="Play a short sound with notifications from this device."
+          disabled={!active}
+        />
+        {endpoint ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="settings-push-test"
+              onClick={() => { void sendTest() }}
+              disabled={busy}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+            >
+              Send test notification
+            </button>
+            {testResult ? <span className="text-xs text-muted-foreground">{testResult}</span> : null}
+          </div>
+        ) : null}
+      </div>
+
       {error ? (
-        <div className="mt-3 rounded-md border border-rose-300/70 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
+        <div className="mt-3 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
           {error}
         </div>
       ) : null}
     </li>
+  )
+}
+
+function NotificationDeviceRow({ device, busy, onRefresh, onTestResult }: {
+  device: PushDevice
+  busy: boolean
+  onRefresh(): Promise<void>
+  onTestResult(value: string): void
+}): JSX.Element {
+  const update = async (enabled: boolean): Promise<void> => {
+    await fetch('/push/device', {
+      method: 'PATCH', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: device.deviceId, enabled }),
+    })
+    await onRefresh()
+  }
+  const remove = async (): Promise<void> => {
+    await fetch('/push/device', {
+      method: 'DELETE', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: device.deviceId }),
+    })
+    await onRefresh()
+  }
+  const test = async (): Promise<void> => {
+    const res = await fetch('/push/test', {
+      method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: device.deviceId }),
+    })
+    const body = res.ok ? await res.json() as { delivered?: number } : null
+    onTestResult((body?.delivered ?? 0) > 0 ? `Test sent to ${device.name}.` : `${device.name} did not receive the test.`)
+  }
+  return (
+    <div className="rounded-md bg-muted/30 p-3" data-testid={`settings-notification-device-${device.deviceId}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-foreground">{device.name}{device.current ? ' · This device' : ''}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">Last registered {new Date(device.lastSeenAt).toLocaleString()}</div>
+        </div>
+        <Toggle checked={device.enabled} onChange={(next) => { void update(next) }} ariaLabel={`System notifications for ${device.name}`} disabled={busy} />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" onClick={() => { void test() }} disabled={busy || !device.enabled} className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted disabled:opacity-50">Send test</button>
+        {!device.current ? <button type="button" onClick={() => { void remove() }} disabled={busy} className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50">Remove</button> : null}
+      </div>
+    </div>
   )
 }
 
@@ -262,23 +269,28 @@ function NotificationKindToggle({
   label,
   description,
   disabled,
+  onChanged,
 }: {
   prefKey: string
   label: string
   description: string
   disabled: boolean
+  onChanged?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const [checked, setChecked] = useBooleanPref(prefKey, true)
   return (
-    <div className="flex flex-col gap-3 rounded-md bg-muted/30 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-2.5">
       <div className="min-w-0">
         <div className="text-xs font-medium text-foreground">{label}</div>
-        <div className="text-[11px] text-muted-foreground">{description}</div>
+        <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{description}</div>
       </div>
       <Toggle
         checked={checked}
-        onChange={setChecked}
+        onChange={(next) => {
+          setChecked(next)
+          queueMicrotask(() => onChanged?.())
+        }}
         ariaLabel={t('settings.interface.notify', { label })}
         testId={`settings-toggle-notification-${prefKey}`}
         disabled={disabled}
@@ -290,30 +302,19 @@ function NotificationKindToggle({
 function collectEnabledKinds(): readonly DesktopNotificationKind[] {
   const kinds: DesktopNotificationKind[] = []
   for (const pref of DESKTOP_NOTIFICATION_PREFS) {
-    // Per-kind prefs default to true; only skip when explicitly disabled.
     const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(pref.key)
-    const enabled = raw === null ? true : raw !== 'false'
+    const enabled = raw === null || (raw !== '0' && raw !== 'false')
     if (enabled) kinds.push(pref.kind as DesktopNotificationKind)
   }
   return kinds
 }
 
-function explainSupport(reason: PushSupport['reason']): string {
+function backgroundDeliveryFailure(reason: 'permission_denied' | 'no_vapid' | 'subscribe_failed' | 'server_rejected'): string {
   switch (reason) {
-    case 'no_service_worker': return 'this browser has no service worker support'
-    case 'no_push_manager': return 'this browser has no PushManager'
-    case 'no_notification': return 'this browser has no Notification API'
-    case 'ios_needs_standalone': return 'add RunLab to your home screen first (iOS restriction)'
-    default: return 'push is not available in this context'
-  }
-}
-
-function explainPushFailure(reason: 'permission_denied' | 'no_vapid' | 'subscribe_failed' | 'server_rejected'): string {
-  switch (reason) {
-    case 'permission_denied': return 'Browser denied the notification permission. Enable it in site settings.'
-    case 'no_vapid': return 'The host has no VAPID keys configured; push cannot be enabled.'
-    case 'subscribe_failed': return 'Failed to subscribe with the browser push service.'
-    case 'server_rejected': return 'The host rejected the subscription payload.'
+    case 'permission_denied': return 'Notifications are blocked in browser settings.'
+    case 'no_vapid': return 'Background delivery is not configured. Notifications will work while this browser is open.'
+    case 'subscribe_failed': return 'Background delivery could not be enabled. Notifications will work while this browser is open.'
+    case 'server_rejected': return 'The server could not register this device for background delivery.'
   }
 }
 

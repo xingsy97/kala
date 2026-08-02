@@ -177,6 +177,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
           {invites.map((invite) => {
             const labelValue = meaningfulInviteLabel(invite.label) ?? ''
             const title = invite.workspaceId ?? (labelValue || t('settings.executorAccess.unboundInvite'))
+            const expired = Date.parse(invite.expiresAt) <= Date.now()
             const subtitle = invite.workspaceId
               ? labelValue || t('settings.executorAccess.boundInvite')
               : t('settings.executorAccess.waitingForFirstUse')
@@ -193,8 +194,8 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
                           {subtitle}
                         </div>
                       </div>
-                      <span className={cn('rounded px-1.5 py-0.5 text-xs ring-1', invite.revoked ? 'bg-destructive/10 text-destructive ring-destructive/40' : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300')}>
-                        {invite.revoked ? t('settings.executorAccess.revoked') : t('settings.executorAccess.inviteActive')}
+                      <span className={cn('rounded px-1.5 py-0.5 text-xs ring-1', invite.revoked || expired ? 'bg-destructive/10 text-destructive ring-destructive/40' : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300')}>
+                        {invite.revoked ? t('settings.executorAccess.revoked') : expired ? t('settings.executorAccess.expired') : t('settings.executorAccess.inviteActive')}
                       </span>
                     </div>
                     <label className="block max-w-md text-[11px] font-medium text-muted-foreground">
@@ -212,6 +213,7 @@ export function ExecutorAccessSection({ executors = [] }: { executors?: readonly
                     <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
                       <InviteMeta label={t('settings.executorAccess.inviteId')} value={invite.id.slice(0, 12)} mono />
                       <InviteMeta label={t('settings.executorAccess.created')} value={formatDate(invite.createdAt)} />
+                      <InviteMeta label={t('settings.executorAccess.expires')} value={formatDate(invite.expiresAt)} />
                       <InviteMeta label={t('settings.executorAccess.lastUsed')} value={invite.lastUsedAt ? formatDate(invite.lastUsedAt) : t('settings.executorAccess.never')} />
                     </div>
                   </div>

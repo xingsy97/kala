@@ -16,16 +16,15 @@
  *     to reconnect`), not on the first mount.
  *   - Session error: dedup on `scope:message` so repeated identical errors
  *     don't stack, but a distinct new error still fires.
- *   - Sub-agent completed/failed: socket-driven; the app never keeps a per-child
- *     `useSubAgentSession` (that's inside the SubAgentCard), so we listen to
- *     `server:control_update` directly.
+ *   - Sub-agent lifecycle stays inside the parent transcript/card. It must not
+ *     fan out to application-level notifications independently of the parent.
  *   - Background shell exit: observed on the timeline-derived task list; toasts
  *     when a running task transitions to done/killed.
  */
 
 import { useEffect, useRef } from 'react'
 
-import type { ApprovalRequiredEvent, ControlUpdate, SessionErrorEvent, SessionSummary } from '@agent-kernel/shared'
+import type { ApprovalRequiredEvent, SessionErrorEvent, SessionSummary } from '@agent-kernel/shared'
 
 import type { BackgroundTerminalTask } from './background-terminal.js'
 import { decideInactiveSummaryNotification } from './domain/notification-policy.js'
@@ -169,6 +168,11 @@ export function useInactiveSessionSummaryToasts({
       next.set(session.sessionId, session.status)
       const before = prev.get(session.sessionId)
 
+      // Child sessions are implementation details of the parent's agent tool.
+      // Their result is already rendered in the parent transcript, so treating
+      // them as background sessions duplicates application-level signals.
+      if (session.parentSessionId) continue
+
       // If a completion toast was pending for this session and it is no longer in
       // a terminal-completed state, the earlier `done` was a transient mid-turn
       // flip — cancel the pending toast.
@@ -238,63 +242,6 @@ export function useInactiveSessionSummaryToasts({
  */
 const FINISH_NOTIFY_DEBOUNCE_MS = 1500
 
-
-/**
- * Watches sub-agent lifecycle events on the socket and toasts on
- * completion/failure. Keys off `childSessionId` so the same child doesn't
- * double-toast when the parent replays events. Also tracks per-child
- * `agentType` from the `_started` event so completion toasts can label
- * themselves without having to peek at the timeline.
- */
-export function useSubAgentToasts(socket: DashboardSocket | null): void {
-  useEffect(() => {
-    if (!socket) return
-    const agentTypeByChild = new Map<string, string>()
-    const alreadyToasted = new Set<string>()
-
-    const onStarted = (payload: { childSessionId: string; agentType?: string }): void => {
-      if (payload.agentType) agentTypeByChild.set(payload.childSessionId, payload.agentType)
-    }
-    const onFinished = (payload: {
-      childSessionId: string
-      status: 'completed' | 'failed' | 'cancelled'
-      durationMs: number
-      error?: string
-    }): void => {
-      if (alreadyToasted.has(payload.childSessionId)) return
-      alreadyToasted.add(payload.childSessionId)
-      const label = agentTypeByChild.get(payload.childSessionId) ?? 'agent'
-      const durationLabel = formatDuration(payload.durationMs)
-      if (payload.status === 'completed') {
-        notify.success(`Sub-agent done — ${label}`, {
-          id: `subagent-${payload.childSessionId}`,
-          description: durationLabel ? `Finished in ${durationLabel}` : 'Finished',
-        })
-      } else if (payload.status === 'cancelled') {
-        notify.info(`Sub-agent interrupted — ${label}`, {
-          id: `subagent-${payload.childSessionId}`,
-          description: payload.error ?? 'Cancelled',
-        })
-      } else {
-        notify.error(`Sub-agent failed — ${label}`, {
-          id: `subagent-${payload.childSessionId}`,
-          description: payload.error ?? 'Unknown failure',
-          duration: 10000,
-        })
-      }
-    }
-
-    const onControlUpdate = (payload: ControlUpdate): void => {
-      if (payload.kind === 'sub_agent_started') onStarted(payload)
-      if (payload.kind === 'sub_agent_finished') onFinished(payload)
-    }
-
-    socket.on('server:control_update', onControlUpdate)
-    return () => {
-      socket.off('server:control_update', onControlUpdate)
-    }
-  }, [socket])
-}
 
 /**
  * Watches the derived background-terminal task list and fires a toast when a

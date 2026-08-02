@@ -12,6 +12,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type {
   AgentConfig,
   AgentState,
+  MessageContent,
 } from '@agent-kernel/kernel'
 import type {
   ApprovalRequiredEvent,
@@ -30,7 +31,7 @@ import type {
   HumanAttentionTimeline,
 } from '@agent-kernel/shared'
 import { PROTOCOL_VERSION, buildHumanAttentionTimeline } from '@agent-kernel/shared'
-import { io, type Socket } from 'socket.io-client'
+import { io as socketIo, type Socket } from 'socket.io-client'
 
 import { decideSessionHydration } from './session-hydration-policy.js'
 import { projectStatusFromEntry } from './state-flow.js'
@@ -45,6 +46,7 @@ import {
 } from './session-projection.js'
 import type { CachedSessionView, SessionViewCache } from './session-view-cache.js'
 import { readBooleanPref, PREF_SMOOTH_STREAMING_TEXT } from './lib/prefs.js'
+import { emitRpc, emitRpcInBackground } from './socket-rpc.js'
 
 export type { ConnectionStatus, TimelineEntry } from './session-projection.js'
 
@@ -108,6 +110,7 @@ const CONTROL_SOCKET_SESSION_ID = '__agent-kernel-control__'
  * consumes the pure rate model to pace how received tokens are revealed.
  */
 import { computeReveal } from './features/chat/text-reveal/rate.js'
+import { shouldCommitStreamFrame, streamReleaseCount } from './features/chat/text-reveal/scheduler.js'
 
 export function useSession({
   host,
@@ -210,6 +213,7 @@ export function useSession({
     const MIN_COMMIT_MS = 66
     let lastCommitMs = 0
     let pendingCommit = ''
+    let pageVisible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
     let carry = 0 // fractional characters owed, carried across frames (smooth mode)
     let lastFrameMs = 0
     const commitPending = (): void => {
@@ -223,6 +227,7 @@ export function useSession({
     const drainSmooth = (): void => {
       const buf = streamBufferRef.current
       if (buf.length === 0) {
+        if (pageVisible) commitPending()
         streamRafRef.current = null
         lastFrameMs = 0
         return
@@ -232,16 +237,18 @@ export function useSession({
       lastFrameMs = t
       const release = computeReveal(buf.length, dt, carry)
       carry = release.carry
-      const count = release.count
-      if (count <= 0) {
-        streamRafRef.current = requestAnimationFrame(drainSmooth)
-        return
+      const count = streamReleaseCount(buf.length, release.count)
+      if (count > 0) {
+        const chunk = buf.slice(0, count)
+        streamBufferRef.current = buf.slice(count)
+        pendingCommit += chunk
       }
-      const chunk = buf.slice(0, count)
-      streamBufferRef.current = buf.slice(count)
-      // Smooth mode commits every frame it releases characters (cheap: only the
-      // tail re-renders) so the reveal is per-frame even, not batched.
-      setStreamingText((prev) => prev + chunk)
+      if (shouldCommitStreamFrame({
+        now: t,
+        lastCommitAt: lastCommitMs,
+        backlog: streamBufferRef.current.length,
+        visible: pageVisible,
+      })) commitPending()
       streamRafRef.current = requestAnimationFrame(drainSmooth)
     }
 
@@ -273,6 +280,19 @@ export function useSession({
       }
     }
 
+    const handleVisibilityChange = (): void => {
+      pageVisible = document.visibilityState !== 'hidden'
+      if (!pageVisible) return
+      // Commit the already-released chunk once on resume, then continue pacing
+      // any remaining backlog. Hidden tabs never replay every skipped frame.
+      commitPending()
+      if (streamBufferRef.current.length > 0 && streamRafRef.current === null) {
+        lastFrameMs = 0
+        streamRafRef.current = requestAnimationFrame(drainStreamBuffer)
+      }
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', handleVisibilityChange)
+
     const resetStream = (): void => {
       streamBufferRef.current = ''
       pendingCommit = ''
@@ -287,16 +307,20 @@ export function useSession({
 
     let disposed = false
     let socket: DashboardSocket | null = null
+    let reconnectCleanup: (() => void) | null = null
     const connect = async (): Promise<void> => {
       if (!cached && cache?.hydrate) {
-        cached = await cache.hydrate(sessionId)
+        // IndexedDB can be blocked by another tab or browser shutdown recovery.
+        // Durable cache is an optimization and must never block the live socket.
+        cached = await Promise.race([
+          cache.hydrate(sessionId),
+          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 250)),
+        ])
         if (disposed) return
-        if (cached) {
-          dispatchProjection({ kind: 'hydrate', generation, sessionId, cached })
-        }
+        if (cached) dispatchProjection({ kind: 'hydrate', generation, sessionId, cached })
       }
 
-      socket = io(`${host}/dashboard`, {
+      socket = socketIo(`${host}/dashboard`, {
         auth: {
           sessionId,
           role: 'dashboard',
@@ -306,12 +330,23 @@ export function useSession({
         reconnection: true,
         reconnectionDelay: 500,
         reconnectionDelayMax: 30_000,
-        reconnectionAttempts: 30,
+        reconnectionAttempts: Infinity,
         randomizationFactor: 0.5,
+        transports: ['websocket', 'polling'],
+        tryAllTransports: true,
       }) as DashboardSocket
       socketRef.current = socket
-      setBoundSocket({ sessionId, socket })
       bindSocket(socket)
+      setBoundSocket({ sessionId, socket })
+      const reconnectNow = (): void => {
+        if (!disposed && socket && !socket.connected) socket.connect()
+      }
+      window.addEventListener('online', reconnectNow)
+      document.addEventListener('visibilitychange', reconnectNow)
+      reconnectCleanup = () => {
+        window.removeEventListener('online', reconnectNow)
+        document.removeEventListener('visibilitychange', reconnectNow)
+      }
     }
 
     const bindSocket = (socket: DashboardSocket): void => {
@@ -341,9 +376,12 @@ export function useSession({
       // deduped by seq below.
       const hydration = decideSessionHydration({ cached, hostCursor: p.cursor })
       if (hydration.kind === 'load_full_history') {
+        // Full history is authoritative even when the local timeline is merely
+        // empty. Mark the replay as a reset so rows appear and any stale live
+        // conflict cannot survive under the same sequence.
+        resetHistoryBaseOnNextReplay = true
         if (hydration.resetTimeline) {
           cache?.delete(p.sessionId)
-          resetHistoryBaseOnNextReplay = true
           dispatchProjection({ kind: 'reset_timeline', generation, sessionId })
         }
         socket.emit('client:load_history', { sessionId: p.sessionId })
@@ -378,11 +416,13 @@ export function useSession({
     socket.on('event:appended', (p) => {
       if (!isCurrentSocket() || p.sessionId !== sessionId) return
       if (p.event.kind === 'llm_response' || p.event.kind === 'llm_error') {
-        // Turn-boundary events: flush any buffered deltas first so ordering is
-        // preserved, then reset the streaming tail and apply immediately.
-        resetStream()
+        // Commit the persisted response first, while the live tail still
+        // occupies the same transcript position/key. Clear the streaming tail
+        // on the next animation frame so React reuses that row instead of
+        // briefly removing it and remounting completed Markdown/code.
         flushProjectionQueue()
         dispatchProjection({ kind: 'appended', generation, sessionId, payload: p })
+        requestAnimationFrame(() => { if (isCurrentSocket()) resetStream() })
         return
       }
       // High-frequency mid-turn events (tool_call / tool_result): coalesce to
@@ -474,6 +514,9 @@ export function useSession({
       // an authoritative baseline via session:ready + history.
       projectionQueue = []
       streamBufferRef.current = ''
+      pendingCommit = ''
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', handleVisibilityChange)
+      reconnectCleanup?.()
       socket?.close()
       if (socketRef.current === socket) socketRef.current = null
       setBoundSocket((current) => current?.socket === socket ? null : current)
@@ -562,11 +605,12 @@ export function useSession({
   )
 }
 
-export function useDashboardControlSocket(host: string, token?: string): DashboardSocket | null {
+export function useDashboardControlSocket(host: string, token?: string, enabled = true): DashboardSocket | null {
   const [socket, setSocket] = useState<DashboardSocket | null>(null)
 
   useEffect(() => {
-    const next = io(`${host}/dashboard`, {
+    if (!enabled) { setSocket(null); return }
+    const next = socketIo(`${host}/dashboard`, {
       auth: {
         sessionId: CONTROL_SOCKET_SESSION_ID,
         role: 'dashboard',
@@ -584,7 +628,7 @@ export function useDashboardControlSocket(host: string, token?: string): Dashboa
       next.close()
       setSocket((current) => current === next ? null : current)
     }
-  }, [host, token])
+  }, [host, token, enabled])
 
   return socket
 }
@@ -725,7 +769,17 @@ export function createSessionWithAck(
     }, timeoutMs)
     socket.on('session:ready', onReady)
     socket.on('session:error', onError)
-    createSession(socket, input)
+    void emitRpc(socket, 'client:create_session', {
+      sessionId: input.sessionId,
+      ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+      ...(input.workspaceName !== undefined ? { workspaceName: input.workspaceName } : {}),
+      ...(input.cwd !== undefined && input.cwd.length > 0 ? { cwd: input.cwd } : {}),
+      ...(input.tools !== undefined ? { tools: input.tools } : {}),
+      ...(input.selectedModel !== undefined && input.selectedModel.length > 0 ? { selectedModel: input.selectedModel } : {}),
+    }, { timeoutMs }).catch((error) => {
+      cleanup()
+      reject(error)
+    })
   })
 }
 
@@ -750,8 +804,8 @@ export function reorderQueuedMessage(
   sessionId: string,
   id: string,
   beforeId?: string | null,
-): void {
-  socket.emit('client:reorder_queued_message', {
+): Promise<void> {
+  return emitRpc(socket, 'client:reorder_queued_message', {
     sessionId,
     id,
     ...(beforeId !== undefined ? { beforeId } : {}),
@@ -763,16 +817,17 @@ export function updateQueuedMessage(
   sessionId: string,
   id: string,
   text: string,
-): void {
-  socket.emit('client:update_queued_message', { sessionId, id, text })
+  content?: readonly MessageContent[],
+): Promise<void> {
+  return emitRpc(socket, 'client:update_queued_message', { sessionId, id, text, ...(content ? { content } : {}) })
 }
 
 export function deleteQueuedMessage(
   socket: DashboardSocket,
   sessionId: string,
   id: string,
-): void {
-  socket.emit('client:delete_queued_message', { sessionId, id })
+): Promise<void> {
+  return emitRpc(socket, 'client:delete_queued_message', { sessionId, id })
 }
 
 export function renameSession(

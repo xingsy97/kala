@@ -1,7 +1,7 @@
 import type { ServerSettingsPayload } from '@agent-kernel/shared'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { cn } from '../../../lib/utils.js'
@@ -18,13 +18,15 @@ export function AgentSection({
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const agentPrompt = payload.agentPrompt
+  const [customPrompt, setCustomPrompt] = useState(agentPrompt?.customPrompt ?? '')
+  useEffect(() => setCustomPrompt(agentPrompt?.customPrompt ?? ''), [agentPrompt?.customPrompt])
 
   const updatePreset = useMutation({
-    mutationFn: async (preset: string): Promise<ServerSettingsPayload> => {
+    mutationFn: async ({ preset, customPrompt }: { preset: string; customPrompt?: string }): Promise<ServerSettingsPayload> => {
       const res = await fetch('/settings/agent-prompt', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ preset }),
+        body: JSON.stringify({ preset, ...(customPrompt !== undefined ? { customPrompt } : {}) }),
       })
       const body = await res.json() as ServerSettingsPayload | { error?: string }
       if (!res.ok) throw new Error('error' in body && body.error ? body.error : `HTTP ${res.status}`)
@@ -59,7 +61,7 @@ export function AgentSection({
                   )}
                   onClick={() => {
                     setError(null)
-                    if (!selected) updatePreset.mutate(preset.id)
+                    if (!selected) updatePreset.mutate({ preset: preset.id })
                   }}
                   disabled={updatePreset.isPending}
                   data-testid={`settings-agent-preset-${preset.id}`}
@@ -74,6 +76,33 @@ export function AgentSection({
               )
             })}
           </div>
+          {agentPrompt.selectedPreset === 'custom' ? (
+            <div className="space-y-2">
+              <label htmlFor="settings-agent-custom-prompt" className="text-sm font-medium text-foreground">Custom system prompt</label>
+              <textarea
+                id="settings-agent-custom-prompt"
+                data-testid="settings-agent-custom-prompt"
+                className="min-h-64 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={customPrompt}
+                onChange={(event) => setCustomPrompt(event.target.value)}
+                disabled={updatePreset.isPending}
+              />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  disabled={updatePreset.isPending || !customPrompt.trim() || customPrompt === agentPrompt.customPrompt}
+                  onClick={() => {
+                    setError(null)
+                    updatePreset.mutate({ preset: 'custom', customPrompt })
+                  }}
+                  data-testid="settings-agent-custom-prompt-save"
+                >
+                  {updatePreset.isPending ? 'Saving…' : 'Save prompt'}
+                </button>
+              </div>
+            </div>
+          ) : null}
           {error ? <div className="text-xs text-destructive">{error}</div> : null}
           <div className="rounded-md bg-muted/30 p-3 text-xs text-muted-foreground ring-1 ring-border/50">
             <div>{t('settings.agent.appliesToNewSessions')}</div>

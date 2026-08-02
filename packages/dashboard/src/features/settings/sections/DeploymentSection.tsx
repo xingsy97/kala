@@ -29,7 +29,7 @@ export function DeploymentSection({
     {
       component: t('settings.deployment.hostRuntime'),
       detail: hostDeliveryLabel(build),
-      version: payload.versions?.host ?? '—',
+      version: build?.releaseTag ?? payload.versions?.host ?? '—',
       commit: build?.gitCommit ?? 'unknown',
       builtAt: build?.builtAt ?? 'unknown',
       instance: typeof window === 'undefined' ? t('settings.deployment.sameOriginHost') : window.location.host,
@@ -38,11 +38,11 @@ export function DeploymentSection({
     {
       component: t('settings.deployment.dashboardComponent'),
       detail: dashboardDeliveryLabel(build),
-      version: DASHBOARD_VERSION,
+      version: build?.releaseTag ?? DASHBOARD_VERSION,
       commit: build?.gitCommit ?? 'unknown',
       builtAt: build?.builtAt ?? 'unknown',
       instance: t('settings.deployment.embeddedInHost'),
-      health: t('settings.deployment.loaded'),
+      health: build?.dashboardMode ? `${t('settings.deployment.loaded')} · ${build.dashboardMode}` : t('settings.deployment.loaded'),
     },
     {
       component: t('settings.deployment.protocolComponent'),
@@ -60,7 +60,7 @@ export function DeploymentSection({
       commit: executor.build?.gitCommit ?? t('settings.deployment.notReported'),
       builtAt: executor.build?.builtAt ?? t('settings.deployment.notReported'),
       instance: executorInstanceLabel(executor),
-      health: executorHealthLabel(executor, t('settings.deployment.connected'), t('settings.deployment.legacyMetadataMissing')),
+      health: `${executorHealthLabel(executor, t('settings.deployment.connected'), t('settings.deployment.legacyMetadataMissing'))} · attached ${formatTimestamp(executor.attachedAt)}`,
     })),
   ]
   return (
@@ -187,6 +187,11 @@ function executorInstanceLabel(executor: AttachedExecutor): string {
 function executorHealthLabel(executor: AttachedExecutor, connected: string, legacyMetadataMissing: string): string {
   if (!executor.build) return legacyMetadataMissing
   return connected
+}
+
+function formatTimestamp(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
 function executorCapabilitiesLabel(executor: AttachedExecutor, t: ReturnType<typeof useTranslation>['t']): string {

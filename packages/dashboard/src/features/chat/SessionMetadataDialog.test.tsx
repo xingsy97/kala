@@ -96,6 +96,11 @@ describe('SessionMetadataDialog', () => {
     expect(dlg.textContent).toContain('my-mbp')
     expect(dlg.textContent).toContain('claude-opus-4-7')
     expect(dlg.textContent).toContain('1,200')
+    expect(dlg.className).toContain('!bottom-0')
+    expect(dlg.className).toContain('grid-rows-[auto_minmax(0,1fr)_auto]')
+    expect(screen.getByTestId('session-metadata-body').className).toContain('overflow-y-auto')
+    expect(screen.getByTestId('session-metadata-footer').className).toContain('border-t')
+    expect(screen.getByTestId('session-metadata-label').className).toContain('text-base')
   })
 
   it('shows the current cwd as a read-only display next to a Change trigger', () => {

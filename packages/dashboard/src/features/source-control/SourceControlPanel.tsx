@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import { AlertCircle, ChevronDown, ChevronRight, Columns2, FileCode2, Folder, GitBranch, List, ListTree, Loader2, RefreshCw, Rows3 } from 'lucide-react'
 import type { Socket } from 'socket.io-client'
@@ -62,30 +62,32 @@ const GIT_STATUS_LABEL: Record<GitFileChange['status'], string> = {
 }
 
 function SourceControlPanelImpl({ socket, workspaceId, sessionId, cwd, fontSizePx = 12 }: SourceControlPanelProps): JSX.Element {
+  const resourceKey = `${workspaceId ?? 'offline'}\0${cwd ?? ''}`
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<{ file: GitFileChange; staged: boolean } | null>(null)
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(() => new Set())
   const [viewMode, setViewMode] = useState<GitViewMode>(() => readGitViewMode(sourceControlViewModeKey(sessionId, workspaceId)))
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
   const online = Boolean(socket && workspaceId)
   const viewModeKey = sourceControlViewModeKey(sessionId, workspaceId)
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!socket || !workspaceId) return
     setLoading(true)
-    const result = await requestGitStatus(socket, { workspaceId, sessionId: sessionId ?? undefined, cwd })
+    const result = await requestGitStatus(socket, { workspaceId, sessionId: sessionIdRef.current ?? undefined, cwd })
     setStatus(result)
     setCollapsedDirs(new Set())
     setLoading(false)
-  }, [cwd, sessionId, socket, workspaceId])
+  }, [cwd, resourceKey, socket, workspaceId])
 
   useEffect(() => {
     setStatus(null)
     setSelected(null)
-    setCollapsedDirs(new Set())
-    setViewMode(readGitViewMode(viewModeKey))
     if (online) void refresh()
-  }, [online, refresh, viewModeKey])
+  }, [online, resourceKey])
+  useEffect(() => { setViewMode(readGitViewMode(viewModeKey)) }, [viewModeKey])
 
   const groups = useMemo(() => groupGitFiles(status?.files ?? []), [status])
   const fileCount = status?.files.length ?? 0

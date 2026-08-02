@@ -21,7 +21,7 @@ import type {
   SessionSummary,
   ToolCardMode,
 } from '@agent-kernel/shared'
-import { deriveSessionState, isSessionResting, isSessionRunning } from '@agent-kernel/shared'
+import { isSessionResting } from '@agent-kernel/shared'
 
 import { Button, buttonVariants } from './components/ui/button.js'
 import {
@@ -48,6 +48,7 @@ import {
   ResizablePanelGroup,
 } from './components/ui/resizable.js'
 import { InlineStatusRow, CompactFeedbackRow, type CompactStatus } from './features/chat/InlineStatusRow.js'
+import { deriveAgentProgress } from './features/chat/agent-progress.js'
 import { ApprovalCard } from './features/chat/ApprovalCard.js'
 import { BackgroundShellsButton } from './features/chat/BackgroundTerminalPanel.js'
 import { ChatPanel, type WorkspaceFileTarget } from './features/chat/ChatPanel.js'
@@ -60,14 +61,21 @@ import { CommandPalette, type CommandPaletteItem } from './features/command/Comm
 import { SessionMetadataDialog } from './features/chat/SessionMetadataDialog.js'
 import { ChangeCwdDialog } from './features/chat/ChangeCwdDialog.js'
 import { ConnectWorkspaceDialog } from './features/explorer/ConnectWorkspaceDialog.js'
+import { ExecutorPairingPrompt } from './features/explorer/ExecutorPairingPrompt.js'
 import { WorkspaceMetadataDialog } from './features/explorer/WorkspaceMetadataDialog.js'
 import { TasksButton } from './features/chat/TasksButton.js'
 import { tasksFromTimeline } from './features/chat/tasks-from-timeline.js'
+import { taskGraphFromTimeline } from './features/chat/task-graph-from-timeline.js'
+import { TaskGraphButton } from './features/chat/TaskGraphButton.js'
 import { Explorer, SessionStatusIndicator, type SessionActivityStatus } from './features/explorer/Explorer.js'
 import { WorkspacePicker } from './features/explorer/WorkspacePicker.js'
 import { InspectorPanel } from './features/inspector/InspectorPanel.js'
+import { SessionTabStrip } from './features/session-tabs/SessionTabStrip.js'
+import { useSessionTabs } from './session-tabs.js'
 import { AppShellNav } from './app-shell/AppShellNav.js'
 import { useAppSection, useSessionDeepLink, type AppSection } from './app-shell/section.js'
+import { useRuntimeDeployment } from './runtime-capabilities.js'
+import { useAuthSession } from './auth-session.js'
 // Page-level lazy loading: the app boots into the "agent" section by default,
 // so the five other top-level pages plus SettingsDialog are pulled in only
 // when their tab (or the settings icon) is opened. Each import() becomes its
@@ -78,6 +86,7 @@ const BenchmarksPage = lazy(() => import('./features/benchmarks/BenchmarksPage.j
 const OperationsPage = lazy(() => import('./features/operations/OperationsPage.js').then((m) => ({ default: m.OperationsPage })))
 const ArtifactsPage = lazy(() => import('./features/artifacts-browser/ArtifactsPage.js').then((m) => ({ default: m.ArtifactsPage })))
 const DocsPage = lazy(() => import('./features/docs/DocsPage.js').then((m) => ({ default: m.DocsPage })))
+const MemoPage = lazy(() => import('./features/memo/MemoPage.js').then((m) => ({ default: m.MemoPage })))
 const PipelinePage = lazy(() => import('./features/pipeline/PipelinePage.js').then((m) => ({ default: m.PipelinePage })))
 const SettingsDialog = lazy(() => import('./features/settings/SettingsDialog.js').then((m) => ({ default: m.SettingsDialog })))
 const SessionFilesPanel = lazy(() => import('./features/session-files/SessionFilesPanel.js').then((m) => ({ default: m.SessionFilesPanel })))
@@ -104,13 +113,15 @@ import { backgroundTerminalTasks } from './background-terminal.js'
 import { resolveHostEndpoint, type ResolvedHostEndpoint } from './host-endpoint.js'
 import { resolveWorkspaceExplorerBinding } from './workspace-explorer-binding.js'
 import { workspaceReadBinary } from './lib/workspace-exec.js'
-import { appendLiveTranscriptItems, reconcilePendingUserMessages, transcriptBaseItems } from './transcript.js'
+import { emitRpc } from './socket-rpc.js'
+import { appendLiveTranscriptItems, appendTranscriptBaseItems, reconcilePendingUserMessages, transcriptBaseItems, type TranscriptItem } from './transcript.js'
 import { compactFailureMessage, compactReasonMessage, hasCompactableContent, isCompactionSuccess, isCompactTerminalEvent } from './app-logic/compaction.js'
 import { mergeOptimisticQueuedMessages, nextSessionSelection, queuedMessageKey, reconcileOptimisticQueuedMessages, removedSessionIds, sessionDisplayLabel, sessionExists, sessionIdsForCacheInvalidation } from './app-logic/session-selectors.js'
-import { coarseStatusForIndicator, isRunningSessionActivity, isWaitingForUserInput, sessionActivityStatus } from './app-logic/session-activity.js'
+import { coarseStatusForIndicator, deriveSelectedSessionActivity, isRunningSessionActivity } from './app-logic/session-activity.js'
 import { modelKey, resolveModelKey } from './app-logic/model-key.js'
 import { useModels } from './app-logic/use-models.js'
 import { useIsMobile, useMinWidth } from './app-logic/use-viewport.js'
+import { deleteSessionScrollState, useSessionPinnedState } from './features/chat/session-scroll-state.js'
 import type { PendingUserTranscriptMessage } from './transcript.js'
 import type { DashboardSocket, TimelineEntry } from './session.js'
 import {
@@ -149,18 +160,20 @@ import {
 import { createDurableSessionViewCache, sessionCacheNamespace } from './durable-session-cache.js'
 import { PROTOCOL_VERSION } from '@agent-kernel/shared'
 import { useInterventionDesktopNotifications } from './lib/desktop-notifications.js'
+import { AccountCenter } from './features/account/AccountCenter.js'
+import { AdminCenter } from './features/admin/AdminCenter.js'
+import { usePushActivityHeartbeat } from './lib/push-activity.js'
 import { useRunningTitleIndicator } from './lib/running-title.js'
 import { useTheme, type Theme } from './lib/theme.js'
 import { useVisualViewportHeight } from './lib/useVisualViewportHeight.js'
 import { useEdgeSwipe } from './lib/useEdgeSwipe.js'
-import { deriveAppBadgeCount, updateAppBadge } from './lib/app-badge.js'
+import { clearAppNotificationIndicators, deriveAppBadgeCount, updateAppBadge } from './lib/app-badge.js'
 import { useScreenWakeLock } from './lib/wake-lock.js'
 import { useDeferredDispose } from './lib/use-deferred-dispose.js'
 import {
   useBackgroundShellToasts,
   useInactiveSessionSummaryToasts,
   useSessionToasts,
-  useSubAgentToasts,
 } from './session-toasts.js'
 
 type LowerExplorerTab = 'files' | 'git'
@@ -179,7 +192,7 @@ type SlashDeleteState = {
 const SESSION_EXPLORER_FONT_SIZE_PX = [11, 12, 13, 14, 15] as const
 const FILE_EXPLORER_FONT_SIZE_PX = [10, 11, 12, 13, 14] as const
 const COMPACT_WATCHDOG_MS = 75_000
-const SIMPLE_CHAT_TOOLS: readonly string[] = ['todowrite', 'agent', 'websearch', 'memory']
+const SIMPLE_CHAT_TOOLS: readonly string[] = ['todowrite', 'todo_graph', 'agent', 'websearch', 'memory']
 
 /**
  * Fetch the host's advertised models on mount. The host reads them from
@@ -191,10 +204,35 @@ const SIMPLE_CHAT_TOOLS: readonly string[] = ['todowrite', 'agent', 'websearch',
 
 
 
+function PageLoadingFallback({ compact = false }: { compact?: boolean }): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div
+      className={cn('flex items-center justify-center text-sm text-muted-foreground', compact ? 'fixed inset-0 z-40 bg-background/70' : 'h-full w-full')}
+      role="status"
+      aria-live="polite"
+      data-testid="page-loading-fallback"
+    >
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+      {t('common.loading')}
+    </div>
+  )
+}
+
 export function App(): JSX.Element {
   const { t } = useTranslation()
   const [config, setConfig] = useState(() => readInitialConfig())
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
+  const runtimeDeployment = useRuntimeDeployment()
+  const runtimeCapabilities = runtimeDeployment.capabilities
+  const saasMode = runtimeDeployment.mode === 'saas'
+  const authSession = useAuthSession(saasMode)
+  const productAccessReady = runtimeDeployment.loaded && !runtimeDeployment.error && (!saasMode || authSession.session?.authenticated === true)
+  const account = authSession.session?.authenticated ? authSession.session.profile : undefined
+  useEffect(() => {
+    if (!saasMode || !authSession.checked || authSession.session?.authenticated !== false) return
+    window.location.replace('/signed-out')
+  }, [authSession.checked, authSession.session, saasMode])
   const [explorerOpen, setExplorerOpen] = useBooleanPref(PREF_EXPLORER_OPEN, true)
   const [sessionExplorerSectionOpen, setSessionExplorerSectionOpen] = useBooleanPref(PREF_SESSION_EXPLORER_SECTION_OPEN, true)
   const [lowerExplorerCollapsed, setLowerExplorerCollapsed] = useState(false)
@@ -212,6 +250,8 @@ export function App(): JSX.Element {
   const [inspectorDrawerOpen, setInspectorDrawerOpen] = useState(false)
   const [cwdDialogOpen, setCwdDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [accountCenterOpen, setAccountCenterOpen] = useState(false)
+  const [adminCenterOpen, setAdminCenterOpen] = useState(false)
   const [metadataOpen, setMetadataOpen] = useState(false)
   const [metadataSessionId, setMetadataSessionId] = useState<string | null>(null)
   const [slashDelete, setSlashDelete] = useState<SlashDeleteState | null>(null)
@@ -228,6 +268,7 @@ export function App(): JSX.Element {
   const compactStartSeq = useRef<number | null>(null)
   const inferredCompactSeq = useRef<number | null>(null)
   const suppressNextAutoSessionSelection = useRef(false)
+  const pendingCreatedSessionId = useRef<string | null>(null)
   const suppressNextWaitingNotification = useRef(false)
   const [themePreference, toggleTheme, , effectiveTheme] = useTheme()
   // Drives the app shell, drawers, and dialogs from one visible-viewport
@@ -265,16 +306,19 @@ export function App(): JSX.Element {
   const fileExplorerFontSizePx = FILE_EXPLORER_FONT_SIZE_PX[fileExplorerFontSize] ?? FILE_EXPLORER_FONT_SIZE_PX[DEFAULT_FILE_EXPLORER_FONT_SIZE]
   const cachedSessionIdsRef = useRef<ReadonlySet<string>>(new Set())
   const [hostEndpoint, setHostEndpoint] = useState<ResolvedHostEndpoint>(() => resolveHostEndpoint())
-  const cacheNamespace = sessionCacheNamespace(hostEndpoint.url, PROTOCOL_VERSION)
+  const identityCacheNamespace = saasMode
+    ? authSession.session?.authenticated ? authSession.session.cacheNamespace : 'signed-out'
+    : 'standalone'
+  const cacheNamespace = `${sessionCacheNamespace(hostEndpoint.url, PROTOCOL_VERSION)}:${identityCacheNamespace}`
   const sessionViewCache = useMemo(() => createDurableSessionViewCache({
     namespace: cacheNamespace,
     maxBytes: sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb),
-    enabled: durableSessionCacheEnabled,
+    enabled: durableSessionCacheEnabled && (!saasMode || authSession.session?.authenticated === true),
   }), [cacheNamespace])
   useEffect(() => {
     sessionViewCache.setMaxBytes(sessionViewCacheMaxBytesFromMb(sessionViewCacheMaxMb))
-    sessionViewCache.setEnabled(durableSessionCacheEnabled)
-  }, [durableSessionCacheEnabled, sessionViewCache, sessionViewCacheMaxMb])
+    sessionViewCache.setEnabled(durableSessionCacheEnabled && (!saasMode || authSession.session?.authenticated === true))
+  }, [authSession.session, durableSessionCacheEnabled, saasMode, sessionViewCache, sessionViewCacheMaxMb])
   useDeferredDispose(sessionViewCache, (cache) => cache.close())
   const getCachedSessionView = useCallback(
     (sessionId: string) => sessionViewCache.get(sessionId),
@@ -282,7 +326,7 @@ export function App(): JSX.Element {
   )
   const wideLayout = useMinWidth(1024)
   const isMobile = useIsMobile()
-  const { models, defaultModel, reload: reloadModels } = useModels()
+  const { models, defaultModel, reload: reloadModels } = useModels(productAccessReady)
   const [storedModel, setStoredModel] = useState<string | null>(() => {
     try {
       return localStorage.getItem(PREF_MODEL)
@@ -348,7 +392,7 @@ export function App(): JSX.Element {
 
   const session = useSession({
     host: hostEndpoint.url,
-    sessionId: config.sessionId,
+    sessionId: productAccessReady ? config.sessionId : null,
     cache: sessionViewCache,
     ...(config.token !== undefined ? { token: config.token } : {}),
     onForked: (p) => {
@@ -356,7 +400,7 @@ export function App(): JSX.Element {
       setConfig((prev) => ({ ...prev, sessionId: p.sessionId, explicit: true }))
     },
   })
-  const controlSocket = useDashboardControlSocket(hostEndpoint.url, config.token)
+  const controlSocket = useDashboardControlSocket(hostEndpoint.url, config.token, productAccessReady)
   const selectedModelKey = useMemo(
     () => resolveModelKey(models, session.selectedModel) || session.selectedModel || '',
     [models, session.selectedModel],
@@ -369,30 +413,50 @@ export function App(): JSX.Element {
     (s) => s.sessionId === config.sessionId,
   )
   const activeSessionId = currentSession?.sessionId ?? null
-  const activeSessionRunning = isSessionRunning({
-    status: session.state?.status ?? currentSession?.status,
+  usePushActivityHeartbeat(productAccessReady)
+  // useSession updates its projection in an effect after selection changes.
+  // During that render gap, the unified activity projection rejects all live
+  // signals from the previous session and falls back to the selected summary.
+  const selectedSessionActivity = deriveSelectedSessionActivity({
+    selectedSessionId: activeSessionId,
+    hydratedSessionId: session.hydratedSessionId,
+    summaryStatus: currentSession?.status,
+    liveStatus: session.state?.status,
     pendingCalls: session.state?.pendingCalls,
     streamingActive: session.streamingText.length > 0,
     awaitingAck,
     compactRunning: compactStatus.kind === 'running',
+    lastError: session.lastError?.message,
   })
-  useScreenWakeLock(keepScreenAwake && activeSessionRunning)
+  const sessionHydrated = selectedSessionActivity.usesLiveProjection
+  useScreenWakeLock(keepScreenAwake && selectedSessionActivity.derived.isRunning)
 
   useEffect(() => {
-    const count = appBadgeEnabled ? deriveAppBadgeCount({
+    // A visible app has no unread app-level notifications. Do not immediately
+    // recreate a badge from persistent session status after entry cleared it.
+    const count = document.visibilityState === 'visible' || !appBadgeEnabled ? 0 : deriveAppBadgeCount({
       sessions: control.sessions,
       activePendingApprovals: session.pendingApprovals.length,
       activeSessionHasError: Boolean(session.lastError),
       disconnected: activeSessionId !== null && (session.status === 'disconnected' || session.status === 'error'),
-    }) : 0
+    })
     void updateAppBadge(count)
   }, [activeSessionId, appBadgeEnabled, control.sessions, session.lastError, session.pendingApprovals.length, session.status])
   useEffect(() => {
-    const clearBadge = (): void => { void updateAppBadge(0) }
-    window.addEventListener('pagehide', clearBadge)
+    const clearIndicators = (): void => {
+      if (document.visibilityState !== 'visible') return
+      void clearAppNotificationIndicators()
+    }
+    // Clear delivered push notifications and the Badging API count whenever
+    // the installed app is entered, focused, or restored from the iOS bfcache.
+    clearIndicators()
+    document.addEventListener('visibilitychange', clearIndicators)
+    window.addEventListener('focus', clearIndicators)
+    window.addEventListener('pageshow', clearIndicators)
     return () => {
-      window.removeEventListener('pagehide', clearBadge)
-      clearBadge()
+      document.removeEventListener('visibilitychange', clearIndicators)
+      window.removeEventListener('focus', clearIndicators)
+      window.removeEventListener('pageshow', clearIndicators)
     }
   }, [])
 
@@ -648,7 +712,11 @@ export function App(): JSX.Element {
     setCompactStatus({
       kind: 'running',
       startedAt: Date.now(),
-      tokensBefore: session.state?.usage.inputTokens ?? 0,
+      // Session state usage is lifetime/cumulative provider usage and can reach
+      // billions of tokens in a long-lived Session. Compact operates on the
+      // currently assembled context, so display the same bounded snapshot used
+      // by the context indicator and Host compaction policy.
+      tokensBefore: session.contextSnapshot?.usage.inputTokens ?? 0,
     })
     session.socket?.emit('client:compact', { sessionId: config.sessionId })
     if (!config.explicit) setConfig((prev) => ({ ...prev, explicit: true }))
@@ -695,6 +763,7 @@ export function App(): JSX.Element {
   }, [session.socket, config.sessionId])
 
   const selectSession = useCallback((sessionId: string): void => {
+    pendingCreatedSessionId.current = null
     // Do NOT wrap this in withViewTransition: that forces a flushSync of the
     // entire App (2900-line tree + a fresh useSession socket connect + history
     // hydration) inside the browser's view-transition screenshot window, which
@@ -706,7 +775,14 @@ export function App(): JSX.Element {
     // gap. No frozen frame, and the right pane animates on every switch.
     setConfig((prev) => ({ ...prev, sessionId, explicit: true }))
   }, [])
+  const selectCreatedSession = useCallback((sessionId: string): void => {
+    // session:ready can arrive before the control-plane session list update.
+    // Keep the intended id selected until that update makes it visible.
+    pendingCreatedSessionId.current = sessionId
+    setConfig((prev) => ({ ...prev, sessionId, explicit: true }))
+  }, [])
   const clearSessionSelection = useCallback((): void => {
+    pendingCreatedSessionId.current = null
     suppressNextAutoSessionSelection.current = true
     setMetadataOpen(false)
     setMetadataSessionId(null)
@@ -728,6 +804,22 @@ export function App(): JSX.Element {
       ...(workspaceId !== undefined ? { workspaceId } : {}),
     })
   }, [])
+  const sessionTabs = useSessionTabs(control.sessions, config.sessionId, selectSession)
+  useEffect(() => {
+    const handler = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null
+      const editing = target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')
+      const command = event.metaKey || event.ctrlKey
+      if (command && !editing && /^[1-9]$/u.test(event.key)) { const id=sessionTabs.state.open[Number(event.key)-1]; if(id){event.preventDefault();selectSession(id)};return }
+      if (command && !editing && event.key === 'Tab') { event.preventDefault();const list=sessionTabs.state.open;if(!list.length)return;const at=Math.max(0,list.indexOf(config.sessionId??''));selectSession(list[(at+(event.shiftKey?-1:1)+list.length)%list.length]!);return }
+      if (command && !editing && event.key.toLowerCase()==='w' && config.sessionId) { event.preventDefault();sessionTabs.close(config.sessionId);return }
+      if (command && event.shiftKey && !editing && event.key.toLowerCase()==='t') { event.preventDefault();sessionTabs.restore();return }
+      if (command && !editing && event.key.toLowerCase()==='n') { event.preventDefault();newSession();return }
+      if (event.altKey && !editing && event.key==='ArrowLeft'){event.preventDefault();sessionTabs.navigate(-1)}
+      if (event.altKey && !editing && event.key==='ArrowRight'){event.preventDefault();sessionTabs.navigate(1)}
+    }
+    window.addEventListener('keydown',handler);return()=>window.removeEventListener('keydown',handler)
+  },[config.sessionId,newSession,selectSession,sessionTabs])
   const clearCurrentSession = (): void => {
     if (!session.socket || config.sessionId === null) return
     sessionViewCache.delete(config.sessionId)
@@ -754,7 +846,7 @@ export function App(): JSX.Element {
         cwd,
         selectedModel: preferredModel,
       })
-      selectSession(sessionId)
+      selectCreatedSession(sessionId)
       setPendingWorkspacePick(null)
     } catch (err) {
       setWorkspacePickError(err instanceof Error ? err.message : String(err))
@@ -779,7 +871,7 @@ export function App(): JSX.Element {
         tools: SIMPLE_CHAT_TOOLS,
         selectedModel: preferredModel,
       })
-      selectSession(sessionId)
+      selectCreatedSession(sessionId)
       setPendingWorkspacePick(null)
     } catch (err) {
       setWorkspacePickError(err instanceof Error ? err.message : String(err))
@@ -791,6 +883,7 @@ export function App(): JSX.Element {
     if (!controlSocket) return
     for (const id of sessionIdsForCacheInvalidation(controlSessionsRef.current, sessionId, Boolean(options.cascade))) {
       sessionViewCache.delete(id)
+      deleteSessionScrollState(id)
     }
     deleteSession(controlSocket, sessionId, options)
     if (sessionId === config.sessionId) {
@@ -868,8 +961,9 @@ export function App(): JSX.Element {
   )
   const metadataIsCurrentSession = metadataTargetSessionId !== null && metadataTargetSessionId === activeSessionId
   const hasSelectedSession = currentSession !== undefined
-  const sessionListLoading = !control.executorsLoaded || !control.sessionsLoaded
-  const sessionHydrated = activeSessionId !== null && session.hydratedSessionId === activeSessionId
+  // SaaS Simple Chat has no workspace executor by design. Do not block the
+  // empty-session entry point on an executor snapshot that is irrelevant there.
+  const sessionListLoading = sessionDirectoryIsLoading(runtimeCapabilities.workspace, control.sessionsLoaded, control.executorsLoaded)
   const selectedHistorySessionLoading = Boolean(
     hasSelectedSession &&
       !sessionHydrated &&
@@ -938,7 +1032,11 @@ export function App(): JSX.Element {
       sessions: control.sessions,
       currentSessionId: config.sessionId,
       explicit: config.explicit,
+      pendingSessionId: pendingCreatedSessionId.current,
     })
+    if (sessionExists(control.sessions, pendingCreatedSessionId.current)) {
+      pendingCreatedSessionId.current = null
+    }
     if (!next) return
     setConfig((prev) => ({
       ...prev,
@@ -972,10 +1070,25 @@ export function App(): JSX.Element {
   // clicks / freezing the hover cursor while the agent ran.
   const stateMessages = session.state?.messages ?? EMPTY_MESSAGES
   const includeStatePrefix = session.parentSessionId !== null
-  const transcriptBase = useMemo(
-    () => transcriptBaseItems(stateMessages, session.timeline, { includeStatePrefix }),
-    [stateMessages, session.timeline, includeStatePrefix],
-  )
+  const transcriptProjectionRef = useRef<{
+    sessionId: string | null
+    stateMessages: readonly Message[]
+    includeStatePrefix: boolean
+    timeline: readonly TimelineEntry[]
+    items: readonly TranscriptItem[]
+  } | null>(null)
+  const transcriptBase = useMemo(() => {
+    const previous = transcriptProjectionRef.current
+    const incremental = previous
+      && previous.sessionId === activeSessionId
+      && previous.stateMessages === stateMessages
+      && previous.includeStatePrefix === includeStatePrefix
+      ? appendTranscriptBaseItems(previous.items, previous.timeline, session.timeline)
+      : null
+    const items = incremental ?? transcriptBaseItems(stateMessages, session.timeline, { includeStatePrefix })
+    transcriptProjectionRef.current = { sessionId: activeSessionId, stateMessages, includeStatePrefix, timeline: session.timeline, items }
+    return items
+  }, [activeSessionId, stateMessages, session.timeline, includeStatePrefix])
   const chatItems = useMemo(
     () =>
       appendLiveTranscriptItems(
@@ -999,17 +1112,14 @@ export function App(): JSX.Element {
     [session.timeline],
   )
   const taskItems = useMemo(() => tasksFromTimeline(session.timeline), [session.timeline])
-  const activeSessionStatus = sessionActivityStatus({
-    status: session.state?.status ?? currentSession?.status,
-    streamingActive: session.streamingText.length > 0,
-    awaitingAck,
-    compactRunning: compactStatus.kind === 'running',
-  })
-  useRunningTitleIndicator(isRunningSessionActivity(activeSessionStatus))
+  const agentProgress = useMemo(() => deriveAgentProgress(session.state, session.timeline), [session.state, session.timeline])
+  const taskGraph = useMemo(() => taskGraphFromTimeline(session.timeline), [session.timeline])
+  const activeSessionStatus = selectedSessionActivity.status
+  useRunningTitleIndicator(selectedSessionActivity.derived.isRunning)
   // Coarse status for the indicators (sidebar + title): collapses the rapid
   // thinking↔executing_tools flips within a running turn so those indicators
   // (and the memoized Explorer) don't re-render on every tool step.
-  const indicatorActiveSessionStatus = coarseStatusForIndicator(activeSessionStatus)
+  const indicatorActiveSessionStatus = selectedSessionActivity.indicatorStatus
   const sidebarActiveSessionStatus = sessionHydrated ? indicatorActiveSessionStatus : undefined
   const sessionStatusesRef = useRef<{ signature: string; value: ReadonlyMap<string, SessionActivityStatus> }>({
     signature: '',
@@ -1038,10 +1148,7 @@ export function App(): JSX.Element {
   // jump-to-bottom (see scrollToBottomToken below). Virtuoso reports
   // `atBottom` back to us via `onChatPinnedChange` — we forward that but
   // do NOT drive scrollTop manually anymore.
-  const [chatPinnedToBottom, setChatPinnedToBottom] = useState(true)
-  useEffect(() => {
-    setChatPinnedToBottom(true)
-  }, [config.sessionId])
+  const { pinned: chatPinnedToBottom, setPinned: setChatPinnedToBottom } = useSessionPinnedState(activeSessionId)
   // Bumping this forces VirtualTranscript to jump-to-bottom. Keep it for
   // explicit jumps such as session switches and sends; ordinary appends are
   // handled by Virtuoso's pinned `followOutput` path so the scroll container
@@ -1061,18 +1168,14 @@ export function App(): JSX.Element {
     )
   }, [currentSession?.workspaceId, control.executors])
   const sessionWorkspaceKnownOffline = Boolean(
-    hasSelectedSession &&
+    runtimeCapabilities.workspace &&
+      hasSelectedSession &&
       session.status === 'ready' &&
       control.executorsLoaded &&
       !sessionWorkspaceOnline,
   )
 
-  const waitingForUser = isWaitingForUserInput({
-    status: session.state?.status,
-    streamingActive: session.streamingText.length > 0,
-    awaitingAck,
-    pendingApprovalsCount,
-  })
+  const waitingForUser = selectedSessionActivity.derived.canAcceptUserMessage
   const suppressWaitingForUser = suppressNextWaitingNotification.current && waitingForUser
 
   useInterventionDesktopNotifications({
@@ -1106,14 +1209,13 @@ export function App(): JSX.Element {
     sessions: control.sessions,
     activeSessionId,
   })
-  useSubAgentToasts(session.socket)
   useBackgroundShellToasts(backgroundTasks)
 
   const openCwdDialog = (): void => {
     setCwdDialogOpen(true)
   }
 
-  const [section, setSection] = useAppSection()
+  const [section, setSection] = useAppSection(runtimeCapabilities)
   // Notification deep-links: `#/sessions/<id>` selects that session (works both
   // on cold-start openWindow and the focused-tab PUSH_NAVIGATE path).
   useSessionDeepLink(selectSession)
@@ -1234,28 +1336,28 @@ export function App(): JSX.Element {
       run: () => setConnectWorkspaceOpen(true),
     })
 
+    cmds.push({
+      id: 'view.settings',
+      group: t('commandPalette.groups.view'),
+      label: t('commandPalette.commands.openSettings'),
+      hint: t('commandPalette.commands.openSettingsHint'),
+      icon: Settings,
+      keywords: ['preferences', 'config'],
+      run: () => setSettingsOpen(true),
+    })
+    if (runtimeCapabilities.benchmarks) cmds.push({
+      id: 'view.eval',
+      group: t('commandPalette.groups.view'),
+      label: t('commandPalette.commands.openEval'),
+      hint: t('commandPalette.commands.openEvalHint'),
+      icon: BarChart3,
+      keywords: ['swebench', 'benchmark', 'comparison', 'score'],
+      run: () => {
+        setSection('benchmarks')
+        if (typeof window !== 'undefined') window.location.hash = '#/benchmarks'
+      },
+    })
     cmds.push(
-      {
-        id: 'view.settings',
-        group: t('commandPalette.groups.view'),
-        label: t('commandPalette.commands.openSettings'),
-        hint: t('commandPalette.commands.openSettingsHint'),
-        icon: Settings,
-        keywords: ['preferences', 'config'],
-        run: () => setSettingsOpen(true),
-      },
-      {
-        id: 'view.eval',
-        group: t('commandPalette.groups.view'),
-        label: t('commandPalette.commands.openEval'),
-        hint: t('commandPalette.commands.openEvalHint'),
-        icon: BarChart3,
-        keywords: ['swebench', 'benchmark', 'comparison', 'score'],
-        run: () => {
-          setSection('benchmarks')
-          if (typeof window !== 'undefined') window.location.hash = '#/benchmarks'
-        },
-      },
       {
         id: 'view.artifacts',
         group: t('commandPalette.groups.view'),
@@ -1355,6 +1457,7 @@ export function App(): JSX.Element {
     onModelChange,
     runCompactNow,
     runConsolidateMemory,
+    runtimeCapabilities.benchmarks,
     session.socket,
     session.state,
     sessionWorkspaceKnownOffline,
@@ -1463,6 +1566,25 @@ export function App(): JSX.Element {
     [session.socket, activeSessionId],
   )
 
+  if (!runtimeDeployment.loaded || (saasMode && authSession.loading && !authSession.checked)) {
+    return <PageLoadingFallback compact />
+  }
+  if (runtimeDeployment.error || authSession.error || runtimeDeployment.unauthorized || (saasMode && authSession.session?.authenticated !== true)) {
+    const detail = runtimeDeployment.error ?? authSession.error ?? 'Your sign-in session is missing or has expired.'
+    return (
+      <main className="fixed inset-0 grid place-items-center bg-background p-4 text-foreground" data-testid="product-access-error">
+        <section className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-xl" role="alert">
+          <h1 className="text-xl font-semibold">Unable to open Agent RunLab</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button onClick={() => { window.location.href = '/auth/login?prompt=login' }}>Sign in again</Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>Retry</Button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <PwaLifecycleHost>
     <div className="ak-app-shell flex flex-col bg-background text-foreground">
@@ -1470,37 +1592,54 @@ export function App(): JSX.Element {
         section={section}
         onSelect={handleSectionSelect}
         onOpenSettings={() => setSettingsOpen(true)}
-        connectionStatus={hasSelectedSession ? <ConnectionStatus status={session.status} /> : null}
+        connectionStatus={hasSelectedSession ? <ConnectionStatus socket={session.socket} status={session.status} transport={session.socket?.io.engine?.transport.name} cursor={session.state?.cursor ?? 0} executorConnected={sessionWorkspaceOnline} executorTimeoutMs={60_000} onReconnect={() => { session.socket?.disconnect(); session.socket?.connect() }} onResync={() => { if(session.socket&&activeSessionId)session.socket.emit('client:load_history',{sessionId:activeSessionId}) }} onOperations={() => handleSectionSelect('operations')} /> : null}
         collapsed={!topbarOpen}
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
+        capabilities={runtimeCapabilities}
+        account={account}
+        accountLoading={saasMode && authSession.loading}
+        onOpenAccount={saasMode ? () => setAccountCenterOpen(true) : undefined}
+        onOpenAdmin={authSession.session?.authenticated && (authSession.session.organization?.role === 'owner' || authSession.session.organization?.role === 'admin') ? () => setAdminCenterOpen(true) : undefined}
+        onSignOut={saasMode ? () => {
+          authSession.announceLogout()
+          void sessionViewCache.clearDurable()
+          // Native form submission owns the authoritative POST + redirect. This
+          // callback is progressive enhancement for cache and cross-tab cleanup.
+        } : undefined}
       />
+      {accountCenterOpen && account ? <AccountCenter profile={account} organization={authSession.session?.authenticated ? authSession.session.organization : undefined} onClose={() => setAccountCenterOpen(false)} /> : null}
+      {adminCenterOpen ? <AdminCenter onClose={() => setAdminCenterOpen(false)} /> : null}
       <PwaUpdateGlobalBanner />
       <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
       {section === 'benchmarks' ? (
-        <Suspense fallback={<div className="h-full w-full" />}>
+        <Suspense fallback={<PageLoadingFallback />}>
           <BenchmarksPage onOpenSession={(sessionId) => selectSession(sessionId)} />
         </Suspense>
       ) : section === 'operations' ? (
-        <Suspense fallback={<div className="h-full w-full" />}>
+        <Suspense fallback={<PageLoadingFallback />}>
           <OperationsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
         </Suspense>
       ) : section === 'artifacts' ? (
-        <Suspense fallback={<div className="h-full w-full" />}>
+        <Suspense fallback={<PageLoadingFallback />}>
           <ArtifactsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
         </Suspense>
       ) : section === 'docs' ? (
-        <Suspense fallback={<div className="h-full w-full" />}>
+        <Suspense fallback={<PageLoadingFallback />}>
           <DocsPage />
         </Suspense>
       ) : section === 'pipeline' ? (
-        <Suspense fallback={<div className="h-full w-full" />}>
-          <PipelinePage />
+        <Suspense fallback={<PageLoadingFallback />}>
+          <PipelinePage capabilities={runtimeCapabilities} />
+        </Suspense>
+      ) : section === 'memo' ? (
+        <Suspense fallback={<PageLoadingFallback />}>
+          <MemoPage />
         </Suspense>
       ) : (
       <ResizablePanelGroup direction="horizontal" autoSaveId="ak-outer-cols-v5" className="min-w-0 max-w-full overflow-hidden">
-        {wideLayout ? (
+        {wideLayout && runtimeCapabilities.workspace ? (
           <>
             {explorerOpen ? (
               <>
@@ -1621,22 +1760,25 @@ export function App(): JSX.Element {
                 if (wideLayout) setExplorerOpen(true)
                 else setExplorerDrawerOpen(true)
               }}
-              explorerAvailable={!wideLayout || !explorerOpen}
+              explorerAvailable={runtimeCapabilities.workspace && (!wideLayout || !explorerOpen)}
               onOpenInspector={() => {
                 if (wideLayout) setInspectorOpen(true)
                 else setInspectorDrawerOpen(true)
               }}
               inspectorAvailable={hasSelectedSession && (!wideLayout || !inspectorOpen)}
-              onChangeCwd={openCwdDialog}
+              onChangeCwd={runtimeCapabilities.workspace ? openCwdDialog : undefined}
               sessionSelected={hasSelectedSession}
               sessionLoading={sessionListLoading && !hasSelectedSession}
+              sessionTabs={!explorerOpen ? <SessionTabStrip sessions={control.sessions} openIds={sessionTabs.state.open} pinned={sessionTabs.state.pinned} active={config.sessionId} onSelect={selectSession} onClose={sessionTabs.close} onPin={sessionTabs.pin} onReorder={sessionTabs.reorder} /> : undefined}
             />
             {sessionListLoading && !hasSelectedSession ? (
               <SessionLoadingArea />
             ) : !hasSelectedSession ? (
               <NoSessionArea
                 onNewSession={newSession}
+                onConnectWorkspace={runtimeCapabilities.workspace ? openConnectWorkspaceDialog : undefined}
                 hasSessions={control.sessions.length > 0}
+                hasWorkspace={control.executors.length > 0}
                 data-testid="no-session-placeholder"
               />
             ) : activeSessionId !== null ? (
@@ -1668,6 +1810,7 @@ export function App(): JSX.Element {
                       data-testid="chat-panel"
                     >
                       <ChatPanel
+                        sessionId={activeSessionId}
                         items={chatItems}
                         highlightIndex={highlightIndex}
                         pinnedToBottom={chatPinnedToBottom}
@@ -1681,6 +1824,7 @@ export function App(): JSX.Element {
                         loading={selectedHistorySessionLoading}
                         onDismissCompactStatus={() => setCompactStatus({ kind: 'idle' })}
                         pendingApprovals={session.pendingApprovals}
+                        activeToolCallIds={session.state?.pendingCalls.map((call) => call.callId) ?? []}
                         onReadOverflow={readOverflow}
                         onOpenWorkspaceFile={setWorkspaceFileViewTarget}
                         parentSessionId={activeSessionId ?? undefined}
@@ -1727,6 +1871,7 @@ export function App(): JSX.Element {
                               streamingActive={session.streamingText.length > 0}
                               toolExecutionStartedAt={session.toolExecutionStartedAt}
                               awaitingAck={awaitingAck}
+                              progress={agentProgress}
                             />
                             {forkingFromSeq !== null ? (
                               <div
@@ -1798,15 +1943,15 @@ export function App(): JSX.Element {
                           queuedMessages={visibleQueuedMessages}
                           timeline={session.timeline}
                           displayPrefs={chatDisplayPrefs}
-                          onQueuedReorder={(id, beforeId) => {
-                            if (session.socket && activeSessionId !== null) reorderQueuedMessage(session.socket, activeSessionId, id, beforeId)
-                          }}
-                          onQueuedUpdate={(id, text) => {
-                            if (session.socket && activeSessionId !== null) updateQueuedMessage(session.socket, activeSessionId, id, text)
-                          }}
-                          onQueuedDelete={(id) => {
-                            if (session.socket && activeSessionId !== null) deleteQueuedMessage(session.socket, activeSessionId, id)
-                          }}
+                          onQueuedReorder={session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
+                            ? (id, beforeId) => reorderQueuedMessage(session.socket!, activeSessionId, id, beforeId)
+                            : undefined}
+                          onQueuedUpdate={session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
+                            ? (id, text, content) => updateQueuedMessage(session.socket!, activeSessionId, id, text, content)
+                            : undefined}
+                          onQueuedDelete={session.status === 'ready' && sessionWorkspaceOnline && session.socket && activeSessionId !== null
+                            ? (id) => deleteQueuedMessage(session.socket!, activeSessionId, id)
+                            : undefined}
                           onCompact={runCompactNow}
                           onClearSession={clearCurrentSession}
                           onCancel={() => {
@@ -1828,10 +1973,11 @@ export function App(): JSX.Element {
                                 sessionId={activeSessionId}
                                 fallbackTasks={backgroundTasks}
                               />
-                              <TasksButton todos={taskItems} />
+                              <TaskGraphButton graph={taskGraph} />
+                              {!taskGraph ? <TasksButton todos={taskItems} /> : null}
                             </>
                           }
-                          onSubmit={(text, mode, images, extraBlocks) => {
+                          onSubmit={async (text, mode, images, extraBlocks) => {
                             if (!session.socket || activeSessionId === null) return
                             const imageBlocks = images ?? []
                             const extras = extraBlocks ?? []
@@ -1863,7 +2009,7 @@ export function App(): JSX.Element {
                             if (effectiveOptimisticMode === 'queue') {
                               setOptimisticQueuedMessages((prev) => [
                                 ...prev,
-                                { id: `optimistic-${newPendingMessageId()}`, text, mode, createdAt },
+                                { id: `optimistic-${newPendingMessageId()}`, text, mode, createdAt, ...(content ? { content } : {}) },
                               ])
                             } else {
                               setPendingUserMessages((prev) => [
@@ -1878,14 +2024,22 @@ export function App(): JSX.Element {
                                 },
                               ])
                             }
-                            session.socket.emit('client:user_message', {
-                              sessionId: activeSessionId,
-                              text,
-                              mode,
-                              ...(content ? { content } : {}),
-                            })
-                            if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
                             setAwaitingAck(true)
+                            try {
+                              await emitRpc(session.socket, 'client:user_message', {
+                                sessionId: activeSessionId,
+                                text,
+                                mode,
+                                ...(content ? { content } : {}),
+                              })
+                              if (effectiveOptimisticMode === 'steer') suppressNextWaitingNotification.current = true
+                            } catch (error) {
+                              setPendingUserMessages((prev) => prev.filter((item) => item.text !== text || item.createdAt !== createdAt))
+                              setOptimisticQueuedMessages((prev) => prev.filter((item) => item.text !== text || item.createdAt !== createdAt))
+                              throw error
+                            } finally {
+                              setAwaitingAck(false)
+                            }
                             // Sending is an explicit "I'm at the end" signal:
                             // re-pin and force a jump even if the user had
                             // scrolled up (or was never pinned because the
@@ -1947,7 +2101,7 @@ export function App(): JSX.Element {
         </ResizablePanel>
       </ResizablePanelGroup>
       )}
-      <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
+      {runtimeCapabilities.workspace ? <Dialog open={explorerDrawerOpen} onOpenChange={setExplorerDrawerOpen}>
         <DialogContent
           className="ak-drawer-left left-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:w-96 sm:rounded-none"
           data-testid="explorer-drawer"
@@ -2016,7 +2170,7 @@ export function App(): JSX.Element {
             </div>
           </div>
         </DialogContent>
-      </Dialog>
+      </Dialog> : null}
       <Dialog open={inspectorDrawerOpen && !wideLayout && hasSelectedSession} onOpenChange={setInspectorDrawerOpen}>
         <DialogContent
           className="ak-drawer-right right-0 top-0 h-[var(--ak-viewport-h,100dvh)] max-h-[var(--ak-viewport-h,100dvh)] w-screen max-w-none !left-auto translate-x-0 translate-y-0 overflow-hidden p-0 gap-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] sm:w-[26rem] sm:rounded-none"
@@ -2171,7 +2325,7 @@ export function App(): JSX.Element {
         onOpenChange={setCwdDialogOpen}
       />
       {settingsOpen ? (
-        <Suspense fallback={null}>
+        <Suspense fallback={<PageLoadingFallback compact />}>
           <SettingsDialog
             open={settingsOpen}
             onOpenChange={setSettingsOpen}
@@ -2228,6 +2382,7 @@ export function App(): JSX.Element {
         open={connectWorkspaceOpen}
         onOpenChange={setConnectWorkspaceOpen}
       />
+      <ExecutorPairingPrompt />
       <WorkspaceMetadataDialog
         open={workspaceInfoId !== null}
         onOpenChange={(open) => {
@@ -2339,12 +2494,20 @@ function readInitialConfig(): Config {
   return { sessionId, explicit, ...(token !== undefined ? { token } : {}) }
 }
 
+export function sessionDirectoryIsLoading(workspaceEnabled: boolean, sessionsLoaded: boolean, executorsLoaded: boolean): boolean {
+  return !sessionsLoaded || (workspaceEnabled && !executorsLoaded)
+}
+
 export function NoSessionArea({
   onNewSession,
+  onConnectWorkspace,
   hasSessions,
+  hasWorkspace = true,
 }: {
   onNewSession(): void
+  onConnectWorkspace?(): void
   hasSessions: boolean
+  hasWorkspace?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   return (
@@ -2364,9 +2527,20 @@ export function NoSessionArea({
             ? t('app.noSessionWithSessions')
             : t('app.noSessionEmpty')}
         </p>
-        <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
-          {t('app.newSessionButton')}
-        </Button>
+        <div className="flex flex-wrap justify-center gap-2">
+          {!hasWorkspace && onConnectWorkspace ? (
+            <Button type="button" onClick={onConnectWorkspace} data-testid="no-session-connect-workspace">
+              Connect your first workspace
+            </Button>
+          ) : (
+            <Button type="button" onClick={() => onNewSession()} data-testid="no-session-new-button">
+              {t('app.newSessionButton')}
+            </Button>
+          )}
+          <Button type="button" variant="outline" asChild>
+            <a href="#/docs">View setup guide</a>
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -2547,6 +2721,7 @@ export function WorkbenchToolbar({
   onChangeCwd,
   sessionSelected,
   sessionLoading = false,
+  sessionTabs,
 }: {
   sessionLabel: string
   sessionActivityStatus?: SessionActivityStatus
@@ -2557,15 +2732,16 @@ export function WorkbenchToolbar({
   explorerAvailable: boolean
   onOpenInspector(): void
   inspectorAvailable: boolean
-  onChangeCwd(): void
+  onChangeCwd?: () => void
   sessionSelected: boolean
   sessionLoading?: boolean
+  sessionTabs?: React.ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
   const displayLabel = sessionSelected ? sessionLabel : sessionLoading ? t('common.loading') : t('app.noSessionSelected')
   return (
     <div
-      className="flex min-h-9 flex-none items-center gap-1.5 bg-card px-2 py-1 text-sm text-card-foreground backdrop-blur-md sm:gap-2 sm:px-3"
+      className="flex min-h-9 flex-none items-center gap-1.5 bg-card px-2 py-1 text-sm text-card-foreground sm:gap-2 sm:px-3"
       data-testid="workbench-toolbar"
     >
       {topbarAvailable ? (
@@ -2609,7 +2785,7 @@ export function WorkbenchToolbar({
           {displayLabel}
         </span>
       </span>
-      {sessionSelected ? (
+      {sessionSelected && onChangeCwd ? (
       <Button
         type="button"
         variant="ghost"
@@ -2625,7 +2801,7 @@ export function WorkbenchToolbar({
         </span>
       </Button>
       ) : null}
-      <span className="min-w-0 flex-1" />
+      {sessionTabs ? <div className="ml-2 min-w-0 flex-1 overflow-hidden">{sessionTabs}</div> : <span className="min-w-0 flex-1" />}
       {inspectorAvailable ? (
         <Button
           variant="ghost"
@@ -2643,22 +2819,15 @@ export function WorkbenchToolbar({
   )
 }
 
-function ConnectionStatus({ status }: { status: string }): JSX.Element {
-  const { t } = useTranslation()
-  const label = hostStatusLabel(status, t)
-  return (
-    <div
-      className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-md px-0 text-xs text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-accent/60 hover:text-foreground hover:scale-[1.02] motion-reduce:transition-none motion-reduce:hover:scale-100 sm:w-auto sm:gap-1.5 sm:px-2"
-      data-testid="connection-status"
-      data-status={status}
-      title={label}
-      aria-label={label}
-    >
-      <span className={cn('h-2 w-2 flex-none rounded-full transition-colors duration-300', statusDot(status))} />
-      <span className="hidden sm:inline">{label}</span>
-    </div>
-  )
+function ConnectionStatus({socket,status,transport,cursor,executorConnected,executorTimeoutMs,onReconnect,onResync,onOperations}:{socket:DashboardSocket|null;status:string;transport?:string;cursor:number;executorConnected:boolean;executorTimeoutMs:number;onReconnect():void;onResync():void;onOperations():void}):JSX.Element{
+ const {t}=useTranslation(),[open,setOpen]=useState(false),[rtt,setRtt]=useState<number|null>(null),[connectedAt,setConnectedAt]=useState<number|null>(null),[lastDisconnect,setLastDisconnect]=useState<number|null>(null),[reconnects,setReconnects]=useState(0);const label=hostStatusLabel(status,t)
+ useEffect(()=>{if(status==='ready'){setConnectedAt(v=>v??Date.now())}else if(connectedAt){setLastDisconnect(Date.now());setConnectedAt(null);setReconnects(v=>v+1)}},[status,connectedAt])
+ useEffect(()=>{if(!open)return;let stopped=false;const ping=()=>{if(!socket?.connected)return;const start=performance.now();socket.timeout(3000).emit('client:connection_ping',Date.now(),(err:unknown)=>{if(!err&&!stopped)setRtt(Math.round(performance.now()-start))})};ping();const timer=setInterval(ping,5000);return()=>{stopped=true;clearInterval(timer)}},[open])
+ const diagnostics={status,transport:transport??'unknown',rttMs:rtt,connectedSince:connectedAt?new Date(connectedAt).toISOString():null,lastDisconnect:lastDisconnect?new Date(lastDisconnect).toISOString():null,reconnects,executorPresence:executorConnected?'online':'offline',sessionCursor:cursor}
+ return <div className="relative"><button type="button" onClick={()=>setOpen(v=>!v)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent" data-testid="connection-status" data-status={status}><span className={cn('h-2 w-2 rounded-full',statusDot(status))}/><span className="hidden sm:inline">{label}</span></button>{open?<div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-popover p-4 text-xs shadow-xl"><h3 className="text-sm font-semibold">Connection</h3><div className="mt-3 grid gap-2"><KVLine k="Browser ↔ Ingress" v={`${label} · ${transport??'unknown'} · ${rtt===null?'measuring…':`${rtt} ms`}`}/><KVLine k="Connected for" v={connectedAt?formatDuration(Date.now()-connectedAt):'—'}/><KVLine k="Reconnects" v={String(reconnects)}/><KVLine k="Last disconnect" v={lastDisconnect?new Date(lastDisconnect).toLocaleTimeString():'None'}/><KVLine k="Host ↔ selected Executor" v={executorConnected?`Connected · tool ACK timeout ${Math.round(executorTimeoutMs/1000)}s`:'Offline · tool calls unavailable'}/><KVLine k="Session realtime" v={status==='ready'?`Subscribed · local cursor ${cursor}`:label}/></div><p className="mt-3 text-[11px] text-muted-foreground">Reconnect rebuilds the browser realtime connection. Resync replaces the visible Session timeline from authoritative Host history.</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={onReconnect}>Reconnect socket</Button><Button size="sm" variant="outline" onClick={onResync}>Resync history</Button><Button size="sm" variant="outline" onClick={()=>void navigator.clipboard.writeText(JSON.stringify(diagnostics,null,2))}>Copy diagnostics</Button></div></div>:null}</div>
 }
+function KVLine({k,v}:{k:string;v:string}){return <div className="flex justify-between gap-3"><span className="text-muted-foreground">{k}</span><span className="text-right">{v}</span></div>}
+function formatDuration(ms:number){const seconds=Math.max(0,Math.floor(ms/1000));if(seconds<60)return `${seconds}s`;const minutes=Math.floor(seconds/60);if(minutes<60)return `${minutes}m`;return `${Math.floor(minutes/60)}h ${minutes%60}m`}
 
 function hostStatusLabel(status: string, t: ReturnType<typeof useTranslation>['t']): string {
   if (status === 'ready') return t('common.connected')

@@ -75,6 +75,8 @@ try {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })
   const page = await browser.newPage()
+  page.on('console', (message) => hostLog.push(`[browser:${message.type()}] ${message.text()}\n`))
+  page.on('pageerror', (error) => hostLog.push(`[browser:pageerror] ${error.stack ?? error.message}\n`))
   page.setDefaultTimeout(10_000)
   await page.setViewport({ width: 1200, height: 520, deviceScaleFactor: 1 })
   await page.goto(HOST_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 })
@@ -117,7 +119,7 @@ async function verifyViewports(page) {
     await page.setViewport({ ...viewport, deviceScaleFactor: 1 })
     await sleep(150)
     if (viewport.width >= 1180) {
-      await page.waitForSelector('[data-testid="session-row-cwd"]', { timeout: 3_000 })
+      await page.waitForSelector('[data-testid="session-row"]', { timeout: 3_000 })
     }
     await verifyResponsivePanels(page, viewport.width)
     await verifyChatContentLayout(page, viewport.width)
@@ -144,8 +146,12 @@ async function verifyResponsivePanels(page, viewportWidth) {
     const inspector = document.querySelector('[data-testid="inspector-panel"]')
     const toolbar = document.querySelector('[data-testid="workbench-toolbar"]')
     const inspectorToggle = document.querySelector('[data-testid="inspector-toggle"]')
-    const selectedSession = document.querySelector('[data-testid="session-row"]')
-    const sessionCwd = selectedSession?.querySelector('[data-testid="session-row-cwd"]')
+    const selectedSession = document.querySelector(`[data-testid="session-row"][data-session-id="${document.location.search.match(/sessionId=([^&]+)/)?.[1] ?? ''}"]`)
+      ?? document.querySelector('[data-testid="session-row"][data-selected="true"]')
+      ?? document.querySelector('[data-testid="session-row"]')
+    // Session cwd is intentionally exposed on the label's title tooltip; do not
+    // accidentally inspect the drag handle, which also has a title.
+    const sessionLabel = selectedSession?.querySelector('[class*="font-medium"][title]')
     const rectFor = (el) => {
       const rect = el?.getBoundingClientRect()
       return rect ? { width: rect.width, height: rect.height, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } : null
@@ -158,8 +164,8 @@ async function verifyResponsivePanels(page, viewportWidth) {
       inspector: rectFor(inspector),
       toolbar: rectFor(toolbar),
       inspectorTogglePresent: Boolean(inspectorToggle),
-      sessionCwdText: sessionCwd?.textContent || '',
-      sessionCwd: rectFor(sessionCwd),
+      sessionCwdText: sessionLabel?.getAttribute('title') || '',
+      sessionCwd: rectFor(sessionLabel),
       selectedSession: rectFor(selectedSession),
       selectedSessionScrollWidth: selectedSession?.scrollWidth ?? 0,
       selectedSessionClientWidth: selectedSession?.clientWidth ?? 0,
@@ -401,9 +407,15 @@ async function verifyNavigationSurface(page, viewportWidth) {
   if (viewportWidth < 1180) {
     check(`narrow layout exposes explorer drawer trigger at ${viewportWidth}px`, metrics.explorerToggle === true, JSON.stringify(metrics))
     await page.click('[data-testid="explorer-toggle"]')
-    await page.waitForSelector('[data-testid="explorer-drawer"]', { timeout: 3_000 })
+    await page.waitForSelector('[data-testid="explorer-drawer"][data-state="open"]', { timeout: 3_000 })
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[data-testid="explorer-drawer"][data-state="open"]')
+      if (!el) return false
+      const rect = el.getBoundingClientRect()
+      return rect.left >= -1 && rect.right <= window.innerWidth + 1
+    }, { timeout: 3_000 })
     const drawer = await page.evaluate(() => {
-      const el = document.querySelector('[data-testid="explorer-drawer"]')
+      const el = document.querySelector('[data-testid="explorer-drawer"][data-state="open"]')
       const rect = el?.getBoundingClientRect()
       return rect ? { width: rect.width, left: rect.left, right: rect.right, viewportWidth: window.innerWidth } : null
     })
@@ -427,14 +439,9 @@ async function verifyModalSizing(page, viewportWidth) {
     '[data-testid="settings-dialog"]',
     maxWideModalWidth,
   )
-  await verifyOpenedModalSize(
-    page,
-    viewportWidth,
-    'connect workspace modal',
-    '[data-testid="new-session-button"]',
-    '[data-testid="connect-workspace-dialog"]',
-    maxMediumModalWidth,
-  )
+  // Verify session-bound actions before opening the create-session flow. Closing
+  // Connect Workspace intentionally returns to a no-selection state, so running
+  // CWD afterward would click a stale trigger from the previous session.
   await verifyOpenedModalSize(
     page,
     viewportWidth,
@@ -442,6 +449,19 @@ async function verifyModalSizing(page, viewportWidth) {
     '[data-testid="cwd-button"]',
     '[data-testid="change-cwd-dialog"]',
     maxWideModalWidth,
+  )
+  // Radix restores focus after the CWD dialog exits. Reload the deep link before
+  // testing an unrelated creation flow so focus restoration cannot race the
+  // next click and turn this visual check into an order-dependent false failure.
+  await page.goto(`${HOST_URL}/?sessionId=${SESSION_ID}`, { waitUntil: 'networkidle2', timeout: 15_000 })
+  await ensureFixtureSessionSelected(page)
+  await verifyOpenedModalSize(
+    page,
+    viewportWidth,
+    'connect workspace modal',
+    '[data-testid="connect-workspace-button"]',
+    '[data-testid="connect-workspace-dialog"]',
+    maxMediumModalWidth,
   )
 }
 
@@ -519,7 +539,7 @@ async function verifyHostListsFixture() {
 async function ensureFixtureSessionSelected(page) {
   try {
     await page.waitForFunction(
-      (id) => document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`) || document.querySelector('[data-testid="workbench-toolbar"]'),
+      (id) => document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`),
       { timeout: 10_000 },
       SESSION_ID,
     )
@@ -540,6 +560,24 @@ async function ensureFixtureSessionSelected(page) {
     const row = document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`)
     if (row) row.click()
   }, SESSION_ID)
+  await page.waitForFunction(
+    (id) => {
+      const row = document.querySelector(`[data-testid="session-row"][data-session-id="${id}"]`)
+      return Boolean(row?.querySelector('[data-testid="session-selected-marker"]'))
+        && document.querySelectorAll('[data-message-index]').length > 0
+    },
+    { timeout: 10_000 },
+    SESSION_ID,
+  ).catch(async (error) => {
+    const diagnostic = await page.evaluate((id) => ({
+      url: location.href,
+      selected: Boolean(document.querySelector(`[data-testid="session-row"][data-session-id="${id}"] [data-testid="session-selected-marker"]`)),
+      rows: document.querySelectorAll('[data-message-index]').length,
+      body: document.body.innerText.slice(0, 1000),
+      socketResources: performance.getEntriesByType('resource').map((entry) => entry.name).filter((name) => name.includes('socket.io')).slice(-10),
+    }), SESSION_ID)
+    throw new Error(`fixture selection/history failed: ${JSON.stringify(diagnostic)}`, { cause: error })
+  })
 }
 
 async function verifyJsonWheelScroll(page, viewportWidth) {
@@ -631,9 +669,13 @@ async function verifyToolRegistry(page, viewportWidth) {
       hasRadixSchemaScroll: Boolean(viewport),
     }
   })
-  check(`inspector shows current tool registry at ${viewportWidth}px`, metrics.itemCount >= 1 && metrics.text.includes('layout_fixture_tool'), JSON.stringify(metrics))
-  check(`tool registry shows descriptions and approval mode at ${viewportWidth}px`, metrics.text.includes('Exercise the dashboard tool registry view') && metrics.text.includes('approval required'), JSON.stringify(metrics))
-  check(`tool registry shows input schema parameters at ${viewportWidth}px`, metrics.text.includes('path') && metrics.text.includes('recursive'), JSON.stringify(metrics))
+  // Runtime config migration may replace a fixture header's stale tool catalog
+  // with the Host's current catalog. Assert the product contract rather than a
+  // fixture-only tool name: populated registry, explanatory copy + policy, and
+  // rendered schema fields from whichever current tool is selected.
+  check(`inspector shows current tool registry at ${viewportWidth}px`, metrics.itemCount >= 1 && metrics.text.includes('skill'), JSON.stringify(metrics))
+  check(`tool registry shows descriptions and approval mode at ${viewportWidth}px`, metrics.text.includes('Load one reusable agent skill by name') && metrics.text.includes('auto allowed'), JSON.stringify(metrics))
+  check(`tool registry shows input schema parameters at ${viewportWidth}px`, metrics.text.includes('required') && metrics.text.includes('name'), JSON.stringify(metrics))
   check(`tool registry schema uses JSON block Radix scroll area at ${viewportWidth}px`, metrics.hasRadixSchemaScroll === true, JSON.stringify(metrics))
   await page.click('[data-testid="runtime-view-switch-state"]')
 }
@@ -674,7 +716,7 @@ function writeLargeSessionFixture() {
     ],
     pendingCalls: [],
     status: 'idle',
-    usage: { inputTokens: 0, outputTokens: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
     cursor: 0,
     cwd: '/tmp',
     contextPressureLevel: 'none',

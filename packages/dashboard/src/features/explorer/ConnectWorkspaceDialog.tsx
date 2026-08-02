@@ -29,6 +29,8 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   const { t } = useTranslation()
   const [tab, setTab] = useState<OsTab>(() => detectCurrentOs())
   const [copied, setCopied] = useState(false)
+  const [mode, setMode] = useState<'pair'|'invite'>('pair')
+  const [copyError, setCopyError] = useState<string | null>(null)
   const hostUrl = useMemo(() => hostUrlFromLocation(), [])
   const fallbackBootstrapBaseUrl = useMemo(() => `${hostUrl}/release-assets`, [hostUrl])
 
@@ -62,12 +64,18 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
   })
   const bootstrapBaseUrl = resolveBootstrapBaseUrl(settingsQuery.data?.release, hostUrl, fallbackBootstrapBaseUrl)
   const error = inviteQuery.error ? (inviteQuery.error as Error).message : null
-  const command = commandFor(tab, hostUrl, bootstrapBaseUrl, invite?.inviteToken)
+  const command = commandFor(tab, hostUrl, bootstrapBaseUrl, mode === 'invite' ? invite?.inviteToken : undefined)
 
   const copy = async (): Promise<void> => {
-    await navigator.clipboard.writeText(command)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopyError(null)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch (error) {
+      setCopied(false)
+      setCopyError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   return (
@@ -87,21 +95,39 @@ export function ConnectWorkspaceDialog({ open, onOpenChange }: Props): JSX.Eleme
             tab={tab}
             command={command}
             copied={copied}
-            disabled={!invite}
+            disabled={mode === 'invite' && !invite}
             onCopy={() => void copy()}
             onTabChange={(next) => {
               setTab(next)
               setCopied(false)
+              setCopyError(null)
             }}
           />
-          <div className="mt-3 text-xs text-muted-foreground">
-            {error ? <span className="text-destructive">{error}</span> : invite ? t('explorer.connectDialog.inviteReady') : t('explorer.connectDialog.preparingInvite')}
+          <div className="mb-3 flex gap-2"><Button size="sm" variant={mode==='pair'?'outline':'ghost'} onClick={()=>setMode('pair')}>Approve in Dashboard</Button><Button size="sm" variant={mode==='invite'?'outline':'ghost'} onClick={()=>setMode('invite')}>Use invite</Button></div>
+          <Pairings mode={mode} />
+          <div className="mt-3 text-xs text-muted-foreground" role={error || copyError ? 'alert' : 'status'}>
+            {error ? (
+              <span className="text-destructive">
+                {error}{' '}
+                <button type="button" className="underline" onClick={() => { void inviteQuery.refetch() }}>{t('common.reload')}</button>
+              </span>
+            ) : copyError ? (
+              <span className="text-destructive">{copyError}</span>
+            ) : invite ? t('explorer.connectDialog.inviteReady') : t('explorer.connectDialog.preparingInvite')}
           </div>
         </div>
       </DialogContent>
     </Dialog>
   )
 }
+
+function Pairings({mode}:{mode:'pair'|'invite'}):JSX.Element|null{
+  const query=useQuery({queryKey:['executor-pairings'],queryFn:async()=>{const r=await fetch('/auth/executor-pairings');if(!r.ok)throw new Error(await r.text());return await r.json() as {pairings:Array<{id:string;code:string;label?:string;workspaceId:string;status:string;expiresAt:string}>}},enabled:mode==='pair',refetchInterval:2000})
+  if(mode!=='pair')return null
+  const pending=(query.data?.pairings??[]).filter(p=>p.status==='pending')
+  return <div className="mb-3 space-y-2">{pending.map(p=><div key={p.id} className="flex items-center justify-between rounded-md border p-3"><div><div className="font-mono text-lg font-semibold tracking-widest">{p.code}</div><div className="text-xs text-muted-foreground">{p.label||p.workspaceId}</div></div><div className="flex gap-2"><Button size="sm" onClick={()=>void decide(p.id,'approve',query.refetch)}>Approve</Button><Button size="sm" variant="outline" onClick={()=>void decide(p.id,'reject',query.refetch)}>Reject</Button></div></div>)}</div>
+}
+async function decide(id:string,action:'approve'|'reject',refresh:()=>unknown){const r=await fetch(`/auth/executor-pairings/${encodeURIComponent(id)}/${action}`,{method:'POST'});if(!r.ok)throw new Error(await r.text());await refresh()}
 
 function TerminalCommand({
   tab,
@@ -164,10 +190,7 @@ function TerminalCommand({
         </Button>
       </div>
       <div className="bg-[#101216] px-4 py-4 font-mono text-[12px] leading-6 text-zinc-100">
-        <div className="flex min-w-0 gap-2">
-          <span className="flex-none text-emerald-400">$</span>
-          <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words">{command}</pre>
-        </div>
+        <pre className="min-w-0 select-all whitespace-pre-wrap break-words">{command || t('explorer.connectDialog.preparingInvite')}</pre>
       </div>
     </section>
   )
@@ -191,15 +214,17 @@ function powershellQuote(value: string): string {
 }
 
 function commandFor(tab: OsTab, hostUrl: string, bootstrapBaseUrl: string, invite?: string): string {
-  const invitePart = invite ? invite : 'preparing-invite'
+  const invitePart = invite ?? ''
   const base = bootstrapBaseUrl.replace(/\/+$/, '')
   if (tab === 'windows') {
     const quotedHost = powershellQuote(hostUrl)
     const quotedInvite = powershellQuote(invitePart)
+    const query=invitePart?`?invite=${encodeURIComponent(invitePart)}`:''
+    return `iex (irm ${powershellQuote(`${hostUrl}/install.ps1${query}`)})`
     return [
       `$dir = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "agent-kernel-$([guid]::NewGuid())");`,
-      `iwr ${base}/agent-kernel-executor.cjs -OutFile "$dir/agent-kernel-executor.cjs";`,
-      `iwr ${base}/SHA256SUMS -OutFile "$dir/SHA256SUMS";`,
+      `iwr ${powershellQuote(`${base}/agent-kernel-executor.cjs`)} -OutFile "$dir/agent-kernel-executor.cjs";`,
+      `iwr ${powershellQuote(`${base}/SHA256SUMS`)} -OutFile "$dir/SHA256SUMS";`,
       `$exp = (Get-Content "$dir/SHA256SUMS" | Where-Object { $_ -match 'agent-kernel-executor.cjs$' }).Split()[0];`,
       `if ((Get-FileHash "$dir/agent-kernel-executor.cjs" -Algorithm SHA256).Hash -ne $exp.ToUpper()) { throw 'checksum mismatch' };`,
       `$env:HOST_URL=${quotedHost};`,
@@ -208,7 +233,7 @@ function commandFor(tab: OsTab, hostUrl: string, bootstrapBaseUrl: string, invit
       `node "$dir/agent-kernel-executor.cjs"`,
     ].join('\n')
   }
-  return `wget -O- ${base}/run.sh | COMPONENT=executor AGENT_KERNEL_RELEASE_BASE_URL=${shellQuote(base)} HOST_URL=${shellQuote(hostUrl)} EXECUTOR_INVITE=${shellQuote(invitePart)} SANDBOX_ROOTS="$HOME" bash`
+  return `curl -fsSL ${shellQuote(`${hostUrl}/install${invitePart?`?invite=${encodeURIComponent(invitePart)}`:''}`)} | sh`
 }
 
 function resolveBootstrapBaseUrl(

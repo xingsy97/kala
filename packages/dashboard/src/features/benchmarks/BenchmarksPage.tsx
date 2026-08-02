@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -84,7 +85,7 @@ export function BenchmarksPage({
       </header>
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden md:grid-cols-[minmax(260px,0.7fr)_minmax(0,2.3fr)]">
-          <div className="min-h-0 border-b border-border/50 md:border-b-0 md:border-r">
+          <div className={selectedRun ? 'hidden min-h-0 border-b border-border/50 md:block md:border-b-0 md:border-r' : 'min-h-0 border-b border-border/50 md:border-b-0 md:border-r'}>
             <RunListPanel
               runs={runs}
               loading={loading}
@@ -94,7 +95,18 @@ export function BenchmarksPage({
               onRefresh={() => { loadRuns() }}
             />
           </div>
-          <div className="min-h-0 min-w-0 overflow-hidden">
+          <div className={selectedRun ? 'min-h-0 min-w-0 overflow-hidden' : 'hidden min-h-0 min-w-0 overflow-hidden md:block'}>
+            {selectedRun ? (
+              <button
+                type="button"
+                className="flex h-11 w-full items-center gap-2 border-b border-border/50 px-4 text-sm text-muted-foreground md:hidden"
+                onClick={() => setSelectedRunId(null)}
+                data-testid="benchmarks-mobile-back"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                {t('common.back')}
+              </button>
+            ) : null}
             <RunDetailPanel run={selectedRun} onDeleted={() => { setSelectedRunId(null); loadRuns() }} />
           </div>
         </div>

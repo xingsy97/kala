@@ -23,6 +23,7 @@ import type {
 } from '@agent-kernel/shared/push'
 
 import { isStandalone } from './pwa.js'
+import { pushDeviceId } from './push-activity.js'
 
 export type PushSupport = {
   supported: boolean
@@ -105,6 +106,8 @@ export async function subscribeToPush(kinds: readonly DesktopNotificationKind[])
     endpoint: subscription.endpoint,
     keys: { p256dh, auth },
     kinds,
+    deviceId: pushDeviceId(),
+    deviceName: describeCurrentDevice(),
     userAgent: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
   }
   const res = await fetch('/push/subscribe', {
@@ -115,6 +118,13 @@ export async function subscribeToPush(kinds: readonly DesktopNotificationKind[])
   })
   if (!res.ok) return { ok: false, reason: 'server_rejected', detail: `HTTP ${res.status}` }
   return { ok: true, endpoint: subscription.endpoint }
+}
+
+function describeCurrentDevice(): string {
+  const ua = navigator.userAgent
+  const platform = /iPhone|iPad/.test(ua) ? 'iPhone or iPad' : /Android/.test(ua) ? 'Android' : /Macintosh/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows PC' : 'Linux computer'
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser'
+  return `${browser} on ${platform}`
 }
 
 export async function unsubscribeFromPush(): Promise<boolean> {

@@ -5,6 +5,7 @@ import {
   Bot,
   Cable,
   Cpu,
+  ChevronDown,
   KeyRound,
   Palette,
   PlugZap,
@@ -13,6 +14,7 @@ import {
   Shield,
   SlidersHorizontal,
   TerminalSquare,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -21,11 +23,15 @@ import type { AttachedExecutor, ServerSettingsPayload } from '@agent-kernel/shar
 
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  dialogMobileSheetClassName,
+  dialogTouchCloseClassName,
 } from '../../components/ui/dialog.js'
+import { cn } from '../../lib/utils.js'
 import { ScrollArea } from '../../components/ui/scroll-area.js'
 import type { DurableSessionViewCache } from '../../durable-session-cache.js'
 import { SettingsSectionButton } from './controls.js'
@@ -54,26 +60,30 @@ type Props = {
 
 type SectionKey = 'runtime' | 'connection' | 'agent' | 'models' | 'security' | 'socketAdmin' | 'executorAccess' | 'approvals' | 'hooks' | 'mcp' | 'interface' | 'deployment' | 'notifications'
 
-const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: LucideIcon }[] = [
-  { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint', icon: Cable },
-  { key: 'agent', label: 'settings.sections.agent.label', hint: 'settings.sections.agent.hint', icon: Bot },
-  { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint', icon: Cpu },
-  { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint', icon: KeyRound },
-  { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint', icon: TerminalSquare },
-  { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint', icon: Palette },
-  { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint', icon: Shield },
-  { key: 'socketAdmin', label: 'settings.sections.socketAdmin.label', hint: 'settings.sections.socketAdmin.hint', icon: ServerCog },
-  { key: 'hooks', label: 'settings.sections.hooks.label', hint: 'settings.sections.hooks.hint', icon: PlugZap },
-  { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint', icon: SlidersHorizontal },
-  { key: 'deployment', label: 'settings.sections.deployment.label', hint: 'settings.sections.deployment.hint', icon: Rocket },
-  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: Blocks },
-  { key: 'notifications', label: 'settings.sections.notifications.label', hint: 'settings.sections.notifications.hint', icon: Bell },
+type SectionGroup = 'personal' | 'workspace' | 'agent' | 'administration'
+const SECTION_GROUPS: readonly SectionGroup[] = ['personal', 'workspace', 'agent', 'administration']
+const SECTIONS: readonly { key: SectionKey; label: string; hint: string; icon: LucideIcon; group: SectionGroup }[] = [
+  { key: 'interface', label: 'settings.sections.interface.label', hint: 'settings.sections.interface.hint', icon: Palette, group: 'personal' },
+  { key: 'notifications', label: 'settings.sections.notifications.label', hint: 'settings.sections.notifications.hint', icon: Bell, group: 'personal' },
+  { key: 'executorAccess', label: 'settings.sections.executorAccess.label', hint: 'settings.sections.executorAccess.hint', icon: TerminalSquare, group: 'workspace' },
+  { key: 'agent', label: 'settings.sections.agent.label', hint: 'settings.sections.agent.hint', icon: Bot, group: 'agent' },
+  { key: 'models', label: 'settings.sections.models.label', hint: 'settings.sections.models.hint', icon: Cpu, group: 'agent' },
+  { key: 'approvals', label: 'settings.sections.approvals.label', hint: 'settings.sections.approvals.hint', icon: KeyRound, group: 'agent' },
+  { key: 'connection', label: 'settings.sections.connection.label', hint: 'settings.sections.connection.hint', icon: Cable, group: 'administration' },
+  { key: 'security', label: 'settings.sections.security.label', hint: 'settings.sections.security.hint', icon: Shield, group: 'administration' },
+  { key: 'socketAdmin', label: 'settings.sections.socketAdmin.label', hint: 'settings.sections.socketAdmin.hint', icon: ServerCog, group: 'administration' },
+  { key: 'hooks', label: 'settings.sections.hooks.label', hint: 'settings.sections.hooks.hint', icon: PlugZap, group: 'administration' },
+  { key: 'runtime', label: 'settings.sections.runtime.label', hint: 'settings.sections.runtime.hint', icon: SlidersHorizontal, group: 'administration' },
+  { key: 'deployment', label: 'settings.sections.deployment.label', hint: 'settings.sections.deployment.hint', icon: Rocket, group: 'administration' },
+  { key: 'mcp', label: 'settings.sections.mcp.label', hint: 'settings.sections.mcp.hint', icon: Blocks, group: 'administration' },
 ]
 
 export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors = [], sessionCache }: Props): JSX.Element {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [section, setSection] = useState<SectionKey>('connection')
+  const activeSection = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0]!
+  const ActiveSectionIcon = activeSection.icon
 
   const settingsQuery = useQuery({
     queryKey: ['settings'],
@@ -95,20 +105,54 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[calc(var(--ak-viewport-h,100dvh)-env(safe-area-inset-top)-env(safe-area-inset-bottom)-0.5rem)] max-w-4xl overflow-hidden border-border bg-background p-0 text-foreground shadow-2xl gap-0 grid-rows-[auto_minmax(0,1fr)] sm:h-[min(90dvh,44rem)] [&_input]:border-border [&_input]:bg-background [&_input]:text-foreground [&_select]:border-border [&_select]:bg-background [&_select]:text-foreground [&_table]:bg-muted/20 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-background [&_textarea]:text-foreground [&_th]:bg-muted/50 [&_th]:text-foreground"
+        className={cn(dialogMobileSheetClassName, 'h-auto grid-rows-[auto_minmax(0,1fr)] border-x-0 border-border bg-background text-foreground shadow-2xl sm:h-[min(90dvh,44rem)] sm:max-w-4xl sm:border-x [&_input]:border-border [&_input]:bg-background [&_input]:text-foreground [&_select]:border-border [&_select]:bg-background [&_select]:text-foreground [&_table]:bg-muted/20 [&_td]:text-foreground [&_textarea]:border-border [&_textarea]:bg-background [&_textarea]:text-foreground [&_th]:bg-muted/50 [&_th]:text-foreground')}
         data-testid="settings-dialog"
       >
-        <DialogHeader className="border-b border-border bg-card px-4 py-3 sm:px-5">
-          <DialogTitle className="text-base font-semibold text-foreground">{t('settings.title')}</DialogTitle>
-          <DialogDescription className="line-clamp-2 text-xs text-muted-foreground sm:line-clamp-none">
-            {t('settings.description')}
-          </DialogDescription>
+        <DialogHeader className="relative min-h-[4.5rem] justify-center border-b border-border bg-card px-4 py-2 pr-14 md:min-h-0 md:px-5 md:py-3 md:pr-14">
+          <div className="md:hidden">
+            <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t('settings.title')}</div>
+            <label className="relative mt-0.5 inline-flex max-w-[calc(100vw-5rem)] items-center gap-2 pr-6" data-testid="settings-mobile-section-picker">
+              <span className="sr-only">{t('settings.sectionsLabel')}</span>
+              <ActiveSectionIcon className="h-4 w-4 flex-none text-muted-foreground" aria-hidden="true" />
+              <span className="truncate text-lg font-semibold leading-6 text-foreground">{t(activeSection.label)}</span>
+              <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <select
+                value={section}
+                onChange={(event) => setSection(event.target.value as SectionKey)}
+                className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+                aria-label={t('settings.sectionsLabel')}
+                data-testid="settings-mobile-section-select"
+              >
+                {SECTIONS.map((item) => <option key={item.key} value={item.key}>{t(item.label)}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="hidden md:block">
+            <DialogTitle className="text-base font-semibold text-foreground">{t('settings.title')}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t('settings.description')}
+            </DialogDescription>
+          </div>
+          <DialogClose
+            className={dialogTouchCloseClassName}
+            aria-label={t('common.close')}
+            data-testid="settings-dialog-close"
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
+          </DialogClose>
         </DialogHeader>
-        <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[200px_minmax(0,1fr)] md:grid-rows-1">
-          <aside className="min-h-0 min-w-0 border-b border-border bg-sidebar md:border-b-0 md:border-r">
-            <nav className="flex w-full max-w-full gap-1 overflow-x-auto p-2 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:block md:h-full md:space-y-1 md:overflow-x-hidden md:overflow-y-auto md:p-3" aria-label={t('settings.sectionsLabel')}>
-              {SECTIONS.map((s) => (
-                <SettingsSectionButton key={s.key} section={s} active={section === s.key} onClick={() => setSection(s.key)} />
+        <div className="grid min-h-0 min-w-0 md:grid-cols-[200px_minmax(0,1fr)]">
+          <aside className="hidden min-h-0 min-w-0 border-border bg-sidebar md:!block md:border-r">
+            <nav className="h-full space-y-1 overflow-x-hidden overflow-y-auto p-3" aria-label={t('settings.sectionsLabel')}>
+              {SECTION_GROUPS.map((group) => (
+                <div key={group} className="space-y-1" data-testid={`settings-group-${group}`}>
+                  <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/45 first:pt-0">
+                    {t(`settings.groups.${group}`)}
+                  </div>
+                  {SECTIONS.filter((item) => item.group === group).map((item) => (
+                    <SettingsSectionButton key={item.key} section={item} active={section === item.key} onClick={() => setSection(item.key)} />
+                  ))}
+                </div>
               ))}
             </nav>
           </aside>
@@ -116,13 +160,20 @@ export function SettingsDialog({ open, onOpenChange, onModelsChanged, executors 
             className="min-h-0 min-w-0 max-w-full overflow-x-hidden bg-background"
             viewportClassName="[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0 [&>div]:!max-w-full"
           >
-            <div className="min-w-0 max-w-full overflow-x-hidden p-4 text-foreground sm:p-7" data-testid="settings-responsive-content">
+            <div className="mx-auto min-w-0 max-w-2xl overflow-x-hidden px-4 py-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-foreground md:max-w-full md:p-7" data-testid="settings-responsive-content">
               {loadError ? (
-                <div className="rounded-md border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                  {t('settings.loadFailed', { error: loadError })}
+                <div className="rounded-md border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
+                  <p>{t('settings.loadFailed', { error: loadError })}</p>
+                  <button
+                    type="button"
+                    className="mt-3 rounded-md border border-red-300/50 px-3 py-1.5 text-sm font-medium hover:bg-red-500/10"
+                    onClick={() => { void settingsQuery.refetch() }}
+                  >
+                    {t('common.reload')}
+                  </button>
                 </div>
               ) : payload === null ? (
-                <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
+                <div className="text-sm text-muted-foreground" role="status" aria-live="polite">{t('common.loading')}</div>
               ) : section === 'runtime' ? (
                 <RuntimeSection payload={payload} />
               ) : section === 'connection' ? (

@@ -1,4 +1,4 @@
-/**
+/*
  * Mirrors the browser's visible viewport into CSS variables used by the app
  * shell, drawers, and dialogs. `100dvh` is not enough on iOS PWA: in
  * standalone mode and during keyboard transitions WebKit can report a layout
@@ -30,9 +30,6 @@ export function useVisualViewportHeight(): number {
       root.dataset.akKeyboard = keyboardOpen ? 'open' : 'closed'
     }
     update()
-    // visualViewport fires 'resize' while the keyboard slides, when the URL
-    // bar collapses, and on orientation changes. window 'resize' catches the
-    // desktop path and older WebKit builds where visualViewport is missing.
     vv?.addEventListener('resize', update)
     vv?.addEventListener('scroll', update)
     window.addEventListener('resize', update)

@@ -25,6 +25,7 @@ function renderComposer(props?: {
   onReadFile?: (path: string) => Promise<{ content?: string; error?: string }>
   queuedMessages?: React.ComponentProps<typeof Composer>['queuedMessages']
   onQueuedDelete?: (id: string) => void
+  onQueuedUpdate?: (id: string, text: string) => void
   state?: React.ComponentProps<typeof Composer>['state']
   disabled?: boolean
   humanAttention?: React.ComponentProps<typeof Composer>['humanAttention']
@@ -45,6 +46,7 @@ function renderComposer(props?: {
       displayPrefs={props?.displayPrefs}
       disabled={props?.disabled}
       {...(props?.onQueuedDelete ? { onQueuedDelete: props.onQueuedDelete } : {})}
+      {...(props?.onQueuedUpdate ? { onQueuedUpdate: props.onQueuedUpdate } : {})}
       onSubmit={props?.onSubmit ?? (() => {})}
       onCompact={props?.onCompact ?? (() => {})}
       {...(props?.onCancel ? { onCancel: props.onCancel } : {})}
@@ -298,6 +300,42 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('later', 'queue', undefined, undefined)
   })
 
+  it('clears the submitted draft before the reliable acknowledgement resolves', () => {
+    const onSubmit = vi.fn(() => new Promise<void>(() => {}))
+    renderComposer({ onSubmit })
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'sent now' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    expect(onSubmit).toHaveBeenCalledWith('sent now', 'steer', undefined, undefined)
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', '')
+  })
+
+  it('restores the draft and surfaces an error when reliable submit fails', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error('message acknowledgement timed out'))
+    renderComposer({ onSubmit })
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'keep this draft' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+
+    await screen.findByText('message acknowledgement timed out')
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'keep this draft')
+  })
+
+  it('does not overwrite a new draft when a previous send acknowledgement fails', async () => {
+    let rejectSubmit: ((error: Error) => void) | undefined
+    const onSubmit = vi.fn(() => new Promise<void>((_, reject) => { rejectSubmit = reject }))
+    renderComposer({ onSubmit })
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'first draft' } })
+    fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Enter' })
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'new draft' } })
+    rejectSubmit?.(new Error('ack failed'))
+
+    await screen.findByText('ack failed')
+    expect(screen.getByTestId('composer-input')).toHaveProperty('value', 'new draft')
+  })
+
   it('keeps send mode selection available in simple mode', () => {
     const onSubmit = vi.fn()
     const previousMode = window.localStorage.getItem('ak-composer-mode')
@@ -316,6 +354,31 @@ describe('Composer', () => {
     fireEvent.click(screen.getByTestId('composer-send'))
 
     expect(onSubmit).toHaveBeenCalledWith('later from simple', 'queue', undefined, undefined)
+  })
+
+  it('focuses the mobile simple composer without scrolling the viewport', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer()
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    const input = screen.getByTestId('composer-input-simple') as HTMLDivElement
+    const focus = vi.spyOn(input, 'focus')
+    fireEvent.pointerDown(input, { pointerType: 'touch' })
+
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it('exposes a mobile simple-to-full mode control', () => {
+    const previousMode = window.localStorage.getItem('ak-composer-mode')
+    window.localStorage.setItem('ak-composer-mode', 'simple')
+    renderComposer()
+    if (previousMode === null) window.localStorage.removeItem('ak-composer-mode')
+    else window.localStorage.setItem('ak-composer-mode', previousMode)
+
+    fireEvent.click(screen.getByTestId('composer-mode-toggle'))
+    expect(screen.getByTestId('composer-input')).toBeTruthy()
   })
 
   it('supports slash commands in simple mode', () => {
@@ -362,6 +425,13 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('pasted text', 'steer', undefined, undefined)
   })
 
+  it('uses the midpoint between the iOS safe area and compact bottom padding', () => {
+    renderComposer()
+    const composer = screen.getByTestId('composer')
+    expect(composer.className).toContain('pb-[calc(env(safe-area-inset-bottom)/2+0.125rem)]')
+    expect(composer.className).not.toContain('max(env(safe-area-inset-bottom)')
+  })
+
   it('keeps context usage next to send in simple mode', () => {
     const previousMode = window.localStorage.getItem('ak-composer-mode')
     window.localStorage.setItem('ak-composer-mode', 'simple')
@@ -381,14 +451,40 @@ describe('Composer', () => {
     expect(send.className).toContain('h-9')
     expect(sendMode.className).toContain('h-9')
 
-    // The composer-mode toggle is a hover handle, but it must not reserve a
-    // standalone row above either composer mode.
+    // The mode handle gets its own shallow row: it must not overlay the input
+    // or expand across the full composer when focused on touch devices.
     const modeToggle = screen.getByTestId('composer-mode-toggle')
     expect(modeToggle).toBeTruthy()
-    expect(modeToggle.className).toContain('absolute')
-    expect(modeToggle.className).toContain('-top-2')
+    expect(modeToggle.className).not.toContain('absolute')
+    expect(modeToggle.className).not.toContain('inset-x-0')
+    expect(modeToggle.className).toContain('w-12')
+    expect(modeToggle.compareDocumentPosition(shell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(sendMode)
     expect(screen.queryByTestId('composer-mode-toggle-menuitem')).toBeNull()
+  })
+
+  it('shows compact image tokens and preserves attachments while editing queued messages', () => {
+    const onQueuedUpdate = vi.fn()
+    const queuedWithImages = [{
+        id: 'queued-image',
+        text: 'review this',
+        mode: 'queue',
+        createdAt: '2026-07-06T00:00:00.000Z',
+        content: [
+          { type: 'text', text: 'review this' },
+          { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: 'base64-a' } },
+          { type: 'image', source: { kind: 'base64', mediaType: 'image/jpeg', data: 'base64-b' } },
+        ],
+      }]
+    renderComposer({ onQueuedUpdate, queuedMessages: queuedWithImages })
+
+    expect(screen.getByText('review this [Image #1] [Image #2]')).toBeTruthy()
+    expect(screen.queryByRole('img')).toBeNull()
+    fireEvent.click(screen.getByTestId('queued-message-edit'))
+    expect(screen.getByTestId('queued-message-edit-attachments').textContent).toBe('[Image #1] [Image #2]')
+    fireEvent.change(screen.getByTestId('queued-message-edit-input'), { target: { value: 'updated text' } })
+    fireEvent.click(screen.getByTestId('queued-message-save'))
+    expect(onQueuedUpdate).toHaveBeenCalledWith('queued-image', 'updated text', queuedWithImages[0]!.content)
   })
 
   it('shows queued message management in simple mode', () => {
@@ -477,7 +573,7 @@ describe('Composer', () => {
     expect(dock.textContent ?? '').toContain('Steering update')
   })
 
-  it('allows queued messages to be reordered, edited, and deleted', () => {
+  it('allows queued messages to be reordered, edited, and deleted', async () => {
     const onQueuedReorder = vi.fn()
     const onQueuedUpdate = vi.fn()
     const onQueuedDelete = vi.fn()
@@ -516,7 +612,8 @@ describe('Composer', () => {
     const input = screen.getByTestId('queued-message-edit-input')
     fireEvent.change(input, { target: { value: 'edited queued' } })
     fireEvent.click(screen.getByTestId('queued-message-save'))
-    expect(onQueuedUpdate).toHaveBeenCalledWith('q1', 'edited queued')
+    expect(onQueuedUpdate).toHaveBeenCalledWith('q1', 'edited queued', undefined)
+    await waitFor(() => expect(screen.queryByTestId('queued-message-edit-input')).toBeNull())
 
     fireEvent.click(screen.getAllByTestId('queued-message-delete')[1]!)
     expect(onQueuedDelete).toHaveBeenCalledWith('q2')
@@ -628,7 +725,7 @@ describe('Composer', () => {
       expect(images[0].source.mediaType).toBe('image/png')
       expect(images[0].source.data.length).toBeGreaterThan(0)
     }
-    expect(screen.queryByTestId('pasted-image-tray')).toBeNull()
+    await waitFor(() => expect(screen.queryByTestId('pasted-image-tray')).toBeNull())
   })
 
   it('removes a pasted image when the close button is clicked', async () => {

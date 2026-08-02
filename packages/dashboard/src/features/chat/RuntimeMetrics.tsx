@@ -98,7 +98,11 @@ export function RuntimeMetrics({
     const raw: ReadonlyArray<Omit<BreakdownSegment, 'percent'>> = [
       { key: 'system', label: t('chat.runtimeMetrics.systemReserve'), tokens: b.system, className: 'bg-sky-500' },
       { key: 'tools', label: t('chat.runtimeMetrics.toolDefinitions'), tokens: b.tools, className: 'bg-indigo-500' },
-      { key: 'transcript', label: t('chat.runtimeMetrics.messages'), tokens: b.transcript, className: 'bg-emerald-500' },
+      ...(b.transcriptBreakdown ? [
+        { key: 'userMessages', label: t('chat.runtimeMetrics.userMessages'), tokens: b.transcriptBreakdown.userMessages, className: 'bg-emerald-500' },
+        { key: 'assistantMessages', label: t('chat.runtimeMetrics.assistantMessages'), tokens: b.transcriptBreakdown.assistantMessages, className: 'bg-violet-500' },
+        { key: 'toolResults', label: t('chat.runtimeMetrics.toolResults'), tokens: b.transcriptBreakdown.toolResults, className: 'bg-orange-500' },
+      ] : [{ key: 'transcript', label: t('chat.runtimeMetrics.messages'), tokens: b.transcript, className: 'bg-emerald-500' }]),
       { key: 'memory', label: t('chat.runtimeMetrics.memory'), tokens: b.memory, className: 'bg-teal-500' },
       { key: 'attachments', label: t('chat.runtimeMetrics.attachments'), tokens: b.attachments, className: 'bg-amber-500' },
       { key: 'pendingUserInput', label: t('chat.runtimeMetrics.pendingInput'), tokens: b.pendingUserInput, className: 'bg-rose-500' },

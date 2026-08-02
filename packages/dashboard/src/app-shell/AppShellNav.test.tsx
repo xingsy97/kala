@@ -35,6 +35,54 @@ describe('AppShellNav', () => {
     expect(screen.getByTestId('app-shell-nav-agent').getAttribute('aria-current')).toBeNull()
   })
 
+  it('hides Benchmarks when the authoritative capability is disabled', () => {
+    renderNav({ capabilities: { agent: true, benchmarks: false, evaluations: false }, section: 'agent' })
+    expect(screen.queryByTestId('app-shell-nav-benchmarks')).toBeNull()
+    expect(screen.getByTestId('app-shell-nav-agent')).toBeTruthy()
+  })
+
+  it('shows the authenticated account and signs out from the account menu', () => {
+    const onSignOut = vi.fn()
+    renderNav({
+      section: 'agent',
+      account: { displayName: 'RunLab Demo', email: 'runlab-demo@example.test', initials: 'RD' },
+      onSignOut,
+    })
+    fireEvent.click(screen.getByTestId('account-menu-trigger'))
+    expect(screen.getByTestId('account-identity-summary').textContent).toContain('RunLab Demo')
+    expect(screen.getByTestId('account-identity-summary').textContent).toContain('runlab-demo@example.test')
+    const form = screen.getByTestId('account-sign-out').closest('form')
+    expect(form?.method).toContain('post')
+    expect(form?.getAttribute('action')).toBe('/auth/logout')
+    fireEvent.submit(form!)
+    expect(onSignOut).not.toHaveBeenCalled()
+    fireEvent(window, new PageTransitionEvent('pagehide'))
+    expect(onSignOut).toHaveBeenCalledOnce()
+  })
+
+  it('does not unmount the native logout form before navigation commits', () => {
+    const onSignOut = vi.fn()
+    renderNav({ section: 'agent', account: { displayName: 'Demo', initials: 'D' }, onSignOut })
+    const form = screen.getByTestId('account-sign-out').closest('form')!
+    fireEvent.submit(form)
+    expect(form.isConnected).toBe(true)
+    expect(screen.getByTestId('account-sign-out')).toBeTruthy()
+    expect(onSignOut).not.toHaveBeenCalled()
+  })
+
+  it('opens account details from the account menu', () => {
+    const onOpenAccount = vi.fn()
+    renderNav({ section: 'agent', account: { displayName: 'Demo', initials: 'D' }, onOpenAccount })
+    fireEvent.click(screen.getByTestId('account-menu-trigger'))
+    fireEvent.click(screen.getByTestId('account-details'))
+    expect(onOpenAccount).toHaveBeenCalledOnce()
+  })
+
+  it('does not render a fake account trigger without an authenticated identity', () => {
+    renderNav({ section: 'agent' })
+    expect(screen.queryByTestId('account-menu')).toBeNull()
+  })
+
   it('invokes onSelect when a tab is clicked', () => {
     const onSelect = vi.fn()
     renderNav({ section: 'agent', onSelect })
