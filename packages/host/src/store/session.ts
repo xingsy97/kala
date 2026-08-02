@@ -43,6 +43,8 @@ export type SessionRecord = {
   readonly workspaceName?: string
   lastEventAt?: string
   state: AgentState
+  /** Stable default title captured from the first persisted user_message event. */
+  firstUserMessage?: string
   /**
    * Operator-set display label from the most recent `client:rename_session`.
    * Loaded from the last MetadataEntry in the JSONL and updated in place
@@ -94,6 +96,13 @@ export class SessionStore {
    * in-flight map guarantees only one `create()` per sessionId.
    */
   private readonly inFlight = new Map<string, Promise<SessionRecord>>()
+  /**
+   * Last-resort per-Session commit lock. HostLoop normally serializes turns, but
+   * cancellation, recovery and administrative paths have historically reached
+   * `record()` concurrently. The store is the final authority and must reject
+   * stale caller-computed states rather than append duplicate cursor values.
+   */
+  private readonly recordTails = new Map<string, Promise<void>>()
 
   constructor(private readonly sessionsDir: string, private readonly options: SessionStoreOptions = {}) {
     mkdirSync(this.sessionsDir, { recursive: true })
@@ -426,20 +435,39 @@ export class SessionStore {
     llmTrace?: LLMTrace,
     model?: string,
   ): Promise<void> {
-    const rec = this.records.get(sessionId)
-    if (!rec) throw new Error(`Cannot record on unknown session: ${sessionId}`)
-    const entry = await appendEventEntry({
-      path: rec.logPath,
-      seq: nextState.cursor,
-      event,
-      effects,
-      ...(usageDelta ? { usage: usageDelta } : {}),
-      ...(llmTrace ? { llmTrace } : {}),
-      ...(model ? { model } : {}),
+    const previous = this.recordTails.get(sessionId) ?? Promise.resolve()
+    const commit = previous.catch(() => undefined).then(async () => {
+      const rec = this.records.get(sessionId)
+      if (!rec) throw new Error(`Cannot record on unknown session: ${sessionId}`)
+      const expectedCursor = rec.state.cursor + 1
+      if (nextState.cursor !== expectedCursor) {
+        throw new Error(
+          `stale Session transition for ${sessionId}: expected cursor ${expectedCursor}, received ${nextState.cursor}`,
+        )
+      }
+      const entry = await appendEventEntry({
+        path: rec.logPath,
+        seq: nextState.cursor,
+        event,
+        effects,
+        ...(usageDelta ? { usage: usageDelta } : {}),
+        ...(llmTrace ? { llmTrace } : {}),
+        ...(model ? { model } : {}),
+      })
+      // Publish in-memory state only after the durable append and fsync succeed.
+      rec.state = nextState
+      rec.lastEventAt = entry.ts
+      if (event.kind === 'user_message' && event.text?.trim() && !rec.firstUserMessage) {
+        rec.firstUserMessage = event.text
+      }
+      this.summaryCache.delete(rec.logPath)
     })
-    rec.state = nextState
-    rec.lastEventAt = entry.ts
-    this.summaryCache.delete(rec.logPath)
+    this.recordTails.set(sessionId, commit)
+    try {
+      await commit
+    } finally {
+      if (this.recordTails.get(sessionId) === commit) this.recordTails.delete(sessionId)
+    }
   }
 
   list(): SessionRecord[] {
@@ -687,6 +715,7 @@ export class SessionStore {
       latestStringFromMetadata(parsed.metadata, 'workspaceName') ??
       parsed.header.workspaceName
     const label = latestStringFromMetadata(parsed.metadata, 'label')
+    const firstUserMessage = firstUserMessageFromEvents(parsed.events)
     const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
     const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
     const preferences: SessionPreferences = {
@@ -706,6 +735,7 @@ export class SessionStore {
         ? { lastEventAt: parsed.events[parsed.events.length - 1]!.ts }
         : {}),
       state: finalState,
+      ...(firstUserMessage ? { firstUserMessage } : {}),
       ...(parsed.header.parentSessionId
         ? { parentSessionId: parsed.header.parentSessionId }
         : {}),
@@ -785,7 +815,6 @@ function loadedRecordForPath(
 }
 
 function summarizeRecord(record: SessionRecord): SessionSummary {
-  const firstUserMessage = firstUserMessageFromState(record.state)
   return {
     sessionId: record.sessionId,
     createdAt: record.createdAt,
@@ -796,21 +825,18 @@ function summarizeRecord(record: SessionRecord): SessionSummary {
     ...(record.workspaceName !== undefined ? { workspaceName: record.workspaceName } : {}),
     status: record.state.status,
     ...(record.state.cwd ? { currentCwd: record.state.cwd } : {}),
-    ...(firstUserMessage ? { firstUserMessage: firstUserMessage.slice(0, 120) } : {}),
+    ...(record.firstUserMessage ? { firstUserMessage: record.firstUserMessage.slice(0, 120) } : {}),
     ...(record.label ? { label: record.label } : {}),
     ...(Object.keys(record.preferences).length > 0 ? { preferences: record.preferences } : {}),
   }
 }
 
-function firstUserMessageFromState(state: AgentState): string | undefined {
-  for (const message of state.messages) {
-    if (message.role !== 'user') continue
-    const text = message.content
-      .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
-      .map((part) => part.text)
-      .join('\n')
-      .trim()
-    if (text.length > 0) return text
+function firstUserMessageFromEvents(
+  events: readonly { event: AgentEvent }[],
+): string | undefined {
+  for (const entry of events) {
+    if (entry.event.kind !== 'user_message') continue
+    if (entry.event.text?.trim()) return entry.event.text
   }
   return undefined
 }
@@ -825,11 +851,7 @@ function summarizeLog(
     parsed.snapshots.length > 0
       ? parsed.snapshots[parsed.snapshots.length - 1]!
       : undefined
-  const firstUserEvent = events.find((e) => e.event.kind === 'user_message')
-  const firstUserText =
-    firstUserEvent && firstUserEvent.event.kind === 'user_message'
-      ? firstUserEvent.event.text
-      : undefined
+  const firstUserText = firstUserMessageFromEvents(events)
   const label = latestStringFromMetadata(parsed.metadata, 'label')
   const selectedModel = latestStringFromMetadata(parsed.metadata, 'selectedModel')
   const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)

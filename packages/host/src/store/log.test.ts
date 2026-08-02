@@ -249,4 +249,32 @@ describe('readSessionLog', () => {
     // Sanity: the raw file really did have contents.
     expect((await readFile(path, 'utf8')).length).toBeGreaterThan(0)
   })
+
+  it('preserves and resequences durable events when a legacy log contains duplicate sequences', async () => {
+    const path = join(dir, 'duplicate-seq.jsonl')
+    await writeHeader({ path, sessionId: 'dup', config, initialState })
+    await appendEventEntry({ path, seq: 1, event: { kind: 'user_message', text: 'first' }, effects: [] })
+    await appendEventEntry({ path, seq: 1, event: { kind: 'user_message', text: 'racing duplicate' }, effects: [] })
+
+    const parsed = await readSessionLog(path)
+    expect(parsed.events.map((entry) => ({ seq: entry.seq, event: entry.event }))).toMatchObject([
+      { seq: 1, event: { kind: 'user_message', text: 'first' } },
+      { seq: 2, event: { kind: 'user_message', text: 'racing duplicate' } },
+    ])
+    expect(parsed.warnings).toContain('Repaired event sequence 1 to 2 after 1')
+  })
+
+  it('preserves physical append order while repairing regressing and gapped legacy sequences', async () => {
+    const path = join(dir, 'regressing-seq.jsonl')
+    await writeHeader({ path, sessionId: 'regress', config, initialState })
+    await appendEventEntry({ path, seq: 1, event: { kind: 'user_message', text: 'one' }, effects: [] })
+    await appendEventEntry({ path, seq: 3, event: { kind: 'cancel' }, effects: [] })
+    await appendEventEntry({ path, seq: 2, event: { kind: 'cancel' }, effects: [] })
+
+    const parsed = await readSessionLog(path)
+    expect(parsed.events.map((entry) => entry.seq)).toEqual([1, 2, 3])
+    expect(parsed.events.map((entry) => entry.event.kind)).toEqual(['user_message', 'cancel', 'cancel'])
+    expect(parsed.warnings).toContain('Repaired event sequence 3 to 2 after 1')
+    expect(parsed.warnings).toContain('Repaired event sequence 2 to 3 after 3')
+  })
 })

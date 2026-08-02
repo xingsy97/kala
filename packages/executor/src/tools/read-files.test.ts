@@ -25,4 +25,20 @@ describe('read_files', () => {
     expect(out).toContain(`===== ${join(root, 'b.txt')} =====`)
     expect(out).toContain('2\ttwo')
   })
+
+  it('keeps truncated multi-file output within the byte budget', async () => {
+    writeFileSync(join(root, 'large.txt'), '界'.repeat(500))
+    const maxBytes = 180
+    const out = await readFilesTool.run({
+      files: [
+        { path: join(root, 'a.txt') },
+        { path: join(root, 'large.txt') },
+      ],
+      max_bytes: maxBytes,
+    }, makeCtx(root))
+
+    expect(Buffer.byteLength(out, 'utf8')).toBeLessThanOrEqual(maxBytes)
+    expect(out).toContain(`... read_files output truncated at ${maxBytes} bytes ...`)
+    expect(out).not.toContain('�')
+  })
 })

@@ -94,7 +94,12 @@ export async function openDashboard(options: BrowserSessionOptions): Promise<Bro
     page,
     cdp,
     async waitForComposer(timeoutMs = 20_000) {
-      await page.waitForSelector('[data-testid="composer-input"], textarea', { timeout: timeoutMs })
+      try {
+        await page.waitForSelector('[data-testid="composer-input"], textarea', { timeout: timeoutMs })
+      } catch (error) {
+        const diagnostic = await page.evaluate(() => ({ url: location.href, text: document.body.textContent?.slice(0, 1200), html: document.body.innerHTML.slice(0, 1200) }))
+        throw new Error(`composer did not become ready: ${JSON.stringify(diagnostic)}`, { cause: error })
+      }
     },
     async sendPrompt(text: string) {
       const input = (await page.$('[data-testid="composer-input"]')) ?? (await page.$('textarea'))

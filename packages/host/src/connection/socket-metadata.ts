@@ -59,6 +59,7 @@ export function executorAnnouncedConnectionMeta(input: {
 function dashboardLabel(actor: DashboardActor): string {
   if (actor.kind === 'github_user') return `dashboard ${actor.login}`
   if (actor.kind === 'token') return 'dashboard token'
+  if (actor.kind === 'ingress') return `dashboard ${actor.role}`
   return 'dashboard'
 }
 

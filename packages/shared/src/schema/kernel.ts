@@ -231,6 +231,7 @@ export const AgentStateSchema: z.ZodType<AgentState> = z.discriminatedUnion('sta
 
 const UserMessageEventSchema = z.object({
   kind: z.literal('user_message'),
+  operationId: z.string().min(1).optional(),
   text: z.string().optional(),
   content: z.array(MessageContentSchema).optional(),
 })
@@ -287,6 +288,7 @@ const MessagesReplacedEventSchema = z.object({
     end: z.number().int().nonnegative(),
   }),
   replacementMessages: z.array(MessageSchema),
+  resume: z.boolean().optional(),
   artifactRef: EventArtifactRefSchema.optional(),
 })
 

@@ -136,9 +136,14 @@ export type HostLoopDeps = {
 
 export type LoopHandle = {
   dispatch(sessionId: string, event: AgentEvent, options?: DispatchOptions): Promise<void>
-  compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result'): Promise<void>
+  compact(sessionId: string, trigger?: 'manual' | 'auto' | 'preflight' | 'tool_result', resume?: boolean): Promise<boolean>
   hasActiveLlmCall(sessionId: string): boolean
+  /** True while any serialized turn work is still running, including the gaps between LLM and tool effects. */
+  hasActiveTurn(sessionId: string): boolean
+  waitForActiveTurn(sessionId: string): Promise<void>
   recoverInterruptedLlm(sessionId: string): Promise<boolean>
+  /** Resume a dangling Session once; coalesces reconnect/restart callers. */
+  ensureSessionResumed(sessionId: string): Promise<boolean>
   beginDrain(mode: LoopDrainMode): void
   endDrain(): void
   drainSnapshot(sessionId: string): LoopDrainSessionSnapshot

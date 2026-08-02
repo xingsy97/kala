@@ -43,6 +43,7 @@ import { loadOrCreateWorkspaceId } from './workspace-id.js'
 import { collectIpAddresses, normalizeOs } from './announce-info.js'
 import { subscribeBackgroundTasks } from './tools/background-shell.js'
 import { createTerminalManager } from './terminal-manager.js'
+import { ExecutionReceiptStore } from './execution-receipts.js'
 import type { RuntimeLogger } from './logger.js'
 import packageJson from '../package.json' with { type: 'json' }
 
@@ -83,6 +84,7 @@ export type ExecutorOptions = {
   logger?: Pick<RuntimeLogger, 'debug' | 'info' | 'warn'>
   /** Injectable Socket.IO factory — used by tests. */
   ioFactory?: typeof clientIO
+  receiptStorePath?: string | false
 }
 
 export type PermanentError = {
@@ -123,6 +125,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   const overflowConfig = overflowConfigFromEnv(
     join(workspaceRoot, '.agent-kernel', 'overflow'),
   )
+  const receiptStore = options.receiptStorePath === false
+    ? null
+    : new ExecutionReceiptStore(options.receiptStorePath ?? join(workspaceRoot, '.agent-kernel', 'execution-receipts.json'))
+  const receiptStoreReady = receiptStore?.load() ?? Promise.resolve()
 
   const factory = options.ioFactory ?? clientIO
   const socket = factory(`${options.host}/executor`, {
@@ -135,20 +141,26 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     },
     reconnection: true,
     reconnectionDelay: 500,
-    reconnectionDelayMax: 600_000,  // keep trying forever, backing off to 10 minutes
+    reconnectionDelayMax: 60_000,   // keep recovery bounded while retaining jitter
     reconnectionAttempts: Infinity,
     randomizationFactor: 0.5,       // +/-50% jitter, avoid thundering-herd reconnect
+    ...(options.invite ? { extraHeaders: { 'x-agent-runlab-executor-invite': options.invite } } : {})
   }) as Socket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>
 
   const inFlight = new Map<string, AbortController>()
+  // A reconnect can redispatch a callId while the original invocation is still
+  // running. Keep every socket ACK callback so completion reaches whichever
+  // socket the host currently tracks instead of being stranded on the old one.
+  const inFlightAcks = new Map<string, Array<(result: ToolResultAck) => void>>()
   // Idempotency cache: remember the last N completed tool calls so a
   // duplicate `tool:call` (from `redispatchPending` on the host after a
   // reconnect) does not re-run a tool that already succeeded. LRU-lite:
   // insertion order via Map; when full, drop the oldest entry.
   const COMPLETED_CALL_CACHE_MAX = 500
   const completedCalls = new Map<string, ToolResultAck>()
-  const rememberCompleted = (callId: string, ack: ToolResultAck): void => {
-    completedCalls.set(callId, ack)
+  const receiptKey = (sessionId: string, callId: string): string => `${sessionId}:${callId}`
+  const rememberCompleted = (key: string, ack: ToolResultAck): void => {
+    completedCalls.set(key, ack)
     while (completedCalls.size > COMPLETED_CALL_CACHE_MAX) {
       const oldest = completedCalls.keys().next().value
       if (oldest === undefined) break
@@ -203,6 +215,10 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
   socket.on('disconnect', (reason) => {
     logger.info({ reason }, 'socket disconnected')
+    // Interactive terminals cannot be safely resumed after losing their output
+    // transport. Close them eagerly so shells do not continue consuming CPU or
+    // mutating the workspace invisibly while the dashboard is disconnected.
+    terminals.closeAll()
   })
   socket.io.on('reconnect_attempt', (n) => {
     logger.info({ attempt: n }, 'socket reconnect attempt')
@@ -266,25 +282,48 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     // path via kernel `call_tool`, and `redispatchPending` on the host
     // side when the socket reconnects. If we already ran this call, don't
     // run it again; ack with the cached result.
-    const cached = completedCalls.get(payload.callId)
+    await receiptStoreReady
+    const key = receiptKey(payload.sessionId, payload.callId)
+    const cached = completedCalls.get(key) ?? receiptStore?.get(key)
     if (cached) {
       ack(cached)
       return
     }
-    // Already running: the original promise chain will ack when done.
-    // Ignore the duplicate emit.
-    if (inFlight.has(payload.callId)) return
+    // Already running: attach this fresh socket's ACK callback to the same
+    // invocation. Ignoring it loses the result when the host has moved pending
+    // ownership to a replacement socket during reconnect.
+    if (inFlight.has(key)) {
+      const waiters = inFlightAcks.get(key) ?? []
+      waiters.push(ack)
+      inFlightAcks.set(key, waiters)
+      return
+    }
 
     const controller = new AbortController()
-    inFlight.set(payload.callId, controller)
+    inFlight.set(key, controller)
+    inFlightAcks.set(key, [ack])
     const result = await runOne(tools, sandbox, controller.signal, payload, overflowConfig)
-    inFlight.delete(payload.callId)
-    rememberCompleted(payload.callId, result)
-    ack(result)
+    try {
+      // Keep the call in-flight until its receipt crosses the durability barrier.
+      // Reconnect duplicates join the same ACK fan-out instead of observing an
+      // in-memory completion that could disappear on process restart.
+      await receiptStore?.set(key, result)
+      rememberCompleted(key, result)
+      inFlight.delete(key)
+      const waiters = inFlightAcks.get(key) ?? []
+      inFlightAcks.delete(key)
+      for (const reply of waiters) reply(result)
+    } catch {
+      // Never acknowledge an execution result that was not made durable. Keep
+      // duplicate callbacks silent so the Host retains its absolute deadline
+      // and can settle the operation as a timeout rather than a false success.
+      inFlight.delete(key)
+      inFlightAcks.delete(key)
+    }
   })
 
   socket.on('tool:cancel', (payload: ToolCancelMessage) => {
-    const ctrl = inFlight.get(payload.callId)
+    const ctrl = inFlight.get(receiptKey(payload.sessionId, payload.callId))
     if (ctrl) ctrl.abort()
   })
 

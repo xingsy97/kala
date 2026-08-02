@@ -13,6 +13,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { createHash } from 'node:crypto'
 
 import type { DesktopNotificationKind } from '@agent-kernel/shared/push'
 
@@ -29,6 +30,9 @@ export type PushSubscriptionRecord = {
   kinds: readonly DesktopNotificationKind[]
   /** Optional UA string; helps triage when dropping stale subscriptions. */
   userAgent?: string
+  deviceId?: string
+  deviceName?: string
+  enabled?: boolean
 }
 
 export class PushSubscriptionStore {
@@ -45,7 +49,12 @@ export class PushSubscriptionStore {
       try {
         const parsed = JSON.parse(line) as PushSubscriptionRecord
         if (typeof parsed.endpoint === 'string' && parsed.keys?.p256dh && parsed.keys?.auth) {
-          this.byEndpoint.set(parsed.endpoint, parsed)
+          this.byEndpoint.set(parsed.endpoint, {
+            ...parsed,
+            deviceId: parsed.deviceId ?? pushDeviceIdForEndpoint(parsed.endpoint),
+            deviceName: parsed.deviceName ?? deviceNameFromUserAgent(parsed.userAgent),
+            enabled: parsed.enabled ?? true,
+          })
         }
       } catch {
         // Skip corrupt line — see class comment.
@@ -62,7 +71,12 @@ export class PushSubscriptionStore {
    * PATCH so the store always reflects the browser's current preferences.
    */
   upsert(record: PushSubscriptionRecord): void {
-    this.byEndpoint.set(record.endpoint, record)
+    this.byEndpoint.set(record.endpoint, {
+      ...record,
+      deviceId: record.deviceId ?? pushDeviceIdForEndpoint(record.endpoint),
+      deviceName: record.deviceName ?? deviceNameFromUserAgent(record.userAgent),
+      enabled: record.enabled ?? true,
+    })
     this.flush()
   }
 
@@ -80,6 +94,33 @@ export class PushSubscriptionStore {
     return this.byEndpoint.size
   }
 
+  updateDevice(deviceId: string, update: { enabled?: boolean; name?: string }): boolean {
+    let changed = false
+    for (const [endpoint, record] of this.byEndpoint) {
+      if (record.deviceId !== deviceId) continue
+      this.byEndpoint.set(endpoint, {
+        ...record,
+        ...(update.enabled !== undefined ? { enabled: update.enabled } : {}),
+        ...(update.name !== undefined ? { deviceName: update.name } : {}),
+      })
+      changed = true
+    }
+    if (changed) this.flush()
+    return changed
+  }
+
+  removeDevice(deviceId: string): boolean {
+    let changed = false
+    for (const [endpoint, record] of this.byEndpoint) {
+      if (record.deviceId === deviceId) {
+        this.byEndpoint.delete(endpoint)
+        changed = true
+      }
+    }
+    if (changed) this.flush()
+    return changed
+  }
+
   private flush(): void {
     mkdirSync(dirname(this.filePath), { recursive: true })
     const body = [...this.byEndpoint.values()]
@@ -87,4 +128,15 @@ export class PushSubscriptionStore {
       .join('\n')
     writeFileSync(this.filePath, body ? `${body}\n` : '', 'utf8')
   }
+}
+
+export function pushDeviceIdForEndpoint(endpoint: string): string {
+  return `legacy-${createHash('sha256').update(endpoint).digest('base64url').slice(0, 16)}`
+}
+
+export function deviceNameFromUserAgent(userAgent?: string): string {
+  if (!userAgent) return 'Previously registered device'
+  const platform = /iPhone|iPad/.test(userAgent) ? 'iPhone or iPad' : /Android/.test(userAgent) ? 'Android' : /Macintosh/.test(userAgent) ? 'Mac' : /Windows/.test(userAgent) ? 'Windows PC' : 'Linux computer'
+  const browser = /Edg\//.test(userAgent) ? 'Edge' : /Firefox\//.test(userAgent) ? 'Firefox' : /Chrome\//.test(userAgent) ? 'Chrome' : /Safari\//.test(userAgent) ? 'Safari' : 'Browser'
+  return `${browser} on ${platform}`
 }

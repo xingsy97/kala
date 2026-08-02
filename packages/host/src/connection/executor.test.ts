@@ -347,6 +347,40 @@ describe('ExecutorRegistry', () => {
     }
   })
 
+  it('preserves the original timeout deadline across reconnects', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const reg = createExecutorRegistry(
+        fakeIo() as never,
+        makeResolver({ 'sess-deadline': 'ws-default' }),
+        100,
+      )
+      const first = makeFakeSocket('deadline-1')
+      reg.attach(first as never, announceOf('e-deadline'))
+      const pending = reg.callTool('sess-deadline', callEffect('c-deadline'))
+
+      await vi.advanceTimersByTimeAsync(80)
+      const replacement = makeFakeSocket('deadline-2')
+      reg.attach(replacement as never, announceOf('e-deadline'))
+
+      // Reconnect leaves only the original 20ms budget; it must not reset to a
+      // new 100ms window.
+      await vi.advanceTimersByTimeAsync(19)
+      let settled = false
+      void pending.then(() => { settled = true })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(pending).resolves.toEqual({
+        ok: false,
+        content: 'tool call ack timed out after 100ms (post-reconnect)',
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('cancelPending emits tool:cancel for every in-flight call in that session', () => {
     const reg = createExecutorRegistry(
       fakeIo() as never,

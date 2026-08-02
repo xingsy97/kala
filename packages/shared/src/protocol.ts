@@ -102,6 +102,7 @@ export type SessionPreferences = {
 }
 
 export type ClientUpdatePreferences = {
+  operationId?: string
   sessionId: string
   preferences: SessionPreferences
 }
@@ -346,6 +347,7 @@ export type CompactStatusEvent =
 // ============================================================================
 
 export type ClientUserMessage = {
+  operationId?: string
   sessionId: string
   text: string
   mode?: 'steer' | 'queue'
@@ -358,11 +360,13 @@ export type ClientUserMessage = {
 }
 
 export type ClientUserApprove = {
+  operationId?: string
   sessionId: string
   callId: string
 }
 
 export type ClientUserReject = {
+  operationId?: string
   sessionId: string
   callId: string
   reason?: string
@@ -404,6 +408,7 @@ export type ServerTokenDeltaEvent = {
 }
 
 export type ClientSetApprovalMode = {
+  operationId?: string
   sessionId: string
   mode: ApprovalMode
 }
@@ -429,6 +434,7 @@ export type ClientFork = {
  * Idempotent — a second emit for the same id is a no-op on the store side.
  */
 export type ClientCreateSession = {
+  operationId?: string
   sessionId: string
   /**
    * Bind the session to a workspace. Optional — when omitted, the session
@@ -460,23 +466,28 @@ export type ClientSubscribe = {
 }
 
 export type ClientSetCwd = {
+  operationId?: string
   sessionId: string
   cwd: string
 }
 
 export type ClientReorderQueuedMessage = {
+  operationId?: string
   sessionId: string
   id: string
   beforeId?: string | null
 }
 
 export type ClientUpdateQueuedMessage = {
+  operationId?: string
   sessionId: string
   id: string
   text: string
+  content?: readonly MessageContent[]
 }
 
 export type ClientDeleteQueuedMessage = {
+  operationId?: string
   sessionId: string
   id: string
 }
@@ -487,6 +498,7 @@ export type ClientDeleteQueuedMessage = {
  * entry so summaries survive host restarts.
  */
 export type ClientRenameSession = {
+  operationId?: string
   sessionId: string
   label: string
 }
@@ -497,6 +509,7 @@ export type ClientRenameSession = {
  * dashboards and persisted session summaries.
  */
 export type ClientRenameWorkspace = {
+  operationId?: string
   workspaceId: string
   workspaceName: string
 }
@@ -1188,6 +1201,7 @@ export type ClientLoadHistory = {
 }
 
 export type ClientDeleteSession = {
+  operationId?: string
   sessionId: string
   /** Delete all descendant fork/sub-agent sessions whose parent chain starts here. */
   cascade?: boolean
@@ -1306,7 +1320,7 @@ export type ClientSetDefaultModel = {
   model: string
 }
 
-export type AgentSystemPromptPresetId = 'codex' | 'claude-code'
+export type AgentSystemPromptPresetId = 'codex' | 'claude-code' | 'custom'
 
 export type SettingsAgentPromptPreset = {
   id: AgentSystemPromptPresetId
@@ -1317,11 +1331,13 @@ export type SettingsAgentPromptPreset = {
 export type SettingsAgentPrompt = {
   selectedPreset: AgentSystemPromptPresetId
   presets: readonly SettingsAgentPromptPreset[]
+  customPrompt: string
   configPath: string
 }
 
 export type ClientUpdateAgentPromptSettings = {
   preset: AgentSystemPromptPresetId
+  customPrompt?: string
 }
 
 export type SettingsHookSummary = {
@@ -1357,7 +1373,36 @@ export type SocketConnectionAuditSnapshot = {
   updatedAt: string
 }
 
+export type DeploymentMode = 'standalone' | 'saas'
+
+export type RuntimeCapabilities = {
+  agent: boolean
+  workspace: boolean
+  benchmarks: boolean
+  evaluations: boolean
+}
+
+export const FULL_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
+  agent: true,
+  workspace: true,
+  benchmarks: true,
+  evaluations: true,
+}
+
+export const SAAS_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
+  agent: true,
+  workspace: true,
+  benchmarks: false,
+  evaluations: false,
+}
+
+export type RuntimeCapabilitiesPayload = {
+  mode: DeploymentMode
+  capabilities: RuntimeCapabilities
+}
+
 export type ServerSettingsPayload = {
+  deployment?: RuntimeCapabilitiesPayload
   providers: readonly SettingsProviderSummary[]
   defaultModel: string
   hooks: readonly SettingsHookSummary[]
@@ -1436,6 +1481,7 @@ export type ExecutorInviteSummary = {
   label?: string
   workspaceId?: string
   createdAt: string
+  expiresAt: string
   lastUsedAt?: string
   revoked: boolean
 }
@@ -1459,18 +1505,23 @@ export type ServerExecutorInviteRevokedPayload = {
 // Socket.IO event maps
 // ============================================================================
 
+export type RpcAck<T = undefined> =
+  | (T extends undefined ? { ok: true } : { ok: true; value: T })
+  | { ok: false; error: string }
+
 export type DashboardClientToServerEvents = {
-  'client:user_message': (payload: ClientUserMessage) => void
-  'client:user_approve': (payload: ClientUserApprove) => void
-  'client:user_reject': (payload: ClientUserReject) => void
+  'client:connection_ping': (sentAt: number, ack: (serverAt: number) => void) => void
+  'client:user_message': (payload: ClientUserMessage, ack?: (result: RpcAck) => void) => void
+  'client:user_approve': (payload: ClientUserApprove, ack?: (result: RpcAck) => void) => void
+  'client:user_reject': (payload: ClientUserReject, ack?: (result: RpcAck) => void) => void
   'client:cancel': (payload: ClientCancel) => void
   'client:interrupt_sub_agent': (payload: ClientInterruptSubAgent) => void
   'client:clear': (payload: ClientClear) => void
   'client:compact': (payload: ClientCompact) => void
   'client:cancel_stream': (payload: ClientCancelStream) => void
-  'client:set_approval_mode': (payload: ClientSetApprovalMode) => void
+  'client:set_approval_mode': (payload: ClientSetApprovalMode, ack?: (result: RpcAck) => void) => void
   'client:fork': (payload: ClientFork) => void
-  'client:create_session': (payload: ClientCreateSession) => void
+  'client:create_session': (payload: ClientCreateSession, ack?: (result: RpcAck) => void) => void
   'client:list_dirs': (payload: ClientListDirs) => void
   'client:list_files': (payload: ClientListFiles) => void
   'client:read_overflow': (payload: ClientReadOverflow) => void
@@ -1478,14 +1529,14 @@ export type DashboardClientToServerEvents = {
   'client:list_sessions': (payload: ClientListSessions) => void
   'client:load_history': (payload: ClientLoadHistory) => void
   'client:load_log_artifact': (payload: ClientLoadLogArtifact) => void
-  'client:delete_session': (payload: ClientDeleteSession) => void
-  'client:update_preferences': (payload: ClientUpdatePreferences) => void
-  'client:set_cwd': (payload: ClientSetCwd) => void
-  'client:reorder_queued_message': (payload: ClientReorderQueuedMessage) => void
-  'client:update_queued_message': (payload: ClientUpdateQueuedMessage) => void
-  'client:delete_queued_message': (payload: ClientDeleteQueuedMessage) => void
-  'client:rename_session': (payload: ClientRenameSession) => void
-  'client:rename_workspace': (payload: ClientRenameWorkspace) => void
+  'client:delete_session': (payload: ClientDeleteSession, ack?: (result: RpcAck) => void) => void
+  'client:update_preferences': (payload: ClientUpdatePreferences, ack?: (result: RpcAck) => void) => void
+  'client:set_cwd': (payload: ClientSetCwd, ack?: (result: RpcAck) => void) => void
+  'client:reorder_queued_message': (payload: ClientReorderQueuedMessage, ack?: (result: RpcAck) => void) => void
+  'client:update_queued_message': (payload: ClientUpdateQueuedMessage, ack?: (result: RpcAck) => void) => void
+  'client:delete_queued_message': (payload: ClientDeleteQueuedMessage, ack?: (result: RpcAck) => void) => void
+  'client:rename_session': (payload: ClientRenameSession, ack?: (result: RpcAck<string>) => void) => void
+  'client:rename_workspace': (payload: ClientRenameWorkspace, ack?: (result: RpcAck<string>) => void) => void
   'client:consolidate_memory': (payload: ClientConsolidateMemory) => void
   'bg:list': (
     payload: ClientListBgTasks,
@@ -1567,6 +1618,9 @@ export type QueuedMessagePreview = {
   text: string
   mode: 'steer' | 'queue'
   createdAt: string
+  /** Structured attachments are included so the compact queue dock can render
+   * stable placeholders such as [Image #1] without embedding full previews. */
+  content?: readonly MessageContent[]
 }
 
 export type ExecutorClientToServerEvents = {

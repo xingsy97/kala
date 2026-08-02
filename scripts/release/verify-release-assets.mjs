@@ -77,6 +77,7 @@ for (const asset of manifest.assets) {
     const missingHost = spawnSync('bash', ['-c', 'COMPONENT=executor bash release/run.sh'], {
       cwd: root,
       encoding: 'utf8',
+      env: { ...process.env, HOST_URL: '' },
     })
     if (missingHost.status === 0) fail(`${asset} executor missing HOST_URL smoke test should fail`)
     const missingHostOutput = `${missingHost.stdout}\n${missingHost.stderr}`
@@ -158,6 +159,7 @@ if (manifest.assets.includes('agent-kernel-executor.cjs')) {
   const executor = spawnSync('node', ['agent-kernel-executor.cjs'], {
     cwd: releaseDir,
     encoding: 'utf8',
+    env: { ...process.env, HOST_URL: '' },
   })
   if (executor.status !== 1) fail('executor usage smoke test should exit 1')
   const output = `${executor.stdout}\n${executor.stderr}`
@@ -195,6 +197,7 @@ if (nativeExecutor) {
   const executor = spawnSync(`./${nativeExecutor}`, [], {
     cwd: releaseDir,
     encoding: 'utf8',
+    env: { ...process.env, HOST_URL: '' },
   })
   if (executor.status !== 1) fail('native executor usage smoke test should exit 1')
   const output = `${executor.stdout}\n${executor.stderr}`

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createSandbox, SandboxError } from './sandbox.js'
+import { createSandbox, isPathInsideRoot, SandboxError } from './sandbox.js'
 
 // The sandbox returns *canonical* absolute paths (symlinks resolved, and on
 // Windows 8.3 short names like `C:\example\…` expanded to their long
@@ -16,6 +16,11 @@ function canonical(p: string): string {
 }
 
 describe('sandbox', () => {
+  it('compares Windows roots case-insensitively with Windows separators', () => {
+    expect(isPathInsideRoot('C:\\Users\\Admin\\work', 'c:\\users\\admin', 'win32')).toBe(true)
+    expect(isPathInsideRoot('C:\\Users\\Administrator', 'C:\\Users\\Admin', 'win32')).toBe(false)
+  })
+
   let workspace: string
   let outside: string
 

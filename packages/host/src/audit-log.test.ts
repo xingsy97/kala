@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -25,8 +25,9 @@ describe('audit-log', () => {
       outcome: 'ok',
       metadata: { messageBytes: 10 },
     })
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    const text = await readFile(join(dir, 'audit-2026-07-11.jsonl'), 'utf8')
+    await logger.flush()
+    const path = join(dir, 'audit-2026-07-11.jsonl')
+    const text = await readFile(path, 'utf8')
     expect(JSON.parse(text.trim())).toEqual({
       ts: '2026-07-11T01:02:03.000Z',
       action: 'dashboard.user_message',
@@ -35,5 +36,26 @@ describe('audit-log', () => {
       outcome: 'ok',
       metadata: { messageBytes: 10 },
     })
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  it('serializes concurrent calls in invocation order and flushes deterministically', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'ak-audit-order-'))
+    const logger = createAuditLogger(dir)
+    for (let index = 0; index < 20; index++) {
+      logger.log({
+        ts: '2026-07-11T01:02:03.000Z',
+        action: `action-${index}`,
+        actor: { kind: 'system' },
+        outcome: 'ok',
+      })
+    }
+    await logger.close()
+
+    const lines = (await readFile(join(dir, 'audit-2026-07-11.jsonl'), 'utf8')).trim().split('\n')
+    expect(lines.map((line) => JSON.parse(line).action)).toEqual(
+      Array.from({ length: 20 }, (_, index) => `action-${index}`),
+    )
+    expect(logger.failureCount).toBe(0)
   })
 })

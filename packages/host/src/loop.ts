@@ -44,6 +44,7 @@ import { maybeAutoCompact, runCompact } from './extensions/compaction.js'
 import { interruptSubAgentsForParent, isCancelledSubAgentChild } from './extensions/agent-tool.js'
 import { runPostToolHooks, runPreToolHooks } from './extensions/hooks-runner.js'
 import { isSkillManager } from './extensions/skills.js'
+import { todoGraphContinuationState } from './extensions/todo-graph.js'
 import { dispatchConfiguredTool } from './agent-modules/execution.js'
 import type {
   HostLoopDeps,
@@ -85,7 +86,17 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
   const inFlightAborts = new Map<string, AbortController>()
   const inFlightTools = new Map<string, Set<string>>()
   const sessionTails = new Map<string, Promise<void>>()
+  const recoveries = new Map<string, Promise<boolean>>()
+  // Cancellation must abort I/O immediately, but its state transition still has
+  // to join the per-session serialized tail. Dispatching cancel directly used
+  // to race concurrent cancel clicks/reconnects: every reducer read the same
+  // cursor and persisted duplicate sequence numbers.
+  const pendingCancels = new Map<string, Promise<void>>()
   const loopGuard = new Map<string, PostCompactionLoopGuard>()
+  // At most one recovery continuation per durable todo_graph revision. The
+  // graph must advance before another terminal reply can be auto-resumed,
+  // preventing a broken model from hot-looping forever.
+  const graphContinuationRevision = new Map<string, number>()
   let drainMode: LoopDrainMode = 'none'
   // Per-session "stop at next safe boundary" flags (steer's polite interrupt).
   // A flagged session lets its in-flight LLM response + tools finish, then the
@@ -107,6 +118,36 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
     for (const resolve of waiters) resolve(snapshot)
   }
 
+  const maybeResumeDurableGraphWork = async (sessionId: string, cause: AgentEvent): Promise<void> => {
+    if (cause.kind === 'cancel' || cause.kind === 'clear') return
+    // A durable graph means the user explicitly requested autonomous progress.
+    // A plain assistant `stop` while work remains is therefore a recoverable
+    // premature terminal boundary, including the boundary produced immediately
+    // after automatic compaction.
+    for (let attempts = 0; attempts < 32; attempts += 1) {
+      const record = deps.store.get(sessionId)
+      if (!record || (record.state.status !== 'done' && record.state.status !== 'idle')) return
+      const graph = await todoGraphContinuationState(deps, sessionId)
+      if (!graph.needsContinuation) return
+      if (graphContinuationRevision.get(sessionId) === graph.revision) return
+      graphContinuationRevision.set(sessionId, graph.revision)
+      await dispatchOne(deps, sessionId, {
+        kind: 'messages_replaced',
+        reason: 'recovery',
+        replaceRange: { start: 0, end: 0 },
+        replacementMessages: [],
+        resume: true,
+      }, inFlightAborts, undefined, undefined, {
+        handle,
+        loopGuard,
+        drain: () => drainMode,
+        steerStop: () => steerStopSessions.has(sessionId),
+        toolStarted: markToolStarted,
+        toolSettled: markToolSettled,
+      }, notifyCheckpoint)
+    }
+  }
+
   const handle: LoopHandle = {
     async dispatch(sessionId, event, options) {
       if (drainMode !== 'none' && event.kind !== 'cancel') {
@@ -115,7 +156,25 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
         }
       }
       if (event.kind === 'cancel') {
-        await dispatchOne(deps, sessionId, event, inFlightAborts, undefined, undefined, undefined, notifyCheckpoint)
+        // Cancel cannot wait behind the active turn: that turn may itself be
+        // blocked on the tool/LLM we need to abort. Coalesce concurrent clicks,
+        // and ignore stale repeats once the reducer has already reached rest.
+        const existing = pendingCancels.get(sessionId)
+        if (existing) return await existing
+        const status = deps.store.get(sessionId)?.state.status
+        if (status === 'idle' || status === 'done' || status === 'error') {
+          // Preserve the public cancellation contract without polluting the
+          // event log/cursor with a reducer no-op.
+          deps.tools.cancelPending(sessionId)
+          return
+        }
+        const cancel = dispatchOne(deps, sessionId, event, inFlightAborts, undefined, undefined, undefined, notifyCheckpoint)
+          .finally(() => {
+            if (pendingCancels.get(sessionId) === cancel) pendingCancels.delete(sessionId)
+            notifyCheckpoint(sessionId)
+          })
+        pendingCancels.set(sessionId, cancel)
+        await cancel
         return
       }
       const prior = sessionTails.get(sessionId) ?? Promise.resolve()
@@ -131,7 +190,10 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
             toolStarted: markToolStarted,
             toolSettled: markToolSettled,
           }, notifyCheckpoint)
-          if (drainMode === 'none') await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
+          if (drainMode === 'none') {
+            await maybeAutoCompact(deps, sessionId, compactionInFlight, handle)
+            await maybeResumeDurableGraphWork(sessionId, event)
+          }
         })
         .finally(() => {
           if (sessionTails.get(sessionId) === next) sessionTails.delete(sessionId)
@@ -140,18 +202,40 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       sessionTails.set(sessionId, next)
       await next
     },
-    async compact(sessionId, trigger = 'manual') {
-      const replaced = await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts)
-      // Arm the post-compact loop guard ONLY on successful replacement. A
-      // skipped/rejected attempt did not change messages, so there is nothing
-      // for the model to loop back on. tool_result compaction is mid-batch;
-      // guarding there would starve the batch of legitimate follow-up calls.
+    async compact(sessionId, trigger = 'manual', resume = false) {
+      // Commit replacement first without inline continuation. runCompact owns
+      // metadata and its in-flight lock; resuming from inside it meant the next
+      // LLM/tools ran before the lock cleared and before loop guards were armed.
+      const replaced = await runCompact(deps, sessionId, trigger, compactionInFlight, inFlightAborts, false)
       if (replaced && trigger !== 'tool_result') {
         loopGuard.set(sessionId, {
           remainingCalls: POST_COMPACTION_GUARD_CALLS,
           seen: new Map(),
         })
       }
+      let shouldResume = resume
+      if (replaced && trigger === 'auto' && !shouldResume) {
+        const graph = await todoGraphContinuationState(deps, sessionId)
+        shouldResume = graph.needsContinuation && graphContinuationRevision.get(sessionId) !== graph.revision
+        if (shouldResume) graphContinuationRevision.set(sessionId, graph.revision)
+      }
+      if (replaced && shouldResume) {
+        await dispatchOne(deps, sessionId, {
+          kind: 'messages_replaced',
+          reason: 'recovery',
+          replaceRange: { start: 0, end: 0 },
+          replacementMessages: [],
+          resume: true,
+        }, inFlightAborts, undefined, undefined, {
+          handle,
+          loopGuard,
+          drain: () => drainMode,
+          steerStop: () => steerStopSessions.has(sessionId),
+          toolStarted: markToolStarted,
+          toolSettled: markToolSettled,
+        }, notifyCheckpoint)
+      }
+      return replaced
     },
     cancelStream(sessionId) {
       const ctrl = inFlightAborts.get(sessionId)
@@ -165,21 +249,56 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
     hasActiveLlmCall(sessionId) {
       return inFlightAborts.has(sessionId)
     },
+    hasActiveTurn(sessionId) {
+      return sessionTails.has(sessionId)
+    },
+    async waitForActiveTurn(sessionId) {
+      await (sessionTails.get(sessionId) ?? Promise.resolve()).catch(() => {})
+    },
     async recoverInterruptedLlm(sessionId) {
-      if (inFlightAborts.has(sessionId)) return false
-      const record = deps.store.get(sessionId)
-      if (!record || record.state.status !== 'thinking' || record.state.pendingCalls.length > 0) {
-        return false
-      }
-      await dispatchOne(deps, sessionId, interruptedLlmRecoveryEvent(), inFlightAborts, undefined, undefined, {
-        handle,
-        loopGuard,
-        drain: () => drainMode,
-        steerStop: () => steerStopSessions.has(sessionId),
-        toolStarted: markToolStarted,
-        toolSettled: markToolSettled,
-      }, notifyCheckpoint)
-      return true
+      return await handle.ensureSessionResumed(sessionId)
+    },
+    async ensureSessionResumed(sessionId) {
+      const existing = recoveries.get(sessionId)
+      if (existing) return await existing
+      const recovery = (async (): Promise<boolean> => {
+        if (drainMode !== 'none' || sessionTails.has(sessionId) || inFlightAborts.has(sessionId)) return false
+        const record = deps.store.get(sessionId) ?? await deps.store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
+        if (!record) return false
+        if (record.state.status === 'thinking' && record.state.pendingCalls.length === 0) {
+          await dispatchOne(deps, sessionId, interruptedLlmRecoveryEvent(), inFlightAborts, undefined, undefined, {
+            handle,
+            loopGuard,
+            drain: () => drainMode,
+            steerStop: () => steerStopSessions.has(sessionId),
+            toolStarted: markToolStarted,
+            toolSettled: markToolSettled,
+          }, notifyCheckpoint)
+          return true
+        }
+        if (record.state.status !== 'executing_tools' || record.state.pendingCalls.length === 0) return false
+        const effects = record.state.pendingCalls
+          .filter((call) => call.status === 'approved' || call.status === 'dispatched')
+          .map((call) => ({
+            kind: 'call_tool' as const,
+            callId: call.callId,
+            name: call.name,
+            input: call.input,
+            ...(record.state.cwd !== undefined ? { cwd: record.state.cwd } : {}),
+          }))
+        if (effects.length === 0) return false
+        const resultQueue = createSerialQueue()
+        await Promise.all(effects.map((eff) => performCallTool(
+          deps, sessionId, eff, inFlightAborts,
+          { handle, loopGuard, toolStarted: markToolStarted, toolSettled: markToolSettled },
+          resultQueue,
+        )))
+        return true
+      })().finally(() => {
+        if (recoveries.get(sessionId) === recovery) recoveries.delete(sessionId)
+      })
+      recoveries.set(sessionId, recovery)
+      return await recovery
     },
     beginDrain(mode) {
       drainMode = mode
@@ -206,28 +325,7 @@ export function runHostLoop(deps: HostLoopDeps): LoopHandle {
       })
     },
     async resumeSession(sessionId) {
-      if (drainMode !== 'none') return false
-      const record = deps.store.get(sessionId) ?? await deps.store.load(sessionId, { recoverDangling: false }).catch(() => undefined)
-      if (!record) return false
-      if (record.state.status === 'thinking' && record.state.pendingCalls.length === 0) {
-        return await handle.recoverInterruptedLlm(sessionId)
-      }
-      if (record.state.status === 'executing_tools' && record.state.pendingCalls.length > 0) {
-        const effects = record.state.pendingCalls
-          .filter((call) => call.status === 'approved' || call.status === 'dispatched')
-          .map((call) => ({
-            kind: 'call_tool' as const,
-            callId: call.callId,
-            name: call.name,
-            input: call.input,
-            ...(record.state.cwd !== undefined ? { cwd: record.state.cwd } : {}),
-          }))
-        if (effects.length === 0) return false
-        const resultQueue = createSerialQueue()
-        await Promise.all(effects.map((eff) => performCallTool(deps, sessionId, eff, inFlightAborts, { handle, loopGuard, toolStarted: markToolStarted, toolSettled: markToolSettled }, resultQueue)))
-        return true
-      }
-      return false
+      return await handle.ensureSessionResumed(sessionId)
     },
   }
 
@@ -278,6 +376,62 @@ function interruptedLlmRecoveryEvent(): AgentEvent {
   }
 }
 
+type CommittedTransition = {
+  record: SessionRecord
+  next: AgentState
+  effects: readonly Effect[]
+}
+
+// Every synthesized event eventually calls dispatchOne. Serialize the short
+// read → step → durable append → broadcast section here; effects execute after
+// releasing this lock so recursive Tool/LLM events cannot deadlock.
+const commitTails = new WeakMap<HostLoopDeps['store'], Map<string, Promise<void>>>()
+
+async function commitTransition(
+  deps: HostLoopDeps,
+  sessionId: string,
+  event: AgentEvent,
+  llmTrace?: LLMTrace,
+  model?: string,
+  extras?: EventBroadcastExtras,
+): Promise<CommittedTransition> {
+  let tails = commitTails.get(deps.store)
+  if (!tails) {
+    tails = new Map()
+    commitTails.set(deps.store, tails)
+  }
+  const previous = tails.get(sessionId) ?? Promise.resolve()
+  let committed!: CommittedTransition
+  const current = previous.catch(() => undefined).then(async () => {
+    const record = deps.store.get(sessionId)
+    if (!record) throw new Error(`Unknown session: ${sessionId}`)
+    if (event.kind !== 'cancel' && isSkillManager(deps.skills)) await deps.skills.refreshConfig(record)
+    const prior = record.state
+    const { next, effects } = step(prior, event, record.config)
+    const safeLlmTrace = llmTrace ? redactLlmTrace(llmTrace) : undefined
+    const usageChanged =
+      next.usage.inputTokens !== prior.usage.inputTokens ||
+      next.usage.outputTokens !== prior.usage.outputTokens ||
+      next.usage.cacheCreationTokens !== prior.usage.cacheCreationTokens ||
+      next.usage.cacheReadTokens !== prior.usage.cacheReadTokens
+    await deps.store.record(
+      sessionId, event, effects, next, usageChanged ? next.usage : undefined,
+      safeLlmTrace, model,
+    )
+    safeBroadcast(() =>
+      deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, safeLlmTrace, model, extras),
+    )
+    committed = { record, next, effects }
+  })
+  tails.set(sessionId, current)
+  try {
+    await current
+    return committed
+  } finally {
+    if (tails.get(sessionId) === current) tails.delete(sessionId)
+  }
+}
+
 export async function dispatchOne(
   deps: HostLoopDeps,
   sessionId: string,
@@ -289,35 +443,8 @@ export async function dispatchOne(
   onCheckpoint?: (sessionId: string) => void,
   extras?: EventBroadcastExtras,
 ): Promise<void> {
-  const record = deps.store.get(sessionId)
-  if (!record) throw new Error(`Unknown session: ${sessionId}`)
-
-  if (event.kind !== 'cancel' && isSkillManager(deps.skills)) {
-    await deps.skills.refreshConfig(record)
-  }
-
-  const prior = record.state
-  const { next, effects } = step(prior, event, record.config)
-  const safeLlmTrace = llmTrace ? redactLlmTrace(llmTrace) : undefined
-
-  const usageChanged =
-    next.usage.inputTokens !== prior.usage.inputTokens ||
-    next.usage.outputTokens !== prior.usage.outputTokens ||
-    next.usage.cacheCreationTokens !== prior.usage.cacheCreationTokens ||
-    next.usage.cacheReadTokens !== prior.usage.cacheReadTokens
-
-  await deps.store.record(
-    sessionId,
-    event,
-    effects,
-    next,
-    usageChanged ? next.usage : undefined,
-    safeLlmTrace,
-    model,
-  )
-
-  safeBroadcast(() =>
-    deps.broadcast.onEvent(sessionId, next.cursor, event, effects, next, safeLlmTrace, model, extras),
+  const { record, next, effects } = await commitTransition(
+    deps, sessionId, event, llmTrace, model, extras,
   )
 
   // Cancellation of in-flight IO is the host's job (SPEC §Non-goals:
@@ -455,18 +582,31 @@ async function performCallLlm(
       }
     : undefined
   try {
-    let res = await callLlmOnce({
+    const callInput = {
       deps,
       tools: effect.tools,
       signal: controller.signal,
       config,
       model,
       onTextDelta,
-    }, messages)
+    }
+    let res
+    try {
+      res = await callLlmOnce(callInput, messages)
+    } catch (err) {
+      // Token estimators are approximate. If a provider rejects a suddenly
+      // huge user/tool item, recover this SAME turn once instead of persisting
+      // llm_error and stranding the autonomous run.
+      if (!runtime || controller.signal.aborted || !isContextOverflowError(err)) throw err
+      await runtime.handle.compact(sessionId, 'preflight', false)
+      const current = deps.store.get(sessionId)?.state.messages ?? messages
+      const retryMessages = emergencyTruncate(current, config, contextLimitForSession(deps, sessionId))
+      res = await callLlmOnce(callInput, retryMessages)
+    }
     await maybeRecordTokenUsageObservation(deps, sessionId, res, messages, effect.tools)
     if (shouldRecoverFromMaxTokens(res) && runtime && !controller.signal.aborted) {
       try {
-        await runtime.handle.compact(sessionId, 'preflight')
+        await runtime.handle.compact(sessionId, 'preflight', false)
         const retryMessages = deps.store.get(sessionId)?.state.messages ?? messages
         res = await callLlmOnce({
           deps,
@@ -524,6 +664,16 @@ async function performCallLlm(
   } finally {
     if (aborts.get(sessionId) === controller) aborts.delete(sessionId)
   }
+}
+
+function isContextOverflowError(err: unknown): boolean {
+  const input = err && typeof err === 'object' && 'input' in err
+    ? (err as { input?: { status?: number; bodyText?: string } }).input
+    : undefined
+  const status = input?.status
+  const text = `${err instanceof Error ? err.message : String(err)} ${input?.bodyText ?? ''}`.toLowerCase()
+  if (status !== undefined && ![400, 413, 422].includes(status)) return false
+  return /context(?:_|\s|-)*(?:length|window)|too many tokens|prompt is too long|maximum.*tokens|request too large/u.test(text)
 }
 
 function shouldRecoverFromMaxTokens(res: Awaited<ReturnType<typeof callLlmOnce>>): boolean {
@@ -890,18 +1040,17 @@ async function messagesForLlmCall(
 ): Promise<readonly import('@agent-kernel/kernel').Message[]> {
   const contextLimit = contextLimitForSession(deps, sessionId)
   if (!runtime || !shouldPreflightCompact(config, messages, contextLimit)) return messages
+  let applied = false
   try {
-    await runtime.handle.compact(sessionId, 'preflight')
+    applied = await runtime.handle.compact(sessionId, 'preflight')
   } catch {
-    // Compaction failed (circuit breaker open, summarizer down, etc). Do NOT
-    // send the original oversized messages — provider will reject with PTL and
-    // the failure surfaces to the user as a broken turn. Emergency truncate to
-    // the preflight budget by dropping whole assistant-groups from the head.
-    const after = deps.store.get(sessionId)?.state.messages ?? messages
-    if (!shouldPreflightCompact(config, after, contextLimit)) return after
-    return emergencyTruncate(after, config, contextLimit)
+    // Fall through to deterministic local recovery below.
   }
-  return deps.store.get(sessionId)?.state.messages ?? messages
+  const after = deps.store.get(sessionId)?.state.messages ?? messages
+  if (applied && !shouldPreflightCompact(config, after, contextLimit)) return after
+  // Skipped, circuit-open, failed, or no-progress compaction must still make
+  // progress. Enforce a hard request budget, including one-message cases.
+  return emergencyTruncate(after, config, contextLimit)
 }
 
 function emergencyTruncate(
@@ -924,7 +1073,42 @@ function emergencyTruncate(
     dropped += 1
     if (dropped > 100) break
   }
-  return [...leadingSystem, ...groups.flat()]
+  const remaining = [...leadingSystem, ...groups.flat()]
+  if (!shouldPreflightCompact(config, remaining, contextLimitOverride)) return remaining
+  return truncateOversizedMessageContent(remaining, preflightTokenLimit(config, contextLimitOverride))
+}
+
+/**
+ * Last-resort liveness fallback for one irreducibly huge message/group. Keep
+ * message roles and tool call/result pairing, but shrink the largest text item
+ * head+tail until the actual estimated request fits. This is deterministic and
+ * always makes progress; without it a single huge user paste could survive all
+ * whole-group dropping and strand the turn after provider overflow.
+ */
+function truncateOversizedMessageContent(
+  messages: readonly import('@agent-kernel/kernel').Message[],
+  tokenLimit: number,
+): readonly import('@agent-kernel/kernel').Message[] {
+  let current = messages.map((message) => ({ ...message, content: message.content.map((item) => ({ ...item })) }))
+  for (let pass = 0; pass < 32 && estimateMessageTokens(current) >= tokenLimit; pass += 1) {
+    let target: { message: number; content: number; text: string } | undefined
+    current.forEach((message, messageIndex) => message.content.forEach((item, contentIndex) => {
+      if (item.type !== 'text' && item.type !== 'tool_result') return
+      const text = item.type === 'text' ? item.text : item.content
+      if (!target || text.length > target.text.length) target = { message: messageIndex, content: contentIndex, text }
+    }))
+    if (!target || target.text.length <= 256) break
+    const excessTokens = Math.max(1, estimateMessageTokens(current) - tokenLimit + 64)
+    const keepChars = Math.max(256, target.text.length - excessTokens * 4)
+    const head = Math.floor(keepChars * 0.6)
+    const tail = Math.max(0, keepChars - head)
+    const nextText = `${target.text.slice(0, head).trimEnd()}\n[... ${target.text.length - keepChars} chars omitted by emergency context recovery ...]\n${target.text.slice(-tail).trimStart()}`
+    const message = current[target.message]!
+    const item = message.content[target.content]!
+    if (item.type === 'text') message.content[target.content] = { ...item, text: nextText }
+    else if (item.type === 'tool_result') message.content[target.content] = { ...item, content: nextText }
+  }
+  return current
 }
 
 function shouldPreflightCompact(
@@ -935,20 +1119,19 @@ function shouldPreflightCompact(
   const contextLimit = contextLimitOverride ?? config.contextLimit
   if (!contextLimit || contextLimit <= 0) return false
   if (!messages.some((m) => m.role !== 'system')) return false
+  return estimateMessageTokens(messages) >= preflightTokenLimit(config, contextLimit)
+}
+
+function preflightTokenLimit(config: AgentConfig, contextLimitOverride?: number): number {
+  const contextLimit = contextLimitOverride ?? config.contextLimit
+  if (!contextLimit || contextLimit <= 0) return Number.MAX_SAFE_INTEGER
   const baseReserve = Math.min(
-    Math.max(
-      PREFLIGHT_RESERVE_FLOOR_TOKENS,
-      Math.round(contextLimit * PREFLIGHT_RESERVE_RATIO),
-    ),
+    Math.max(PREFLIGHT_RESERVE_FLOOR_TOKENS, Math.round(contextLimit * PREFLIGHT_RESERVE_RATIO)),
     Math.floor(contextLimit * 0.25),
   )
-  // Extended-thinking budget is spent on THIS turn's reasoning tokens, before
-  // the summary response the reserve already accounts for. Add it so a big
-  // thinking budget doesn't quietly eat the compaction headroom.
   const thinking = config.thinkingBudget && config.thinkingBudget > 0 ? config.thinkingBudget : 0
   const reserve = Math.min(baseReserve + thinking, Math.floor(contextLimit * 0.5))
-  const limit = Math.max(0, contextLimit - reserve)
-  return estimateMessageTokens(messages) >= limit
+  return Math.max(0, contextLimit - reserve)
 }
 
 function contextLimitForSession(

@@ -79,6 +79,7 @@ type Pending = {
   cwd?: string
   resolve: (result: { ok: boolean; content: string }) => void
   timer: NodeJS.Timeout
+  deadlineAt: number
 }
 
 export type ExecutorChangeListener = (change: ServerExecutorChangedPayload) => void
@@ -197,6 +198,10 @@ export function createExecutorRegistry(
     for (const p of oldBind.pending.values()) {
       clearTimeout(p.timer)
       const ackTimeoutMs = ackTimeoutMsFor(p.name, p.input, toolAckTimeoutMs)
+      // Preserve the original absolute deadline. A reconnect must not grant a
+      // fresh timeout window; repeated network flaps would otherwise keep an
+      // orphaned tool call pending forever.
+      const remainingMs = Math.max(0, p.deadlineAt - Date.now())
       const timer = setTimeout(() => {
         if (newBind.pending.delete(p.callId)) {
           p.resolve({
@@ -204,7 +209,7 @@ export function createExecutorRegistry(
             content: `tool call ack timed out after ${ackTimeoutMs}ms (post-reconnect)`,
           })
         }
-      }, ackTimeoutMs)
+      }, remainingMs)
       newBind.pending.set(p.callId, {
         sessionId: p.sessionId,
         callId: p.callId,
@@ -213,6 +218,7 @@ export function createExecutorRegistry(
         ...(p.cwd !== undefined ? { cwd: p.cwd } : {}),
         resolve: p.resolve,
         timer,
+        deadlineAt: p.deadlineAt,
       })
       newBind.socket.emit(
         'tool:call',
@@ -478,6 +484,7 @@ export function createExecutorRegistry(
       const ackTimeoutMs = ackTimeoutMsFor(eff.name, eff.input, toolAckTimeoutMs)
       audit?.log({ action: 'tool.dispatch', actor: { kind: 'system' }, target: { sessionId, workspaceId: bind.announcement.workspaceId, callId: eff.callId, toolName: eff.name }, outcome: 'ok', metadata: { cwd: eff.cwd } })
       return await new Promise<{ ok: boolean; content: string }>((resolve) => {
+        const deadlineAt = Date.now() + ackTimeoutMs
         const timer = setTimeout(() => {
           if (bind.pending.delete(eff.callId)) {
             audit?.log({ action: 'tool.result', actor: { kind: 'executor', executorId: bind.announcement.executorId, workspaceId: bind.announcement.workspaceId }, target: { sessionId, callId: eff.callId, toolName: eff.name }, outcome: 'error', error: 'timeout' })
@@ -495,6 +502,7 @@ export function createExecutorRegistry(
           ...(eff.cwd !== undefined ? { cwd: eff.cwd } : {}),
           resolve,
           timer,
+          deadlineAt,
         })
         bind.socket.emit(
           'tool:call',

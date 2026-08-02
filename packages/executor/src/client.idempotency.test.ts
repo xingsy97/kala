@@ -68,6 +68,7 @@ describe('executor idempotency', () => {
       executorId: 'ex-idem',
       tools: [testTool],
       ioFactory: (() => socket) as never,
+      receiptStorePath: false,
     })
 
     // trigger 'connect' so startExecutor emits the announce (harmless here)
@@ -98,7 +99,28 @@ describe('executor idempotency', () => {
     expect(ack2).toHaveBeenCalledWith({ callId: 'call-A', ok: true, content: 'ran-tool' })
   })
 
-  it('ignores a duplicate tool:call for a call still in flight (no double-spawn)', async () => {
+  it('does not collide when two Sessions reuse the same provider callId', async () => {
+    const runs = vi.fn(async (_input, context) => `ran-${context.sessionId}`)
+    const socket = makeMockSocket()
+    startExecutor({
+      host: 'http://x', workspaceId: 'ws-scoped', workspaceName: 'ws-scoped', executorId: 'ex-scoped',
+      tools: [{ name: 'stub', run: runs }], ioFactory: (() => socket) as never, receiptStorePath: false,
+    })
+    socket.__trigger('connect')
+
+    const first = vi.fn()
+    socket.__trigger('tool:call', { sessionId: 'session-a', callId: 'same-call', name: 'stub', input: {} }, first)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const second = vi.fn()
+    socket.__trigger('tool:call', { sessionId: 'session-b', callId: 'same-call', name: 'stub', input: {} }, second)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(runs).toHaveBeenCalledTimes(2)
+    expect(first).toHaveBeenCalledWith({ callId: 'same-call', ok: true, content: 'ran-session-a' })
+    expect(second).toHaveBeenCalledWith({ callId: 'same-call', ok: true, content: 'ran-session-b' })
+  })
+
+  it('fans out completion to duplicate in-flight ACK callbacks without double-spawn', async () => {
     let resolveRun: ((v: string) => void) | null = null
     const runs = vi.fn(
       () =>
@@ -116,6 +138,7 @@ describe('executor idempotency', () => {
       executorId: 'ex-slow',
       tools: [testTool],
       ioFactory: (() => socket) as never,
+      receiptStorePath: false,
     })
     socket.__trigger('connect')
 
@@ -128,15 +151,18 @@ describe('executor idempotency', () => {
     socket.__trigger('tool:call', { sessionId: 's1', callId: 'call-B', name: 'slow', input: {} }, ack2)
     await new Promise((r) => setTimeout(r, 5))
 
-    // ack2 must not fire yet — no cached result, still in flight
+    // Neither callback fires until the single invocation completes.
     expect(ack2).not.toHaveBeenCalled()
     expect(runs).toHaveBeenCalledTimes(1)
 
-    // finish the first call
+    // Finish once; both the old and replacement socket callbacks receive the
+    // result so the host cannot strand pending ownership after reconnect.
     resolveRun!('slow-done')
     await new Promise((r) => setTimeout(r, 10))
 
-    expect(ack1).toHaveBeenCalledWith({ callId: 'call-B', ok: true, content: 'slow-done' })
+    const expected = { callId: 'call-B', ok: true, content: 'slow-done' }
+    expect(ack1).toHaveBeenCalledWith(expected)
+    expect(ack2).toHaveBeenCalledWith(expected)
     expect(runs).toHaveBeenCalledTimes(1) // never re-ran
   })
 
@@ -149,6 +175,7 @@ describe('executor idempotency', () => {
       executorId: 'ex-reject',
       tools: [],
       ioFactory: (() => socket) as never,
+      receiptStorePath: false,
     })
     socket.__trigger('connect')
 
@@ -178,6 +205,7 @@ describe('executor idempotency', () => {
       tools: [],
       onToken,
       ioFactory: (() => socket) as never,
+      receiptStorePath: false,
     })
 
     socket.__trigger('executor:welcome', { token: 'ak_exec_saved', workspaceId: 'ws-welcome' })
@@ -199,6 +227,7 @@ describe('executor idempotency', () => {
       executorId: 'ex-ver',
       tools: [],
       ioFactory: (() => socket) as never,
+      receiptStorePath: false,
     })
 
     socket.__trigger('connect_error', new Error('version_incompatible'))
@@ -219,6 +248,7 @@ describe('executor idempotency', () => {
       executorId: 'ex-retry',
       tools: [],
       ioFactory: (() => socket) as never,
+      receiptStorePath: false,
     })
 
     const resolved = await Promise.race([
@@ -237,7 +267,7 @@ describe('executor idempotency', () => {
     handle.close()
   })
 
-  it('configures socket.io to retry forever with a 10 minute backoff ceiling', () => {
+  it('configures socket.io to retry forever with a bounded one minute backoff', () => {
     const socket = makeMockSocket()
     const ioFactory = vi.fn(() => socket)
 
@@ -255,7 +285,7 @@ describe('executor idempotency', () => {
       expect.objectContaining({
         reconnection: true,
         reconnectionDelay: 500,
-        reconnectionDelayMax: 600_000,
+        reconnectionDelayMax: 60_000,
         reconnectionAttempts: Infinity,
       }),
     )

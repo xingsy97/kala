@@ -33,14 +33,21 @@ export function snapshotFromConfig(
   override?: ContextWindowOverride,
   selectedModel?: string,
 ): ContextUsageSnapshot {
-  const transcriptTokens = estimateMessageTokens(messages)
-  const userMessages = messages.filter((m) => m.role === 'user')
-  const assistantMessages = messages.filter((m) => m.role === 'assistant')
-  const toolMessages = messages.filter((m) => m.role === 'tool')
+  let transcriptTokens = 0
+  let userMessageTokens = 0
+  let assistantMessageTokens = 0
+  let toolResultTokens = 0
+  for (const message of messages) {
+    const tokens = estimateMessageTokens([message])
+    transcriptTokens += tokens
+    if (message.role === 'user') userMessageTokens += tokens
+    else if (message.role === 'assistant') assistantMessageTokens += tokens
+    else if (message.role === 'tool') toolResultTokens += tokens
+  }
   const transcriptBreakdown = {
-    userMessages: estimateMessageTokens(userMessages),
-    assistantMessages: estimateMessageTokens(assistantMessages),
-    toolResults: estimateMessageTokens(toolMessages),
+    userMessages: userMessageTokens,
+    assistantMessages: assistantMessageTokens,
+    toolResults: toolResultTokens,
   }
   const toolTokens = estimateToolSchemaTokens(config.tools)
   const reserveTokens = reserveForContext(override?.contextTokens ?? override?.contextWindow ?? config.contextLimit)

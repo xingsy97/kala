@@ -5,12 +5,16 @@ import { runStreamingMarkdownFlicker, STREAMING_MARKDOWN_LLM } from './streaming
 import { runStatusIndicatorJank, TOOL_LOOP_LLM } from './status-indicator-jank.js'
 import { runInspectorOpenCost, INSPECTOR_LOAD_LLM } from './inspector-open-cost.js'
 import { runMobileInspectorOverflow, MOBILE_INSPECTOR_LLM } from './mobile-inspector-overflow.js'
+import { runStreamingScrollAnchor, STREAMING_SCROLL_ANCHOR_LLM } from './streaming-scroll-anchor.js'
+import { runSaasCapabilities, SAAS_CAPABILITIES_LLM } from './saas-capabilities.js'
 
 export type { ScenarioContext, ScenarioResult } from './types.js'
 export * from './streaming-markdown-flicker.js'
 export * from './status-indicator-jank.js'
 export * from './inspector-open-cost.js'
 export * from './mobile-inspector-overflow.js'
+export * from './streaming-scroll-anchor.js'
+export * from './saas-capabilities.js'
 
 /**
  * A registry entry ties a scenario to the scripted LLM that drives it and the
@@ -31,6 +35,30 @@ export type ScenarioDefinition = {
 }
 
 export const SCENARIOS: readonly ScenarioDefinition[] = [
+  {
+    name: 'saas-capabilities',
+    reproduces: 'SaaS exposes Agent while hiding and blocking Benchmark/Evaluation.',
+    makeLlm: () => SAAS_CAPABILITIES_LLM(),
+    mobile: true,
+    cpuThrottleRate: 1,
+    run: (ctx) => runSaasCapabilities(ctx),
+  },
+  {
+    name: 'streaming-scroll-anchor',
+    reproduces: 'User scrolls upward while a live markdown row keeps growing.',
+    makeLlm: () => STREAMING_SCROLL_ANCHOR_LLM(),
+    mobile: false,
+    cpuThrottleRate: 1,
+    run: (ctx) => runStreamingScrollAnchor(ctx),
+  },
+  {
+    name: 'streaming-scroll-anchor-mobile',
+    reproduces: 'User scrolls upward on mobile while a live markdown row keeps growing.',
+    makeLlm: () => STREAMING_SCROLL_ANCHOR_LLM(),
+    mobile: true,
+    cpuThrottleRate: 2,
+    run: (ctx) => runStreamingScrollAnchor(ctx),
+  },
   {
     name: 'streaming-markdown-flicker',
     reproduces: 'Already-rendered markdown blocks flicker while later content streams in.',

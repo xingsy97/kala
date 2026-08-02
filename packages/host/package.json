@@ -12,7 +12,8 @@
     }
   },
   "bin": {
-    "agent-kernel-host": "./dist/bin/agent-kernel-host.js"
+    "agent-kernel-host": "./dist/bin/agent-kernel-host.js",
+    "agent-runlab-runtime-service": "./dist/bin/agent-runlab-runtime-service.js"
   },
   "files": [
     "dist",
@@ -34,10 +35,13 @@
     "@agent-kernel/kernel": "workspace:*",
     "@agent-kernel/shared": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.3.212",
+    "@aws-sdk/client-s3": "^3.1098.0",
+    "@aws-sdk/s3-request-presigner": "^3.1098.0",
     "@socket.io/admin-ui": "^0.5.1",
     "bcryptjs": "^2.4.3",
     "eventsource-parser": "^3.1.0",
     "fflate": "^0.8.3",
+    "http-proxy": "^1.18.1",
     "jsonc-parser": "^3.3.1",
     "p-retry": "^8.0.0",
     "socket.io": "^4.8.1",
@@ -47,6 +51,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/http-proxy": "^1.17.17",
     "@types/node": "^22.9.0",
     "@types/web-push": "^3.6.4",
     "fast-check": "^4.9.0",

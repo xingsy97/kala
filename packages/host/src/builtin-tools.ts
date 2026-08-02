@@ -22,29 +22,33 @@ export function resolveBuiltinAgentModule(input: {
   skills?: readonly SkillInfo[]
   contextLimit?: number
   systemPromptPreset?: AgentSystemPromptPreset
+  customSystemPrompt?: string
 } = {}) {
-  return resolveAgentModule(createBuiltinAgentModule(input.systemPromptPreset), {
+  return resolveAgentModule(createBuiltinAgentModule(input.systemPromptPreset, input.customSystemPrompt), {
     mode: 'coding',
     skills: input.skills ?? [],
     ...(input.contextLimit !== undefined ? { contextLimit: input.contextLimit } : {}),
   })
 }
 
-export type AgentSystemPromptPreset = 'codex' | 'claude-code'
+export type AgentSystemPromptPreset = 'codex' | 'claude-code' | 'custom'
 
 export const AGENT_SYSTEM_PROMPT_PRESETS: readonly { id: AgentSystemPromptPreset; label: string; description: string }[] = [
   { id: 'codex', label: 'Codex', description: 'Direct coding-agent prompt with explicit execution and verification rules.' },
   { id: 'claude-code', label: 'Claude Code', description: 'Concise pair-programming prompt shaped for file edits, commands, and progress tracking.' },
+  { id: 'custom', label: 'Custom', description: 'An editable system prompt for new sessions.' },
 ]
 
 export function normalizeAgentSystemPromptPreset(value: unknown): AgentSystemPromptPreset {
-  return value === 'claude-code' ? 'claude-code' : 'codex'
+  return value === 'claude-code' || value === 'custom' ? value : 'codex'
 }
 
-export function createBuiltinAgentModule(preset: AgentSystemPromptPreset = 'codex'): AgentModule {
+export function createBuiltinAgentModule(preset: AgentSystemPromptPreset = 'codex', customSystemPrompt = DEFAULT_CUSTOM_SYSTEM_PROMPT): AgentModule {
   const systemPrompt = preset === 'claude-code'
     ? claudeCodeSystemPromptPlugin
-    : codexSystemPromptPlugin
+    : preset === 'custom'
+      ? customSystemPromptPlugin(customSystemPrompt)
+      : codexSystemPromptPlugin
   return {
     id: `coding-agent-${preset}`,
     version: '2026-07-15',
@@ -70,6 +74,27 @@ const codexSystemPromptPlugin: SystemPromptPlugin = {
       'Report concrete outcomes: what changed, what was verified, and what remains risky or untested.',
     ].join('\n\n')
   },
+}
+
+export const DEFAULT_CUSTOM_SYSTEM_PROMPT = [
+  'You are Codex, a coding agent running inside Agent RunLab in a shared developer workspace.',
+  'Work pragmatically: inspect the codebase before changing it, make focused edits, and verify the result with the narrowest reliable tests.',
+  'Prefer existing project patterns over new abstractions. Use fast search tools first, especially ripgrep-backed search, before broad file reads.',
+  'Treat filesystem, shell, network, and memory tools as real side effects. Avoid destructive actions unless the user clearly requested them or approval policy permits them.',
+  'When editing, keep unrelated files and user changes intact. Do not revert work you did not make.',
+  'If the user asks you to modify files, run commands, or continue unfinished work, either ask a necessary clarification, explain a real blocker, or continue by using tools. Do not claim that you changed, ran, verified, or completed something unless a tool result confirms it.',
+  'For multi-step work, keep a concise task list and update it as the state changes. Mark work complete only after verification.',
+  'Report concrete outcomes: what changed, what was verified, and what remains risky or untested.',
+  'When referencing a file, use a Markdown link such as [filename](path/to/this/file).',
+].join('\n\n')
+
+function customSystemPromptPlugin(prompt: string): SystemPromptPlugin {
+  return {
+    id: 'custom-system-prompt',
+    version: '2026-07-15',
+    label: 'Custom System Prompt',
+    render: () => prompt,
+  }
 }
 
 const claudeCodeSystemPromptPlugin: SystemPromptPlugin = {
@@ -207,11 +232,18 @@ const planningToolset: ToolsetPlugin = {
   version: '2026-07-15',
   label: 'Planning',
   provideTools() {
-    return [tool('todowrite', 'executor', 'read', false, 'todowrite', {
-      purpose: 'Create and maintain a structured task list for the current session. The input replaces the entire list.',
-      whenToUse: ['Use for multi-step work, usually three or more steps.', 'Use when the user asks for a todo list or progress tracking.'],
-      constraints: ['Always include every todo that should remain.', 'Exactly one item may be in_progress at a time.', 'Mark completed only after verification.'],
-    }, { type: 'object', required: ['todos'], properties: { todos: { type: 'array', description: 'The complete replacement list of todos.', items: { type: 'object', required: ['content', 'status'], properties: { content: { type: 'string', description: 'Short imperative description of the task.' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] }, priority: { type: 'string', enum: ['high', 'medium', 'low'] } } } } } })]
+    return [
+      tool('todowrite', 'executor', 'read', false, 'todowrite', {
+        purpose: 'Create and maintain a simple linear task list for the current session. The input replaces the entire list.',
+        whenToUse: ['Use for straightforward multi-step work without dependencies.', 'Use when the user asks for a simple todo list.'],
+        constraints: ['Use todo_graph instead when tasks have prerequisites or parallel branches.', 'Always include every todo that should remain.', 'Exactly one item may be in_progress at a time.', 'Mark completed only after verification.'],
+      }, { type: 'object', required: ['todos'], properties: { todos: { type: 'array', description: 'The complete replacement list of todos.', items: { type: 'object', required: ['content', 'status'], properties: { content: { type: 'string', description: 'Short imperative description of the task.' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] }, priority: { type: 'string', enum: ['high', 'medium', 'low'] } } } } } }),
+      tool('todo_graph', 'host', 'read', false, 'todo_graph', {
+        purpose: 'Create and maintain a session task dependency graph with parallel branches and blocked work. Operations are atomic.',
+        whenToUse: ['Use when tasks have prerequisites, fan-out/fan-in, blocked work, or parallel execution.', 'Use for complex implementation plans that cannot be represented accurately as a linear list.'],
+        constraints: ['Use stable semantic node IDs.', 'Add only real dependencies; do not turn ordering preferences into edges.', 'Blocked nodes cannot be in_progress, but multiple unblocked nodes may be in_progress.', 'Prefer incremental operations after initial replace.', 'Mark completed only after verification.'],
+      }, todoGraphSchema),
+    ]
   },
 }
 
@@ -258,6 +290,40 @@ const memoryToolset: ToolsetPlugin = {
       whenToUse: ['Use durable workspace/global memory for stable user or project preferences.', 'Use session memory for notes that should fork with the session.'],
       constraints: ['Do not store secrets.', 'Write concise, durable facts rather than raw transcripts.'],
     }, { type: 'object', required: ['operation', 'scope'], properties: { operation: { type: 'string', enum: ['list', 'read', 'write', 'delete'] }, scope: { type: 'string', enum: ['session', 'workspace', 'global'] }, key: { type: 'string', description: 'Required for read/write/delete. Pattern: ^[a-zA-Z0-9_-]{1,64}$.' }, content: { type: 'string', description: 'Required for write. Text/markdown content, capped at 128 KB per entry.' }, updatedAt: { type: 'string', description: 'ISO-8601 timestamp for session-scope writes.' } } })]
+  },
+}
+
+const todoGraphNodeSchema = {
+  type: 'object', required: ['id', 'content', 'status'], additionalProperties: false,
+  properties: {
+    id: { type: 'string', pattern: '^[a-zA-Z][a-zA-Z0-9_-]{0,63}$' },
+    content: { type: 'string', minLength: 1, maxLength: 500 },
+    status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
+    priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+  },
+}
+const todoGraphEdgeSchema = {
+  type: 'object', required: ['from', 'to'], additionalProperties: false,
+  properties: { from: { type: 'string' }, to: { type: 'string' } },
+}
+const todoGraphSchema = {
+  type: 'object', required: ['operations'], additionalProperties: false,
+  properties: {
+    expectedRevision: { type: 'integer', minimum: 0 },
+    operations: {
+      type: 'array', minItems: 1, maxItems: 100,
+      items: {
+        type: 'object', required: ['op'],
+        properties: {
+          op: { type: 'string', enum: ['replace', 'add_node', 'update_node', 'remove_node', 'add_edge', 'remove_edge', 'clear'] },
+          nodes: { type: 'array', items: todoGraphNodeSchema }, edges: { type: 'array', items: todoGraphEdgeSchema },
+          node: todoGraphNodeSchema, id: { type: 'string' }, content: { type: 'string', minLength: 1, maxLength: 500 },
+          status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
+          priority: { type: ['string', 'null'], enum: ['high', 'medium', 'low', null] },
+          from: { type: 'string' }, to: { type: 'string' }, cascade: { type: 'boolean' },
+        },
+      },
+    },
   },
 }
 

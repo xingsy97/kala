@@ -107,7 +107,7 @@ Rules:
 - Preserve opaque identifiers exactly as written: UUIDs, hashes, commit IDs, session IDs, hostnames, ports, URLs, file names, room IDs, and socket IDs.
 - Write summary bodies in the primary language used by the conversation. Keep section headings exactly as shown.
 - Do not copy API keys, bearer tokens, passwords, cookies, or private key material. If such a value matters, describe the credential source or configuration shape and redact the secret value.
-- Preserve todo/task state from todowrite or equivalent tool calls.
+- Preserve todo/task state from todowrite, todo_graph (including dependencies, ready/blocked state, and active nodes), or equivalent tool calls.
 - Preserve tool-result evidence, but summarize noisy logs to the command, exit/status, and decisive lines.
 - Use terse bullets, not prose paragraphs.
 - Do NOT address the user. Do NOT ask questions. Do NOT describe that you are summarizing or continuing anything.
@@ -180,6 +180,7 @@ type CompactTrigger = 'manual' | 'auto' | 'preflight' | 'tool_result'
  */
 type CompactSessionRuntime = {
   consecutiveFailures: number
+  breakerCursor?: number
   // Marks a same-batch back-off. The value is a stable identifier for the
   // active batch; when the batch identifier changes (or clears), back-off
   // lifts. We use the id of the assistant message that spawned the batch.
@@ -222,6 +223,7 @@ export async function runCompact(
   trigger: CompactTrigger,
   inFlight: Set<string>,
   aborts: Map<string, AbortController>,
+  resume = false,
 ): Promise<boolean> {
   if (inFlight.has(sessionId)) {
     // Concurrent invocation. `manual` is the only one a human sees; the
@@ -234,7 +236,10 @@ export async function runCompact(
   const rt = getRuntime(sessionId)
   const attemptId = newAttemptId()
 
-  if (trigger !== 'manual' && rt.consecutiveFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES) {
+  // Scope the breaker to the transcript generation. A later cursor is a
+  // half-open probe, so a transient summarizer outage cannot permanently stop
+  // autonomous recovery until a human compacts or the Host restarts.
+  if (trigger !== 'manual' && rt.consecutiveFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES && rt.breakerCursor === record.state.cursor) {
     await dispatchSkip(deps, sessionId, trigger, attemptId, 'circuit_breaker_open', aborts)
     return false
   }
@@ -376,12 +381,12 @@ export async function runCompact(
         tokensBefore,
         tokensAfter,
       })
-      rt.consecutiveFailures += 1
+      noteCompactFailure(rt, record.state.cursor)
       if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
       if (trigger === 'manual') throw new Error(`compact rejected before dispatch: ${invalidReason}`)
       return false
     }
-    const budgetReason = evaluatePostCompactionBudget(tokensAfter, contextLimit)
+    const budgetReason = evaluatePostCompactionBudget(tokensAfter, contextLimit) ?? evaluateCompactionProgress(tokensBefore, tokensAfter)
     if (budgetReason) {
       await dispatchRejected(deps, sessionId, trigger, attemptId, budgetReason, {
         replaceRange,
@@ -389,7 +394,7 @@ export async function runCompact(
         tokensAfter,
         contextLimit: effectiveContextLimit(contextLimit),
       })
-      rt.consecutiveFailures += 1
+      noteCompactFailure(rt, record.state.cursor)
       if (trigger === 'tool_result') markBatchBackOff(rt, record.state)
       if (trigger === 'manual') throw new Error(`compact rejected before dispatch: ${budgetReason}`)
       return false
@@ -403,6 +408,7 @@ export async function runCompact(
         reason: 'compaction',
         replaceRange,
         replacementMessages,
+        ...(resume ? { resume: true } : {}),
       },
       aborts,
       compact.trace,
@@ -442,6 +448,7 @@ export async function runCompact(
 
     // Success: reset counters and back-off.
     rt.consecutiveFailures = 0
+    rt.breakerCursor = undefined
     rt.mutedForBatch = undefined
     return true
   } finally {
@@ -495,9 +502,14 @@ async function recordFailure(
     | 'summary_too_short'
     | 'summary_conversational',
 ): Promise<void> {
-  rt.consecutiveFailures += 1
+  noteCompactFailure(rt, deps.store.get(sessionId)?.state.cursor)
   const reason = reasonOverride ?? 'summarizer_failed'
   await dispatchSkip(deps, sessionId, trigger, attemptId, reason, aborts, errorMessage(err))
+}
+
+function noteCompactFailure(rt: CompactSessionRuntime, cursor: number | undefined): void {
+  rt.consecutiveFailures += 1
+  if (rt.consecutiveFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES) rt.breakerCursor = cursor
 }
 
 async function dispatchSkip(
@@ -537,7 +549,7 @@ async function dispatchRejected(
   sessionId: string,
   trigger: CompactTrigger,
   attemptId: string,
-  reason: 'pending_call_orphaned' | 'invalid_replace_range' | 'post_compaction_still_over_budget' | 'session_changed',
+  reason: 'pending_call_orphaned' | 'invalid_replace_range' | 'post_compaction_still_over_budget' | 'post_compaction_no_progress' | 'session_changed',
   extra: Record<string, unknown>,
 ): Promise<void> {
   await appendCompactionMetadata(deps, sessionId, 'compaction_rejected', {
@@ -1045,6 +1057,14 @@ function hasUserToolResultContent(message: Message): boolean {
   return message.role === 'user' && message.content.some((content) => content.type === 'tool_result')
 }
 
+function evaluateCompactionProgress(tokensBefore: number, tokensAfter: number): 'post_compaction_no_progress' | undefined {
+  // Tiny synthetic windows can have a structured handoff larger than their
+  // toy transcript. Enforce progress for real contexts while preserving those
+  // focused trigger tests.
+  if (tokensBefore < 4_000) return undefined
+  return tokensAfter >= tokensBefore ? 'post_compaction_no_progress' : undefined
+}
+
 function evaluatePostCompactionBudget(
   tokensAfter: number,
   contextLimit: number | undefined,
@@ -1058,24 +1078,45 @@ function evaluatePostCompactionBudget(
   return tokensAfter > hardBudget ? 'post_compaction_still_over_budget' : undefined
 }
 
-function choosePreserveFrom(state: AgentState, trigger: CompactTrigger, contextLimit: number | undefined): number {
-  if (trigger === 'tool_result') {
-    const safe = choosePendingSafePreserveFrom(state, contextLimit)
-    if (safe !== undefined) return safe
-  }
-  return chooseRecentUserPreserveFrom(state.messages, contextLimit)
+type MessageBoundaryIndex = {
+  compactablePrefix: readonly boolean[]
+  suffixTokens: readonly number[]
 }
 
-function chooseRecentUserPreserveFrom(messages: readonly Message[], contextLimit: number | undefined): number {
+function buildMessageBoundaryIndex(messages: readonly Message[]): MessageBoundaryIndex {
+  const compactablePrefix = new Array<boolean>(messages.length + 1).fill(false)
+  const suffixTokens = new Array<number>(messages.length + 1).fill(0)
+  for (let i = 0; i < messages.length; i++) {
+    compactablePrefix[i + 1] = compactablePrefix[i]! || isCompactableMessage(messages[i]!, i)
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    suffixTokens[i] = estimateMessageTokens([messages[i]!]) + suffixTokens[i + 1]!
+  }
+  return { compactablePrefix, suffixTokens }
+}
+
+function choosePreserveFrom(state: AgentState, trigger: CompactTrigger, contextLimit: number | undefined): number {
+  const index = buildMessageBoundaryIndex(state.messages)
+  if (trigger === 'tool_result') {
+    const safe = choosePendingSafePreserveFrom(state, contextLimit, index)
+    if (safe !== undefined) return safe
+  }
+  return chooseRecentUserPreserveFrom(state.messages, contextLimit, index)
+}
+
+function chooseRecentUserPreserveFrom(
+  messages: readonly Message[],
+  contextLimit: number | undefined,
+  index = buildMessageBoundaryIndex(messages),
+): number {
   const targetRecentTailTokens = recentTailTargetTokens(contextLimit)
   let newestSafeFallback: number | undefined
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]!.role !== 'user') continue
     if (isAnchoredSummaryMessage(messages[i]!)) continue
-    if (!hasCompactableContent(messages.slice(0, i))) continue
+    if (!index.compactablePrefix[i]) continue
     newestSafeFallback ??= i
-    const tail = messages.slice(i)
-    if (estimateMessageTokens(tail) <= targetRecentTailTokens) return i
+    if (index.suffixTokens[i]! <= targetRecentTailTokens) return i
   }
   // If every real user-turn tail is still over the target, keep the newest
   // valid user turn. Choosing the oldest one would preserve the entire huge
@@ -1091,7 +1132,11 @@ function isAnchoredSummaryMessage(message: Message): boolean {
   return message.role === 'user' && collectText(message.content).startsWith(SUMMARY_PREFIX)
 }
 
-function choosePendingSafePreserveFrom(state: AgentState, contextLimit: number | undefined): number | undefined {
+function choosePendingSafePreserveFrom(
+  state: AgentState,
+  contextLimit: number | undefined,
+  index = buildMessageBoundaryIndex(state.messages),
+): number | undefined {
   const activeAssistant = findActiveToolBatchIndex(state)
   if (activeAssistant === undefined) return undefined
   // Walk backward from the assistant that spawned the active batch, looking
@@ -1100,12 +1145,11 @@ function choosePendingSafePreserveFrom(state: AgentState, contextLimit: number |
   // orphan the tool_result), never a tool_result itself.
   for (let i = activeAssistant - 1; i >= 0; i--) {
     if (state.messages[i]?.role !== 'user') continue
-    if (!hasCompactableContent(state.messages.slice(0, i))) continue
-    const tail = state.messages.slice(i)
+    if (!index.compactablePrefix[i]) continue
     // Prefer tails inside the budget, but the closest user message to the
     // active batch is always safe: it keeps the parent user turn + the
     // assistant tool_call + all pending tool_results together.
-    if (estimateMessageTokens(tail) <= recentTailTargetTokens(contextLimit) || i === activeAssistant - 1) {
+    if (index.suffixTokens[i]! <= recentTailTargetTokens(contextLimit) || i === activeAssistant - 1) {
       return i
     }
   }

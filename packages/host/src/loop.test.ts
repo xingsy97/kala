@@ -134,6 +134,68 @@ describe('host loop', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('resumes once when an LLM stops while durable todo_graph work remains', async () => {
+    const graph = JSON.stringify({
+      version: 1, revision: 1,
+      nodes: [{ id: 'work', content: 'finish work', status: 'in_progress', priority: 'high' }],
+      edges: [],
+      summary: { total: 1, completed: 0, active: 1, ready: 0, blocked: 0, cancelled: 0 },
+      ready: [], blocked: [], changed: ['work'],
+    })
+    let calls = 0
+    const llm: LLMAdapter = {
+      name: 'graph-resume',
+      async call() {
+        calls += 1
+        if (calls === 1) return { message: { role: 'assistant', content: [{ type: 'tool_call', callId: 'graph-1', name: 'todo_graph', input: { operations: [] } }] }, finishReason: 'tool_calls' }
+        return { message: { role: 'assistant', content: [{ type: 'text', text: calls === 2 ? 'premature stop' : 'recovered once' }] }, finishReason: 'stop' }
+      },
+    }
+    const graphConfig = createConfig({ tools: [{ name: 'todo_graph', description: 'graph', inputSchema: { type: 'object' }, requiresApproval: false }], systemPrompt: 'sys' })
+    store.get(sessionId)!.config = graphConfig
+    const loop = runHostLoop({
+      store, llm,
+      tools: nullTools({ callTool: async (_sid, effect) => effect.name === 'todo_graph' ? { ok: true, content: graph } : { ok: true, content: 'ok' } }),
+      broadcast: silentBroadcast(),
+    })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'continue until graph is done' })
+    expect(calls).toBe(3)
+    expect(store.get(sessionId)!.state.status).toBe('done')
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    expect(parsed.events.filter((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toHaveLength(1)
+
+    // Simulate a fresh Host process auto-compacting the resting Session. Durable
+    // graph state must cause an immediate continuation after replacement.
+    let postCompactCalls = 0
+    const afterRestart = runHostLoop({
+      store,
+      llm: {
+        name: 'auto-compact-resume',
+        async call(params) {
+          postCompactCalls += 1
+          if (params.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
+            return { message: { role: 'assistant', content: [{ type: 'text', text: OK_SUMMARY_BODY }] }, usage: { inputTokens: 10, outputTokens: 10 } }
+          }
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'continued after auto compact' }] }, finishReason: 'stop' }
+        },
+      },
+      tools: nullTools(), broadcast: silentBroadcast(),
+    })
+    await expect(afterRestart.compact(sessionId, 'auto')).resolves.toBe(true)
+    expect(postCompactCalls).toBe(2)
+    const afterCompact = await readSessionLog(store.get(sessionId)!.logPath)
+    expect(afterCompact.events.at(-2)?.event).toMatchObject({ kind: 'messages_replaced', reason: 'recovery', resume: true })
+    expect(afterCompact.events.at(-1)?.event.kind).toBe('llm_response')
+  })
+
+  it('does not resume terminal replies without durable graph work', async () => {
+    const llm = scriptedLlm([{ message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, finishReason: 'stop' }])
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'one answer' })
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    expect(parsed.events.filter((entry) => entry.event.kind === 'messages_replaced' && entry.event.reason === 'recovery')).toHaveLength(0)
+  })
+
   it('runs a plain-answer turn to done and writes the log', async () => {
     const llm = scriptedLlm([
       {
@@ -893,6 +955,43 @@ describe('host loop', () => {
     expect(rec.state.pendingCalls).toEqual([])
   })
 
+  it('coalesces concurrent cancel requests into one persisted transition', async () => {
+    let releaseTool: ((result: { ok: boolean; content: string }) => void) | undefined
+    let signalTool: (() => void) | undefined
+    const toolStarted = new Promise<void>((resolve) => { signalTool = resolve })
+    const cancels: string[] = []
+    const loop = runHostLoop({
+      store,
+      llm: scriptedLlm([{
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_call', callId: 'c-concurrent-cancel', name: 'read', input: { path: '/tmp/x' } }],
+        },
+      }]),
+      tools: {
+        callTool: () => new Promise((resolve) => {
+          releaseTool = resolve
+          signalTool?.()
+        }),
+        cancelPending: (sid) => {
+          cancels.push(sid)
+          releaseTool?.({ ok: false, content: 'cancelled' })
+        },
+      },
+      broadcast: silentBroadcast(),
+    })
+
+    const turn = loop.dispatch(sessionId, { kind: 'user_message', text: 'read x' })
+    await toolStarted
+    await Promise.all(Array.from({ length: 12 }, () => loop.dispatch(sessionId, { kind: 'cancel' })))
+    await turn
+
+    expect(cancels).toEqual([sessionId])
+    const parsed = await readSessionLog(store.get(sessionId)!.logPath)
+    expect(parsed.events.filter((entry) => entry.event.kind === 'cancel')).toHaveLength(1)
+    expect(new Set(parsed.events.map((entry) => entry.seq)).size).toBe(parsed.events.length)
+  })
+
   it('cancel with no pending tool is still safe (no-op cancelPending)', async () => {
     // Cancel from idle (no tool call ever dispatched): kernel is a noop,
     // executor has nothing to interrupt, but cancelPending is still
@@ -916,9 +1015,10 @@ describe('host loop', () => {
     await loop.dispatch(sessionId, { kind: 'cancel' })
     expect(cancels).toEqual([sessionId])
     const rec = store.get(sessionId)!
-    // cancel from idle → transitions[idle].cancel = noop, so state stays
-    // idle with cursor advanced by one.
+    // A stale/repeated cancel at rest still reaches the executor cancellation
+    // hook, but must not append a duplicate no-op event or advance the cursor.
     expect(rec.state.status).toBe('idle')
+    expect(rec.state.cursor).toBe(0)
   })
 
   it('manual compact() summarizes and replaces messages', async () => {
@@ -1324,6 +1424,51 @@ describe('host loop', () => {
     const compact = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
     expect(compact).toMatchObject({ kind: 'messages_replaced', reason: 'compaction' })
     expect(parsed.runtimeMetadata.some((e) => e.action === 'compaction_applied' && e.payload.trigger === 'preflight')).toBe(true)
+  })
+
+  it('recovers a provider context overflow by compacting and continuing the same turn once', async () => {
+    const rec = await store.create({ config: createConfig({ systemPrompt: 'sys', tools: [], contextLimit: 100_000 }), sessionId: 'sess-provider-overflow' })
+    let normalCalls = 0
+    const calls: string[] = []
+    const llm: LLMAdapter = {
+      name: 'overflow-recovery-mock',
+      async call(params) {
+        if (params.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) {
+          calls.push('compact')
+          return { message: { role: 'assistant', content: [{ type: 'text', text: OK_SUMMARY_BODY }] } }
+        }
+        normalCalls += 1
+        calls.push(`normal-${normalCalls}`)
+        if (normalCalls === 1) throw Object.assign(new Error('maximum context length exceeded'), { input: { status: 400, bodyText: 'too many tokens' } })
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'continued after forced recovery' }] } }
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(rec.sessionId, { kind: 'user_message', text: 'perform this once' })
+    expect(calls).toEqual(['normal-1', 'compact', 'normal-2'])
+    const state = store.get(rec.sessionId)!.state
+    expect(state.status).toBe('done')
+    expect(state.messages.filter((message) => message.role === 'user' && JSON.stringify(message).includes('perform this once'))).toHaveLength(1)
+    expect(JSON.stringify(state.messages)).toContain('continued after forced recovery')
+  })
+
+  it('hard-truncates one irreducibly huge message when compaction fails', async () => {
+    const rec = await store.create({ config: createConfig({ systemPrompt: 'sys', tools: [], contextLimit: 20_000 }), sessionId: 'sess-single-huge-message' })
+    const normalInputs: import('@agent-kernel/kernel').Message[][] = []
+    const llm: LLMAdapter = {
+      name: 'single-huge-recovery-mock',
+      async call(params) {
+        if (params.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) throw new Error('summarizer unavailable')
+        normalInputs.push([...params.messages])
+        return { message: { role: 'assistant', content: [{ type: 'text', text: 'completed despite huge input' }] } }
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(rec.sessionId, { kind: 'user_message', text: `head-${'x'.repeat(120_000)}-tail` })
+    expect(normalInputs).toHaveLength(1)
+    expect(estimateStringTokens(JSON.stringify(normalInputs[0]))).toBeLessThan(20_000)
+    expect(JSON.stringify(normalInputs[0])).toContain('omitted by emergency context recovery')
+    expect(store.get(rec.sessionId)!.state.status).toBe('done')
   })
 
   it('compacts between sibling tool results when the first result exhausts context headroom', async () => {

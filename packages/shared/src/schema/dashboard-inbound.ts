@@ -85,11 +85,14 @@ export const SessionPreferencesSchema = z.object({
   toolCardMode: z.enum(['dots', 'standard']).optional(),
 }) satisfies z.ZodType<SessionPreferences>
 
+const OperationIdSchema = z.string().min(1).max(128).optional()
+
 // ============================================================================
 // Composer / turn-loop
 // ============================================================================
 
 export const ClientUserMessageSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   text: z.string(),
   mode: z.enum(['steer', 'queue']).optional(),
@@ -97,11 +100,13 @@ export const ClientUserMessageSchema = z.object({
 }) satisfies z.ZodType<ClientUserMessage>
 
 export const ClientUserApproveSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   callId: WireIdSchema,
 }) satisfies z.ZodType<ClientUserApprove>
 
 export const ClientUserRejectSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   callId: WireIdSchema,
   reason: z.string().optional(),
@@ -130,6 +135,7 @@ export const ClientInterruptSubAgentSchema = z.object({
 }) satisfies z.ZodType<ClientInterruptSubAgent>
 
 export const ClientSetApprovalModeSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   mode: ApprovalModeSchema,
 }) satisfies z.ZodType<ClientSetApprovalMode>
@@ -146,6 +152,7 @@ export const ClientForkSchema = z.object({
 }) satisfies z.ZodType<ClientFork>
 
 export const ClientCreateSessionSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   workspaceId: WorkspaceIdSchema.optional(),
   workspaceName: z.string().optional(),
@@ -169,6 +176,7 @@ export const ClientLoadLogArtifactSchema = z.object({
 }) satisfies z.ZodType<ClientLoadLogArtifact>
 
 export const ClientDeleteSessionSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   cascade: z.boolean().optional(),
 }) satisfies z.ZodType<ClientDeleteSession>
@@ -190,11 +198,13 @@ export const ClientListExecutorsSchema = EmptyRecordSchema as unknown as z.ZodTy
 // ============================================================================
 
 export const ClientUpdatePreferencesSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   preferences: SessionPreferencesSchema,
 }) satisfies z.ZodType<ClientUpdatePreferences>
 
 export const ClientSetCwdSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   cwd: z.string(),
 }) satisfies z.ZodType<ClientSetCwd>
@@ -204,18 +214,22 @@ export const ClientSetCwdSchema = z.object({
 // ============================================================================
 
 export const ClientReorderQueuedMessageSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   id: WireIdSchema,
   beforeId: WireIdSchema.nullable().optional(),
 }) satisfies z.ZodType<ClientReorderQueuedMessage>
 
 export const ClientUpdateQueuedMessageSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   id: WireIdSchema,
   text: z.string(),
+  content: z.array(MessageContentSchema).optional(),
 }) satisfies z.ZodType<ClientUpdateQueuedMessage>
 
 export const ClientDeleteQueuedMessageSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   id: WireIdSchema,
 }) satisfies z.ZodType<ClientDeleteQueuedMessage>
@@ -225,11 +239,13 @@ export const ClientDeleteQueuedMessageSchema = z.object({
 // ============================================================================
 
 export const ClientRenameSessionSchema = z.object({
+  operationId: OperationIdSchema,
   sessionId: SessionIdSchema,
   label: z.string(),
 }) satisfies z.ZodType<ClientRenameSession>
 
 export const ClientRenameWorkspaceSchema = z.object({
+  operationId: OperationIdSchema,
   workspaceId: WorkspaceIdSchema,
   workspaceName: z.string(),
 }) satisfies z.ZodType<ClientRenameWorkspace>
@@ -411,5 +427,6 @@ export const ClientSetDefaultModelSchema = z.object({
 }) satisfies z.ZodType<ClientSetDefaultModel>
 
 export const ClientUpdateAgentPromptSettingsSchema = z.object({
-  preset: z.enum(['codex', 'claude-code']),
+  preset: z.enum(['codex', 'claude-code', 'custom']),
+  customPrompt: z.string().min(1).max(100_000).optional(),
 }) satisfies z.ZodType<ClientUpdateAgentPromptSettings>

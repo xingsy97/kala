@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
 
@@ -221,25 +220,13 @@ export class RestartCoordinator {
       return
     }
 
-    const [cmd, ...args] = this.command
-    if (!cmd) throw new Error('restart command is empty')
     return this.options.closeServer().then(() => {
       if (this.actor.snapshot().current?.attemptId !== command.attemptId) return
-      const child = spawn(cmd, args, {
-        detached: true,
-        stdio: 'ignore',
-        env: process.env,
-      })
-      return new Promise<void>((resolve, reject) => {
-        child.once('error', reject)
-        child.once('spawn', () => {
-          child.removeListener('error', reject)
-          child.unref()
-          resolve()
-        })
-      }).then(() => {
-        this.options.exitProcess?.(0) ?? process.exit(0)
-      })
+      // The service supervisor owns process replacement. Spawning a detached
+      // copy here allowed old and new Hosts to overlap in the same systemd
+      // cgroup and append reused cursor values to one Session JSONL.
+      if (this.options.exitProcess) this.options.exitProcess(0)
+      else process.exit(0)
     })
   }
 }
@@ -254,8 +241,23 @@ function readRestartState(path: string): HostRestartAttempt | null {
 }
 
 function writeRestartState(path: string, attempt: HostRestartAttempt): void {
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(attempt, null, 2)}\n`, { mode: 0o600 })
+  const parent = dirname(path)
+  mkdirSync(parent, { recursive: true })
+  const temp = `${path}.tmp-${process.pid}`
+  writeFileSync(temp, `${JSON.stringify(attempt, null, 2)}\n`, { mode: 0o600 })
+  const file = openSync(temp, 'r')
+  try {
+    fsyncSync(file)
+  } finally {
+    closeSync(file)
+  }
+  renameSync(temp, path)
+  const directory = openSync(parent, 'r')
+  try {
+    fsyncSync(directory)
+  } finally {
+    closeSync(directory)
+  }
 }
 
 function commandAttemptId(command: RestartWorkflowCommand): string {

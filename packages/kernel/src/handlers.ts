@@ -350,6 +350,7 @@ export function onClear(state: AgentState): HandlerResult {
 export function onMessagesReplaced(
   state: AgentState,
   event: Extract<AgentEvent, { kind: 'messages_replaced' }>,
+  config: AgentConfig,
 ): HandlerResult {
   const { start, end } = event.replaceRange
   if (!Number.isInteger(start) || !Number.isInteger(end)) return rejectInvalidEvent(state)
@@ -357,15 +358,20 @@ export function onMessagesReplaced(
   if (state.pendingCalls.length > 0 && !preservesPendingToolCallGroup(state, end)) {
     return rejectInvalidEvent(state)
   }
+  const messages = [
+    ...state.messages.slice(0, start),
+    ...event.replacementMessages,
+    ...state.messages.slice(end),
+  ]
+  if (event.resume && (state.status === 'idle' || state.status === 'done' || state.status === 'error')) {
+    const next = transitionAgentState(state, { status: 'thinking', pendingCalls: [] }, { messages })
+    return {
+      next,
+      effects: [{ kind: 'call_llm', messages, tools: config.tools }],
+    }
+  }
   return {
-    next: {
-      ...state,
-      messages: [
-        ...state.messages.slice(0, start),
-        ...event.replacementMessages,
-        ...state.messages.slice(end),
-      ],
-    },
+    next: { ...state, messages },
     effects: [],
   }
 }

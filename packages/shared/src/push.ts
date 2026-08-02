@@ -39,6 +39,8 @@ export const DESKTOP_NOTIFICATION_KINDS: readonly DesktopNotificationKind[] = [
 export type PushSubscribeRequest = {
   endpoint: string
   keys: { p256dh: string; auth: string }
+  deviceId?: string
+  deviceName?: string
   ownerId?: string
   userAgent?: string
   kinds: readonly DesktopNotificationKind[]
@@ -49,6 +51,15 @@ export type PushSubscribeRequest = {
  * configured on this host (env vars missing) — dashboard should hide the
  * push UI in that case instead of failing on subscribe.
  */
+export type PushDevice = {
+  deviceId: string
+  name: string
+  enabled: boolean
+  current: boolean
+  lastSeenAt: string
+  userAgent?: string
+}
+
 export type PushVapidKeyResponse = {
   publicKey: string | null
 }

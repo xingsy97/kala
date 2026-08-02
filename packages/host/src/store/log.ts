@@ -152,8 +152,21 @@ export async function appendEventEntry(
     ...(llmTraceArtifact ? { llmTraceArtifact } : {}),
     ...(params.model ? { model: params.model } : {}),
   }
-  await appendFile(params.path, JSON.stringify(entry) + '\n', 'utf8')
+  // Event entries are the authority for Session state. `appendFile()` resolving
+  // only means bytes reached the kernel page cache; a crash could otherwise
+  // acknowledge and broadcast an event that is absent after restart.
+  await appendDurableLine(params.path, JSON.stringify(entry) + '\n')
   return entry
+}
+
+async function appendDurableLine(path: string, line: string): Promise<void> {
+  const handle = await open(path, 'a')
+  try {
+    await handle.writeFile(line, 'utf8')
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
 }
 
 function summarizeLlmTrace(trace: LLMTrace): LLMTrace {
@@ -342,11 +355,30 @@ export async function readSessionLog(path: string): Promise<ParsedLog> {
     throw new Error(`Log ${path} missing header`)
 
   const events: EventEntry[] = []
+  let lastRawEventSeq = header.initialState.cursor
+  let canonicalEventSeq = header.initialState.cursor
   const snapshots: SnapshotEntry[] = []
   const metadata: MetadataEntry[] = []
   const runtimeMetadata: RuntimeMetadataEntry[] = []
   for (const e of entries.slice(1)) {
-    if (e.kind === 'event') events.push(e)
+    if (e.kind === 'event') {
+      if (!Number.isSafeInteger(e.seq) || e.seq <= 0) {
+        warnings.push(`Dropped event with invalid sequence ${String(e.seq)}`)
+        continue
+      }
+      canonicalEventSeq += 1
+      if (e.seq !== lastRawEventSeq + 1) {
+        // A historical graceful-restart bug could start the replacement Host
+        // before the previous process had fully stopped. The replacement loaded
+        // an older cursor and then durably appended valid transitions with reused
+        // sequence numbers. Dropping those entries loses real user messages on
+        // every reload. JSONL append order is the final authority: preserve every
+        // valid event and repair only its in-memory cursor for fold/history.
+        warnings.push(`Repaired event sequence ${e.seq} to ${canonicalEventSeq} after ${lastRawEventSeq}`)
+      }
+      lastRawEventSeq = e.seq
+      events.push(e.seq === canonicalEventSeq ? e : { ...e, seq: canonicalEventSeq })
+    }
     else if (e.kind === 'snapshot') snapshots.push(e)
     else if (e.kind === 'metadata') metadata.push(e)
     else if (e.kind === 'runtime_metadata') runtimeMetadata.push(e)

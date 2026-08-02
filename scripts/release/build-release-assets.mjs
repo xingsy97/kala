@@ -12,6 +12,7 @@ import { build } from 'esbuild'
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
 const dashboardDist = join(root, 'packages/dashboard/dist')
+const docsDir = join(root, 'docs')
 const modelCatalogSeed = join(root, 'resources', 'model-catalog', 'models-dev-seed.json')
 const socketAdminDist = resolveSocketAdminDist()
 const options = parseOptions(process.argv.slice(2))
@@ -144,13 +145,8 @@ if (nativeOnly) {
 }
 
 if (includeDashboard) {
-  await run('tar', [
-    '-czf',
-    join(outDir, 'agent-kernel-dashboard-dist.tar.gz'),
-    '-C',
-    dashboardDist,
-    '.',
-  ])
+  await run('tar', ['-czf', join(outDir, 'agent-kernel-dashboard-dist.tar.gz'), '-C', dashboardDist, '.'])
+  await run('tar', ['-czf', join(outDir, 'agent-runlab-docs.tar.gz'), '-C', docsDir, '.'])
 }
 
 finalizeRelease()
@@ -182,6 +178,7 @@ function finalizeRelease() {
   const assets = builtEntries.flatMap((entry) => [entry.cjs, ...entry.natives].filter(Boolean))
     .concat(benchmarkRunnerEntries.map((entry) => entry.name).filter(exists))
     .concat(includeDashboard && exists('agent-kernel-dashboard-dist.tar.gz') ? ['agent-kernel-dashboard-dist.tar.gz'] : [])
+    .concat(includeDashboard && exists('agent-runlab-docs.tar.gz') ? ['agent-runlab-docs.tar.gz'] : [])
     .concat(includeDashboard && exists('agent-runlab-model-catalog-seed.json') ? ['agent-runlab-model-catalog-seed.json'] : [])
     .concat(bootstrapAssets)
   const hasNativeAssets = builtEntries.some((entry) => entry.natives.length > 0)

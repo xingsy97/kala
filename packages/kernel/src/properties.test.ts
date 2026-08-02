@@ -49,6 +49,23 @@ describe('kernel state machine properties', () => {
     }), { numRuns: 200 })
   })
 
+  it('terminal/resting states never retain pending calls under arbitrary events', () => {
+    fc.assert(fc.property(eventsArb, (events) => {
+      let state = createInitialState({ sessionId: 'terminal-property', systemPrompt: 'system' })
+      for (const event of events) {
+        state = step(state, event, config).next
+        if (state.status === 'idle' || state.status === 'thinking' || state.status === 'done' || state.status === 'error') {
+          expect(state.pendingCalls).toEqual([])
+        }
+        const settled = new Set<string>()
+        for (const message of state.messages) {
+          for (const content of message.content) if (content.type === 'tool_result') settled.add(content.callId)
+        }
+        for (const pending of state.pendingCalls) expect(settled.has(pending.callId)).toBe(false)
+      }
+    }), { numRuns: 300 })
+  })
+
   it('fold equals iterative step for arbitrary event sequences', () => {
     fc.assert(fc.property(eventsArb, (events) => {
       const initial = createInitialState({ sessionId: 'property', systemPrompt: 'system' })

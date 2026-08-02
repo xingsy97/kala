@@ -15,19 +15,22 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type {
+  PushDevice,
   PushSubscribeRequest,
   PushVapidKeyResponse,
 } from '@agent-kernel/shared/push'
 import { DESKTOP_NOTIFICATION_KINDS } from '@agent-kernel/shared/push'
 
 import type { PushDispatcher } from './dispatch.js'
-import type { PushSubscriptionStore } from './store.js'
+import { deviceNameFromUserAgent, pushDeviceIdForEndpoint, type PushSubscriptionStore } from './store.js'
 import type { VapidKeys } from './vapid.js'
+import type { PushActivityTracker } from './activity.js'
 
 type PushHttpContext = {
   store: PushSubscriptionStore
   vapid: VapidKeys | null
   dispatcher: PushDispatcher
+  activity: PushActivityTracker
 }
 
 export type PushRouteHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>
@@ -53,6 +56,42 @@ export function createPushRoutes(ctx: PushHttpContext): PushRouteHandler {
       sendJson(res, 200, { configured: status.configured, subscribers })
       return true
     }
+    if (path === '/push/devices' && req.method === 'GET') {
+      const currentDeviceId = new URL(url, 'http://localhost').searchParams.get('currentDeviceId')
+      const devices: PushDevice[] = ctx.store.list().map((record) => ({
+        deviceId: record.deviceId ?? pushDeviceIdForEndpoint(record.endpoint),
+        name: record.deviceName ?? deviceNameFromUserAgent(record.userAgent),
+        enabled: record.enabled !== false,
+        current: currentDeviceId !== null && record.deviceId === currentDeviceId,
+        lastSeenAt: record.updatedAt,
+        ...(record.userAgent ? { userAgent: record.userAgent } : {}),
+      }))
+      sendJson(res, 200, { devices })
+      return true
+    }
+    if (path === '/push/device' && req.method === 'PATCH') {
+      const body = await readJson<{ deviceId?: unknown; enabled?: unknown; name?: unknown }>(req)
+      if (typeof body?.deviceId !== 'string') {
+        sendJson(res, 400, { error: 'missing deviceId' })
+        return true
+      }
+      const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : undefined
+      const changed = ctx.store.updateDevice(body.deviceId, {
+        ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+        ...(name ? { name } : {}),
+      })
+      sendJson(res, changed ? 200 : 404, { ok: changed })
+      return true
+    }
+    if (path === '/push/device' && req.method === 'DELETE') {
+      const body = await readJson<{ deviceId?: unknown }>(req)
+      if (typeof body?.deviceId !== 'string') {
+        sendJson(res, 400, { error: 'missing deviceId' })
+        return true
+      }
+      sendJson(res, 200, { ok: true, removed: ctx.store.removeDevice(body.deviceId) })
+      return true
+    }
     if (path === '/push/test' && req.method === 'POST') {
       // Fires a single notification to every current subscriber (usually
       // just the caller). Bypasses the per-kind filter so users can verify
@@ -60,19 +99,33 @@ export function createPushRoutes(ctx: PushHttpContext): PushRouteHandler {
       // waiting event happens. Returns per-endpoint outcomes so a "delivered:0"
       // is immediately explainable from the client without SSHing into the
       // host to read logs.
-      const outcomes = await ctx.dispatcher.sendRawDetailed({
+      const body = await readJson<{ deviceId?: unknown }>(req)
+      const payload = {
         kind: 'session_error',
         sessionId: 'test',
-        title: 'Agent RunLab test push',
-        body: 'If you see this, background push is working on this device.',
+        title: 'Agent RunLab test notification',
+        body: 'Notifications are working on this device.',
         url: '/',
         tag: 'ak-test-push',
-      })
+      } as const
+      const outcomes = typeof body?.deviceId === 'string'
+        ? await ctx.dispatcher.sendToDevice(body.deviceId, payload)
+        : await ctx.dispatcher.sendRawDetailed(payload)
       sendJson(res, 200, {
         ok: true,
         delivered: outcomes.filter((o) => o.ok).length,
         outcomes,
       })
+      return true
+    }
+    if (path === '/push/activity' && req.method === 'POST') {
+      const body = await readJson<{ deviceId?: unknown; active?: unknown }>(req)
+      if (typeof body?.deviceId !== 'string' || body.deviceId.length < 8 || body.deviceId.length > 128 || typeof body.active !== 'boolean') {
+        sendJson(res, 400, { error: 'invalid activity payload' })
+        return true
+      }
+      ctx.activity.update(body.deviceId, body.active)
+      sendJson(res, 200, { ok: true })
       return true
     }
     if (path === '/push/subscribe' && req.method === 'POST') {
@@ -91,6 +144,9 @@ export function createPushRoutes(ctx: PushHttpContext): PushRouteHandler {
         updatedAt: now,
         ...(parsed.ownerId ? { ownerId: parsed.ownerId } : {}),
         ...(parsed.userAgent ? { userAgent: parsed.userAgent } : {}),
+        ...(parsed.deviceId ? { deviceId: parsed.deviceId } : {}),
+        ...(parsed.deviceName ? { deviceName: parsed.deviceName } : {}),
+        enabled: existing?.enabled ?? true,
       })
       sendJson(res, 200, { ok: true, subscribers: ctx.store.size() })
       return true
@@ -126,6 +182,8 @@ async function parseSubscribeBody(req: IncomingMessage): Promise<PushSubscribeRe
     kinds,
     ...(typeof body.ownerId === 'string' ? { ownerId: body.ownerId } : {}),
     ...(typeof body.userAgent === 'string' ? { userAgent: body.userAgent } : {}),
+    ...(typeof body.deviceId === 'string' ? { deviceId: body.deviceId } : {}),
+    ...(typeof body.deviceName === 'string' ? { deviceName: body.deviceName } : {}),
   }
 }
 

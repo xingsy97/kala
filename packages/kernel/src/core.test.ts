@@ -502,6 +502,35 @@ describe('step: approval / rejection', () => {
     expect(next.messages.at(-1)?.role).toBe('tool')
     expect(effects[0]?.kind).toBe('call_llm')
   })
+
+  it('duplicate approval is an idempotent no-op after dispatch', () => {
+    const s0: AgentState = {
+      ...initial(), status: 'awaiting_approval',
+      pendingCalls: [{ callId: 'c1', name: 'write', input: {}, status: 'awaiting_approval' }],
+    }
+    const approved = step(s0, { kind: 'user_approve', callId: 'c1' }, CONFIG)
+    const duplicate = step(approved.next, { kind: 'user_approve', callId: 'c1' }, CONFIG)
+    expect(duplicate.next.pendingCalls).toEqual(approved.next.pendingCalls)
+    expect(duplicate.next.messages).toEqual(approved.next.messages)
+    expect(duplicate.effects).toEqual([])
+  })
+
+  it('partial rejection preserves sibling approvals and waits for settlement', () => {
+    const s0: AgentState = {
+      ...initial(), status: 'awaiting_approval',
+      pendingCalls: [
+        { callId: 'c1', name: 'write', input: {}, status: 'awaiting_approval' },
+        { callId: 'c2', name: 'write', input: {}, status: 'awaiting_approval' },
+      ],
+    }
+    const rejected = step(s0, { kind: 'user_reject', callId: 'c1', reason: 'no' }, CONFIG)
+    expect(rejected.next.status).toBe('awaiting_approval')
+    expect(rejected.next.pendingCalls).toEqual([
+      { callId: 'c2', name: 'write', input: {}, status: 'awaiting_approval' },
+    ])
+    expect(rejected.effects).toEqual([])
+    expect(rejected.next.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool_result', callId: 'c1', ok: false })
+  })
 })
 
 describe('step: tool_result', () => {
@@ -764,6 +793,59 @@ describe('step: messages_replaced', () => {
       s0.messages[3],
     ])
     expect(next.usage).toEqual(s0.usage)
+  })
+
+  it('resumes the autonomous turn when a manual compaction requests continuation', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'done',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'you are' }] },
+        { role: 'user', content: [{ type: 'text', text: 'finish the task autonomously' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'partial work before compaction' }] },
+      ],
+    }
+    const replacement = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'compacted handoff' }] }]
+    const { next, effects } = step(
+      s0,
+      {
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 3 },
+        replacementMessages: replacement,
+        resume: true,
+      },
+      c,
+    )
+
+    expect(next.status).toBe('thinking')
+    expect(next.messages).toEqual([s0.messages[0], replacement[0]])
+    expect(effects).toEqual([{ kind: 'call_llm', messages: next.messages, tools: c.tools }])
+  })
+
+  it('does not start a second LLM call when a busy compaction carries resume', () => {
+    const s0: AgentState = {
+      ...initial(),
+      status: 'thinking',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'you are' }] },
+        { role: 'user', content: [{ type: 'text', text: 'current task' }] },
+      ],
+    }
+    const { next, effects } = step(
+      s0,
+      {
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 2 },
+        replacementMessages: [{ role: 'user', content: [{ type: 'text', text: 'compacted handoff' }] }],
+        resume: true,
+      },
+      c,
+    )
+
+    expect(next.status).toBe('thinking')
+    expect(effects).toEqual([])
   })
 
   it('ignores invalid ranges', () => {

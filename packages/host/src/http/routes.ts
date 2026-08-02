@@ -39,6 +39,7 @@ import type {
 } from '@agent-kernel/shared'
 import { schema } from '@agent-kernel/shared'
 import { parseWire } from '../wire-validation.js'
+import { disabledEnhancementCapability } from '../runtime-capabilities.js'
 
 import { buildArtifactManifest, pruneArtifacts } from '../artifact-manifest.js'
 import {
@@ -115,6 +116,9 @@ import {
   readGithubSession,
 } from '../auth-control.js'
 import type { AuditActor, AuditLogger } from '../audit-log.js'
+import type { SessionArtifactRegistry } from '../session-artifact-registry.js'
+import type { OperationalMetrics } from '../operational-metrics.js'
+import type { MemoStore } from '../memo-store.js'
 import { diffToolCatalogs } from '../tool-catalog-diff.js'
 import { writeExecutorCapabilitySnapshot } from '../executor-capabilities.js'
 import type { SessionStore } from '../store/session.js'
@@ -333,7 +337,10 @@ function parseAllowedOriginsFromEnv(): string[] | null {
 
 function applyCorsHeaders(req: IncomingMessage, headers: Record<string, string>): void {
   const allowed = parseAllowedOriginsFromEnv()
-  if (allowed === null) return
+  if (allowed === null) {
+    headers['access-control-allow-origin'] = '*'
+    return
+  }
   const origin = req.headers.origin
   if (typeof origin === 'string' && allowed.includes(origin)) {
     headers['access-control-allow-origin'] = origin
@@ -357,6 +364,8 @@ export function attachJsonRoutes(
     initializeSocketAdmin?: (input: { password: string; mode?: 'development' | 'production' }) => ServerSettingsPayload
     updateSocketAdminMode?: (input: { mode: 'development' | 'production' }) => ServerSettingsPayload
     artifactRootDir?: string | false
+    docsRootDir?: string
+    sessionArtifacts?: SessionArtifactRegistry
     sessions?: SessionStore
     routerHealth?: () => unknown
     executorsSnapshot?: () => readonly AttachedExecutor[]
@@ -371,14 +380,47 @@ export function attachJsonRoutes(
      * user message without a live socket.
      */
     enqueueUserMessage?: (input: { sessionId: string; text: string }) => Promise<void>
+    capabilities?: import('@agent-kernel/shared').RuntimeCapabilities
+    metrics?: OperationalMetrics
+    memoStore?: MemoStore
   },
 ): void {
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/'
-    if (url.startsWith('/socket.io/')) return
+    // Engine.IO exclusively owns this path and may already have committed the
+    // polling response before Node invokes this later request listener.
+    if (url.startsWith('/socket.io/') || routeClaimed(req) || res.headersSent || res.writableEnded) return
+    // Keep error responses CORS-readable too; sendJson also applies the same
+    // policy, but capability denials commonly use sendError.
+    const corsHeaders: Record<string, string> = {}
+    applyCorsHeaders(req, corsHeaders)
+    for (const [name, value] of Object.entries(corsHeaders)) res.setHeader(name, value)
     // Strip query string / fragment before matching, so `/models?ts=…`
     // (cache-buster) still hits.
     const path = url.split('?')[0]?.split('#')[0] ?? ''
+    if ((path === '/memo' || path === '/user/session-tabs') && ['GET', 'HEAD', 'PUT'].includes(req.method ?? '') && payloads.memoStore) {
+      claimRoute(req)
+      const principalOwner = memoOwner(req)
+      const owner = principalOwner ? `${principalOwner}:${path === '/memo' ? 'memo' : 'session-tabs'}` : undefined
+      if (!owner) { sendError(res, 401, 'memo_authentication_required'); return }
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        void payloads.memoStore.read(owner).then((body) => sendJson(req, res, body)).catch((error) => sendError(res, 500, error instanceof Error ? error.message : String(error)))
+        return
+      }
+      void readJson(req).then((raw) => {
+        const body = raw as { content?: unknown; expectedRevision?: unknown }
+        if (typeof body.content !== 'string' || (body.expectedRevision !== undefined && (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0))) throw new HttpRouteError(400, 'invalid_memo_document')
+        return payloads.memoStore!.write(owner, { content: body.content, ...(body.expectedRevision !== undefined ? { expectedRevision: Number(body.expectedRevision) } : {}) })
+      }).then((body) => sendJson(req, res, body)).catch((error) => sendError(res, error instanceof Error && error.message === 'memo_revision_conflict' ? 409 : error instanceof HttpRouteError ? error.status : 500, error instanceof Error ? error.message : String(error)))
+      return
+    }
+    if (path === '/metrics' && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      const body = payloads.metrics?.render() ?? ''
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(req.method === 'HEAD' ? undefined : body)
+      return
+    }
     if (req.method === 'OPTIONS') {
       const headers: Record<string, string> = {
         'access-control-allow-methods': 'GET, HEAD, POST, DELETE, OPTIONS',
@@ -392,6 +434,14 @@ export function attachJsonRoutes(
         res.end()
         return
       }
+    }
+    if (path === '/runtime/capabilities' && (req.method === 'GET' || req.method === 'HEAD')) {
+      claimRoute(req)
+      sendJson(req, res, {
+        mode: payloads.capabilities?.benchmarks === false && payloads.capabilities?.evaluations === false ? 'saas' : 'standalone',
+        capabilities: payloads.capabilities ?? { agent: true, benchmarks: true, evaluations: true },
+      })
+      return
     }
     if (path === '/themes/marketplace/search' && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
@@ -468,6 +518,24 @@ export function attachJsonRoutes(
       const body: ServerExecutorInvitesPayload = { invites: payloads.auth?.executorIdentityStore?.inviteSnapshot() ?? [] }
       sendJson(req, res, body)
       return
+    }
+    if (path === '/auth/executor-pairings' && req.method === 'POST') {
+      claimRoute(req)
+      void readJson(req).then((body) => {
+        const input=body as {workspaceId?:unknown;label?:unknown};const workspaceId=cleanString(input.workspaceId)
+        if(!workspaceId){sendError(res,400,'workspaceId is required');return}
+        const pairing=payloads.auth?.executorIdentityStore?.createPairing({workspaceId,label:cleanString(input.label)})
+        if(!pairing){sendError(res,500,'executor identity store is not configured');return}
+        payloads.audit?.log({action:'executor_pairing.request',actor:{kind:'anonymous'},target:{workspaceId},outcome:'ok',metadata:{id:pairing.id}})
+        sendJson(req,res,pairing)
+      }).catch((e)=>sendError(res,400,e instanceof Error?e.message:String(e)));return
+    }
+    if (path === '/auth/executor-pairings' && req.method === 'GET') { claimRoute(req);sendJson(req,res,{pairings:payloads.auth?.executorIdentityStore?.pairingSnapshot()??[]});return }
+    const pairingMatch=path.match(/^\/auth\/executor-pairings\/([^/]+)\/(approve|reject|claim)$/u)
+    if(pairingMatch&&req.method==='POST'){
+      claimRoute(req);const id=decodeURIComponent(pairingMatch[1]??''),action=pairingMatch[2]
+      if(action==='claim'){void readJson(req).then((body)=>{const secret=cleanString((body as {claimSecret?:unknown}).claimSecret);const result=secret?payloads.auth?.executorIdentityStore?.claimPairing(id,secret):undefined;if(!result){sendError(res,404,'pairing not found');return}sendJson(req,res,result)});return}
+      const result=payloads.auth?.executorIdentityStore?.decidePairing(id,action==='approve');if(!result){sendError(res,404,'pending pairing not found');return}payloads.audit?.log({action:`executor_pairing.${action}`,actor:httpActor(req,payloads.auth),target:{workspaceId:result.workspaceId},outcome:'ok',metadata:{id}});sendJson(req,res,result);return
     }
     if (path === '/auth/executor-invites' && req.method === 'POST') {
       claimRoute(req)
@@ -766,6 +834,10 @@ export function attachJsonRoutes(
     }
     if (path === '/eval/swebench/plan' && req.method === 'POST') {
       claimRoute(req)
+      if (payloads.capabilities?.evaluations === false || payloads.capabilities?.benchmarks === false) {
+        sendError(res, 403, 'FEATURE_DISABLED: evaluations')
+        return
+      }
       void readJson(req)
         .then((body) => createSweBenchPlan(body as CreateSweBenchPlanRequest, payloads.artifactRootDir))
         .then((result) => sendJson(req, res, result))
@@ -775,7 +847,13 @@ export function attachJsonRoutes(
     if (path === '/enhancement/action' && req.method === 'POST') {
       claimRoute(req)
       void readJson(req)
-        .then((body) => runEnhancementAction(body as EnhancementActionRequest, payloads))
+        .then((body) => {
+          const request = body as EnhancementActionRequest
+          const action = requiredString(request.action, 'action')
+          const disabled = payloads.capabilities ? disabledEnhancementCapability(action, payloads.capabilities) : null
+          if (disabled) throw new HttpRouteError(403, `FEATURE_DISABLED: ${disabled}`)
+          return runEnhancementAction(request, payloads)
+        })
         .then((result) => {
           payloads.audit?.log({ action: 'http.enhancement_action', actor: httpActor(req, payloads.auth), target: { action: (result as { action?: unknown }).action }, outcome: 'ok' })
           sendJson(req, res, result)
@@ -783,7 +861,36 @@ export function attachJsonRoutes(
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 400, err instanceof Error ? err.message : String(err)))
       return
     }
+    if (req.method === 'POST' && path === '/session-artifacts/register') {
+      claimRoute(req)
+      if (!payloads.sessionArtifacts || !payloads.sessions) { sendError(res, 404, 'session artifacts are not configured'); return }
+      void readJson(req).then(async (body) => {
+        const input = body as { sessionId?: string; title?: string; fileName?: string; data?: string }
+        if (!input.sessionId || !input.fileName || !input.data) throw new HttpRouteError(400, 'sessionId, fileName, and base64 data are required')
+        await payloads.sessions!.load(input.sessionId)
+        const record = await payloads.sessionArtifacts!.registerImage({ sessionId: input.sessionId, title: input.title, fileName: input.fileName, data: Buffer.from(input.data, 'base64') })
+        sendJson(req, res, { ...record, uri: `artifact://${record.artifactId}` })
+      }).catch((error: unknown) => sendError(res, error instanceof HttpRouteError ? error.status : 400, error instanceof Error ? error.message : String(error)))
+      return
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') return
+    if (path.startsWith('/session-artifacts/')) {
+      claimRoute(req)
+      const artifactId = decodeURIComponent(path.slice('/session-artifacts/'.length))
+      const record = payloads.sessionArtifacts?.get(artifactId)
+      if (!record || !payloads.sessions) { sendError(res, 404, 'artifact not found'); return }
+      const sessionId = new URL(url, 'http://localhost').searchParams.get('sessionId')
+      if (!sessionId || record.sessionId !== sessionId) { sendError(res, 403, 'artifact does not belong to this session'); return }
+      void payloads.sessions.load(sessionId)
+        .then(() => {
+          const headers = { 'content-type': record.mediaType, 'content-length': String(record.bytes), 'cache-control': 'private, max-age=31536000, immutable', etag: `"${record.sha256}"` }
+          res.writeHead(200, headers)
+          if (req.method === 'HEAD') res.end()
+          else createReadStream(payloads.sessionArtifacts!.contentPath(record)).pipe(res)
+        })
+        .catch(() => sendError(res, 404, 'session not found'))
+      return
+    }
     if (path === '/artifacts/manifest') {
       claimRoute(req)
       if (!payloads.artifactRootDir) {
@@ -808,14 +915,14 @@ export function attachJsonRoutes(
     }
     if (path === '/docs/index') {
       claimRoute(req)
-      void listDocsIndex()
+      void listDocsIndex(payloads.docsRootDir)
         .then((result) => sendJson(req, res, result))
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
     }
     if (path === '/docs/content') {
       claimRoute(req)
-      void readDocContent(url)
+      void readDocContent(url, payloads.docsRootDir)
         .then((content) => sendJson(req, res, content))
         .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 500, err instanceof Error ? err.message : String(err)))
       return
@@ -845,6 +952,7 @@ export function attachJsonRoutes(
 function isProtectedJsonRoute(path: string): boolean {
   return path === '/models' ||
     path === '/settings' ||
+    path === '/runtime/capabilities' ||
     path === '/runtime/restart/status' ||
     path === '/runtime/restart' ||
     path === '/runtime/restart/abort' ||
@@ -2186,11 +2294,11 @@ function valueOf<T>(value: T | (() => T)): T {
   return typeof value === 'function' ? (value as () => T)() : value
 }
 
-function claimRoute(req: IncomingMessage): void {
+export function claimRoute(req: IncomingMessage): void {
   ;(req as IncomingMessage & { [ROUTE_CLAIMED]?: true })[ROUTE_CLAIMED] = true
 }
 
-function routeClaimed(req: IncomingMessage): boolean {
+export function routeClaimed(req: IncomingMessage): boolean {
   return (req as IncomingMessage & { [ROUTE_CLAIMED]?: true })[ROUTE_CLAIMED] === true
 }
 
@@ -2229,8 +2337,8 @@ type DocsIndexEntry = {
   updatedAt: string
 }
 
-async function listDocsIndex(): Promise<{ root: 'docs'; docs: DocsIndexEntry[] }> {
-  const root = docsRoot()
+async function listDocsIndex(configuredRoot?: string): Promise<{ root: 'docs'; docs: DocsIndexEntry[] }> {
+  const root = docsRoot(configuredRoot)
   const docs: DocsIndexEntry[] = []
   await collectDocs(root, '', docs)
   docs.sort((a, b) => a.path.localeCompare(b.path))
@@ -2262,12 +2370,12 @@ async function collectDocs(root: string, relativeDir: string, out: DocsIndexEntr
   }
 }
 
-async function readDocContent(url: string): Promise<{ path: string; title: string; body: string; updatedAt: string }> {
+async function readDocContent(url: string, configuredRoot?: string): Promise<{ path: string; title: string; body: string; updatedAt: string }> {
   const parsed = new URL(url, 'http://x')
   const requested = parsed.searchParams.get('path') ?? ''
   if (!requested || requested.includes('\0')) throw new HttpRouteError(400, 'missing doc path')
   if (extname(requested).toLowerCase() !== '.md') throw new HttpRouteError(400, 'doc path must be a markdown file')
-  const root = docsRoot()
+  const root = docsRoot(configuredRoot)
   const rel = normalize(requested).replace(/^[/\\]+/, '')
   const abs = join(root, rel)
   if (!abs.startsWith(root + sep) && abs !== root) throw new HttpRouteError(403, 'doc path escapes docs root')
@@ -2286,14 +2394,20 @@ async function readDocContent(url: string): Promise<{ path: string; title: strin
   }
 }
 
-function docsRoot(): string {
-  let cursor = resolvePath(process.cwd())
-  for (let i = 0; i < 8; i++) {
-    const candidate = join(cursor, 'docs')
-    if (existsSync(candidate)) return candidate
-    const parent = dirname(cursor)
-    if (parent === cursor) break
-    cursor = parent
+function docsRoot(configuredRoot?: string): string {
+  if (configuredRoot) return resolvePath(configuredRoot)
+  const starts = [resolvePath(process.cwd())]
+  const executable = process.argv[1]
+  if (executable) starts.push(dirname(resolvePath(executable)))
+  for (const start of starts) {
+    let cursor = start
+    for (let i = 0; i < 8; i++) {
+      const candidate = join(cursor, 'docs')
+      if (existsSync(candidate)) return candidate
+      const parent = dirname(cursor)
+      if (parent === cursor) break
+      cursor = parent
+    }
   }
   return resolvePath(process.cwd(), 'docs')
 }
@@ -2311,6 +2425,14 @@ function titleFromDocPath(path: string): string {
     .filter(Boolean)
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(' ')
+}
+
+function memoOwner(req: IncomingMessage): string | undefined {
+  const principal = req.headers['x-agent-runlab-principal']
+  if (typeof principal === 'string' && principal.length > 0) return `ingress:${principal}`
+  // Standalone has no user identity provider; one local owner is intentional.
+  if (!req.headers['x-agent-runlab-organization-id']) return 'standalone:local-user'
+  return undefined
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

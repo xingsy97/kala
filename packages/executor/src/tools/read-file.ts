@@ -44,8 +44,18 @@ export async function readOneFile(
   if (s.isDirectory()) throw new ToolError('EISDIR', `path is a directory (use list_directory): ${input.path}`)
   if (s.size > MAX_BYTES) throw new ToolError('E2BIG', `file exceeds size limit (${s.size} bytes); use offset/limit or run_shell+head`)
 
-  const raw = await readFile(resolved, 'utf8')
-  return formatNumberedLines(raw, offset, limit)
+  const bytes = await readFile(resolved)
+  if (looksBinary(bytes)) throw new ToolError('EBINARY', `binary file cannot be rendered as text: ${input.path}; use image/file preview or download`)
+  return formatNumberedLines(bytes.toString('utf8'), offset, limit)
+}
+
+function looksBinary(bytes: Buffer): boolean {
+  const sample = bytes.subarray(0, Math.min(bytes.length, 8_192))
+  if (sample.includes(0)) return true
+  if (sample.length === 0) return false
+  let control = 0
+  for (const byte of sample) if (byte < 9 || (byte > 13 && byte < 32)) control += 1
+  return control / sample.length > 0.1
 }
 
 export function formatNumberedLines(raw: string, offset: number, limit: number): string {

@@ -94,9 +94,12 @@ import { isSkillManager } from '../extensions/skills.js'
 import { contextSnapshot, snapshotFromConfig, type ContextWindowOverride } from '../context/manager.js'
 import { sessionRoom } from './rooms.js'
 import { dashboardConnectionMeta, type ConnectionMeta } from './socket-metadata.js'
+import { OperationDeduper } from './operation-deduper.js'
 
 export type QueuedUserMessage = {
   id: string
+  /** Client operation identity; stable across ACK loss and reconnect retry. */
+  operationId: string
   text: string
   mode: 'steer' | 'queue'
   createdAt: string
@@ -108,7 +111,7 @@ export type MessageQueueManager = {
   hydrate(sessionId: string): Promise<void>
   enqueue(sessionId: string, msg: QueuedUserMessage, priority?: 'front'): Promise<void>
   reorder(sessionId: string, id: string, beforeId?: string | null): Promise<void>
-  update(sessionId: string, id: string, text: string): Promise<void>
+  update(sessionId: string, id: string, text: string, content?: readonly MessageContent[]): Promise<void>
   delete(sessionId: string, id: string): Promise<void>
   pending(sessionId: string): number
   snapshot(sessionId: string): ServerMessageQueueEvent
@@ -153,6 +156,7 @@ export function configureDashboardNamespace(
   ns: DashboardNs,
   deps: DashboardDeps,
 ): void {
+  const operations = new OperationDeduper()
   const getDefaultConfig = (): AgentConfig => typeof deps.defaultConfig === 'function'
     ? deps.defaultConfig()
     : deps.defaultConfig
@@ -181,6 +185,7 @@ export function configureDashboardNamespace(
       clientVersion: auth.clientVersion,
     })
     socket.data.dashboardActor = authResult.actor
+    socket.data.readOnly = authResult.actor.kind === 'ingress' && authResult.actor.role === 'viewer'
     socket.data.connectionMeta = connectionMeta
     deps.audit?.log({ action: 'dashboard.socket_accept', actor: authResult.actor, target: { sessionId: auth.sessionId }, outcome: 'ok', metadata: auditConnectionMeta(connectionMeta) })
     nextFn()
@@ -190,6 +195,7 @@ export function configureDashboardNamespace(
     const auth = socket.handshake.auth as HandshakeAuth
     // Middleware guarantees auth.sessionId is present for the dashboard role.
     const sessionId = auth.sessionId!
+    socket.on('client:connection_ping', (_sentAt, ack) => ack(Date.now()))
 
     // Local `vparse` — closes over `socket.id` + the connected sessionId so
     // handlers can call `vparse(schema.X, raw, 'client:x')` in one line.
@@ -217,6 +223,23 @@ export function configureDashboardNamespace(
     }
     const auditScopedAccessDenied = (action: string, targetSessionId: string, workspaceId: string, error: string): void => {
       deps.audit?.log({ action, actor: auditActor(socket), target: { sessionId: targetSessionId, workspaceId }, outcome: 'denied', error })
+    }
+    if (socket.data.readOnly === true) {
+      const writeEvents = [
+        'client:user_message', 'client:user_approve', 'client:user_reject', 'client:cancel', 'client:interrupt_sub_agent',
+        'client:clear', 'client:compact', 'client:cancel_stream', 'client:set_approval_mode', 'client:fork',
+        'client:create_session', 'client:delete_session', 'client:update_preferences', 'client:set_cwd',
+        'client:reorder_queued_message', 'client:update_queued_message', 'client:delete_queued_message',
+        'client:rename_session', 'client:rename_workspace', 'client:consolidate_memory', 'bg:kill',
+        'terminal:create', 'terminal:input', 'terminal:resize', 'terminal:kill', 'workspace:exec',
+      ] as const
+      socket.use(([event, ...args], next) => {
+        if (!writeEvents.includes(event as typeof writeEvents[number])) { next(); return }
+        const ack = args.at(-1)
+        if (typeof ack === 'function') (ack as (value: { ok: false; error: string }) => void)({ ok: false, error: 'forbidden: runtime:write required' })
+        deps.audit?.log({ action: `dashboard.${event}`, actor: auditActor(socket), outcome: 'denied', error: 'runtime:write required' })
+        next(new Error('forbidden: runtime:write required'))
+      })
     }
 
     // Register first-paint request handlers before any awaited session load.
@@ -335,7 +358,10 @@ export function configureDashboardNamespace(
     let record: SessionRecord | undefined = deps.store.get(sessionId)
     if (!record) {
       try {
-        record = await deps.store.load(sessionId)
+        // Do not convert a dangling `thinking` state into a terminal
+        // `[interrupted]` response during reconnect. The Loop resumes that
+        // state below; eager Store recovery would end the turn first.
+        record = await deps.store.load(sessionId, { recoverDangling: false })
       } catch {
         record = undefined
       }
@@ -354,6 +380,10 @@ export function configureDashboardNamespace(
         )
     socket.emit('session:ready', ready)
     socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
+    // A service-manager restart has no persisted RestartCoordinator marker for
+    // the active turn. Resume any dangling LLM/tool state on first hydration;
+    // resumeSession is idempotent while a live serialized turn exists.
+    if (record && !isRestingStatus(record.state.status)) void deps.loop.resumeSession(sessionId)
     void deps.messageQueues.drain(sessionId)
 
     socket.on('subscribe', async (raw: ClientSubscribe) => {
@@ -363,7 +393,7 @@ export function configureDashboardNamespace(
       let target = deps.store.get(sessionId)
       if (!target) {
         try {
-          target = await deps.store.load(sessionId, { runtimeConfig: getDefaultConfig() })
+          target = await deps.store.load(sessionId, { recoverDangling: false, runtimeConfig: getDefaultConfig() })
         } catch {
           target = undefined
         }
@@ -384,14 +414,18 @@ export function configureDashboardNamespace(
           )
       socket.emit('session:ready', payload)
       socket.emit('server:message_queue', deps.messageQueues.snapshot(sessionId))
+      if (target && !isRestingStatus(target.state.status)) void deps.loop.resumeSession(sessionId)
       void deps.messageQueues.drain(sessionId)
     })
 
-    socket.on('client:user_message', async (raw: ClientUserMessage) => {
+    socket.on('client:user_message', async (raw: ClientUserMessage, ack) => {
       const p = vparse(schema.ClientUserMessageSchema, raw, 'client:user_message', (raw as ClientUserMessage | undefined)?.sessionId)
-      if (!p) return
-      deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
-      await handleUserMessage(deps, p)
+      if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      const result = await operations.run(p.operationId, async () => {
+        deps.audit?.log({ action: 'dashboard.user_message', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { messageBytes: Buffer.byteLength(p.text, 'utf8'), mode: p.mode ?? 'steer' } })
+        await handleUserMessage(deps, p)
+      })
+      ack?.(result)
     })
     socket.on('client:user_approve', async (raw: ClientUserApprove) => {
       const p = vparse(schema.ClientUserApproveSchema, raw, 'client:user_approve', (raw as ClientUserApprove | undefined)?.sessionId)
@@ -464,7 +498,9 @@ export function configureDashboardNamespace(
           )
           return
         }
-        await deps.loop.compact(p.sessionId)
+        // A dashboard-triggered compact is an in-band user command: once the
+        // handoff is persisted, immediately let the agent continue from it.
+        await deps.loop.compact(p.sessionId, 'manual', true)
       } catch (err) {
         deps.broadcastError(
           p.sessionId,
@@ -532,20 +568,23 @@ export function configureDashboardNamespace(
       deps.audit?.log({ action: 'dashboard.cwd_change', actor: auditActor(socket), target: { sessionId: p.sessionId }, outcome: 'ok', metadata: { cwd: validation.cwd } })
       await broadcastSessionList(deps)
     })
-    socket.on('client:reorder_queued_message', async (raw: ClientReorderQueuedMessage) => {
+    socket.on('client:reorder_queued_message', async (raw: ClientReorderQueuedMessage, ack) => {
       const p = vparse(schema.ClientReorderQueuedMessageSchema, raw, 'client:reorder_queued_message', (raw as ClientReorderQueuedMessage | undefined)?.sessionId)
-      if (!p) return
-      await deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId)
+      if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      const result = await operations.run(p.operationId, () => deps.messageQueues.reorder(p.sessionId, p.id, p.beforeId))
+      ack?.(result)
     })
-    socket.on('client:update_queued_message', async (raw: ClientUpdateQueuedMessage) => {
+    socket.on('client:update_queued_message', async (raw: ClientUpdateQueuedMessage, ack) => {
       const p = vparse(schema.ClientUpdateQueuedMessageSchema, raw, 'client:update_queued_message', (raw as ClientUpdateQueuedMessage | undefined)?.sessionId)
-      if (!p) return
-      await deps.messageQueues.update(p.sessionId, p.id, p.text)
+      if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      const result = await operations.run(p.operationId, () => deps.messageQueues.update(p.sessionId, p.id, p.text, p.content))
+      ack?.(result)
     })
-    socket.on('client:delete_queued_message', async (raw: ClientDeleteQueuedMessage) => {
+    socket.on('client:delete_queued_message', async (raw: ClientDeleteQueuedMessage, ack) => {
       const p = vparse(schema.ClientDeleteQueuedMessageSchema, raw, 'client:delete_queued_message', (raw as ClientDeleteQueuedMessage | undefined)?.sessionId)
-      if (!p) return
-      await deps.messageQueues.delete(p.sessionId, p.id)
+      if (!p) { ack?.({ ok: false, error: 'invalid payload' }); return }
+      const result = await operations.run(p.operationId, () => deps.messageQueues.delete(p.sessionId, p.id))
+      ack?.(result)
     })
     socket.on('client:rename_session', async (raw: ClientRenameSession) => {
       const p = vparse(schema.ClientRenameSessionSchema, raw, 'client:rename_session', (raw as ClientRenameSession | undefined)?.sessionId)
@@ -798,9 +837,9 @@ export function configureDashboardNamespace(
       }
       socket.emit('server:memory_consolidated', payload)
     })
-    socket.on('client:create_session', async (raw: ClientCreateSession) => {
+    socket.on('client:create_session', async (raw: ClientCreateSession, ack) => {
       const parsed = vparse(schema.ClientCreateSessionSchema, raw, 'client:create_session', (raw as ClientCreateSession | undefined)?.sessionId)
-      if (!parsed) return
+      if (!parsed) { ack?.({ ok: false, error: 'invalid payload' }); return }
       let p: ClientCreateSession = parsed
       try {
         const selectedModel = p.selectedModel?.trim()
@@ -860,12 +899,11 @@ export function configureDashboardNamespace(
             }
           }
         }
+        ack?.({ ok: true })
       } catch (err) {
-        deps.broadcastError(
-          p.sessionId,
-          'host',
-          err instanceof Error ? err.message : String(err),
-        )
+        const message = err instanceof Error ? err.message : String(err)
+        deps.broadcastError(p.sessionId, 'host', message)
+        ack?.({ ok: false, error: message })
       }
     })
 
@@ -1153,44 +1191,36 @@ async function handleUserMessage(
     record = await loadRecordForDashboard(deps, p.sessionId)
     if (!record) return
   }
-  const mode = p.mode ?? 'steer'
+  const requestedMode = p.mode ?? 'steer'
+  // Queue is a follow-up only while another turn is active. On an idle/done
+  // session it dispatches immediately, so keeping it as a visible queue item
+  // for the whole awaited Agent turn makes the dock claim that an already-sent
+  // message is still pending. Treat that internal handoff as a hidden steer;
+  // the durable user_message and external request semantics stay unchanged.
+  const mode = requestedMode === 'queue' && isRestingStatus(record.state.status)
+    ? 'steer'
+    : requestedMode
   const queued: QueuedUserMessage = {
     id: ulid(),
+    operationId: p.operationId ?? ulid(),
     text: p.text,
     mode,
     createdAt: new Date().toISOString(),
     ...(p.content ? { content: p.content } : {}),
     ...(messageModel ? { model: messageModel } : {}),
   }
-  if (mode === 'queue') {
-    await deps.messageQueues.enqueue(p.sessionId, queued)
-    await deps.messageQueues.drain(p.sessionId)
-    return
-  }
-  if (!isRestingStatus(record.state.status)) {
-    // Steer semantics: DON'T truncate the in-flight response or the running tool
-    // call. Queue the message at the front (priority), then ask the loop to stop
-    // at the next safe boundary — it lets the current LLM response and any tools
-    // it spawned finish, then halts before the next autonomous think and settles
-    // the session to a resting status. The turn-completion hook (and the direct
-    // drain below) then dispatch the front-queued steer as the next user turn.
-    //
-    // Front-enqueue BEFORE requesting the stop: the stop settles the FSM to rest
-    // and emits a state broadcast; the completion hook only re-drains when it
-    // sees a resting status *with* a pending message, so the message must already
-    // be queued or the broadcast could fire against an empty queue.
-    await deps.messageQueues.enqueue(p.sessionId, queued, 'front')
+  // The Socket.IO ACK means "reliably accepted", not "the Agent turn has
+  // completed". Persist every message before acknowledging, then drain in the
+  // background. Awaiting loop.dispatch here made an idle direct send hold its
+  // ACK for the entire LLM/tool turn; the dashboard timed out and restored a
+  // draft that had already been sent.
+  await deps.messageQueues.enqueue(p.sessionId, queued, mode === 'steer' ? 'front' : undefined)
+  if (mode === 'steer' && !isRestingStatus(record.state.status)) {
+    // Do not truncate an in-flight response/tool. Stop at the next safe boundary
+    // and let the persisted front-queued steer become the next user turn.
     deps.loop.requestStopAtBoundary(p.sessionId)
-    // Also kick a drain directly: if the session had already reached rest between
-    // our load and here, the completion hook may not fire, so don't rely on it.
-    await deps.messageQueues.drain(p.sessionId)
-    return
   }
-  await deps.loop.dispatch(p.sessionId, {
-    kind: 'user_message',
-    text: p.text,
-    ...(p.content ? { content: p.content } : {}),
-  }, messageModel ? { model: messageModel } : undefined)
+  void deps.messageQueues.drain(p.sessionId)
 }
 
 async function loadRecordForDashboard(
@@ -1244,14 +1274,21 @@ async function validateWorkspaceCwd(
 ): Promise<{ ok: true; cwd: string } | { ok: false; reason: string }> {
   const trimmed = cwd.trim()
   if (trimmed.length === 0) return { ok: false, reason: 'cwd is empty' }
-  const resolved = resolvePath(trimmed)
+  const windowsPath = /^[a-z]:[\\/]/iu.test(trimmed)
+  const normalizeRemotePath = (value: string): string => windowsPath
+    ? value.replaceAll('/', '\\').replace(/\\+$/u, '').toLowerCase()
+    : resolvePath(value)
+  const resolved = windowsPath ? trimmed.replaceAll('/', '\\') : resolvePath(trimmed)
   const executor = deps.executors.snapshot().find((e) => e.workspaceId === workspaceId)
   if (!executor) return { ok: false, reason: 'workspace offline' }
   const roots = executor.sandboxRoots ?? []
   if (roots.length === 0) return await validateDirectoryExists(deps, workspaceId, resolved)
   for (const root of roots) {
-    const r = resolvePath(root)
-    if (resolved === r || resolved.startsWith(r + sep)) {
+    const r = windowsPath ? root.replaceAll('/', '\\') : resolvePath(root)
+    const candidateKey = normalizeRemotePath(resolved)
+    const rootKey = normalizeRemotePath(r)
+    const separator = windowsPath ? '\\' : sep
+    if (candidateKey === rootKey || candidateKey.startsWith(rootKey.endsWith(separator) ? rootKey : rootKey + separator)) {
       return await validateDirectoryExists(deps, workspaceId, resolved)
     }
   }

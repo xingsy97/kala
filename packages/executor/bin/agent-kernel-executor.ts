@@ -39,6 +39,8 @@ import { startExecutor } from '../src/client.js'
 import { createRuntimeLogger } from '../src/logger.js'
 import { checkExecutorUpdate } from '../src/update.js'
 import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
+import { readPairingJson } from '../src/pairing-response.js'
+import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
 import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile } from '../src/workspace-id.js'
 
 const logger = createRuntimeLogger('agent-kernel-executor')
@@ -216,9 +218,7 @@ async function main(): Promise<void> {
 
   const host = args.host ?? process.env.HOST_URL
   const name = args.name ?? process.env.WORKSPACE_NAME
-  const envRoots = process.env.SANDBOX_ROOTS
-    ? process.env.SANDBOX_ROOTS.split(':').filter((s) => s.length > 0)
-    : []
+  const envRoots = parseSandboxRootsEnv(process.env.SANDBOX_ROOTS)
   const sandboxRoots = args.sandboxRoots.length > 0 ? args.sandboxRoots : envRoots
   const invite = args.invite ?? process.env.EXECUTOR_INVITE
   const profile = normalizeExecutorProfile(args.profile ?? process.env.AGENT_KERNEL_EXECUTOR_PROFILE)
@@ -240,7 +240,25 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const authKind = invite ? 'invite' : token ? 'token' : 'none'
+  let pairingToken = token
+  if (!invite && !pairingToken) {
+    const workspaceId = loadOrCreateWorkspaceId(undefined, profile)
+    const pairingUrl = `${host.replace(/\/$/u, '')}/auth/executor-pairings`
+    const response = await fetch(pairingUrl, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ workspaceId, label: name }) })
+    const pairing = await readPairingJson<{ id: string; claimSecret: string; code: string; expiresAt: string }>(response, 'start pairing', pairingUrl)
+    logger.info({ code: pairing.code, expiresAt: pairing.expiresAt }, 'approve this executor in Agent RunLab')
+    while (Date.now() < Date.parse(pairing.expiresAt)) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      const claimUrl = `${host.replace(/\/$/u, '')}/auth/executor-pairings/${encodeURIComponent(pairing.id)}/claim`
+      const claim = await fetch(claimUrl, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ claimSecret: pairing.claimSecret }) })
+      if (claim.status === 404) continue
+      const result = await readPairingJson<{ status: string; token?: string }>(claim, 'check pairing approval', claimUrl)
+      if (result.token) { pairingToken = result.token; saveExecutorToken(result.token, undefined, profile); break }
+      if (result.status === 'rejected' || result.status === 'expired') throw new Error(`pairing ${result.status}`)
+    }
+    if (!pairingToken) throw new Error('pairing expired')
+  }
+  const authKind = invite ? 'invite' : pairingToken ? 'token' : 'none'
   const rootsLabel = sandboxRoots.length > 0 ? sandboxRoots.join(':') : '<no jail>'
   const profileLabel = profile ?? 'default'
   logger.info(
@@ -277,7 +295,7 @@ async function main(): Promise<void> {
     workspaceId: loadOrCreateWorkspaceId(undefined, profile),
     ...(name !== undefined ? { workspaceName: name } : {}),
     ...(sandboxRoots.length > 0 ? { sandboxRoots } : {}),
-    ...(token !== undefined ? { token } : {}),
+    ...(pairingToken !== undefined ? { token: pairingToken } : {}),
     ...(invite !== undefined ? { invite } : {}),
     ...(executorId !== undefined ? { executorId } : {}),
     logger,

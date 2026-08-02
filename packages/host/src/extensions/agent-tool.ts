@@ -157,6 +157,29 @@ export async function runAgentTool(
     )
   }
 
+  // Active tracking is process-local, while parentCallId is durable. Restart can
+  // redispatch a pending `agent` call; reuse its completed child or explicitly
+  // terminate an incomplete orphan instead of spawning a duplicate child.
+  const existingChild = (await deps.store.listChildren(parentSessionId))
+    .find((candidate) => candidate.parentCallId === effect.callId)
+  if (existingChild) {
+    const final = existingChild.state
+    const turns = final.cursor
+    if (final.status === 'done') {
+      return okEnvelope(existingChild.sessionId, agentType, finalAssistantText(final), turns, 0)
+    }
+    if (final.status !== 'error') {
+      await dispatchOne(deps, existingChild.sessionId, { kind: 'cancel' }, aborts)
+    }
+    return failEnvelope(
+      existingChild.sessionId,
+      agentType,
+      `sub-agent recovery stopped incomplete child in status ${final.status}`,
+      turns,
+      0,
+    )
+  }
+
   const effectiveTools = pickEffectiveTools(effect.input.tools, policy.allowedTools)
   const startedAt = new Date()
   const child = await deps.store.create({

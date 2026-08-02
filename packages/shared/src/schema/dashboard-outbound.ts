@@ -710,12 +710,13 @@ const SettingsSkillSummarySchema = z.object({
 })
 
 const SettingsAgentPromptSchema = z.object({
-  selectedPreset: z.enum(['codex', 'claude-code']),
+  selectedPreset: z.enum(['codex', 'claude-code', 'custom']),
   presets: z.array(z.object({
-    id: z.enum(['codex', 'claude-code']),
+    id: z.enum(['codex', 'claude-code', 'custom']),
     label: z.string(),
     description: z.string(),
   })),
+  customPrompt: z.string(),
   configPath: z.string(),
 }) satisfies z.ZodType<SettingsAgentPrompt>
 
@@ -823,6 +824,7 @@ export const ExecutorInviteSummarySchema = z.object({
   label: z.string().optional(),
   workspaceId: z.string().optional(),
   createdAt: z.string(),
+  expiresAt: z.string(),
   lastUsedAt: z.string().optional(),
   revoked: z.boolean(),
 }) satisfies z.ZodType<ExecutorInviteSummary>
@@ -837,6 +839,7 @@ export const ServerExecutorInvitePayloadSchema = z.object({
   label: z.string().optional(),
   workspaceId: z.string().optional(),
   createdAt: z.string(),
+  expiresAt: z.string(),
   lastUsedAt: z.string().optional(),
   revoked: z.boolean().optional(),
 }) satisfies z.ZodType<ServerExecutorInvitePayload>

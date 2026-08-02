@@ -19,6 +19,7 @@ import type {
   ServerExecutorChangedPayload,
   ServerExecutorsPayload,
   ServerHistoryPayload,
+  RpcAck,
   ServerMessageQueueEvent,
   ServerSettingsPayload,
   ServerSessionsPayload,
@@ -112,15 +113,17 @@ function attachDirListHandler(
   roots: readonly string[],
   existingDirs: readonly string[],
 ): void {
-  const known = new Set(existingDirs.map((p) => resolve(p)))
+  const normalize = (p: string): string => /^[a-z]:[\\/]/iu.test(p) ? p.replaceAll('/', '\\').toLowerCase() : resolve(p)
+  const known = new Set(existingDirs.map(normalize))
   // Host-internal fs / bg / overflow RPCs arrive as ordinary `tool:call`
   // messages. The stub executor pretends to be the `__fs_list_dirs` built-in
   // and returns a JSON string matching DirListResult.
   executor.on('tool:call', (payload, ack: (result: ToolResultAck) => void) => {
     if (payload.name !== '__fs_list_dirs') return
     const input = payload.input as { requestId: string; workspaceId: string; path?: string }
-    const requested = resolve(input.path ?? roots[0] ?? process.cwd())
-    const result: DirListResult = known.has(requested)
+    const rawRequested = input.path ?? roots[0] ?? process.cwd()
+    const requested = /^[a-z]:[\\/]/iu.test(rawRequested) ? rawRequested.replaceAll('/', '\\') : resolve(rawRequested)
+    const result: DirListResult = known.has(normalize(requested))
       ? {
           requestId: input.requestId,
           workspaceId: input.workspaceId,
@@ -317,6 +320,22 @@ describe('wire protocol', () => {
       expect(await ok.text()).toContain('echo local')
       const missing = await fetch(`http://localhost:${localServer.port}/release-assets/missing.sh`)
       expect(missing.status).toBe(404)
+      const powershell = await fetch(`http://localhost:${localServer.port}/install.ps1?invite=abc'def`, {
+        headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'downloads.example.test' },
+      })
+      expect(powershell.status).toBe(200)
+      expect(powershell.headers.get('content-type')).toContain('text/plain')
+      const script = await powershell.text()
+      expect(script).toContain("$ErrorActionPreference='Stop'")
+      expect(script).toContain("$env:HOST_URL='https://downloads.example.test'")
+      expect(script).toContain("$env:EXECUTOR_INVITE='abc''def'")
+      expect(script).toContain('Invoke-WebRequest -UseBasicParsing')
+      expect(script).toContain('|Out-Null')
+      expect(script).not.toContain("$r.Headers['Content-Type']")
+      expect(script).toContain('SHA256SUMS')
+      expect(script).toContain('Get-FileHash')
+      expect(script).toContain('checksum mismatch')
+      expect(script).not.toContain('<!DOCTYPE html>')
     } finally {
       await localServer.close()
       rmSync(releaseDir, { recursive: true, force: true })
@@ -364,7 +383,7 @@ describe('wire protocol', () => {
   })
 
   it('updates agent prompt settings through HTTP', async () => {
-    let selectedPreset: 'codex' | 'claude-code' = 'codex'
+    let selectedPreset: 'codex' | 'claude-code' | 'custom' = 'codex'
     const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-agent-prompt-'))
     const localServer = await startHostServer({
       port: 0,
@@ -380,7 +399,9 @@ describe('wire protocol', () => {
           presets: [
             { id: 'codex', label: 'Codex', description: 'Codex prompt' },
             { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
+            { id: 'custom', label: 'Custom', description: 'Custom prompt' },
           ],
+          customPrompt: 'Custom prompt',
           configPath: '/tmp/agent.json',
         },
         paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
@@ -397,7 +418,9 @@ describe('wire protocol', () => {
             presets: [
               { id: 'codex', label: 'Codex', description: 'Codex prompt' },
               { id: 'claude-code', label: 'Claude Code', description: 'Claude Code prompt' },
+              { id: 'custom', label: 'Custom', description: 'Custom prompt' },
             ],
+            customPrompt: input.customPrompt ?? 'Custom prompt',
             configPath: '/tmp/agent.json',
           },
           paths: { claudeSettings: '', codexConfig: '', manualModels: '', hooksConfig: '', sessionsDir: '' },
@@ -1108,6 +1131,15 @@ describe('wire protocol', () => {
     expect(history.entries).toEqual([])
 
     dashboard.close()
+  })
+
+  it('exposes bounded Prometheus operational metrics', async () => {
+    const response = await fetch(`${url}/metrics`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/plain')
+    const body = await response.text()
+    expect(body).toContain('agent_kernel_process_starts_total')
+    expect(body).toContain('deployment_mode="standalone"')
   })
 
   it('serves custom dashboard middleware after JSON routes', async () => {
@@ -3197,6 +3229,23 @@ describe('wire protocol', () => {
     executor.close()
   })
 
+  it('client:create_session preserves and validates a Windows cwd on a Linux host', async () => {
+    const sessionId = 'wire-create-session-windows-cwd'
+    const root = 'C:\\Users\\Admin'
+    const child = 'c:\\users\\admin\\project'
+    const executor = clientIO(`${url}/executor`, { transports: ['websocket'], auth: { role: 'executor', clientVersion: PROTOCOL_VERSION }, reconnection: false }) as ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>
+    await new Promise<void>((resolve) => executor.on('connect', () => resolve()))
+    executor.emit('executor:announce', { executorId: 'ex-windows-cwd', workspaceId: 'ws-windows-cwd', workspaceName: 'windows-box', tools: ['write'], sandboxRoots: [root], runtime: 'node', runtimeVersion: '22', os: 'win32' })
+    attachDirListHandler(executor, [root], [root, child])
+    const dashboard = clientIO(`${url}/dashboard`, { transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false }) as ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    await waitForWorkspace(dashboard, 'ws-windows-cwd')
+    const ready = new Promise<SessionReadyEvent>((resolve) => { dashboard.off('session:ready'); dashboard.on('session:ready', resolve) })
+    dashboard.emit('client:create_session', { sessionId, workspaceId: 'ws-windows-cwd', workspaceName: 'windows-box', cwd: child })
+    await expect(ready).resolves.toMatchObject({ state: { cwd: child } })
+    dashboard.close(); executor.close()
+  })
+
   it('client:list_dirs returns directory entries from the selected executor', async () => {
     const sessionId = 'wire-list-dirs'
     const root = resolve(dir, 'dir-root')
@@ -3547,7 +3596,21 @@ describe('wire protocol', () => {
       })
     })
 
-    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    const firstAck = await new Promise<RpcAck>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('direct message ACK waited for the Agent turn')), 500)
+      dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer', operationId: 'direct-first' }, (result) => {
+        clearTimeout(timer)
+        resolve(result)
+      })
+    })
+    expect(firstAck).toEqual({ ok: true })
+    const retryAck = await dashboard.timeout(500).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'first',
+      mode: 'steer',
+      operationId: 'direct-first',
+    })
+    expect(retryAck).toEqual({ ok: true })
     await new Promise<void>((resolve) => {
       const poll = setInterval(() => {
         if (seenPrompts.length === 1) {
@@ -3556,7 +3619,14 @@ describe('wire protocol', () => {
         }
       }, 10)
     })
-    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue' })
+    dashboard.emit('client:user_message', { sessionId, text: 'second', mode: 'queue', operationId: 'queued-second' })
+    const retryQueuedAck = await dashboard.timeout(500).emitWithAck('client:user_message', {
+      sessionId,
+      text: 'second',
+      mode: 'queue',
+      operationId: 'queued-second',
+    })
+    expect(retryQueuedAck).toEqual({ ok: true })
     const deadline = Date.now() + 2000
     while (Date.now() < deadline && !queueEvents.some((e) => e.pending === 1 && e.text === 'second')) {
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -3578,6 +3648,75 @@ describe('wire protocol', () => {
     expect(seenModels).toEqual(['provider:model-a', 'provider:model-a'])
     expect(server.store.get(sessionId)?.preferences.selectedModel).toBe('provider:model-b')
 
+    dashboard.close()
+  })
+
+  it('does not interrupt an active turn when queueing during a transient done state', async () => {
+    const sessionId = 'wire-message-queue-transient-done'
+    await server.close()
+    const http = createServer()
+    await new Promise<void>((resolve) => http.listen(0, resolve))
+    const port = (http.address() as AddressInfo).port
+    let releaseFinish!: () => void
+    const finishGate = new Promise<void>((resolve) => { releaseFinish = resolve })
+    const seenPrompts: string[] = []
+    server = await startHostServer({
+      port,
+      sessionsDir: dir,
+      defaultConfig: config,
+      httpServer: http,
+      toolTimeoutMs: 2000,
+      llm: {
+        name: 'queue-transient-done-test',
+        async call(p) {
+          const userText = p.messages
+            .filter((m) => m.role === 'user')
+            .map((m) => m.content.map((c) => ('text' in c ? c.text : '')).join(''))
+            .join('|')
+          seenPrompts.push(userText)
+          if (seenPrompts.length === 1) await finishGate
+          return { message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+        },
+      },
+    })
+    url = `http://localhost:${server.port}`
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+
+    dashboard.emit('client:user_message', { sessionId, text: 'first', mode: 'steer' })
+    while (seenPrompts.length === 0) await new Promise((resolve) => setTimeout(resolve, 5))
+    dashboard.emit('client:user_message', { sessionId, text: 'queued', mode: 'queue' })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(seenPrompts).toEqual(['first'])
+    expect(server.store.get(sessionId)?.state.messages.some((message) => message.role === 'user' && message.content.some((part) => part.type === 'text' && part.text === 'queued'))).toBe(false)
+
+    releaseFinish()
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline && seenPrompts.length < 2) await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(seenPrompts).toEqual(['first', 'first|queued'])
+    dashboard.close()
+  })
+
+  it('does not expose an idle queue-mode send as a pending queue item', async () => {
+    const sessionId = 'wire-idle-queue-hidden'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false,
+    })
+    await new Promise<SessionReadyEvent>((resolve) => dashboard.on('session:ready', resolve))
+    const queueEvents: ServerMessageQueueEvent[] = []
+    dashboard.on('server:message_queue', (event) => { if (event.sessionId === sessionId) queueEvents.push(event) })
+    const ack = await dashboard.timeout(500).emitWithAck('client:user_message', {
+      sessionId, text: 'send immediately', mode: 'queue', operationId: 'idle-queue-send',
+    })
+    expect(ack).toEqual({ ok: true })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(queueEvents.every((event) => event.items.every((item) => item.text !== 'send immediately'))).toBe(true)
     dashboard.close()
   })
 
@@ -3873,6 +4012,7 @@ describe('wire protocol', () => {
 
     const parsed = await readSessionLog(server.store.get(sessionId)!.logPath)
     expect(parsed.runtimeMetadata.some((entry) => entry.action === 'message_queue_snapshot')).toBe(true)
+    expect(parsed.events.some((entry) => entry.event.kind === 'llm_response' && entry.event.message.content.some((part) => part.type === 'text' && part.text === '[interrupted]'))).toBe(false)
     dashboard.close()
   })
 

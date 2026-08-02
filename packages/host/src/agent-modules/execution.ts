@@ -2,6 +2,7 @@ import type { CallToolEffect } from '@agent-kernel/kernel'
 
 import { runAgentTool } from '../extensions/agent-tool.js'
 import { isSkillManager, runSkillTool } from '../extensions/skills.js'
+import { runTodoGraphTool } from '../extensions/todo-graph.js'
 import type { HostLoopDeps } from '../loop-types.js'
 
 export type ToolExecutionResult = {
@@ -24,6 +25,8 @@ export async function dispatchConfiguredTool(
   switch (handler) {
     case 'agent':
       return await runAgentTool(deps, sessionId, effect, aborts)
+    case 'todo_graph':
+      return await runTodoGraphTool(deps, sessionId, effect)
     case 'skill':
       if (!deps.skills) return { ok: false, content: 'skills are not configured on this host' }
       return await runSkillTool(

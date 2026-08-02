@@ -13,6 +13,7 @@ import { createServer, type IncomingMessage, type Server as HttpServer, type Ser
 import { join } from 'node:path'
 
 import type {
+  AttachedExecutor,
   ModelInfo,
   ServerMessageQueueEvent,
   ServerSettingsPayload,
@@ -40,6 +41,8 @@ import { PushSubscriptionStore } from './push/store.js'
 import { loadOrCreateVapidKeys } from './push/vapid.js'
 import { createPushDispatcher } from './push/dispatch.js'
 import { createPushRoutes } from './push/routes.js'
+import { PushActivityTracker } from './push/activity.js'
+import { OperationalMetrics } from './operational-metrics.js'
 import {
   createExecutorRegistry,
   DEFAULT_TOOL_ACK_TIMEOUT_MS,
@@ -56,21 +59,28 @@ import {
   type ExecutorNs,
 } from './connection/executor-ns.js'
 import { sessionRoom } from './connection/rooms.js'
-import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount } from './http/routes.js'
+import { attachDynamicStaticMountHandler, attachEmbeddedStaticHandler, attachJsonRoutes, attachReleaseAssetsHandler, claimRoute, attachRequestHandler, attachStaticHandler, type EmbeddedStaticAsset, type StaticMount } from './http/routes.js'
+import { SessionArtifactRegistry } from './session-artifact-registry.js'
+import { MemoStore } from './memo-store.js'
+import { firstForwardedHeader, powershellQuoteLocal, shellQuoteLocal } from './shell-quote.js'
 import type { AuthConfig } from './auth-control.js'
 import type { AuditLogger } from './audit-log.js'
 import { noopAuditLogger } from './audit-log.js'
 import { snapshotFromConfig, type ContextWindowOverride } from './context/manager.js'
 import { setWireValidationLogger } from './wire-validation.js'
 import type { RuntimeLogger } from './logger.js'
+import type { DeploymentMode, RuntimeCapabilities } from '@agent-kernel/shared'
+import { FULL_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 import type { SocketAdminConfig } from './socket-admin.js'
 import { defaultRestartStatePath, RestartCoordinator } from './restart-coordinator.js'
 import { socketConnectionAuditSnapshot } from './connection/socket-audit.js'
 import { loadPersistedMessageQueue, persistMessageQueueSnapshot } from './message-queue-store.js'
+import { readSessionLog } from './store/log.js'
 import { modelIdFromRef, resolveModelContextWindow } from './model-capabilities.js'
 
 export type HostServerOptions = {
   port: number
+  listenHost?: string
   sessionsDir: string
   llm: LLMAdapter
   defaultConfig: AgentConfig | (() => AgentConfig)
@@ -110,6 +120,7 @@ export type HostServerOptions = {
   hookRunner?: HookRunner
   skills?: SkillRegistry | SkillManager
   artifactRootDir?: string | false
+  docsRootDir?: string
   /**
    * Advertised via `GET /settings`. Read-only settings snapshot for the
    * dashboard's Settings dialog — providers, hooks, MCP status, config
@@ -127,6 +138,8 @@ export type HostServerOptions = {
   updateSocketAdminMode?: Parameters<typeof attachJsonRoutes>[1]['updateSocketAdminMode']
   routerHealth?: () => unknown
   logger?: Pick<RuntimeLogger, 'warn'>
+  deploymentMode?: DeploymentMode
+  capabilities?: RuntimeCapabilities
 }
 
 export type HostServer = {
@@ -134,6 +147,7 @@ export type HostServer = {
   readonly http: HttpServer
   readonly loop: LoopHandle
   readonly store: SessionStore
+  readonly executorsSnapshot: () => readonly AttachedExecutor[]
   readonly port: number
   close(): Promise<void>
 }
@@ -147,16 +161,47 @@ export async function startHostServer(
     })
   }
   const auth: AuthConfig | undefined = options.auth ?? (options.authToken ? { sharedToken: options.authToken } : undefined)
+  const deploymentMode = options.deploymentMode ?? 'standalone'
+  const metrics = new OperationalMetrics()
+  metrics.increment('agent_kernel_process_starts_total', 'Host process starts', { component: 'host', deployment_mode: deploymentMode })
+  const capabilities = options.capabilities ?? FULL_RUNTIME_CAPABILITIES
   const audit = options.audit ?? noopAuditLogger
   const http = options.httpServer ?? createServer()
   const allowedOrigins = parseAllowedOrigins(process.env.AGENT_KERNEL_ALLOWED_ORIGINS)
   const io = new IOServer(http, {
     cors: allowedOrigins === null ? { origin: '*' } : { origin: allowedOrigins, credentials: true },
+    pingInterval: 20_000,
+    pingTimeout: 30_000,
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 120_000,
+      // Authentication/version middleware must still run after recovery.
+      skipMiddlewares: false,
+    },
   })
+  const TOKEN_DELTA_BATCH_MS = 16
+  const tokenDeltaBatches = new Map<string, { text: string; timer: ReturnType<typeof setTimeout> }>()
+  const flushTokenDelta = (sessionId: string): void => {
+    const batch = tokenDeltaBatches.get(sessionId)
+    if (!batch) return
+    clearTimeout(batch.timer)
+    tokenDeltaBatches.delete(sessionId)
+    if (batch.text.length > 0) {
+      io.of('/dashboard').to(sessionRoom(sessionId)).emit('session:token_delta', { sessionId, text: batch.text })
+    }
+  }
   let closed = false
   const closeServer = async (): Promise<void> => {
     if (closed) return
     closed = true
+    for (const batch of tokenDeltaBatches.values()) clearTimeout(batch.timer)
+    tokenDeltaBatches.clear()
+    // Queue persistence and post-turn drains may still be crossing their durable
+    // boundary after the last socket closes. Wait before callers remove the
+    // Session directory (tests) or replace storage (shutdown/deploy).
+    await Promise.allSettled([...queueLoads.values(), ...queueMutations.values()])
+    for (let attempt = 0; attempt < 100 && drainingQueues.size > 0; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10))
+    }
     await new Promise<void>((resolve, reject) => {
       io.close((err) => (err ? reject(err) : resolve()))
     })
@@ -187,6 +232,9 @@ export async function startHostServer(
     ? options.defaultConfig()
     : options.defaultConfig
   const store = new SessionStore(options.sessionsDir, { runtimeConfig: getDefaultConfig })
+  const sessionArtifacts = new SessionArtifactRegistry(join(options.sessionsDir, '..', 'session-artifacts'))
+  await sessionArtifacts.load()
+  const memoStore = new MemoStore(join(options.sessionsDir, '..', 'memos'))
   const defaultSkillRootsList = defaultSkillRoots()
   const defaultSkillRegistry = await discoverSkills(defaultSkillRootsList)
   const workspaceAliases = new WorkspaceAliasStore(join(options.sessionsDir, '..', 'workspace-aliases.json'))
@@ -199,9 +247,30 @@ export async function startHostServer(
   const pushStore = new PushSubscriptionStore(join(options.sessionsDir, '..', 'push-subscriptions.jsonl'))
   await pushStore.load()
   const vapid = loadOrCreateVapidKeys(options.sessionsDir)
-  const pushDispatcher = createPushDispatcher({ store: pushStore, vapid })
-  const pushRoutes = createPushRoutes({ store: pushStore, vapid, dispatcher: pushDispatcher })
+  const pushActivity = new PushActivityTracker()
+  const pushDispatcher = createPushDispatcher({
+    store: pushStore,
+    vapid,
+    shouldSuppress: () => pushActivity.hasActiveDevice(),
+  })
+  const pushRoutes = createPushRoutes({ store: pushStore, vapid, dispatcher: pushDispatcher, activity: pushActivity })
   http.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const requestUrl = new URL(req.url ?? '/', 'http://localhost')
+    if (requestUrl.pathname === '/install' && req.method === 'GET') {
+      claimRoute(req)
+      const invite = requestUrl.searchParams.get('invite')
+      const origin = `${firstForwardedHeader(req.headers['x-forwarded-proto']) ?? 'http'}://${firstForwardedHeader(req.headers['x-forwarded-host']) ?? req.headers.host ?? 'localhost'}`
+      const script = `#!/bin/sh\nset -eu\nexport COMPONENT=executor HOST_URL=${shellQuoteLocal(origin)} AGENT_KERNEL_RELEASE_BASE_URL=${shellQuoteLocal(`${origin}/release-assets`)} SANDBOX_ROOTS="$HOME"${invite ? ` EXECUTOR_INVITE=${shellQuoteLocal(invite)}` : ''}\ncurl -fsSL ${shellQuoteLocal(`${origin}/release-assets/run.sh`)} | bash\n`
+      res.writeHead(200, { 'content-type': 'text/x-shellscript; charset=utf-8', 'cache-control': 'no-store' });res.end(script);return
+    }
+    if (requestUrl.pathname === '/install.ps1' && req.method === 'GET') {
+      claimRoute(req)
+      const invite = requestUrl.searchParams.get('invite')
+      const origin = `${firstForwardedHeader(req.headers['x-forwarded-proto']) ?? 'http'}://${firstForwardedHeader(req.headers['x-forwarded-host']) ?? req.headers.host ?? 'localhost'}`
+      const script = `$ErrorActionPreference='Stop'; function Get-RunLabFile([string]$Uri,[string]$Path,[string]$Label){try{Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 $Uri -OutFile $Path|Out-Null}catch{Remove-Item -Force -ErrorAction SilentlyContinue $Path; throw "Agent RunLab $Label download failed: $($_.Exception.Message)"}; $prefix=if(Test-Path $Path){$text=[System.IO.File]::ReadAllText($Path).TrimStart();$text.Substring(0,[Math]::Min(32,$text.Length))}else{''}; if(!(Test-Path $Path)-or (Get-Item $Path).Length-eq 0-or $prefix-match '^<!DOCTYPE|^<html'){Remove-Item -Force -ErrorAction SilentlyContinue $Path; throw "Agent RunLab $Label download returned HTML or an empty response. Check access policy for /release-assets/*."}}; $env:HOST_URL=${powershellQuoteLocal(origin)}; $env:SANDBOX_ROOTS=$env:USERPROFILE; ${invite ? `$env:EXECUTOR_INVITE=${powershellQuoteLocal(invite)}; ` : ''}$d=Join-Path $env:LOCALAPPDATA 'AgentRunLab'; New-Item -ItemType Directory -Force -Path $d|Out-Null; $exe=Join-Path $d 'agent-kernel-executor.cjs'; $tmp="$exe.download"; $sum=Join-Path $d 'SHA256SUMS.download'; try{Get-RunLabFile ${powershellQuoteLocal(`${origin}/release-assets/agent-kernel-executor.cjs`)} $tmp 'executor'; Get-RunLabFile ${powershellQuoteLocal(`${origin}/release-assets/SHA256SUMS`)} $sum 'checksum'; $expected=((Get-Content $sum|Where-Object {$_ -match ' agent-kernel-executor\\.cjs$'}|Select-Object -First 1)-split '\\s+')[0]; if(!$expected){throw 'Agent RunLab SHA256SUMS does not contain the executor checksum'}; if((Get-FileHash $tmp -Algorithm SHA256).Hash-ne $expected.ToUpperInvariant()){throw 'Agent RunLab executor checksum mismatch'}; Move-Item -Force $tmp $exe}finally{Remove-Item -Force -ErrorAction SilentlyContinue $tmp,$sum}; node $exe`
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });res.end(script);return
+    }
+    if ((req.url ?? '/').split('?')[0]?.startsWith('/push/')) claimRoute(req)
     // pushRoutes returns true when it handled the request. Anything not
     // matching /push/* falls through to attachJsonRoutes and beyond.
     void pushRoutes(req, res).then((handled) => {
@@ -247,7 +316,7 @@ export async function startHostServer(
   attachJsonRoutes(http, {
     models: options.models ?? [],
     defaultModel: options.defaultModel ?? '',
-    ...(options.settings ? { settings: settingsWithSkills(options.settings) } : {}),
+    ...(options.settings ? { settings: () => ({ ...settingsWithSkills(options.settings!)(), deployment: { mode: deploymentMode, capabilities } }) } : {}),
     ...(options.addManualModel ? { addManualModel: options.addManualModel } : {}),
     ...(options.deleteManualModel ? { deleteManualModel: options.deleteManualModel } : {}),
     ...(options.addManualProvider ? { addManualProvider: options.addManualProvider } : {}),
@@ -257,9 +326,14 @@ export async function startHostServer(
     ...(options.initializeSocketAdmin ? { initializeSocketAdmin: (input: { password: string; mode?: 'development' | 'production' }) => options.initializeSocketAdmin!({ ...input, activate: activateSocketAdmin }) } : {}),
     ...(options.updateSocketAdminMode ? { updateSocketAdminMode: options.updateSocketAdminMode } : {}),
     ...(options.artifactRootDir !== undefined ? { artifactRootDir: options.artifactRootDir } : {}),
+    ...(options.docsRootDir ? { docsRootDir: options.docsRootDir } : {}),
+    sessionArtifacts,
     ...(options.routerHealth ? { routerHealth: options.routerHealth } : {}),
     ...(auth ? { auth } : {}),
     audit,
+    capabilities,
+    metrics,
+    memoStore,
     sessions: store,
     executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     restartStatus: () => restart?.status() ?? {
@@ -276,8 +350,10 @@ export async function startHostServer(
     enqueueUserMessage: async ({ sessionId, text }) => {
       // Persist as a queued follow-up and drain immediately. Delivered as soon
       // as any in-flight turn finishes; no live socket required.
+      const operationId = ulid()
       await messageQueues.enqueue(sessionId, {
-        id: ulid(),
+        id: operationId,
+        operationId,
         text,
         mode: 'queue',
         createdAt: new Date().toISOString(),
@@ -379,6 +455,7 @@ export async function startHostServer(
         text: item.text,
         mode: item.mode,
         createdAt: item.createdAt,
+        ...(item.content ? { content: item.content } : {}),
       })),
     }
   }
@@ -429,13 +506,19 @@ export async function startHostServer(
       await loadQueue(sessionId)
     },
     async enqueue(sessionId, msg, priority) {
+      let changed = false
       await withQueueMutation(sessionId, async () => {
         const queue = [...await loadQueue(sessionId)]
+        // operationId survives ACK loss, reconnect and Host restart. A retry is
+        // already accepted when it is still queued or has a durable user event.
+        if (queue.some((item) => item.operationId === msg.operationId)) return
+        if (await sessionHasUserOperation(store, sessionId, msg.operationId)) return
         if (priority === 'front') queue.unshift(msg)
         else queue.push(msg)
         await persistQueue(sessionId, queue)
+        changed = true
       })
-      emitQueueUpdate(sessionId)
+      if (changed) emitQueueUpdate(sessionId)
     },
     async reorder(sessionId, id, beforeId) {
       let changed = false
@@ -454,15 +537,18 @@ export async function startHostServer(
       if (!changed) return
       emitQueueUpdate(sessionId)
     },
-    async update(sessionId, id, text) {
+    async update(sessionId, id, text, content) {
       let changed = false
       await withQueueMutation(sessionId, async () => {
         const queue = [...await loadQueue(sessionId)]
         const index = queue.findIndex((item) => item.id === id)
         if (index === -1) return
         const trimmed = text.trim()
-        if (trimmed.length === 0) return
-        queue[index] = { ...queue[index]!, text: trimmed }
+        const current = queue[index]!
+        const nextContent = content ?? current.content
+        const hasImages = nextContent?.some((part) => part.type === 'image') ?? false
+        if (trimmed.length === 0 && !hasImages) return
+        queue[index] = { ...current, text: trimmed, ...(nextContent ? { content: nextContent } : {}) }
         await persistQueue(sessionId, queue)
         changed = true
       })
@@ -486,10 +572,10 @@ export async function startHostServer(
     },
     snapshot: queueSnapshot,
     async drain(sessionId) {
-      if (drainingQueues.has(sessionId)) return
+      if (closed || drainingQueues.has(sessionId)) return
       drainingQueues.add(sessionId)
       try {
-        while (true) {
+        while (!closed) {
           await loadQueue(sessionId)
           if ((queuedMessages.get(sessionId)?.length ?? 0) === 0) return
           let record = store.get(sessionId)
@@ -500,30 +586,64 @@ export async function startHostServer(
               return
             }
           }
+          // `state.status` can briefly be `done` while dispatchOne is still
+          // unwinding after an LLM/tool effect. Status alone is therefore not a
+          // safe queue-drain boundary: dispatching here starts the queued turn
+          // before the current serialized turn has actually ended. Wait for the
+          // Loop's per-session tail to settle before re-reading state.
+          if (loop.hasActiveTurn(sessionId)) {
+            await loop.waitForActiveTurn(sessionId)
+            if (closed) return
+            record = store.get(sessionId)
+            if (!record) return
+          }
           if (record.state.status === 'thinking' && !loop.hasActiveLlmCall(sessionId)) {
             await loop.recoverInterruptedLlm(sessionId)
             record = store.get(sessionId)
           }
           if (!record || !isRestingStatus(record.state.status)) return
-          const next = await withQueueMutation(sessionId, async () => {
+          const next = (await loadQueue(sessionId))[0]
+          if (!next || closed) return
+          // Dispatch first and persist the dequeue only after the durable
+          // user_message commit. A crash before commit leaves the item queued;
+          // a crash after commit is recognized by operationId and only removes
+          // the already-dispatched item on recovery.
+          const alreadyDispatched = await sessionHasUserOperation(store, sessionId, next.operationId)
+          if (!alreadyDispatched) {
+            await loop.dispatch(sessionId, {
+              kind: 'user_message',
+              operationId: next.operationId,
+              text: next.text,
+              ...(next.content ? { content: next.content } : {}),
+            }, next.model ? { model: next.model } : undefined)
+          }
+          if (closed) return
+          await withQueueMutation(sessionId, async () => {
+            if (closed) return
             const queue = [...await loadQueue(sessionId)]
-            if (queue.length === 0) return undefined
-            const item = queue.shift()
+            if (queue[0]?.id !== next.id) return
+            queue.shift()
             await persistQueue(sessionId, queue)
-            return item
           })
-          if (!next) return
-          emitQueueUpdate(sessionId)
-          await loop.dispatch(sessionId, {
-            kind: 'user_message',
-            text: next.text,
-            ...(next.content ? { content: next.content } : {}),
-          }, next.model ? { model: next.model } : undefined)
+          if (!closed) emitQueueUpdate(sessionId)
         }
       } finally {
         drainingQueues.delete(sessionId)
       }
     },
+  }
+
+  async function sessionHasUserOperation(
+    sessionStore: SessionStore,
+    sessionId: string,
+    operationId: string,
+  ): Promise<boolean> {
+    const record = sessionStore.get(sessionId)
+    if (!record) return false
+    const parsed = await readSessionLog(record.logPath)
+    return parsed.events.some((entry) =>
+      entry.event.kind === 'user_message' && entry.event.operationId === operationId,
+    )
   }
 
   // Coalesce `server:sessions` broadcasts. The loop's onEvent fires once per
@@ -567,6 +687,20 @@ export async function startHostServer(
 
   const broadcast: LoopBroadcast = {
     onEvent(sessionId, seq, event, effects, state, llmTrace, model, extras) {
+      if (event.kind === 'llm_response') {
+        metrics.increment('agent_kernel_llm_calls_total', 'LLM calls', { provider: llmTrace?.provider ?? 'unknown', outcome: 'ok' })
+        if (event.usage) {
+          metrics.increment('agent_kernel_llm_input_tokens_total', 'LLM input tokens', { provider: llmTrace?.provider ?? 'unknown' }, event.usage.inputTokens)
+          metrics.increment('agent_kernel_llm_output_tokens_total', 'LLM output tokens', { provider: llmTrace?.provider ?? 'unknown' }, event.usage.outputTokens)
+        }
+      } else if (event.kind === 'llm_error') {
+        metrics.increment('agent_kernel_llm_calls_total', 'LLM calls', { provider: llmTrace?.provider ?? 'unknown', outcome: 'error' })
+      }
+      // Terminal events must never overtake buffered text on the socket. The
+      // Dashboard uses them to clear its live tail and install persisted state.
+      if (event.kind === 'llm_response' || event.kind === 'llm_error' || event.kind === 'cancel') {
+        flushTokenDelta(sessionId)
+      }
       const room = sessionRoom(sessionId)
       const slimEffects = effects.map(slimEffect)
       const hasEffectsArtifact = effects.some((effect) => effect.kind === 'call_llm')
@@ -609,7 +743,7 @@ export async function startHostServer(
         cursor: state.cursor,
         state,
       })
-      if (isRestingStatus(state.status) && messageQueues.pending(sessionId) > 0) {
+      if (!closed && isRestingStatus(state.status) && messageQueues.pending(sessionId) > 0) {
         setTimeout(() => {
           void messageQueues.drain(sessionId)
         }, 0)
@@ -622,7 +756,8 @@ export async function startHostServer(
       // Requiring an empty queue makes this fire only on a real turn end.
       const prev = lastSessionStatus.get(sessionId)
       lastSessionStatus.set(sessionId, state.status)
-      if (prev && prev !== 'done' && state.status === 'done' && messageQueues.pending(sessionId) === 0) {
+      const isSubAgentSession = store.get(sessionId)?.parentSessionId !== undefined
+      if (!isSubAgentSession && prev && prev !== 'done' && state.status === 'done' && messageQueues.pending(sessionId) === 0) {
         void pushDispatcher.send({
           kind: 'waiting_for_user',
           sessionId,
@@ -640,16 +775,19 @@ export async function startHostServer(
         name: eff.name,
         input: eff.input,
       })
-      void pushDispatcher.send({
-        kind: 'approval_required',
-        sessionId,
-        title: 'Approval required',
-        body: `${eff.name} is waiting for your approval.`,
-        url: `/#/sessions/${sessionId}`,
-        tag: `approval:${sessionId}:${eff.callId}`,
-      })
+      if (store.get(sessionId)?.parentSessionId === undefined) {
+        void pushDispatcher.send({
+          kind: 'approval_required',
+          sessionId,
+          title: 'Approval required',
+          body: `${eff.name} is waiting for your approval.`,
+          url: `/#/sessions/${sessionId}`,
+          tag: `approval:${sessionId}:${eff.callId}`,
+        })
+      }
     },
     onError(sessionId, message) {
+      flushTokenDelta(sessionId)
       const payload: SessionErrorEvent = {
         sessionId,
         scope: 'llm',
@@ -657,21 +795,27 @@ export async function startHostServer(
       }
       io.of('/dashboard').to(sessionRoom(sessionId)).emit('session:error', payload)
       io.of('/executor').to(sessionRoom(sessionId)).emit('session:error', payload)
-      void pushDispatcher.send({
-        kind: 'session_error',
-        sessionId,
-        title: 'Session error',
-        // Cap the body — the raw error text can be an unbounded stack trace.
-        body: message.length > 240 ? `${message.slice(0, 237)}…` : message,
-        url: `/#/sessions/${sessionId}`,
-        tag: `error:${sessionId}`,
-      })
+      if (store.get(sessionId)?.parentSessionId === undefined) {
+        void pushDispatcher.send({
+          kind: 'session_error',
+          sessionId,
+          title: 'Session error',
+          // Cap the body — the raw error text can be an unbounded stack trace.
+          body: message.length > 240 ? `${message.slice(0, 237)}…` : message,
+          url: `/#/sessions/${sessionId}`,
+          tag: `error:${sessionId}`,
+        })
+      }
     },
     onTokenDelta(sessionId, text) {
-      io.of('/dashboard').to(sessionRoom(sessionId)).emit('session:token_delta', {
-        sessionId,
-        text,
-      })
+      if (text.length === 0) return
+      const pending = tokenDeltaBatches.get(sessionId)
+      if (pending) {
+        pending.text += text
+        return
+      }
+      const timer = setTimeout(() => flushTokenDelta(sessionId), TOKEN_DELTA_BATCH_MS)
+      tokenDeltaBatches.set(sessionId, { text, timer })
     },
     onSubAgentStarted(payload) {
       const room = sessionRoom(payload.parentSessionId)
@@ -825,19 +969,23 @@ export async function startHostServer(
       resolve()
     }
     http.once('error', onError)
-    http.listen(options.port, onListening)
+    http.listen(options.port, options.listenHost, onListening)
   })
   const addr = http.address()
   const port =
     typeof addr === 'object' && addr && 'port' in addr ? addr.port : options.port
 
-  void restart.resumeMarkedSessions()
+  // Finish recovery before accepting the startup path as ready. Detached
+  // recovery raced dashboard hydration/queue drain and could issue two LLM
+  // calls for one durable `thinking` state.
+  await restart.resumeMarkedSessions()
 
   return {
     io,
     http,
     loop,
     store,
+    executorsSnapshot: () => executors.snapshot().map((executor) => workspaceAliases.apply(executor)),
     port,
     close: closeServer,
   }

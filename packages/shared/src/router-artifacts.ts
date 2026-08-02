@@ -204,7 +204,7 @@ function providerFromAdapter(adapterName: string | undefined): string | undefine
 function toolKind(name: string): ToolCatalogArtifact['tools'][number]['kind'] {
   if (name === 'skill') return 'skill_loader'
   if (name === 'agent') return 'sub_agent'
-  if (name === 'memory') return 'host'
+  if (name === 'memory' || name === 'todo_graph') return 'host'
   if (
     name === 'bash' ||
     name === 'bash_output' ||

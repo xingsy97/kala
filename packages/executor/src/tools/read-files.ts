@@ -16,17 +16,37 @@ export const readFilesTool: Tool = {
     const requestedMax = optionalPositiveInt(input, 'max_bytes', 1) ?? DEFAULT_MAX_BYTES
     const maxBytes = Math.min(requestedMax, HARD_MAX_BYTES)
     const chunks: string[] = []
+    let totalBytes = 0
+    const marker = `... read_files output truncated at ${maxBytes} bytes ...`
     for (const file of files) {
       const content = await readOneFile(file, ctx)
-      chunks.push(`===== ${file.path} =====\n${content}`)
-      const total = Buffer.byteLength(chunks.join('\n\n'), 'utf8')
-      if (total > maxBytes) {
-        chunks.push(`... read_files output truncated at ${maxBytes} bytes ...`)
-        break
+      const chunk = `===== ${file.path} =====\n${content}`
+      const separator = chunks.length > 0 ? '\n\n' : ''
+      const chunkBytes = Buffer.byteLength(separator + chunk, 'utf8')
+      if (totalBytes + chunkBytes <= maxBytes) {
+        chunks.push(chunk)
+        totalBytes += chunkBytes
+        continue
       }
+      const separatorBytes = Buffer.byteLength('\n\n', 'utf8')
+      const markerBytes = Buffer.byteLength(marker, 'utf8')
+      const remaining = Math.max(0, maxBytes - totalBytes - markerBytes - separatorBytes * 2)
+      if (remaining > 0) chunks.push(truncateUtf8(chunk, remaining))
+      chunks.push(marker)
+      break
     }
     return chunks.join('\n\n')
   },
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value, 'utf8')
+  if (bytes.length <= maxBytes) return value
+  let end = maxBytes
+  // UTF-8 continuation bytes cannot begin a decoded suffix. Back up to the
+  // start of the final code point so truncation never emits U+FFFD.
+  while (end > 0 && (bytes[end] ?? 0) >= 0x80 && (bytes[end] ?? 0) < 0xc0) end -= 1
+  return bytes.subarray(0, end).toString('utf8')
 }
 
 function parseFiles(input: Record<string, unknown>): ReadFileEntry[] {

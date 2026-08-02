@@ -38,7 +38,7 @@ import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
 import type { ManualModelInput, ManualProviderInput, ModelInfo, ServerSettingsPayload } from '@agent-kernel/shared'
-import { PROTOCOL_VERSION } from '@agent-kernel/shared'
+import { FULL_RUNTIME_CAPABILITIES, PROTOCOL_VERSION, SAAS_RUNTIME_CAPABILITIES } from '@agent-kernel/shared'
 import bcrypt from 'bcryptjs'
 
 import packageJson from '../package.json' with { type: 'json' }
@@ -164,6 +164,12 @@ async function main(): Promise<void> {
     return
   }
 
+  const deploymentMode = process.env.AGENT_KERNEL_DEPLOYMENT_MODE === 'saas' ? 'saas' : 'standalone'
+  const capabilities = deploymentMode === 'saas' ? SAAS_RUNTIME_CAPABILITIES : FULL_RUNTIME_CAPABILITIES
+  if (deploymentMode === 'saas' && argv.some((arg) => /^(eval|benchmark|swebench|terminal-bench|program-bench)/u.test(arg))) {
+    throw new Error('FEATURE_DISABLED: Benchmark/Evaluation CLI is unavailable in SaaS mode')
+  }
+
   const enhancementCommand = parseEnhancementCli(argv)
   if (await runEnhancementCli(enhancementCommand)) return
 
@@ -218,6 +224,7 @@ async function main(): Promise<void> {
   const resolveCurrentAgentModule = () => resolveBuiltinAgentModule({
     skills: skills.skills,
     systemPromptPreset: agentSettings.systemPromptPreset,
+    customSystemPrompt: agentSettings.customSystemPrompt,
     ...(resolveModelContextWindow(registry.defaultModel, registry.models)
       ? { contextLimit: resolveModelContextWindow(registry.defaultModel, registry.models) }
       : {}),
@@ -274,6 +281,7 @@ async function main(): Promise<void> {
     agentPrompt: {
       selectedPreset: agentSettings.systemPromptPreset,
       presets: AGENT_SYSTEM_PROMPT_PRESETS,
+      customPrompt: agentSettings.customSystemPrompt,
       configPath: agentSettingsPath,
     },
     auth: authSettings(effectiveAuth),
@@ -294,6 +302,8 @@ async function main(): Promise<void> {
 
   const server = await startHostServer({
     port,
+    deploymentMode,
+    capabilities,
     sessionsDir,
     llm,
     logger,
@@ -333,7 +343,10 @@ async function main(): Promise<void> {
       return makeSettings()
     },
     updateAgentPrompt: (input) => {
-      agentSettings = { systemPromptPreset: normalizeAgentSystemPromptPreset(input.preset) }
+      agentSettings = {
+        systemPromptPreset: normalizeAgentSystemPromptPreset(input.preset),
+        customSystemPrompt: input.customPrompt ?? agentSettings.customSystemPrompt,
+      }
       writeAgentRuntimeSettings(agentSettingsPath, agentSettings)
       resolvedAgentModule = resolveCurrentAgentModule()
       return makeSettings()
@@ -384,6 +397,7 @@ async function main(): Promise<void> {
     ...(hookRunner ? { hookRunner } : {}),
     skills,
     artifactRootDir,
+    ...(process.env.AGENT_KERNEL_DOCS_DIR ? { docsRootDir: process.env.AGENT_KERNEL_DOCS_DIR } : {}),
     routerHealth: () => ({
       generatedAt: new Date().toISOString(),
       providers: healthRegistry.entries(),
@@ -394,6 +408,8 @@ async function main(): Promise<void> {
 
   const startupDetails = {
     port: server.port,
+    deploymentMode,
+    capabilities,
     sessionsDir,
     llm: llm.name,
     models: registry.models.map((m) => m.id),

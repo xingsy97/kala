@@ -53,12 +53,14 @@ function normalizeQueuedMessage(raw: unknown): QueuedUserMessage | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const record = raw as Record<string, unknown>
   const id = stringValue(record.id)
+  const operationId = stringValue(record.operationId)
   const text = stringValue(record.text)
   const createdAt = stringValue(record.createdAt)
   const mode = record.mode === 'queue' || record.mode === 'steer' ? record.mode : undefined
   if (!id || !text || !createdAt || !mode) return undefined
   return {
     id,
+    operationId: operationId ?? id,
     text,
     mode,
     createdAt,
@@ -70,6 +72,7 @@ function normalizeQueuedMessage(raw: unknown): QueuedUserMessage | undefined {
 function serializeQueuedMessage(item: QueuedUserMessage): Record<string, unknown> {
   return {
     id: item.id,
+    operationId: item.operationId,
     text: item.text,
     mode: item.mode,
     createdAt: item.createdAt,

@@ -59,6 +59,14 @@ export class SandboxError extends Error {
   }
 }
 
+export function isPathInsideRoot(canonical: string, root: string, platform: NodeJS.Platform = process.platform): boolean {
+  const normalize = (value: string): string => platform === 'win32' ? value.toLowerCase() : value
+  const candidate = normalize(canonical)
+  const normalizedRoot = normalize(root)
+  const separator = platform === 'win32' ? '\\' : sep
+  return candidate === normalizedRoot || candidate.startsWith(normalizedRoot.endsWith(separator) ? normalizedRoot : normalizedRoot + separator)
+}
+
 async function canonicalizeMaybeMissing(p: string): Promise<string> {
   if (existsSync(p)) return await realpath(p)
   let cur = p
@@ -127,8 +135,7 @@ export function createSandbox(options: SandboxOptions): Sandbox {
       const canonical = await canonicalizeMaybeMissing(absolute)
       if (canonicalRoots.length === 0) return canonical
       for (const root of canonicalRoots) {
-        if (canonical === root) return canonical
-        if (canonical.startsWith(root + sep)) return canonical
+        if (isPathInsideRoot(canonical, root)) return canonical
       }
       throw new SandboxError(
         `EACCES: outside sandbox: ${input}`,

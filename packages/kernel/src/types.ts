@@ -249,6 +249,8 @@ export type AgentState = AgentStateCommon & AgentStatePhase
 
 export type UserMessageEvent = {
   kind: 'user_message'
+  /** Stable accepted-operation identity used for durable exactly-once Queue drain. */
+  operationId?: string
   text?: string
   content?: readonly MessageContent[]
 }
@@ -323,6 +325,8 @@ export type MessagesReplacedEvent = {
     end: number
   }
   replacementMessages: readonly Message[]
+  /** Continue the autonomous turn from the compacted handoff. */
+  resume?: boolean
   artifactRef?: EventArtifactRef
 }
 

@@ -125,12 +125,12 @@ describe('RestartCoordinator', () => {
     expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({ phase: 'completed' })
   })
 
-  it('reports a spawn failure instead of exiting', async () => {
-    const { coordinator, options } = harness({ command: ['/path/that/does/not/exist'] })
+  it('closes and exits for the service supervisor without spawning an overlapping Host', async () => {
+    const { coordinator, options } = harness({ command: ['/path/that/must/not/be-spawned'] })
     await coordinator.request({ mode: 'force' })
-    await vi.waitFor(() => expect(coordinator.status().last?.phase).toBe('failed'))
+    await vi.waitFor(() => expect(options.exitProcess).toHaveBeenCalledWith(0))
 
-    expect(coordinator.status().last?.error).toMatch(/ENOENT/)
-    expect(options.exitProcess).not.toHaveBeenCalled()
+    expect(options.closeServer).toHaveBeenCalledOnce()
+    expect(coordinator.status().last?.phase).not.toBe('failed')
   })
 })

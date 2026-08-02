@@ -25,7 +25,7 @@ import process from 'node:process'
 
 import type { ManualModelInput, ManualProviderInput, ModelInfo, ModelSource, ProviderWire } from '@agent-kernel/shared'
 
-import { normalizeAgentSystemPromptPreset, type AgentSystemPromptPreset } from './builtin-tools.js'
+import { DEFAULT_CUSTOM_SYSTEM_PROMPT, normalizeAgentSystemPromptPreset, type AgentSystemPromptPreset } from './builtin-tools.js'
 import type { HookConfig, HookEvent } from './extensions/hooks.js'
 import { knownContextWindow } from './model-capabilities.js'
 
@@ -53,6 +53,7 @@ export type RuntimeConfig = {
 
 export type AgentRuntimeSettings = {
   systemPromptPreset: AgentSystemPromptPreset
+  customSystemPrompt: string
 }
 
 export type LoadRuntimeConfigOptions = {
@@ -416,18 +417,26 @@ export function defaultAgentSettingsPath(home = homedir()): string {
 
 export function loadAgentRuntimeSettings(path = defaultAgentSettingsPath()): AgentRuntimeSettings {
   const raw = tryReadFile(path)
-  if (raw === undefined) return { systemPromptPreset: 'codex' }
+  if (raw === undefined) return { systemPromptPreset: 'codex', customSystemPrompt: DEFAULT_CUSTOM_SYSTEM_PROMPT }
   try {
-    const parsed = JSON.parse(raw) as { systemPromptPreset?: unknown }
-    return { systemPromptPreset: normalizeAgentSystemPromptPreset(parsed.systemPromptPreset) }
+    const parsed = JSON.parse(raw) as { systemPromptPreset?: unknown; customSystemPrompt?: unknown }
+    return {
+      systemPromptPreset: normalizeAgentSystemPromptPreset(parsed.systemPromptPreset),
+      customSystemPrompt: typeof parsed.customSystemPrompt === 'string' && parsed.customSystemPrompt.trim()
+        ? parsed.customSystemPrompt
+        : DEFAULT_CUSTOM_SYSTEM_PROMPT,
+    }
   } catch {
-    return { systemPromptPreset: 'codex' }
+    return { systemPromptPreset: 'codex', customSystemPrompt: DEFAULT_CUSTOM_SYSTEM_PROMPT }
   }
 }
 
 export function writeAgentRuntimeSettings(path: string, settings: AgentRuntimeSettings): void {
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify({ systemPromptPreset: normalizeAgentSystemPromptPreset(settings.systemPromptPreset) }, null, 2)}\n`, 'utf8')
+  writeFileSync(path, `${JSON.stringify({
+    systemPromptPreset: normalizeAgentSystemPromptPreset(settings.systemPromptPreset),
+    customSystemPrompt: settings.customSystemPrompt,
+  }, null, 2)}\n`, 'utf8')
 }
 
 function applyManualModels(

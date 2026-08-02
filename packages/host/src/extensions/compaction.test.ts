@@ -158,6 +158,31 @@ describe('compaction extension', () => {
     expect(skips.filter((s) => s.payload.reason === 'circuit_breaker_open').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('allows one automatic half-open probe after the transcript cursor advances', async () => {
+    let call = 0
+    const llm: LLMAdapter = {
+      name: 'half-open-mock',
+      async call(params) {
+        call += 1
+        if (call === 1) return turnReply()
+        if (call <= 4) throw new Error('temporary summarizer outage')
+        if (params.systemPrompt?.includes('CONTEXT CHECKPOINT COMPACTION')) return summaryReply()
+        return turnReply()
+      },
+    }
+    const loop = runHostLoop({ store, llm, tools: nullTools(), broadcast: silentBroadcast() })
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'hi' })
+    for (let i = 0; i < 3; i++) await loop.compact(sessionId, 'auto')
+    await loop.compact(sessionId, 'auto')
+    const skipsBefore = await readSkipEvents(store.get(sessionId)!.logPath)
+    expect(skipsBefore.some((entry) => entry.payload.reason === 'circuit_breaker_open')).toBe(true)
+
+    await loop.dispatch(sessionId, { kind: 'user_message', text: 'new generation' })
+    const applied = await loop.compact(sessionId, 'auto')
+    expect(applied).toBe(true)
+    expect((await readReplacedEvents(store.get(sessionId)!.logPath).then((events) => events.length))).toBeGreaterThan(0)
+  })
+
   it('manual bypasses the open breaker and success closes it', async () => {
     let call = 0
     const llm: LLMAdapter = {
@@ -348,6 +373,7 @@ describe('compaction extension', () => {
     const replaced = parsed.events.find((e) => e.event.kind === 'messages_replaced')?.event
     expect(replaced?.replaceRange).toEqual({ start: 1, end: 4 })
     expect(replaced?.replacementMessages).toHaveLength(2)
+    expect(replaced?.resume).toBeUndefined()
     expect(store.get(sessionId)!.state.messages.map((m) => m.role)).toEqual(['system', 'user', 'user', 'user', 'assistant'])
     const meta = parsed.runtimeMetadata.find((entry) => entry.action === 'compaction_applied')
     expect(meta?.payload.previousSummaryChars).toBeGreaterThan(0)

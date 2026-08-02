@@ -30,6 +30,7 @@ export type DashboardActor =
   | { kind: 'anonymous' }
   | { kind: 'token' }
   | { kind: 'github_user'; login: string; id?: number }
+  | { kind: 'ingress'; principal: string; organizationId: string; role: 'owner' | 'admin' | 'member' | 'viewer' }
 
 export type ExecutorIdentity = {
   accepted: boolean
@@ -57,6 +58,10 @@ export function authenticateDashboardHandshake(
   req: IncomingMessage,
   config: AuthConfig | undefined,
 ): { ok: true; actor: DashboardActor } | { ok: false; reason: string } {
+  const principal = header(req, 'x-agent-runlab-principal')
+  const organizationId = header(req, 'x-agent-runlab-organization-id')
+  const role = header(req, 'x-agent-runlab-organization-role')
+  if (principal && organizationId && isOrganizationRole(role)) return { ok: true, actor: { kind: 'ingress', principal, organizationId, role } }
   if (!config?.github?.required && !config?.sharedToken) return { ok: true, actor: { kind: 'anonymous' } }
   if (config.github?.required) {
     const session = readGithubSession(req, config.github)
@@ -192,6 +197,15 @@ export function authSettings(config: AuthConfig | undefined): {
       inviteCount: invites.filter((invite) => !invite.revoked).length,
     },
   }
+}
+
+function header(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function isOrganizationRole(value: string | undefined): value is 'owner' | 'admin' | 'member' | 'viewer' {
+  return value === 'owner' || value === 'admin' || value === 'member' || value === 'viewer'
 }
 
 function readCookie(req: IncomingMessage, name: string): string | undefined {

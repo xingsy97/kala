@@ -308,6 +308,54 @@ describe('SessionStore.listSummaries', () => {
     expect(summary?.lastEventAt).toBeUndefined()
   })
 
+  it('keeps the first user message as the title after state replacement and reload', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({
+      sessionId: 'sess-compacted-summary',
+      defaultConfig: config,
+    })
+    const afterFirstMessage = {
+      ...record.state,
+      cursor: record.state.cursor + 1,
+      messages: [
+        ...record.state.messages,
+        { role: 'user' as const, content: [{ type: 'text' as const, text: 'original user request' }] },
+      ],
+    }
+    await store.record(
+      record.sessionId,
+      { kind: 'user_message', text: 'original user request' },
+      [],
+      afterFirstMessage,
+    )
+    await store.record(
+      record.sessionId,
+      {
+        kind: 'messages_replaced',
+        reason: 'compaction',
+        replaceRange: { start: 1, end: 2 },
+        replacementMessages: [
+          { role: 'user', content: [{ type: 'text', text: 'Another LLM produced a summary' }] },
+        ],
+      },
+      [],
+      {
+        ...afterFirstMessage,
+        cursor: afterFirstMessage.cursor + 1,
+        messages: [
+          record.state.messages[0]!,
+          { role: 'user', content: [{ type: 'text', text: 'Another LLM produced a summary' }] },
+        ],
+      },
+    )
+
+    const [summary] = await store.listSummaries()
+    const reloaded = await new SessionStore(dir).load(record.sessionId, { recoverDangling: false })
+
+    expect(summary?.firstUserMessage).toBe('original user request')
+    expect(reloaded.firstUserMessage).toBe('original user request')
+  })
+
   it('reuses cached disk summaries until a log changes', async () => {
     const store = new SessionStore(dir)
     const sessionId = 'sess-disk-summary'
@@ -555,5 +603,28 @@ describe('SessionStore crash recovery', () => {
     const parsed = await readSessionLog(rec.logPath)
     expect(parsed.events).toHaveLength(2)
     expect(parsed.events[1]!.event.kind).toBe('llm_response')
+  })
+
+  it('rejects concurrent stale transitions instead of appending duplicate cursors', async () => {
+    const sessionId = 'sess-concurrent-record'
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId, config })
+    const firstEvent = { kind: 'user_message', text: 'first' } as const
+    const secondEvent = { kind: 'user_message', text: 'second' } as const
+    const first = step(record.state, firstEvent, record.config)
+    const second = step(record.state, secondEvent, record.config)
+
+    const settled = await Promise.allSettled([
+      store.record(sessionId, firstEvent, first.effects, first.next),
+      store.record(sessionId, secondEvent, second.effects, second.next),
+    ])
+
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    expect(String(rejected?.reason)).toContain('stale Session transition')
+    const parsed = await readSessionLog(record.logPath)
+    expect(parsed.events).toHaveLength(1)
+    expect(parsed.events[0]?.seq).toBe(1)
+    expect(record.state.cursor).toBe(1)
   })
 })

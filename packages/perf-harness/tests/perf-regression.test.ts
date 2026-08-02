@@ -66,10 +66,20 @@ describe('perf-harness regressions', () => {
     const tsx = existsSync(tsxBin) ? tsxBin : null
     if (!tsx) return // covered by the skip above
     const { stdout } = await execFileAsync(tsx, [cli], { cwd: pkgRoot })
-    for (const name of ['streaming-markdown-flicker', 'status-indicator-jank', 'inspector-open-cost', 'mobile-inspector-overflow']) {
+    for (const name of ['streaming-scroll-anchor', 'streaming-scroll-anchor-mobile', 'streaming-markdown-flicker', 'status-indicator-jank', 'inspector-open-cost', 'mobile-inspector-overflow']) {
       expect(stdout).toContain(name)
     }
   })
+
+  runIf(
+    'streaming keeps the historical viewport anchored after user scroll-up',
+    async () => {
+      const { code, stdout } = await runScenario('streaming-scroll-anchor')
+      expect(stdout).toContain('PASS')
+      expect(code).toBe(0)
+    },
+    SCENARIO_TIMEOUT_MS,
+  )
 
   runIf(
     'streaming markdown keeps already-rendered blocks stable',

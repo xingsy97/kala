@@ -49,6 +49,7 @@ export type PushDispatcher = {
    * can display *why* delivered=0 without needing host logs.
    */
   sendRawDetailed: (payload: PushEventPayload) => Promise<PushSendOutcome[]>
+  sendToDevice: (deviceId: string, payload: PushEventPayload) => Promise<PushSendOutcome[]>
   /** Diagnostic surface for the settings page. */
   status: () => { configured: true; subscribers: number } | { configured: false }
 }
@@ -56,6 +57,8 @@ export type PushDispatcher = {
 export function createPushDispatcher(input: {
   store: PushSubscriptionStore
   vapid: VapidKeys | null
+  /** Product notifications are skipped while any dashboard is actively used. */
+  shouldSuppress?: () => boolean
   logger?: (message: string, meta?: Record<string, unknown>) => void
 }): PushDispatcher {
   const { store, vapid } = input
@@ -76,8 +79,8 @@ export function createPushDispatcher(input: {
   return {
     status: () => vapid ? { configured: true, subscribers: store.size() } : { configured: false },
     send: async (payload: PushEventPayload): Promise<number> => {
-      if (!vapid) return 0
-      const targets = store.list().filter((sub) => matchesKind(sub.kinds, payload.kind))
+      if (!vapid || input.shouldSuppress?.()) return 0
+      const targets = store.list().filter((sub) => sub.enabled !== false && matchesKind(sub.kinds, payload.kind))
       const outcomes = await fanout(targets, payload)
       return outcomes.filter((o) => o.ok).length
     },
@@ -89,6 +92,10 @@ export function createPushDispatcher(input: {
     sendRawDetailed: async (payload: PushEventPayload): Promise<PushSendOutcome[]> => {
       if (!vapid) return []
       return fanout(store.list(), payload)
+    },
+    sendToDevice: async (deviceId, payload) => {
+      if (!vapid) return []
+      return fanout(store.list().filter((sub) => sub.deviceId === deviceId && sub.enabled !== false), payload)
     },
   }
 
