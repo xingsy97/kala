@@ -4,6 +4,7 @@ import {
   buildDeployPlan,
   installScript,
   releaseFiles,
+  rollbackScript,
   remotePathForShell,
   rsyncUploadArgs,
   seedUploadScript,
@@ -27,6 +28,13 @@ function fakeFs(names) {
 }
 
 describe('deploy plan', () => {
+  it('keeps the LXD deployment contract available from deploy:remote', async () => {
+    const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('./deploy-remote.mjs', import.meta.url), 'utf8'))
+    expect(source).toContain("optionValueLocal(rawArgs, '--lxd')")
+    expect(source).toContain('sha256sum -c SHA256SUMS --ignore-missing')
+    expect(source).toContain('deploy failed; rolling back LXD')
+    expect(source).toContain('systemctl is-active --quiet')
+  })
   it('discovers only deployable release assets in stable order', () => {
     const fs = fakeFs(['z.tmp', 'run.sh', ...REQUIRED, 'manifest.json', 'agent-runlab-model-catalog-seed.json'])
     expect(releaseFiles(`${ROOT}/release`, fs)).toEqual([
@@ -61,6 +69,21 @@ describe('deploy plan', () => {
     expect(plan.pollMs).toBe(2000)
     expect(plan.seedCommand).toContain('cp -p "$REMOTE_BIN/bundle-dashboard-with-runtime.cjs"')
     expect(plan.installCommand).toContain('agent-kernel-executor.cjs')
+    expect(plan.service).toBeUndefined()
+    expect(plan.sudo).toBe(false)
+  })
+
+  it('supports non-interactive sudo service recovery options', () => {
+    const fs = fakeFs([...REQUIRED])
+    const plan = buildDeployPlan({
+      args: ['--ssh', 'target', '--host-url', 'http://127.0.0.1:3000', '--remote-bin', '~/bin', '--service', 'agent-runlab-host', '--sudo'],
+      env: {},
+      root: ROOT,
+      ...fs,
+    })
+    expect(plan.service).toBe('agent-runlab-host')
+    expect(plan.sudo).toBe(true)
+    expect(plan.rollbackCommand).toContain("sudo -n systemctl restart 'agent-runlab-host'")
   })
 
   it('requires core release assets before deployment can run', () => {
@@ -88,6 +111,19 @@ describe('deploy plan', () => {
     expect(script).toContain('chmod +x "$REMOTE_BIN/run.sh"')
     expect(script).not.toContain('chmod +x "$REMOTE_BIN/manifest.json"')
     expect(script).toContain('cp -p "$REMOTE_BIN/agent-runlab-model-catalog-seed.json" "$MODEL_CATALOG_DIR/models-dev-seed.json"')
+    expect(script).toContain('sha256sum -c SHA256SUMS --ignore-missing')
+    expect(script).toContain('>> "$BACKUP_DIR/.deployed-files"')
+    expect(script.indexOf('.agent-kernel-backup-current')).toBeLessThan(script.indexOf('mv "$UPLOAD_DIR/agent-kernel-executor.cjs"'))
+  })
+
+  it('builds a rollback script that restores the last backup and restarts the service', () => {
+    const script = rollbackScript('~/bin', 'agent-runlab-host')
+    expect(script).toContain('.agent-kernel-backup-current')
+    expect(script).toContain('while IFS= read -r name')
+    expect(script).toContain('rm -f "$REMOTE_BIN/$name"')
+    expect(script).toContain('cp -p "$BACKUP_DIR/$name" "$REMOTE_BIN/$name"')
+    expect(script).toContain("systemctl restart 'agent-runlab-host'")
+    expect(rollbackScript('~/bin', 'agent-runlab-host', true)).toContain("sudo -n systemctl restart 'agent-runlab-host'")
   })
 
   it('seeds the upload directory from installed assets for incremental transfer', () => {

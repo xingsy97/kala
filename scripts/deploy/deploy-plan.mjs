@@ -34,6 +34,8 @@ export function buildDeployPlan({ args, env, root, now = new Date(), exists = ex
   const restartTimeoutMs = positiveNumber(options.restartTimeoutMs ?? env.AK_DEPLOY_RESTART_TIMEOUT_MS ?? 600000, '--restart-timeout-ms')
   const statusTimeoutMs = positiveNumber(options.statusTimeoutMs ?? env.AK_DEPLOY_STATUS_TIMEOUT_MS ?? restartTimeoutMs + 60000, '--status-timeout-ms')
   const pollMs = positiveNumber(options.pollMs ?? env.AK_DEPLOY_POLL_MS ?? 2000, '--poll-ms')
+  const service = options.service ?? env.AK_DEPLOY_SERVICE
+  const sudo = options.sudo === true || /^(?:1|true|yes|on)$/iu.test(env.AK_DEPLOY_SUDO ?? '')
 
   if (!RESTART_MODES.has(restartMode)) throw new Error('--restart-mode must be checkpoint, when_idle, or force')
 
@@ -65,6 +67,9 @@ export function buildDeployPlan({ args, env, root, now = new Date(), exists = ex
     uploadDirShell: remotePathForShell(uploadDir),
     seedCommand: seedUploadScript(remoteBin, uploadDir, files),
     installCommand: installScript(remoteBin, uploadDir, files),
+    rollbackCommand: rollbackScript(remoteBin, service, sudo),
+    service,
+    sudo,
   }
 }
 
@@ -85,11 +90,15 @@ export function installScript(remoteBinDir, remoteUploadDir, names) {
     `UPLOAD_DIR=${remotePathForShell(remoteUploadDir)}`,
     'BACKUP_DIR="$REMOTE_BIN/.agent-kernel-backup-$(date +%Y%m%d%H%M%S)"',
     'mkdir -p "$REMOTE_BIN" "$BACKUP_DIR"',
+    'cd "$UPLOAD_DIR"',
+    'sha256sum -c SHA256SUMS --ignore-missing',
     'MODEL_CATALOG_DIR="$HOME/.local/share/agent-runlab/model-catalog"',
   ]
   for (const name of names) {
+    lines.push(`printf '%s\\n' ${sh(name)} >> "$BACKUP_DIR/.deployed-files"`)
     lines.push(`if [ -e "$REMOTE_BIN/${name}" ]; then cp -p "$REMOTE_BIN/${name}" "$BACKUP_DIR/${name}"; fi`)
   }
+  lines.push('printf "%s\\n" "$BACKUP_DIR" > "$REMOTE_BIN/.agent-kernel-backup-current"')
   for (const name of names) {
     lines.push(`mv "$UPLOAD_DIR/${name}" "$REMOTE_BIN/${name}"`)
   }
@@ -104,6 +113,18 @@ export function installScript(remoteBinDir, remoteUploadDir, names) {
   lines.push('printf "%s\n" "$UPLOAD_DIR" > "$REMOTE_BIN/.agent-kernel-upload-current"')
   lines.push('rmdir "$UPLOAD_DIR" 2>/dev/null || true')
   return lines.join('\n')
+}
+
+export function rollbackScript(remoteBinDir, service, sudo = false) {
+  return [
+    'set -euo pipefail',
+    `REMOTE_BIN=${remotePathForShell(remoteBinDir)}`,
+    'BACKUP_DIR=$(cat "$REMOTE_BIN/.agent-kernel-backup-current")',
+    '[ -d "$BACKUP_DIR" ]',
+    '[ -f "$BACKUP_DIR/.deployed-files" ]',
+    'while IFS= read -r name; do rm -f "$REMOTE_BIN/$name"; [ ! -e "$BACKUP_DIR/$name" ] || cp -p "$BACKUP_DIR/$name" "$REMOTE_BIN/$name"; done < "$BACKUP_DIR/.deployed-files"',
+    ...(service ? [`${sudo ? 'sudo -n ' : ''}systemctl restart ${sh(service)}`] : []),
+  ].join('\n')
 }
 
 export function seedUploadScript(remoteBinDir, remoteUploadDir, names) {
@@ -147,6 +168,8 @@ export function parseOptions(args) {
     restartTimeoutMs: optionValue(normalized, '--restart-timeout-ms'),
     statusTimeoutMs: optionValue(normalized, '--status-timeout-ms'),
     pollMs: optionValue(normalized, '--poll-ms'),
+    service: optionValue(normalized, '--service'),
+    sudo: normalized.includes('--sudo'),
   }
 }
 
