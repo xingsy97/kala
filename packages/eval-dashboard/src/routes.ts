@@ -1,14 +1,14 @@
 export const ROUTES = [
-  { path: '/', id: 'overview', label: 'Overview', eyebrow: 'System pulse' },
-  { path: '/library', id: 'library', label: 'Test Library', eyebrow: 'Immutable inputs' },
-  { path: '/runs', id: 'runs', label: 'Runs', eyebrow: 'Execution control' },
-  { path: '/leaderboard', id: 'leaderboard', label: 'Leaderboard', eyebrow: 'Native ranking' },
-  { path: '/analysis', id: 'analysis', label: 'Analysis', eyebrow: 'Trace intelligence' },
-  { path: '/defects', id: 'defects', label: 'Defects', eyebrow: 'Failure evidence' },
-  { path: '/regression', id: 'regression', label: 'Regression', eyebrow: 'Release gates' },
-  { path: '/insights', id: 'insights', label: 'Insights', eyebrow: 'Product impact' },
-  { path: '/reports', id: 'reports', label: 'Reports', eyebrow: 'Immutable exports' },
-  { path: '/administration', id: 'administration', label: 'Administration', eyebrow: 'Policy & audit' },
+  { path: '/', id: 'overview', label: 'Overview', eyebrow: 'Quality and readiness' },
+  { path: '/library', id: 'library', label: 'Test Library', eyebrow: 'Datasets and task sets' },
+  { path: '/runs', id: 'runs', label: 'Runs', eyebrow: 'Create and monitor' },
+  { path: '/leaderboard', id: 'leaderboard', label: 'Leaderboard', eyebrow: 'Compare systems' },
+  { path: '/analysis', id: 'analysis', label: 'Analysis', eyebrow: 'Scores and patterns' },
+  { path: '/defects', id: 'defects', label: 'Defects', eyebrow: 'Review verified issues' },
+  { path: '/regression', id: 'regression', label: 'Regression', eyebrow: 'Validate releases' },
+  { path: '/insights', id: 'insights', label: 'Insights', eyebrow: 'Prioritized actions' },
+  { path: '/reports', id: 'reports', label: 'Reports', eyebrow: 'Create and share' },
+  { path: '/administration', id: 'administration', label: 'Administration', eyebrow: 'Access and operations' },
 ] as const
 
 export type RouteId = typeof ROUTES[number]['id']

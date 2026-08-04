@@ -105,10 +105,18 @@ describe('DashboardControlPlane browser security', () => {
   })
 
   it('maps authorization failures and redacts internal HTTP details', () => {
-    expect(errorMessage(new ControlPlaneHttpError(401, 'TOKEN_EXPIRED', 'issuer details'))).toContain('Sign in or configure')
-    expect(errorMessage(new ControlPlaneHttpError(403, 'POLICY_DENIED', 'internal policy id'))).toContain('Permission denied')
-    expect(errorMessage(new ControlPlaneHttpError(500, 'DB_FAILURE', 'database host secret'))).toBe('Control Plane request failed.')
+    expect(errorMessage(new ControlPlaneHttpError(401, 'TOKEN_EXPIRED', 'issuer details'))).toContain('Sign in')
+    expect(errorMessage(new ControlPlaneHttpError(403, 'POLICY_DENIED', 'internal policy id'))).toContain('permission')
+    expect(errorMessage(new ControlPlaneHttpError(500, 'DB_FAILURE', 'database host secret'))).toContain('could not complete')
     expect(errorMessage(new ControlPlaneHttpError(500, 'DB_FAILURE', 'database host secret'))).not.toContain('database')
+  })
+
+  it('turns protocol validation arrays and fenced leases into actionable messages', () => {
+    const raw = new Error(JSON.stringify([{ code: 'custom', message: 'started analysis jobs require fenced lease authority', path: [] }]))
+    expect(errorMessage(raw)).toContain('no longer owns its lease')
+    expect(errorMessage(raw)).toContain('start a new analysis')
+    expect(errorMessage(raw)).not.toContain('"code"')
+    expect(errorMessage(raw)).not.toContain('fenced lease authority')
   })
 })
 

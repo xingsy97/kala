@@ -15,18 +15,18 @@ export function Administration({ data, capabilities, controlPlane, locale, reten
   const administration = object(value.administration);
   const security = object(administration.security);
   const maintenance = object(administration.maintenance);
-  const [reloadConfirmation, setReloadConfirmation] = useState("");
+  const [reloadConfirmed, setReloadConfirmed] = useState(false);
   const [reloadMessage, setReloadMessage] = useState("");
   const [reloading, setReloading] = useState(false);
   const reloadLock = useRef(false);
   const reload = async () => {
-    if (reloadConfirmation !== "reload-security-registry" || reloadLock.current) return;
+    if (!reloadConfirmed || reloadLock.current) return;
     reloadLock.current = true;
     setReloading(true);
     try {
-      await controlPlane.reloadSecurity(reloadConfirmation);
+      await controlPlane.reloadSecurity("reload-security-registry");
       setReloadMessage(translate(locale, "admin.reloadSuccess"));
-      setReloadConfirmation("");
+      setReloadConfirmed(false);
     } catch (error) {
       setReloadMessage(errorMessage(error));
     } finally {
@@ -45,15 +45,17 @@ export function Administration({ data, capabilities, controlPlane, locale, reten
     <section className="split">
       <div className="panel">
         <PanelHeading title={translate(locale, "admin.authTitle")} eyebrow={translate(locale, "admin.authEyebrow")} />
-        <Rows items={[...array(security.principals), ...array(security.serviceKeys)]} fields={["principalId", "kind", "role", "serviceId", "scopes", "keyCount", "status"]} />
+        <Rows items={[...array(security.principals), ...array(security.serviceKeys)]} fields={["principalId", "kind", "role", "scopes", "status"]} />
       </div>
       <div className="panel">
         <PanelHeading title={translate(locale, "admin.trustTitle")} eyebrow={translate(locale, "admin.trustEyebrow")} />
-        <Rows items={array(security.trustKeys)} fields={["keyReference", "algorithm", "scopes", "status", "validFrom", "validUntil", "rotatedToKeyReference", "revokedAt"]} />
-        <label>{translate(locale, "admin.reloadPrompt")} <code>reload-security-registry</code>
-          <input aria-label={translate(locale, "admin.reloadLabel")} value={reloadConfirmation} onChange={(event) => setReloadConfirmation(event.target.value)} />
+        <Rows items={array(security.trustKeys)} fields={["keyReference", "scopes", "status", "validUntil"]} />
+        <p>Reload access and trust configuration from the reviewed server files. Existing sessions may lose access if the configuration changed.</p>
+        <label className="check-field">
+          <input aria-label="Confirm security registry reload" type="checkbox" checked={reloadConfirmed} onChange={(event) => setReloadConfirmed(event.target.checked)} />
+          I understand that this may change active access permissions.
         </label>
-        <button disabled={reloading || reloadConfirmation !== "reload-security-registry"} aria-busy={reloading} onClick={() => void reload()}>{translate(locale, "admin.reloadAction")}</button>
+        <button disabled={reloading || !reloadConfirmed} aria-busy={reloading} onClick={() => void reload()}>{translate(locale, "admin.reloadAction")}</button>
         {reloadMessage && <p role="status">{reloadMessage}</p>}
       </div>
     </section>
@@ -62,16 +64,16 @@ export function Administration({ data, capabilities, controlPlane, locale, reten
       <AdminPanel locale={locale} title="admin.backupTitle" eyebrow="admin.backupEyebrow"><Rows items={[...array(maintenance.backups), ...array(maintenance.restoreDrills)]} fields={["backupId", "createdAt", "verifiedAt", "transactionCount", "artifactCount", "rtoTargetSeconds", "rtoObservedSeconds", "rtoMet"]} /></AdminPanel>
     </section>
     <section className="split">
-      <AdminPanel locale={locale} title="admin.agentRegistry" eyebrow="admin.noCredentials"><Rows items={pageItems(value.agents)} fields={["variantId", "backendId", "agentVersion", "model.modelId", "credentialRefs"]} /></AdminPanel>
-      <AdminPanel locale={locale} title="admin.workerRegistry" eyebrow="admin.capacity"><Rows items={[...pageItems(value.workers), ...pageItems(value.sandboxes)]} fields={["registration.workerId", "registration.workerVersion", "session.status", "session.activeLeaseCount", "heartbeatAt", "registration.readiness.checkedAt", "provider", "imageDigest", "capacity"]} /></AdminPanel>
+      <AdminPanel locale={locale} title="admin.agentRegistry" eyebrow="admin.noCredentials"><Rows items={pageItems(value.agents)} fields={["variantId", "backendId", "agentVersion", "model.modelId"]} /></AdminPanel>
+      <AdminPanel locale={locale} title="admin.workerRegistry" eyebrow="admin.capacity"><Rows items={[...pageItems(value.workers), ...pageItems(value.sandboxes)]} fields={["registration.workerId", "session.status", "session.activeLeaseCount", "heartbeatAt", "provider", "capacity"]} /></AdminPanel>
     </section>
     <section className="split">
-      <AdminPanel locale={locale} title="admin.datasetCatalog" eyebrow="admin.provenance"><Rows items={pageItems(value.datasets)} fields={["datasetId", "version", "split", "totalItems", "manifestHash"]} /></AdminPanel>
+      <AdminPanel locale={locale} title="admin.datasetCatalog" eyebrow="admin.provenance"><Rows items={pageItems(value.datasets)} fields={["datasetId", "version", "split", "totalItems"]} /></AdminPanel>
       <AdminPanel locale={locale} title="admin.verifierVersions" eyebrow="admin.analysisAuthority"><Rows items={[...pageItems(value.verifiers), ...pageItems(value.detectors)]} fields={["verifierId", "verifierVersion", "id"]} /></AdminPanel>
     </section>
     <section className="split">
       <AdminPanel locale={locale} title="admin.protocolPolicy" eyebrow="admin.compatibility">
-        <dl className="definition-list"><dt>Control Plane</dt><dd>{capabilities?.controlPlaneVersion ?? "—"}</dd><dt>Protocols</dt><dd>{capabilities?.protocolVersions.join(", ") ?? "—"}</dd><dt>{translate(locale, "admin.cleanCutover")}</dt><dd>{capabilities?.cleanCutover ? translate(locale, "admin.enforced") : translate(locale, "admin.unavailable")}</dd><dt>{translate(locale, "admin.legacy")}</dt><dd>{capabilities?.deprecatedCompatibilitySurfaces.length ?? "—"}</dd><dt>{translate(locale, "admin.destructive")}</dt><dd>{translate(locale, "admin.exactConfirmation")}</dd></dl>
+        <dl className="definition-list"><dt>Service version</dt><dd>{capabilities?.controlPlaneVersion ?? "Not available"}</dd><dt>Compatibility</dt><dd>{capabilities?.cleanCutover ? "Current" : "Review required"}</dd><dt>Deprecated integrations</dt><dd>{capabilities?.deprecatedCompatibilitySurfaces.length ?? 0}</dd><dt>Destructive actions</dt><dd>Explicit confirmation required</dd></dl>
       </AdminPanel>
       <AdminPanel locale={locale} title="admin.governanceTitle" eyebrow="admin.governanceEyebrow"><Rows items={pageItems(value.retention)} fields={["policyId", "retainDays", "protectPublishedLeaderboardEvidence", "protectRegressionEvidence"]} /></AdminPanel>
     </section>

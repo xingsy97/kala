@@ -32,4 +32,19 @@ describe("virtualized Rows", () => {
     const renderedRows = screen.getAllByRole("row").slice(1);
     expect(renderedRows.some((row) => row.getAttribute("aria-rowindex") === "17")).toBe(true);
   });
+
+  it("renders human labels, statuses, arrays, and objects without JSON dumps", () => {
+    render(<Rows items={[{
+      runId: "fresh-sdlc-journey-20260803082358-22094",
+      outcome: "unknown",
+      evidenceRefs: ["first", "second"],
+      confidenceInterval: { lower: 0.7, upper: 0.9 },
+    }]} fields={["runId", "outcome", "evidenceRefs", "confidenceInterval"]} />);
+    expect(screen.getByText("Run")).toBeTruthy();
+    expect(screen.getByText("No result yet")).toBeTruthy();
+    expect(screen.getByText("First, Second")).toBeTruthy();
+    expect(screen.getByText("2 properties")).toBeTruthy();
+    expect(document.body.textContent).not.toContain('{"lower"');
+    expect(document.body.textContent).not.toContain("fresh-sdlc-journey-20260803082358-22094");
+  });
 });

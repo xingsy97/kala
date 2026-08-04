@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { HumanValue, humanLabel } from "../presentation.js";
 
 export function Rows({
   items,
@@ -53,7 +54,7 @@ export function Rows({
         <thead>
           <tr>
             {fields.map((name) => (
-              <th key={name}>{name.split(".").at(-1)}</th>
+              <th key={name}>{humanLabel(name)}</th>
             ))}
           </tr>
         </thead>
@@ -77,7 +78,7 @@ export function Rows({
                 }
               >
                 {fields.map((name) => (
-                  <td key={name}>{display(path(item, name))}</td>
+                  <td key={name}><HumanValue value={path(item, name)} field={name} /></td>
                 ))}
               </tr>
             );
@@ -121,10 +122,4 @@ function path(value: unknown, name: string): unknown {
 function field(value: unknown, name: string): string {
   const found = path(value, name);
   return found === undefined || found === null ? "" : String(found);
-}
-
-function display(value: unknown): string {
-  if (value === undefined || value === null || value === "") return "—";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }

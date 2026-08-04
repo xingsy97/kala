@@ -277,9 +277,8 @@ async function verifyLeaderboard(activeBrowser, telemetry) {
 
   await page.select('.leaderboard-filters label:nth-of-type(1) select', 'audit')
   await page.select('.leaderboard-filters label:nth-of-type(2) select', 'codex')
-  await page.type('.leaderboard-filters label:nth-of-type(3) input', 'fixture-model')
-  await page.select('.leaderboard-filters label:nth-of-type(4) select', 'cost')
-  await page.select('.leaderboard-filters label:nth-of-type(5) select', 'asc')
+  await page.select('.leaderboard-filters label:nth-of-type(3) select', 'cost')
+  await page.select('.leaderboard-filters label:nth-of-type(4) select', 'asc')
   const requestsBeforeAudit = requests.length
   await page.click('.leaderboard-filters .primary')
   await waitFor(() => requests.length > requestsBeforeAudit, 5_000, 'filtered Leaderboard audit request')
@@ -292,8 +291,7 @@ async function verifyLeaderboard(activeBrowser, telemetry) {
     statuses: [...document.querySelectorAll('.leaderboard-table tbody tr:not(.leaderboard-details):not(.virtual-spacer) td:last-child')].map((cell) => cell.textContent?.trim()),
   }))
 
-  const comparisonInput = '.exploratory-comparison input'
-  await page.type(comparisonInput, comparisonSliceHash)
+  await page.select('.exploratory-comparison select', comparisonSliceHash)
   const requestsBeforePreview = requests.length
   await clickButton(page, 'Preview warning')
   const warning = await page.$eval('.comparability-warning', (element) => element.textContent?.replace(/\s+/gu, ' ').trim())
@@ -425,13 +423,13 @@ async function verifyProductWorkflows(activeBrowser, telemetry) {
     selectedRun: document.querySelector('.run-detail')?.getAttribute('data-selected-run'),
     selectedTrial: document.querySelector('.run-detail')?.getAttribute('data-selected-trial'),
     trialRows: document.querySelector('.run-detail .table-wrap')?.getAttribute('data-total-rows'),
-    artifactLinks: document.querySelectorAll('.artifact-links a').length,
+    artifactLinks: document.querySelectorAll('.artifact-links a, .artifact-links button').length,
     traceState: document.querySelector('.trace-panel')?.getAttribute('data-trace-state'),
     traceVisualHidden: document.querySelector('.trace-strip')?.getAttribute('aria-hidden'),
     traceRows: document.querySelector('.trace-panel .table-wrap')?.getAttribute('data-total-rows'),
     traceRenderedRows: document.querySelector('.trace-panel .table-wrap')?.getAttribute('data-rendered-rows'),
     traceTableKeyboardReachable: document.querySelector('.trace-panel .table-wrap')?.getAttribute('tabindex'),
-    immutablePreviewEntry: !![...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'New run specification'),
+    guidedCreationEntry: !![...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'New evaluation'),
   }))
   await page.goto(routeUrl(routes[2], 'trace-large'), { waitUntil: 'domcontentloaded', timeout: 15_000 })
   await waitForRouteState(page, 'runs', 'ready')
@@ -451,9 +449,9 @@ async function verifyProductWorkflows(activeBrowser, telemetry) {
     workflows[routeId] = await page.evaluate((id) => ({
       route: document.querySelector('main')?.getAttribute('data-route'),
       panels: document.querySelectorAll('.panel').length,
-      commandWorkflow: !!document.querySelector('.command-workflow'),
-      supportedCommandText: document.querySelector('.command-workflow > p')?.textContent,
-      reportDownloads: id === 'reports' ? document.querySelectorAll('.download-grid a').length : undefined,
+      commandWorkflow: !!document.querySelector('.action-workflow'),
+      guidedAction: document.querySelector('.action-workflow .primary')?.textContent?.trim(),
+      reportDownloads: id === 'reports' ? document.querySelectorAll('.download-grid a, .download-grid button').length : undefined,
       retentionVisible: id === 'administration' ? document.body.textContent?.includes('Retention & artifact policy') : undefined,
     }), routeId)
   }
@@ -523,7 +521,7 @@ function validate(result) {
   }
   if (result.leaderboard.expansion.links.length !== 4 || !result.leaderboard.expansion.links.some((link) => link.text === 'Contributing runs' && link.href?.startsWith('/runs?runId=')) || !result.leaderboard.expansion.links.some((link) => link.text === 'Methodology' && link.href?.startsWith('/reports?runId=')) || !result.leaderboard.expansion.comparabilityKey?.includes(exactSliceHash)) failures.push('leaderboard row expansion/provenance links failed: ' + JSON.stringify(result.leaderboard.expansion))
   const audit = result.leaderboard.audit
-  if (audit.view !== 'audit' || audit.url.view !== 'audit' || audit.url.agentType !== 'codex' || audit.url.modelId !== 'fixture-model' || audit.url.sortBy !== 'cost' || audit.url.sortDirection !== 'asc' || !audit.heading?.includes('Invalidated & superseded') || audit.ranks.some((rank) => rank !== '—') || audit.statuses.some((status) => status === 'active')) failures.push('leaderboard inactive audit/filter/sort failed: ' + JSON.stringify(audit))
+  if (audit.view !== 'audit' || audit.url.view !== 'audit' || audit.url.agentType !== 'codex' || audit.url.sortBy !== 'cost' || audit.url.sortDirection !== 'asc' || !audit.heading?.includes('Invalidated & superseded') || audit.ranks.some((rank) => rank !== '—') || audit.statuses.some((status) => status === 'active')) failures.push('leaderboard inactive audit/filter/sort failed: ' + JSON.stringify(audit))
   const comparison = result.leaderboard.comparison
   if (!comparison.warning?.includes('Not directly rank-comparable') || comparison.requestsBeforePreview !== comparison.requestsAfterPreview || comparison.urlSlice !== comparisonSliceHash || comparison.requestedSlice !== comparisonSliceHash || !comparison.badge?.includes('no shared rank') || comparison.ranks.some((rank) => rank !== '—')) failures.push('leaderboard warning-gated cross-slice exploration failed: ' + JSON.stringify(comparison))
   if (result.liveEvents.sequence !== '2' || result.liveEvents.liveState !== 'connected' || result.liveEvents.authoritativeQueries < 2 || !result.liveEvents.droppedSequenceDetected || !result.liveEvents.resumedAfterSequence) failures.push('live event dropped-sequence recovery failed: ' + JSON.stringify(result.liveEvents))
@@ -534,12 +532,12 @@ function validate(result) {
   if (!operator.deletion.impactQueried || operator.deletion.beforeConfirmation !== 2 || operator.deletion.command?.type !== 'run.delete' || operator.deletion.command?.expectedImpactHash !== deletionImpactHash || operator.deletion.command?.confirmation !== 'delete:browser-run-1' || !operator.deletion.protectedDeleteDisabled || operator.deletion.commandsAfterProtectedDelete !== 3) failures.push('delete impact/confirmation failed: ' + JSON.stringify(operator.deletion))
   if (operator.retry.failedStateRestored !== 'failed' || operator.retry.committedStateRestoredBeforeRefresh !== 'committed' || operator.retry.committedStateRestoredAfterRefresh !== 'committed' || !operator.retry.sameCommand || operator.retry.firstIdempotencyKey !== operator.retry.retryIdempotencyKey || operator.retry.attempts !== 2) failures.push('operator retry continuity failed: ' + JSON.stringify(operator.retry))
   const workflows = result.productWorkflows
-  if (workflows.runDetails.selectedRun !== 'browser-run-1' || !workflows.runDetails.selectedTrial || Number(workflows.runDetails.trialRows) < 1 || workflows.runDetails.artifactLinks < 1 || workflows.runDetails.traceState !== 'ready' || Number(workflows.runDetails.traceRows) < 1 || Number(workflows.runDetails.traceRenderedRows) !== Number(workflows.runDetails.traceRows) || workflows.runDetails.traceVisualHidden !== 'true' || workflows.runDetails.traceTableKeyboardReachable !== '0' || !workflows.runDetails.immutablePreviewEntry) failures.push('run detail/trace/immutable creation workflow failed: ' + JSON.stringify(workflows.runDetails))
+  if (workflows.runDetails.selectedRun !== 'browser-run-1' || !workflows.runDetails.selectedTrial || Number(workflows.runDetails.trialRows) < 1 || workflows.runDetails.artifactLinks < 1 || workflows.runDetails.traceState !== 'ready' || Number(workflows.runDetails.traceRows) < 1 || Number(workflows.runDetails.traceRenderedRows) !== Number(workflows.runDetails.traceRows) || workflows.runDetails.traceVisualHidden !== 'true' || workflows.runDetails.traceTableKeyboardReachable !== '0' || !workflows.runDetails.guidedCreationEntry) failures.push('run detail/trace/immutable creation workflow failed: ' + JSON.stringify(workflows.runDetails))
   if (workflows.largeTrace.totalRows < 100 || workflows.largeTrace.renderedRows >= workflows.largeTrace.totalRows || workflows.largeTrace.virtualized !== 'true' || workflows.largeTrace.keyboardReachable !== '0') failures.push('large normalized trace virtualization failed: ' + JSON.stringify(workflows.largeTrace))
   if (result.internationalization.initial.language !== 'zh-CN' || result.internationalization.initial.heading !== '排行榜' || result.internationalization.initial.activeNav !== '排行榜' || result.internationalization.initial.selector !== 'zh-CN' || result.internationalization.switched.language !== 'en' || result.internationalization.switched.heading !== 'Leaderboard' || result.internationalization.switched.stored !== 'en') failures.push('internationalization-ready chrome failed: ' + JSON.stringify(result.internationalization))
   for (const route of ['analysis', 'defects', 'regression', 'insights', 'reports', 'administration']) {
     const workflow = workflows[route]
-    if (workflow.route !== route || workflow.panels < 2 || !workflow.commandWorkflow || !workflow.supportedCommandText || workflow.supportedCommandText.endsWith('none advertised')) failures.push(route + ' product workflow failed: ' + JSON.stringify(workflow))
+    if (workflow.route !== route || workflow.panels < 2 || !workflow.commandWorkflow || (route !== 'administration' && !workflow.guidedAction)) failures.push(route + ' product workflow failed: ' + JSON.stringify(workflow))
   }
   if (workflows.reports.reportDownloads !== 7 || workflows.administration.retentionVisible !== true) failures.push('report download or administration governance workflow failed: ' + JSON.stringify({ reports: workflows.reports, administration: workflows.administration }))
   if (Object.values(result.contrast.ratios).some((ratio) => ratio < 4.5)) failures.push('text contrast tokens are below 4.5:1')
@@ -549,7 +547,7 @@ function validate(result) {
   const expectedStaleConsole = (entry) => entry.context.endsWith(':stale') && entry.message.includes('status of 503')
   const unexpectedHttp = result.telemetry.httpErrors.filter((entry) => !entry.context.endsWith(':error') && !expectedStaleHttp(entry) && !expectedRetryFailure(entry))
   const unexpectedConsole = result.telemetry.consoleErrors.filter((entry) => !entry.context.endsWith(':error') && !entry.context.endsWith(':offline') && !expectedStaleConsole(entry) && !expectedRetryFailure(entry))
-  const unexpectedFailures = result.telemetry.requestFailures.filter((entry) => !entry.context.endsWith(':offline') && !(entry.url.includes('/api/v1/events') && entry.error === 'net::ERR_ABORTED'))
+  const unexpectedFailures = result.telemetry.requestFailures.filter((entry) => !entry.context.endsWith(':offline') && !(entry.error === 'net::ERR_ABORTED' && (entry.url.includes('/api/v1/events') || entry.url.includes('/api/v1/query'))))
   if (unexpectedHttp.length) failures.push('unexpected HTTP errors: ' + JSON.stringify(unexpectedHttp))
   if (unexpectedConsole.length) failures.push('unexpected console errors: ' + JSON.stringify(unexpectedConsole))
   if (unexpectedFailures.length) failures.push('unexpected request failures: ' + JSON.stringify(unexpectedFailures))

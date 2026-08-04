@@ -170,10 +170,40 @@ export function allowedControlPlaneUrl(value: string, allowedOrigins: readonly s
 }
 
 export function errorMessage(error: unknown): string {
-  if (error instanceof ControlPlaneHttpError && error.status === 401) return 'Authentication required. Sign in or configure dashboard credentials.'
-  if (error instanceof ControlPlaneHttpError && error.status === 403) return 'Permission denied. Your account does not have access to this operation.'
-  if (error instanceof ControlPlaneHttpError) return 'Control Plane request failed.'
-  return error instanceof Error ? error.message : String(error)
+  if (error instanceof ControlPlaneHttpError && error.status === 401) return 'Sign in to continue.'
+  if (error instanceof ControlPlaneHttpError && error.status === 403) return 'You do not have permission to perform this action.'
+  if (error instanceof ControlPlaneHttpError && error.status === 409) return 'This item changed while the action was in progress. Refresh the page and try again.'
+  if (error instanceof ControlPlaneHttpError && error.status >= 500) return 'The evaluation service could not complete the request. Try again in a moment.'
+  if (error instanceof ControlPlaneHttpError) return 'The requested action could not be completed.'
+  const raw = error instanceof Error ? error.message : String(error)
+  if (/unsupported(?:\s+control\s+plane)?\s+protocol/i.test(raw))
+    return 'This dashboard is not compatible with the connected evaluation service. Update the dashboard or service before continuing.'
+  const messages = validationMessages(raw)
+  if (messages.some((message) => message.includes('fenced lease authority')))
+    return 'This analysis job was started by a worker that no longer owns its lease. Select an active run and start a new analysis.'
+  if (messages.length) return messages.map(humanValidationMessage).join(' ')
+  if (/network|fetch|connection/i.test(raw)) return 'The evaluation service is not reachable. Check the connection and try again.'
+  return 'The requested action could not be completed. Review the selected values and try again.'
+}
+
+function validationMessages(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((issue) => {
+      if (!issue || typeof issue !== 'object') return []
+      const message = (issue as Record<string, unknown>).message
+      return typeof message === 'string' ? [message] : []
+    })
+  } catch { return [] }
+}
+
+function humanValidationMessage(message: string): string {
+  return message
+    .replace(/\bids?\b/gi, 'selection')
+    .replace(/\brequired\b/gi, 'is required')
+    .replace(/^./, (letter) => letter.toUpperCase())
+    .replace(/\.?$/, '.')
 }
 
 function dashboardRuntimeConfig(): DashboardRuntimeConfig {

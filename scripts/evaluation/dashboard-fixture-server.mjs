@@ -6,6 +6,7 @@ import { extname, normalize, relative, resolve, sep } from 'node:path'
 const root = resolve(process.argv[2])
 const port = Number(process.argv[3])
 const exactSliceHash = 'a'.repeat(64)
+const comparisonSliceHash = 'c'.repeat(64)
 const deletionImpactHash = 'b'.repeat(64)
 const capabilities = {
   schemaVersion: 1, protocolVersions: [1], controlPlaneVersion: 'browser-fixture',
@@ -38,6 +39,12 @@ createServer(async (request, response) => {
       receivedQueries.push({ scenario, query })
       if (scenario === 'error' || scenario === 'stale') return json(response, 503, { code: 'FIXTURE_UNAVAILABLE', message: 'The authoritative fixture is unavailable.' })
       return json(response, 200, queryResult(query, scenario))
+    }
+    if (url.pathname === '/api/v1/administration/status' && request.method === 'GET') {
+      return json(response, 200, { security: { principals: [{ principalId: 'browser-operator', kind: 'user', role: 'administrator', scopes: ['administration:read'], keyCount: 1, status: 'active' }], serviceKeys: [], trustKeys: [] }, maintenance: { retentionSweeps: [], backups: [], restoreDrills: [], audit: [] } })
+    }
+    if (url.pathname === '/api/v1/administration/security/reload' && request.method === 'POST') {
+      return json(response, 200, { generation: 2 })
     }
     if (url.pathname === '/api/v1/commands') {
       const command = await requestJson(request)
@@ -80,19 +87,21 @@ function queryResult(query, scenario) {
   if (query.resource === 'trial') return { id: query.trialId, trialId: query.trialId, runId: 'browser-run-1', taskId: 'task-1', agentVariantId: 'runlab', attempt: 1, state: 'completed' }
   if (scenario === 'live' && query.resource === 'runs') return page([{ id: 'browser-live-run', accepted: { spec: { runId: 'browser-live-run' } }, state: 'running', events: Array.from({ length: liveProjectionSequence + 1 }, (_, sequence) => ({ sequence })), updatedAt: 'live-sequence-' + String(liveProjectionSequence) }], false, 1)
   const empty = scenario === 'empty'
-  const count = empty ? 0 : scenario === 'large' ? Math.min(Number(query?.page?.limit ?? 100), 100) : scenario === 'partial' ? 2 : 1
+  const count = empty ? 0 : scenario === 'large' ? Math.min(Number(query?.page?.limit ?? 100), 100) : scenario === 'partial' || (query.resource === 'catalog' && query.catalog === 'task-packs') ? 2 : 1
   const values = Array.from({ length: count }, (_, index) => valueForQuery(query, index))
   const hasMore = scenario === 'partial' || scenario === 'large'
-  return page(values, hasMore, hasMore ? Math.max(count + 17, 10_000) : count)
+  const result = page(values, hasMore, hasMore ? Math.max(count + 17, 10_000) : count)
+  return query.resource === 'leaderboard' ? { ...result, pivot: query.pivot || 'model', rankingGroups: ['comparable'] } : result
 }
 
 function valueForQuery(query, index) {
   const suffix = String(index + 1)
   if (query.resource === 'runs') return runValue(index)
   if (query.resource === 'run') return runValue(0)
+  if (query.resource === 'events') return { schemaVersion: 1, sequence: index, at: '2026-08-03T00:00:00.000Z', runId: 'browser-run-1', type: 'run.state', producer: 'control-plane', data: { state: 'running' } }
   if (query.resource === 'trials') return { id: 'browser-trial-' + suffix, trialId: 'browser-trial-' + suffix, runId: 'browser-run-1', taskId: 'task-' + suffix, agentVariantId: ['runlab', 'claude', 'codex'][index % 3], attempt: 1, state: index % 2 ? 'completed' : 'queued' }
-  if (query.resource === 'artifacts') return { id: 'artifact-' + suffix, artifactId: 'artifact-' + suffix, path: 'browser-run-1/browser-trial-1/' + (index === 0 ? 'normalized-events.jsonl' : 'artifact-' + suffix + '.json'), mediaType: index === 0 ? 'application/x-ndjson' : 'application/json', bytes: 128 + index, sha256: '9'.repeat(64), redaction: 'passed', classification: 'operator' }
-  if (query.resource === 'analysis-jobs') return { id: 'analysis-' + suffix, jobId: 'analysis-' + suffix, runId: 'browser-run-1', kind: ['grading', 'detectors', 'trace-alignment'][index % 3], state: 'completed', inputManifestHash: '1'.repeat(64), outputManifestHash: '2'.repeat(64) }
+  if (query.resource === 'artifacts') return { artifactId: 'artifact-' + suffix, path: 'browser-run-1/browser-trial-1/' + (index === 0 ? 'normalized-events.jsonl' : 'artifact-' + suffix + '.json'), mediaType: index === 0 ? 'application/x-ndjson' : 'application/json', bytes: 128 + index, sha256: '9'.repeat(64), redaction: 'passed', classification: 'operator' }
+  if (query.resource === 'analysis-jobs') { const kind = ['grading', 'detectors', 'trace-alignment'][index % 3]; return { schemaVersion: 1, protocolVersion: 1, jobId: 'analysis-' + suffix, runId: 'browser-run-1', kind, inputRefs: ['run:browser-run-1'], inputManifestHash: '1'.repeat(64), implementationId: 'browser-analyzer', implementationVersion: '1.0.0', configHash: '2'.repeat(64), ...(kind === 'detectors' ? { detectorIds: ['tool-recovery'] } : {}), attempt: 0, state: 'queued', createdAt: '2026-08-03T00:00:00.000Z', updatedAt: '2026-08-03T00:00:00.000Z' } }
   if (query.resource === 'capability-vectors') return { schemaVersion: 1, methodologyVersion: '1.0.0', runId: 'browser-run-1', agentVariantId: ['runlab', 'claude', 'codex'][index % 3], components: capabilityComponents() }
   if (query.resource === 'defects') return { id: 'finding-' + suffix, findingId: 'finding-' + suffix, detectorId: 'tool-recovery', detectorVersion: '1', runId: 'browser-run-1', trialId: 'browser-trial-1', category: 'tool_recovery', severity: index ? 'medium' : 'critical', confidence: 0.95, firstDivergenceSequence: 4, status: 'human_validated' }
   if (query.resource === 'reproductions') return { id: 'bundle-' + suffix, bundleId: 'bundle-' + suffix, findingId: 'finding-' + suffix, failureFingerprint: '3'.repeat(64), reproduction: { reproduced: 2, minimization: { minimizedUnits: 1 } } }
@@ -100,7 +109,7 @@ function valueForQuery(query, index) {
   if (query.resource === 'regressions') return { id: 'regression-' + suffix, packId: 'regression-' + suffix, version: '1.' + suffix, taskPackRef: 'browser-pack-1', severity: 'high', owner: 'release-engineering', allowedFlakeRate: 0.02, promotionSourceFindingId: 'finding-1' }
   if (query.resource === 'regression-decisions') return { id: 'gate-' + suffix, gateId: 'gate-' + suffix, baselineConfigHash: '4'.repeat(64), candidateConfigHash: '5'.repeat(64), pairedTasks: 20, repeats: 3, flakyTasks: [], infrastructureFailures: [], violations: [], decision: 'pass', statistics: { baselineSuccessRate: 0.7, candidateSuccessRate: 0.75, successRateDelta: 0.05, pairedWins: 2, pairedLosses: 1, pairedTies: 17, mcnemarPValue: 1, confidenceInterval: { level: 0.95, lower: -0.05, upper: 0.15, method: 'paired-bootstrap', samples: 10000 }, repeatedRunVariance: { baseline: 0.01, candidate: 0, taskCount: 20 }, evidenceCompleteness: { baseline: 1, candidate: 1, completePairs: 60, totalPairs: 60 }, pareto: { relation: 'candidate_dominates', baseline: { quality: 0.7, costUsd: 1, latencyMs: 1000 }, candidate: { quality: 0.75, costUsd: 0.9, latencyMs: 900 } }, taskDeltas: [{ taskId: 'task-1', baseline: 0, candidate: 1, delta: 1, repeats: 3 }], flakeRate: 0 } }
   if (query.resource === 'insights') return { id: 'insight-' + suffix, insightId: 'insight-' + suffix, failureCluster: 'cluster-' + suffix, affectedTaskRate: 0.1, severity: 'medium', suspectedLayer: 'runtime', confidence: 0.9, recommendation: 'Preserve observe-before-act recovery.', expectedMetric: 'recovery_rate', regressionPackId: 'regression-1', owner: 'runtime-team', status: 'validated', evidenceRefs: ['finding-1'], postFixValidationRefs: ['gate-1'] }
-  if (query.resource === 'reports') return { id: 'report-' + suffix, reportId: 'report-' + suffix, runRefs: ['browser-run-' + suffix], methodologyVersion: '1', inputEvidenceHash: '6'.repeat(64), includesAllConfiguredRepeats: true, redactionPassed: true, generatedAt: '2026-08-03T00:00:00.000Z' }
+  if (query.resource === 'reports') return { schemaVersion: 1, reportId: 'report-' + suffix, runRefs: ['browser-run-' + suffix], methodologyVersion: '1', inputEvidenceHash: '6'.repeat(64), semanticHash: '7'.repeat(64), formats: ['json', 'csv', 'html', 'pdf', 'junit', 'sarif', 'markdown'].map((format) => ({ format, path: 'reports/report-' + suffix + '.' + format, sha256: '8'.repeat(64) })), includesAllConfiguredRepeats: true, redactionPassed: true, generatedAt: '2026-08-03T00:00:00.000Z' }
   if (query.resource === 'retention') return { id: 'retention-' + suffix, policyId: 'retention-' + suffix, retainDays: 30, protectPublishedLeaderboardEvidence: true, protectRegressionEvidence: true }
   if (query.resource === 'workers') return { id: 'worker-' + suffix, workerId: 'worker-' + suffix, workerVersion: '1', capacity: { cpu: 8, memoryMb: 16384 } }
   if (query.resource === 'audit') return { id: 'audit-' + suffix, sequence: index, at: '2026-08-03T00:00:00.000Z', actor: { kind: 'operator' }, operation: 'run.accepted', resourceType: 'run', resourceId: 'browser-run-' + suffix, commandId: 'command-' + suffix }
@@ -117,7 +126,7 @@ function runValue(index) {
 function catalogValue(catalog, index) {
   const suffix = String(index + 1)
   if (catalog === 'datasets') return dataset()
-  if (catalog === 'task-packs') return { id: 'browser-pack-' + suffix, version: '1', evaluatedSlice: evaluatedSlice(exactSliceHash) }
+  if (catalog === 'task-packs') return { id: 'browser-pack-' + suffix, version: '1', evaluatedSlice: evaluatedSlice(index === 0 ? exactSliceHash : comparisonSliceHash) }
   if (catalog === 'tasks') return { id: 'task-' + suffix, taskId: 'task-' + suffix, taskPackId: 'browser-pack-1', title: 'Fresh browser task ' + suffix, license: 'MIT' }
   if (catalog === 'agents') return { id: 'agent-' + suffix, backendId: 'codex', provider: 'openai', agentVersion: '1' }
   if (catalog === 'sandboxes') return { id: 'sandbox-' + suffix, provider: 'docker', imageDigest: 'sha256:browser' }
@@ -148,7 +157,11 @@ function evaluatedSlice(sliceManifestHash) {
 }
 
 function dataset() {
-  return { datasetId: 'swe-bench-verified', displayName: 'SWE-Bench Verified', version: '2', sourceRevision: 'browser-fixture', manifestHash: 'e'.repeat(64), taskIdsHash: 'f'.repeat(64), split: 'test', totalItems: 5000, officialBenchmark: true, license: 'MIT', evaluationPermission: 'test' }
+  return { datasetId: 'swe-bench-verified', displayName: 'SWE-Bench Verified', version: '2', sourceRevision: 'browser-fixture', manifestHash: 'e'.repeat(64), taskIdsHash: 'f'.repeat(64), split: 'test', totalItems: 5000, officialBenchmark: true, policy: fixturePolicy() }
+}
+function fixturePolicy() {
+  const granted = { status: 'granted', basis: 'browser acceptance fixture' }
+  return { license: { status: 'granted', basis: 'MIT' }, permissions: { evaluation: granted, training: { status: 'unreviewed' } }, sourceProvenance: { status: 'granted', sourceRefs: ['fixture:browser'] }, publication: { artifact: granted, report: granted, leaderboard: granted, redistribution: { status: 'granted', basis: 'MIT' } } }
 }
 
 function capabilityComponents() {

@@ -206,11 +206,11 @@ describe("standalone evaluation dashboard", () => {
     controlPlane.administrationStatus.mockResolvedValue({ security: { principals: [{ principalId: "operator-one", kind: "user", role: "operator", scopes: ["admin"], keyCount: 1 }], serviceKeys: [], trustKeys: [{ keyReference: "trust-one", algorithm: "ed25519", status: "revoked" }] }, maintenance: { retentionSweeps: [{ policyId: "policy-one", dryRun: true, evaluatedAt: "2026-08-03T00:00:00.000Z", candidates: [] }], backups: [{ backupId: "backup-one" }], restoreDrills: [{ backupId: "backup-one", rtoMet: true }], audit: [] } });
     render(<App controlPlane={controlPlane as never} />);
     expect(await screen.findByText("Auth principals & service keys")).toBeTruthy();
-    expect(screen.getByText("operator-one")).toBeTruthy();
+    expect(screen.getByText("Operator one")).toBeTruthy();
     expect(screen.getByText("Retention sweep status")).toBeTruthy();
     const action = screen.getByRole("button", { name: "Reload security registry" }) as HTMLButtonElement;
     expect(action.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Security reload confirmation"), { target: { value: "reload-security-registry" } });
+    fireEvent.click(screen.getByLabelText("Confirm security registry reload"));
     expect(action.disabled).toBe(false);
     fireEvent.click(action);
     fireEvent.click(action);
@@ -244,7 +244,7 @@ describe("standalone evaluation dashboard", () => {
     const controlPlane = client();
     render(<App controlPlane={controlPlane as never} />);
     expect(
-      await screen.findByText("One durable authority for every Agent trial."),
+      await screen.findByText("Understand quality, cost and release readiness."),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Runs/ }));
     await waitFor(() => expect(location.pathname).toBe("/runs"));
@@ -284,7 +284,7 @@ describe("standalone evaluation dashboard", () => {
       "subscribeRunEvents",
     ).mockReturnValue(() => undefined);
     const view = render(<App />);
-    expect(await screen.findByText("fresh-default-run")).toBeTruthy();
+    expect(await screen.findByText("Default run")).toBeTruthy();
     view.rerender(<App />);
     await waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
     expect(query).toHaveBeenCalledTimes(5);
@@ -335,22 +335,22 @@ describe("standalone evaluation dashboard", () => {
   it("does not show a previous route's projection when the new route fails", async () => {
     const controlPlane = client();
     render(<App controlPlane={controlPlane as never} />);
-    expect(await screen.findByText("run-one")).toBeTruthy();
+    expect(await screen.findByText("Run one")).toBeTruthy();
     controlPlane.query.mockRejectedValue(new Error("route unavailable"));
     fireEvent.click(screen.getByRole("button", { name: /Analysis/ }));
     expect(await screen.findByText("Error")).toBeTruthy();
-    expect(screen.queryByText("run-one")).toBeNull();
+    expect(screen.queryByText("Run one")).toBeNull();
     expect(screen.queryByText("Stale data")).toBeNull();
   });
 
   it("retains the last authoritative projection as explicitly stale when refresh fails", async () => {
     const controlPlane = client();
     render(<App controlPlane={controlPlane as never} />);
-    expect(await screen.findByText("run-one")).toBeTruthy();
+    expect(await screen.findByText("Run one")).toBeTruthy();
     controlPlane.query.mockRejectedValueOnce(new Error("refresh unavailable"));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect((await screen.findAllByText("Stale data")).length).toBe(2);
-    expect(screen.getByText("run-one")).toBeTruthy();
+    expect(screen.getByText("Run one")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 
@@ -701,62 +701,19 @@ describe("standalone evaluation dashboard", () => {
     );
   });
 
-  it("submits run.create only after the complete canonical spec validates and renders immutable provenance", async () => {
+  it("requires a reviewed template instead of accepting raw run JSON", async () => {
     history.replaceState({}, "", "/runs");
     const controlPlane = client();
     controlPlane.connect.mockResolvedValue(workflowCapabilities);
-    controlPlane.command.mockImplementation(
-      async (command: { idempotencyKey: string; commandId: string }) => ({
-        schemaVersion: 1,
-        idempotencyKey: command.idempotencyKey,
-        commandId: command.commandId,
-        committedSequence: 1,
-        committedAt: "2026-08-03T00:00:00.000Z",
-        projectionVersion: 1,
-      }),
-    );
     render(<App controlPlane={controlPlane as never} />);
     fireEvent.click(
-      await screen.findByRole("button", { name: "New run specification" }),
+      await screen.findByRole("button", { name: "New evaluation" }),
     );
-    const editor = screen.getByLabelText("Canonical EvaluationRunSpec JSON");
-    fireEvent.change(editor, {
-      target: { value: '{"schemaVersion":1,"runId":"name-only"}' },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Validate immutable spec" }),
-    );
-    expect(await screen.findByRole("alert")).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "Submit resolved run" }),
-    ).toBeNull();
+    expect(await screen.findByText("No run templates are configured")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /JSON/i })).toBeNull();
+    expect(screen.queryByLabelText("Run ID")).toBeNull();
+    expect((screen.getByRole("button", { name: "Review run" }) as HTMLButtonElement).disabled).toBe(true);
     expect(controlPlane.command).not.toHaveBeenCalled();
-
-    fireEvent.change(editor, {
-      target: { value: JSON.stringify(canonicalRunSpec) },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Validate immutable spec" }),
-    );
-    const preview = await screen.findByLabelText(
-      "Immutable run specification preview",
-    );
-    expect(preview.textContent).toContain("swe-bench-verified · 1");
-    expect(preview.textContent).toContain("named_subset");
-    expect(preview.textContent).toContain("2/500 · 0.4%");
-    expect(preview.textContent).toContain("swe-bench-official · 1");
-    expect(controlPlane.command).not.toHaveBeenCalled();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Submit resolved run" }),
-    );
-    await waitFor(() =>
-      expect(controlPlane.command).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "run.create",
-          spec: expect.objectContaining({ runId: "canonical-fixture-v1" }),
-        }),
-      ),
-    );
   });
 
   it("creates and starts a guided template only when a compatible online Worker advertises every runtime capability", async () => {
@@ -841,7 +798,7 @@ describe("standalone evaluation dashboard", () => {
     );
     render(<App controlPlane={controlPlane as never} />);
     fireEvent.click(
-      await screen.findByRole("button", { name: "New run specification" }),
+      await screen.findByRole("button", { name: "New evaluation" }),
     );
     expect(screen.getByLabelText("Experiment template")).toBeTruthy();
     expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe(
@@ -860,11 +817,9 @@ describe("standalone evaluation dashboard", () => {
       (screen.getByLabelText("Budget USD (optional)") as HTMLInputElement)
         .value,
     ).toBe("2.5");
-    fireEvent.change(screen.getByLabelText("Run ID"), {
-      target: { value: "guided-web-run" },
-    });
+    expect(screen.queryByLabelText("Run ID")).toBeNull();
     fireEvent.click(
-      screen.getByRole("button", { name: "Validate immutable spec" }),
+      screen.getByRole("button", { name: "Review run" }),
     );
     expect(await screen.findByText("1 compatible online")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Create & start" }));
@@ -872,18 +827,18 @@ describe("standalone evaluation dashboard", () => {
     expect(controlPlane.command.mock.calls[0]![0]).toMatchObject({
       type: "run.create",
       spec: {
-        runId: "guided-web-run",
+        runId: expect.stringMatching(/^web-guided-smoke-/),
         sandbox: {
           artifactAllowlist: expect.arrayContaining([
-            "custom-task-pack/guided-web-run:task-one:guided-agent:0/native-result.json",
-            "custom-task-pack/guided-web-run:task-two:guided-agent:1/native-result.json",
+            expect.stringMatching(/^custom-task-pack\/web-guided-smoke-.+:task-one:guided-agent:0\/native-result\.json$/),
+            expect.stringMatching(/^custom-task-pack\/web-guided-smoke-.+:task-two:guided-agent:1\/native-result\.json$/),
           ]),
         },
       },
     });
     expect(controlPlane.command.mock.calls[1]![0]).toMatchObject({
       type: "run.start",
-      runId: "guided-web-run",
+      runId: expect.stringMatching(/^web-guided-smoke-/),
     });
   });
 
@@ -996,7 +951,7 @@ describe("standalone evaluation dashboard", () => {
       return { items: [], page: { hasMore: false, total: 0 } };
     }) as never);
     render(<App controlPlane={controlPlane as never} />);
-    expect(await screen.findByText("finding-one")).toBeTruthy();
+    expect(await screen.findByText("Finding one")).toBeTruthy();
     expect(controlPlane.query).toHaveBeenCalledWith(
       expect.objectContaining({
         resource: "defects",
@@ -1027,13 +982,18 @@ describe("standalone evaluation dashboard", () => {
         }),
       ),
     );
-    expect(await screen.findByText("finding-two")).toBeTruthy();
+    expect(await screen.findByText("Finding two")).toBeTruthy();
   });
 
-  it("never submits a workflow command before validation and exact confirmation", async () => {
+  it("uses authoritative selections instead of JSON or manually entered IDs", async () => {
     history.replaceState({}, "", "/analysis");
     const controlPlane = client();
     controlPlane.connect.mockResolvedValue(workflowCapabilities);
+    controlPlane.query.mockImplementation((async (query: { resource: string; catalog?: string }) => {
+      if (query.resource === "runs") return { items: [{ accepted: { spec: { runId: "run-one", taskPack: { id: "sdlc-journey" } } }, state: "completed" }], page: { hasMore: false } };
+      if (query.resource === "catalog" && query.catalog === "detectors") return { items: [{ detectorId: "tool-recovery", name: "Tool recovery" }], page: { hasMore: false } };
+      return { items: [], page: { hasMore: false, total: 0 } };
+    }) as never);
     controlPlane.command.mockResolvedValue({
       schemaVersion: 1,
       idempotencyKey: "ack",
@@ -1043,40 +1003,16 @@ describe("standalone evaluation dashboard", () => {
       projectionVersion: 9,
     });
     render(<App controlPlane={controlPlane as never} />);
-    const editor = await screen.findByLabelText("Command body JSON");
-    fireEvent.change(editor, {
-      target: {
-        value: JSON.stringify({
-          type: "run.analyze",
-          runId: "run-one",
-          detectorIds: ["tool-recovery"],
-        }),
-      },
-    });
-    expect(controlPlane.command).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Validate command" }));
-    const submit = (await screen.findByRole("button", {
-      name: "Submit committed command",
-    })) as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText(/Type submit:run.analyze/), {
-      target: { value: "submit:run.analyze-extra" },
-    });
-    expect(submit.disabled).toBe(true);
-    expect(controlPlane.command).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText(/Type submit:run.analyze/), {
-      target: { value: "submit:run.analyze" },
-    });
+    expect(screen.queryByLabelText("Command body JSON")).toBeNull();
+    fireEvent.change(await screen.findByLabelText("Run"), { target: { value: "run-one" } });
+    const detectorSelect = screen.getByRole("listbox", { name: /Detectors/ });
+    const detectorOption = detectorSelect.querySelector<HTMLOptionElement>('option[value="tool-recovery"]')!;
+    detectorOption.selected = true;
+    fireEvent.change(detectorSelect);
+    const submit = screen.getByRole("button", { name: "Find issues" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
     fireEvent.click(submit);
-    await waitFor(() =>
-      expect(controlPlane.command).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "run.analyze",
-          runId: "run-one",
-          detectorIds: ["tool-recovery"],
-        }),
-      ),
-    );
-    expect(await screen.findByText("Committed at projection 9")).toBeTruthy();
+    await waitFor(() => expect(controlPlane.command).toHaveBeenCalledWith(expect.objectContaining({ type: "run.analyze", runId: "run-one", detectorIds: ["tool-recovery"] })));
+    expect(await screen.findByText(/accepted and is now reflected/)).toBeTruthy();
   });
 });

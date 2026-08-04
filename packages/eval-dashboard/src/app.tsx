@@ -33,6 +33,7 @@ import {
 import { ROUTES, routeFromPath, type RouteId } from "./routes.js";
 import { Administration } from "./components/administration.js";
 import { EmptyScene, Metric, PanelHeading, Rows } from "./components/data-table.js";
+import { StatusBadge, humanize } from "./presentation.js";
 
 type LoadState =
   | "loading"
@@ -74,7 +75,7 @@ const RESOURCES: Record<
     capability: "analysis-jobs",
     columns: ["jobId", "runId", "kind", "state"],
     filters: [
-      { parameter: "state", label: "State" },
+      { parameter: "state", label: "Status", values: ["queued", "started", "completed", "failed", "cancelled"] },
       {
         parameter: "kind",
         label: "Job kind",
@@ -114,7 +115,6 @@ const RESOURCES: Record<
           "tool_recovery",
           "planning_execution",
           "trace_divergence",
-          "unknown",
         ],
       },
       {
@@ -262,7 +262,7 @@ export function App({
         if (signal?.aborted) return;
         const text = errorMessage(error);
         const unsupported =
-          /unsupported(?:\s+control\s+plane)?\s+protocol/iu.test(text);
+          /not compatible with the connected evaluation service|unsupported(?:\s+control\s+plane)?\s+protocol/iu.test(text);
         const stale =
           !unsupported &&
           hasAuthoritativeData.current &&
@@ -611,6 +611,7 @@ function RouteView(props: {
             allowed={["retention.set"]}
             capabilities={props.capabilities}
             controlPlane={props.controlPlane}
+            context={props.data}
           />
         }
       />
@@ -689,12 +690,21 @@ async function loadRoute(
   if (route === "leaderboard") {
     require("leaderboard");
     const controls = leaderboardControls();
+    const catalog = capabilities.queryResources.includes("catalog")
+      ? await client.query<Page>({ resource: "catalog", catalog: "task-packs", page: { limit: 100 } }, signal)
+          .catch(() => ({ items: [], page: { hasMore: false } }))
+      : { items: [], page: { hasMore: false } };
+    const evaluationSets = catalog.items.flatMap((item) => {
+      const hash = field(item, "evaluatedSlice.sliceManifestHash");
+      return hash ? [{ hash, label: humanize(field(item, "id") || "Evaluation set") + " · " + display(path(item, "evaluatedSlice.selectedItems")) + " tasks" }] : [];
+    });
     if (!controls.sliceManifestHash)
-      return { requiresSlice: true, pivot: controls.pivot };
-    return await client.query(
+      return { requiresSlice: true, pivot: controls.pivot, evaluationSets };
+    const board = await client.query(
       leaderboardQuery(controls, controls.sliceManifestHash),
       signal,
     );
+    return { board, evaluationSets };
   }
   if (route === "runs") {
     require("runs");
@@ -802,7 +812,7 @@ async function loadRoute(
         : {}),
       page: { limit: 100 },
     } as EvaluationQuery;
-    const [jobs, defects, capabilityVectors, archive] = await Promise.all([
+    const [jobs, defects, capabilityVectors, archive, runs, detectors] = await Promise.all([
       client.query<Page>(
         queryForResource(RESOURCES.analysis, parameters),
         signal,
@@ -819,13 +829,20 @@ async function loadRoute(
       capabilities.queryResources.includes("archive-summary")
         ? client.query({ resource: "archive-summary" }, signal)
         : Promise.resolve(undefined),
+      capabilities.queryResources.includes("runs")
+        ? client.query<Page>({ resource: "runs", page: { limit: 100 } }, signal)
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
+      capabilities.queryResources.includes("catalog")
+        ? client.query<Page>({ resource: "catalog", catalog: "detectors", page: { limit: 100 } }, signal)
+            .catch(() => ({ items: [], page: { hasMore: false } }))
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
     ]);
-    return { jobs, defects, capabilityVectors, archive };
+    return { jobs, defects, capabilityVectors, archive, runs, detectors };
   }
   if (route === "defects") {
     require("defects");
     const parameters = new URLSearchParams(globalThis.location.search);
-    const [defects, reproductions, promotions, archive] = await Promise.all([
+    const [defects, reproductions, promotions, archive, runs, jobs] = await Promise.all([
       client.query<Page>(
         queryForResource(RESOURCES.defects, parameters),
         signal,
@@ -845,12 +862,18 @@ async function loadRoute(
       capabilities.queryResources.includes("archive-summary")
         ? client.query({ resource: "archive-summary" }, signal)
         : Promise.resolve(undefined),
+      capabilities.queryResources.includes("runs")
+        ? client.query<Page>({ resource: "runs", page: { limit: 100 } }, signal)
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
+      capabilities.queryResources.includes("analysis-jobs")
+        ? client.query<Page>({ resource: "analysis-jobs", page: { limit: 100 } }, signal)
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
     ]);
-    return { defects, reproductions, promotions, archive };
+    return { defects, reproductions, promotions, archive, runs, jobs };
   }
   if (route === "regression") {
     require("regressions");
-    const [packs, decisions, archive] = await Promise.all([
+    const [packs, decisions, archive, runs, agents] = await Promise.all([
       client.query<Page>(
         { resource: "regressions", page: { limit: 100 } },
         signal,
@@ -864,13 +887,20 @@ async function loadRoute(
       capabilities.queryResources.includes("archive-summary")
         ? client.query({ resource: "archive-summary" }, signal)
         : Promise.resolve(undefined),
+      capabilities.queryResources.includes("runs")
+        ? client.query<Page>({ resource: "runs", page: { limit: 100 } }, signal)
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
+      capabilities.queryResources.includes("catalog")
+        ? client.query<Page>({ resource: "catalog", catalog: "agents", page: { limit: 100 } }, signal)
+            .catch(() => ({ items: [], page: { hasMore: false } }))
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
     ]);
-    return { packs, decisions, archive };
+    return { packs, decisions, archive, runs, agents };
   }
   if (route === "insights" || route === "reports") {
     const resource = RESOURCES[route];
     require(resource.capability);
-    const [live, archive] = await Promise.all([
+    const [live, archive, runs, findings, packs] = await Promise.all([
       client.query(
         queryForResource(
           resource,
@@ -881,8 +911,19 @@ async function loadRoute(
       capabilities.queryResources.includes("archive-summary")
         ? client.query({ resource: "archive-summary" }, signal)
         : Promise.resolve(undefined),
+      capabilities.queryResources.includes("archived-runs")
+        ? client.query<Page>({ resource: "archived-runs", page: { limit: 100 } }, signal)
+        : capabilities.queryResources.includes("runs")
+          ? client.query<Page>({ resource: "runs", page: { limit: 100 } }, signal)
+          : Promise.resolve({ items: [], page: { hasMore: false } }),
+      capabilities.queryResources.includes("defects")
+        ? client.query<Page>({ resource: "defects", page: { limit: 100 } }, signal)
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
+      capabilities.queryResources.includes("regressions")
+        ? client.query<Page>({ resource: "regressions", page: { limit: 100 } }, signal)
+        : Promise.resolve({ items: [], page: { hasMore: false } }),
     ]);
-    return { live, archive };
+    return { live, archive, runs, findings, packs };
   }
   throw new Error("Unknown dashboard route: " + String(route));
 }
@@ -924,8 +965,8 @@ function Overview({
   return (
     <div className="content-grid">
       <section className="hero-card">
-        <p>Release evidence, not anecdotes.</p>
-        <h2>One durable authority for every Agent trial.</h2>
+        <p>Evaluation workspace</p>
+        <h2>Understand quality, cost and release readiness.</h2>
         <div className="hero-metrics">
           <Metric label="Live runs" value={String(runs.length)} />
           <Metric label="Archived runs" value={display(archive.runCount)} />
@@ -964,8 +1005,8 @@ function Overview({
       />
       <section className="panel">
         <PanelHeading
-          title="Platform metrics"
-          eyebrow="Trace and durable projection derived"
+          title="Service performance"
+          eyebrow="Operational health and response times"
         />
         <Rows
           items={[
@@ -1056,8 +1097,8 @@ function Overview({
       />
       <section className="panel accent">
         <PanelHeading
-          title="Independent platform SLOs"
-          eyebrow="No collapsed pass boolean"
+          title="Reliability objectives"
+          eyebrow="Current service health"
         />
         <div className="attention-score">
           <strong>
@@ -1070,7 +1111,7 @@ function Overview({
         </div>
         <Rows
           items={slos}
-          fields={["id", "status", "target", "observed", "evidenceRefs"]}
+          fields={["id", "status", "target", "observed"]}
         />
       </section>
     </div>
@@ -1365,7 +1406,7 @@ function ArchivedRunDetailView({
         eyebrow="Immutable result, metrics, provenance and conclusion"
       />
       <div className="spec-band">
-        <Metric label="Outcome" value={field(run, "outcome")} />
+        <div className="metric"><span>Result</span><strong><StatusBadge value={field(run, "outcome")} fallback="No result recorded" /></strong></div>
         <Metric
           label="Passed"
           value={field(run, "passedTrials") + "/" + field(run, "trialCount")}
@@ -1384,16 +1425,12 @@ function ArchivedRunDetailView({
       <Rows
         items={trials}
         fields={[
-          "trialId",
           "taskId",
           "agentVariantId",
           "benchmarkId",
           "outcome",
           "evidenceLevel",
           "nativeMetrics",
-          "normalizedEventCount",
-          "resultHash",
-          "artifactManifestHash",
         ]}
       />
       <h3>Source documents</h3>
@@ -1408,10 +1445,7 @@ function ArchivedRunDetailView({
             )}
           >
             {field(document, "title")}
-            <small>
-              {field(document, "kind")} · SHA-256 {field(document, "sha256")} ·{" "}
-              {field(document, "bytes")} bytes
-            </small>
+            <small>{humanize(field(document, "kind"))} · {new Intl.NumberFormat().format(Number(field(document, "bytes")))} bytes</small>
           </button>
         ))}
       </div>
@@ -1451,11 +1485,7 @@ function Library({
           "split",
           "totalItems",
           "officialBenchmark",
-          "policy.license.status",
           "policy.permissions.evaluation.status",
-          "policy.permissions.training.status",
-          "policy.sourceProvenance.status",
-          "policy.publication.redistribution.status",
         ]}
         controlPlane={controlPlane}
       />
@@ -1467,18 +1497,9 @@ function Library({
           fields={[
             "id",
             "version",
-            "evaluatedSlice.selectionKind",
             "evaluatedSlice.selectedItems",
             "evaluatedSlice.coverageRatio",
-            "evaluatedSlice.sliceManifestHash",
-            "policy.license.status",
             "policy.permissions.evaluation.status",
-            "policy.permissions.training.status",
-            "policy.sourceProvenance.status",
-            "policy.publication.artifact.status",
-            "policy.publication.report.status",
-            "policy.publication.leaderboard.status",
-            "policy.publication.redistribution.status",
           ]}
           controlPlane={controlPlane}
         />
@@ -1487,13 +1508,9 @@ function Library({
           catalog="tasks"
           initial={value.tasks}
           fields={[
-            "taskId",
-            "taskPackId",
             "title",
-            "policy.license.status",
+            "taskPackId",
             "policy.permissions.evaluation.status",
-            "policy.permissions.training.status",
-            "policy.sourceProvenance.status",
           ]}
           controlPlane={controlPlane}
         />
@@ -1613,8 +1630,10 @@ function Leaderboard({
   controlPlane: DashboardControlPlane;
 }): JSX.Element {
   const initialControls = leaderboardControls();
+  const root = object(data);
+  const evaluationSets = array(root.evaluationSets).map((item) => ({ hash: field(item, "hash"), label: field(item, "label") }));
   const [controls, setControls] = useState(initialControls);
-  const [result, setResult] = useState(data);
+  const [result, setResult] = useState(root.board ?? data);
   const [comparisonHash, setComparisonHash] = useState(
     new URLSearchParams(globalThis.location.search).get(
       "compareSliceManifestHash",
@@ -1623,12 +1642,12 @@ function Leaderboard({
   const [comparisonWarning, setComparisonWarning] = useState<string>();
   const [comparison, setComparison] = useState<unknown>();
   const [error, setError] = useState<string>();
-  useEffect(() => setResult(data), [data]);
+  useEffect(() => setResult(object(data).board ?? data), [data]);
   const load = async () => {
     const exactSliceHash = controls.sliceManifestHash.trim().toLowerCase();
     if (!/^[a-f0-9]{64}$/u.test(exactSliceHash)) {
       setError(
-        "Enter an exact 64-character evaluated-slice SHA-256. Boards never mix unlike denominators.",
+        "Select an available evaluation set before loading the leaderboard.",
       );
       return;
     }
@@ -1656,7 +1675,7 @@ function Leaderboard({
     const requested = comparisonHash.trim().toLowerCase();
     if (!/^[a-f0-9]{64}$/u.test(requested)) {
       setError(
-        "Exploratory comparison requires an exact 64-character evaluated-slice SHA-256.",
+        "Select a different evaluation set to preview the comparison.",
       );
       return;
     }
@@ -1756,15 +1775,7 @@ function Leaderboard({
             <option value="codex">Codex</option>
           </select>
         </label>
-        <label>
-          Model
-          <input
-            value={controls.modelId}
-            onChange={(event) =>
-              setControls({ ...controls, modelId: event.target.value })
-            }
-          />
-        </label>
+
         <label>
           Sort
           <select
@@ -1800,21 +1811,14 @@ function Leaderboard({
           </select>
         </label>
         <label className="wide-control">
-          Slice manifest
-          <input
-            value={controls.sliceManifestHash}
-            onChange={(event) =>
-              setControls({
-                ...controls,
-                sliceManifestHash: event.target.value,
-              })
-            }
-            placeholder="64-character SHA-256"
-            spellCheck={false}
-          />
+          Evaluation set
+          <select value={controls.sliceManifestHash} onChange={(event) => setControls({ ...controls, sliceManifestHash: event.target.value })}>
+            <option value="">Select an evaluation set…</option>
+            {evaluationSets.map((set) => <option key={set.hash} value={set.hash}>{set.label}</option>)}
+          </select>
         </label>
-        <button className="primary" onClick={() => void load()}>
-          Load board
+        <button className="primary" disabled={!controls.sliceManifestHash} onClick={() => void load()}>
+          Load leaderboard
         </button>
       </section>
       {error && (
@@ -1825,7 +1829,7 @@ function Leaderboard({
       <section className="slice-badge" aria-label="Active evaluated slice">
         <span>Authoritative denominator</span>
         <strong>{sliceLabel}</strong>
-        {exactHash && <code>{exactHash}</code>}
+
       </section>
       {contentState === "partial" && (
         <p className="partial-note" role="status">
@@ -1848,8 +1852,8 @@ function Leaderboard({
         />
         {requiresSlice ? (
           <EmptyScene
-            title="Select an evaluated slice"
-            detail="Enter its immutable manifest hash. The board will never combine entries from different denominators."
+            title={evaluationSets.length ? "Select an evaluation set" : "No evaluation sets are ready"}
+            detail={evaluationSets.length ? "Choose a reviewed task set above. Rankings only compare systems evaluated on the same tasks." : "Ask an administrator to publish a task set with a reviewed evaluation selection."}
           />
         ) : (
           <LeaderboardRows items={items} ranked={controls.view === "active"} />
@@ -1860,22 +1864,16 @@ function Leaderboard({
       </section>
       <section className="panel exploratory-comparison">
         <PanelHeading
-          title="Cross-slice exploration"
-          eyebrow="Never directly rank-comparable"
+          title="Compare another evaluation set"
+          eyebrow="Shown separately to avoid misleading rankings"
         />
         <div className="inline-filter">
           <label>
-            Other slice manifest
-            <input
-              value={comparisonHash}
-              onChange={(event) => {
-                setComparisonHash(event.target.value);
-                setComparison(undefined);
-                setComparisonWarning(undefined);
-              }}
-              placeholder="Different 64-character SHA-256"
-              spellCheck={false}
-            />
+            Comparison set
+            <select value={comparisonHash} onChange={(event) => { setComparisonHash(event.target.value); setComparison(undefined); setComparisonWarning(undefined); }}>
+              <option value="">Select another set…</option>
+              {evaluationSets.filter((set) => set.hash !== controls.sliceManifestHash).map((set) => <option key={set.hash} value={set.hash}>{set.label}</option>)}
+            </select>
           </label>
           <button onClick={previewComparison}>Preview warning</button>
         </div>
@@ -1917,6 +1915,7 @@ function Leaderboard({
         allowed={["leaderboard.invalidate"]}
         capabilities={capabilities}
         controlPlane={controlPlane}
+        context={data}
       />
     </div>
   );
@@ -2533,8 +2532,7 @@ function Runs({
               >
                 {archivedItems.map((run) => (
                   <option key={field(run, "runId")} value={field(run, "runId")}>
-                    {field(run, "taskPackId") || "evaluation"} ·{" "}
-                    {field(run, "runId")} · {field(run, "outcome")}
+                    {humanize(field(run, "taskPackId") || "Evaluation")} · {conclusionStatusLabel(field(run, "outcome"))}
                   </option>
                 ))}
               </select>
@@ -2685,9 +2683,6 @@ function RunCreation({
   const initialTemplate =
     templates.find((template) => template.recommended) ?? templates[0];
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"template" | "json">(
-    templates.length ? "template" : "json",
-  );
   const [templateId, setTemplateId] = useState(
     initialTemplate?.templateId ?? "",
   );
@@ -2710,7 +2705,6 @@ function RunCreation({
     const value = initialTemplate?.spec.execution.budget?.maxUsd;
     return value === undefined ? "" : String(value);
   });
-  const [draft, setDraft] = useState("");
   const [spec, setSpec] = useState<EvaluationRunSpec>();
   const [error, setError] = useState<string>();
   const selectedTemplate = templates.find(
@@ -2754,18 +2748,15 @@ function RunCreation({
 
   const validate = () => {
     try {
-      const candidate =
-        mode === "json"
-          ? JSON.parse(draft)
-          : buildTemplateSpec({
-              template: selectedTemplate,
-              runId,
-              agentVariantId: templateAgent?.variantId ?? "",
-              repeats,
-              timeoutSeconds,
-              maxConcurrency,
-              budgetUsd,
-            });
+      const candidate = buildTemplateSpec({
+        template: selectedTemplate,
+        runId,
+        agentVariantId: templateAgent?.variantId ?? "",
+        repeats,
+        timeoutSeconds,
+        maxConcurrency,
+        budgetUsd,
+      });
       const parsed = EvaluationRunSpecSchema.parse(candidate);
       setSpec(parsed);
       setError(undefined);
@@ -2792,14 +2783,13 @@ function RunCreation({
       if (!started) return;
     }
     setOpen(false);
-    setDraft("");
     setSpec(undefined);
   };
   return (
     <section className="panel run-creation">
       <PanelHeading
-        title="Create immutable run"
-        eyebrow="Resolved specification required"
+        title="Create evaluation"
+        eyebrow="Choose a reviewed template"
       />
       {!open ? (
         <div className="action-callout">
@@ -2811,38 +2801,12 @@ function RunCreation({
             disabled={!capabilities?.commands.includes("run.create")}
             onClick={() => setOpen(true)}
           >
-            New run specification
+            New evaluation
           </button>
         </div>
       ) : (
         <div className="stack">
-          {templates.length > 0 && (
-            <div
-              className="creation-mode"
-              role="group"
-              aria-label="Run creation mode"
-            >
-              <button
-                className={mode === "template" ? "active" : ""}
-                onClick={() => {
-                  setMode("template");
-                  setSpec(undefined);
-                }}
-              >
-                Guided template
-              </button>
-              <button
-                className={mode === "json" ? "active" : ""}
-                onClick={() => {
-                  setMode("json");
-                  setSpec(undefined);
-                }}
-              >
-                Advanced JSON
-              </button>
-            </div>
-          )}
-          {mode === "template" && selectedTemplate ? (
+          {selectedTemplate ? (
             <div className="template-builder">
               <label>
                 Experiment template
@@ -2865,16 +2829,6 @@ function RunCreation({
                 {selectedTemplate.description}
               </p>
               <div className="template-fields">
-                <label>
-                  Run ID
-                  <input
-                    value={runId}
-                    onChange={(event) => {
-                      setRunId(event.target.value);
-                      setSpec(undefined);
-                    }}
-                  />
-                </label>
                 <label>
                   Agent
                   <select
@@ -2943,19 +2897,10 @@ function RunCreation({
               </div>
             </div>
           ) : (
-            <label>
-              Canonical EvaluationRunSpec JSON
-              <textarea
-                value={draft}
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                  setSpec(undefined);
-                }}
-                rows={12}
-                spellCheck={false}
-                placeholder="Paste a canonical protocol-v1 EvaluationRunSpec"
-              />
-            </label>
+            <div className="human-error" role="status">
+              <strong>No run templates are configured</strong>
+              <p>Ask an administrator to publish a reviewed run template before creating an evaluation.</p>
+            </div>
           )}
           <div className="dialog-actions">
             <button
@@ -2969,10 +2914,10 @@ function RunCreation({
             </button>
             <button
               className="primary"
-              disabled={mode === "json" ? !draft.trim() : !selectedTemplate}
+              disabled={!selectedTemplate}
               onClick={validate}
             >
-              Validate immutable spec
+              Review run
             </button>
           </div>
           {error && (
@@ -3469,7 +3414,7 @@ function RunDetail({
         </p>
       )}
       <div className="spec-band">
-        <Metric label="State" value={field(run, "state") || "—"} />
+        <div className="metric"><span>Status</span><strong><StatusBadge value={field(run, "state")} /></strong></div>
         <Metric
           label="Progress"
           value={
@@ -3574,7 +3519,7 @@ function RunDetail({
               key={field(trial, "trialId")}
               value={field(trial, "trialId")}
             >
-              {field(trial, "trialId")} · {field(trial, "state")}
+              {humanize(field(trial, "taskId") || field(trial, "trialId"))} · {humanize(field(trial, "state"))}
             </option>
           ))}
         </select>
@@ -3795,8 +3740,8 @@ function Analysis({
       />
       <section className="panel">
         <PanelHeading
-          title="Normalized capability vectors"
-          eyebrow="Eleven evidence-linked components"
+          title="Capability scores"
+          eyebrow="Quality by evaluated capability"
         />
         <Rows
           items={vectors.flatMap(capabilityRows)}
@@ -3815,8 +3760,8 @@ function Analysis({
       <section className="split">
         <div className="panel">
           <PanelHeading
-            title="Failure taxonomy & divergence"
-            eyebrow="First meaningful difference"
+            title="Failure patterns"
+            eyebrow="Where unsuccessful runs begin to differ"
           />
           <Rows
             items={pageItems(value.defects)}
@@ -3831,15 +3776,15 @@ function Analysis({
         </div>
         <div className="panel">
           <PanelHeading
-            title="Analysis coverage"
-            eyebrow="Authoritative methods"
+            title="Available analysis"
+            eyebrow="What this workspace can measure"
           />
           <ul className="fact-list">
-            <li>Native benchmark scores and normalized capability vectors</li>
-            <li>Paired statistics and confidence intervals</li>
-            <li>Cost/latency Pareto and post-divergence cost</li>
-            <li>Environment/platform health separation</li>
-            <li>Evaluated-slice comparability diagnostics</li>
+            <li>Task quality and capability scores</li>
+            <li>Confidence and repeated-run consistency</li>
+            <li>Cost and latency trade-offs</li>
+            <li>Infrastructure failures separated from Agent failures</li>
+            <li>Fair-comparison checks across evaluation sets</li>
           </ul>
         </div>
       </section>
@@ -3854,6 +3799,7 @@ function Analysis({
         ]}
         capabilities={capabilities}
         controlPlane={controlPlane}
+        context={data}
       />
     </div>
   );
@@ -3898,8 +3844,9 @@ function Defects({
         resource={RESOURCES.defects}
         initial={value.defects}
         controlPlane={controlPlane}
-        title="Detector findings & clusters"
-        eyebrow="Evidence and first divergence"
+        title="Issues requiring review"
+        eyebrow="Impact, severity and verification status"
+        filterOptions={{ runId: commandOptions(value).runs }}
       />
       <section className="split">
         <div className="panel">
@@ -3920,8 +3867,8 @@ function Defects({
         </div>
         <div className="panel">
           <PanelHeading
-            title="Human taxonomy promotions"
-            eyebrow="Annotations and ownership"
+            title="Classification changes"
+            eyebrow="Reviewer decisions and ownership"
           />
           <Rows
             items={pageItems(value.promotions)}
@@ -3941,6 +3888,7 @@ function Defects({
         allowed={["defect.promote", "failure-cluster.promote"]}
         capabilities={capabilities}
         controlPlane={controlPlane}
+        context={data}
       />
     </div>
   );
@@ -3965,8 +3913,8 @@ function Regression({
       />
       <section className="panel">
         <PanelHeading
-          title="Versioned regression packs"
-          eyebrow="Owners, locks, flake policy & promotion source"
+          title="Regression suites"
+          eyebrow="Coverage, owner and acceptable flake rate"
         />
         <Rows
           items={pageItems(value.packs)}
@@ -3983,8 +3931,8 @@ function Regression({
       </section>
       <section className="panel">
         <PanelHeading
-          title="Baseline / candidate release decisions"
-          eyebrow="Bootstrap, variance, completeness & Pareto"
+          title="Release decisions"
+          eyebrow="Baseline and candidate outcomes"
         />
         <Rows
           items={pageItems(value.decisions)}
@@ -3992,17 +3940,9 @@ function Regression({
             "gateId",
             "decision",
             "pairedTasks",
-            "repeats",
-            "flakyTasks",
-            "infrastructureFailures",
             "violations",
             "statistics.successRateDelta",
-            "statistics.confidenceInterval",
-            "statistics.mcnemarPValue",
-            "statistics.repeatedRunVariance",
-            "statistics.evidenceCompleteness",
             "statistics.pareto.relation",
-            "statistics.taskDeltas",
           ]}
         />
       </section>
@@ -4011,6 +3951,7 @@ function Regression({
         allowed={["regression.evaluate"]}
         capabilities={capabilities}
         controlPlane={controlPlane}
+        context={data}
       />
     </div>
   );
@@ -4036,25 +3977,18 @@ function Insights({
       />
       <section className="panel">
         <PanelHeading
-          title="Evidence-linked product insights"
-          eyebrow="Impact through post-fix validation"
+          title="Prioritized recommendations"
+          eyebrow="Observed impact and recommended action"
         />
         <Rows
           items={items}
           fields={[
             "insightId",
             "failureCluster",
-            "affectedTaskRate",
             "severity",
-            "suspectedLayer",
-            "confidence",
             "recommendation",
-            "expectedMetric",
-            "regressionPackId",
             "owner",
             "status",
-            "evidenceRefs",
-            "postFixValidationRefs",
           ]}
         />
       </section>
@@ -4063,6 +3997,7 @@ function Insights({
         allowed={["insight.record"]}
         capabilities={capabilities}
         controlPlane={controlPlane}
+        context={data}
       />
     </div>
   );
@@ -4091,14 +4026,16 @@ function Reports({
         resource={RESOURCES.reports}
         initial={live}
         controlPlane={controlPlane}
-        eyebrow="Methodology, provenance & signed manifest"
+        eyebrow="Purpose, scope and availability"
+        filterOptions={{ runId: commandOptions(value).runs }}
       />
       <ReportDownloads items={items} controlPlane={controlPlane} />
       <OperatorCommandForm
-        title="Generate immutable report"
+        title="Create report"
         allowed={["report.generate"]}
         capabilities={capabilities}
         controlPlane={controlPlane}
+        context={data}
       />
     </div>
   );
@@ -4109,116 +4046,151 @@ function OperatorCommandForm({
   allowed,
   capabilities,
   controlPlane,
+  context,
 }: {
   title: string;
   allowed: EvaluationCommand["type"][];
   capabilities?: ControlPlaneCapabilities;
   controlPlane: DashboardControlPlane;
+  context: unknown;
 }): JSX.Element {
-  const supported = allowed.filter((type) =>
-    capabilities?.commands.includes(type),
-  );
-  const [draft, setDraft] = useState("");
-  const [command, setCommand] = useState<EvaluationCommand>();
-  const [confirmation, setConfirmation] = useState("");
-  const [state, setState] = useState<
-    "idle" | "pending" | "committed" | "failed"
-  >("idle");
+  const supported = allowed.filter((type) => capabilities?.commands.includes(type));
+  const humanSupported = supported.filter((type) => type !== "defect.promote" && type !== "run.counterfactual");
+  const [type, setType] = useState<EvaluationCommand["type"] | "">(humanSupported[0] ?? "");
+  const [values, setValues] = useState<Record<string, string>>({
+    retainDays: "90", methodologyVersion: "1.0.0", severity: "medium", confidence: "0.8",
+    affectedTaskRate: "0", status: "proposed", suspectedLayer: "runtime", owner: "Evaluation team",
+    maxSuccessRateDropPp: "2", maxNewCriticalDefects: "0", maxTestGamingRate: "0",
+    maxP95CostIncreasePct: "20", allowedFlakeRate: "0.02", confidenceLevel: "0.95",
+  });
+  const [multi, setMulti] = useState<Record<string, string[]>>({});
+  const [state, setState] = useState<"idle" | "pending" | "committed" | "failed">("idle");
   const [message, setMessage] = useState<string>();
-  const validate = () => {
-    try {
-      const input = object(JSON.parse(draft));
-      const parsed = EvaluationCommandSchema.parse({
-        ...operatorCommandEnvelope(operatorSession()),
-        ...input,
-      });
-      if (!allowed.includes(parsed.type))
-        throw new Error("command type is not valid for this workflow");
-      if (!supported.includes(parsed.type))
-        throw new Error("Control Plane does not advertise this command");
-      setCommand(parsed);
-      setConfirmation("");
-      setState("idle");
-      setMessage(undefined);
-    } catch (cause) {
-      setCommand(undefined);
-      setMessage(errorMessage(cause));
-      setState("failed");
-    }
-  };
+  const options = commandOptions(context);
+  const update = (name: string, value: string) => setValues((current) => ({ ...current, [name]: value }));
   const submit = async () => {
-    if (!command || confirmation !== "submit:" + command.type) return;
-    setState("pending");
+    if (!type) return;
+    setState("pending"); setMessage(undefined);
     try {
+      const command = EvaluationCommandSchema.parse(humanCommand(type, values, multi));
       const acknowledgement = await controlPlane.command(command);
       setState("committed");
-      setMessage(
-        "Committed at projection " + String(acknowledgement.projectionVersion),
-      );
-    } catch (cause) {
-      setState("failed");
-      setMessage(errorMessage(cause));
-    }
+      setMessage("The action was accepted and is now reflected in the evaluation history (revision " + String(acknowledgement.projectionVersion) + ").");
+    } catch (cause) { setState("failed"); setMessage(errorMessage(cause)); }
   };
+  if (!humanSupported.length) return (
+    <section className="panel action-workflow unavailable-workflow">
+      <PanelHeading title={title} eyebrow="Action unavailable" />
+      <p>This action requires a dedicated guided workflow and is not exposed as a raw JSON editor.</p>
+    </section>
+  );
   return (
-    <section className="panel command-workflow">
-      <PanelHeading title={title} eyebrow="Versioned command contract" />
-      <p>
-        Supported here:{" "}
-        {supported.length ? supported.join(", ") : "none advertised"}
-      </p>
-      <label>
-        Command body JSON
-        <textarea
-          rows={6}
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            setCommand(undefined);
-          }}
-          placeholder={'{ "type": "' + allowed[0] + '", … }'}
-          spellCheck={false}
-        />
-      </label>
-      <div className="dialog-actions">
-        <button disabled={!draft.trim()} onClick={validate}>
-          Validate command
-        </button>
+    <section className="panel action-workflow">
+      <PanelHeading title={title} eyebrow="Guided action" />
+      {humanSupported.length > 1 && <label>Action<select value={type} onChange={(event) => { setType(event.target.value as EvaluationCommand["type"]); setMessage(undefined); }}>
+        {humanSupported.map((value) => <option key={value} value={value}>{commandLabel(value)}</option>)}
+      </select></label>}
+      <div className="structured-form">
+        {type.startsWith("run.") && <>
+          <Choice label="Run" name="runId" value={values.runId} options={options.runs} onChange={update} />
+          {type === "run.analyze" && <MultiChoice label="Detectors" name="detectorIds" values={multi.detectorIds ?? []} options={options.detectors} onChange={(name, value) => setMulti((current) => ({ ...current, [name]: value }))} />}
+        </>}
+        {type === "leaderboard.invalidate" && <><Choice label="Published entry" name="entryId" value={values.entryId} options={options.entries} onChange={update} /><TextField label="Reason" name="reason" value={values.reason} onChange={update} /></>}
+        {type === "failure-cluster.promote" && <>
+          <Choice label="Run" name="runId" value={values.runId} options={options.runs} onChange={update} />
+          <Choice label="Analysis job" name="sourceJobId" value={values.sourceJobId} options={options.jobs} onChange={update} />
+          <Choice label="Failure cluster" name="clusterId" value={values.clusterId} options={options.clusters} onChange={update} />
+          <TextField label="Human-readable name" name="humanName" value={values.humanName} onChange={update} />
+          <Choice label="Category" name="promotedCategory" value={values.promotedCategory} options={DEFECT_CATEGORIES} onChange={update} />
+        </>}
+        {type === "regression.evaluate" && <>
+          <TextField label="Release check name" name="gateId" value={values.gateId} onChange={update} />
+          <Choice label="Baseline run" name="baselineRunId" value={values.baselineRunId} options={options.runs} onChange={update} />
+          <Choice label="Candidate run" name="candidateRunId" value={values.candidateRunId} options={options.runs} onChange={update} />
+          <Choice label="Baseline agent" name="baselineAgentVariantId" value={values.baselineAgentVariantId} options={options.agents} onChange={update} />
+          <Choice label="Candidate agent" name="candidateAgentVariantId" value={values.candidateAgentVariantId} options={options.agents} onChange={update} />
+          <NumberField label="Maximum success-rate drop (percentage points)" name="maxSuccessRateDropPp" value={values.maxSuccessRateDropPp} onChange={update} />
+          <NumberField label="Maximum new critical defects" name="maxNewCriticalDefects" value={values.maxNewCriticalDefects} onChange={update} />
+          <NumberField label="Maximum cost increase (%)" name="maxP95CostIncreasePct" value={values.maxP95CostIncreasePct} onChange={update} />
+        </>}
+        {type === "report.generate" && <>
+          <TextField label="Report name" name="reportId" value={values.reportId} onChange={update} />
+          <MultiChoice label="Runs to include" name="runIds" values={multi.runIds ?? []} options={options.runs} onChange={(name, value) => setMulti((current) => ({ ...current, [name]: value }))} />
+          <Choice label="Methodology" name="methodologyVersion" value={values.methodologyVersion} options={[{ value: "1.0.0", label: "Standard methodology 1.0" }]} onChange={update} />
+        </>}
+        {type === "retention.set" && <>
+          <TextField label="Policy name" name="policyId" value={values.policyId} onChange={update} />
+          <NumberField label="Keep evaluation data for (days)" name="retainDays" value={values.retainDays} onChange={update} />
+          <CheckField label="Always retain published leaderboard evidence" name="protectLeaderboard" values={values} setValues={setValues} />
+          <CheckField label="Always retain release-validation evidence" name="protectRegression" values={values} setValues={setValues} />
+        </>}
+        {type === "insight.record" && <>
+          <TextField label="Insight name" name="insightId" value={values.insightId} onChange={update} />
+          <Choice label="Related issue or cluster" name="failureCluster" value={values.failureCluster} options={[...options.clusters, ...options.findings]} onChange={update} />
+          <Choice label="Severity" name="severity" value={values.severity} options={SEVERITIES} onChange={update} />
+          <Choice label="Likely source" name="suspectedLayer" value={values.suspectedLayer} options={SUSPECTED_LAYERS} onChange={update} />
+          <TextField label="Recommended action" name="recommendation" value={values.recommendation} onChange={update} />
+          <TextField label="Expected metric improvement" name="expectedMetric" value={values.expectedMetric} onChange={update} />
+          <Choice label="Regression suite" name="regressionPackId" value={values.regressionPackId} options={options.packs} onChange={update} />
+          <TextField label="Owner" name="owner" value={values.owner} onChange={update} />
+        </>}
       </div>
-      {command && (
-        <div className="command-confirmation">
-          <code>
-            {command.type} · {command.idempotencyKey}
-          </code>
-          <label>
-            Type <code>{"submit:" + command.type}</code>
-            <input
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-            />
-          </label>
-          <button
-            className="primary"
-            disabled={
-              state === "pending" || confirmation !== "submit:" + command.type
-            }
-            onClick={() => void submit()}
-          >
-            Submit committed command
-          </button>
-        </div>
-      )}
-      {message && (
-        <p
-          className={state === "failed" ? "inline-error" : "redaction-note"}
-          role="status"
-        >
-          {message}
-        </p>
-      )}
+      <button className="primary" disabled={state === "pending" || !formReady(type, values, multi)} onClick={() => void submit()}>{state === "pending" ? "Submitting…" : commandActionLabel(type)}</button>
+      {message && <div className={state === "failed" ? "human-error" : "human-success"} role="status"><strong>{state === "failed" ? "Action not completed" : "Action completed"}</strong><p>{message}</p></div>}
     </section>
   );
 }
+
+type Option = { value: string; label: string };
+const DEFECT_CATEGORIES: Option[] = ["instruction_drift", "context_forgetting", "test_gaming", "tool_recovery", "planning_execution", "trace_divergence"].map((value) => ({ value, label: humanize(value) }));
+const SEVERITIES: Option[] = ["low", "medium", "high", "critical"].map((value) => ({ value, label: humanize(value) }));
+const SUSPECTED_LAYERS: Option[] = ["model", "prompt", "tool", "runtime", "environment", "verifier"].map((value) => ({ value, label: humanize(value) }));
+function Choice({ label, name, value = "", options, onChange }: { label: string; name: string; value?: string; options: Option[]; onChange(name: string, value: string): void }): JSX.Element {
+  return <label>{label}<select value={value} onChange={(event) => onChange(name, event.target.value)}><option value="">Select…</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+}
+function MultiChoice({ label, name, values, options, onChange }: { label: string; name: string; values: string[]; options: Option[]; onChange(name: string, value: string[]): void }): JSX.Element {
+  return <label>{label}<select multiple size={Math.min(6, Math.max(3, options.length))} value={values} onChange={(event) => onChange(name, [...event.currentTarget.selectedOptions].map((option) => option.value))}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Select one or more options.</small></label>;
+}
+function TextField({ label, name, value = "", onChange }: { label: string; name: string; value?: string; onChange(name: string, value: string): void }): JSX.Element { return <label>{label}<input value={value} onChange={(event) => onChange(name, event.target.value)} /></label>; }
+function NumberField(props: Parameters<typeof TextField>[0]): JSX.Element { return <label>{props.label}<input type="number" min="0" step="any" value={props.value} onChange={(event) => props.onChange(props.name, event.target.value)} /></label>; }
+function CheckField({ label, name, values, setValues }: { label: string; name: string; values: Record<string,string>; setValues: React.Dispatch<React.SetStateAction<Record<string,string>>> }): JSX.Element { return <label className="check-field"><input type="checkbox" checked={values[name] === "true"} onChange={(event) => setValues((current) => ({ ...current, [name]: String(event.target.checked) }))} />{label}</label>; }
+function commandOptions(context: unknown): Record<string, Option[]> {
+  const found: Record<string, Map<string,string>> = Object.fromEntries(["runs","detectors","entries","jobs","clusters","findings","agents","packs"].map((key) => [key, new Map()]));
+  const visit = (value: unknown) => { if (Array.isArray(value)) return value.forEach(visit); if (!value || typeof value !== "object") return; const item = value as Record<string,unknown>;
+    add("runs", field(item,"accepted.spec.runId") || field(item,"runId"), field(item,"accepted.spec.taskPack.id") || field(item,"taskPackId"));
+    add("detectors", field(item,"detectorId") || (field(item,"id").includes("detector") ? field(item,"id") : ""), field(item,"name"));
+    add("entries", field(item,"entryId"), field(item,"modelId") || field(item,"agentVariantId")); add("jobs", field(item,"jobId"), field(item,"kind"));
+    add("clusters", field(item,"clusterId") || field(item,"cluster.clusterId"), field(item,"humanName") || field(item,"cluster.humanName"));
+    add("findings", field(item,"findingId"), field(item,"category")); add("agents", field(item,"agentVariantId") || field(item,"variantId"), field(item,"name"));
+    add("packs", field(item,"packId") || field(item,"regressionPackId"), field(item,"owner")); Object.values(item).forEach(visit);
+  };
+  const add = (group: string, value: string, hint: string) => { if (value) found[group]!.set(value, hint ? `${humanize(hint)} · ${humanize(value.replace(/^fresh-/, ""))}` : humanize(value.replace(/^fresh-/, ""))); };
+  visit(context); return Object.fromEntries(Object.entries(found).map(([key,map]) => [key,[...map].map(([value,label]) => ({value,label}))]));
+}
+function humanCommand(type: EvaluationCommand["type"], values: Record<string,string>, multi: Record<string,string[]>): unknown {
+  const envelope = operatorCommandEnvelope(operatorSession()); const id = (value: string | undefined, fallback: string) => (value?.trim() || `${fallback}-${Date.now()}`).toLowerCase().replace(/[^a-z0-9._-]+/g,"-");
+  if (type === "run.grade" || type === "run.align" || type === "run.cluster") return { ...envelope, type, runId: values.runId };
+  if (type === "run.analyze") return { ...envelope, type, runId: values.runId, detectorIds: multi.detectorIds };
+  if (type === "leaderboard.invalidate") return { ...envelope, type, entryId: values.entryId, reason: values.reason };
+  if (type === "failure-cluster.promote") return { ...envelope, type, runId: values.runId, sourceJobId: values.sourceJobId, clusterId: values.clusterId, humanName: values.humanName, promotedCategory: values.promotedCategory, promotedBy: { actorId: operatorSession().sessionId, authority: "operator" } };
+  if (type === "regression.evaluate") return { ...envelope, type, gateId: id(values.gateId,"release-check"), baseline: { runId: values.baselineRunId, agentVariantId: values.baselineAgentVariantId }, candidate: { runId: values.candidateRunId, agentVariantId: values.candidateAgentVariantId }, rules: { maxSuccessRateDropPp: +values.maxSuccessRateDropPp, maxNewCriticalDefects: +values.maxNewCriticalDefects, maxTestGamingRate: +values.maxTestGamingRate, maxP95CostIncreasePct: +values.maxP95CostIncreasePct, allowedFlakeRate: +values.allowedFlakeRate, confidenceLevel: +values.confidenceLevel } };
+  if (type === "report.generate") return { ...envelope, type, reportId: id(values.reportId,"report"), runIds: multi.runIds, methodologyVersion: values.methodologyVersion };
+  if (type === "retention.set") return { ...envelope, type, policy: { schemaVersion: 1, policyId: id(values.policyId,"retention"), retainDays: +values.retainDays, protectPublishedLeaderboardEvidence: values.protectLeaderboard === "true", protectRegressionEvidence: values.protectRegression === "true", derivedArtifactDeletion: "transitive", requireConfirmation: true } };
+  if (type === "insight.record") return { ...envelope, type, insight: { schemaVersion:1, insightId:id(values.insightId,"insight"), evidenceRefs:[values.failureCluster], failureCluster:values.failureCluster, affectedTaskRate:+values.affectedTaskRate, severity:values.severity, suspectedLayer:values.suspectedLayer, confidence:+values.confidence, recommendation:values.recommendation, expectedMetric:values.expectedMetric, regressionPackId:values.regressionPackId, owner:values.owner, status:values.status, postFixValidationRefs:[] } };
+  return { ...envelope, type };
+}
+function formReady(type: string, values: Record<string,string>, multi: Record<string,string[]>): boolean {
+  if (type.startsWith("run.")) return Boolean(values.runId && (type !== "run.analyze" || multi.detectorIds?.length));
+  if (type === "report.generate") return Boolean(multi.runIds?.length && values.methodologyVersion);
+  if (type === "retention.set") return Boolean(values.retainDays);
+  if (type === "regression.evaluate") return Boolean(values.baselineRunId && values.candidateRunId && values.baselineAgentVariantId && values.candidateAgentVariantId);
+  if (type === "insight.record") return Boolean(values.failureCluster && values.recommendation && values.expectedMetric && values.regressionPackId);
+  if (type === "failure-cluster.promote") return Boolean(values.runId && values.sourceJobId && values.clusterId && values.humanName && values.promotedCategory);
+  if (type === "leaderboard.invalidate") return Boolean(values.entryId && values.reason);
+  return false;
+}
+function commandLabel(type: string): string { return ({"run.grade":"Calculate scores","run.analyze":"Find issues","run.align":"Compare traces","run.cluster":"Group failures","leaderboard.invalidate":"Remove published result","failure-cluster.promote":"Classify failure cluster","regression.evaluate":"Evaluate release","report.generate":"Create report","retention.set":"Update retention policy","insight.record":"Save recommendation"} as Record<string,string>)[type] ?? humanize(type); }
+function commandActionLabel(type: string): string { return commandLabel(type); }
 
 function ResourceTable({
   route,
@@ -4250,13 +4222,15 @@ function FilterableResourcePanel({
   initial,
   controlPlane,
   title = resource.title,
-  eyebrow = "Control Plane authority",
+  eyebrow = "Current evaluation data",
+  filterOptions = {},
 }: {
   resource: Resource;
   initial: unknown;
   controlPlane: DashboardControlPlane;
   title?: string;
   eyebrow?: string;
+  filterOptions?: Record<string, Option[]>;
 }): JSX.Element {
   const [result, setResult] = useState(initial);
   const [filters, setFilters] = useState(() =>
@@ -4312,7 +4286,7 @@ function FilterableResourcePanel({
           {resource.filters.map((filter) => (
             <label key={filter.parameter}>
               {filter.label}
-              {filter.values ? (
+              {filter.values || filterOptions[filter.parameter]?.length ? (
                 <select
                   value={filters[filter.parameter]}
                   onChange={(event) =>
@@ -4323,9 +4297,9 @@ function FilterableResourcePanel({
                   }
                 >
                   <option value="">All</option>
-                  {filter.values.map((value) => (
-                    <option key={value} value={value}>
-                      {value.replaceAll("_", " ")}
+                  {(filterOptions[filter.parameter] ?? filter.values!.map((value) => ({ value, label: humanize(value) }))).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
@@ -4617,8 +4591,13 @@ function field(value: unknown, name: string): string {
   return found === undefined || found === null ? "" : String(found);
 }
 function display(value: unknown): string {
-  if (value === undefined || value === null || value === "") return "—";
-  if (typeof value === "object") return JSON.stringify(value);
+  if (value === undefined || value === null || value === "") return "Not available";
+  if (Array.isArray(value)) return value.length ? value.slice(0, 3).map(String).join(", ") + (value.length > 3 ? ` +${value.length - 3}` : "") : "None";
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const summary = record.label ?? record.name ?? record.title ?? record.status ?? record.state;
+    return summary === undefined ? `${Object.keys(record).length} properties` : String(summary);
+  }
   return String(value);
 }
 function liveRunsFrom(
