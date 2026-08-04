@@ -37,8 +37,8 @@ describe("evaluation dashboard nginx security policy", () => {
 
   it("never caches private API or HTML responses and only caches hashed assets immutably", () => {
     expect(config.match(/add_header Cache-Control "private, no-store" always;/g)?.length).toBeGreaterThanOrEqual(4);
-    expect(location("location = /index.html", "location ~* ^/assets/")).toContain('Cache-Control "no-cache, no-store, must-revalidate"');
-    const assets = location("location ~* ^/assets/", "location /");
+    expect(location("location = /index.html", "location ~* \"")).toContain('Cache-Control "no-cache, no-store, must-revalidate"');
+    const assets = location("location ~* \"", "location /");
     expect(assets).toMatch(/\{8,\}/);
     expect(assets).toContain('Cache-Control "public, max-age=31536000, immutable"');
   });
