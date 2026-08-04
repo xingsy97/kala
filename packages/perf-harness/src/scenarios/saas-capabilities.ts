@@ -17,16 +17,19 @@ export async function runSaasCapabilities(ctx: ScenarioContext): Promise<Scenari
     throw new Error(`SaaS capability bootstrap failed: ${JSON.stringify(diagnostic)}`, { cause: error })
   }
   const metrics = await session.page.evaluate(async (host) => {
-    const capability = await fetch(`${host}/runtime/capabilities`).then((response) => response.json()) as { mode: string; capabilities: { agent: boolean; workspace: boolean } }
+    const capability = await fetch(`${host}/runtime/capabilities`).then((response) => response.json()) as { mode: string; capabilities: { agent: boolean; workspace: boolean; operations: boolean; artifacts: boolean; pipeline: boolean } }
     const direct = await fetch(`${host}/eval/swebench/plan`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
     return {
       mode: capability.mode,
       agent: capability.capabilities.agent,
       workspace: capability.capabilities.workspace,
+      operations: capability.capabilities.operations,
+      artifacts: capability.capabilities.artifacts,
+      pipeline: capability.capabilities.pipeline,
       directStatus: direct.status,
       directBody: await direct.text(),
     }
   }, stack.hostOrigin)
-  const pass = metrics.mode === 'saas' && metrics.agent && metrics.workspace && metrics.directStatus === 404
+  const pass = metrics.mode === 'saas' && metrics.agent && metrics.workspace && metrics.operations && metrics.artifacts && metrics.pipeline && metrics.directStatus === 404
   return { name: 'saas-capabilities', reproduces: 'SaaS publishes only product capabilities and has no legacy evaluation route.', metrics, pass, notes: JSON.stringify(metrics) }
 }
