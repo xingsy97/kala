@@ -1,6 +1,6 @@
 # Evaluation Platform Second Review Acceptance
 
-Status: implementation and working-tree acceptance complete; clean-checkout replay pending the final review commits.
+Status: complete. The final code revision `de682f2` passed an independent clean-checkout replay; the subsequent acceptance-record commit changes documentation only.
 
 ## Review scope
 
