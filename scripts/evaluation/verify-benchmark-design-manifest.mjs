@@ -59,13 +59,10 @@ for (const [id, path] of Object.entries(adapterFiles)) {
 }
 
 const completionClaimFiles = [
-  'experiments/evals/2026-07-agent-benchmark-comparison/README.md',
-  'experiments/evals/2026-07-agent-benchmark-comparison/manifest.md',
-  'experiments/evals/2026-07-agent-benchmark-comparison/interview-rehearsal.md',
-  'experiments/evals/2026-07-agent-benchmark-comparison/next-actions.md',
-  'experiments/evals/2026-07-agent-benchmark-comparison/legacy-runner-analysis.md',
-  'experiments/evals/2026-07-agent-benchmark-comparison/legacy-runner-runbook.md',
-  'experiments/evals/2026-07-agent-benchmark-comparison/reports/programbench/runbook.md',
+  'docs/evaluation/COMPATIBILITY.md',
+  'docs/evaluation/benchmark-design-manifest.json',
+  'docs/architecture/agent-evaluation-platform-refactor.md',
+  'docs/architecture/agent-evaluation-platform-implementation-ledger.md',
 ]
 for (const path of completionClaimFiles) {
   const source = await readFile(resolve(root, path), 'utf8')
