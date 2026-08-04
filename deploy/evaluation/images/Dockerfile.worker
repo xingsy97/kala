@@ -1,0 +1,90 @@
+FROM docker:29.1.3-cli@sha256:4fa0ee1f3a7e4354c4ea34558b6d4ee32859baf4973d4c8ccc8e7fe3dd730c04 AS docker-cli
+
+FROM node:22-bookworm-slim AS build
+RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
+WORKDIR /source
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/kernel/package.json packages/kernel/package.json
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/eval-protocol/package.json packages/eval-protocol/package.json
+COPY packages/eval-sdk/package.json packages/eval-sdk/package.json
+COPY packages/eval-worker/package.json packages/eval-worker/package.json
+COPY packages/eval-orchestrator/package.json packages/eval-orchestrator/package.json
+COPY adapters/environments/common/package.json adapters/environments/common/package.json
+COPY adapters/environments/docker/package.json adapters/environments/docker/package.json
+COPY adapters/environments/lxd-container/package.json adapters/environments/lxd-container/package.json
+COPY adapters/environments/lxd-vm/package.json adapters/environments/lxd-vm/package.json
+COPY adapters/agents/cli-common/package.json adapters/agents/cli-common/package.json
+COPY adapters/agents/custom-command/package.json adapters/agents/custom-command/package.json
+COPY adapters/agents/agent-runlab/package.json adapters/agents/agent-runlab/package.json
+COPY adapters/agents/codex/package.json adapters/agents/codex/package.json
+COPY adapters/agents/claude-code/package.json adapters/agents/claude-code/package.json
+COPY adapters/benchmarks/common/package.json adapters/benchmarks/common/package.json
+COPY adapters/benchmarks/custom-task-pack/package.json adapters/benchmarks/custom-task-pack/package.json
+COPY adapters/benchmarks/swe-bench/package.json adapters/benchmarks/swe-bench/package.json
+COPY adapters/benchmarks/terminal-bench/package.json adapters/benchmarks/terminal-bench/package.json
+COPY adapters/benchmarks/program-bench/package.json adapters/benchmarks/program-bench/package.json
+COPY adapters/benchmarks/code-understanding/package.json adapters/benchmarks/code-understanding/package.json
+COPY adapters/benchmarks/memory-planning/package.json adapters/benchmarks/memory-planning/package.json
+COPY adapters/benchmarks/fault-scenarios/package.json adapters/benchmarks/fault-scenarios/package.json
+COPY adapters/benchmarks/sdlc-journey/package.json adapters/benchmarks/sdlc-journey/package.json
+COPY adapters/benchmarks/swe-marathon/package.json adapters/benchmarks/swe-marathon/package.json
+RUN pnpm install --frozen-lockfile \
+  --filter @agent-kernel/eval-worker... \
+  --filter @agent-kernel/eval-environment-docker... \
+  --filter @agent-kernel/eval-environment-lxd-container... \
+  --filter @agent-kernel/eval-environment-lxd-vm... \
+  --filter @agent-kernel/eval-agent-custom-command... \
+  --filter @agent-kernel/eval-agent-runlab... \
+  --filter @agent-kernel/eval-agent-codex... \
+  --filter @agent-kernel/eval-agent-claude-code... \
+  --filter @agent-kernel/eval-benchmark-custom-task-pack... \
+  --filter @agent-kernel/eval-benchmark-swe-bench... \
+  --filter @agent-kernel/eval-benchmark-terminal-bench... \
+  --filter @agent-kernel/eval-benchmark-program-bench... \
+  --filter @agent-kernel/eval-benchmark-code-understanding... \
+  --filter @agent-kernel/eval-benchmark-memory-planning... \
+  --filter @agent-kernel/eval-benchmark-fault-scenarios... \
+  --filter @agent-kernel/eval-benchmark-sdlc-journey... \
+  --filter @agent-kernel/eval-benchmark-swe-marathon...
+COPY packages/kernel packages/kernel
+COPY packages/shared packages/shared
+COPY packages/eval-protocol packages/eval-protocol
+COPY packages/eval-sdk packages/eval-sdk
+COPY packages/eval-worker packages/eval-worker
+COPY adapters adapters
+RUN pnpm --filter @agent-kernel/kernel build \
+  && pnpm --filter @agent-kernel/shared build \
+  && pnpm --filter @agent-kernel/eval-protocol build \
+  && pnpm --filter @agent-kernel/eval-sdk build \
+  && pnpm --filter @agent-kernel/eval-worker build \
+  && pnpm --filter '@agent-kernel/eval-environment-*' build \
+  && pnpm --filter '@agent-kernel/eval-agent-*' build \
+  && pnpm --filter '@agent-kernel/eval-benchmark-*' build
+RUN pnpm deploy --legacy --filter @agent-kernel/eval-worker --prod /runtime \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-environment-docker --prod /plugins/docker \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-environment-lxd-container --prod /plugins/lxd-container \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-environment-lxd-vm --prod /plugins/lxd-vm \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-agent-custom-command --prod /plugins/custom-command \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-agent-runlab --prod /plugins/agent-runlab \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-agent-codex --prod /plugins/codex \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-agent-claude-code --prod /plugins/claude-code \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-custom-task-pack --prod /plugins/custom-task-pack \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-swe-bench --prod /plugins/swe-bench \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-terminal-bench --prod /plugins/terminal-bench \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-program-bench --prod /plugins/program-bench \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-code-understanding --prod /plugins/code-understanding \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-memory-planning --prod /plugins/memory-planning \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-fault-scenarios --prod /plugins/fault-scenarios \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-sdlc-journey --prod /plugins/sdlc-journey \
+  && pnpm deploy --legacy --filter @agent-kernel/eval-benchmark-swe-marathon --prod /plugins/swe-marathon
+
+FROM node:22-bookworm-slim
+ENV NODE_ENV=production
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+RUN install -d -o node -g node /var/lib/agent-evaluation-worker
+USER node
+WORKDIR /runtime
+COPY --from=build --chown=node:node /runtime ./
+COPY --from=build --chown=node:node /plugins /plugins
+ENTRYPOINT ["node", "dist/bin/eval-worker.js"]

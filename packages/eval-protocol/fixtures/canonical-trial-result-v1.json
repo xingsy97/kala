@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "runId": "canonical-fixture-v1",
+  "trialId": "canonical-fixture-v1:task-one:runlab-model-a:0",
+  "agentVariantId": "runlab-model-a",
+  "taskId": "task-one",
+  "repeatIndex": 0,
+  "environmentLock": {
+    "schemaVersion": 1,
+    "provider": "docker",
+    "imageDigest": "sha256:fixture",
+    "repositoryRevision": "fixture-revision-1",
+    "dependencyLockHashes": {
+      "pnpm-lock.yaml": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "redactedEnvironment": {
+      "CI": "true"
+    },
+    "resourcePolicyHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "networkPolicyHash": "3333333333333333333333333333333333333333333333333333333333333333",
+    "toolchainVersions": {
+      "node": "22.16.0"
+    },
+    "fixtureVersions": {
+      "canonical-fixture": "1"
+    },
+    "faultInjectorVersions": {}
+  },
+  "nativeEventsRef": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/native-events.jsonl",
+  "normalizedEventsRef": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/normalized-events.jsonl",
+  "normalizedEventCount": 2,
+  "analyzerInputRef": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/analyzer-input.json",
+  "finalDiffRef": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/final.diff",
+  "stdoutRef": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/stdout.log",
+  "stderrRef": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/stderr.log",
+  "usage": {
+    "availability": "unavailable",
+    "reason": "fixture backend does not expose usage"
+  },
+  "benchmarkResult": {
+    "schemaVersion": 1,
+    "benchmarkId": "swe-bench",
+    "verifierId": "swe-bench-official",
+    "verifierVersion": "1",
+    "nativeMetrics": {
+      "resolved": true
+    },
+    "rawResultRef": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/verifier-result.json",
+    "officialEvidence": true
+  },
+  "artifactManifest": {
+    "schemaVersion": 1,
+    "runId": "canonical-fixture-v1",
+    "trialId": "canonical-fixture-v1:task-one:runlab-model-a:0",
+    "leaseId": "canonical-lease-v1",
+    "generatedAt": "2026-08-03T00:10:00.000Z",
+    "entries": [
+      {
+        "artifactId": "native-events.jsonl",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/native-events.jsonl",
+        "mediaType": "application/x-ndjson",
+        "bytes": 128,
+        "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "redaction": "passed",
+        "classification": "sensitive"
+      },
+      {
+        "artifactId": "normalized-events.jsonl",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/normalized-events.jsonl",
+        "mediaType": "application/x-ndjson",
+        "bytes": 256,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "redaction": "passed",
+        "classification": "operator"
+      },
+      {
+        "artifactId": "analyzer-input.json",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/analyzer-input.json",
+        "mediaType": "application/json",
+        "bytes": 512,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "redaction": "passed",
+        "classification": "operator"
+      },
+      {
+        "artifactId": "final.diff",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/final.diff",
+        "mediaType": "text/x-diff",
+        "bytes": 64,
+        "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "redaction": "passed",
+        "classification": "sensitive"
+      },
+      {
+        "artifactId": "stdout.log",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/stdout.log",
+        "mediaType": "text/plain",
+        "bytes": 32,
+        "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+        "redaction": "passed",
+        "classification": "sensitive"
+      },
+      {
+        "artifactId": "stderr.log",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/stderr.log",
+        "mediaType": "text/plain",
+        "bytes": 0,
+        "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "redaction": "passed",
+        "classification": "sensitive"
+      },
+      {
+        "artifactId": "usage.json",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/usage.json",
+        "mediaType": "application/json",
+        "bytes": 96,
+        "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "redaction": "passed",
+        "classification": "operator"
+      },
+      {
+        "artifactId": "verifier-result.json",
+        "path": "canonical-fixture-v1/canonical-fixture-v1:task-one:runlab-model-a:0/verifier-result.json",
+        "mediaType": "application/json",
+        "bytes": 160,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "redaction": "passed",
+        "classification": "operator"
+      }
+    ],
+    "manifestHash": "6c379fab8e796ff79a38f8eab9734a7c0e06bde52b55329508337a2b125b3f48"
+  },
+  "evidenceLevel": "official",
+  "resultHash": "a7c1ba253369b5757c063b65d0d4e51a99c53b7eac21d20dcabb733d27aaae81"
+}

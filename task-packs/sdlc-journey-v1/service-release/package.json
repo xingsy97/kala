@@ -1,0 +1,11 @@
+{
+  "name": "agent-eval-sdlc-service-release",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs"
+  }
+}

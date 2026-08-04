@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "gateId": "ci-fixture-block",
+  "baselineConfigHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "candidateConfigHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "pairedTasks": 5,
+  "repeats": 3,
+  "confidenceLevel": 0.95,
+  "flakyTasks": [],
+  "infrastructureFailures": [],
+  "violations": [{ "rule": "success-rate-drop", "observed": 20, "threshold": 2 }],
+  "statistics": {
+    "baselineSuccessRate": 1,
+    "candidateSuccessRate": 0.8,
+    "successRateDelta": -0.2,
+    "pairedWins": 0,
+    "pairedLosses": 1,
+    "pairedTies": 4,
+    "mcnemarPValue": 1,
+    "confidenceInterval": { "level": 0.95, "lower": -0.55, "upper": 0.15 },
+    "flakeRate": 0
+  },
+  "decision": "block",
+  "evidenceRefs": ["result:baseline-fixture", "result:candidate-regression-fixture"]
+}

@@ -1,0 +1,2202 @@
+[
+  {
+    "schemaVersion": 1,
+    "templateId": "custom-command-smoke",
+    "label": "Local deterministic smoke",
+    "description": "Credential-free Docker smoke for Web create/start/control/monitoring. It is not a ranked model benchmark.",
+    "kind": "smoke",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "compose-smoke-task"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-custom-command-smoke",
+      "taskPack": {
+        "id": "custom-task-pack",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "compose-smoke-full",
+          "dataset": {
+            "datasetId": "compose-smoke",
+            "displayName": "Compose Smoke",
+            "version": "1.0.0",
+            "sourceRevision": "bc1480a02e74606f10d78004998c031d47df30c93251fc7b958ad18e70b53012",
+            "manifestHash": "bc1480a02e74606f10d78004998c031d47df30c93251fc7b958ad18e70b53012",
+            "taskIdsHash": "0bdb9ab2edf71893ce148e433c5ab70409964f185b4a1acb95c13ab4e6ebe058",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "local standalone deployment acceptance"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:compose-smoke"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "local standalone deployment acceptance"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "local standalone deployment acceptance"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "local standalone deployment acceptance"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "0bdb9ab2edf71893ce148e433c5ab70409964f185b4a1acb95c13ab4e6ebe058"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/compose-smoke.json",
+          "sliceManifestHash": "861ac87541e3f1d2e039fee0e6f6df8c8e33c3d8da3fa435fc9f87a1a20aadf5"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "local standalone deployment acceptance"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:custom-task-pack"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "local standalone deployment acceptance"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "local standalone deployment acceptance"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "local standalone deployment acceptance"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "custom-command-smoke",
+          "backendId": "custom-command",
+          "agentVersion": "1.0.0",
+          "model": {
+            "modelId": "deterministic-command"
+          },
+          "configHash": "716a08198194e656a2361f123f86eb76d063d948fc39a5959caac1cc8c122eb6",
+          "config": {
+            "argv": [
+              "sh",
+              "-ceu",
+              "printf \"# Deterministic evaluation fixture\\n\\nweb-controlled run accepted\\n\" > README.md; printf \"web evaluation worker accepted\\n\""
+            ]
+          },
+          "credentialRefs": []
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 30000,
+        "inactivityTimeoutMs": 10000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "docker",
+        "imageDigest": "node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 1,
+          "memoryMb": 256,
+          "diskMb": 256,
+          "pids": 64
+        },
+        "network": {
+          "mode": "denied",
+          "allowedDestinations": []
+        },
+        "artifactAllowlist": [
+          "{taskPackId}/{trialId}/native-result.json"
+        ]
+      },
+      "verification": {
+        "verifierId": "custom-task-verifier",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 30000,
+        "configHash": "41b4d80911e9faa04adc72b25aa988e6ab2e08f2ffa31ec2399790a244ad70a2"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "5307cff643869cb5b857d8c9e59915af86cd7c20a688304ac3b3193fd3ec7a4a"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "terminal-bench-real",
+    "label": "Terminal-Bench-compatible local task pack · non-official",
+    "description": "Run the non-official compatible/local task pack against its immutable one-task slice in a fresh pinned LXD sandbox. Results are not official benchmark results.",
+    "kind": "benchmark",
+    "recommended": true,
+    "builder": {
+      "taskIds": [
+        "release-ledger-reconciliation"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-terminal-bench-real",
+      "taskPack": {
+        "id": "terminal-bench",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "terminal-bench-production-v1",
+          "dataset": {
+            "datasetId": "terminal-bench-v1",
+            "displayName": "Terminal-Bench-compatible local task pack · non-official",
+            "version": "1.0.0",
+            "sourceRevision": "c1ccae715d618df01927f64daf8a171fb91e4c966ac944e437575d9fa577c4df",
+            "manifestHash": "c1ccae715d618df01927f64daf8a171fb91e4c966ac944e437575d9fa577c4df",
+            "taskIdsHash": "d8a9a65151f9e36481e1b4ca9a340f44c69670a168e51586f91e939454a38b55",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:terminal-bench"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "d8a9a65151f9e36481e1b4ca9a340f44c69670a168e51586f91e939454a38b55"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/terminal-bench.json",
+          "sliceManifestHash": "38f82d0c8c9ab172b9cfee0880cabfb5e7e57d71b31ca6be24ccf2196d067eec"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:terminal-bench"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 900000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/base",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "terminal-bench-native",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 120000,
+        "configHash": "1298685971e277708c076e505504f04fc6a63c82616b40cd36a426805895f95b"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "program-bench-real",
+    "label": "ProgramBench-compatible local task pack · non-official",
+    "description": "Run the non-official compatible/local task pack against its immutable one-task slice in a fresh pinned LXD sandbox. Results are not official benchmark results.",
+    "kind": "benchmark",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "greeting-cli"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-program-bench-real",
+      "taskPack": {
+        "id": "program-bench",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "program-bench-production-v1",
+          "dataset": {
+            "datasetId": "program-bench-v1",
+            "displayName": "ProgramBench-compatible local task pack · non-official",
+            "version": "1.0.0",
+            "sourceRevision": "7bee1e4ab22fba37542deea8f975593e00d437b143b958b2a94aa2eb3fb40b94",
+            "manifestHash": "7bee1e4ab22fba37542deea8f975593e00d437b143b958b2a94aa2eb3fb40b94",
+            "taskIdsHash": "716c345e957d5bf3e8b0cd11717841eb6f8c9735e4fa18998e5cb16497fb659a",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:program-bench"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "716c345e957d5bf3e8b0cd11717841eb6f8c9735e4fa18998e5cb16497fb659a"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/program-bench.json",
+          "sliceManifestHash": "dd2bfa49958ae8b70863ea8b208238fa3094a564b13283bce4273586d41b1887"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:program-bench"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 900000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/base",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "program-bench-native",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 120000,
+        "configHash": "8376ec01f6ebf07600cc6219352fe33b87d2172ddf21ee9c64751264f66490bc"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "code-understanding-real",
+    "label": "Code Understanding local task pack · non-official",
+    "description": "Run the non-official compatible/local task pack against its immutable one-task slice in a fresh pinned LXD sandbox. Results are not official benchmark results.",
+    "kind": "benchmark",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "configuration-runtime-trace"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-code-understanding-real",
+      "taskPack": {
+        "id": "code-understanding",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "code-understanding-production-v1",
+          "dataset": {
+            "datasetId": "code-understanding-v1",
+            "displayName": "Code Understanding local task pack · non-official",
+            "version": "1.0.0",
+            "sourceRevision": "85cb65e90782059286dd7f17eb36395ed4098a44feb6ea1dfde2530aadbda81c",
+            "manifestHash": "85cb65e90782059286dd7f17eb36395ed4098a44feb6ea1dfde2530aadbda81c",
+            "taskIdsHash": "212f0d37c71d477b5afef47df8d97626f42c47c6574e99b523cdddeb69e73fb4",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:code-understanding"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "212f0d37c71d477b5afef47df8d97626f42c47c6574e99b523cdddeb69e73fb4"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/code-understanding.json",
+          "sliceManifestHash": "e7eca2fda41c39ac6bf4b5337865b6275c4623ab7b4c3a43b197e14684821a77"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:code-understanding"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 900000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/base",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "code-understanding-native",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 120000,
+        "configHash": "be939fef8ee083874942aa5e542f488b314957c4c1697d803af1eaba272454f8"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "memory-planning-real",
+    "label": "Memory & Planning local task pack · non-official",
+    "description": "Run the non-official compatible/local task pack against its immutable one-task slice in a fresh pinned LXD sandbox. Results are not official benchmark results.",
+    "kind": "benchmark",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "release-handoff"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-memory-planning-real",
+      "taskPack": {
+        "id": "memory-planning",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "memory-planning-production-v1",
+          "dataset": {
+            "datasetId": "memory-planning-v1",
+            "displayName": "Memory & Planning local task pack · non-official",
+            "version": "1.0.0",
+            "sourceRevision": "aa709eb98d8f95a52bf6760fbe29dcc4a7bcc624891b6c729584ef5bb7c48450",
+            "manifestHash": "aa709eb98d8f95a52bf6760fbe29dcc4a7bcc624891b6c729584ef5bb7c48450",
+            "taskIdsHash": "f43db998d185bd9fdfda6a9d0179fcfed4851905d9e583e8f1cce111c4c32b7e",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:memory-planning"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "f43db998d185bd9fdfda6a9d0179fcfed4851905d9e583e8f1cce111c4c32b7e"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/memory-planning.json",
+          "sliceManifestHash": "fdfaa449e96d34daf4b54c73ad796d0cfc4520a6318b22ff417cdafb2762f189"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:memory-planning"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 900000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/base",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "memory-planning-native",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 120000,
+        "configHash": "0c1d1942b1a1b6188df803c192632f2423bac1cf3150d4662a63e10d2be0f5b5"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "fault-scenarios-real",
+    "label": "Fault Scenarios local task pack · non-official",
+    "description": "Run the non-official compatible/local task pack against its immutable one-task slice in a fresh pinned LXD sandbox. Results are not official benchmark results.",
+    "kind": "benchmark",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "config-schema-recovery"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-fault-scenarios-real",
+      "taskPack": {
+        "id": "fault-scenarios",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "fault-scenarios-production-v1",
+          "dataset": {
+            "datasetId": "fault-scenarios-v1",
+            "displayName": "Fault Scenarios local task pack · non-official",
+            "version": "1.0.0",
+            "sourceRevision": "269bd7f5533813a25b2c75cc9b00bf2e7fcfac29002e4a926cd9e6b2936b850e",
+            "manifestHash": "269bd7f5533813a25b2c75cc9b00bf2e7fcfac29002e4a926cd9e6b2936b850e",
+            "taskIdsHash": "fab933f2abc9c61af1b7ab9586e9bc71961f4c6bfd546544cf406f2a91dac394",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:fault-scenarios"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "fab933f2abc9c61af1b7ab9586e9bc71961f4c6bfd546544cf406f2a91dac394"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/fault-scenarios.json",
+          "sliceManifestHash": "f12ab7d599a003693bdb2a3613a96e902afa965fc16c3a78f0053e85e48dc733"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:fault-scenarios"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 900000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/base",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "fault-scenario-native",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 120000,
+        "configHash": "f8741582417c93c93504fab18f541f999537e0681d593a9e22f22cceb5fdd261"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "sdlc-journey-real",
+    "label": "SDLC local task pack · non-official",
+    "description": "Run the non-official compatible/local task pack against its immutable one-task slice in a fresh pinned LXD sandbox. Results are not official benchmark results.",
+    "kind": "benchmark",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "service-release-v2"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-sdlc-journey-real",
+      "taskPack": {
+        "id": "sdlc-journey",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "sdlc-journey-production-v1",
+          "dataset": {
+            "datasetId": "sdlc-journey-v1",
+            "displayName": "SDLC local task pack · non-official",
+            "version": "1.0.0",
+            "sourceRevision": "c14d5eaaede825985c5541def5b187ee3484adb025e070f42fbe339e5fe3678b",
+            "manifestHash": "c14d5eaaede825985c5541def5b187ee3484adb025e070f42fbe339e5fe3678b",
+            "taskIdsHash": "624d5da5489eefa55462245a48cfbeba70b20a82ec002b0d3b61a992b99c0313",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:sdlc-journey"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "624d5da5489eefa55462245a48cfbeba70b20a82ec002b0d3b61a992b99c0313"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/sdlc-journey.json",
+          "sliceManifestHash": "2f72aac4faabf4dd9d5be81ca6b3c7556a6b68c13fc256d3bc16e9caaaf5c2dd"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:sdlc-journey"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 900000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/base",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "sdlc-journey-native",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 120000,
+        "configHash": "5bd508ca125f485bc8d7403cc82f639e508f5978df2d29ba7803b5f8c26785e3"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "swe-marathon-real",
+    "label": "SWE-Marathon-compatible local task pack · non-official",
+    "description": "Run the non-official compatible/local task pack against its immutable one-task slice in a fresh pinned LXD sandbox. Results are not official benchmark results.",
+    "kind": "benchmark",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "public-release-marathon"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "{taskPackId}/{trialId}/native-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-swe-marathon-real",
+      "taskPack": {
+        "id": "swe-marathon",
+        "version": "1.0.0",
+        "evaluatedSlice": {
+          "sliceId": "swe-marathon-production-v1",
+          "dataset": {
+            "datasetId": "swe-marathon-v1",
+            "displayName": "SWE-Marathon-compatible local task pack · non-official",
+            "version": "1.0.0",
+            "sourceRevision": "f7889c78cdbe59fac1c5d6e531cd6dab2945fafc8e7623e323bd1dcec763ba10",
+            "manifestHash": "f7889c78cdbe59fac1c5d6e531cd6dab2945fafc8e7623e323bd1dcec763ba10",
+            "taskIdsHash": "4c90c15c74fea2bfcfaf8233276a2eeae4ecead8f709d2bcd341eaff7b2d3e6a",
+            "totalItems": 1,
+            "officialBenchmark": false,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:swe-marathon"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "public synthetic evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "full",
+          "selectionSpec": {
+            "kind": "full",
+            "taskIdsHash": "4c90c15c74fea2bfcfaf8233276a2eeae4ecead8f709d2bcd341eaff7b2d3e6a"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 1,
+          "taskIdsManifestRef": "catalog/swe-marathon.json",
+          "sliceManifestHash": "08b71922020f288660ca17765b970a2f0fea2dc87235e86a644f1aca14294880"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:swe-marathon"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public synthetic evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 900000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/base",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "swe-marathon-native",
+        "verifierVersion": "1.0.0",
+        "officialRequired": false,
+        "timeoutMs": 120000,
+        "configHash": "d15ecda1b9e5de33af09e6db4da59af86d4aea81adf2d2da77c58fcf611e3d91"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "templateId": "swe-bench-astropy-12907",
+    "label": "SWE-Bench Verified · pinned official harness · local run · Astropy 12907",
+    "description": "Run the pinned official SWE-Bench harness locally for astropy__astropy-12907 in the pinned accepted LXD trial image.",
+    "kind": "benchmark",
+    "recommended": false,
+    "builder": {
+      "taskIds": [
+        "astropy__astropy-12907"
+      ],
+      "artifactAllowlistPathTemplates": [
+        "swe-bench/{trialId}/official-result.json"
+      ]
+    },
+    "spec": {
+      "schemaVersion": 1,
+      "runId": "template-swe-bench-real",
+      "taskPack": {
+        "id": "swe-bench",
+        "version": "verified-1",
+        "evaluatedSlice": {
+          "sliceId": "swe-bench-production-v1",
+          "dataset": {
+            "datasetId": "swe-bench-verified",
+            "displayName": "SWE-Bench Verified",
+            "version": "verified-1",
+            "sourceRevision": "8a94a16c1704afcb9379d36934399813696d4c9c82fac928e01a4cd83134244a",
+            "manifestHash": "8a94a16c1704afcb9379d36934399813696d4c9c82fac928e01a4cd83134244a",
+            "taskIdsHash": "20bb8b1df1eb190f0edb76a0e1cc1ebf371e5b7d0cc42d374857f73833e10007",
+            "totalItems": 500,
+            "officialBenchmark": true,
+            "policy": {
+              "license": {
+                "status": "granted",
+                "basis": "MIT"
+              },
+              "permissions": {
+                "evaluation": {
+                  "status": "granted",
+                  "basis": "SWE-Bench benchmark evaluation"
+                },
+                "training": {
+                  "status": "unreviewed"
+                }
+              },
+              "sourceProvenance": {
+                "status": "granted",
+                "sourceRefs": [
+                  "dataset:swe-bench"
+                ]
+              },
+              "publication": {
+                "artifact": {
+                  "status": "granted",
+                  "basis": "SWE-Bench benchmark evaluation"
+                },
+                "report": {
+                  "status": "granted",
+                  "basis": "SWE-Bench benchmark evaluation"
+                },
+                "leaderboard": {
+                  "status": "granted",
+                  "basis": "SWE-Bench benchmark evaluation"
+                },
+                "redistribution": {
+                  "status": "granted",
+                  "basis": "MIT"
+                }
+              }
+            }
+          },
+          "selectionKind": "explicit_ids",
+          "selectionSpec": {
+            "kind": "explicit_ids",
+            "taskIdsHash": "20bb8b1df1eb190f0edb76a0e1cc1ebf371e5b7d0cc42d374857f73833e10007"
+          },
+          "selectedItems": 1,
+          "coverageRatio": 0.002,
+          "taskIdsManifestRef": "catalog/swe-bench-astropy-12907.json",
+          "sliceManifestHash": "b0a4c30fca7bdd2d8c2fb423de5d1f4537b83f9755d791baeddb04db33e7c445"
+        },
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "SWE-Bench benchmark evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "task-pack:swe-bench"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "SWE-Bench benchmark evaluation"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "SWE-Bench benchmark evaluation"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "SWE-Bench benchmark evaluation"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "agents": [
+        {
+          "variantId": "agent-runlab",
+          "backendId": "agent-runlab",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "provider": "openai",
+            "baseUrl": "http://model-gateway.invalid:3000/v1"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "91c056887212272a2ec123f0ba26a883790d14050cd851c68e5607ee7cc602f6"
+        },
+        {
+          "variantId": "claude-code",
+          "backendId": "claude-code",
+          "model": {
+            "provider": "anthropic",
+            "modelId": "claude-opus-4.8"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "anthropic",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "915ab0fad97457c2cbd5cb932d412ad10c33d002d8da34f97105eca1f870164a"
+        },
+        {
+          "variantId": "codex",
+          "backendId": "codex",
+          "model": {
+            "provider": "openai",
+            "modelId": "gpt-5.6-sol"
+          },
+          "config": {
+            "baseUrl": "http://model-gateway.invalid:3000/v1",
+            "transport": "app-server",
+            "reasoningEffort": "medium"
+          },
+          "credentialRefs": [
+            {
+              "referenceId": "local-model-api-key",
+              "provider": "openai",
+              "scope": [
+                "model-inference"
+              ]
+            }
+          ],
+          "agentVersion": "0.0.0",
+          "configHash": "3ee5e96e3ce9747fb5256ee71b0c775010d2c8d1ea0652d93103aab62c8c9d34"
+        }
+      ],
+      "execution": {
+        "repeats": 1,
+        "priority": 0,
+        "maxConcurrency": 1,
+        "maxConcurrencyPerBackend": 1,
+        "maxConcurrencyPerProvider": 1,
+        "leaseMs": 30000,
+        "timeoutMs": 1800000,
+        "inactivityTimeoutMs": 180000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "retryableCategories": [],
+          "backoffMs": 0
+        }
+      },
+      "sandbox": {
+        "provider": "lxd-container",
+        "imageDigest": "lxd-image.invalid/swe-bench",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 2,
+          "memoryMb": 4096,
+          "diskMb": 8192,
+          "pids": 512
+        },
+        "network": {
+          "mode": "allowlist",
+          "allowedDestinations": [
+            "model-gateway.invalid:3000"
+          ]
+        },
+        "artifactAllowlist": [
+          "runlab-session.jsonl",
+          "runlab-native.tar"
+        ]
+      },
+      "verification": {
+        "verifierId": "swe-bench-official",
+        "verifierVersion": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+        "officialRequired": true,
+        "timeoutMs": 1800000,
+        "configHash": "1f5f3675d858a78698813d91be5fb8a54c0aa2346dcefca79359ad23e9bf225a"
+      },
+      "analysis": {
+        "detectorIds": [
+          "instruction-drift",
+          "context-forgetting",
+          "test-gaming",
+          "tool-recovery",
+          "planning-execution"
+        ],
+        "repeatsRequired": 1,
+        "configHash": "aeef4a7ce33d892c0112868939d237ad4528284c78513d872e6f9cd5a5b8d343"
+      },
+      "createdAt": "2026-08-04T00:00:00.000Z"
+    }
+  }
+]

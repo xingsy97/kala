@@ -1,0 +1,6 @@
+{
+  "triggerId": "path-drift",
+  "supersededStepId": "legacy-deploy",
+  "replacementStepId": "verify",
+  "reason": "The legacy deployment path was removed; verification is now the terminal release step."
+}

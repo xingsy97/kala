@@ -1,0 +1,15 @@
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!packages/
+!packages/eval-protocol/
+!packages/eval-protocol/**
+!packages/eval-sdk/
+!packages/eval-sdk/**
+!packages/eval-dashboard/
+!packages/eval-dashboard/**
+!deploy/
+!deploy/evaluation/
+!deploy/evaluation/nginx.conf

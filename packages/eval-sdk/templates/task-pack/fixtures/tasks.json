@@ -1,0 +1,32 @@
+{
+  "tasks": [
+    {
+      "schemaVersion": 1,
+      "taskId": "write-answer",
+      "taskPackId": "example:sample-task-pack",
+      "taskPackVersion": "1.0.0",
+      "title": "Write a deterministic answer",
+      "prompt": "Create answer.txt containing exactly: public synthetic fixture",
+      "repository": { "kind": "artifact", "archiveRef": "fixtures/empty-workspace.tar", "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "revision": "synthetic-v1" },
+      "requiredSandboxImageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "fixtureManifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "faultScenarioIds": [],
+      "verification": [{ "stepId": "answer", "argv": ["sh", "-ceu", "test \"$(cat answer.txt)\" = \"public synthetic fixture\""], "cwd": ".", "timeoutMs": 10000, "requiredExitCode": 0 }],
+      "analysis": { "constraints": [], "protectedPaths": [], "hiddenVerifierPaths": [] },
+      "policy": {
+        "license": { "status": "granted", "basis": "CC0-1.0" },
+        "permissions": {
+          "evaluation": { "status": "granted", "basis": "public synthetic evaluation" },
+          "training": { "status": "denied" }
+        },
+        "sourceProvenance": { "status": "granted", "sourceRefs": ["synthetic:sample-task-pack"] },
+        "publication": {
+          "artifact": { "status": "granted" },
+          "report": { "status": "granted" },
+          "leaderboard": { "status": "denied" },
+          "redistribution": { "status": "granted", "basis": "CC0-1.0" }
+        }
+      }
+    }
+  ]
+}

@@ -6,8 +6,6 @@ export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
   'agent-kernel-executor.cjs',
   'agent-kernel-dashboard-dist.tar.gz',
   'agent-runlab-model-catalog-seed.json',
-  'agent-runlab-swebench-runner.cjs',
-  'claude-code-swebench-runner.cjs',
   'run.sh',
   'manifest.json',
   'RELEASE_NOTES.md',
@@ -17,9 +15,12 @@ export const DEPLOYABLE_RELEASE_ASSETS = Object.freeze([
 export const REQUIRED_RELEASE_ASSETS = Object.freeze([
   'bundle-dashboard-with-runtime.cjs',
   'agent-kernel-executor.cjs',
+  'SHA256SUMS',
+])
+
+export const RETIRED_RELEASE_ASSETS = Object.freeze([
   'agent-runlab-swebench-runner.cjs',
   'claude-code-swebench-runner.cjs',
-  'SHA256SUMS',
 ])
 
 const RESTART_MODES = new Set(['checkpoint', 'when_idle', 'force'])
@@ -82,7 +83,7 @@ export function releaseFiles(releaseDir, { exists = existsSync, readDir = readdi
     .sort()
 }
 
-export function installScript(remoteBinDir, remoteUploadDir, names) {
+export function installScript(remoteBinDir, remoteUploadDir, names, retiredNames = RETIRED_RELEASE_ASSETS) {
   const catalogSeed = 'agent-runlab-model-catalog-seed.json'
   const lines = [
     'set -euo pipefail',
@@ -97,6 +98,11 @@ export function installScript(remoteBinDir, remoteUploadDir, names) {
   for (const name of names) {
     lines.push(`printf '%s\\n' ${sh(name)} >> "$BACKUP_DIR/.deployed-files"`)
     lines.push(`if [ -e "$REMOTE_BIN/${name}" ]; then cp -p "$REMOTE_BIN/${name}" "$BACKUP_DIR/${name}"; fi`)
+  }
+  for (const name of retiredNames) {
+    lines.push(`printf '%s\\n' ${sh(name)} >> "$BACKUP_DIR/.deployed-files"`)
+    lines.push(`if [ -e "$REMOTE_BIN/${name}" ]; then cp -p "$REMOTE_BIN/${name}" "$BACKUP_DIR/${name}"; fi`)
+    lines.push(`rm -f "$REMOTE_BIN/${name}"`)
   }
   lines.push('printf "%s\\n" "$BACKUP_DIR" > "$REMOTE_BIN/.agent-kernel-backup-current"')
   for (const name of names) {

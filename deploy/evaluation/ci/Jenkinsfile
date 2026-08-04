@@ -1,0 +1,20 @@
+pipeline {
+  agent { docker { image 'node:22-bookworm-slim' } }
+  stages {
+    stage('Agent evaluation gate') {
+      steps {
+        sh 'corepack enable'
+        sh 'pnpm install --frozen-lockfile'
+        sh 'pnpm --filter @agent-kernel/eval-orchestrator build'
+        sh 'node packages/eval-orchestrator/dist/bin/eval-ci.js --decision "$AGENT_EVAL_GATE_DECISION" --report-manifest "$AGENT_EVAL_REPORT_MANIFEST" --report-url "$AGENT_EVAL_REPORT_URL" --output-dir agent-evaluation-ci'
+      }
+    }
+  }
+  post {
+    always {
+      archiveArtifacts artifacts: 'agent-evaluation-ci/**', allowEmptyArchive: false
+      junit testResults: 'agent-evaluation-ci/gate.junit.xml', allowEmptyResults: false
+      recordIssues tools: [sarif(pattern: 'agent-evaluation-ci/gate.sarif.json')], enabledForFailure: true
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "gateId": "ci-fixture-indeterminate",
+  "baselineConfigHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "candidateConfigHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "pairedTasks": 5,
+  "repeats": 3,
+  "confidenceLevel": 0.95,
+  "flakyTasks": [],
+  "infrastructureFailures": ["fixture-environment-failure"],
+  "violations": [],
+  "statistics": {
+    "baselineSuccessRate": 1,
+    "candidateSuccessRate": 1,
+    "successRateDelta": 0,
+    "pairedWins": 0,
+    "pairedLosses": 0,
+    "pairedTies": 4,
+    "mcnemarPValue": 1,
+    "confidenceInterval": { "level": 0.95, "lower": 0, "upper": 0 },
+    "flakeRate": 0
+  },
+  "decision": "indeterminate",
+  "evidenceRefs": ["result:baseline-fixture", "failure:fixture-environment-failure"]
+}

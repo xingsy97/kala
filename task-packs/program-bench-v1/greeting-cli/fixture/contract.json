@@ -1,0 +1,5 @@
+{
+  "argv": ["fixture"],
+  "stdout": "hello fixture\n",
+  "exitCode": 0
+}

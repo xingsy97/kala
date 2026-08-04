@@ -1,0 +1,35 @@
+[
+  {
+    "sliceManifestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tasks": [
+      {
+        "schemaVersion": 1,
+        "taskId": "compose-smoke-task",
+        "taskPackId": "custom-task-pack",
+        "taskPackVersion": "1.0.0",
+        "title": "Compose canonical smoke",
+        "prompt": "Produce fresh canonical evaluation evidence.",
+        "repository": {
+          "kind": "artifact",
+          "archiveRef": "fixtures/compose-smoke.tar",
+          "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "revision": "compose-smoke-revision"
+        },
+        "fixtureManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "faultScenarioIds": [],
+        "verification": [
+          { "stepId": "canonical-smoke", "argv": ["true"], "cwd": ".", "timeoutMs": 1000, "requiredExitCode": 0, "nativeMetric": "passed" }
+        ],
+        "analysis": {
+          "constraints": [
+            { "id": "canonical-smoke", "kind": "must", "sourceRef": "task#canonical-smoke", "verifierId": "compose-native", "verifierVersion": "1.0.0", "verifierMetric": "passed" }
+          ],
+          "protectedPaths": [],
+          "hiddenVerifierPaths": []
+        },
+        "license": "MIT",
+        "evaluationPermission": "local standalone deployment acceptance"
+      }
+    ]
+  }
+]

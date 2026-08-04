@@ -1,0 +1,7 @@
+architecture: x86_64
+creation_date: __CREATION_DATE__
+properties:
+  architecture: amd64
+  os: ubuntu
+  type: squashfs
+  variant: swe-bench-official-oci-rootfs

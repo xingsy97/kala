@@ -1,0 +1,40 @@
+services:
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/evaluation/images/Dockerfile.worker
+    command:
+      - --url
+      - http://orchestrator:13100
+      - --worker-id
+      - worker-compose
+      - --worker-version
+      - acceptance
+      - --data-dir
+      - /var/lib/agent-evaluation-worker
+      - --cpu
+      - "1"
+      - --memory-mb
+      - "512"
+      - --disk-mb
+      - "2048"
+      - --max-trials
+      - "1"
+      - --plugin
+      - /plugins/docker/dist/index.js
+      - --plugin
+      - /plugins/custom-command/dist/index.js
+      - --plugin
+      - /plugins/custom-task-pack/dist/index.js
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    volumes:
+      - evaluation-worker-data:/var/lib/agent-evaluation-worker
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ["${AGENT_EVAL_DOCKER_GID:-112}"]
+    depends_on:
+      orchestrator: { condition: service_healthy }
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+volumes:
+  evaluation-worker-data: {}

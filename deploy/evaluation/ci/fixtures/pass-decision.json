@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "gateId": "ci-fixture-pass",
+  "baselineConfigHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "candidateConfigHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "pairedTasks": 5,
+  "repeats": 3,
+  "confidenceLevel": 0.95,
+  "flakyTasks": ["fixture-flaky-task"],
+  "infrastructureFailures": [],
+  "violations": [],
+  "statistics": {
+    "baselineSuccessRate": 0.8,
+    "candidateSuccessRate": 1,
+    "successRateDelta": 0.2,
+    "pairedWins": 1,
+    "pairedLosses": 0,
+    "pairedTies": 3,
+    "mcnemarPValue": 1,
+    "confidenceInterval": { "level": 0.95, "lower": -0.29, "upper": 0.69 },
+    "flakeRate": 0.2
+  },
+  "decision": "pass",
+  "evidenceRefs": ["result:baseline-fixture", "result:candidate-fixture"]
+}

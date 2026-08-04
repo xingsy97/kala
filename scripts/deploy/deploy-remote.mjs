@@ -4,13 +4,28 @@ import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { buildDeployPlan, rsyncUploadArgs, sh } from './deploy-plan.mjs'
+import { buildDeployPlan, RETIRED_RELEASE_ASSETS, rsyncUploadArgs, sh } from './deploy-plan.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const rawArgs = process.argv.slice(2)
-const lxdContainer = optionValueLocal(rawArgs, '--lxd') ?? process.env.AK_DEPLOY_LXD
+const dryRun = rawArgs.includes('--dry-run')
+const effectiveArgs = rawArgs.filter((arg) => arg !== '--dry-run')
+const lxdContainer = optionValueLocal(effectiveArgs, '--lxd') ?? process.env.AK_DEPLOY_LXD
 if (lxdContainer) {
-  deployLxd({ container: lxdContainer, remoteBin: optionValueLocal(rawArgs, '--remote-bin') ?? process.env.AK_DEPLOY_REMOTE_BIN ?? '/home/ubuntu/.bin', service: optionValueLocal(rawArgs, '--service') ?? process.env.AK_DEPLOY_SERVICE ?? 'agent-runlab-host', skipBuild: rawArgs.includes('--skip-build') })
+  const lxdPlan = {
+    mode: 'lxd',
+    container: lxdContainer,
+    remoteBin: optionValueLocal(effectiveArgs, '--remote-bin') ?? process.env.AK_DEPLOY_REMOTE_BIN ?? '/home/ubuntu/.bin',
+    service: optionValueLocal(effectiveArgs, '--service') ?? process.env.AK_DEPLOY_SERVICE ?? 'agent-runlab-host',
+    skipBuild: effectiveArgs.includes('--skip-build'),
+    retiredAssets: RETIRED_RELEASE_ASSETS,
+  }
+  if (dryRun) {
+    console.log(JSON.stringify({ dryRun: true, ...lxdPlan }, null, 2))
+    console.log('dry run complete: no build, LXD transfer, install, restart, or cleanup was executed')
+    process.exit(0)
+  }
+  deployLxd(lxdPlan)
   process.exit(0)
 }
 // --async / --no-wait / AK_DEPLOY_ASYNC=1 all mean "fire the restart and exit,
@@ -19,11 +34,11 @@ if (lxdContainer) {
 // waiting synchronously deadlocks the graceful restart, because the checkpoint
 // drain will never see this session's tool bucket empty until the deploy
 // script returns, and the deploy script is the one blocking on the restart.
-const asyncFlagIndex = rawArgs.findIndex((arg) => arg === '--async' || arg === '--no-wait')
+const asyncFlagIndex = effectiveArgs.findIndex((arg) => arg === '--async' || arg === '--no-wait')
 const asyncMode = asyncFlagIndex !== -1 || /^(?:1|true|yes|on)$/i.test(process.env.AK_DEPLOY_ASYNC ?? '')
 const cleanedArgs = asyncFlagIndex !== -1
-  ? [...rawArgs.slice(0, asyncFlagIndex), ...rawArgs.slice(asyncFlagIndex + 1)]
-  : rawArgs
+  ? [...effectiveArgs.slice(0, asyncFlagIndex), ...effectiveArgs.slice(asyncFlagIndex + 1)]
+  : effectiveArgs
 const plan = buildDeployPlan({ args: cleanedArgs, env: process.env, root })
 
 const {
@@ -50,9 +65,16 @@ console.log(`host url: ${hostUrl}`)
 console.log(`upload dir: ${uploadDir}`)
 if (service) console.log(`remote service: ${service}${sudo ? ' (sudo -n)' : ''}`)
 if (asyncMode) console.log('async mode: restart is fire-and-forget (no wait for completed)')
+if (dryRun) {
+  console.log(`restart mode: ${restartMode}`)
+  console.log(`release files: ${files.join(', ')}`)
+  console.log(`retired remote files: ${RETIRED_RELEASE_ASSETS.join(', ')}`)
+  console.log('dry run complete: no build, SSH command, upload, install, restart, or rollback was executed')
+  process.exit(0)
+}
 
 if (service && sudo) stage('verify remote service privilege', () => remote(`sudo -n systemctl is-active ${sh(service)} >/dev/null`))
-if (!rawArgs.includes('--skip-build')) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--no-native', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
+if (!effectiveArgs.includes('--skip-build')) stage('build release assets', () => run('node', ['scripts/release/build-release-assets.mjs', '--no-native', '--repo', process.env.GITHUB_REPOSITORY ?? 'local/agent-runlab']))
 stage('verify release assets', () => run('node', ['scripts/release/verify-release-assets.mjs']))
 stage('prepare incremental upload', () => remote(seedCommand))
 stage('transfer release assets', transferReleaseAssets)
@@ -209,10 +231,11 @@ function deployLxd({ container, remoteBin, service, skipBuild }) {
   const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
   const upload = `${remoteBin}/.agent-kernel-upload-${stamp}`
   const backup = `${remoteBin}/.agent-kernel-backup-${stamp}`
+  const managed = [...files, ...RETIRED_RELEASE_ASSETS]
   stage('prepare LXD upload', () => lxcExec(container, `mkdir -p ${sh(upload)} ${sh(backup)}`))
   stage('transfer LXD release assets', () => { for (const file of files) run('lxc', ['file', 'push', join(releaseDir, file), `${container}${upload}/${file}`]) })
   stage('verify staged checksums', () => lxcExec(container, `cd ${sh(upload)} && sha256sum -c SHA256SUMS --ignore-missing`))
-  const install = ['set -euo pipefail', `BIN=${sh(remoteBin)}`, `UPLOAD=${sh(upload)}`, `BACKUP=${sh(backup)}`, 'for f in bundle-dashboard-with-runtime.cjs agent-kernel-executor.cjs SHA256SUMS; do [ ! -e "$BIN/$f" ] || cp -p "$BIN/$f" "$BACKUP/$f"; done', 'for f in bundle-dashboard-with-runtime.cjs agent-kernel-executor.cjs SHA256SUMS; do mv "$UPLOAD/$f" "$BIN/$f"; done', 'chmod 755 "$BIN/bundle-dashboard-with-runtime.cjs" "$BIN/agent-kernel-executor.cjs"', `systemctl restart ${sh(service)}`].join('\n')
+  const install = ['set -euo pipefail', `BIN=${sh(remoteBin)}`, `UPLOAD=${sh(upload)}`, `BACKUP=${sh(backup)}`, `for f in ${managed.map(sh).join(' ')}; do [ ! -e "$BIN/$f" ] || cp -p "$BIN/$f" "$BACKUP/$f"; done`, `rm -f ${RETIRED_RELEASE_ASSETS.map((file) => `"$BIN/${file}"`).join(' ')}`, `for f in ${files.map(sh).join(' ')}; do mv "$UPLOAD/$f" "$BIN/$f"; done`, 'chmod 755 "$BIN/bundle-dashboard-with-runtime.cjs" "$BIN/agent-kernel-executor.cjs"', `systemctl restart ${sh(service)}`].join('\n')
   try {
     stage('install and restart LXD service', () => lxcExec(container, install))
     stage('verify LXD service health', () => { lxcExec(container, `systemctl is-active --quiet ${sh(service)}`); lxcExec(container, `pid=$(systemctl show -p MainPID --value ${sh(service)}); [ "$pid" -gt 1 ] && kill -0 "$pid"`) })
@@ -223,7 +246,7 @@ function deployLxd({ container, remoteBin, service, skipBuild }) {
     console.log(`deploy complete: LXD ${container} service=${service} sha256=${remoteHash}`)
   } catch (error) {
     console.error(`deploy failed; rolling back LXD ${container}`)
-    lxcExec(container, `set -eu; BIN=${sh(remoteBin)}; BACKUP=${sh(backup)}; for f in bundle-dashboard-with-runtime.cjs agent-kernel-executor.cjs SHA256SUMS; do [ ! -e "$BACKUP/$f" ] || cp -p "$BACKUP/$f" "$BIN/$f"; done; systemctl restart ${sh(service)}`)
+    lxcExec(container, `set -eu; BIN=${sh(remoteBin)}; BACKUP=${sh(backup)}; for f in ${managed.map(sh).join(' ')}; do rm -f "$BIN/$f"; [ ! -e "$BACKUP/$f" ] || cp -p "$BACKUP/$f" "$BIN/$f"; done; systemctl restart ${sh(service)}`)
     throw error
   }
 }

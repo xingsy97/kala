@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "reportId": "ci-fixture-report",
+  "inputEvidenceHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "semanticHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "runRefs": ["ci-fixture-baseline", "ci-fixture-candidate"],
+  "formats": [
+    { "format": "json", "path": "reports/ci-fixture/report.json", "sha256": "1111111111111111111111111111111111111111111111111111111111111111" },
+    { "format": "csv", "path": "reports/ci-fixture/report.csv", "sha256": "2222222222222222222222222222222222222222222222222222222222222222" },
+    { "format": "html", "path": "reports/ci-fixture/report.html", "sha256": "3333333333333333333333333333333333333333333333333333333333333333" },
+    { "format": "pdf", "path": "reports/ci-fixture/report.pdf", "sha256": "4444444444444444444444444444444444444444444444444444444444444444" },
+    { "format": "junit", "path": "reports/ci-fixture/report.junit.xml", "sha256": "5555555555555555555555555555555555555555555555555555555555555555" },
+    { "format": "sarif", "path": "reports/ci-fixture/report.sarif.json", "sha256": "6666666666666666666666666666666666666666666666666666666666666666" },
+    { "format": "markdown", "path": "reports/ci-fixture/report.md", "sha256": "7777777777777777777777777777777777777777777777777777777777777777" }
+  ],
+  "methodologyVersion": "1.0.0",
+  "includesAllConfiguredRepeats": true,
+  "redactionPassed": true,
+  "generatedAt": "2026-08-03T04:00:00.000Z"
+}

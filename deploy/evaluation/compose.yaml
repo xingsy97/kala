@@ -1,0 +1,266 @@
+name: agent-evaluation
+
+x-service-policy: &service-policy
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-worker: &worker
+  <<: *service-policy
+  build:
+    context: ../..
+    dockerfile: deploy/evaluation/images/Dockerfile.worker
+  entrypoint: ["node", "--import", "/opt/agent-evaluation/authenticated-fetch.mjs", "/runtime/dist/bin/eval-worker.js"]
+  command: &worker-command
+    - --url
+    - http://orchestrator:13100
+    - --worker-version
+    - 1.0.0
+    - --data-dir
+    - /var/lib/agent-evaluation-worker
+    - --cpu
+    - "${AGENT_EVAL_WORKER_CPU:-4}"
+    - --memory-mb
+    - "${AGENT_EVAL_WORKER_MEMORY_MB:-8192}"
+    - --disk-mb
+    - "${AGENT_EVAL_WORKER_DISK_MB:-65536}"
+    - --max-trials
+    - "${AGENT_EVAL_WORKER_MAX_TRIALS:-1}"
+    - --readiness-templates
+    - /opt/agent-evaluation/config/run-templates.json
+    - --plugin
+    - /plugins/custom-command/dist/index.js
+    - --plugin
+    - /plugins/agent-runlab/dist/src/index.js
+    - --plugin
+    - /plugins/codex/dist/src/index.js
+    - --plugin
+    - /plugins/claude-code/dist/index.js
+    - --plugin
+    - /plugins/custom-task-pack/dist/index.js
+    - --plugin
+    - /plugins/swe-bench/dist/src/index.js
+    - --plugin
+    - /plugins/terminal-bench/dist/index.js
+    - --plugin
+    - /plugins/program-bench/dist/index.js
+    - --plugin
+    - /plugins/code-understanding/dist/index.js
+    - --plugin
+    - /plugins/memory-planning/dist/index.js
+    - --plugin
+    - /plugins/fault-scenarios/dist/index.js
+    - --plugin
+    - /plugins/sdlc-journey/dist/index.js
+    - --plugin
+    - /plugins/swe-marathon/dist/index.js
+  environment: &worker-environment
+    AGENT_EVAL_URL: http://orchestrator:13100
+    AGENT_EVAL_TOKEN_FILE: /run/secrets/worker_token
+    AGENT_EVAL_CREDENTIAL_HELPER_SETTINGS: /run/secrets/model_settings
+    AGENT_EVAL_SIGNING_KEY_FILE: /run/secrets/worker_signing_key
+    AGENT_EVAL_KEY_REFERENCE: worker-compose-key
+    AGENT_EVAL_CREDENTIAL_HELPER_REFERENCE_IDS: local-model-api-key
+    AGENT_EVAL_MODEL_ENDPOINT_AUTHORITY: "${AGENT_EVAL_MODEL_ENDPOINT_AUTHORITY:?set model endpoint host:port in deployment.env}"
+    HOME: /var/lib/agent-evaluation-worker/home
+    LXD_CONF: /var/lib/agent-evaluation-worker/lxd
+    NODE_OPTIONS: --max-old-space-size=1024
+  read_only: true
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+  volumes: &worker-volumes
+    - evaluation-worker-data:/var/lib/agent-evaluation-worker
+    - ./fixtures:/var/lib/agent-evaluation-worker/fixtures:ro
+    - evaluation-rendered-config:/opt/agent-evaluation/config:ro
+    - ./authenticated-fetch.mjs:/opt/agent-evaluation/authenticated-fetch.mjs:ro
+  depends_on:
+    config-init: { condition: service_completed_successfully }
+    orchestrator: { condition: service_healthy }
+  healthcheck:
+    test: ["CMD", "node", "-e", "require('fs').accessSync('/run/secrets/worker_token');require('fs').accessSync('/run/secrets/model_settings');process.kill(1,0)"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 15s
+  deploy:
+    resources:
+      limits: { cpus: "${AGENT_EVAL_WORKER_LIMIT_CPUS:-4}", memory: "${AGENT_EVAL_WORKER_LIMIT_MEMORY:-8G}" }
+      reservations: { memory: "${AGENT_EVAL_WORKER_RESERVATION_MEMORY:-512M}" }
+
+services:
+  config-init:
+    <<: *service-policy
+    build:
+      context: ../..
+      dockerfile: deploy/evaluation/images/Dockerfile.orchestrator
+    user: "0:0"
+    cap_add: ["DAC_OVERRIDE"]
+    entrypoint: ["node", "/opt/agent-evaluation/render-run-templates.mjs", "/opt/agent-evaluation/run-templates.source.json", "/opt/agent-evaluation/config/run-templates.json"]
+    environment:
+      AGENT_EVAL_MODEL_ENDPOINT_AUTHORITY: "${AGENT_EVAL_MODEL_ENDPOINT_AUTHORITY:?set model endpoint host:port in deployment.env}"
+      AGENT_EVAL_LXD_IMAGE: "${AGENT_EVAL_LXD_IMAGE:?set trusted LXD image alias or fingerprint in deployment.env}"
+      AGENT_EVAL_SWE_BENCH_LXD_IMAGE: "${AGENT_EVAL_SWE_BENCH_LXD_IMAGE:?set trusted SWE-Bench LXD image alias or fingerprint in deployment.env}"
+    read_only: true
+    restart: "no"
+    volumes:
+      - ./run-templates.json:/opt/agent-evaluation/run-templates.source.json:ro
+      - ./render-run-templates.mjs:/opt/agent-evaluation/render-run-templates.mjs:ro
+      - evaluation-rendered-config:/opt/agent-evaluation/config
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: "64M" }
+
+  orchestrator:
+    <<: *service-policy
+    build:
+      context: ../..
+      dockerfile: deploy/evaluation/images/Dockerfile.orchestrator
+    command: ["--host", "0.0.0.0", "--data-dir", "/var/lib/agent-evaluation", "--catalog", "/opt/agent-evaluation/catalog.json", "--run-templates", "/opt/agent-evaluation/config/run-templates.json", "--evidence-dir", "/opt/agent-evaluation/evidence", "--auth-config", "/run/secrets/auth_config"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    volumes: ["evaluation-control-plane-data:/var/lib/agent-evaluation", "evaluation-rendered-config:/opt/agent-evaluation/config:ro"]
+    secrets: [auth_config]
+    ports: ["${AGENT_EVAL_BIND_ADDRESS:-127.0.0.1}:${AGENT_EVAL_PORT:-13100}:13100"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:13100/healthz').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: "${AGENT_EVAL_ORCHESTRATOR_LIMIT_CPUS:-2}", memory: "${AGENT_EVAL_ORCHESTRATOR_LIMIT_MEMORY:-2G}" }
+        reservations: { memory: "256M" }
+
+  analyzer:
+    <<: *service-policy
+    build:
+      context: ../..
+      dockerfile: deploy/evaluation/images/Dockerfile.analyzer
+    entrypoint: ["node", "--import", "/opt/agent-evaluation/authenticated-fetch.mjs", "/runtime/dist/bin/eval-analyzer.js"]
+    command: ["--url", "http://orchestrator:13100", "--service-id", "analyzer-compose", "--executor-id", "analyzer-compose", "--key-reference", "analyzer-compose-key", "--health-host", "0.0.0.0", "--health-port", "13101"]
+    environment:
+      AGENT_EVAL_URL: http://orchestrator:13100
+      AGENT_EVAL_TOKEN_FILE: /run/secrets/analyzer_token
+      AGENT_EVAL_SIGNING_KEY_FILE: /run/secrets/analyzer_signing_key
+      NODE_OPTIONS: --max-old-space-size=768
+    secrets: [analyzer_token, analyzer_signing_key]
+    volumes: ["./authenticated-fetch.mjs:/opt/agent-evaluation/authenticated-fetch.mjs:ro"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    depends_on:
+      config-init: { condition: service_completed_successfully }
+      orchestrator: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:13101/').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: "${AGENT_EVAL_ANALYZER_LIMIT_CPUS:-2}", memory: "${AGENT_EVAL_ANALYZER_LIMIT_MEMORY:-2G}" }
+        reservations: { memory: "256M" }
+
+  docker-worker:
+    <<: *worker
+    profiles: ["docker-worker"]
+    environment:
+      <<: *worker-environment
+      AGENT_EVAL_WORKER_PROFILE: docker
+      AGENT_EVAL_SERVICE_ID: docker-worker-compose
+      AGENT_EVAL_WORKER_ID: docker-worker-compose
+      AGENT_EVAL_WORKER_PLUGINS: /plugins/docker/dist/index.js
+    volumes:
+      - evaluation-worker-data:/var/lib/agent-evaluation-worker
+      - ./fixtures:/var/lib/agent-evaluation-worker/fixtures:ro
+      - evaluation-rendered-config:/opt/agent-evaluation/config:ro
+      - ./authenticated-fetch.mjs:/opt/agent-evaluation/authenticated-fetch.mjs:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    secrets:
+      - source: worker_token
+        target: worker_token
+      - source: docker_model_settings
+        target: model_settings
+      - source: worker_signing_key
+        target: worker_signing_key
+    group_add: ["${AGENT_EVAL_DOCKER_GID:?set Docker socket group ID in deployment.env}"]
+
+  lxd-worker:
+    <<: *worker
+    profiles: ["lxd-worker"]
+    environment:
+      <<: *worker-environment
+      AGENT_EVAL_WORKER_PROFILE: lxd
+      AGENT_EVAL_SERVICE_ID: lxd-worker-compose
+      AGENT_EVAL_WORKER_ID: lxd-worker-compose
+      AGENT_EVAL_WORKER_PLUGINS: /plugins/lxd-container/dist/index.js,/plugins/lxd-vm/dist/index.js
+    volumes:
+      - evaluation-worker-data:/var/lib/agent-evaluation-worker
+      - ./fixtures:/var/lib/agent-evaluation-worker/fixtures:ro
+      - evaluation-rendered-config:/opt/agent-evaluation/config:ro
+      - ./authenticated-fetch.mjs:/opt/agent-evaluation/authenticated-fetch.mjs:ro
+      - "${AGENT_EVAL_LXC_BIN:-/snap/lxd/current/bin/lxc}:/usr/local/bin/lxc:ro"
+      - "${AGENT_EVAL_LXD_SOCKET:-/var/snap/lxd/common/lxd/unix.socket}:/var/snap/lxd/common/lxd/unix.socket"
+    secrets:
+      - source: worker_token
+        target: worker_token
+      - source: lxd_model_settings
+        target: model_settings
+      - source: worker_signing_key
+        target: worker_signing_key
+    group_add: ["${AGENT_EVAL_LXD_GID:?set LXD socket group ID in deployment.env}"]
+
+  dashboard:
+    <<: *service-policy
+    build:
+      context: ../..
+      dockerfile: deploy/evaluation/images/Dockerfile.dashboard
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - '{ printf "events {}\nhttp { include /etc/nginx/mime.types;\n"; sed "s|__AGENT_EVAL_DASHBOARD_TOKEN__|$$(cat /run/secrets/dashboard_token)|g" /opt/agent-evaluation/nginx.conf; printf "\n}\n"; } > /run/nginx.conf; chown nginx:nginx /run/nginx.conf; chmod 0400 /run/nginx.conf; exec su nginx -s /bin/sh -c "exec nginx -e /tmp/nginx-error.log -c /run/nginx.conf -g ''daemon off;''"'
+    secrets: [dashboard_token]
+    volumes: ["./nginx.conf:/opt/agent-evaluation/nginx.conf:ro"]
+    read_only: true
+    user: "0:0"
+    cap_add: ["DAC_OVERRIDE", "CHOWN", "FOWNER", "SETUID", "SETGID"]
+    tmpfs: ["/var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700", "/run:rw,noexec,nosuid,size=4m,uid=101,gid=101,mode=0700", "/tmp:rw,noexec,nosuid,size=4m,uid=101,gid=101,mode=0700"]
+    ports: ["${AGENT_EVAL_BIND_ADDRESS:-127.0.0.1}:${AGENT_EVAL_DASHBOARD_PORT:-13180}:8080"]
+    depends_on:
+      orchestrator: { condition: service_healthy }
+      analyzer: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: "256M" }
+        reservations: { memory: "32M" }
+
+secrets:
+  auth_config:
+    file: "${AGENT_EVAL_AUTH_CONFIG_FILE:?set auth config secret file in deployment.env}"
+  worker_token:
+    file: "${AGENT_EVAL_WORKER_TOKEN_FILE:?set worker token secret file in deployment.env}"
+  analyzer_token:
+    file: "${AGENT_EVAL_ANALYZER_TOKEN_FILE:?set analyzer token secret file in deployment.env}"
+  worker_signing_key:
+    file: "${AGENT_EVAL_WORKER_SIGNING_KEY_FILE:?set Worker signing key secret file in deployment.env}"
+  analyzer_signing_key:
+    file: "${AGENT_EVAL_ANALYZER_SIGNING_KEY_FILE:?set Analyzer signing key secret file in deployment.env}"
+  dashboard_token:
+    file: "${AGENT_EVAL_DASHBOARD_TOKEN_FILE:?set dashboard token secret file in deployment.env}"
+  docker_model_settings:
+    file: "${AGENT_EVAL_DOCKER_MODEL_SETTINGS_FILE:?set Docker-profile model settings secret file in deployment.env}"
+  lxd_model_settings:
+    file: "${AGENT_EVAL_LXD_MODEL_SETTINGS_FILE:?set LXD-profile model settings secret file in deployment.env}"
+
+volumes:
+  evaluation-control-plane-data: {}
+  evaluation-rendered-config: {}
+  evaluation-worker-data: {}

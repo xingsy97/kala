@@ -1,0 +1,13 @@
+agent-evaluation-gate:
+  image: node:22-bookworm-slim
+  script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - pnpm --filter @agent-kernel/eval-orchestrator build
+    - node packages/eval-orchestrator/dist/bin/eval-ci.js --decision "$AGENT_EVAL_GATE_DECISION" --report-manifest "$AGENT_EVAL_REPORT_MANIFEST" --report-url "$AGENT_EVAL_REPORT_URL" --output-dir agent-evaluation-ci
+  artifacts:
+    when: always
+    paths: [agent-evaluation-ci]
+    reports:
+      junit: agent-evaluation-ci/gate.junit.xml
+      sast: agent-evaluation-ci/gate.sarif.json

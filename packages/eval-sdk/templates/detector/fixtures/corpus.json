@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "license": "CC0-1.0",
+  "evaluationPermission": "public synthetic evaluation and redistribution",
+  "cases": [
+    { "caseId": "explicit-error", "expectedFinding": true, "events": [{ "schemaVersion": 1, "sequence": 0, "at": "2026-08-03T00:00:00.000Z", "kind": "error", "nativeEventRef": "native.jsonl#0", "data": { "code": "SYNTHETIC_FAILURE" } }] },
+    { "caseId": "successful-status", "expectedFinding": false, "events": [{ "schemaVersion": 1, "sequence": 0, "at": "2026-08-03T00:00:00.000Z", "kind": "status", "nativeEventRef": "native.jsonl#0", "data": { "state": "completed" } }] }
+  ]
+}

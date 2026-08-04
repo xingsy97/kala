@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "runId": "canonical-fixture-v1",
+  "taskPack": {
+    "id": "swe-bench",
+    "version": "verified-1",
+    "evaluatedSlice": {
+      "sliceId": "django-2-v1",
+      "dataset": {
+        "datasetId": "swe-bench-verified",
+        "displayName": "SWE-Bench Verified",
+        "version": "1",
+        "sourceRevision": "official-revision-1",
+        "manifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "taskIdsHash": "dad6049ef15f9950201924d8dd24469b53be0ea535ab0ba39128d42d27ef1cdc",
+        "split": "test",
+        "totalItems": 500,
+        "officialBenchmark": true,
+        "policy": {
+          "license": {
+            "status": "granted",
+            "basis": "MIT"
+          },
+          "permissions": {
+            "evaluation": {
+              "status": "granted",
+              "basis": "benchmark evaluation"
+            },
+            "training": {
+              "status": "unreviewed"
+            }
+          },
+          "sourceProvenance": {
+            "status": "granted",
+            "sourceRefs": [
+              "https://www.swebench.com/"
+            ]
+          },
+          "publication": {
+            "artifact": {
+              "status": "granted",
+              "basis": "public benchmark results"
+            },
+            "report": {
+              "status": "granted",
+              "basis": "public benchmark results"
+            },
+            "leaderboard": {
+              "status": "granted",
+              "basis": "public benchmark results"
+            },
+            "redistribution": {
+              "status": "granted",
+              "basis": "MIT"
+            }
+          }
+        }
+      },
+      "selectionKind": "named_subset",
+      "selectionSpec": {
+        "kind": "named_subset",
+        "namedSubsetId": "django-2-v1",
+        "taskIdsHash": "dad6049ef15f9950201924d8dd24469b53be0ea535ab0ba39128d42d27ef1cdc"
+      },
+      "selectedItems": 2,
+      "coverageRatio": 0.004,
+      "taskIdsManifestRef": "datasets/django-2-v1.json",
+      "sliceManifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "policy": {
+      "license": {
+        "status": "granted",
+        "basis": "MIT"
+      },
+      "permissions": {
+        "evaluation": {
+          "status": "granted",
+          "basis": "benchmark evaluation"
+        },
+        "training": {
+          "status": "unreviewed"
+        }
+      },
+      "sourceProvenance": {
+        "status": "granted",
+        "sourceRefs": [
+          "task-pack:swe-bench@verified-1"
+        ]
+      },
+      "publication": {
+        "artifact": {
+          "status": "granted",
+          "basis": "public benchmark results"
+        },
+        "report": {
+          "status": "granted",
+          "basis": "public benchmark results"
+        },
+        "leaderboard": {
+          "status": "granted",
+          "basis": "public benchmark results"
+        },
+        "redistribution": {
+          "status": "granted",
+          "basis": "MIT"
+        }
+      }
+    }
+  },
+  "agents": [
+    {
+      "variantId": "runlab-model-a",
+      "backendId": "agent-runlab",
+      "agentVersion": "1.0.0",
+      "model": {
+        "provider": "fixture",
+        "modelId": "model-a",
+        "modelVersion": "1"
+      },
+      "configHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "config": {
+        "reasoning": "high"
+      },
+      "credentialRefs": [
+        {
+          "referenceId": "fixture-key",
+          "provider": "fixture",
+          "scope": [
+            "model"
+          ]
+        }
+      ]
+    }
+  ],
+  "execution": {
+    "repeats": 3,
+    "priority": 0,
+    "maxConcurrency": 3,
+    "maxConcurrencyPerBackend": 3,
+    "maxConcurrencyPerProvider": 3,
+    "leaseMs": 30000,
+    "timeoutMs": 600000,
+    "inactivityTimeoutMs": 120000,
+    "retryPolicy": {
+      "maxAttempts": 2,
+      "retryableCategories": [
+        "provider_failure"
+      ],
+      "backoffMs": 1000
+    },
+    "budget": {
+      "maxUsd": 10,
+      "maxTokens": 100000,
+      "maxWallMs": 1800000
+    }
+  },
+  "sandbox": {
+    "provider": "docker",
+    "imageDigest": "sha256:fixture",
+    "readOnlyBase": true,
+    "ephemeralOverlay": true,
+    "resources": {
+      "cpu": 2,
+      "memoryMb": 4096,
+      "diskMb": 20480,
+      "pids": 512
+    },
+    "network": {
+      "mode": "denied",
+      "allowedDestinations": []
+    },
+    "artifactAllowlist": [
+      "native-events.jsonl",
+      "normalized-events.jsonl",
+      "final.diff",
+      "verifier-result.json"
+    ]
+  },
+  "verification": {
+    "verifierId": "swe-bench-official",
+    "verifierVersion": "1",
+    "officialRequired": true,
+    "timeoutMs": 120000,
+    "configHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "analysis": {
+    "detectorIds": [
+      "instruction-drift",
+      "tool-recovery"
+    ],
+    "repeatsRequired": 3,
+    "configHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "createdAt": "2026-08-03T00:00:00.000Z"
+}

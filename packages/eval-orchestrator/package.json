@@ -1,0 +1,40 @@
+{
+  "name": "@agent-kernel/eval-orchestrator",
+  "version": "0.0.0",
+  "description": "Standalone durable Control Plane for the Agent Evaluation Platform.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "bin": {
+    "agent-eval-orchestrator": "./dist/bin/eval-orchestrator.js",
+    "agent-eval": "./dist/bin/eval-cli.js",
+    "agent-eval-ci": "./dist/bin/eval-ci.js"
+  },
+  "files": ["dist", "src", "bin", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx watch bin/eval-orchestrator.ts"
+  },
+  "dependencies": {
+    "@agent-kernel/eval-protocol": "workspace:*",
+    "@agent-kernel/eval-sdk": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  },
+  "sideEffects": false,
+  "license": "MIT"
+}

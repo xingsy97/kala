@@ -1,0 +1,6 @@
+{
+  "name": "@agent-kernel/eval-agent-codex", "version": "0.0.0", "type": "module", "main": "./dist/src/index.js", "types": "./dist/src/index.d.ts", "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } }, "bin": { "agent-eval-codex-app-server": "./dist/bin/codex-app-server-driver.js" },
+  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": { "@agent-kernel/eval-agent-cli-common": "workspace:*", "@agent-kernel/eval-protocol": "workspace:*", "@agent-kernel/eval-sdk": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.9.0", "typescript": "^5.6.3", "vitest": "^2.1.5" }, "sideEffects": false
+}

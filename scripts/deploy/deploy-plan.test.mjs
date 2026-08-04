@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildDeployPlan,
   installScript,
+  RETIRED_RELEASE_ASSETS,
   releaseFiles,
   rollbackScript,
   remotePathForShell,
@@ -12,7 +13,7 @@ import {
 } from './deploy-plan.mjs'
 
 const ROOT = '/repo'
-const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'agent-runlab-swebench-runner.cjs', 'claude-code-swebench-runner.cjs', 'bundle-dashboard-with-runtime.cjs']
+const REQUIRED = ['SHA256SUMS', 'agent-kernel-executor.cjs', 'bundle-dashboard-with-runtime.cjs']
 
 function fakeFs(names) {
   return {
@@ -30,10 +31,12 @@ function fakeFs(names) {
 describe('deploy plan', () => {
   it('keeps the LXD deployment contract available from deploy:remote', async () => {
     const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('./deploy-remote.mjs', import.meta.url), 'utf8'))
-    expect(source).toContain("optionValueLocal(rawArgs, '--lxd')")
+    expect(source).toContain("optionValueLocal(effectiveArgs, '--lxd')")
     expect(source).toContain('sha256sum -c SHA256SUMS --ignore-missing')
     expect(source).toContain('deploy failed; rolling back LXD')
     expect(source).toContain('systemctl is-active --quiet')
+    expect(source).toContain("rawArgs.includes('--dry-run')")
+    expect(source).toContain('no build, SSH command, upload, install, restart, or rollback was executed')
   })
   it('discovers only deployable release assets in stable order', () => {
     const fs = fakeFs(['z.tmp', 'run.sh', ...REQUIRED, 'manifest.json', 'agent-runlab-model-catalog-seed.json'])
@@ -41,9 +44,7 @@ describe('deploy plan', () => {
       'SHA256SUMS',
       'agent-kernel-executor.cjs',
       'agent-runlab-model-catalog-seed.json',
-      'agent-runlab-swebench-runner.cjs',
       'bundle-dashboard-with-runtime.cjs',
-      'claude-code-swebench-runner.cjs',
       'manifest.json',
       'run.sh',
     ])
@@ -114,6 +115,10 @@ describe('deploy plan', () => {
     expect(script).toContain('sha256sum -c SHA256SUMS --ignore-missing')
     expect(script).toContain('>> "$BACKUP_DIR/.deployed-files"')
     expect(script.indexOf('.agent-kernel-backup-current')).toBeLessThan(script.indexOf('mv "$UPLOAD_DIR/agent-kernel-executor.cjs"'))
+    for (const retired of RETIRED_RELEASE_ASSETS) {
+      expect(script).toContain(`cp -p "$REMOTE_BIN/${retired}" "$BACKUP_DIR/${retired}"`)
+      expect(script).toContain(`rm -f "$REMOTE_BIN/${retired}"`)
+    }
   })
 
   it('builds a rollback script that restores the last backup and restarts the service', () => {

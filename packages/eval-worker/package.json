@@ -1,0 +1,16 @@
+{
+  "name": "@agent-kernel/eval-worker",
+  "version": "0.0.0",
+  "description": "Independent Worker process for isolated Agent evaluation trials.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } },
+  "bin": { "agent-eval-worker": "./dist/bin/eval-worker.js" },
+  "files": ["dist", "src", "bin", "README.md"],
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run", "test:watch": "vitest", "typecheck": "tsc --noEmit", "dev": "tsx watch bin/eval-worker.ts" },
+  "dependencies": { "@agent-kernel/eval-protocol": "workspace:*", "@agent-kernel/eval-sdk": "workspace:*" },
+  "devDependencies": { "@agent-kernel/eval-orchestrator": "workspace:*", "@types/node": "^22.9.0", "tsx": "^4.19.2", "typescript": "^5.6.3", "vitest": "^2.1.5" },
+  "sideEffects": false,
+  "license": "MIT"
+}

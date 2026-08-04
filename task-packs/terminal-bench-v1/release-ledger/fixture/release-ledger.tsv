@@ -1,0 +1,6 @@
+id	environment	status	amount	checksum
+r-100	production	settled	42	17c4830704302b5a42887bc6b2b15fe467f1e002ba717cacfabad0be20773788
+r-101	staging	settled	900	725f0d82dea4097acad3fc713a1f8b3debcbdbd1e18445e39d6608566603cfb0
+r-102	production	pending	300	ca7c44bf1f9878279ff5b480867bda0728fbd2d57d7483ccc1a8cfe289b9a0b3
+r-103	production	settled	75	5e32fbb4b57b9c2243d2bbcaf1eb9181254f7bce05fd15d8b3cfcb1e2b576b9c
+r-104	production	settled	500	invalid-checksum

@@ -27,6 +27,413 @@ importers:
         specifier: ^2.1.5
         version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
 
+  adapters/agents/agent-runlab:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+      '@agent-kernel/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
+      socket.io-client:
+        specifier: ^4.8.1
+        version: 4.8.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/agents/certification:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@agent-kernel/eval-agent-claude-code':
+        specifier: workspace:*
+        version: link:../claude-code
+      '@agent-kernel/eval-agent-codex':
+        specifier: workspace:*
+        version: link:../codex
+      '@agent-kernel/eval-agent-runlab':
+        specifier: workspace:*
+        version: link:../agent-runlab
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/agents/claude-code:
+    dependencies:
+      '@agent-kernel/eval-agent-cli-common':
+        specifier: workspace:*
+        version: link:../cli-common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/agents/cli-common:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/agents/codex:
+    dependencies:
+      '@agent-kernel/eval-agent-cli-common':
+        specifier: workspace:*
+        version: link:../cli-common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/agents/custom-command:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/code-understanding:
+    dependencies:
+      '@agent-kernel/eval-benchmark-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      fast-check:
+        specifier: ^4.9.0
+        version: 4.9.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/common:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/custom-task-pack:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/fault-scenarios:
+    dependencies:
+      '@agent-kernel/eval-benchmark-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/memory-planning:
+    dependencies:
+      '@agent-kernel/eval-benchmark-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      fast-check:
+        specifier: ^4.9.0
+        version: 4.9.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/program-bench:
+    dependencies:
+      '@agent-kernel/eval-benchmark-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/sdlc-journey:
+    dependencies:
+      '@agent-kernel/eval-benchmark-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/swe-bench:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/swe-marathon:
+    dependencies:
+      '@agent-kernel/eval-benchmark-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/benchmarks/terminal-bench:
+    dependencies:
+      '@agent-kernel/eval-benchmark-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/environments/common:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/environments/docker:
+    dependencies:
+      '@agent-kernel/eval-environment-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/environments/lxd-container:
+    dependencies:
+      '@agent-kernel/eval-environment-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  adapters/environments/lxd-vm:
+    dependencies:
+      '@agent-kernel/eval-environment-common':
+        specifier: workspace:*
+        version: link:../common
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/eval-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
   packages/dashboard:
     dependencies:
       '@agent-kernel/kernel':
@@ -225,6 +632,147 @@ importers:
       workbox-window:
         specifier: ^7.4.1
         version: 7.4.1
+
+  packages/eval-analyzer:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../eval-sdk
+    devDependencies:
+      '@agent-kernel/eval-orchestrator':
+        specifier: workspace:*
+        version: link:../eval-orchestrator
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  packages/eval-dashboard:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../eval-sdk
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16.0.1
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/react':
+        specifier: ^18.3.12
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.1
+        version: 18.3.7(@types/react@18.3.31)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.3
+        version: 4.7.0(vite@5.4.21(@types/node@22.20.0)(terser@5.49.0))
+      jsdom:
+        specifier: ^25.0.1
+        version: 25.0.1
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.4.11
+        version: 5.4.21(@types/node@22.20.0)(terser@5.49.0)
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  packages/eval-orchestrator:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../eval-sdk
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.5
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  packages/eval-protocol:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      fast-check:
+        specifier: ^4.9.0
+        version: 4.9.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  packages/eval-sdk:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../eval-protocol
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
+
+  packages/eval-worker:
+    dependencies:
+      '@agent-kernel/eval-protocol':
+        specifier: workspace:*
+        version: link:../eval-protocol
+      '@agent-kernel/eval-sdk':
+        specifier: workspace:*
+        version: link:../eval-sdk
+    devDependencies:
+      '@agent-kernel/eval-orchestrator':
+        specifier: workspace:*
+        version: link:../eval-orchestrator
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.0
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.5
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
 
   packages/executor:
     dependencies:
@@ -446,6 +994,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.0)(jsdom@25.0.1)(terser@5.49.0)
 
   packages/substrate:
     dependencies:
