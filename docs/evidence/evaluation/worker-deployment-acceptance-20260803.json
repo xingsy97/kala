@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T09:57:40.947Z",
+  "scope": "fresh standalone eval-worker process deployment; public plugins; real Docker trial sandbox; canonical evidence; verified lifecycle",
+  "baseUrl": "http://192.0.2.4:23200",
+  "worker": {
+    "registration": {
+      "schemaVersion": 1,
+      "workerId": "worker-compose",
+      "workerVersion": "acceptance",
+      "protocolVersions": [
+        1
+      ],
+      "sandboxProviders": [
+        "docker"
+      ],
+      "agentBackends": [
+        "custom-command"
+      ],
+      "capacity": {
+        "cpu": 1,
+        "memoryMb": 512,
+        "diskMb": 2048,
+        "gpu": 0,
+        "maxTrials": 1
+      }
+    },
+    "registeredAt": "2026-08-03T09:57:31.787Z",
+    "heartbeatAt": "2026-08-03T09:57:31.787Z"
+  },
+  "runId": "fresh-worker-msd22o52-6c757265",
+  "trialId": "fresh-worker-msd22o52-6c757265:compose-smoke-task:compose-worker-agent:0",
+  "runState": "completed",
+  "trialState": "completed",
+  "trialAttempt": 1,
+  "sandbox": {
+    "provider": "docker",
+    "imageDigest": "node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed",
+    "toolchainVersions": {
+      "docker": "29.1.3"
+    }
+  },
+  "lifecycleStates": [
+    "leased",
+    "environment_preparing",
+    "agent_running",
+    "artifacts_collecting",
+    "verifying",
+    "analyzing",
+    "completed"
+  ],
+  "evidence": {
+    "resultHash": "0add336231b8d8835146100a0d85b9e35b3bbb96f32c87ae33ec83895cc1446b",
+    "artifactManifestHash": "533817369523646360a905f22d8888f6847070036ffb80897eccef142311a171",
+    "evidenceLevel": "native",
+    "normalizedEventCount": 2,
+    "finalDiffBytes": 177,
+    "nativeVerifierArtifact": "fresh-worker-msd22o52-6c757265/fresh-worker-msd22o52-6c757265:compose-smoke-task:compose-worker-agent:0/extra/custom-task-pack/fresh-worker-msd22o52-6c757265:compose-smoke-task:compose-worker-agent:0/native-result.json",
+    "nativeMetrics": {
+      "passed": true,
+      "passedSteps": 1,
+      "totalSteps": 1
+    }
+  }
+}

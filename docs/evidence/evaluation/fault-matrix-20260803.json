@@ -1,0 +1,261 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:46.331Z",
+  "scope": "fresh standalone evaluation fault injection; no Host sessions or historical evaluation artifacts",
+  "scenarios": [
+    {
+      "id": "worker-death",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration classifies an in-flight trial indeterminate after hard Worker loss stops lease heartbeats",
+      "durationMs": 147.05639400000018
+    },
+    {
+      "id": "control-plane-restart",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "versioned Control Plane HTTP API recovers the same authoritative HTTP query after a Control Plane restart",
+      "durationMs": 19.085195999999996
+    },
+    {
+      "id": "provider-429",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration classifies rate limit as retryable provider responsibility",
+      "durationMs": 55.81904800000029,
+      "responsibility": {
+        "category": "provider_failure",
+        "responsibility": "provider",
+        "observedStateSufficientForRecovery": true,
+        "retryable": true
+      }
+    },
+    {
+      "id": "provider-timeout",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration classifies provider timeout as retryable provider responsibility",
+      "durationMs": 51.70836099999997,
+      "responsibility": {
+        "category": "provider_failure",
+        "responsibility": "provider",
+        "observedStateSufficientForRecovery": true,
+        "retryable": true
+      }
+    },
+    {
+      "id": "lost-result-ack",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration retries a lost result acknowledgement against the idempotent committed result",
+      "durationMs": 194.17273700000032
+    },
+    {
+      "id": "environment-setup-failure",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration classifies setup failure as environment responsibility",
+      "durationMs": 42.607990999999856,
+      "responsibility": {
+        "category": "environment_failure",
+        "responsibility": "environment",
+        "observedStateSufficientForRecovery": true,
+        "retryable": true
+      }
+    },
+    {
+      "id": "interrupted-artifact-upload",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "versioned Control Plane HTTP API discards an interrupted HTTP artifact body and accepts one verified retry",
+      "durationMs": 64.30348500000014
+    },
+    {
+      "id": "verifier-timeout",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration bounds a verifier that ignores cancellation and attributes the timeout to the verifier",
+      "durationMs": 74.07644399999981,
+      "responsibility": {
+        "category": "timeout",
+        "responsibility": "verifier",
+        "observedStateSufficientForRecovery": true,
+        "retryable": true
+      }
+    },
+    {
+      "id": "duplicate-completion",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "EvaluationControlPlane durable authority leases only compatible trials and makes result completion idempotent by hash",
+      "durationMs": 91.15227700000014
+    },
+    {
+      "id": "lease-expiry",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "EvaluationControlPlane durable authority requeues expired work only before any execution receipt and classifies ambiguous work indeterminate",
+      "durationMs": 51.51518899999974,
+      "responsibility": {
+        "category": "indeterminate_side_effect",
+        "responsibility": "indeterminate",
+        "observedStateSufficientForRecovery": false,
+        "retryable": false
+      }
+    },
+    {
+      "id": "resource-exhaustion",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration classifies disk exhaustion as environment responsibility",
+      "durationMs": 42.6345409999999,
+      "responsibility": {
+        "category": "environment_failure",
+        "responsibility": "environment",
+        "observedStateSufficientForRecovery": true,
+        "retryable": true
+      }
+    },
+    {
+      "id": "observable-agent-failure",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration attributes an observable Agent failure to the Agent and records sufficient recovery state",
+      "durationMs": 50.63217500000019,
+      "responsibility": {
+        "category": "agent_failure",
+        "responsibility": "agent",
+        "observedStateSufficientForRecovery": true,
+        "retryable": false
+      }
+    },
+    {
+      "id": "durable-cancellation",
+      "status": "passed",
+      "kind": "fault-injection-test",
+      "test": "Worker durable Control Plane integration propagates durable run cancellation through a rejected lease heartbeat to the live Agent",
+      "durationMs": 213.97199
+    },
+    {
+      "id": "rollback",
+      "status": "passed",
+      "kind": "fresh-sandbox-lifecycle",
+      "benchmarkId": "sdlc-journey",
+      "sandboxId": "eval-ct-sdlc-journey-30903-e9e7b282",
+      "provider": "lxd-container",
+      "metric": "rollback_verified",
+      "environmentLock": {
+        "schemaVersion": 1,
+        "provider": "lxd-container",
+        "imageDigest": "9c68ebff3356d887806098d468618b53cf4269c9a1173ebdaf9a113aa2cfae64",
+        "repositoryRevision": "c9325f718bfbc072fb2b5ebc17ccb79822913c79",
+        "dependencyLockHashes": {},
+        "redactedEnvironment": {},
+        "resourcePolicyHash": "cd79b1d222894e1ca32edd0c7bfe5af0995012f8e1e3bbe63bee7a8258f3de8f",
+        "networkPolicyHash": "4ca84cc5adf71eb9bfb8742ba1979cb57bdcf8f84be62c19270138b51eaaa9b1",
+        "toolchainVersions": {
+          "lxd": "Client version: 5.21.5 LTS"
+        },
+        "fixtureVersions": {
+          "sdlc-journey": "1"
+        },
+        "faultInjectorVersions": {}
+      }
+    },
+    {
+      "id": "fault-recovery-control",
+      "status": "passed",
+      "kind": "fresh-sandbox-lifecycle",
+      "benchmarkId": "fault-scenarios",
+      "sandboxId": "eval-ct-fault-scenarios-30903-0e705160",
+      "provider": "lxd-container",
+      "metric": "recovered",
+      "environmentLock": {
+        "schemaVersion": 1,
+        "provider": "lxd-container",
+        "imageDigest": "9c68ebff3356d887806098d468618b53cf4269c9a1173ebdaf9a113aa2cfae64",
+        "repositoryRevision": "9be01fa4b79baef37c383dfbe04a99f59ccb7603",
+        "dependencyLockHashes": {},
+        "redactedEnvironment": {},
+        "resourcePolicyHash": "cd79b1d222894e1ca32edd0c7bfe5af0995012f8e1e3bbe63bee7a8258f3de8f",
+        "networkPolicyHash": "4ca84cc5adf71eb9bfb8742ba1979cb57bdcf8f84be62c19270138b51eaaa9b1",
+        "toolchainVersions": {
+          "lxd": "Client version: 5.21.5 LTS"
+        },
+        "fixtureVersions": {
+          "fault-scenarios": "1"
+        },
+        "faultInjectorVersions": {
+          "deterministic-config-fault-v1": "declared-by-task-pack"
+        }
+      }
+    }
+  ],
+  "runtimeResidue": {
+    "instances": [],
+    "networks": [],
+    "acls": []
+  },
+  "sourceHashes": [
+    {
+      "path": "packages/eval-protocol/src/failure.ts",
+      "sha256": "ef7d330d431eb20c9c68b0f65a10c57100716b8daf6c643600823ed12f0d5f3d"
+    },
+    {
+      "path": "packages/eval-protocol/src/protocol.test.ts",
+      "sha256": "4deadb6b5079e9f4912ac307cf6e951fabee3e359e22372265ec0b57c5b422a3"
+    },
+    {
+      "path": "packages/eval-worker/src/trial-runner.ts",
+      "sha256": "e56f2d7cb2319bae571d6608efa3278456f5e1308bb5f5d911f39c626cfc07c0"
+    },
+    {
+      "path": "packages/eval-worker/src/worker.integration.test.ts",
+      "sha256": "52baa9ef4acef279674e4e61d28a62cf592e9ea3d63a991c7a94264b20905462"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.ts",
+      "sha256": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/http-server.ts",
+      "sha256": "7472b59a940cb0d3431a97829592dbaef9b188ea3e8bf1bb7a74a5bb9ae785c6"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.test.ts",
+      "sha256": "0892c7aa684fdff79e81acda1f74e2272f9c13fad310d14735c3d7fef89fdb28"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/http-server.test.ts",
+      "sha256": "77712797f9dd452ee0c726b8117cc038e09f81fb3c100cdf4caea21e30cd0960"
+    },
+    {
+      "path": "scripts/evaluation/verify-benchmark-lifecycles.mjs",
+      "sha256": "05b3f2932cd01f4e81d83d719974c08ac9eabb9054a58b645db0daa79a75811e"
+    },
+    {
+      "path": "scripts/evaluation/verify-fault-matrix.mjs",
+      "sha256": "7ebadb889637ddeff7acc9f76f67659b3569e375a2244331296f92783f297097"
+    },
+    {
+      "path": "adapters/benchmarks/fault-scenarios/src/index.ts",
+      "sha256": "7349f950a34275f172623006dd6a1d74442dd3544c8af2553b2bdb024a8885e8"
+    },
+    {
+      "path": "task-packs/fault-scenarios-v1/config-schema-recovery/INCIDENT.md",
+      "sha256": "acabb8258b4a3c7c54190b1decbad3c9363f39219ee9e06ccb68f65b9d51fee9"
+    },
+    {
+      "path": "task-packs/fault-scenarios-v1/config-schema-recovery/scripts/check.mjs",
+      "sha256": "c160e26a982452d07fd47e987397b27b46e700310c40cd05aee68262a9f477db"
+    },
+    {
+      "path": "task-packs/fault-scenarios-v1/config-schema-recovery/src/config.mjs",
+      "sha256": "7f803c5d98cdb2214f2741a90710d876bd22a26b45e39c884657ee41f62c80ee"
+    },
+    {
+      "path": "task-packs/fault-scenarios-v1/config-schema-recovery/tests/config.test.mjs",
+      "sha256": "b6f91b401e24cf7e517be6f9ac5cad2a7234326b7bcb0e7590e8d1728ac1f4c6"
+    }
+  ]
+}

@@ -232,9 +232,9 @@ The current implementation has a concrete trace/artifact foundation:
   display metadata such as call sequence is not injected into the API body.
 - `GET /artifacts/manifest` and `GET /artifacts/content` provide bounded
   dashboard access to trace, request, response, and assembly artifacts.
-- Headless browser coverage in `verify:dashboard-debugger` and
-  `verify:dashboard-enhancement-actions` checks API body separation, redaction,
-  artifact rendering, and missing-artifact-root first-use behavior.
+- Headless browser coverage in `verify:dashboard-debugger` checks API body
+  separation and artifact rendering; Host integration tests cover redaction and
+  missing-artifact-root first-use behavior.
 - LLM adapters capture the provider `gatewayRequestId` (Anthropic
   `request-id` header or message id; OpenAI `x-request-id`/`openai-request-id`
   header or streaming/non-streaming `chatcmpl_*` id) and an optional

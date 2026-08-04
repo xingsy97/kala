@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T05:32:12.926Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + three real Agent backends + fresh LXD sandbox + official SWE-Bench verifier",
+  "runId": "fresh-swe-bench-astropy__astropy-12907-20260803052938-37670",
+  "instanceId": "astropy__astropy-12907",
+  "sourceRecordHash": "bcadb9e2ee9c01d1951516eeb31a5864abb90adc8e3bedc5419ce4eb414517db",
+  "sourceFetchedFresh": true,
+  "runState": "completed",
+  "freshSandboxes": 3,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-37670",
+  "gradingOutputHash": "d0e5e6ee04168bd9b2849eb4353cd9ed0cb719e6bf262b2da9a1ea52633c6224",
+  "analysisJobId": "analysis-run-analyze-37670",
+  "analysisOutputHash": "e8b567c1ed6f88fe8f6dc2a843591e4599433f8ee834a8d2599b563ff030cb85",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-swe-bench-astropy__astropy-12907-20260803052938-37670:astropy__astropy-12907:agent-runlab:0",
+      "agentVariantId": "agent-runlab",
+      "resultHash": "8218b60888cc743d43506059e0a78dd5ebe41ce8f738de027a4b192075800ab1",
+      "artifactManifestHash": "85da1db45524576c4e820ee8bf1ba26d2f521832bdc4025719be86e9c0547179",
+      "evidenceLevel": "official",
+      "nativeMetrics": {
+        "resolved": true,
+        "completed": true,
+        "patchApplied": true
+      },
+      "normalizedEventCount": 82
+    },
+    {
+      "trialId": "fresh-swe-bench-astropy__astropy-12907-20260803052938-37670:astropy__astropy-12907:claude-code:0",
+      "agentVariantId": "claude-code",
+      "resultHash": "43efa7c4082882a8e1bb550219509bbe3b128959688ed1468d39b795b0368997",
+      "artifactManifestHash": "403beff5511ca0019fb3585bececa3c5508806a058749aabea5fdf48969d908a",
+      "evidenceLevel": "official",
+      "nativeMetrics": {
+        "resolved": true,
+        "completed": true,
+        "patchApplied": true
+      },
+      "normalizedEventCount": 84
+    },
+    {
+      "trialId": "fresh-swe-bench-astropy__astropy-12907-20260803052938-37670:astropy__astropy-12907:codex:0",
+      "agentVariantId": "codex",
+      "resultHash": "5e2891873e198515e339055d7c1104d47a50cf33efd3dc84bebeac5131ac7a58",
+      "artifactManifestHash": "be6408ea32320f0f02ba8e43f81c209546a882d5f98529a58b9a7cd797d35b7c",
+      "evidenceLevel": "official",
+      "nativeMetrics": {
+        "resolved": true,
+        "completed": true,
+        "patchApplied": true
+      },
+      "normalizedEventCount": 315
+    }
+  ]
+}

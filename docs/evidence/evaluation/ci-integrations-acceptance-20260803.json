@@ -1,0 +1,282 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:28.015Z",
+  "scope": "commands extracted from each CI platform file and executed verbatim in isolated workspaces against one versioned standalone gate contract; no Host sessions or historical evaluation artifacts",
+  "acceptanceClaim": "three CI examples consuming one versioned standalone machine-readable gate contract",
+  "contract": {
+    "cli": "agent-eval-ci",
+    "outputs": [
+      "gate.json",
+      "gate.csv",
+      "gate.junit.xml",
+      "gate.sarif.json",
+      "gate.md"
+    ],
+    "exitCodes": {
+      "pass": 0,
+      "block": 1,
+      "indeterminate": 2
+    }
+  },
+  "integrations": [
+    {
+      "id": "github-actions",
+      "file": "github-actions.yml"
+    },
+    {
+      "id": "gitlab-ci",
+      "file": "gitlab-ci.yml"
+    },
+    {
+      "id": "jenkins",
+      "file": "Jenkinsfile"
+    }
+  ],
+  "passExecutions": [
+    {
+      "integration": "github-actions",
+      "file": "deploy/evaluation/ci/github-actions.yml",
+      "declaredCommands": [
+        "node packages/eval-orchestrator/dist/bin/eval-ci.js --decision \"$AGENT_EVAL_GATE_DECISION\" --report-manifest \"$AGENT_EVAL_REPORT_MANIFEST\" --output-dir agent-evaluation-ci"
+      ],
+      "executedCommand": "node packages/eval-orchestrator/dist/bin/eval-ci.js --decision \"$AGENT_EVAL_GATE_DECISION\" --report-manifest \"$AGENT_EVAL_REPORT_MANIFEST\" --output-dir agent-evaluation-ci",
+      "executedCommandSha256": "66477d8f83009842e1795019851a684d1e9a754359e9282120bade7ff899123d",
+      "executionCwd": "<isolated-workspace>",
+      "artifactContract": {
+        "mechanism": "actions/upload-artifact@v4",
+        "always": true,
+        "path": "agent-evaluation-ci"
+      },
+      "exitCode": 0,
+      "stdout": {
+        "ok": true,
+        "decision": "pass",
+        "classification": "pass-with-flakes",
+        "exitCode": 0,
+        "outputDirectory": "/tmp/agent-eval-ci-integrations-pgl7PL/github-actions/agent-evaluation-ci"
+      },
+      "outputs": {
+        "gate.json": {
+          "bytes": 2280,
+          "sha256": "a2a5c22c85f2e4662011ffe098784bfaee9a967e0406b45e5daf28b553ee4b9f"
+        },
+        "gate.csv": {
+          "bytes": 415,
+          "sha256": "49dda01c65ceaa77cc1edb09b6624b68d2dcbeb9d9468585d19a04b0a7928010"
+        },
+        "gate.junit.xml": {
+          "bytes": 458,
+          "sha256": "570d60a03a6154f4a488a6e8728a5159e6f24a22ec2e68e8ef7fef9b337c8494"
+        },
+        "gate.sarif.json": {
+          "bytes": 447,
+          "sha256": "800ece7b005bd22e2a9afa6816a589e59f2518939318f7dd8037d02192c37d81"
+        },
+        "gate.md": {
+          "bytes": 441,
+          "sha256": "cf64ef07ad3bc13c3b082cefa6b0e63f0069ddfba722dc0ebc1abbed040028a5"
+        }
+      }
+    },
+    {
+      "integration": "gitlab-ci",
+      "file": "deploy/evaluation/ci/gitlab-ci.yml",
+      "declaredCommands": [
+        "corepack enable",
+        "pnpm install --frozen-lockfile",
+        "pnpm --filter @agent-kernel/eval-orchestrator build",
+        "node packages/eval-orchestrator/dist/bin/eval-ci.js --decision \"$AGENT_EVAL_GATE_DECISION\" --report-manifest \"$AGENT_EVAL_REPORT_MANIFEST\" --output-dir agent-evaluation-ci"
+      ],
+      "executedCommand": "node packages/eval-orchestrator/dist/bin/eval-ci.js --decision \"$AGENT_EVAL_GATE_DECISION\" --report-manifest \"$AGENT_EVAL_REPORT_MANIFEST\" --output-dir agent-evaluation-ci",
+      "executedCommandSha256": "66477d8f83009842e1795019851a684d1e9a754359e9282120bade7ff899123d",
+      "executionCwd": "<isolated-workspace>",
+      "artifactContract": {
+        "mechanism": "artifacts",
+        "always": true,
+        "path": "agent-evaluation-ci",
+        "junit": "agent-evaluation-ci/gate.junit.xml"
+      },
+      "exitCode": 0,
+      "stdout": {
+        "ok": true,
+        "decision": "pass",
+        "classification": "pass-with-flakes",
+        "exitCode": 0,
+        "outputDirectory": "/tmp/agent-eval-ci-integrations-pgl7PL/gitlab-ci/agent-evaluation-ci"
+      },
+      "outputs": {
+        "gate.json": {
+          "bytes": 2280,
+          "sha256": "a2a5c22c85f2e4662011ffe098784bfaee9a967e0406b45e5daf28b553ee4b9f"
+        },
+        "gate.csv": {
+          "bytes": 415,
+          "sha256": "49dda01c65ceaa77cc1edb09b6624b68d2dcbeb9d9468585d19a04b0a7928010"
+        },
+        "gate.junit.xml": {
+          "bytes": 458,
+          "sha256": "570d60a03a6154f4a488a6e8728a5159e6f24a22ec2e68e8ef7fef9b337c8494"
+        },
+        "gate.sarif.json": {
+          "bytes": 447,
+          "sha256": "800ece7b005bd22e2a9afa6816a589e59f2518939318f7dd8037d02192c37d81"
+        },
+        "gate.md": {
+          "bytes": 441,
+          "sha256": "cf64ef07ad3bc13c3b082cefa6b0e63f0069ddfba722dc0ebc1abbed040028a5"
+        }
+      }
+    },
+    {
+      "integration": "jenkins",
+      "file": "deploy/evaluation/ci/Jenkinsfile",
+      "declaredCommands": [
+        "corepack enable",
+        "pnpm install --frozen-lockfile",
+        "pnpm --filter @agent-kernel/eval-orchestrator build",
+        "node packages/eval-orchestrator/dist/bin/eval-ci.js --decision \"$AGENT_EVAL_GATE_DECISION\" --report-manifest \"$AGENT_EVAL_REPORT_MANIFEST\" --output-dir agent-evaluation-ci"
+      ],
+      "executedCommand": "node packages/eval-orchestrator/dist/bin/eval-ci.js --decision \"$AGENT_EVAL_GATE_DECISION\" --report-manifest \"$AGENT_EVAL_REPORT_MANIFEST\" --output-dir agent-evaluation-ci",
+      "executedCommandSha256": "66477d8f83009842e1795019851a684d1e9a754359e9282120bade7ff899123d",
+      "executionCwd": "<isolated-workspace>",
+      "artifactContract": {
+        "mechanism": "post/always",
+        "always": true,
+        "path": "agent-evaluation-ci/**",
+        "junit": "agent-evaluation-ci/gate.junit.xml"
+      },
+      "exitCode": 0,
+      "stdout": {
+        "ok": true,
+        "decision": "pass",
+        "classification": "pass-with-flakes",
+        "exitCode": 0,
+        "outputDirectory": "/tmp/agent-eval-ci-integrations-pgl7PL/jenkins/agent-evaluation-ci"
+      },
+      "outputs": {
+        "gate.json": {
+          "bytes": 2280,
+          "sha256": "a2a5c22c85f2e4662011ffe098784bfaee9a967e0406b45e5daf28b553ee4b9f"
+        },
+        "gate.csv": {
+          "bytes": 415,
+          "sha256": "49dda01c65ceaa77cc1edb09b6624b68d2dcbeb9d9468585d19a04b0a7928010"
+        },
+        "gate.junit.xml": {
+          "bytes": 458,
+          "sha256": "570d60a03a6154f4a488a6e8728a5159e6f24a22ec2e68e8ef7fef9b337c8494"
+        },
+        "gate.sarif.json": {
+          "bytes": 447,
+          "sha256": "800ece7b005bd22e2a9afa6816a589e59f2518939318f7dd8037d02192c37d81"
+        },
+        "gate.md": {
+          "bytes": 441,
+          "sha256": "cf64ef07ad3bc13c3b082cefa6b0e63f0069ddfba722dc0ebc1abbed040028a5"
+        }
+      }
+    }
+  ],
+  "blockExecution": {
+    "exitCode": 1,
+    "stdout": {
+      "ok": false,
+      "decision": "block",
+      "classification": "regression",
+      "exitCode": 1,
+      "outputDirectory": "/tmp/agent-eval-ci-integrations-pgl7PL/block"
+    },
+    "outputs": {
+      "gate.json": {
+        "bytes": 2350,
+        "sha256": "324fff54526db5763f89f17053299c74a19cdba8f7691fecfb88bfb97d0b510b"
+      },
+      "gate.csv": {
+        "bytes": 409,
+        "sha256": "a1fbeb9f1e5ac4a2e7dff1736913e67b6ce95e0e90b1e88ee1a913b12f8f9e6f"
+      },
+      "gate.junit.xml": {
+        "bytes": 563,
+        "sha256": "cbb3ab896c111b45e31f48532b660596ebffe18812e8b659fa2859939eaf5660"
+      },
+      "gate.sarif.json": {
+        "bytes": 1095,
+        "sha256": "25c39966b778d72ad2711c0179c8cf9a74814ba61c862a3e7ade687b387c6814"
+      },
+      "gate.md": {
+        "bytes": 449,
+        "sha256": "ab7bd554193edeb6f0dbdca2cb0032b56dbd4ae9da13f457f5d258c3e09d0b6f"
+      }
+    }
+  },
+  "indeterminateExecution": {
+    "exitCode": 2,
+    "stdout": {
+      "ok": false,
+      "decision": "indeterminate",
+      "classification": "infrastructure",
+      "exitCode": 2,
+      "outputDirectory": "/tmp/agent-eval-ci-integrations-pgl7PL/indeterminate"
+    },
+    "outputs": {
+      "gate.json": {
+        "bytes": 2294,
+        "sha256": "142dc421d709bc10fd638984727002902721332bc35f967930f0b057147fbc56"
+      },
+      "gate.csv": {
+        "bytes": 431,
+        "sha256": "858b638845a9342513c65a7acc075f782222e082ad3a6afb144f26d343968f8c"
+      },
+      "gate.junit.xml": {
+        "bytes": 540,
+        "sha256": "ed6ca59a46086a934ce8cc7199a05b10d8b3e9f01199ded4a6a799530ce23061"
+      },
+      "gate.sarif.json": {
+        "bytes": 454,
+        "sha256": "d6ce3786d693a8597d0ebf95905698076513a3ea747d41afd4a3da1edd72f268"
+      },
+      "gate.md": {
+        "bytes": 457,
+        "sha256": "e925eb02b652bdd7cfa3b6364fccb1fbed039fe9ae58a767758939de54d49c81"
+      }
+    }
+  },
+  "sourceHashes": [
+    {
+      "path": "packages/eval-orchestrator/bin/eval-ci.ts",
+      "sha256": "1400fbd93ee19c16b1c9887a9ed122b983c584220f9b3d3498c6d3c8f3dada03"
+    },
+    {
+      "path": "deploy/evaluation/ci/github-actions.yml",
+      "sha256": "9bd68796062e16f5dc86e9f86c7b040473a6ae8ae4e5f6bf9df9260dced284df"
+    },
+    {
+      "path": "deploy/evaluation/ci/gitlab-ci.yml",
+      "sha256": "512730d45e872781c0702ba62549cc9b5e3d7073a2c2c14bca69af11d7e185b6"
+    },
+    {
+      "path": "deploy/evaluation/ci/Jenkinsfile",
+      "sha256": "24679460c227d53ad4311067078fd855446833a6047a445281a33913ab63e565"
+    },
+    {
+      "path": "deploy/evaluation/ci/fixtures/pass-decision.json",
+      "sha256": "c9f2e93eb457830427d58e55ac5d27c23330a4ede7c1cd96b4c636dd319bd58f"
+    },
+    {
+      "path": "deploy/evaluation/ci/fixtures/block-decision.json",
+      "sha256": "92bb4892f564e673742cac43a276de3c085d28076d19d713c5af8e28d2dd65a4"
+    },
+    {
+      "path": "deploy/evaluation/ci/fixtures/indeterminate-decision.json",
+      "sha256": "3a39ffb3b66c99be20bba9e35ac95f22c9ac96fd3dd427acf79afc9451f19b02"
+    },
+    {
+      "path": "deploy/evaluation/ci/fixtures/report-manifest.json",
+      "sha256": "430ed1e3beef6091c54d5b997137862decf2e3aa4bba46b6897e922af2119e7b"
+    },
+    {
+      "path": "scripts/evaluation/verify-ci-integrations.mjs",
+      "sha256": "5a848658ea79b0549e1f56caf8c22916736076558a32dfb262ba52fca9dfbd84"
+    }
+  ]
+}

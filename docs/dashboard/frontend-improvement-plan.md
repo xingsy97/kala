@@ -141,9 +141,9 @@ horizontal overflow. Wide path/config tables use stacked key/value rows where a
 table would be unreadable. Controls wrap at narrow widths without moving primary
 actions outside the viewport.
 
-### Artifacts and Benchmarks
+### Artifacts and Session Profiles
 
-Artifact inventory, eval runs, eval trials, profiles, and memory use two renderers
+Artifact inventory, Session profiles, and memory use two renderers
 from the same data model:
 
 - desktop keeps dense comparison tables;

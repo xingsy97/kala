@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:14:54.805Z",
+  "scope": "current-source standalone Compose image build and Control Plane rolling recovery in an isolated non-production project; post-recovery durable grader and analyzer acceptance",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "package.json": "afa4c2aa3d87217eed4782100ef02c0cf2321b939ab5f1b990c6ef0dcbcec932",
+    "pnpm-lock.yaml": "9df3924410aec8fd6a3dc51f3e0ada05141d19f073ecf6c85aa462a6847c376a",
+    "pnpm-workspace.yaml": "5833a38d940a030f9584bcc925b37bd958740cba28f0558c580502007a0cb607",
+    "tsconfig.base.json": "75a2dc87c5e60cf8669657b41685b6f529078c7290cf47d51066a5f1d8a556f6",
+    "packages/eval-analyzer/src/control-plane-loop.ts": "e0a5ac74c0027c3c2d53e9cbcfaede818d72a48fbb830d9e98cdc61f215cbc05",
+    "packages/eval-analyzer/src/control-plane-loop.test.ts": "53fe1ad4592bc02e696570f97f04724cd6ddc63e0ee5391e6fc26af84458ca8d",
+    "packages/eval-analyzer/src/runner.ts": "9d301fd79772c7d0382930e19b9c40fb17a49fafd55f3b0963ff8a3f9328fc8f",
+    "packages/eval-analyzer/src/grader-runner.ts": "91ef8f8d0e4bde3d29dc6142afed25f8c3ab71d7ba238a9df3361748bde63161",
+    "deploy/evaluation/compose.yaml": "0c4a8319b1f7527fb82d42d3ff393a9bf3f6b96a0d17d46df5894c0bbee3a4b8",
+    "deploy/evaluation/acceptance/compose.acceptance.yaml": "fc2cb54b0a2fd1dae7197d5e51e0bfddeaf247c55dfbef87fa3dfb71f6b268d9",
+    "deploy/evaluation/images/Dockerfile.orchestrator": "8c2ed66a23e34ee72ba0d69f082dc0f0b4667089a4550b40dced2cbc318d58f0",
+    "deploy/evaluation/images/Dockerfile.analyzer": "82ec0b68ea3ddbc15bff9251b719a20cb89348a38cdd127c81eb1341d803edf7",
+    "deploy/evaluation/images/Dockerfile.dashboard": "cdff262acefc8c389f7bf6860b926fbaf1de0034bb8192cd4a709b10502c5acc",
+    "scripts/evaluation/verify-compose-deployment.mjs": "4b1915f20942defc90509a18fcb11c018f5cea7fcb6f9a7139345e398bf701b4",
+    "scripts/evaluation/verify-compose-rolling-recovery.mjs": "99e4a0b5cd987c05be850e6afa85d22f64f82eee51760b10bac0f0ffeb90b1f8"
+  },
+  "sourceBundleSha256": "174bbc8016402e986e9541b1b67bfd99151515210ee81e6dba3c459b707ed79e",
+  "environment": {
+    "project": "agent-eval-rolling-current-20260803",
+    "production": false,
+    "controlPlaneUrl": "http://127.0.0.1:23300",
+    "dashboardUrl": "http://127.0.0.1:23380"
+  },
+  "images": [
+    {
+      "service": "orchestrator",
+      "imageId": "sha256:db25284189d3c1676ebdf71f0a06c45dcf4e2eee071477f9a1df677c4c271d73"
+    },
+    {
+      "service": "analyzer",
+      "imageId": "sha256:e967c7a606f68401bb7bffc75571c9a8dec7576d7f19b549e4b3969e8f0b013c"
+    },
+    {
+      "service": "dashboard",
+      "imageId": "sha256:6919b3e0a00dcde46804b0209f7bd39ae5a7964f961e78df774d6b415eda86c8"
+    }
+  ],
+  "rollingRecovery": {
+    "status": "passed",
+    "operation": "stop and start the isolated Compose orchestrator while leaving analyzer and dashboard running",
+    "stoppedAt": "2026-08-03T13:14:40.308Z",
+    "healthyAt": "2026-08-03T13:14:54.068Z",
+    "analyzer": {
+      "containerIdBefore": "d637b476fb2168c4a2fdce3b3df68f13fa255180ccf5150ae4343106850d5a11",
+      "containerIdDuringDisconnect": "d637b476fb2168c4a2fdce3b3df68f13fa255180ccf5150ae4343106850d5a11",
+      "containerIdAfterRecovery": "d637b476fb2168c4a2fdce3b3df68f13fa255180ccf5150ae4343106850d5a11",
+      "restartCountBefore": 0,
+      "restartCountDuringDisconnect": 0,
+      "restartCountAfterRecovery": 0,
+      "healthDuringDisconnect": "healthy",
+      "healthAfterRecovery": "healthy"
+    },
+    "orchestrator": {
+      "containerId": "73185a96044a8efb202c35d034551630c98c323c7623a4598b052fba22a95a75",
+      "healthAfterRecovery": "healthy",
+      "restartCountAfterRecovery": 0
+    },
+    "dashboard": {
+      "containerId": "bf2bcc1cecf1ea39a9bafbaeab9ee92e76a16d22305f5bdd98808a0b00a96e41",
+      "healthAfterRecovery": "healthy",
+      "restartCountAfterRecovery": 0
+    }
+  },
+  "postRecoveryAcceptance": {
+    "path": "docs/evidence/evaluation/compose-rolling-deployment-acceptance-20260803.json",
+    "sha256": "d4412c3ca94a75c9a2dd93748dc7165d9659793754f290599debd6bd966d66ba",
+    "runId": "fresh-compose-msd94bpf-92fc1e2e",
+    "runState": "completed",
+    "jobs": [
+      {
+        "jobId": "grading-run-grade-123e4567-e89b-42d3-a456-426614170003",
+        "kind": "grading",
+        "state": "completed",
+        "outputManifestHash": "ee73ca03d797ea14ee43c33814d4d0abd0d7f2e24865020133ba643af9df7a20"
+      },
+      {
+        "jobId": "analysis-run-analyze-123e4567-e89b-42d3-a456-426614170010",
+        "kind": "detectors",
+        "state": "completed",
+        "outputManifestHash": "6976ee9d41649219eb8f6ce2210c536f19a2d1c8e3d88560c892296fcfe10f9c"
+      }
+    ]
+  }
+}

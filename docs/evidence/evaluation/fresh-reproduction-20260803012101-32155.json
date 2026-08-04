@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T01:21:03.000Z",
+  "runId": "fresh-reproduction-20260803012101-32155",
+  "bundleId": "fresh-reproduction-20260803012101-32155-config-schema",
+  "failureFingerprint": "22c8deac8ad90f21f2052db688f62b81efe9da439a9a96714a4bbe0e5bc3ff06",
+  "signedPayloadHash": "11c9f05278547622ff4d92c3f4af31e589ca1303839f4ce62a7c977e8ac6abd2",
+  "freshSandboxExecutions": 8,
+  "uniqueFreshEnvironments": true,
+  "cleanupVerified": true,
+  "minimization": { "originalUnits": 3, "minimizedUnits": 1, "attempts": 4 },
+  "reproduction": { "attempts": 2, "reproduced": 2, "sameFailureFingerprint": true },
+  "successControl": { "passed": true, "freshEnvironment": true },
+  "privacy": { "redactionPassed": true, "secretScanPassed": true, "absolutePathScanPassed": true },
+  "bundle": { "signatureVerified": true, "checksumsVerified": true, "minimalWorkspaceIsUstarZstd": true, "manifestSha256": "a84e6d6105eebdf623ada76c5dbdbc524a251f9f435be84d432aa42186d4225a", "minimalWorkspaceSha256": "ea0ed618b82c0bfee8f70a1bbf8c3a594ae435a265244b6a58ce0ef1e581c8ad" },
+  "oneCommandReproduction": { "command": "reproduce.sh", "passed": true, "freshEnvironment": true, "exitCodeObserved": 23, "observedFailureFingerprint": "22c8deac8ad90f21f2052db688f62b81efe9da439a9a96714a4bbe0e5bc3ff06", "cleanupVerified": true }
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T09:46:16.764Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + real Agent backends + LXD sandbox + native verifier",
+  "runId": "fresh-code-understanding-20260803094524-36650",
+  "taskPackId": "code-understanding",
+  "taskIds": [
+    "configuration-runtime-trace"
+  ],
+  "agentIds": [
+    "codex"
+  ],
+  "agentConfigs": [
+    {
+      "variantId": "codex",
+      "backendId": "codex",
+      "model": {
+        "provider": "openai",
+        "modelId": "gpt-5.6-sol"
+      },
+      "configHash": "b0bc87c8e4c7004748fa15755efe8c33c78cdba673431d756ca16fcca733aa7a",
+      "config": {
+        "baseUrl": "http://192.0.2.5:3000/v1",
+        "transport": "app-server",
+        "reasoningEffort": "medium"
+      }
+    }
+  ],
+  "runState": "completed",
+  "startedAt": "2026-08-03T09:45:24.952Z",
+  "completedAt": "2026-08-03T09:46:16.764Z",
+  "durationMs": 51812,
+  "freshSandboxes": 1,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-36650",
+  "gradingOutputHash": "720dcb105b05e8779629c7bae3724b5fbfd061d217f4a7df148a9d9a54fee016",
+  "analysisJobId": "analysis-run-analyze-36650",
+  "analysisOutputHash": "b8cf80ea5ad9d5fe3f320efe0417ac85a1bbcd27bbfeebcad5157c74e820744c",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-code-understanding-20260803094524-36650:configuration-runtime-trace:codex:0",
+      "taskId": "configuration-runtime-trace",
+      "agentVariantId": "codex",
+      "resultHash": "feeb4eade7aab26db1f1bf016e5bb007cd9dd020922af74098ae5f415ff4222a",
+      "artifactManifestHash": "55bd3f10783bc2681a4b5ca0bb0bd69b60b6a5292fdc4e45f463dc95ec87f88c",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "file_recall_at_k": 1,
+        "symbol_recall_at_k": 1,
+        "first_relevant_read_rank": 2,
+        "irrelevant_read_ratio": 0.4358974358974359,
+        "dependency_edge_precision": 0.5,
+        "dependency_edge_recall": 0.5,
+        "verifier_protocol_valid": true,
+        "passedSteps": 1,
+        "totalSteps": 1
+      },
+      "normalizedEventCount": 256
+    }
+  ]
+}

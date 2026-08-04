@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:34.918Z",
+  "scope": "standalone governance gates over current source and fresh synthetic data; historical Host evaluation data is rejected and never discovered",
+  "controls": {
+    "credentialReferences": [
+      {
+        "test": "canonical protocol v1 rejects plaintext credential-like fields and accepts credential references",
+        "status": "passed",
+        "durationMs": 1.1318389999999
+      },
+      {
+        "test": "ArtifactStager privacy boundary redacts referenced and generic secrets from failure artifacts and hashes the redacted result",
+        "status": "passed",
+        "durationMs": 6.209837000000107
+      },
+      {
+        "test": "DockerSandboxProvider orphan ownership keeps environment secrets out of host argv and removes the 0600 guest file",
+        "status": "passed",
+        "durationMs": 0.7073350000000573
+      },
+      {
+        "test": "LXD guest environment injection keeps secrets out of host argv and deletes the 0600 guest file after execution",
+        "status": "passed",
+        "durationMs": 2.3532860000000255
+      }
+    ],
+    "pathContainment": [
+      {
+        "test": "durable and governance contracts requires contained artifact paths, unique entries, and valid leases",
+        "status": "passed",
+        "durationMs": 0.8377179999999953
+      },
+      {
+        "test": "ArtifactStager privacy boundary imports only regular allowlisted files contained by the provider artifact root",
+        "status": "passed",
+        "durationMs": 12.846753999999919
+      },
+      {
+        "test": "path-contained artifact store reads only regular contained files whose size and hash match authority metadata",
+        "status": "passed",
+        "durationMs": 19.14210300000002
+      },
+      {
+        "test": "path-contained artifact store rejects symlink files even when they point inside or outside the root",
+        "status": "passed",
+        "durationMs": 6.2565250000000106
+      },
+      {
+        "test": "immutable multi-format report generation rejects private absolute paths before producing public report files",
+        "status": "passed",
+        "durationMs": 3.6471389999999246
+      }
+    ],
+    "retentionDeletionAudit": [
+      {
+        "test": "EvaluationControlPlane durable authority durably controls defect promotion, reproduction, regression, reports, insights, and immutable audit",
+        "status": "passed",
+        "durationMs": 162.56151599999976
+      }
+    ],
+    "provenance": [
+      {
+        "test": "canonical protocol v1 rejects task and dataset publication without explicit license and evaluation permission grants",
+        "status": "passed",
+        "durationMs": 2.5147289999999884
+      },
+      {
+        "test": "SweBenchBenchmarkAdapter resolves a fresh immutable task without consulting Host runs or sessions",
+        "status": "passed",
+        "durationMs": 3.7491699999999355
+      },
+      {
+        "test": "SweBenchBenchmarkAdapter rejects a derived trial image whose official OCI lineage does not match",
+        "status": "passed",
+        "durationMs": 0.7340149999999994
+      },
+      {
+        "test": "SweBenchBenchmarkAdapter refuses evidence from any unpinned harness revision",
+        "status": "passed",
+        "durationMs": 0.41624899999999343
+      }
+    ],
+    "cleanCutoverProtocol": [
+      {
+        "test": "canonical protocol v1 is a clean-cutover protocol and does not expose a legacy Host parser",
+        "status": "passed",
+        "durationMs": 0.4422079999999369
+      }
+    ]
+  },
+  "administrationAuditBrowserChecks": 9,
+  "dashboardGovernance": {
+    "internationalization": {
+      "initial": {
+        "language": "zh-CN",
+        "heading": "排行榜",
+        "activeNav": "排行榜",
+        "selector": "zh-CN"
+      },
+      "switched": {
+        "language": "en",
+        "heading": "Leaderboard",
+        "stored": "en"
+      }
+    },
+    "normalizedTrace": {
+      "totalRows": 180,
+      "renderedRows": 24,
+      "virtualized": "true",
+      "keyboardReachable": "0"
+    },
+    "errorBoundaryTest": "contains render failures without exposing error detail or mutating durable state"
+  },
+  "runtimeChecks": {
+    "credentialPathsPersisted": [],
+    "canonicalCredentialReferences": [
+      "fixture-key"
+    ],
+    "publicationDenials": {
+      "taskUnknownLicenseRejected": true,
+      "taskDeniedPermissionRejected": true,
+      "datasetUnknownLicenseRejected": true,
+      "datasetUnreviewedPermissionRejected": true
+    }
+  },
+  "cleanCutover": {
+    "boundaries": {
+      "ok": true,
+      "boundaryRules": 13,
+      "sourceRules": 2,
+      "ownershipSources": 27
+    },
+    "sourceScan": {
+      "ok": true,
+      "rootsScanned": 9,
+      "policy": "reject-and-never-discover"
+    },
+    "historicalPolicy": "reject-and-never-discover",
+    "importSurface": "none"
+  },
+  "sourceHashes": [
+    {
+      "path": "packages/eval-protocol/src/common.ts",
+      "sha256": "6f9d1606685b96d44a19e0768bcd2eecd579c94c354308872e73c40badd44971"
+    },
+    {
+      "path": "packages/eval-protocol/src/tasks.ts",
+      "sha256": "654a21446e0e5f195cf3d2b372e5d1621c0d2f66c69e8e435d2b5d08e4025771"
+    },
+    {
+      "path": "packages/eval-protocol/src/datasets.ts",
+      "sha256": "4dd1581d01137e4ff3c1642df14c4184f19bdad3610ef2ca2bb96e405a9ac64f"
+    },
+    {
+      "path": "packages/eval-protocol/src/protocol.test.ts",
+      "sha256": "4deadb6b5079e9f4912ac307cf6e951fabee3e359e22372265ec0b57c5b422a3"
+    },
+    {
+      "path": "packages/eval-worker/src/artifact-stager.ts",
+      "sha256": "b50bec5dba695cf7474c4dc53ec9d7d3df14826a6c46b252cc0d891e6bc7a016"
+    },
+    {
+      "path": "packages/eval-worker/src/artifact-stager.test.ts",
+      "sha256": "d34b40dab6dde828cde2b2d660664761fae037367f18d2655e57e653a1b812ea"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/artifact-store.ts",
+      "sha256": "b440a1796518f3a2b5df912f13c17d05592e59ad46c62491e066e491616015e9"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.ts",
+      "sha256": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a"
+    },
+    {
+      "path": "scripts/evaluation/verify-boundaries.mjs",
+      "sha256": "b9efbccab6c6165f1e9477bdb129705a341db3c1c54c3d2e50fe82c2eebfa0bc"
+    },
+    {
+      "path": "scripts/evaluation/verify-clean-cutover.mjs",
+      "sha256": "5fac4ccdeab5a6a9e5e0db3e2bd0c729c34f333e3719d83f49b15a59b19cce66"
+    },
+    {
+      "path": "scripts/evaluation/verify-governance.mjs",
+      "sha256": "3c8a0cf5eea12bf6734b2dc1545553c9faa760f93536073b1c631f6d1846adfc"
+    }
+  ]
+}

@@ -10,10 +10,9 @@ This file is an index into the substantive documents.
 ## Roadmap
 
 - [roadmap/README.md](../planning/roadmap-notes/README.md) — overview and bottom line
-- [roadmap/eval-moat.md](../planning/roadmap-notes/eval-moat.md) — Part A · evaluation moat
-- [roadmap/rl-e2e.md](../planning/roadmap-notes/rl-e2e.md) — Part B · RL end-to-end
+- [standalone evaluation ledger](../architecture/agent-evaluation-platform-implementation-ledger.md) — invariant-by-invariant implementation and evidence status
 - [roadmap/streaming.md](../planning/roadmap-notes/streaming.md) — Part C · streaming and TTFT
-- [roadmap/product-polish.md](../planning/roadmap-notes/product-polish.md) — Part D · product polish
+- [roadmap/dashboard-product-readiness.md](../planning/roadmap-notes/dashboard-product-readiness.md) — product Session Dashboard readiness
 - [roadmap/what-not-to-do.md](../planning/roadmap-notes/what-not-to-do.md) — explicit non-goals
 
 ## References

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T09:46:43.480Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + real Agent backends + LXD sandbox + native verifier",
+  "runId": "fresh-memory-planning-20260803094524-36651",
+  "taskPackId": "memory-planning",
+  "taskIds": [
+    "release-handoff"
+  ],
+  "agentIds": [
+    "codex"
+  ],
+  "agentConfigs": [
+    {
+      "variantId": "codex",
+      "backendId": "codex",
+      "model": {
+        "provider": "openai",
+        "modelId": "gpt-5.6-sol"
+      },
+      "configHash": "b0bc87c8e4c7004748fa15755efe8c33c78cdba673431d756ca16fcca733aa7a",
+      "config": {
+        "baseUrl": "http://192.0.2.5:3000/v1",
+        "transport": "app-server",
+        "reasoningEffort": "medium"
+      }
+    }
+  ],
+  "runState": "completed",
+  "startedAt": "2026-08-03T09:45:24.967Z",
+  "completedAt": "2026-08-03T09:46:43.480Z",
+  "durationMs": 78513,
+  "freshSandboxes": 1,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-36651",
+  "gradingOutputHash": "caf3119b5f56c31cf45aa871c08e6640e8bfd4ab85f8dd7cd631bff3647e266f",
+  "analysisJobId": "analysis-run-analyze-36651",
+  "analysisOutputHash": "f45df1c8f7cb15cfa81bd8d4ca219de233be8b51bd087baf5c7ec89b489239c5",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-memory-planning-20260803094524-36651:release-handoff:codex:0",
+      "taskId": "release-handoff",
+      "agentVariantId": "codex",
+      "resultHash": "6bd3b502f9d4d8b58fd9e5a521f13719534464e940654a293b0cfc9aed6f64dc",
+      "artifactManifestHash": "256cc3f141d052fbde966ff71b8f6823846299391c7459c2572cc0075dc4dfb4",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "memory_recall": 1,
+        "memory_precision": 1,
+        "stale_memory_use_rate": 0,
+        "correction_compliance": 1,
+        "deletion_compliance": 1,
+        "cross_workspace_isolation": 1,
+        "compaction_retention": 1,
+        "long_term_recall": 1,
+        "prerequisite_edge_precision": 1,
+        "prerequisite_edge_recall": 1,
+        "parallel_branch_recall": 1,
+        "blocked_task_violation_rate": 0,
+        "replan_compliance": 1,
+        "plan_execution_alignment": 1,
+        "verified_completion_rate": 1,
+        "plan_bloat_ratio": 0,
+        "plan_converged": true,
+        "verifier_protocol_valid": true,
+        "passedSteps": 1,
+        "totalSteps": 1
+      },
+      "normalizedEventCount": 375
+    }
+  ]
+}

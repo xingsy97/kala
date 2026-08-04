@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T11:45:20.899Z",
+  "scope": "immutable dataset/version/slice catalog and rank-eligible, slice-isolated Leaderboards across all three pivots",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-protocol/src/datasets.ts": "4dd1581d01137e4ff3c1642df14c4184f19bdad3610ef2ca2bb96e405a9ac64f",
+    "packages/eval-protocol/src/leaderboard.ts": "4076e92b4c724ee07a9980c0ce1f4ad247eac99baeb467aad48351d4533e2dc7",
+    "packages/eval-protocol/src/protocol.test.ts": "e74610b06b1489f2fb4e229693bc7b517ee74c1b9e40572ba33f9786ecba2c5d",
+    "packages/eval-orchestrator/src/task-catalog.ts": "e8699cd0001084413359577c7ec898f92b2730d4f3c44bfae0faaee5c5c8e494",
+    "packages/eval-orchestrator/src/control-plane.ts": "4ec9400515ff4a4f6bacdb42c228a69fce30bf2591de170c06e76845e91fe222",
+    "packages/eval-orchestrator/src/control-plane.test.ts": "f4b19b24c7decd6e49d7d03e9a3b9bbf3cda24182623f953016d1d0ff167f2d1",
+    "packages/eval-dashboard/src/app.tsx": "c0cf80cb947c80e110250869deab450a6d937671c47479fbac1fee32cf261fb9",
+    "scripts/evaluation/verify-dashboard-browser.mjs": "d7bfcab214013e8bf047333f0c54397c0638b09ed981ca4e4be86fc0f4940bc6",
+    "scripts/evaluation/verify-catalog-leaderboard.mjs": "67f73ed5b9184600ceb45c5c0c3f3322aff5e0e23db23170d678c9b2541c98ab"
+  },
+  "requiredTests": [
+    {
+      "test": "dataset slices and Leaderboard authority enforces truthful full/subset/sample identity and labels",
+      "status": "passed",
+      "durationMs": 1.255580000000009
+    },
+    {
+      "test": "dataset slices and Leaderboard authority binds every selection kind to an immutable task-ID manifest",
+      "status": "passed",
+      "durationMs": 0.7885760000000346
+    },
+    {
+      "test": "dataset slices and Leaderboard authority property-checks every slice kind, truthful coverage, and sample provenance",
+      "status": "passed",
+      "durationMs": 29.88086099999998
+    },
+    {
+      "test": "dataset slices and Leaderboard authority enforces the complete Leaderboard eligibility and comparability identity matrix",
+      "status": "passed",
+      "durationMs": 1.9122499999999718
+    },
+    {
+      "test": "dataset slices and Leaderboard authority versions Leaderboard filters, sort, audit, and invalidation as protocol contracts",
+      "status": "passed",
+      "durationMs": 1.8746690000000399
+    },
+    {
+      "test": "EvaluationControlPlane durable authority serves real catalog resources and cursor pagination from accepted immutable specs",
+      "status": "passed",
+      "durationMs": 11.413093000000117
+    },
+    {
+      "test": "EvaluationControlPlane durable authority restores the task and evaluated-slice catalog from the sole durable journal without startup catalog input",
+      "status": "passed",
+      "durationMs": 23.034736000000066
+    },
+    {
+      "test": "EvaluationControlPlane durable authority publishes only complete eligible canonical evidence and replays one authoritative board for all pivots",
+      "status": "passed",
+      "durationMs": 217.73384499999975
+    }
+  ],
+  "catalog": {
+    "durableJournalReplay": true,
+    "startupInputNotRequiredAfterReplay": true,
+    "cursorPagination": true,
+    "selectionKinds": [
+      "full",
+      "official_subset",
+      "named_subset",
+      "explicit_ids",
+      "sampled"
+    ],
+    "immutableTaskIdsHash": true,
+    "truthfulCoverageAndLabels": true
+  },
+  "eligibility": {
+    "officialEvidenceRequiredForOfficialDataset": true,
+    "completedTrialsMustEqualExpected": true,
+    "positiveRepeats": true,
+    "verifierVersionRequired": true,
+    "smokeRejected": true,
+    "nativeRejectedForOfficialDataset": true
+  },
+  "comparabilityIdentity": [
+    "datasetId",
+    "datasetVersion",
+    "split",
+    "sliceManifestHash",
+    "verifierVersion",
+    "repeatPolicyHash",
+    "evidenceLevel"
+  ],
+  "browser": {
+    "pivots": [
+      "model",
+      "agent_type",
+      "test_dataset"
+    ],
+    "exactSliceHashes": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "labelsIncludeSelectionCountCoverageSeedAndFilters": true,
+    "urlFilterSort": {
+      "fixture": "ready",
+      "pivot": "test_dataset",
+      "sliceManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "view": "audit",
+      "sortBy": "cost",
+      "sortDirection": "asc",
+      "agentType": "codex",
+      "modelId": "fixture-model"
+    },
+    "inactiveAuditWithoutRank": true,
+    "rowExpansionLinks": [
+      {
+        "text": "Contributing runs",
+        "href": "/runs?runId=browser-run-1"
+      },
+      {
+        "text": "Task-level results",
+        "href": "/runs?runId=browser-run-1&trialState=completed"
+      },
+      {
+        "text": "Methodology",
+        "href": "/reports?runId=browser-run-1"
+      },
+      {
+        "text": "Artifacts",
+        "href": "/runs?runId=browser-run-1&trialId="
+      }
+    ],
+    "warningGatedCrossSliceExploration": {
+      "urlSlice": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "requestedSlice": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "badge": "Exploratory denominator · no shared rankSWE-Bench Verified · sampled subset · 500/5000 · seed 42 · stratified by repository · filters language=pythoncccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "ranks": [
+        "—"
+      ],
+      "warning": "Not directly rank-comparableThe requested slice has a different immutable denominator. It will appear in a separate unranked group and will never receive a shared rank.I understand · load unranked comparison",
+      "requestsBeforePreview": 5,
+      "requestsAfterPreview": 5
+    },
+    "provenanceExports": [
+      {
+        "csv": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.csv",
+        "json": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+      },
+      {
+        "csv": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.csv",
+        "json": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+      },
+      {
+        "csv": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.csv",
+        "json": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+      }
+    ],
+    "failures": 0
+  },
+  "browserEvidenceSha256": "5c67a865ef0a2dbca5526f1d88fd9a320a621f13b8592d55d89b129b4d69785c"
+}

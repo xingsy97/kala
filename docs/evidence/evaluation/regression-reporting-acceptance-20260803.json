@@ -1,0 +1,455 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:07.170Z",
+  "scope": "fresh standalone seeded baseline/candidate decisions and deterministic immutable report generation; no Host sessions or historical evaluation artifacts",
+  "regression": {
+    "blocked": {
+      "schemaVersion": 1,
+      "gateId": "release-block",
+      "baselineConfigHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "candidateConfigHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "pairedTasks": 3,
+      "repeats": 1,
+      "confidenceLevel": 0.95,
+      "flakyTasks": [],
+      "infrastructureFailures": [],
+      "violations": [
+        {
+          "rule": "success-rate-drop",
+          "observed": 33.333333333333336,
+          "threshold": 2
+        }
+      ],
+      "statistics": {
+        "baselineSuccessRate": 1,
+        "candidateSuccessRate": 0.6666666666666666,
+        "successRateDelta": -0.33333333333333337,
+        "pairedWins": 0,
+        "pairedLosses": 1,
+        "pairedTies": 2,
+        "mcnemarPValue": 1,
+        "confidenceInterval": {
+          "level": 0.95,
+          "lower": -1,
+          "upper": 0,
+          "method": "paired-bootstrap",
+          "samples": 10000
+        },
+        "repeatedRunVariance": {
+          "baseline": 0,
+          "candidate": 0,
+          "taskCount": 3
+        },
+        "evidenceCompleteness": {
+          "baseline": 1,
+          "candidate": 1,
+          "completePairs": 3,
+          "totalPairs": 3
+        },
+        "pareto": {
+          "relation": "insufficient_evidence",
+          "baseline": {
+            "quality": 1,
+            "costUsd": 1,
+            "latencyMs": null
+          },
+          "candidate": {
+            "quality": 0.6666666666666666,
+            "costUsd": 1,
+            "latencyMs": null
+          }
+        },
+        "taskDeltas": [
+          {
+            "taskId": "one",
+            "baseline": 1,
+            "candidate": 0,
+            "delta": -1,
+            "repeats": 1
+          },
+          {
+            "taskId": "three",
+            "baseline": 1,
+            "candidate": 1,
+            "delta": 0,
+            "repeats": 1
+          },
+          {
+            "taskId": "two",
+            "baseline": 1,
+            "candidate": 1,
+            "delta": 0,
+            "repeats": 1
+          }
+        ],
+        "flakeRate": 0
+      },
+      "decision": "block",
+      "evidenceRefs": [
+        "baseline:one:0",
+        "baseline:three:0",
+        "baseline:two:0",
+        "candidate:one:0",
+        "candidate:three:0",
+        "candidate:two:0"
+      ]
+    },
+    "improved": {
+      "schemaVersion": 1,
+      "gateId": "release-improvement",
+      "baselineConfigHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "candidateConfigHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "pairedTasks": 3,
+      "repeats": 1,
+      "confidenceLevel": 0.95,
+      "flakyTasks": [],
+      "infrastructureFailures": [],
+      "violations": [],
+      "statistics": {
+        "baselineSuccessRate": 0.6666666666666666,
+        "candidateSuccessRate": 1,
+        "successRateDelta": 0.33333333333333337,
+        "pairedWins": 1,
+        "pairedLosses": 0,
+        "pairedTies": 2,
+        "mcnemarPValue": 1,
+        "confidenceInterval": {
+          "level": 0.95,
+          "lower": 0,
+          "upper": 1,
+          "method": "paired-bootstrap",
+          "samples": 10000
+        },
+        "repeatedRunVariance": {
+          "baseline": 0,
+          "candidate": 0,
+          "taskCount": 3
+        },
+        "evidenceCompleteness": {
+          "baseline": 1,
+          "candidate": 1,
+          "completePairs": 3,
+          "totalPairs": 3
+        },
+        "pareto": {
+          "relation": "insufficient_evidence",
+          "baseline": {
+            "quality": 0.6666666666666666,
+            "costUsd": 1,
+            "latencyMs": null
+          },
+          "candidate": {
+            "quality": 1,
+            "costUsd": 1,
+            "latencyMs": null
+          }
+        },
+        "taskDeltas": [
+          {
+            "taskId": "one",
+            "baseline": 0,
+            "candidate": 1,
+            "delta": 1,
+            "repeats": 1
+          },
+          {
+            "taskId": "three",
+            "baseline": 1,
+            "candidate": 1,
+            "delta": 0,
+            "repeats": 1
+          },
+          {
+            "taskId": "two",
+            "baseline": 1,
+            "candidate": 1,
+            "delta": 0,
+            "repeats": 1
+          }
+        ],
+        "flakeRate": 0
+      },
+      "decision": "pass",
+      "evidenceRefs": [
+        "baseline:one:0",
+        "baseline:three:0",
+        "baseline:two:0",
+        "candidate:one:0",
+        "candidate:three:0",
+        "candidate:two:0"
+      ]
+    },
+    "flakeAware": {
+      "schemaVersion": 1,
+      "gateId": "release-flake-aware",
+      "baselineConfigHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "candidateConfigHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "pairedTasks": 2,
+      "repeats": 2,
+      "confidenceLevel": 0.95,
+      "flakyTasks": [
+        "flaky"
+      ],
+      "infrastructureFailures": [],
+      "violations": [],
+      "statistics": {
+        "baselineSuccessRate": 1,
+        "candidateSuccessRate": 1,
+        "successRateDelta": 0,
+        "pairedWins": 0,
+        "pairedLosses": 0,
+        "pairedTies": 1,
+        "mcnemarPValue": 1,
+        "confidenceInterval": {
+          "level": 0.95,
+          "lower": 0,
+          "upper": 0,
+          "method": "paired-bootstrap",
+          "samples": 10000
+        },
+        "repeatedRunVariance": {
+          "baseline": 0.125,
+          "candidate": 0,
+          "taskCount": 2
+        },
+        "evidenceCompleteness": {
+          "baseline": 1,
+          "candidate": 1,
+          "completePairs": 4,
+          "totalPairs": 4
+        },
+        "pareto": {
+          "relation": "insufficient_evidence",
+          "baseline": {
+            "quality": 1,
+            "costUsd": 1,
+            "latencyMs": null
+          },
+          "candidate": {
+            "quality": 1,
+            "costUsd": 1,
+            "latencyMs": null
+          }
+        },
+        "taskDeltas": [
+          {
+            "taskId": "stable",
+            "baseline": 1,
+            "candidate": 1,
+            "delta": 0,
+            "repeats": 2
+          }
+        ],
+        "flakeRate": 0.5
+      },
+      "decision": "pass",
+      "evidenceRefs": [
+        "baseline:flaky:0",
+        "baseline:flaky:1",
+        "baseline:stable:0",
+        "baseline:stable:1",
+        "candidate:flaky:0",
+        "candidate:flaky:1",
+        "candidate:stable:0",
+        "candidate:stable:1"
+      ]
+    }
+  },
+  "methodology": {
+    "pairedBootstrapSamples": 10000,
+    "mcnemar": true,
+    "repeatedRunVariance": true,
+    "evidenceCompleteness": true,
+    "taskDeltas": true,
+    "pareto": true
+  },
+  "capabilityVector": {
+    "components": [
+      "taskSuccess",
+      "codeUnderstanding",
+      "instructionFollowing",
+      "toolGrounding",
+      "recovery",
+      "contextRetention",
+      "memoryQuality",
+      "planning",
+      "testIntegrity",
+      "efficiency",
+      "reproducibility"
+    ],
+    "evidenceLinked": true
+  },
+  "report": {
+    "manifest": {
+      "schemaVersion": 1,
+      "reportId": "release-reporting-acceptance",
+      "inputEvidenceHash": "f3732354cf5ce1209d7eb1658f383264ae29dab0b2cfa7a9306944c8ecf979a6",
+      "runRefs": [
+        "canonical-fixture-v1"
+      ],
+      "formats": [
+        {
+          "format": "json",
+          "path": "reports/release-reporting-acceptance/report.json",
+          "sha256": "aabebcbfac4b507dc33cf63691ce8d0611890b2985c401e68ba2562bf4621a39"
+        },
+        {
+          "format": "csv",
+          "path": "reports/release-reporting-acceptance/report.csv",
+          "sha256": "231d51f2b160e9d03fcd2d6fcfeccbecd5e4b1220920296b63640fe9d1038efc"
+        },
+        {
+          "format": "html",
+          "path": "reports/release-reporting-acceptance/report.html",
+          "sha256": "9848ada34af6e893ec5cad95dfce0063817486ac9effe6c8f62bc9d69007d6f6"
+        },
+        {
+          "format": "pdf",
+          "path": "reports/release-reporting-acceptance/report.pdf",
+          "sha256": "750959b708d132928ef0082396a31738e65e9991c4ed04850a2b3f1c9a355f62"
+        },
+        {
+          "format": "junit",
+          "path": "reports/release-reporting-acceptance/report.junit.xml",
+          "sha256": "8b7cff12ace77f0960e1699626ae916dce909cf1597970618c89e322d6fbb887"
+        },
+        {
+          "format": "sarif",
+          "path": "reports/release-reporting-acceptance/report.sarif.json",
+          "sha256": "25e432ea8dbc3a30f973eb30d28e96e793eb2253b51436450835958ddc593901"
+        },
+        {
+          "format": "markdown",
+          "path": "reports/release-reporting-acceptance/report.md",
+          "sha256": "443788c7ed89e4dfe0d8a7773a6b7654f4d5b15b12c54c6e0d713d30c16563d2"
+        }
+      ],
+      "methodologyVersion": "1.0.0",
+      "includesAllConfiguredRepeats": true,
+      "redactionPassed": true,
+      "generatedAt": "2026-08-03T04:00:00.000Z"
+    },
+    "formatChecks": {
+      "json": true,
+      "csv": true,
+      "html": true,
+      "pdf": true,
+      "junit": true,
+      "sarif": true,
+      "markdown": true
+    },
+    "deterministicAcrossInputOrder": true,
+    "formatBytes": {
+      "json": 21435,
+      "csv": 2040,
+      "html": 6982,
+      "pdf": 2335,
+      "junit": 1844,
+      "sarif": 477,
+      "markdown": 4655
+    }
+  },
+  "durableClosedLoop": {
+    "promotionReportInsightAuditTest": {
+      "test": "EvaluationControlPlane durable authority durably controls defect promotion, reproduction, regression, reports, insights, and immutable audit",
+      "status": "passed",
+      "durationMs": 173.55554299999994
+    },
+    "insight": {
+      "schemaVersion": 1,
+      "insightId": "release-insight",
+      "evidenceRefs": [
+        "finding-tool-recovery",
+        "release-improvement"
+      ],
+      "failureCluster": "tool recovery after ambiguous action",
+      "affectedTaskRate": 0.3333333333333333,
+      "severity": "high",
+      "suspectedLayer": "runtime",
+      "confidence": 0.95,
+      "recommendation": "require an observed-state check before replay",
+      "expectedMetric": "paired success-rate delta",
+      "regressionPackId": "release-regression-pack",
+      "owner": "agent-platform",
+      "status": "validated",
+      "postFixValidationRefs": [
+        "release-improvement"
+      ]
+    }
+  },
+  "tests": [
+    {
+      "test": "flake-aware paired regression gate blocks a deterministic success regression with paired statistics",
+      "status": "passed",
+      "durationMs": 14.90150200000005
+    },
+    {
+      "test": "flake-aware paired regression gate classifies flakes and infrastructure failures as indeterminate instead of deterministic Agent regression",
+      "status": "passed",
+      "durationMs": 0.7076950000000579
+    },
+    {
+      "test": "flake-aware paired regression gate passes matched improvements without fabricating unmatched comparisons",
+      "status": "passed",
+      "durationMs": 5.486002000000099
+    },
+    {
+      "test": "immutable multi-format report generation deterministically generates all seven formats and all ten report sections",
+      "status": "passed",
+      "durationMs": 72.86698899999999
+    },
+    {
+      "test": "immutable multi-format report generation rejects missing configured repeats and modified evidence hashes",
+      "status": "passed",
+      "durationMs": 4.929390000000012
+    },
+    {
+      "test": "immutable multi-format report generation rejects private absolute paths before producing public report files",
+      "status": "passed",
+      "durationMs": 2.907483999999954
+    },
+    {
+      "test": "EvaluationControlPlane durable authority durably controls defect promotion, reproduction, regression, reports, insights, and immutable audit",
+      "status": "passed",
+      "durationMs": 173.55554299999994
+    }
+  ],
+  "sourceHashes": [
+    {
+      "path": "packages/eval-orchestrator/src/regression-gate.ts",
+      "sha256": "c70d4911d704e1fb6f2c6f21e8f3f7f4eac9b1f20260d5fec1453a328fe05de7"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/regression-gate.test.ts",
+      "sha256": "ee1dfeca9f0efa6be57888828316482f20eb3c68b2aeb0ba9a13b62c891db647"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/report-generator.ts",
+      "sha256": "baa587b4e5bf90c8358a89c5c12d4c9b6835b3d17054b9f73528393cb39655aa"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/report-generator.test.ts",
+      "sha256": "17e4067405a1c25a5d6433c652abd5c0b1b2dc1191b108d66a56208fa020e034"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/capability-vector.ts",
+      "sha256": "cba7139b82623c392aff48cfbcce23cf9c9e7e6e40e1800028150dda55b15285"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/capability-vector.test.ts",
+      "sha256": "a64a0a81c591479423482b81b24288b2161ec3bbaaa25c5d6fa2f84c725db609"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.ts",
+      "sha256": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.test.ts",
+      "sha256": "0892c7aa684fdff79e81acda1f74e2272f9c13fad310d14735c3d7fef89fdb28"
+    },
+    {
+      "path": "scripts/evaluation/verify-regression-reporting.mjs",
+      "sha256": "f2836a4815b29632eb2ae18ace4e9d5334cbbb49310fe9400beda7030c156aea"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "status": "working-tree-acceptance",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "dirtyTreePatchSha256": "029a06684f3d0f9f62ddcfbc72f0e1378695792d0a88c01a50399c996450193e",
+  "lockfileSha256": "92e5fa33228b3d5e3238a85bd730674ca13e8d3d93aed5a891cb47fa69d59c16",
+  "containerOnly": true,
+  "workload": {
+    "kind": "credential-free-docker-subset",
+    "authority": "custom local task pack, non-official",
+    "state": "completed",
+    "durableEvents": 16,
+    "wallMs": 42,
+    "pipeline": [
+      "authenticated-control-plane",
+      "docker-worker",
+      "child-docker-sandbox",
+      "custom-command-agent",
+      "native-verifier",
+      "signed-artifacts",
+      "analyzer"
+    ]
+  },
+  "security": {
+    "unauthenticatedCapabilitiesStatus": 401,
+    "viewerMutationStatus": 403,
+    "operatorCapabilitiesStatus": 200
+  },
+  "browser": {
+    "image": "ghcr.io/puppeteer/puppeteer@sha256:6dea48646fa972c9705281ff469922e6d10e6a6c9d3426a101fd824b6261e51b",
+    "routes": ["overview", "library", "runs", "leaderboard", "analysis", "defects", "regression", "insights", "reports", "administration"],
+    "checksBeforeRestart": 10,
+    "checksAfterControlPlaneRecreate": 10,
+    "httpFailures": 0,
+    "consoleErrors": 0,
+    "slowestRouteMsBeforeRestart": 918,
+    "slowestRouteMsAfterRestart": 930,
+    "securityHeaders": ["Content-Security-Policy", "Permissions-Policy", "X-Frame-Options"]
+  },
+  "recovery": {
+    "controlPlaneContainerRecreated": true,
+    "dashboardContainerRestarted": false,
+    "dashboardRecoveredViaDynamicDns": true,
+    "backupCreated": true,
+    "backupVerified": true,
+    "restoreVerifiedIntoEmptyDirectory": true
+  },
+  "cleanup": {
+    "composeContainers": 0,
+    "composeNetworks": 0,
+    "composeVolumes": 0,
+    "managedTrialContainers": 0
+  },
+  "externalImages": {
+    "browser": "sha256:6dea48646fa972c9705281ff469922e6d10e6a6c9d3426a101fd824b6261e51b",
+    "httpProbe": "sha256:94e9e444bcba979c2ea12e27ae39bee4cd10bc7041a472c4727a558e213744e6"
+  },
+  "limitations": [
+    "This evidence is bound to a dirty working-tree patch and is not final clean-release evidence.",
+    "The container subset is a deterministic local task pack, not an official benchmark result.",
+    "The detector validation corpus remains explicitly synthetic-derived pending a sufficiently large independently annotated real-trace corpus.",
+    "No credential-bearing model experiment was required for this integration acceptance."
+  ]
+}

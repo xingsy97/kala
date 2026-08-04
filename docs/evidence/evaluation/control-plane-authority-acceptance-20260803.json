@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:07.158Z",
+  "scope": "sole durable run, trial, accepted-spec, event, result, analysis, catalog, and projection authority",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-orchestrator/bin/eval-orchestrator.ts": "e1d5ec7cd43768c3766eb992014164b29f73838edb1734f43bc225757303c0e8",
+    "packages/eval-orchestrator/src/control-plane.ts": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a",
+    "packages/eval-orchestrator/src/journal.ts": "bbd1725eaaa8f7e4c21704f101090bb2429643fe6e8f62ad25c1507452f773c9",
+    "packages/eval-orchestrator/src/model.ts": "82cf64be92bff3b5c6cb608f4138816192ecd2f62c2cd6e86367add7b99da919",
+    "packages/eval-orchestrator/src/projection.ts": "7f5156682766fca116a8be415258df102bec647ad59a9eb42fd5b4be7606d54e",
+    "packages/eval-orchestrator/src/control-plane.test.ts": "0892c7aa684fdff79e81acda1f74e2272f9c13fad310d14735c3d7fef89fdb28",
+    "docs/architecture/agent-evaluation-package-boundaries.json": "734ba03092e12fe0a103c569dca9dc844bab7437f82e7a8d1a14be6617b80541",
+    "docs/architecture/agent-evaluation-platform-ownership.json": "37504fa21cb4919ead432f04e45cd11e5068abb33d218a09775bf3498bc07eae",
+    "scripts/evaluation/verify-control-plane-authority.mjs": "4b731deb3cb2568f96cd66ac24426c4a35ee53540fe1a56cc40d19732bb6b7b4"
+  },
+  "sourceAudit": {
+    "auditedRoots": [
+      "packages",
+      "adapters"
+    ],
+    "productionSourceFilesAudited": 585,
+    "writerFiles": [
+      "packages/eval-orchestrator/bin/eval-orchestrator.ts",
+      "packages/eval-orchestrator/src/control-plane.ts",
+      "packages/eval-orchestrator/src/journal.ts",
+      "packages/eval-orchestrator/src/model.ts",
+      "packages/eval-orchestrator/src/projection.ts"
+    ],
+    "authoritativeWriter": "packages/eval-orchestrator",
+    "secondWriterFound": false
+  },
+  "requiredTests": [
+    {
+      "test": "EvaluationControlPlane durable authority atomically commits idempotent commands and rebuilds the same projection after restart",
+      "status": "passed",
+      "durationMs": 31.155708000000118
+    },
+    {
+      "test": "EvaluationControlPlane durable authority durably accepts only ordered progress transitions from the Worker holding the lease",
+      "status": "passed",
+      "durationMs": 56.66563300000007
+    },
+    {
+      "test": "EvaluationControlPlane durable authority ignores a torn trailing transaction rather than projecting uncommitted state",
+      "status": "passed",
+      "durationMs": 11.408762000000024
+    },
+    {
+      "test": "EvaluationControlPlane durable authority rejects non-trailing journal tampering through the durable transaction hash chain",
+      "status": "passed",
+      "durationMs": 10.80129500000021
+    },
+    {
+      "test": "EvaluationControlPlane durable authority restores the task and evaluated-slice catalog from the sole durable journal without startup catalog input",
+      "status": "passed",
+      "durationMs": 22.315113999999994
+    },
+    {
+      "test": "EvaluationControlPlane durable authority persists authoritative analysis jobs, validates output manifests, and replays terminal job state",
+      "status": "passed",
+      "durationMs": 104.33337799999981
+    },
+    {
+      "test": "EvaluationControlPlane durable authority aggregates result usage, auto-finalizes a run, and persists the projection across restart",
+      "status": "passed",
+      "durationMs": 75.77242999999999
+    }
+  ],
+  "durability": {
+    "atomicAppendThenApply": true,
+    "restartReplay": true,
+    "tornTrailingTransactionExcluded": true,
+    "hashChainTamperingRejected": true,
+    "catalogReplay": true,
+    "analysisReplay": true,
+    "runTrialResultReplay": true
+  }
+}

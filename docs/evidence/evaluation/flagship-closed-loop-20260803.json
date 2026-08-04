@@ -1,0 +1,428 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T12:53:14.597Z",
+  "scope": "fresh standalone LXD flagship runs merged into a new canonical Control Plane; no Host session, legacy artifact, compatibility shim, forwarding, or dual write",
+  "baseline": {
+    "runId": "fresh-fault-scenarios-20260803100157-8557",
+    "specHash": "d91e392e731e75c166cc715f8f5b4801356a639d6fcda590825922e6aaa57e42",
+    "agents": [
+      "agent-runlab",
+      "claude-code",
+      "codex"
+    ],
+    "taskCount": 5,
+    "trialCount": 15,
+    "recovered": 15,
+    "freshEnvironmentLocks": 1,
+    "configHashes": {
+      "agent-runlab": "e80b699eddedfe98d6c05ea77e4f38ccf2cd5784e5b86cefdf4e18085851b1c2",
+      "claude-code": "b626f80e9f1c1235fbb775ef0d17a95d89e8f9f4389803b3423528d249d9b28a",
+      "codex": "b0bc87c8e4c7004748fa15755efe8c33c78cdba673431d756ca16fcca733aa7a"
+    }
+  },
+  "candidate": {
+    "runId": "fresh-fault-scenarios-20260803100640-34455",
+    "specHash": "11f59690fef913303e3f16c5e9ecfa5f36637471354894aa3103af433ad1019d",
+    "agents": [
+      "agent-runlab"
+    ],
+    "taskCount": 5,
+    "trialCount": 5,
+    "recovered": 5,
+    "freshEnvironmentLocks": 1,
+    "configHashes": {
+      "agent-runlab": "79fe3587ad4457eaf654033a79de332735838efdd36b0fb6287355b6e6bc5a8b"
+    }
+  },
+  "immutablePairing": {
+    "sliceManifestHash": "11d504b48293ec68e637f6b665346138d8106ad4890b42addf9a85cf7a67b7bc",
+    "taskIdsHash": "fa408183ba7ed2c5f8e02847200cc261a558b2d59e9d9954fa0a51c6f670db33",
+    "repeats": 1,
+    "pairedCoordinates": 5
+  },
+  "journal": {
+    "importedTransactions": 323,
+    "finalTransactions": 328,
+    "auditRecords": 328,
+    "hashChainVerifiedAfterRestart": true,
+    "sha256": "f2f52846c3b15304eb4578b366758f216f1e13c24313bd7bda0e4c0020d51e66"
+  },
+  "artifacts": {
+    "files": 286,
+    "bytes": 49272741,
+    "importedFiles": 266,
+    "reproductionFiles": 14,
+    "allReportFormatsVerified": true
+  },
+  "finding": {
+    "schemaVersion": 1,
+    "findingId": "flagship-config-schema-finding",
+    "detectorId": "first-divergence-miner",
+    "detectorVersion": "1.0.0",
+    "runId": "fresh-fault-scenarios-20260803100157-8557",
+    "trialId": "fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:agent-runlab:0",
+    "category": "tool_recovery",
+    "severity": "medium",
+    "confidence": 1,
+    "firstDivergenceSequence": 31,
+    "evidenceRefs": [
+      "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:agent-runlab:0/normalized-events.jsonl",
+      "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:claude-code:0/normalized-events.jsonl",
+      "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:codex:0/normalized-events.jsonl"
+    ],
+    "status": "human_validated"
+  },
+  "traceDivergence": {
+    "agent-runlab": {
+      "trialId": "fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:agent-runlab:0",
+      "firstObservationSequence": 31,
+      "firstRecoveryActionSequence": 37,
+      "normalizedEventsRef": "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:agent-runlab:0/normalized-events.jsonl",
+      "nativeEventsRef": "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:agent-runlab:0/native-events.jsonl",
+      "resultHash": "ecc0db3582d617a7d3c82e4844b39bb0e13dabf5164638f5f4e66cc639e5fc1a"
+    },
+    "claude-code": {
+      "trialId": "fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:claude-code:0",
+      "firstObservationSequence": 58,
+      "firstRecoveryActionSequence": 72,
+      "normalizedEventsRef": "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:claude-code:0/normalized-events.jsonl",
+      "nativeEventsRef": "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:claude-code:0/native-events.jsonl",
+      "resultHash": "679cc728b811cc1f219c701ab8b73dc46d49875149991247d2025ffb3db204de"
+    },
+    "codex": {
+      "trialId": "fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:codex:0",
+      "firstObservationSequence": 104,
+      "firstRecoveryActionSequence": 185,
+      "normalizedEventsRef": "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:codex:0/normalized-events.jsonl",
+      "nativeEventsRef": "fresh-fault-scenarios-20260803100157-8557/fresh-fault-scenarios-20260803100157-8557:config-schema-recovery-1:codex:0/native-events.jsonl",
+      "resultHash": "ce72bd8906072ed3c231f2f8a95c9707895900137f1f57f4f73c09c0dbe3e2d8"
+    }
+  },
+  "reproduction": {
+    "bundleId": "fresh-reproduction-20260803125224-29487-config-schema",
+    "signedPayloadHash": "a92efe010586e5d058d130becadb5c6ca9ddbfc4cd05128849ac2a3b8966004c",
+    "signatureVerified": true,
+    "environmentLockHash": "99c7fb54e115e8284ad8cb8a7bdb5c1530ee7de73a67496af8259d1bf061443d",
+    "attempts": 2,
+    "reproduced": 2,
+    "successControl": true,
+    "minimization": {
+      "originalUnits": 3,
+      "minimizedUnits": 1,
+      "attempts": 4
+    },
+    "privacy": {
+      "redactionPassed": true,
+      "secretScanPassed": true,
+      "absolutePathScanPassed": true
+    }
+  },
+  "promotion": {
+    "packId": "flagship-config-schema-regression",
+    "faultScenarioIds": [
+      "invalid-port-type-v1"
+    ],
+    "baselineEvidenceRefs": [
+      "0fff43f5daf82d25be2ec755e082b31b7e02e8dd91a4e687f36e19063ba69011",
+      "3089cf13c2aa69259ed8955d1cce86254160b28870c1e3bface88a82cc96084d",
+      "4fcf96eb1b3d69fdda19951c294a4e1ace9db3461af43610151271ae48ecee94",
+      "c5e73aa916f394984e09af6599902f63d0c10fcc055ec431f3a3728ffb3960d6",
+      "ecc0db3582d617a7d3c82e4844b39bb0e13dabf5164638f5f4e66cc639e5fc1a"
+    ]
+  },
+  "gate": {
+    "schemaVersion": 1,
+    "gateId": "flagship-observe-before-act-gate",
+    "baselineConfigHash": "e80b699eddedfe98d6c05ea77e4f38ccf2cd5784e5b86cefdf4e18085851b1c2",
+    "candidateConfigHash": "79fe3587ad4457eaf654033a79de332735838efdd36b0fb6287355b6e6bc5a8b",
+    "pairedTasks": 5,
+    "repeats": 1,
+    "confidenceLevel": 0.95,
+    "flakyTasks": [],
+    "infrastructureFailures": [],
+    "violations": [],
+    "statistics": {
+      "baselineSuccessRate": 1,
+      "candidateSuccessRate": 1,
+      "successRateDelta": 0,
+      "pairedWins": 0,
+      "pairedLosses": 0,
+      "pairedTies": 5,
+      "mcnemarPValue": 1,
+      "confidenceInterval": {
+        "level": 0.95,
+        "lower": 0,
+        "upper": 0,
+        "method": "paired-bootstrap",
+        "samples": 10000
+      },
+      "repeatedRunVariance": {
+        "baseline": 0,
+        "candidate": 0,
+        "taskCount": 5
+      },
+      "evidenceCompleteness": {
+        "baseline": 1,
+        "candidate": 1,
+        "completePairs": 5,
+        "totalPairs": 5
+      },
+      "pareto": {
+        "relation": "baseline_dominates",
+        "baseline": {
+          "quality": 1,
+          "costUsd": 0,
+          "latencyMs": 54448.2
+        },
+        "candidate": {
+          "quality": 1,
+          "costUsd": 0,
+          "latencyMs": 68972
+        }
+      },
+      "taskDeltas": [
+        {
+          "taskId": "config-schema-recovery-1",
+          "baseline": 1,
+          "candidate": 1,
+          "delta": 0,
+          "repeats": 1
+        },
+        {
+          "taskId": "config-schema-recovery-2",
+          "baseline": 1,
+          "candidate": 1,
+          "delta": 0,
+          "repeats": 1
+        },
+        {
+          "taskId": "config-schema-recovery-3",
+          "baseline": 1,
+          "candidate": 1,
+          "delta": 0,
+          "repeats": 1
+        },
+        {
+          "taskId": "config-schema-recovery-4",
+          "baseline": 1,
+          "candidate": 1,
+          "delta": 0,
+          "repeats": 1
+        },
+        {
+          "taskId": "config-schema-recovery-5",
+          "baseline": 1,
+          "candidate": 1,
+          "delta": 0,
+          "repeats": 1
+        }
+      ],
+      "flakeRate": 0
+    },
+    "decision": "pass",
+    "evidenceRefs": [
+      "0fff43f5daf82d25be2ec755e082b31b7e02e8dd91a4e687f36e19063ba69011",
+      "3089cf13c2aa69259ed8955d1cce86254160b28870c1e3bface88a82cc96084d",
+      "4fcf96eb1b3d69fdda19951c294a4e1ace9db3461af43610151271ae48ecee94",
+      "53ecc42ce456b85dde9c5b15057589b85899fe4365ca6628d6ec755c296be38e",
+      "572ee62a7b62946f9a8fa3c9bc884966c2be705810a3cbc70c2aa477ee9ff747",
+      "6d7eeb9bf47c2f1709324fa9d667da8fe0cd9a068cf7c0e07c87d3aeba27a957",
+      "89f6f7ec274ddb969c9e18f7cc147f14988b34b7a65c38bbf5a73ea4e3201be2",
+      "94a2609a6ff6fd93b9aed510c4867a93388e8c9e03c050bd72493298b74beca1",
+      "c5e73aa916f394984e09af6599902f63d0c10fcc055ec431f3a3728ffb3960d6",
+      "ecc0db3582d617a7d3c82e4844b39bb0e13dabf5164638f5f4e66cc639e5fc1a"
+    ]
+  },
+  "insight": {
+    "schemaVersion": 1,
+    "insightId": "flagship-observe-before-act-insight",
+    "evidenceRefs": [
+      "flagship-config-schema-finding",
+      "flagship-observe-before-act-gate"
+    ],
+    "failureCluster": "configuration recovery requires observing the concrete schema failure before editing",
+    "affectedTaskRate": 1,
+    "severity": "medium",
+    "suspectedLayer": "runtime",
+    "confidence": 1,
+    "recommendation": "observe the failing command and current configuration before applying a recovery edit",
+    "expectedMetric": "paired native recovery success rate",
+    "regressionPackId": "flagship-config-schema-regression",
+    "owner": "agent-platform",
+    "status": "validated",
+    "postFixValidationRefs": [
+      "flagship-observe-before-act-gate"
+    ]
+  },
+  "report": {
+    "schemaVersion": 1,
+    "reportId": "flagship-closed-loop-report",
+    "inputEvidenceHash": "b7d66f188441f1b4d0961be1e8fc72ee904fe7b2927971d6097b3655004df04c",
+    "runRefs": [
+      "fresh-fault-scenarios-20260803100157-8557",
+      "fresh-fault-scenarios-20260803100640-34455"
+    ],
+    "formats": [
+      {
+        "format": "json",
+        "path": "reports/flagship-closed-loop-report/report.json",
+        "sha256": "083b26b2cce12bccc691b04217a37141de084874059fe82bf8d7e6be7f128dfe"
+      },
+      {
+        "format": "csv",
+        "path": "reports/flagship-closed-loop-report/report.csv",
+        "sha256": "4f16f424ce50a225fba88dbd2e3b1c05ae387a95f48a8e34f668073b8036403c"
+      },
+      {
+        "format": "html",
+        "path": "reports/flagship-closed-loop-report/report.html",
+        "sha256": "1050c06c42ce4dfddfad5925cda6dfd7495dfda62a84ee17825693b0ed90a807"
+      },
+      {
+        "format": "pdf",
+        "path": "reports/flagship-closed-loop-report/report.pdf",
+        "sha256": "f9e56e8d5d4544fe01801f5f5fd1f86f75e3b57383595b0c71b1f6890db8837d"
+      },
+      {
+        "format": "junit",
+        "path": "reports/flagship-closed-loop-report/report.junit.xml",
+        "sha256": "495cf1993fe0ca4c15fe8e7be9f812dcff5c1ab81ce1cd932379b53277105f49"
+      },
+      {
+        "format": "sarif",
+        "path": "reports/flagship-closed-loop-report/report.sarif.json",
+        "sha256": "606332a4b5f1641677d10c8a617fe02ce25e6a057c42dcb831e25ae6437ea930"
+      },
+      {
+        "format": "markdown",
+        "path": "reports/flagship-closed-loop-report/report.md",
+        "sha256": "22b318e10c065d4bf9b0e80b83c780580ab058c1f3c6a39ee67ddd38dcd78c2c"
+      }
+    ],
+    "methodologyVersion": "flagship-closed-loop-v1",
+    "includesAllConfiguredRepeats": true,
+    "redactionPassed": true,
+    "generatedAt": "2026-08-03T12:53:14.523Z"
+  },
+  "tenSteps": [
+    {
+      "step": 1,
+      "name": "three Agents selected",
+      "passed": true
+    },
+    {
+      "step": 2,
+      "name": "five-task public fault pack selected",
+      "passed": true
+    },
+    {
+      "step": 3,
+      "name": "isolated trials executed with concurrency",
+      "passed": true
+    },
+    {
+      "step": 4,
+      "name": "native and normalized traces retained",
+      "passed": true
+    },
+    {
+      "step": 5,
+      "name": "native verifier passed all trials",
+      "passed": true
+    },
+    {
+      "step": 6,
+      "name": "recovery defect mined and recorded",
+      "passed": true
+    },
+    {
+      "step": 7,
+      "name": "first divergence compared across three Agents",
+      "passed": true
+    },
+    {
+      "step": 8,
+      "name": "signed minimal reproduction verified",
+      "passed": true
+    },
+    {
+      "step": 9,
+      "name": "defect promoted to regression pack",
+      "passed": true
+    },
+    {
+      "step": 10,
+      "name": "candidate rerun gated and insight validated",
+      "passed": true
+    }
+  ],
+  "restartReplay": {
+    "finding": true,
+    "bundle": true,
+    "pack": true,
+    "gate": true,
+    "insight": true,
+    "report": true,
+    "verified": true
+  },
+  "acknowledgements": [
+    {
+      "schemaVersion": 1,
+      "idempotencyKey": "flagship-record-defect",
+      "commandId": "flagship-record-defect",
+      "committedSequence": 323,
+      "committedAt": "2026-08-03T12:53:14.498Z",
+      "projectionVersion": 324
+    },
+    {
+      "schemaVersion": 1,
+      "idempotencyKey": "flagship-promote-defect",
+      "commandId": "flagship-promote-defect",
+      "committedSequence": 324,
+      "committedAt": "2026-08-03T12:53:14.502Z",
+      "projectionVersion": 325
+    },
+    {
+      "schemaVersion": 1,
+      "idempotencyKey": "flagship-evaluate-regression",
+      "commandId": "flagship-evaluate-regression",
+      "committedSequence": 325,
+      "committedAt": "2026-08-03T12:53:14.509Z",
+      "projectionVersion": 326
+    },
+    {
+      "schemaVersion": 1,
+      "idempotencyKey": "flagship-record-insight",
+      "commandId": "flagship-record-insight",
+      "committedSequence": 326,
+      "committedAt": "2026-08-03T12:53:14.519Z",
+      "projectionVersion": 327
+    },
+    {
+      "schemaVersion": 1,
+      "idempotencyKey": "flagship-generate-report",
+      "commandId": "flagship-generate-report",
+      "committedSequence": 327,
+      "committedAt": "2026-08-03T12:53:14.523Z",
+      "projectionVersion": 328
+    }
+  ],
+  "sourceHashes": [
+    {
+      "path": "scripts/evaluation/run-real-task-pack.mjs",
+      "sha256": "3ef6f632d12d09effd33163c3331df96e716494e72e388559185dd2bb38b30c5"
+    },
+    {
+      "path": "scripts/evaluation/verify-flagship-closed-loop.mjs",
+      "sha256": "80146156ece27656425a60fb8df24ed9d75655ab67886a5745fda467f3b4b711"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.ts",
+      "sha256": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/journal.ts",
+      "sha256": "bbd1725eaaa8f7e4c21704f101090bb2429643fe6e8f62ad25c1507452f773c9"
+    }
+  ]
+}

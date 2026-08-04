@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T11:51:50.555Z",
+  "scope": "durable scheduler, lease/heartbeat/orphan recovery, idempotent completion, cancellation, and indeterminate-effect safety",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-orchestrator/src/control-plane.ts": "4ec9400515ff4a4f6bacdb42c228a69fce30bf2591de170c06e76845e91fe222",
+    "packages/eval-orchestrator/src/control-plane.test.ts": "f4b19b24c7decd6e49d7d03e9a3b9bbf3cda24182623f953016d1d0ff167f2d1",
+    "packages/eval-orchestrator/src/projection.ts": "7f5156682766fca116a8be415258df102bec647ad59a9eb42fd5b4be7606d54e",
+    "packages/eval-worker/src/worker.ts": "f0dbd0d86c89a7c38d0112ebf1e5f89aae7b1ae5e113f113e05a140e3e174fb5",
+    "packages/eval-worker/src/worker.integration.test.ts": "23a1e188e86a81fb359846f1dc5f8dabc4bd1b5645f556f5a72b1ec83d73bf49",
+    "packages/eval-worker/src/trial-runner.ts": "6fbef62444d3c96b846835bbd562f24588781b902bc62a4231a8f8504d80421f",
+    "packages/eval-worker/src/lease-client.ts": "1c263d29ecf672f224302691fecdb8ce23521275c087a18d5b1afe6a8c6a6fff",
+    "scripts/evaluation/verify-scheduler-recovery.mjs": "6e071a444f2220f31e3fbc5fe93f423a0f3b7dcb6791ed8f1fe70047c610e3bb"
+  },
+  "scheduler": [
+    {
+      "test": "EvaluationControlPlane durable authority schedules compatible runs fairly and respects retry backoff after a pre-execution expiry",
+      "status": "passed",
+      "durationMs": 93.16399499999989
+    },
+    {
+      "test": "EvaluationControlPlane durable authority honors priority, backend/provider limits, Worker resources, and the canonical lease ceiling",
+      "status": "passed",
+      "durationMs": 61.167143000000124
+    },
+    {
+      "test": "EvaluationControlPlane durable authority stops scheduling at token, cost, and wall-time budgets and durably blocks queued work",
+      "status": "passed",
+      "durationMs": 247.37660099999994
+    },
+    {
+      "test": "EvaluationControlPlane durable authority automatically retries only declared, observed-safe failure categories and persists failed attempts",
+      "status": "passed",
+      "durationMs": 64.58711399999993
+    }
+  ],
+  "leases": [
+    {
+      "test": "EvaluationControlPlane durable authority leases only compatible trials and makes result completion idempotent by hash",
+      "status": "passed",
+      "durationMs": 77.15606099999991
+    },
+    {
+      "test": "EvaluationControlPlane durable authority renews a live lease from the Control Plane clock and expires it only after the renewed deadline",
+      "status": "passed",
+      "durationMs": 44.67141599999968
+    },
+    {
+      "test": "Worker durable Control Plane integration runs Worker and lease heartbeats and reaps only its labelled orphan set on process start",
+      "status": "passed",
+      "durationMs": 3202.651196
+    },
+    {
+      "test": "Worker durable Control Plane integration classifies an in-flight trial indeterminate after hard Worker loss stops lease heartbeats",
+      "status": "passed",
+      "durationMs": 102.98088100000041
+    },
+    {
+      "test": "Worker durable Control Plane integration retries a lost result acknowledgement against the idempotent committed result",
+      "status": "passed",
+      "durationMs": 117.12570699999992
+    }
+  ],
+  "cancellation": [
+    {
+      "test": "EvaluationControlPlane durable authority requeues expired work only before any execution receipt and classifies ambiguous work indeterminate",
+      "status": "passed",
+      "durationMs": 56.969936999999845
+    },
+    {
+      "test": "EvaluationControlPlane durable authority classifies expired in-flight work during Control Plane restart and requires an explicit indeterminate retry confirmation",
+      "status": "passed",
+      "durationMs": 50.66235999999981
+    },
+    {
+      "test": "Worker durable Control Plane integration calls backend cancellation on timeout and commits a timeout only after cleanup",
+      "status": "passed",
+      "durationMs": 89.40315600000008
+    },
+    {
+      "test": "Worker durable Control Plane integration propagates durable run cancellation through a rejected lease heartbeat to the live Agent",
+      "status": "passed",
+      "durationMs": 178.93199599999934
+    }
+  ],
+  "coverage": {
+    "fairness": true,
+    "priority": true,
+    "concurrencyLimits": true,
+    "workerCapacityBackpressure": true,
+    "tokenCostWallBudgets": true,
+    "selectiveRetry": true,
+    "heartbeatRenewal": true,
+    "leaseExpiry": true,
+    "orphanRecovery": true,
+    "workerDeath": true,
+    "duplicateCompletion": true,
+    "lostResultAcknowledgement": true,
+    "durableCancellation": true,
+    "blindIndeterminateReplayRejected": true
+  }
+}

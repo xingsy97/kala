@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T08:48:03.539Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + real Agent backends + LXD sandbox + native verifier",
+  "runId": "fresh-program-bench-20260803084732-34165",
+  "taskPackId": "program-bench",
+  "taskIds": [
+    "greeting-cli"
+  ],
+  "agentIds": [
+    "codex"
+  ],
+  "agentConfigs": [
+    {
+      "variantId": "codex",
+      "backendId": "codex",
+      "model": {
+        "provider": "openai",
+        "modelId": "gpt-5.6-sol"
+      },
+      "configHash": "b0bc87c8e4c7004748fa15755efe8c33c78cdba673431d756ca16fcca733aa7a",
+      "config": {
+        "baseUrl": "http://192.0.2.5:3000/v1",
+        "transport": "app-server",
+        "reasoningEffort": "medium"
+      }
+    }
+  ],
+  "runState": "completed",
+  "startedAt": "2026-08-03T08:47:32.373Z",
+  "completedAt": "2026-08-03T08:48:03.539Z",
+  "durationMs": 31166,
+  "freshSandboxes": 1,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-34165",
+  "gradingOutputHash": "56b9fe062201c025f8165651fd31482fc068e334b7c4a9725379e5b83e228e7d",
+  "analysisJobId": "analysis-run-analyze-34165",
+  "analysisOutputHash": "3bcad943d6f72c5efa440f9871803dcc1d00db64c9f2b144a2bc75805e61ebe9",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-program-bench-20260803084732-34165:greeting-cli:codex:0",
+      "taskId": "greeting-cli",
+      "agentVariantId": "codex",
+      "resultHash": "4c25a3a0a6dfbc9232347518b906f36b010d99481704ac2357540644a82e08e2",
+      "artifactManifestHash": "5cfe70759e9f8750ed61fa025feaa2add0399bb01f7f10fe0577ada7a405f37c",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "submission_contract": true,
+        "contract_ok": true,
+        "implementation_file_count": 1,
+        "compile_passed": true,
+        "tests_passed": true,
+        "passedSteps": 3,
+        "totalSteps": 3,
+        "verifier_protocol_valid": true
+      },
+      "normalizedEventCount": 196
+    }
+  ]
+}

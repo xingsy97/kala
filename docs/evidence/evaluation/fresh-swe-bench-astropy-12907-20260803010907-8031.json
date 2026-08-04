@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T01:11:32.920Z",
+  "runId": "fresh-swe-bench-astropy__astropy-12907-20260803010907-8031",
+  "instanceId": "astropy__astropy-12907",
+  "sourceFetchedFresh": true,
+  "sourceRecordHash": "bcadb9e2ee9c01d1951516eeb31a5864abb90adc8e3bedc5419ce4eb414517db",
+  "harnessRevision": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+  "runState": "completed",
+  "freshSandboxes": 3,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "trials": [
+    { "agent": "agent-runlab", "evidenceLevel": "official", "resolved": true, "completed": true, "patchApplied": true, "normalizedEvents": 68, "resultHash": "43de41475fa9b91cc2ad3d0322922203854cf88a2b44347ea6fd440c0e103893", "artifactManifestHash": "a51b4b639049f24668e80390d76fe6f08a3a4c34d2feff94e9606d13e2ca7143" },
+    { "agent": "claude-code", "evidenceLevel": "official", "resolved": true, "completed": true, "patchApplied": true, "normalizedEvents": 88, "resultHash": "54481e6f5248831510a2bab6415a303f121b7a4358ec02c463b860cbceacc255", "artifactManifestHash": "92bd9794e6806e29d84d3900aca3f47a970ae5940ec746fdbdd5b434b7b96a5c" },
+    { "agent": "codex", "evidenceLevel": "official", "resolved": true, "completed": true, "patchApplied": true, "normalizedEvents": 399, "resultHash": "cd2e5e047f71df6cc38452260226d95242711aa6946604eac1f5f17fc8ea473f", "artifactManifestHash": "017f675a9e1a809ab5f528a03da6a738d2777b15451aa77a1e9889cf46395e90" }
+  ],
+  "checks": ["official evidence", "pinned OCI and LXD image lineage", "canonical evidence verified", "non-empty final diffs and normalized traces", "artifact byte and SHA-256 integrity", "resolved credential absent from artifacts", "instance/network/ACL cleanup"]
+}

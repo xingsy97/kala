@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:04.885Z",
+  "scope": "real CLI and SDK/Web-style HTTP clients using one durable versioned Control Plane command/query API",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-protocol/src/commands.ts": "46a68acf47656e8a9296137bdcde1c7f8d26c310f300296626212345da98b374",
+    "packages/eval-protocol/src/run-events.ts": "4ab6f1ebe26b214b8ee5f35352355f65f95fd7ec675fafca0ced2336a436cbc6",
+    "packages/eval-sdk/src/client.ts": "c50099be0d8c18c535bebf76eba8191586a8a52ed847f51397e94efff27cc7a8",
+    "packages/eval-orchestrator/bin/eval-cli.ts": "a6e4bb1c9e941965fd51fd374a9a56c3e698c06fdb79c0a94440a64826489d18",
+    "packages/eval-orchestrator/src/control-plane.ts": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a",
+    "packages/eval-orchestrator/src/http-server.ts": "7472b59a940cb0d3431a97829592dbaef9b188ea3e8bf1bb7a74a5bb9ae785c6",
+    "packages/eval-orchestrator/src/http-server.test.ts": "77712797f9dd452ee0c726b8117cc038e09f81fb3c100cdf4caea21e30cd0960",
+    "packages/eval-orchestrator/src/journal.ts": "bbd1725eaaa8f7e4c21704f101090bb2429643fe6e8f62ad25c1507452f773c9",
+    "packages/eval-orchestrator/src/model.ts": "82cf64be92bff3b5c6cb608f4138816192ecd2f62c2cd6e86367add7b99da919",
+    "packages/eval-orchestrator/src/projection.ts": "7f5156682766fca116a8be415258df102bec647ad59a9eb42fd5b4be7606d54e",
+    "packages/eval-dashboard/src/client.ts": "764f00ca77b3d8219b5564fe1d6a3d8ff1c81431b0e1531b81485c116a680f07",
+    "packages/eval-dashboard/src/client.test.ts": "71410b5e5ed75d4fe990cdea545e86963342cb579a30d9c99e9d8f1a974f8268",
+    "scripts/evaluation/verify-control-plane-parity.mjs": "8863b6914f4322e9b3783dc0f306e9859b13ea023fec5aae4cfddc9f87310728"
+  },
+  "requiredTests": [
+    {
+      "test": "versioned Control Plane HTTP API provides CLI/Web client parity with durable projection and committed acknowledgements",
+      "status": "passed",
+      "durationMs": 49.959817000000044
+    },
+    {
+      "test": "versioned Control Plane HTTP API executes the real CLI against the same HTTP commands and queries as the SDK client",
+      "status": "passed",
+      "durationMs": 327.74012400000004
+    },
+    {
+      "test": "versioned Control Plane HTTP API returns the same committed acknowledgement after restart and rejects an idempotency collision over HTTP",
+      "status": "passed",
+      "durationMs": 16.47502799999984
+    },
+    {
+      "test": "DashboardControlPlane protocol gate delegates UI commands to the shared versioned client and returns its committed acknowledgement",
+      "status": "passed",
+      "durationMs": 1.0462999999999738
+    },
+    {
+      "test": "DashboardControlPlane protocol gate loads normalized trace content only through the contained artifact endpoint",
+      "status": "passed",
+      "durationMs": 2.4443169999999554
+    }
+  ],
+  "assertions": {
+    "commandEndpoint": "/api/v1/commands",
+    "queryEndpoint": "/api/v1/query",
+    "committedAcknowledgementFields": [
+      "idempotencyKey",
+      "commandId",
+      "committedSequence",
+      "committedAt",
+      "projectionVersion"
+    ],
+    "duplicateSamePayload": "same acknowledgement and no new transaction",
+    "duplicateDifferentPayload": "HTTP 409 CONFLICT and no new transaction",
+    "restartDurability": true,
+    "realCliProcessParity": true,
+    "dashboardSharedClientDelegation": true,
+    "dashboardContainedArtifactReads": true
+  }
+}

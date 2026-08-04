@@ -58,7 +58,7 @@ Boundary principles:
 - Use Query for one-shot, cacheable HTTP resources with clear keys:
   - `ServerModelsPayload`.
   - `FileListResult` and `FileContentsResult`.
-  - Benchmark run lists and run details.
+  - Product artifact and Session profile lists.
   - Docs tree and document content.
   - Overflow and memory-consolidation result queries.
 - Do not move Socket.IO event streams into Query:
@@ -68,7 +68,7 @@ Boundary principles:
 
 Migration strategy:
 
-1. Start with one page, preferably `ArtifactExplorerDialog` or `features/benchmarks/BenchmarksPage`, and establish provider, loading, and error conventions.
+1. Start with one page, preferably `ArtifactsPage`, and establish provider, loading, and error conventions.
 2. Migrate page by page so each change is reviewable and revertible.
 3. Do not refactor sockets into Query.
 
@@ -112,7 +112,7 @@ Candidate surfaces:
 
 - New-session empty-state welcome copy in `ChatPanel`.
 - `CommandPalette` placeholder or hint copy.
-- `BenchmarksPage` empty state.
+- `ArtifactsPage` empty state.
 - First-connection guidance in `features/explorer/ConnectWorkspaceDialog`.
 - `ErrorBoundary` fallback copy.
 - Optional future docs landing slogan.
@@ -158,7 +158,7 @@ Any proposed visual effect must satisfy all three criteria:
 Examples of forbidden mismatches:
 
 - Typewriter on assistant streaming text makes the model look slower than it is.
-- Animated benchmark table cells interfere with result comparison.
+- Animated profile table cells interfere with result comparison.
 - Effects near loading indicators blur the line between decoration and progress.
 
 ### 4.2 Allowed Zones
@@ -168,8 +168,7 @@ Examples of forbidden mismatches:
 | New-session `ChatPanel` empty state | Typewriter + caret | Local hook |
 | `CommandPalette` placeholder or hint | Typewriter or flip words | Local hook or copied single component |
 | First `ConnectWorkspaceDialog` guidance | Typewriter or blur fade | Local hook or copied single component |
-| Benchmarks empty state | Typewriter | Local hook |
-| Benchmark completion milestone | Number ticker; optional brief celebration | Copied component only if justified |
+| Artifacts empty state | Typewriter | Local hook |
 | Connection established feedback | Subtle pulse or border beam | Tailwind or local component |
 | `ContextPressureBanner` warning | Low-amplitude opacity/scale breathing | Motion |
 | Future overview/status page | Component topology, number ticker, or bento layout | Copied source, reviewed per component |
@@ -183,7 +182,7 @@ Do not add fancy effects to:
 - Assistant streaming message text itself.
 - Session list rows, task rows, shell rows, timestamps, or metadata.
 - Inspector JSON and key-value debug views.
-- Benchmark table cells; only milestone totals may animate.
+- Profile and artifact table cells.
 - Sonner toasts beyond built-in behavior.
 - Loading or spinner-adjacent UI.
 - File tree and explorer node labels.
@@ -193,7 +192,7 @@ Do not add fancy effects to:
 
 A milestone effect must correspond to a meaningful user-visible completion point:
 
-- Allowed: benchmark run finished, first workspace connection succeeded, session created, export succeeded.
+- Allowed: first workspace connection succeeded, session created, export succeeded.
 - Not allowed: every socket event, every message arrival, every click, every route switch.
 
 The same milestone should trigger once per relevant session. Repeated operations should degrade to ordinary feedback.
@@ -241,7 +240,7 @@ Execution rule: each phase should be independently revertible. Phase 2 should be
 - Do not add a long-lived opaque component library.
 - Do not rewrite the socket/session state layer.
 - Do not add abstractions for speculative future needs.
-- Do not chase visual impact in high-frequency work surfaces such as Chat, Explorer, Inspector, or benchmark tables.
+- Do not chase visual impact in high-frequency work surfaces such as Chat, Explorer, Inspector, or artifact tables.
 
 ## 9. Implementation Record: 2026-07-11
 
@@ -270,14 +269,14 @@ Framework:
 
 Migrated:
 
-- `features/artifacts/shared/useArtifactManifest.ts`: `/artifacts/manifest`, while keeping the compatibility-style `{ manifest, loading, error, reload, reloadToken }` API.
+- `features/artifacts/useArtifactManifest.ts`: `/artifacts/manifest`.
 - `app.tsx` `useModels`: `/models`.
 - `features/docs/DocsPage.tsx`: `/docs/index` and `/docs/content` keyed by `selectedPath`.
 
 Deferred:
 
 - `SettingsDialog` settings/model mutations.
-- `BadCasesTab`, `RunTerminalBenchWizard`, and artifact internals around `/enhancement/action` mutations.
+- Artifact internals around `/enhancement/action` mutations.
 
 Test setup:
 
@@ -310,7 +309,7 @@ Added:
 Implemented surfaces:
 
 - `features/chat/ChatPanel.tsx`: empty-state H1.
-- `features/benchmarks/RunListPanel.tsx`: empty benchmark runs state.
+- Product artifact empty-state copy where appropriate.
 - `ErrorBoundary.tsx`: fallback body copy.
 
 Skipped for later review:
@@ -326,6 +325,6 @@ Skipped for later review:
 
 ## 10. Deferred Work
 
-- Move settings and benchmark mutations to `useMutation`.
+- Move settings and product artifact mutations to `useMutation`.
 - Revisit command-palette and first-connection typewriter polish after design review.
-- Add MagicUI-style Number Ticker only for benchmark completion milestones, not as a broad table effect.
+- Avoid number-ticker effects in product operational tables.

@@ -1,21 +1,22 @@
-name: CI
+name: Fast PR
 
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-pr-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  check:
+  fast:
+    name: typecheck / unit / boundaries
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        task:
-          - typecheck
-          - test
-          - swebench-smoke
-          - release-assets
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -23,26 +24,7 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Enable pnpm via Corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@11.3.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.3.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - name: Run ${{ matrix.task }}
-        run: |
-          case "${{ matrix.task }}" in
-            typecheck)
-              pnpm run typecheck
-              ;;
-            test)
-              pnpm run test
-              ;;
-            swebench-smoke)
-              pnpm run verify:swebench-smoke
-              ;;
-            release-assets)
-              pnpm run prepare:socket-admin-ui
-              pnpm run build:release-assets -- --no-native --repo ${{ github.repository }}
-              pnpm run verify:release-assets
-              ;;
-          esac
+      - run: pnpm run ci:fast

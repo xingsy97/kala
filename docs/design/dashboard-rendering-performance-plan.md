@@ -121,7 +121,6 @@ pnpm --filter @agent-kernel/dashboard test
 pnpm --filter @agent-kernel/dashboard verify:real
 pnpm --filter @agent-kernel/dashboard verify:layout-scroll
 pnpm --filter @agent-kernel/dashboard verify:mobile-pwa
-pnpm --filter @agent-kernel/dashboard verify:enhancement-actions
 pnpm --filter @agent-kernel/dashboard verify:subagent-scroll
 pnpm run verify:tasks-button
 ```

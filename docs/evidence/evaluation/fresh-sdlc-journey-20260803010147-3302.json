@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T01:02:57.449Z",
+  "runId": "fresh-sdlc-journey-20260803010147-3302",
+  "scope": "fresh standalone Control Plane, Worker, three real Agent backends, LXD sandboxes, and native verifier",
+  "runState": "completed",
+  "freshSandboxes": 3,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "trials": [
+    { "agent": "agent-runlab", "passedStages": 8, "totalStages": 8, "normalizedEvents": 101, "resultHash": "9448ecba7be88d099031b5fd80aae045bea5a69c9e1eaefadb9c99960d06404b", "artifactManifestHash": "44d329fc9d3c979e67213012a8268b2743504902153d63c00669d6931af32317" },
+    { "agent": "claude-code", "passedStages": 8, "totalStages": 8, "normalizedEvents": 126, "resultHash": "8be23b9ef19b51f783132dd09ed790628e833760add22c06df25e3707dc59146", "artifactManifestHash": "9dda8605044a0d568fbaba29ae4270e0305c283de8bc394ce49719953c92ad0a" },
+    { "agent": "codex", "passedStages": 8, "totalStages": 8, "normalizedEvents": 389, "resultHash": "91ebe5117904cd650b89aaccba58367918449f65a913df32801ca621b0ec6202", "artifactManifestHash": "f892d9ac5b80c3f9b36d0ff555c39b47b2aca12781b3c8e08d036b4ac9df7053" }
+  ],
+  "checks": ["canonical evidence verified", "non-empty final diffs", "artifact byte and SHA-256 integrity", "resolved credential absent from artifacts", "RunLab Host and Executor topology evidence", "instance/network/ACL cleanup"]
+}

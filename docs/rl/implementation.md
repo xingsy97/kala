@@ -493,14 +493,9 @@ Python adapter tests:
 - Verify returned fields: `tokens`, `response_length`, `loss_mask`, reward,
   status, and metadata refs.
 
-Headless browser tests:
-
-- Open the benchmark/eval dashboard.
-- Load a fixture rollout root with one metadata-only rollout and one
-  token-captured rollout.
-- Verify the UI displays distinct readiness states.
-- Open token capture and reward details.
-- Verify no private base URL, API token, or raw private path is rendered.
+Product Dashboard evaluation views are outside this implementation. Inspect
+rollout readiness through the Host RL CLI and artifact contracts; standalone
+evaluation consumes only fresh canonical runs through its own Control Plane.
 
 Local gate commands (must pass before any paid experiment):
 
@@ -513,7 +508,6 @@ pnpm --filter @agent-kernel/dashboard exec vitest run
 python3 -m pytest \
   tests/python/test_slime_agent_kernel_adapter.py \
   tests/python/test_slime_trainer_preflight.py -q
-node scripts/eval/verify-agentic-rl-dashboard.mjs
 gpu-provider-cli show instances --raw
 ```
 
@@ -782,9 +776,6 @@ Source-side implementation:
 - Python slime adapter under `integrations/slime_agent_kernel/`.
 - Python trainer-environment preflight under
   `integrations/slime_agent_kernel/preflight.py`.
-- Dashboard RL readiness panel under
-  `packages/dashboard/src/features/benchmarks/RlReadinessPanel.tsx`.
-- Headless browser dashboard check in `scripts/eval/verify-agentic-rl-dashboard.mjs`.
 
 Test coverage per module:
 
@@ -799,9 +790,6 @@ Test coverage per module:
   and synthetic slime `Sample` construction.
 - `tests/python/test_slime_trainer_preflight.py` — preflight schema and
   strict-mode exit codes.
-- `scripts/eval/verify-agentic-rl-dashboard.mjs` — real Chromium E2E covering
-  missing artifact root, ready rollout rendering, token/reward/sample
-  evidence, and detail expansion.
 
 Baseline local results recorded on 2026-07-12:
 

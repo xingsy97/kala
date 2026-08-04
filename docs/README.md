@@ -25,7 +25,6 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [host/tool-output-overflow.md](host/tool-output-overflow.md) | Executor-side large-output spillover and preview pointers |
 | [host/skills.md](host/skills.md) | OpenCode-style `skill({ name })` tool loading |
 | [host/mcp.md](host/mcp.md) | MCP runtime integration design (planned, not yet implemented) |
-| [host/web-native-paths-implementation.md](host/web-native-paths-implementation.md) | Companion to [capability 12](capabilities/12-web-native-path-handling.md) |
 
 ### Dashboard — React SPA (`packages/dashboard`)
 
@@ -52,11 +51,13 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [protocol/wire-protocol.md](protocol/wire-protocol.md) | **Normative.** Every Socket.IO event between Dashboard, Host, and Executor |
 | [protocol/event-log.md](protocol/event-log.md) | **Current implementation.** JSONL event log format for persistence, replay, fork; see the host session-log document for the breaking v2 target |
 
-### Evals — benchmarks, references
+### Evaluation — standalone platform and benchmark references
 
 | File | Purpose |
 |---|---|
-| [evals/badcase-mining.md](evals/badcase-mining.md) | Bad-case mining: category definitions and pipeline |
+| [architecture/agent-evaluation-platform-refactor.md](architecture/agent-evaluation-platform-refactor.md) | Standalone evaluation architecture and clean-cutover contract |
+| [architecture/agent-evaluation-platform-implementation-ledger.md](architecture/agent-evaluation-platform-implementation-ledger.md) | Atomic implementation and verification ledger |
+| [evaluation/](evaluation/) | Contributor, security, compatibility, and release contracts |
 | [evals/references-comparison.md](evals/references-comparison.md) | Quantitative comparison of Claude Code, Codex, opencode, pi |
 | [evals/domain-knowledge/](evals/domain-knowledge/) | Per-benchmark domain notes (SWE-bench, τ-bench, Terminal-Bench, WebArena) |
 
@@ -124,7 +125,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 
 | File | Purpose |
 |---|---|
-| [capabilities/](capabilities/) | Numbered capability designs (12 items — see the [README](capabilities/README.md)) |
+| [capabilities/](capabilities/) | Numbered capability designs (11 items — see the [README](capabilities/README.md)) |
 
 ### Planning
 
@@ -134,7 +135,7 @@ Documentation index for `agent-kernel`. If you're new here, start with the proje
 | [planning/feature-gaps.md](planning/feature-gaps.md) | Shipped vs. deliberately-out vs. gaps; comparison table (pi / opencode / codex / claude-code) |
 | [planning/production-readiness.md](planning/production-readiness.md) | What still stands between the current build and a production deploy |
 | [planning/roadmap-notes/dashboard-product-readiness.md](planning/roadmap-notes/dashboard-product-readiness.md) | Active coordinating plan for product maturity, phased implementation, and verification evidence |
-| [planning/roadmap-notes/](planning/roadmap-notes/) | Free-form roadmap essays: eval-moat, narrative, streaming, RL, product-polish, what-not-to-do |
+| [planning/roadmap-notes/](planning/roadmap-notes/) | Free-form roadmap essays: streaming, RL, product-polish, and explicit non-goals |
 
 ### Meta — principles, testing, releasing, ADRs
 

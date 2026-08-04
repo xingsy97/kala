@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "scope": "container-only three-Agent same-task benchmark integration design; this manifest is not run evidence",
+  "agents": [
+    "agent-runlab",
+    "claude-code",
+    "codex"
+  ],
+  "pairing": {
+    "sameTaskRequired": true,
+    "sameDatasetRevisionRequired": true,
+    "sameSliceManifestRequired": true,
+    "sameVerifierRequired": true,
+    "freshContainerPerAgentTask": true
+  },
+  "cleanupSchema": {
+    "schemaVersion": 1,
+    "receiptRequired": true,
+    "requiredFields": [
+      "schemaVersion",
+      "runId",
+      "trialId",
+      "agentVariantId",
+      "taskId",
+      "provider",
+      "sandboxId",
+      "destroyedAt",
+      "residue"
+    ],
+    "residue": {
+      "instances": 0,
+      "networks": 0,
+      "acls": 0,
+      "volumes": 0,
+      "credentialFiles": 0
+    },
+    "completionRule": "A run is cleanup-complete only when every planned trial has a destruction receipt and all residue counters are zero."
+  },
+  "packs": [
+    {
+      "id": "swe-bench",
+      "authority": "pinned_official_harness_local_result",
+      "completionClaim": "SWE-Bench local result produced by the pinned official harness",
+      "officialBenchmark": true,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:eadfb7f63cf63e47312d33b332c01a05110ed8f73de62bd8a09749e9e615b6cc",
+        "taskIds": [
+          "astropy__astropy-12907"
+        ],
+        "selectionKind": "explicit_ids",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#swe-bench"
+      },
+      "dataset": {
+        "id": "swe-bench-verified",
+        "version": "verified-1",
+        "revision": "8a94a16c1704afcb9379d36934399813696d4c9c82fac928e01a4cd83134244a",
+        "taskRevision": "d16bfe05a744909de4b27f5875fe0d4ed41ce607"
+      },
+      "expectedVerifier": {
+        "id": "swe-bench-official",
+        "version": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+        "officialRequired": true,
+        "resultEvidenceLevel": "official",
+        "primaryMetric": "resolved"
+      }
+    },
+    {
+      "id": "terminal-bench",
+      "authority": "compatible_local_pack",
+      "completionClaim": "Terminal-Bench-compatible local pack result",
+      "officialBenchmark": false,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:b4351c51e6235cd452d175e28d1b1630b92a8288585c2688b8e7b3ae1d439ba9",
+        "taskIds": [
+          "release-ledger-reconciliation"
+        ],
+        "selectionKind": "full",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#terminal-bench"
+      },
+      "dataset": {
+        "id": "terminal-bench-v1",
+        "version": "1.0.0",
+        "revision": "c1ccae715d618df01927f64daf8a171fb91e4c966ac944e437575d9fa577c4df",
+        "taskRevision": "d9e363ef01a7c00145eec6f4e9fecc17da4c3c74"
+      },
+      "expectedVerifier": {
+        "id": "terminal-bench-native",
+        "version": "1.0.0",
+        "officialRequired": false,
+        "resultEvidenceLevel": "native",
+        "primaryMetric": "reward"
+      }
+    },
+    {
+      "id": "program-bench",
+      "authority": "compatible_local_pack",
+      "completionClaim": "ProgramBench-compatible local pack result",
+      "officialBenchmark": false,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:b4351c51e6235cd452d175e28d1b1630b92a8288585c2688b8e7b3ae1d439ba9",
+        "taskIds": [
+          "greeting-cli"
+        ],
+        "selectionKind": "full",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#program-bench"
+      },
+      "dataset": {
+        "id": "program-bench-v1",
+        "version": "1.0.0",
+        "revision": "7bee1e4ab22fba37542deea8f975593e00d437b143b958b2a94aa2eb3fb40b94",
+        "taskRevision": "4c2999083795581e7b232ca2cefb3374e04f59d2"
+      },
+      "expectedVerifier": {
+        "id": "program-bench-native",
+        "version": "1.0.0",
+        "officialRequired": false,
+        "resultEvidenceLevel": "native",
+        "primaryMetric": "compile_passed"
+      }
+    },
+    {
+      "id": "swe-marathon",
+      "authority": "compatible_local_pack",
+      "completionClaim": "SWE-Marathon-compatible local pack result",
+      "officialBenchmark": false,
+      "containerSubset": {
+        "provider": "lxd-container",
+        "imageDigest": "local:b4351c51e6235cd452d175e28d1b1630b92a8288585c2688b8e7b3ae1d439ba9",
+        "taskIds": [
+          "public-release-marathon"
+        ],
+        "selectionKind": "full",
+        "sliceManifestRef": "deploy/evaluation/catalog.json#swe-marathon"
+      },
+      "dataset": {
+        "id": "swe-marathon-v1",
+        "version": "1.0.0",
+        "revision": "f7889c78cdbe59fac1c5d6e531cd6dab2945fafc8e7623e323bd1dcec763ba10",
+        "taskRevision": "fd004aa132d140256ec3d66e6ecd14b4916df3ac"
+      },
+      "expectedVerifier": {
+        "id": "swe-marathon-native",
+        "version": "1.0.0",
+        "officialRequired": false,
+        "resultEvidenceLevel": "native",
+        "primaryMetric": "resolved_tasks"
+      }
+    }
+  ]
+}

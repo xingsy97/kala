@@ -1,0 +1,417 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:08:13.304Z",
+  "nodeVersion": "v22.16.0",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceBundleSha256": "475c51312cd83dc1a8a278358063bfa2fadb4194d1fb0f3bf7f8c3e21ab64960",
+  "sourceFiles": {
+    "adapters/environments/common/src/conformance.ts": "d7b9478465e08b488dbf71bdc2f2213a34f5f2e085e9962f83b46a6ba56b0aec",
+    "adapters/environments/common/src/lxd.ts": "238c1a269b352aaea519ae2fca213d8407dfba88fcf1a41b4cf7f2ecae6083ae",
+    "adapters/environments/docker/src/index.ts": "bbc0b4f93e59dbf4329bbc31483f63ef44dcf80148c8c5c5f280d955f96f4276",
+    "adapters/environments/lxd-container/src/index.ts": "fededd3020092b28d338a8bc89f5c3e4ac841ac9dfbcbc5109ed7bb19f5f613f",
+    "adapters/environments/lxd-vm/src/index.ts": "37ec314ff545ab6e230a90f4db2292a4abf263e7038f8e46ebad9fc5a7b57004",
+    "scripts/evaluation/verify-sandbox-conformance.mjs": "69eb003bba507519fc724c117f046102a7df1c678a51686cedf4e56ef65b6bbd",
+    "pnpm-lock.yaml": "9df3924410aec8fd6a3dc51f3e0ada05141d19f073ecf6c85aa462a6847c376a"
+  },
+  "providers": [
+    {
+      "name": "docker",
+      "descriptor": {
+        "schemaVersion": 1,
+        "providerId": "docker",
+        "kind": "docker",
+        "version": "0.0.0",
+        "protocolVersions": [
+          1
+        ]
+      },
+      "policy": {
+        "provider": "docker",
+        "imageDigest": "alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 1,
+          "memoryMb": 256,
+          "diskMb": 1024,
+          "pids": 128
+        },
+        "network": {
+          "mode": "denied",
+          "allowedDestinations": []
+        },
+        "artifactAllowlist": []
+      },
+      "preflight": {
+        "ok": true,
+        "errors": [],
+        "warnings": [],
+        "resolvedVersion": "29.6.0"
+      },
+      "result": {
+        "provider": "docker",
+        "checks": {
+          "hostPathInaccessible": true,
+          "trialIsolation": true,
+          "networkDenied": true,
+          "resourceBounded": true,
+          "cancellationKillsDescendants": true,
+          "cleanupComplete": true,
+          "environmentLockReproducible": true
+        },
+        "evidence": {
+          "probes": {
+            "host": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:29.770Z",
+              "completedAt": "2026-08-03T13:05:29.814Z",
+              "timedOut": false
+            },
+            "isolatedWrite": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:29.814Z",
+              "completedAt": "2026-08-03T13:05:29.837Z",
+              "timedOut": false
+            },
+            "isolated": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:29.837Z",
+              "completedAt": "2026-08-03T13:05:29.884Z",
+              "timedOut": false
+            },
+            "network": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:29.885Z",
+              "completedAt": "2026-08-03T13:05:29.934Z",
+              "timedOut": false
+            },
+            "pids": {
+              "exitCode": 0,
+              "stdout": "128",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:29.934Z",
+              "completedAt": "2026-08-03T13:05:29.976Z",
+              "timedOut": false
+            },
+            "memory": {
+              "exitCode": 0,
+              "stdout": "268435456",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:29.976Z",
+              "completedAt": "2026-08-03T13:05:30.014Z",
+              "timedOut": false
+            },
+            "cancellation": {
+              "exitCode": 0,
+              "signal": "SIGTERM",
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:30.014Z",
+              "completedAt": "2026-08-03T13:05:30.173Z",
+              "timedOut": false
+            },
+            "afterCancel": {
+              "exitCode": 1,
+              "stdout": "",
+              "stderr": "Error response from daemon: container d47cd0cdb919605e1dbd80cfa3a276f57be3b1eda2da50b360367a87e85d41e1 is not running\n",
+              "startedAt": "2026-08-03T13:05:30.173Z",
+              "completedAt": "2026-08-03T13:05:30.181Z",
+              "timedOut": false
+            }
+          },
+          "environmentLock": {
+            "schemaVersion": 1,
+            "provider": "docker",
+            "imageDigest": "alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b",
+            "repositoryRevision": "conformance-revision",
+            "dependencyLockHashes": {},
+            "redactedEnvironment": {},
+            "resourcePolicyHash": "f818a8b2e4971f2dd7ea93ba893193dbbc84f9b3ff7221c8b442b98e18adf240",
+            "networkPolicyHash": "4ca84cc5adf71eb9bfb8742ba1979cb57bdcf8f84be62c19270138b51eaaa9b1",
+            "toolchainVersions": {
+              "docker": "29.6.0"
+            },
+            "fixtureVersions": {
+              "custom-task-pack": "1"
+            },
+            "faultInjectorVersions": {}
+          }
+        }
+      }
+    },
+    {
+      "name": "lxd-container",
+      "descriptor": {
+        "schemaVersion": 1,
+        "providerId": "lxd-container",
+        "kind": "lxd-container",
+        "version": "0.0.0",
+        "protocolVersions": [
+          1
+        ]
+      },
+      "policy": {
+        "provider": "lxd-container",
+        "imageDigest": "9c68ebff3356",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 1,
+          "memoryMb": 512,
+          "diskMb": 2048,
+          "pids": 128
+        },
+        "network": {
+          "mode": "denied",
+          "allowedDestinations": []
+        },
+        "artifactAllowlist": []
+      },
+      "preflight": {
+        "ok": true,
+        "errors": [],
+        "warnings": [],
+        "resolvedVersion": "Client version: 5.21.5 LTS"
+      },
+      "result": {
+        "provider": "lxd-container",
+        "checks": {
+          "hostPathInaccessible": true,
+          "trialIsolation": true,
+          "networkDenied": true,
+          "resourceBounded": true,
+          "cancellationKillsDescendants": true,
+          "cleanupComplete": true,
+          "environmentLockReproducible": true
+        },
+        "evidence": {
+          "probes": {
+            "host": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:32.907Z",
+              "completedAt": "2026-08-03T13:05:32.984Z",
+              "timedOut": false
+            },
+            "isolatedWrite": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:32.984Z",
+              "completedAt": "2026-08-03T13:05:33.062Z",
+              "timedOut": false
+            },
+            "isolated": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:33.062Z",
+              "completedAt": "2026-08-03T13:05:33.125Z",
+              "timedOut": false
+            },
+            "network": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:33.125Z",
+              "completedAt": "2026-08-03T13:05:33.207Z",
+              "timedOut": false
+            },
+            "pids": {
+              "exitCode": 0,
+              "stdout": "128",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:33.207Z",
+              "completedAt": "2026-08-03T13:05:33.292Z",
+              "timedOut": false
+            },
+            "memory": {
+              "exitCode": 0,
+              "stdout": "536870912",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:33.292Z",
+              "completedAt": "2026-08-03T13:05:33.370Z",
+              "timedOut": false
+            },
+            "cancellation": {
+              "exitCode": 143,
+              "signal": "SIGTERM",
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:05:33.370Z",
+              "completedAt": "2026-08-03T13:05:34.116Z",
+              "timedOut": false
+            },
+            "afterCancel": {
+              "exitCode": 1,
+              "stdout": "",
+              "stderr": "Error: Instance is not running\n",
+              "startedAt": "2026-08-03T13:05:34.116Z",
+              "completedAt": "2026-08-03T13:05:34.180Z",
+              "timedOut": false
+            }
+          },
+          "environmentLock": {
+            "schemaVersion": 1,
+            "provider": "lxd-container",
+            "imageDigest": "9c68ebff3356d887806098d468618b53cf4269c9a1173ebdaf9a113aa2cfae64",
+            "repositoryRevision": "conformance-revision",
+            "dependencyLockHashes": {},
+            "redactedEnvironment": {},
+            "resourcePolicyHash": "cd79b1d222894e1ca32edd0c7bfe5af0995012f8e1e3bbe63bee7a8258f3de8f",
+            "networkPolicyHash": "4ca84cc5adf71eb9bfb8742ba1979cb57bdcf8f84be62c19270138b51eaaa9b1",
+            "toolchainVersions": {
+              "lxd": "Client version: 5.21.5 LTS"
+            },
+            "fixtureVersions": {
+              "custom-task-pack": "1"
+            },
+            "faultInjectorVersions": {}
+          }
+        }
+      }
+    },
+    {
+      "name": "lxd-vm",
+      "descriptor": {
+        "schemaVersion": 1,
+        "providerId": "lxd-vm",
+        "kind": "lxd-vm",
+        "version": "0.0.0",
+        "protocolVersions": [
+          1
+        ]
+      },
+      "policy": {
+        "provider": "lxd-vm",
+        "imageDigest": "e934afab20c7",
+        "readOnlyBase": true,
+        "ephemeralOverlay": true,
+        "resources": {
+          "cpu": 1,
+          "memoryMb": 1024,
+          "diskMb": 4096,
+          "pids": 128
+        },
+        "network": {
+          "mode": "denied",
+          "allowedDestinations": []
+        },
+        "artifactAllowlist": []
+      },
+      "preflight": {
+        "ok": true,
+        "errors": [],
+        "warnings": [],
+        "resolvedVersion": "Client version: 5.21.5 LTS"
+      },
+      "result": {
+        "provider": "lxd-vm",
+        "checks": {
+          "hostPathInaccessible": true,
+          "trialIsolation": true,
+          "networkDenied": true,
+          "resourceBounded": true,
+          "cancellationKillsDescendants": true,
+          "cleanupComplete": true,
+          "environmentLockReproducible": true
+        },
+        "evidence": {
+          "probes": {
+            "host": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:07:21.648Z",
+              "completedAt": "2026-08-03T13:07:21.738Z",
+              "timedOut": false
+            },
+            "isolatedWrite": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:07:21.738Z",
+              "completedAt": "2026-08-03T13:07:21.839Z",
+              "timedOut": false
+            },
+            "isolated": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:07:21.839Z",
+              "completedAt": "2026-08-03T13:07:21.950Z",
+              "timedOut": false
+            },
+            "network": {
+              "exitCode": 0,
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:07:21.950Z",
+              "completedAt": "2026-08-03T13:07:22.055Z",
+              "timedOut": false
+            },
+            "pids": {
+              "exitCode": 0,
+              "stdout": "128",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:07:22.056Z",
+              "completedAt": "2026-08-03T13:07:22.165Z",
+              "timedOut": false
+            },
+            "memory": {
+              "exitCode": 0,
+              "stdout": "1073741824",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:07:22.165Z",
+              "completedAt": "2026-08-03T13:07:22.276Z",
+              "timedOut": false
+            },
+            "cancellation": {
+              "exitCode": 143,
+              "signal": "SIGTERM",
+              "stdout": "",
+              "stderr": "",
+              "startedAt": "2026-08-03T13:07:22.276Z",
+              "completedAt": "2026-08-03T13:07:22.789Z",
+              "timedOut": false
+            },
+            "afterCancel": {
+              "exitCode": 1,
+              "stdout": "",
+              "stderr": "Error: Instance is not running\n",
+              "startedAt": "2026-08-03T13:07:22.789Z",
+              "completedAt": "2026-08-03T13:07:22.857Z",
+              "timedOut": false
+            }
+          },
+          "environmentLock": {
+            "schemaVersion": 1,
+            "provider": "lxd-vm",
+            "imageDigest": "e934afab20c76870416bd1a5203a084d3a9b7c5a6699256f0afedb6ad6dc7759",
+            "repositoryRevision": "conformance-revision",
+            "dependencyLockHashes": {},
+            "redactedEnvironment": {},
+            "resourcePolicyHash": "d6282799eeb89b1ae6078819428ca4b7d88fea84f8eed64a556823269dbb4564",
+            "networkPolicyHash": "4ca84cc5adf71eb9bfb8742ba1979cb57bdcf8f84be62c19270138b51eaaa9b1",
+            "toolchainVersions": {
+              "lxd": "Client version: 5.21.5 LTS"
+            },
+            "fixtureVersions": {
+              "custom-task-pack": "1"
+            },
+            "faultInjectorVersions": {}
+          }
+        }
+      }
+    }
+  ]
+}

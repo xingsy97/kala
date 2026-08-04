@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T11:52:40.846Z",
+  "scope": "current-source accepted-spec Control Plane to Worker to fresh Docker sandbox to native verifier to canonical evidence to grader/analyzer lifecycle for metamorphic; no historical Session input",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "scripts/evaluation/verify-remaining-benchmark-lifecycles.mjs": "11cd32a34a79b7ac5c18939cf8a5d7eacce225b18654d12a6aca4bd7504fb278",
+    "adapters/benchmarks/swe-marathon/src/index.ts": "c37314db99a4d1be5ecaa9c581f23dac0d859530b562ebfe5915da1252a4b62c",
+    "adapters/benchmarks/custom-task-pack/src/index.ts": "1cc7ca55951aa73c8b8860482a956961e58b88a62f8c7ecb0ebc40a2dd3bb298",
+    "packages/eval-worker/src/trial-runner.ts": "6fbef62444d3c96b846835bbd562f24588781b902bc62a4231a8f8504d80421f",
+    "packages/eval-orchestrator/src/control-plane.ts": "4ec9400515ff4a4f6bacdb42c228a69fce30bf2591de170c06e76845e91fe222",
+    "packages/eval-analyzer/src/runner.ts": "170bf18a83fe3324dd6952d88557f24f9a2a0faced8ada19ebbbc5600735db44",
+    "packages/eval-sdk/src/metamorphic.ts": "fac00145f545402a586b06d535c1b59fcee66b63aab138cfcf9027d1c259aa6a"
+  },
+  "mode": "metamorphic",
+  "runId": "fresh-metamorphic-lifecycle-20260803115236-23044",
+  "runState": "completed",
+  "trialCount": 6,
+  "freshSandboxes": 6,
+  "cleanupVerified": true,
+  "workerErrors": [],
+  "gradingJobId": "grading-run-grade-23044",
+  "analysisJobId": "analysis-run-analyze-23044",
+  "metamorphicVariants": [
+    {
+      "trialId": "fresh-metamorphic-lifecycle-20260803115236-23044:metamorphic-path-rename:deterministic-lifecycle-agent:0",
+      "taskId": "metamorphic-path-rename",
+      "benchmarkId": "program-bench",
+      "sandboxId": "eval-docker-fresh-metamorphic-lifecycle-f9813978",
+      "resultHash": "1881de3009bc0e80ea026e97d76c20dc6ded5520de320776001085aa2c86dfc7",
+      "artifactManifestHash": "8aae825b5e2c2df0b5dd53201a1c1c61b6890e45ce4a4824a9f0d81a8c60c073",
+      "normalizedEventCount": 2,
+      "nativeMetrics": {
+        "submission_contract": true,
+        "contract_ok": true,
+        "implementation_file_count": 1,
+        "compile_passed": true,
+        "tests_passed": true,
+        "passedSteps": 3,
+        "totalSteps": 3,
+        "verifier_protocol_valid": true
+      }
+    },
+    {
+      "trialId": "fresh-metamorphic-lifecycle-20260803115236-23044:metamorphic-requirement-rewording:deterministic-lifecycle-agent:0",
+      "taskId": "metamorphic-requirement-rewording",
+      "benchmarkId": "program-bench",
+      "sandboxId": "eval-docker-fresh-metamorphic-lifecycle-c96ee5a2",
+      "resultHash": "d73c164bb7c57b362ffa113d11a8106b3c45d59b75c4f9c301f94e29d26e7741",
+      "artifactManifestHash": "c7dc6bd1644a616a2a719d86012501b089410065f096ede2a8e60287faf85596",
+      "normalizedEventCount": 2,
+      "nativeMetrics": {
+        "submission_contract": true,
+        "contract_ok": true,
+        "implementation_file_count": 1,
+        "compile_passed": true,
+        "tests_passed": true,
+        "passedSteps": 3,
+        "totalSteps": 3,
+        "verifier_protocol_valid": true
+      }
+    },
+    {
+      "trialId": "fresh-metamorphic-lifecycle-20260803115236-23044:metamorphic-irrelevant-file:deterministic-lifecycle-agent:0",
+      "taskId": "metamorphic-irrelevant-file",
+      "benchmarkId": "program-bench",
+      "sandboxId": "eval-docker-fresh-metamorphic-lifecycle-5ffb508d",
+      "resultHash": "c9a2b4e38c38a67ed47ea051b8c1bbc52f8971a069ff840be2a1bca6120c32be",
+      "artifactManifestHash": "de7d3f3da6c3a67290f871a8bfaa9b6e213de898a42d5db940abaaf60d1a36b5",
+      "normalizedEventCount": 2,
+      "nativeMetrics": {
+        "submission_contract": true,
+        "contract_ok": true,
+        "implementation_file_count": 1,
+        "compile_passed": true,
+        "tests_passed": true,
+        "passedSteps": 3,
+        "totalSteps": 3,
+        "verifier_protocol_valid": true
+      }
+    },
+    {
+      "trialId": "fresh-metamorphic-lifecycle-20260803115236-23044:metamorphic-function-order:deterministic-lifecycle-agent:0",
+      "taskId": "metamorphic-function-order",
+      "benchmarkId": "program-bench",
+      "sandboxId": "eval-docker-fresh-metamorphic-lifecycle-f17a36d8",
+      "resultHash": "f750be9b4e6a0701abdb5a7a43d60b26974f8d7bb68a223d14261b5e24cbd401",
+      "artifactManifestHash": "1f300d618b2dfaf7295746ee792859e10965b9a828416870fa71b8f5f1c177ad",
+      "normalizedEventCount": 2,
+      "nativeMetrics": {
+        "submission_contract": true,
+        "contract_ok": true,
+        "implementation_file_count": 1,
+        "compile_passed": true,
+        "tests_passed": true,
+        "passedSteps": 3,
+        "totalSteps": 3,
+        "verifier_protocol_valid": true
+      }
+    },
+    {
+      "trialId": "fresh-metamorphic-lifecycle-20260803115236-23044:metamorphic-test-output-format:deterministic-lifecycle-agent:0",
+      "taskId": "metamorphic-test-output-format",
+      "benchmarkId": "program-bench",
+      "sandboxId": "eval-docker-fresh-metamorphic-lifecycle-f18edbf2",
+      "resultHash": "f40a321d4c96ce1f13ff7f0f8245e1631789274bda719f2fe45c5f75a5a4dbdb",
+      "artifactManifestHash": "a209731381f254e83607082c9a2beac82c3952cda05c6858ed68837b8cecb519",
+      "normalizedEventCount": 2,
+      "nativeMetrics": {
+        "submission_contract": true,
+        "contract_ok": true,
+        "implementation_file_count": 1,
+        "compile_passed": true,
+        "tests_passed": true,
+        "passedSteps": 3,
+        "totalSteps": 3,
+        "verifier_protocol_valid": true
+      }
+    },
+    {
+      "trialId": "fresh-metamorphic-lifecycle-20260803115236-23044:metamorphic-nonsemantic-config:deterministic-lifecycle-agent:0",
+      "taskId": "metamorphic-nonsemantic-config",
+      "benchmarkId": "program-bench",
+      "sandboxId": "eval-docker-fresh-metamorphic-lifecycle-479bce24",
+      "resultHash": "69401e4b2300034310a116cb2f4af005ddf2816b0874ffefc46c4f583a98e75a",
+      "artifactManifestHash": "c85f1579f789d78cbfd60ed56b55f6e562c65abfce20327c5497a42e0430bb27",
+      "normalizedEventCount": 2,
+      "nativeMetrics": {
+        "submission_contract": true,
+        "contract_ok": true,
+        "implementation_file_count": 1,
+        "compile_passed": true,
+        "tests_passed": true,
+        "passedSteps": 3,
+        "totalSteps": 3,
+        "verifier_protocol_valid": true
+      }
+    }
+  ],
+  "runtimeResidue": {
+    "instances": [],
+    "networks": [],
+    "acls": []
+  }
+}

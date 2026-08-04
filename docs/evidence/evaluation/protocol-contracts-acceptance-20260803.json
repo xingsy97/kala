@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T12:44:56.422Z",
+  "scope": "canonical event, evidence, failure, dataset/slice, plugin, lease, analysis, defect, reproduction, regression, insight, report, and audit contracts",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-protocol/src/agent-backend.ts": "b6b5293ba4e5d83b0f2299f151e518cf6ae7f1ec00dc133e958a7e0defdf780f",
+    "packages/eval-protocol/src/analysis-jobs.ts": "98a72a6655280c7d666c06a134de7ae756158257d0c3ee8492c8943af44153d6",
+    "packages/eval-protocol/src/analyzer.ts": "ba409f3da99827935f3ff46025f25a7814a389fe58fa88a23383b68c3fa01f88",
+    "packages/eval-protocol/src/artifacts.ts": "e339637f46c1bce014643de57c52d023317868bebda62dece298249d6377dcca",
+    "packages/eval-protocol/src/benchmark.ts": "b1656409ec35113ba6d23b8cdf1f2312410cefa21655f683a46df6ba65cce1d5",
+    "packages/eval-protocol/src/commands.ts": "46a68acf47656e8a9296137bdcde1c7f8d26c310f300296626212345da98b374",
+    "packages/eval-protocol/src/common.ts": "6f9d1606685b96d44a19e0768bcd2eecd579c94c354308872e73c40badd44971",
+    "packages/eval-protocol/src/datasets.ts": "4dd1581d01137e4ff3c1642df14c4184f19bdad3610ef2ca2bb96e405a9ac64f",
+    "packages/eval-protocol/src/defects.ts": "5fb5a9b81f910e8440b7fc0775b5925a6aa4cad56419fc16f02caba5f1d0499f",
+    "packages/eval-protocol/src/failure.ts": "ef7d330d431eb20c9c68b0f65a10c57100716b8daf6c643600823ed12f0d5f3d",
+    "packages/eval-protocol/src/governance.ts": "26aed1dc8972a62e86815863b7e27d882b8222e9f84ad77c624cf0d147d220be",
+    "packages/eval-protocol/src/grading.ts": "4bf08a9c85951b8d827f3ca9367d92f49cdba0fd778a17db9fb6560996ace501",
+    "packages/eval-protocol/src/index.ts": "63909e9873bdab18765712d4e39bdc4eca43e5e203d2bf465969f678e5f4383b",
+    "packages/eval-protocol/src/insights.ts": "20832bdb76796c0cfbd3f89898015af33a9e14599d55d4c77e0268266a30888e",
+    "packages/eval-protocol/src/leaderboard.ts": "4076e92b4c724ee07a9980c0ce1f4ad247eac99baeb467aad48351d4533e2dc7",
+    "packages/eval-protocol/src/leases.ts": "73cba2031eff5e2785db2db28460210c1c5cea602ecac04098b497d6bdcf09ba",
+    "packages/eval-protocol/src/methodology.ts": "d1da11d777f92196a8e62e61411bb87f87fee6325530bd1ae9962da5bf43828e",
+    "packages/eval-protocol/src/queries.ts": "b9554613f41c71f744821cbda0b836e0c235d7778b8a37ea74dd49d20e971c33",
+    "packages/eval-protocol/src/regression.ts": "cace24977ca107a045b740f9a6288a5d0a5ca4f58860a6f73ba4366a1489466d",
+    "packages/eval-protocol/src/reports.ts": "32e53f8f7248e068bfb27d3cb0d308c107e67b618ed0762e090f4fe352edd4f5",
+    "packages/eval-protocol/src/reproduction.ts": "1d2111b5a7d08b6b95473c45b409a7d2987f2fbdac9b5d17d0f008e59a440349",
+    "packages/eval-protocol/src/results.ts": "2f4d8cfd9663aff64562874d5189bc620a64983b9000cef0a4a9361151659993",
+    "packages/eval-protocol/src/run-events.ts": "4ab6f1ebe26b214b8ee5f35352355f65f95fd7ec675fafca0ced2336a436cbc6",
+    "packages/eval-protocol/src/run-spec.ts": "ee6216d151c1881ffbf419b19f58bbd7b6c4118d0886c0fde31f073eb58c3f6f",
+    "packages/eval-protocol/src/sandbox.ts": "c4215a2ca5daad50a9f18ba220a64d81d9c8e36827d84bde25e1174e04918d72",
+    "packages/eval-protocol/src/tasks.ts": "654a21446e0e5f195cf3d2b372e5d1621c0d2f66c69e8e435d2b5d08e4025771",
+    "packages/eval-protocol/src/telemetry.ts": "341317426c9525a272b1efcd16a9e17b2a486e14522e618704d4f7715d07c1b0",
+    "packages/eval-protocol/src/protocol.test.ts": "4deadb6b5079e9f4912ac307cf6e951fabee3e359e22372265ec0b57c5b422a3",
+    "scripts/evaluation/verify-protocol-contracts.mjs": "8d8e7fbb3ded3cd99735c926a2371204431ca5263bf4ec691206fcb99ca3d5d3"
+  },
+  "groups": {
+    "statesAndEvents": [
+      {
+        "test": "durable and governance contracts requires monotonic durable events",
+        "status": "passed",
+        "durationMs": 0.5186910000000466
+      },
+      {
+        "test": "durable and governance contracts replays only legal typed run/trial state transitions",
+        "status": "passed",
+        "durationMs": 0.8332599999999957
+      },
+      {
+        "test": "durable and governance contracts property-checks reducer replay determinism and rejects every sequence corruption",
+        "status": "passed",
+        "durationMs": 58.672168
+      }
+    ],
+    "evidenceAndFailures": [
+      {
+        "test": "canonical protocol v1 parses the canonical result fixture and verifies its manifest/result hashes",
+        "status": "passed",
+        "durationMs": 2.8628590000000145
+      },
+      {
+        "test": "canonical protocol v1 never lets smoke or ungraded evidence claim official authority",
+        "status": "passed",
+        "durationMs": 0.49113899999997557
+      },
+      {
+        "test": "durable and governance contracts enforces structured failure responsibility and typed reproduction execution",
+        "status": "passed",
+        "durationMs": 0.5067490000000134
+      }
+    ],
+    "datasetsAndSlices": [
+      {
+        "test": "dataset slices and Leaderboard authority enforces truthful full/subset/sample identity and labels",
+        "status": "passed",
+        "durationMs": 0.6410100000000511
+      },
+      {
+        "test": "dataset slices and Leaderboard authority binds every selection kind to an immutable task-ID manifest",
+        "status": "passed",
+        "durationMs": 0.44094499999999925
+      },
+      {
+        "test": "dataset slices and Leaderboard authority property-checks every slice kind, truthful coverage, and sample provenance",
+        "status": "passed",
+        "durationMs": 21.354452999999978
+      },
+      {
+        "test": "dataset slices and Leaderboard authority versions Leaderboard filters, sort, audit, and invalidation as protocol contracts",
+        "status": "passed",
+        "durationMs": 1.2061780000000226
+      }
+    ],
+    "pluginAndCoordinationContracts": [
+      {
+        "test": "durable and governance contracts requires contained artifact paths, unique entries, and valid leases",
+        "status": "passed",
+        "durationMs": 0.5443489999999542
+      },
+      {
+        "test": "durable and governance contracts negotiates protocol capabilities and rejects incompatible descriptors",
+        "status": "passed",
+        "durationMs": 0.9125680000000216
+      },
+      {
+        "test": "durable and governance contracts accepts namespaced external plugins while keeping external Agents unranked and non-official",
+        "status": "passed",
+        "durationMs": 0.9700060000000121
+      }
+    ],
+    "productEvidenceContracts": [
+      {
+        "test": "durable and governance contracts migrates only canonical platform schemas through explicit forward steps",
+        "status": "passed",
+        "durationMs": 0.2509200000000078
+      },
+      {
+        "test": "durable and governance contracts requires explicit review, redaction evidence, and provenance approval for private public task packs",
+        "status": "passed",
+        "durationMs": 0.4958390000000463
+      },
+      {
+        "test": "durable and governance contracts blocks unsafe reproduction publication, incomplete reports, and unsupported validated insights",
+        "status": "passed",
+        "durationMs": 1.1494009999999548
+      }
+    ]
+  },
+  "summary": {
+    "requiredTests": 16,
+    "protocolSourceFiles": 27,
+    "stateReplayProperties": true,
+    "evidenceAuthority": true,
+    "truthfulDatasetSlices": true,
+    "capabilityNegotiation": true,
+    "explicitForwardMigrationOnly": true,
+    "canonicalV1BackwardReadable": true,
+    "preRefactorHostArtifactsRejected": true,
+    "productEvidencePublicationGuards": true
+  }
+}

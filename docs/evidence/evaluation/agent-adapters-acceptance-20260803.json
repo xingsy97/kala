@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T11:52:23.357Z",
+  "scope": "official Agent adapter public-boundary, certification, isolation, dual-transport, ranking, publication, and fresh real-run acceptance",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "adapters/agents/agent-runlab/bin/runlab-trial-driver.ts": "f694aff9bdeb22f071109ac65ab86b6fbe4ab8be98de7fdad12501235b3ac096",
+    "adapters/agents/agent-runlab/package.json": "1c8ee40e750b59b90a8b146db7f2264b402791ceb8e68c8d837f4656b992ddba",
+    "adapters/agents/agent-runlab/src/driver-readiness.ts": "f2de29a39b2685e85d1708dd70846b02d68db0e97c6c6971fc65523d21eaa179",
+    "adapters/agents/agent-runlab/src/index.ts": "e3a2355364ed1c21682388630e54a1c552a91daf3bed4bd16ce62f8d84920df2",
+    "adapters/agents/claude-code/src/index.ts": "f2fe0e4b5a2d5881878c1a38a72b092162b027d998461f3ddaff2a2fe5ac0bf9",
+    "adapters/agents/codex/bin/codex-app-server-driver.ts": "4be5652abfed9e0914fc8c580c3d17a39bfd40067cd91766d35103812a5bd196",
+    "adapters/agents/codex/src/index.test.ts": "36d6d8e2bd9f1bc1945b83d18683dd46fdd79dd18dc2d695005f362d20d2b8ef",
+    "adapters/agents/codex/src/index.ts": "8915a3a648c76e4f8ff8f93a32221b0753c119cda5fd5ad1e019f68f3e82ace8",
+    "adapters/agents/custom-command/src/index.ts": "02160688927aab66955d2900c2d8753de9d37065bb3910b81ec5eb9d3f98270b",
+    "packages/eval-protocol/src/agent-backend.ts": "b6b5293ba4e5d83b0f2299f151e518cf6ae7f1ec00dc133e958a7e0defdf780f",
+    "packages/eval-protocol/src/leaderboard.ts": "4076e92b4c724ee07a9980c0ce1f4ad247eac99baeb467aad48351d4533e2dc7",
+    "packages/eval-protocol/src/protocol.test.ts": "e74610b06b1489f2fb4e229693bc7b517ee74c1b9e40572ba33f9786ecba2c5d",
+    "scripts/evaluation/run-real-task-pack.mjs": "3ef6f632d12d09effd33163c3331df96e716494e72e388559185dd2bb38b30c5",
+    "scripts/evaluation/verify-agent-adapters.mjs": "cf9edf5fe82d34617b59ec1b2de1bfdda5240bb698a7ea7566bce2b52faa9bce"
+  },
+  "evidenceFiles": {
+    "docs/evidence/evaluation/final-fresh-sdlc-journey-20260803.json": "42b6117f9310850020845c985239644ba9c7a60448b23db7204202149f3417b4",
+    "docs/evidence/evaluation/final-fresh-swe-bench-astropy-12907-20260803.json": "e458fcc3e3d4529cb7a99f3dd47ee7d72f267f03b53ff841db3ed43d1b033a78",
+    "docs/evidence/evaluation/codex-app-server-acceptance-20260803.json": "a640109e515a97c5bbff6d70a950c2f4c51c0b9a345be4760cb0211f9684e953",
+    "docs/evidence/evaluation/codex-exec-json-fallback-acceptance-20260803.json": "6ac9dfb96e4b9f20f472bd98507b200147e1964cb1f97735aa44e1cc2618542d"
+  },
+  "tests": {
+    "passed": 69,
+    "required": [
+      {
+        "test": "AgentRunLabBackend captures public wire events, usage, versions, final response, and diff",
+        "status": "passed",
+        "durationMs": 2.4583209999999553
+      },
+      {
+        "test": "ClaudeCodeAgentBackend sandbox user selection refuses to run Claude Code as root when no unprivileged account exists",
+        "status": "passed",
+        "durationMs": 0.8298530000000142
+      },
+      {
+        "test": "CodexAgentBackend transport isolation uses the formal app-server driver with an isolated Codex home by default",
+        "status": "passed",
+        "durationMs": 1.6464219999999727
+      },
+      {
+        "test": "CodexAgentBackend transport isolation uses ephemeral exec-json fallback without reading user config or session state",
+        "status": "passed",
+        "durationMs": 1.0954710000000318
+      },
+      {
+        "test": "CustomCommandAgentBackend is a non-ranked public plugin and records command events plus the final diff",
+        "status": "passed",
+        "durationMs": 3.6263079999999945
+      },
+      {
+        "test": "dataset slices and Leaderboard authority enforces the complete Leaderboard eligibility and comparability identity matrix",
+        "status": "passed",
+        "durationMs": 1.1656619999999975
+      },
+      {
+        "test": "canonical protocol v1 rejects development-only backends from official-required run specs",
+        "status": "passed",
+        "durationMs": 0.7871539999999868
+      }
+    ],
+    "officialCertification": {
+      "passed": 30,
+      "expected": 30
+    }
+  },
+  "acceptance": {
+    "agentRunLabPublicRuntimeOnly": true,
+    "claudeCodeIsolatedNativeCli": true,
+    "codexTransports": {
+      "appServerRunId": "fresh-sdlc-journey-20260803082358-22094",
+      "execJsonRunId": "fresh-sdlc-journey-20260803082241-11931",
+      "distinctFreshSessions": true
+    },
+    "customCommandRanked": false,
+    "smokeBackend": "protocol-only-not-published",
+    "freshThreeAgentRuns": [
+      "fresh-sdlc-journey-20260803052811-19080",
+      "fresh-swe-bench-astropy__astropy-12907-20260803052938-37670"
+    ]
+  }
+}

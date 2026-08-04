@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T04:49:08.158Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + three real Agent backends + LXD sandbox + native verifier",
+  "runId": "fresh-fault-scenarios-20260803044444-49019",
+  "taskPackId": "fault-scenarios",
+  "taskIds": [
+    "config-schema-recovery-1",
+    "config-schema-recovery-2",
+    "config-schema-recovery-3",
+    "config-schema-recovery-4",
+    "config-schema-recovery-5"
+  ],
+  "agentIds": [
+    "agent-runlab",
+    "claude-code",
+    "codex"
+  ],
+  "runState": "completed",
+  "startedAt": "2026-08-03T04:44:44.121Z",
+  "completedAt": "2026-08-03T04:49:08.158Z",
+  "durationMs": 264037,
+  "freshSandboxes": 15,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-49019",
+  "gradingOutputHash": "94f3191422436460314f242f09e55a282f3bfc0e74e6570eb1828839e361b6ad",
+  "analysisJobId": "analysis-run-analyze-49019",
+  "analysisOutputHash": "7fbe12aa3069d8ee42f09d053a305d1e363be2abe6a1c99774fc4cf9408ab15b",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-1:agent-runlab:0",
+      "taskId": "config-schema-recovery-1",
+      "agentVariantId": "agent-runlab",
+      "resultHash": "f27b6ceb345c65df645f0b28a7a6befa717c87807b43bf9088eeeaebfebb840a",
+      "artifactManifestHash": "30ffd129380e2a86693c8c8f53bf70b0c29973285a96f238be13ae62b4b19213",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 60
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-1:claude-code:0",
+      "taskId": "config-schema-recovery-1",
+      "agentVariantId": "claude-code",
+      "resultHash": "405c7f177e68d3812df4db90b0fcff9474dc47aad17553616238d883d3cfae86",
+      "artifactManifestHash": "13febf4a0d4bda4c7d58bf66a27fd2ea1fc41746fd6164974c869a809001ee84",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 148
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-1:codex:0",
+      "taskId": "config-schema-recovery-1",
+      "agentVariantId": "codex",
+      "resultHash": "b42fcc1158a10e8100b194021cc98ddbfce44f14c4a178e6b76dfdc54fbbf053",
+      "artifactManifestHash": "aaa00ad4b7a90791e5894a4e0dba175e1d58862901755f5af533ec24780b495b",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 351
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-2:agent-runlab:0",
+      "taskId": "config-schema-recovery-2",
+      "agentVariantId": "agent-runlab",
+      "resultHash": "32fff606cec1f8bd25eb78dbee60e0ebaba31ce8f3af054fba513b594f8f5621",
+      "artifactManifestHash": "065703de9a86dbfb642b510c89a4604cf0faf2ff9e2128e75482b826eee02309",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 88
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-2:claude-code:0",
+      "taskId": "config-schema-recovery-2",
+      "agentVariantId": "claude-code",
+      "resultHash": "fb52802674846a3a877220cddb8f1280ffe815d84f507dec4f430158e5f591a2",
+      "artifactManifestHash": "6c0b9b6b05099f628c7cd8d183133852845d665ba93a7e94c9cfeb90367bf94a",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 129
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-2:codex:0",
+      "taskId": "config-schema-recovery-2",
+      "agentVariantId": "codex",
+      "resultHash": "07f3f9720628c7c8733d10d7ced895d1d260758ee56e4661d47b3902d52c19e2",
+      "artifactManifestHash": "d264a0aacf788e6cb52ffabbe8b05714cd9edebb20aab1b6744ab5a2f50471cb",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 289
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-3:agent-runlab:0",
+      "taskId": "config-schema-recovery-3",
+      "agentVariantId": "agent-runlab",
+      "resultHash": "f5d27c367288b5aa03544873bd144db89c8992f3f03abd7398385c25e4c23f10",
+      "artifactManifestHash": "f9d46356225d832388a9fe51b2a077bcc4628eb2f9b91bb2aa21bf655096d90c",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 62
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-3:claude-code:0",
+      "taskId": "config-schema-recovery-3",
+      "agentVariantId": "claude-code",
+      "resultHash": "1bd98a938359d1cf4855100eb3aa46684b8c71996699cc2bc0046a13cd6d8838",
+      "artifactManifestHash": "4370c14656b03467b5d33be51fc182e4fbc67ae2a24683474d6e914bddf5414b",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 113
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-3:codex:0",
+      "taskId": "config-schema-recovery-3",
+      "agentVariantId": "codex",
+      "resultHash": "ccadfd2eae0038547fa2094ca57750b271730a08805c24ba445e8602a16d4083",
+      "artifactManifestHash": "891addc0848def0743b4c39a2fb93a2664fb9477765ea685b2758d340832fb13",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 389
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-4:agent-runlab:0",
+      "taskId": "config-schema-recovery-4",
+      "agentVariantId": "agent-runlab",
+      "resultHash": "445eba6cabd2867b017823db6fb27670a985470546f4ab22cc1756e75020a08b",
+      "artifactManifestHash": "83a6f867b7fca375658aea36873737694ba53d82d30d71580d33073ed9d6bec9",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 73
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-4:claude-code:0",
+      "taskId": "config-schema-recovery-4",
+      "agentVariantId": "claude-code",
+      "resultHash": "5cc40dd2b6bd0289848a0feb99f37cc803854be7f333de97a6bfb81098fce012",
+      "artifactManifestHash": "88b98a7ab0c34bd9155bdd6eae4a12f88da5533b9deade95566c6c00de0a3281",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 127
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-4:codex:0",
+      "taskId": "config-schema-recovery-4",
+      "agentVariantId": "codex",
+      "resultHash": "3ffa397a5f8371aafcc896e98c251cb44da5099fc4332c3417111458b2917d3a",
+      "artifactManifestHash": "37872dd6e40c6814088e3d4e84b142e367804fb8f74097b569bbaea8e61a9168",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 436
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-5:agent-runlab:0",
+      "taskId": "config-schema-recovery-5",
+      "agentVariantId": "agent-runlab",
+      "resultHash": "7cea54d0696d5fb07e1b42f04b22d2073c3c0e967bdb7b1c5e869acb5ba4bcb6",
+      "artifactManifestHash": "11bdb8c2fd4238b286c05b8152985b3147d22e8cc187238a47db8091488af4d2",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 78
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-5:claude-code:0",
+      "taskId": "config-schema-recovery-5",
+      "agentVariantId": "claude-code",
+      "resultHash": "a31419526581cab61754cd89268349455487d19e1343e1de2f18417cee10a449",
+      "artifactManifestHash": "2fd3750e4ea90407159b4127a651e36a23b5752b84d4abad2e805ba64a9de8e5",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 123
+    },
+    {
+      "trialId": "fresh-fault-scenarios-20260803044444-49019:config-schema-recovery-5:codex:0",
+      "taskId": "config-schema-recovery-5",
+      "agentVariantId": "codex",
+      "resultHash": "038dc4fb21b9f0efc56c1cfa8a553e3c8542c57b6cde06118ba2ac9304dfe94e",
+      "artifactManifestHash": "915b40d94d3083e1e771a72eede5effd8c09e9229cac2c3321589d9b8124fa0e",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "fault_injected": true,
+        "fault_observed": true,
+        "recovery_action_grounded": true,
+        "service_recovered": true,
+        "success_control_passed": true,
+        "recovered": true,
+        "passedSteps": 5,
+        "totalSteps": 5,
+        "recovery_stages": 5,
+        "total_recovery_stages": 5
+      },
+      "normalizedEventCount": 333
+    }
+  ]
+}

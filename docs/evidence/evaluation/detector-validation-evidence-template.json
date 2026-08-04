@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "required-detectors-validation-v2",
+  "corpusVersion": "2",
+  "generatedAt": "<ISO-8601>",
+  "provenanceStatement": "synthetic-derived; normalized payloads were not retained, so this evidence must not be called real-trace validation",
+  "sourceEvidenceRefs": [
+    "docs/evidence/evaluation/flagship-five-task-three-agent-20260803.json"
+  ],
+  "manifest": {
+    "manifestHash": "<sha256>",
+    "trainGroupIds": ["<group-id>"],
+    "holdoutGroupIds": ["<group-id>"],
+    "groupLeakageCheck": "passed",
+    "agentIds": ["agent-runlab", "claude-code", "codex"],
+    "caseCounts": {
+      "total": 0,
+      "holdout": 0,
+      "noiseInjected": 0,
+      "missingEvidence": 0,
+      "difficultNegative": 0
+    }
+  },
+  "annotation": {
+    "guidelineVersion": "detector-annotation-v2",
+    "annotatedCases": 0,
+    "doubleAnnotatedCases": 0,
+    "agreement": 0,
+    "adjudicatedCases": 0
+  },
+  "reports": [
+    {
+      "detectorId": "<detector-id>",
+      "holdoutCases": 0,
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "confidenceIntervals": {
+        "method": "group-bootstrap",
+        "confidenceLevel": 0.95,
+        "samples": 1000,
+        "precision": { "lower": 0, "upper": 0 },
+        "recall": { "lower": 0, "upper": 0 },
+        "f1": { "lower": 0, "upper": 0 }
+      },
+      "calibration": { "brier": 0, "ece": 0, "bins": 10 }
+    }
+  ],
+  "limitations": [
+    "No independent real normalized-trace holdout is available in the repository.",
+    "Do not generalize synthetic-derived scores to production prevalence."
+  ]
+}

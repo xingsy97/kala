@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:07.027Z",
+  "scope": "versioned authoritative query API contract, cursor pagination, and resource filters",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-protocol/src/queries.ts": "b9554613f41c71f744821cbda0b836e0c235d7778b8a37ea74dd49d20e971c33",
+    "packages/eval-orchestrator/src/control-plane.ts": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a",
+    "packages/eval-orchestrator/src/control-plane.test.ts": "0892c7aa684fdff79e81acda1f74e2272f9c13fad310d14735c3d7fef89fdb28",
+    "packages/eval-orchestrator/src/http-server.ts": "7472b59a940cb0d3431a97829592dbaef9b188ea3e8bf1bb7a74a5bb9ae785c6",
+    "packages/eval-sdk/src/client.ts": "c50099be0d8c18c535bebf76eba8191586a8a52ed847f51397e94efff27cc7a8",
+    "scripts/evaluation/verify-query-api.mjs": "44257ed5d6a8d83b3c748317f591e6a59f3bec615c02689643c73ba2e617894e"
+  },
+  "requiredTests": [
+    {
+      "test": "EvaluationControlPlane durable authority serves real catalog resources and cursor pagination from accepted immutable specs",
+      "status": "passed",
+      "durationMs": 11.874874999999975
+    },
+    {
+      "test": "EvaluationControlPlane durable authority serves run, trial, and artifact query contracts with cursor pagination and filters",
+      "status": "passed",
+      "durationMs": 67.20397599999978
+    },
+    {
+      "test": "EvaluationControlPlane durable authority publishes only complete eligible canonical evidence and replays one authoritative board for all pivots",
+      "status": "passed",
+      "durationMs": 218.05214000000024
+    },
+    {
+      "test": "EvaluationControlPlane durable authority durably controls defect promotion, reproduction, regression, reports, insights, and immutable audit",
+      "status": "passed",
+      "durationMs": 174.13016800000014
+    },
+    {
+      "test": "EvaluationControlPlane durable authority persists authoritative analysis jobs, validates output manifests, and replays terminal job state",
+      "status": "passed",
+      "durationMs": 103.14948200000026
+    }
+  ],
+  "contract": {
+    "endpoint": "/api/v1/query",
+    "schema": "EvaluationQuerySchema",
+    "resources": [
+      "catalogs",
+      "runs",
+      "trials",
+      "artifacts",
+      "reports",
+      "leaderboards",
+      "analysis-jobs",
+      "analysis-output",
+      "capability-vectors",
+      "platform-metrics",
+      "defects",
+      "reproductions",
+      "regressions",
+      "regression-decisions",
+      "insights",
+      "audit"
+    ],
+    "maximumPageSize": 500,
+    "malformedCursorRejected": true,
+    "invalidPageLimitRejected": true
+  },
+  "filters": {
+    "runsByState": true,
+    "trialsByRunAndState": true,
+    "artifactsByRunAndTrial": true,
+    "leaderboardBySlice": true,
+    "leaderboardActiveAudit": true,
+    "leaderboardAgentModel": true,
+    "leaderboardSort": true,
+    "analysisJobsByRunStateKind": true,
+    "capabilityVectorsByRunAgentMethodology": true,
+    "defectsByRun": true,
+    "reproductionsByFinding": true,
+    "reportsByRun": true
+  },
+  "pagination": {
+    "cursorContinuation": true,
+    "hasMore": true,
+    "total": true,
+    "catalogCoverage": [
+      "agents",
+      "datasets",
+      "tasks",
+      "task-packs",
+      "sandboxes",
+      "verifiers",
+      "detectors"
+    ]
+  }
+}

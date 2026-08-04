@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T11:45:52.230Z",
+  "scope": "ordered non-authoritative SSE notifications with durable sequence catch-up and authoritative Dashboard reload",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-orchestrator/src/http-server.ts": "43ea2e54c598adb9dd6c5b7051bceee8aafa96bcb31a1b9d38d4b192a70655dd",
+    "packages/eval-orchestrator/src/http-server.test.ts": "77712797f9dd452ee0c726b8117cc038e09f81fb3c100cdf4caea21e30cd0960",
+    "packages/eval-dashboard/src/client.ts": "764f00ca77b3d8219b5564fe1d6a3d8ff1c81431b0e1531b81485c116a680f07",
+    "packages/eval-dashboard/src/client.test.ts": "71410b5e5ed75d4fe990cdea545e86963342cb579a30d9c99e9d8f1a974f8268",
+    "packages/eval-dashboard/src/app.tsx": "c0cf80cb947c80e110250869deab450a6d937671c47479fbac1fee32cf261fb9",
+    "packages/eval-dashboard/src/app.test.tsx": "f753c0a54a1984c0991b1e38fc1143133f1339a8c092978a7aeff98bd583a84a",
+    "scripts/evaluation/dashboard-fixture-server.mjs": "e2a19ff6b816761a7e3edcee4949b4595c740fc9205d9276f82ec94f4639ac96",
+    "scripts/evaluation/verify-dashboard-browser.mjs": "d7bfcab214013e8bf047333f0c54397c0638b09ed981ca4e4be86fc0f4940bc6",
+    "scripts/evaluation/verify-live-event-recovery.mjs": "8cb44d003566cc9439ff17365a337981f9c799e5614b435d04f862e40f31c156"
+  },
+  "requiredTests": [
+    {
+      "test": "versioned Control Plane HTTP API serves durable SSE catch-up starting after the requested sequence",
+      "status": "passed",
+      "durationMs": 42.164183000000094
+    },
+    {
+      "test": "versioned Control Plane HTTP API resumes durable SSE catch-up after a dropped connection without replaying acknowledged events",
+      "status": "passed",
+      "durationMs": 61.76030300000002
+    },
+    {
+      "test": "DashboardControlPlane protocol gate reconnects after a dropped event from the last durable sequence and ignores duplicate delivery",
+      "status": "passed",
+      "durationMs": 3.8182369999999537
+    },
+    {
+      "test": "standalone evaluation dashboard treats live events as notifications and reloads the authoritative projection",
+      "status": "passed",
+      "durationMs": 70.52584999999999
+    }
+  ],
+  "server": {
+    "endpoint": "/api/v1/events",
+    "orderedDurableSequence": true,
+    "afterCursor": true,
+    "lastEventId": true,
+    "acknowledgedEventsNotReplayed": true
+  },
+  "dashboard": {
+    "eventPayloadIsNonAuthoritative": true,
+    "projectionReloadAfterNotification": true,
+    "duplicateDeliveryIgnored": true,
+    "sequenceGapDetected": true,
+    "reconnectFromLastContiguousSequence": true,
+    "reconnectStateVisible": true
+  },
+  "browser": {
+    "version": "Chrome/150.0.7871.128",
+    "routeStateChecks": 90,
+    "liveEventRecoveryChecks": 1,
+    "sequence": "2",
+    "liveState": "connected",
+    "authoritativeQueries": 9,
+    "eventRequests": [
+      {
+        "runId": "browser-live-run",
+        "after": "0"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "0"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "2"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "2"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "2"
+      }
+    ],
+    "droppedSequenceDetected": true,
+    "resumedAfterSequence": true
+  },
+  "browserEvidenceSha256": "88a64423cbdd8ab8c0211bf8078c467a04389d0e6d27f8edc8a7e669f5be96d4"
+}

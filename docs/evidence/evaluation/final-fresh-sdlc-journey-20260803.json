@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T05:29:29.374Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + three real Agent backends + LXD sandbox + native verifier",
+  "runId": "fresh-sdlc-journey-20260803052811-19080",
+  "taskPackId": "sdlc-journey",
+  "taskIds": [
+    "service-release-v2"
+  ],
+  "agentIds": [
+    "agent-runlab",
+    "claude-code",
+    "codex"
+  ],
+  "runState": "completed",
+  "startedAt": "2026-08-03T05:28:11.548Z",
+  "completedAt": "2026-08-03T05:29:29.374Z",
+  "durationMs": 77826,
+  "freshSandboxes": 3,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-19080",
+  "gradingOutputHash": "a1f0590b15c156d4db7bf5d17e732fcdd604a6b96920ef9a127a3116d1c64c72",
+  "analysisJobId": "analysis-run-analyze-19080",
+  "analysisOutputHash": "bbc6fac53be4996683c36e7b4a177b8519956723f80da463e028854f32e08c3b",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-sdlc-journey-20260803052811-19080:service-release-v2:agent-runlab:0",
+      "taskId": "service-release-v2",
+      "agentVariantId": "agent-runlab",
+      "resultHash": "8cc5a03ef4b4b8f64cea800792693f19366a50fb3e48aae916c9fbfaaf88d431",
+      "artifactManifestHash": "cfa3e579ebb61a8280c5a2ce40041a822e98c6144aef42bb3e35ce5a4dec78a1",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "investigation_passed": true,
+        "implementation_verified": true,
+        "tests_passed": true,
+        "build_passed": true,
+        "package_created": true,
+        "deploy_succeeded": true,
+        "health_verified": true,
+        "rollback_verified": true,
+        "journey_completed": true,
+        "passedSteps": 8,
+        "totalSteps": 8,
+        "completed_stages": 8,
+        "total_stages": 8
+      },
+      "normalizedEventCount": 79
+    },
+    {
+      "trialId": "fresh-sdlc-journey-20260803052811-19080:service-release-v2:claude-code:0",
+      "taskId": "service-release-v2",
+      "agentVariantId": "claude-code",
+      "resultHash": "ba7ee68ce9543ccb6d299831e13b00f299f5c7a23f78c2ced3f06956042d43e1",
+      "artifactManifestHash": "383070e80243af459f551611b06dbf101ef3afc6fe307ad867e818d99439a059",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "investigation_passed": true,
+        "implementation_verified": true,
+        "tests_passed": true,
+        "build_passed": true,
+        "package_created": true,
+        "deploy_succeeded": true,
+        "health_verified": true,
+        "rollback_verified": true,
+        "journey_completed": true,
+        "passedSteps": 8,
+        "totalSteps": 8,
+        "completed_stages": 8,
+        "total_stages": 8
+      },
+      "normalizedEventCount": 145
+    },
+    {
+      "trialId": "fresh-sdlc-journey-20260803052811-19080:service-release-v2:codex:0",
+      "taskId": "service-release-v2",
+      "agentVariantId": "codex",
+      "resultHash": "ce1c8f2208cb8ec59fbf745d9c4b8a15a21b1eb796180e05f25d576aa5f3dbbd",
+      "artifactManifestHash": "116aa244ffcbd70e5ad38d4a87e3079b763363d6e608b9c4c37bde00fc126ee3",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "investigation_passed": true,
+        "implementation_verified": true,
+        "tests_passed": true,
+        "build_passed": true,
+        "package_created": true,
+        "deploy_succeeded": true,
+        "health_verified": true,
+        "rollback_verified": true,
+        "journey_completed": true,
+        "passedSteps": 8,
+        "totalSteps": 8,
+        "completed_stages": 8,
+        "total_stages": 8
+      },
+      "normalizedEventCount": 351
+    }
+  ]
+}

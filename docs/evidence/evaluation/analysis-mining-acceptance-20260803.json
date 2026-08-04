@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "runId": "fresh-analysis-mining-20260803130402-16759",
+  "generatedAt": "2026-08-03T13:04:05.071Z",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-protocol/src/analyzer.ts": "ba409f3da99827935f3ff46025f25a7814a389fe58fa88a23383b68c3fa01f88",
+    "packages/eval-protocol/src/analysis-jobs.ts": "98a72a6655280c7d666c06a134de7ae756158257d0c3ee8492c8943af44153d6",
+    "packages/eval-protocol/src/commands.ts": "46a68acf47656e8a9296137bdcde1c7f8d26c310f300296626212345da98b374",
+    "packages/eval-protocol/src/defects.ts": "5fb5a9b81f910e8440b7fc0775b5925a6aa4cad56419fc16f02caba5f1d0499f",
+    "packages/eval-protocol/src/queries.ts": "b9554613f41c71f744821cbda0b836e0c235d7778b8a37ea74dd49d20e971c33",
+    "packages/eval-analyzer/src/alignment.ts": "dcc6fd5f95c91d8e648675e6cda8989b5e86afedc3bb95ed362c1559ce609828",
+    "packages/eval-analyzer/src/counterfactual.ts": "b1e1bfb82c36519ffc9398ef6eee5ee818a76f36ff5706304e30358713ae44fb",
+    "packages/eval-analyzer/src/runner.ts": "9d301fd79772c7d0382930e19b9c40fb17a49fafd55f3b0963ff8a3f9328fc8f",
+    "packages/eval-analyzer/src/trace-evidence.ts": "d7a21571d76d11ef15f86053a755212f81d0fe0765e8fb7df87fc988216e9b70",
+    "packages/eval-analyzer/src/reproduction-bundle.ts": "fcc395ab6e7df37c6470073fd9bdffce4405275a4ac5f7259f5701cb99b3967c",
+    "packages/eval-analyzer/src/analyzer.test.ts": "c3fd286a35412f137dc0e283f196f0ed00f76a86ce92ae6497dde3f310f2376b",
+    "packages/eval-analyzer/src/runner.integration.test.ts": "2aae99c3be5a4c861dadcbac904b0deaed4695adb85789d342021ed650f50974",
+    "packages/eval-orchestrator/src/control-plane.ts": "f431d2ac54327510c5a7837d6e5313367870462d3b15bbcda302bccafbc1914a",
+    "packages/eval-orchestrator/src/model.ts": "82cf64be92bff3b5c6cb608f4138816192ecd2f62c2cd6e86367add7b99da919",
+    "packages/eval-orchestrator/src/projection.ts": "7f5156682766fca116a8be415258df102bec647ad59a9eb42fd5b4be7606d54e",
+    "scripts/evaluation/verify-analysis-mining.mjs": "80602b781ef78f80155f8d4a32279084913650fe606189e53251729415f44e4a"
+  },
+  "scope": "fresh public synthetic analyzer lifecycle; no Host session, historical evaluation artifact, or legacy compatibility input",
+  "requiredTests": [
+    {
+      "test": "trace mining and minimization reports the exact first meaningful divergence",
+      "status": "passed",
+      "durationMs": 1.2190130000001318
+    },
+    {
+      "test": "trace mining and minimization aligns cross-Agent semantics, identifies the missing successful action, and measures failed recovery cost",
+      "status": "passed",
+      "durationMs": 4.164277000000084
+    },
+    {
+      "test": "trace mining and minimization clusters unknown failures deterministically and requires human naming for promotion",
+      "status": "passed",
+      "durationMs": 1.0439949999999953
+    },
+    {
+      "test": "trace mining and minimization continues all five interventions from one hash-bound checkpoint",
+      "status": "passed",
+      "durationMs": 1.8426099999999224
+    },
+    {
+      "test": "trace mining and minimization runs a configurable continuation command through a bounded JSON contract",
+      "status": "passed",
+      "durationMs": 23.77737100000013
+    },
+    {
+      "test": "independent analyzer process executes independent alignment, clustering, promotion, and five-way counterfactual jobs with durable authority",
+      "status": "passed",
+      "durationMs": 317.418848
+    },
+    {
+      "test": "independent analyzer process leases a queued job, reads immutable trial evidence, writes verified outputs, and survives Control Plane replay",
+      "status": "passed",
+      "durationMs": 197.48476900000014
+    },
+    {
+      "test": "verified reproduction bundles minimizes, reruns in distinct fresh environments, checks the control, hashes every file, and signs the manifest",
+      "status": "passed",
+      "durationMs": 13.891620999999986
+    }
+  ],
+  "traceAlignment": {
+    "meaningfulEventProjection": true,
+    "volatileCrossAgentFieldsIgnored": true,
+    "successfulFailedPair": true,
+    "crossAgentPair": true,
+    "firstMeaningfulDivergence": true,
+    "missingSuccessfulAction": true,
+    "additionalLoopCost": true,
+    "costAfterDivergence": true
+  },
+  "unknownClustering": {
+    "deterministicFallback": "sha256(normalized action/error sequence)",
+    "analyzerOutputStatus": "unknown",
+    "humanPromotionRequired": true,
+    "durablePromotionAudit": true,
+    "replayVerified": true
+  },
+  "counterfactual": {
+    "immutableCheckpoint": true,
+    "checkpointHashRecomputedByControlPlane": true,
+    "continuationHashRecomputedByControlPlane": true,
+    "sourceFailureFingerprintBound": true,
+    "configuredCommandHarness": true,
+    "interventions": [
+      "corrected_action",
+      "different_backend",
+      "different_model",
+      "corrected_tool_result",
+      "fault_removed"
+    ],
+    "outcomes": [
+      "resolved",
+      "same_failure",
+      "different_failure",
+      "infrastructure_error"
+    ]
+  },
+  "unifiedTrace": {
+    "immutableWorkerTraceInput": true,
+    "analyzerDetectDerivedSpan": true,
+    "reproductionVerifyPerFreshAttempt": true,
+    "successControlSpan": true,
+    "controlPlaneAppendValidation": true
+  },
+  "canonicalJobs": [
+    "trace-alignment",
+    "clustering",
+    "counterfactual"
+  ],
+  "lifecycle": {
+    "freshJournalAndArtifactRoot": true,
+    "standaloneHttpControlPlane": true,
+    "outputManifestHashesVerified": true,
+    "controlPlaneRestartReplay": true,
+    "failures": 0
+  }
+}

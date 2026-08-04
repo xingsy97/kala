@@ -54,7 +54,7 @@ Packet batching and adaptive visual commits are allowed to reduce render cost, b
 - On mobile, suitable short dialogs may present through a shared bottom Sheet.
 - Header and footer remain operable while the body owns scrolling.
 - `visualViewport` and safe-area handling occur at shared surface boundaries, not through per-feature viewport guesses.
-- Long-lived Settings, Operations, Benchmarks, and Artifacts remain page-level workspaces where the existing information architecture specifies them [8].
+- Long-lived Settings, Operations, and Artifacts remain page-level workspaces where the existing information architecture specifies them. Evaluation uses its standalone Dashboard.
 
 ## 4. Delivery phases
 
@@ -205,9 +205,9 @@ Run debugger, enhancement-action, real-provider, and tasks-button checks when th
 - Made Pipeline vertically scrollable on small screens, corrected its incomplete tab semantics, and expanded slide controls to touch-sized targets.
 - Added Docs search labels, status/alert semantics, clear-search recovery, and mobile directory-to-reader navigation.
 - Prevented Create Session cancellation while its durable ACK is pending; added Connect Workspace invite retry, clipboard failure feedback, and shell-safe release URLs.
-- Added Benchmarks mobile list/detail navigation and mobile segmented surfaces for Operations and Artifacts.
+- Added mobile segmented surfaces for Operations and Artifacts.
 - Queue mutation controls are no longer exposed while the Session socket or Workspace is offline.
-- Added `verify:dashboard-top-pages`: deterministic mobile/desktop screenshots for Benchmarks, Operations, Artifacts, Pipeline, and Docs, horizontal-overflow checks, browser console/page-error failure, and visible-control accessible-name checks.
+- Added `verify:dashboard-top-pages`: deterministic mobile/desktop screenshots for Operations, Artifacts, Pipeline, and Docs, horizontal-overflow checks, browser console/page-error failure, and visible-control accessible-name checks.
 - Latest top-page evidence: `/tmp/agent-kernel-top-pages-wFWxHW`.
 
 ### 2026-07-28 — P1 frontend completion slice
@@ -234,6 +234,5 @@ Run debugger, enhancement-action, real-provider, and tasks-button checks when th
 
 [7] `docs/design/dashboard-rendering-performance-plan.md`
 
-[8] `docs/planning/roadmap-notes/product-polish.md`
 
 [9] `docs/design/codebase-efficiency-review-2026-07.md`

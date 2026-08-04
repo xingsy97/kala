@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T08:23:42.941Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + real Agent backends + LXD sandbox + native verifier",
+  "runId": "fresh-sdlc-journey-20260803082241-11931",
+  "taskPackId": "sdlc-journey",
+  "taskIds": [
+    "service-release-v2"
+  ],
+  "agentIds": [
+    "codex"
+  ],
+  "agentConfigs": [
+    {
+      "variantId": "codex",
+      "backendId": "codex",
+      "model": {
+        "provider": "openai",
+        "modelId": "gpt-5.6-sol"
+      },
+      "configHash": "1b5ee32aeb8d8c58387191ceb1d8112622515a75d7c03b3945b10f853849569d",
+      "config": {
+        "baseUrl": "http://192.0.2.5:3000/v1",
+        "transport": "exec-json",
+        "reasoningEffort": "medium"
+      }
+    }
+  ],
+  "runState": "completed",
+  "startedAt": "2026-08-03T08:22:41.920Z",
+  "completedAt": "2026-08-03T08:23:42.941Z",
+  "durationMs": 61021,
+  "freshSandboxes": 1,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-11931",
+  "gradingOutputHash": "52ae7f12880dd5ba543089113608ca4d780e2f84f3cc0170b83e55e7bd0d0c0e",
+  "analysisJobId": "analysis-run-analyze-11931",
+  "analysisOutputHash": "c987e7a6290b86dbc4fd1d3a3b344c4e1a9043aff6297ce322a822d288d03e32",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-sdlc-journey-20260803082241-11931:service-release-v2:codex:0",
+      "taskId": "service-release-v2",
+      "agentVariantId": "codex",
+      "resultHash": "b3771b99cf81e463afc19d74e065af416d73c4b43a56049f3910019a55d9060a",
+      "artifactManifestHash": "ce25d5eb43035aec3a88a8abe54c714387f5033b9aafa5fdc61b126315fe065b",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "investigation_passed": true,
+        "implementation_verified": true,
+        "tests_passed": true,
+        "build_passed": true,
+        "package_created": true,
+        "deploy_succeeded": true,
+        "health_verified": true,
+        "rollback_verified": true,
+        "journey_completed": true,
+        "passedSteps": 8,
+        "totalSteps": 8,
+        "completed_stages": 8,
+        "total_stages": 8
+      },
+      "normalizedEventCount": 25
+    }
+  ]
+}

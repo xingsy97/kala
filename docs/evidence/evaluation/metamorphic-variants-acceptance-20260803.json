@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T09:18:47.355Z",
+  "scope": "deterministic public metamorphic task variants with native semantic-equivalence and memorization/semantic-mutation sensitivity; no historical Session input",
+  "generatorVersion": "1.0.0",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-sdk/src/metamorphic.ts": "fac00145f545402a586b06d535c1b59fcee66b63aab138cfcf9027d1c259aa6a",
+    "packages/eval-sdk/src/metamorphic.test.ts": "e489820a26344ec24294affd5d64bd98d00f0a98d82f5830ec33eb742af66890",
+    "scripts/evaluation/verify-metamorphic-variants.mjs": "e38987426dcaa7b7b8173e4aa6e6993019dfd96789b46bdacf7d1bd4c2fea1dc",
+    "task-packs/metamorphic-v1/greeting-contract/config/runtime.json": "eb2514658a7dc7ab42a1ce86302ca9103fef34b262a637ba69c3f9d7792c58f6",
+    "task-packs/metamorphic-v1/greeting-contract/package.json": "789cabc1a876890d4643cc9f4b0129811b90853ea29d38ec21db43a6c21e81bf",
+    "task-packs/metamorphic-v1/greeting-contract/src/cli.mjs": "d5f71f9a39322792d1dd628dcc2f98bc1b7a164be8cc038cb705f9c4d51a5c96",
+    "task-packs/metamorphic-v1/greeting-contract/src/format.mjs": "5b4d5ea632436d637ad4dc5723eb00699d4fdce3dfc3cb7d4e4389a1accf0b74",
+    "task-packs/metamorphic-v1/greeting-contract/TASK.md": "c0a638984b4187d1deefe034fed193c4ce58149bc49f7d7549280b17d9697c3b",
+    "task-packs/metamorphic-v1/greeting-contract/tests/contract.test.mjs": "ad36e9a533812c857faae0968cbe620ef0cb909b7bfa1394586ab0552c71fc00"
+  },
+  "baseVerifier": {
+    "passed": true,
+    "signature": "671f5f8c0a746729c590ac00e38453a873e92f4857156f285edb05c16c915e73",
+    "samples": 3,
+    "invalidArityRejected": true
+  },
+  "variants": [
+    {
+      "variantId": "path-rename",
+      "kind": "path_rename",
+      "seed": 20260803,
+      "manifestHash": "605ef08baa714a2bdea9fa74f3c6b313d693a53dfc522eca2ea43611bfe74190",
+      "verifier": {
+        "passed": true,
+        "signature": "671f5f8c0a746729c590ac00e38453a873e92f4857156f285edb05c16c915e73",
+        "samples": 3,
+        "invalidArityRejected": true
+      }
+    },
+    {
+      "variantId": "requirement-rewording",
+      "kind": "requirement_rewording",
+      "seed": 20260804,
+      "manifestHash": "05f5bb12a8bdd28ce7bf0656d28dafc1e724b78eb8189c11ac643be06ea1cce2",
+      "verifier": {
+        "passed": true,
+        "signature": "671f5f8c0a746729c590ac00e38453a873e92f4857156f285edb05c16c915e73",
+        "samples": 3,
+        "invalidArityRejected": true
+      }
+    },
+    {
+      "variantId": "irrelevant-file",
+      "kind": "irrelevant_file",
+      "seed": 20260805,
+      "manifestHash": "4f477b4479fac9509cb10653337c8e904bd54669163029f011bacf706d7b3e5d",
+      "verifier": {
+        "passed": true,
+        "signature": "671f5f8c0a746729c590ac00e38453a873e92f4857156f285edb05c16c915e73",
+        "samples": 3,
+        "invalidArityRejected": true
+      }
+    },
+    {
+      "variantId": "function-order",
+      "kind": "function_order",
+      "seed": 20260806,
+      "manifestHash": "f6481a9058eceada2f7f4dca3fcf9ded172922bc98d69841f75fe1945d5db8b0",
+      "verifier": {
+        "passed": true,
+        "signature": "671f5f8c0a746729c590ac00e38453a873e92f4857156f285edb05c16c915e73",
+        "samples": 3,
+        "invalidArityRejected": true
+      }
+    },
+    {
+      "variantId": "test-output-format",
+      "kind": "test_output_format",
+      "seed": 20260807,
+      "manifestHash": "cbd1c8bb13cddc4d803caa62698e34816e29e3c05bd0c1e039db5dced381241f",
+      "verifier": {
+        "passed": true,
+        "signature": "671f5f8c0a746729c590ac00e38453a873e92f4857156f285edb05c16c915e73",
+        "samples": 3,
+        "invalidArityRejected": true
+      }
+    },
+    {
+      "variantId": "nonsemantic-config",
+      "kind": "nonsemantic_config",
+      "seed": 20260808,
+      "manifestHash": "f9719544c16dd2157aaf8e7549dffa5cb1eb9fd60ccfc3a2ac58c766ac91ee63",
+      "verifier": {
+        "passed": true,
+        "signature": "671f5f8c0a746729c590ac00e38453a873e92f4857156f285edb05c16c915e73",
+        "samples": 3,
+        "invalidArityRejected": true
+      }
+    }
+  ],
+  "sensitivity": {
+    "brittlePathCandidate": {
+      "basePassed": true,
+      "variantPassed": false,
+      "detectedBrittlePathAssumption": true
+    },
+    "semanticMutation": {
+      "basePassed": true,
+      "mutantPassed": false,
+      "detectedSemanticChange": true
+    }
+  }
+}

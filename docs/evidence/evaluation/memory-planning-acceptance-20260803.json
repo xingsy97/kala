@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T09:46:59.228Z",
+  "scope": "memory/planning v1 retention, isolation, correction, deletion, compaction, plan-graph property tests and fresh Codex unified lifecycle; no historical Session input",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "adapters/benchmarks/common/src/index.ts": "50eea59b627280b14922ed49a4414e73fac8c86f46f1f60544c1b85666b59d97",
+    "adapters/benchmarks/memory-planning/src/index.ts": "2993039b08b2632d486d8a71147548d53f46301f0f883fe9e85415b8859e9d0a",
+    "adapters/benchmarks/memory-planning/src/index.test.ts": "5b57089d2c4e31c74760cc27a2755df93da1245a1f951816dd7fa8c4fda52d84",
+    "scripts/evaluation/run-real-task-pack.mjs": "3ef6f632d12d09effd33163c3331df96e716494e72e388559185dd2bb38b30c5",
+    "scripts/evaluation/verify-memory-planning-lifecycle.mjs": "9001e4d6fd17c42343f2900015f17a4f9b9782ad35704c6b6b4a6cf72cc8d63c",
+    "task-packs/memory-planning-v1/release-handoff/TASK.md": "1da8cfb493b5afcf0dfb9c54b27facf5d03b0d51aa54d079d5eb408bec625440",
+    "task-packs/memory-planning-v1/release-handoff/response.json": "54fb9c1710015cab07ec56a04e26848767e69470b66b54b551cd6edb09794138",
+    "task-packs/memory-planning-v1/release-handoff/memory/workspace-release/01-intake.md": "33374ad6cd89b9c18cc9691578cd79e13f20cbc190ddf67ecc7f83fc8bc4f277",
+    "task-packs/memory-planning-v1/release-handoff/memory/workspace-release/02-compaction-summary.md": "3616900ef272b03b911d409993a81ce5f33e8962e76a2ae9d57c65dc61480aa5",
+    "task-packs/memory-planning-v1/release-handoff/memory/workspace-release/03-correction-and-forgetting.md": "95422d5ac1685249ffe33ca454c86c82fc18da1717d5b7fe4cbdfa2c1bd6087a",
+    "task-packs/memory-planning-v1/release-handoff/memory/foreign-workspace/snapshot.md": "e59d9afa4769ab6ab322e6f702aa336b6eca8d38c00f354f6db1c71c76652ae4",
+    "task-packs/memory-planning-v1/release-handoff/incident/path-drift.json": "0f4cf2ce177ad4c1d205c7910b561d09d6853c5e9563efe526bdbe4abd456428",
+    "task-packs/memory-planning-v1/release-handoff/scripts/run-step.mjs": "04e2a77797fbb660c93c6ca32a758e7b1f66aa8014b8c56db9d8654d9d0ffba7",
+    "task-packs/memory-planning-v1/release-handoff/scripts/validate-submission.mjs": "90e1c0f0ce3c867ca7827384d9d603e70d7d65253933591ba2df1c93c893a317",
+    "task-packs/memory-planning-v1/release-handoff/tests/contracts.test.mjs": "67b5283fa1940fbc736ed1370494ee33c0bfd6b2ee299f44e97bd6829e13bb1d"
+  },
+  "runEvidence": {
+    "path": "docs/evidence/evaluation/fresh-memory-planning-codex-20260803.json",
+    "sha256": "ace6c1b611ee34d76acf5ec1c5c5b7f69801fea206ee594340d5b3067d30537c"
+  },
+  "runId": "fresh-memory-planning-20260803094524-36651",
+  "taskId": "release-handoff",
+  "agentVariantId": "codex",
+  "normalizedEventCount": 375,
+  "resultHash": "6bd3b502f9d4d8b58fd9e5a521f13719534464e940654a293b0cfc9aed6f64dc",
+  "artifactManifestHash": "256cc3f141d052fbde966ff71b8f6823846299391c7459c2572cc0075dc4dfb4",
+  "nativeMetrics": {
+    "memory_recall": 1,
+    "memory_precision": 1,
+    "stale_memory_use_rate": 0,
+    "correction_compliance": 1,
+    "deletion_compliance": 1,
+    "cross_workspace_isolation": 1,
+    "compaction_retention": 1,
+    "long_term_recall": 1,
+    "prerequisite_edge_precision": 1,
+    "prerequisite_edge_recall": 1,
+    "parallel_branch_recall": 1,
+    "blocked_task_violation_rate": 0,
+    "replan_compliance": 1,
+    "plan_execution_alignment": 1,
+    "verified_completion_rate": 1,
+    "plan_bloat_ratio": 0,
+    "plan_converged": true,
+    "verifier_protocol_valid": true,
+    "passedSteps": 1,
+    "totalSteps": 1
+  },
+  "gradingJobId": "grading-run-grade-36651",
+  "analysisJobId": "analysis-run-analyze-36651",
+  "cleanupVerified": true,
+  "runtimeResidue": {
+    "instances": [],
+    "networks": [],
+    "acls": []
+  }
+}

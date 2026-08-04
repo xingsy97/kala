@@ -1,0 +1,39 @@
+name: Real Model Evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        type: choice
+        options: [task-pack, swe-bench-subset]
+        required: true
+  schedule:
+    - cron: '41 2 * * 6'
+
+permissions:
+  contents: read
+
+jobs:
+  container-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    container:
+      image: node:22-bookworm
+    env:
+      AGENT_EVAL_CREDENTIAL_LOCAL_API_KEY: ${{ secrets.AGENT_EVAL_CREDENTIAL_LOCAL_API_KEY }}
+      AGENT_EVAL_BASE_URL: ${{ vars.AGENT_EVAL_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Run selected expensive subset
+        env:
+          SUITE: ${{ inputs.suite || 'task-pack' }}
+        run: |
+          test -n "$AGENT_EVAL_CREDENTIAL_LOCAL_API_KEY"
+          if [ "$SUITE" = swe-bench-subset ]; then
+            pnpm run evaluation:run-real-swe-bench -- --output tmp/real-model-evaluation.json
+          else
+            pnpm run evaluation:run-real-task-pack -- --tasks 1 --output tmp/real-model-evaluation.json
+          fi

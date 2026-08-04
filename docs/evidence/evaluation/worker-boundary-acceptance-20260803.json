@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T11:51:44.489Z",
+  "scope": "Worker-only ownership of untrusted sandbox, Agent, verifier, artifact staging, and cleanup execution",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "packages/eval-worker/src/trial-runner.ts": "6fbef62444d3c96b846835bbd562f24588781b902bc62a4231a8f8504d80421f",
+    "packages/eval-worker/src/artifact-stager.ts": "388b3f27e6078a2bdd6f61216d44e19e7c6dfa42427472833d9b1c8021e157ad",
+    "packages/eval-worker/src/cleanup.ts": "df16d3cb699c3306aa1e82a111f2084b62f4ba3b889a6cfee10e1d836cb632e5",
+    "packages/eval-worker/src/plugin-loader.ts": "626e729ba0bf4c52b75a7aa2a6738e1d733eb18fa8be88ce0b9c67a730e6bcaa",
+    "packages/eval-worker/src/registry.ts": "44f6b05ba6d7853a84a1c2e4f0a79772d7e9b0e92bff7c5140363db7e7f9a087",
+    "packages/eval-worker/package.json": "57a4003263138f16d75b2bb6bdd3dd76062a793069d253e7bbe36dc37219e3c1",
+    "deploy/evaluation/compose.yaml": "0c4a8319b1f7527fb82d42d3ff393a9bf3f6b96a0d17d46df5894c0bbee3a4b8",
+    "deploy/evaluation/acceptance/compose.worker-acceptance.yaml": "9c034bf60e88dfa9ac6deab4a0d7e673d15297e0aa6ed03a17ccac1a5bf30c49",
+    "deploy/evaluation/images/Dockerfile.worker": "914d57c64f2aaccb8ba4e91349e72aaceca012c04c08399dc707594dcf35fdee",
+    "docs/architecture/agent-evaluation-package-boundaries.json": "734ba03092e12fe0a103c569dca9dc844bab7437f82e7a8d1a14be6617b80541",
+    "docs/architecture/agent-evaluation-platform-ownership.json": "37504fa21cb4919ead432f04e45cd11e5068abb33d218a09775bf3498bc07eae",
+    "scripts/evaluation/verify-worker-boundary.mjs": "5ad80c7f710631bf309cec77645fd4db1133741395b44ebad29adbf8e9b1b5d8"
+  },
+  "ownership": {
+    "successChain": [
+      "this.options.registry.sandbox(",
+      "this.options.registry.agent(",
+      "provider.create(",
+      "backend.start(",
+      "runVerifier(",
+      "provider.collect(",
+      "this.stager.stage(",
+      "this.stager.verify(",
+      "await destroyAndVerify(provider, target)",
+      "commitTrialResult("
+    ],
+    "failureCleanupVerified": true,
+    "workerProductionDependencies": [
+      "@agent-kernel/eval-protocol",
+      "@agent-kernel/eval-sdk"
+    ],
+    "nonWorkerPackagesAudited": [
+      "packages/eval-orchestrator",
+      "packages/eval-analyzer",
+      "packages/eval-dashboard"
+    ],
+    "nonWorkerSourceFilesAudited": 28,
+    "dockerSocketConsumers": [
+      "worker"
+    ]
+  },
+  "runtime": {
+    "workerImage": "sha256:83718e975fc67e09d7c445a3df7fcc8fe194226eb6e8da39d842c34067492dbb",
+    "runId": "fresh-worker-msd22o52-6c757265",
+    "lifecycleStates": [
+      "leased",
+      "environment_preparing",
+      "agent_running",
+      "artifacts_collecting",
+      "verifying",
+      "analyzing",
+      "completed"
+    ],
+    "managedTrialContainersAfterCompletion": 0,
+    "sandboxConformanceProviders": [
+      "docker",
+      "lxd-container",
+      "lxd-vm"
+    ],
+    "sandboxConformanceChecks": 21,
+    "freshRunLabRuns": [
+      "fresh-sdlc-journey-20260803052811-19080",
+      "fresh-swe-bench-astropy__astropy-12907-20260803052938-37670"
+    ],
+    "freshRunLabSandboxes": 6,
+    "cleanupVerified": true,
+    "runLabCoLocationMarkers": [
+      "adapter.started",
+      "hostVersion",
+      "executorVersion",
+      "runlab.driver.ready",
+      "runlab.completed"
+    ]
+  },
+  "evidenceFiles": {
+    "docs/evidence/evaluation/worker-deployment-runtime-20260803.json": "af9590ca960ec20ea7aa38d1b5086024aabb7ef0959b88ed528ed37a712f4678",
+    "docs/evidence/evaluation/worker-deployment-acceptance-20260803.json": "174016c4b5873e570a3f9496d04be2dd7d6e4d46fda8f399dc5b35968cb857e7",
+    "docs/evidence/evaluation/sandbox-conformance-20260803.json": "429f3495c38158c2191f14ff582e62f761c3c1135b5ddd5fdefdc826e6acfba7",
+    "docs/evidence/evaluation/final-fresh-sdlc-journey-20260803.json": "42b6117f9310850020845c985239644ba9c7a60448b23db7204202149f3417b4",
+    "docs/evidence/evaluation/final-fresh-swe-bench-astropy-12907-20260803.json": "e458fcc3e3d4529cb7a99f3dd47ee7d72f267f03b53ff841db3ed43d1b033a78"
+  }
+}

@@ -1,0 +1,3488 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:05:21.609Z",
+  "scope": "fresh standalone production bundle and synthetic authoritative Control Plane; no Host session or historical artifact input",
+  "browser": {
+    "version": "Chrome/150.0.7871.128",
+    "executable": "/snap/bin/chromium",
+    "headless": true
+  },
+  "budgets": {
+    "routeLoadMs": 3000,
+    "maximumApiPageSize": 100,
+    "minimumTextContrast": 4.5
+  },
+  "routeInventory": [
+    {
+      "id": "overview",
+      "path": "/",
+      "label": "Overview"
+    },
+    {
+      "id": "library",
+      "path": "/library",
+      "label": "Test Library"
+    },
+    {
+      "id": "runs",
+      "path": "/runs",
+      "label": "Runs"
+    },
+    {
+      "id": "leaderboard",
+      "path": "/leaderboard",
+      "label": "Leaderboard"
+    },
+    {
+      "id": "analysis",
+      "path": "/analysis",
+      "label": "Analysis"
+    },
+    {
+      "id": "defects",
+      "path": "/defects",
+      "label": "Defects"
+    },
+    {
+      "id": "regression",
+      "path": "/regression",
+      "label": "Regression"
+    },
+    {
+      "id": "insights",
+      "path": "/insights",
+      "label": "Insights"
+    },
+    {
+      "id": "reports",
+      "path": "/reports",
+      "label": "Reports"
+    },
+    {
+      "id": "administration",
+      "path": "/administration",
+      "label": "Administration"
+    }
+  ],
+  "stateMatrix": [
+    {
+      "route": "overview",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Overview",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 1014,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "overview"
+    },
+    {
+      "route": "overview",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "loadMs": 45,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "overview"
+    },
+    {
+      "route": "overview",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 36,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "overview"
+    },
+    {
+      "route": "overview",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 32,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "overview"
+    },
+    {
+      "route": "overview",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 32,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "overview",
+      "retryRecovered": true
+    },
+    {
+      "route": "overview",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "status": "Capability unavailableOverview is unavailable on this Control Plane version.",
+      "loadMs": 31,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "overview"
+    },
+    {
+      "route": "overview",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 25,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "overview"
+    },
+    {
+      "route": "overview",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "overview",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "overview",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Overview",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "overview",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "library",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Test Library",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 949,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "library"
+    },
+    {
+      "route": "library",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "loadMs": 38,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "library"
+    },
+    {
+      "route": "library",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 31,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "library"
+    },
+    {
+      "route": "library",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 33,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "library"
+    },
+    {
+      "route": "library",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 32,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "library",
+      "retryRecovered": true
+    },
+    {
+      "route": "library",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "status": "Capability unavailableTest Library is unavailable on this Control Plane version.",
+      "loadMs": 26,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "library"
+    },
+    {
+      "route": "library",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 26,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "library"
+    },
+    {
+      "route": "library",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "library",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "library",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Test Library",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "library",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "runs",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Runs",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 948,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "runs"
+    },
+    {
+      "route": "runs",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "loadMs": 40,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "runs"
+    },
+    {
+      "route": "runs",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 30,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "runs"
+    },
+    {
+      "route": "runs",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 36,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "runs"
+    },
+    {
+      "route": "runs",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 32,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "runs",
+      "retryRecovered": true
+    },
+    {
+      "route": "runs",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "status": "Capability unavailableRuns is unavailable on this Control Plane version.",
+      "loadMs": 29,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "runs"
+    },
+    {
+      "route": "runs",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 27,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "runs"
+    },
+    {
+      "route": "runs",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "runs",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "runs",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Runs",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "runs",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Leaderboard",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 947,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "leaderboard"
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "loadMs": 42,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "leaderboard"
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 35,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "leaderboard"
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 45,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "leaderboard"
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 34,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "leaderboard",
+      "retryRecovered": true
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "status": "Capability unavailableLeaderboard is unavailable on this Control Plane version.",
+      "loadMs": 38,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "leaderboard"
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 28,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "leaderboard"
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "leaderboard",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "leaderboard",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Leaderboard",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "leaderboard",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "analysis",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Analysis",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 952,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "analysis"
+    },
+    {
+      "route": "analysis",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "loadMs": 40,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "analysis"
+    },
+    {
+      "route": "analysis",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 31,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "analysis"
+    },
+    {
+      "route": "analysis",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 42,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "analysis"
+    },
+    {
+      "route": "analysis",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 37,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "analysis",
+      "retryRecovered": true
+    },
+    {
+      "route": "analysis",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "status": "Capability unavailableAnalysis is unavailable on this Control Plane version.",
+      "loadMs": 31,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "analysis"
+    },
+    {
+      "route": "analysis",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 27,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "analysis"
+    },
+    {
+      "route": "analysis",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "analysis",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "analysis",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Analysis",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "analysis",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "defects",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Defects",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 949,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "defects"
+    },
+    {
+      "route": "defects",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "loadMs": 32,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "defects"
+    },
+    {
+      "route": "defects",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 32,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "defects"
+    },
+    {
+      "route": "defects",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 36,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "defects"
+    },
+    {
+      "route": "defects",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 32,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "defects",
+      "retryRecovered": true
+    },
+    {
+      "route": "defects",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "status": "Capability unavailableDefects is unavailable on this Control Plane version.",
+      "loadMs": 26,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "defects"
+    },
+    {
+      "route": "defects",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 26,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "defects"
+    },
+    {
+      "route": "defects",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "defects",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "defects",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Defects",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "defects",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "regression",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Regression",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 949,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "regression"
+    },
+    {
+      "route": "regression",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "loadMs": 35,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "regression"
+    },
+    {
+      "route": "regression",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 29,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "regression"
+    },
+    {
+      "route": "regression",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 32,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "regression"
+    },
+    {
+      "route": "regression",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 28,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "regression",
+      "retryRecovered": true
+    },
+    {
+      "route": "regression",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "status": "Capability unavailableRegression is unavailable on this Control Plane version.",
+      "loadMs": 26,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "regression"
+    },
+    {
+      "route": "regression",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 26,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "regression"
+    },
+    {
+      "route": "regression",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "regression",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "regression",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Regression",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "regression",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "insights",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Insights",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 949,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "insights"
+    },
+    {
+      "route": "insights",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "loadMs": 31,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "insights"
+    },
+    {
+      "route": "insights",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 29,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "insights"
+    },
+    {
+      "route": "insights",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 29,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "insights"
+    },
+    {
+      "route": "insights",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 45,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "insights",
+      "retryRecovered": true
+    },
+    {
+      "route": "insights",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "status": "Capability unavailableInsights is unavailable on this Control Plane version.",
+      "loadMs": 26,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "insights"
+    },
+    {
+      "route": "insights",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 25,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "insights"
+    },
+    {
+      "route": "insights",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "insights",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "insights",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Insights",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "insights",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "reports",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Reports",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 952,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "reports"
+    },
+    {
+      "route": "reports",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "loadMs": 33,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "reports"
+    },
+    {
+      "route": "reports",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 29,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "reports"
+    },
+    {
+      "route": "reports",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 29,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "reports"
+    },
+    {
+      "route": "reports",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 29,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "reports",
+      "retryRecovered": true
+    },
+    {
+      "route": "reports",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "status": "Capability unavailableReports is unavailable on this Control Plane version.",
+      "loadMs": 25,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "reports"
+    },
+    {
+      "route": "reports",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 26,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "reports"
+    },
+    {
+      "route": "reports",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "reports",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "reports",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Reports",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "reports",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    },
+    {
+      "route": "administration",
+      "loadState": "loading",
+      "ariaBusy": "true",
+      "heading": "Administration",
+      "status": "LoadingConnecting to the local Control Plane…",
+      "loadMs": 947,
+      "scenario": "loading",
+      "expected": "loading",
+      "expectedRoute": "administration"
+    },
+    {
+      "route": "administration",
+      "loadState": "ready",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "loadMs": 35,
+      "scenario": "ready",
+      "expected": "ready",
+      "expectedRoute": "administration"
+    },
+    {
+      "route": "administration",
+      "loadState": "empty",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "status": "EmptyAuthoritative state is current.",
+      "loadMs": 34,
+      "scenario": "empty",
+      "expected": "empty",
+      "expectedRoute": "administration"
+    },
+    {
+      "route": "administration",
+      "loadState": "partial",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "status": "Partial dataShowing the first authoritative page. More records are available.",
+      "loadMs": 37,
+      "scenario": "partial",
+      "expected": "partial",
+      "expectedRoute": "administration"
+    },
+    {
+      "route": "administration",
+      "loadState": "error",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "status": "ErrorFIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "loadMs": 34,
+      "scenario": "error",
+      "expected": "error",
+      "expectedRoute": "administration",
+      "retryRecovered": true
+    },
+    {
+      "route": "administration",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "status": "Capability unavailableAdministration is unavailable on this Control Plane version.",
+      "loadMs": 28,
+      "scenario": "unsupported-capability",
+      "expected": "unsupported",
+      "expectedRoute": "administration"
+    },
+    {
+      "route": "administration",
+      "loadState": "unsupported",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "status": "Capability unavailableUnsupported Control Plane protocol. Dashboard supports v1.",
+      "loadMs": 29,
+      "scenario": "unsupported-protocol",
+      "expected": "unsupported",
+      "expectedRoute": "administration"
+    },
+    {
+      "route": "administration",
+      "loadState": "offline",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "status": "OfflineAuthoritative state is current.Try again",
+      "scenario": "offline",
+      "expected": "offline",
+      "expectedRoute": "administration",
+      "reconnectRecovered": true
+    },
+    {
+      "route": "administration",
+      "loadState": "stale",
+      "ariaBusy": "false",
+      "heading": "Administration",
+      "status": "Stale dataThe last authoritative projection is retained, but refresh failed: FIXTURE_UNAVAILABLE: The authoritative fixture is unavailable.Try again",
+      "scenario": "stale",
+      "expected": "stale",
+      "expectedRoute": "administration",
+      "retainedAuthoritativeContent": true,
+      "retryRecovered": true
+    }
+  ],
+  "responsive": [
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 62,
+      "route": "overview",
+      "heading": "Overview",
+      "navItems": 10,
+      "activeName": "Overview",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 57,
+      "route": "library",
+      "heading": "Test Library",
+      "navItems": 10,
+      "activeName": "Test Library",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 60,
+      "route": "runs",
+      "heading": "Runs",
+      "navItems": 10,
+      "activeName": "Runs",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 63,
+      "route": "leaderboard",
+      "heading": "Leaderboard",
+      "navItems": 10,
+      "activeName": "Leaderboard",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 62,
+      "route": "analysis",
+      "heading": "Analysis",
+      "navItems": 10,
+      "activeName": "Analysis",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 61,
+      "route": "defects",
+      "heading": "Defects",
+      "navItems": 10,
+      "activeName": "Defects",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 58,
+      "route": "regression",
+      "heading": "Regression",
+      "navItems": 10,
+      "activeName": "Regression",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 65,
+      "route": "insights",
+      "heading": "Insights",
+      "navItems": 10,
+      "activeName": "Insights",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 56,
+      "route": "reports",
+      "heading": "Reports",
+      "navItems": 10,
+      "activeName": "Reports",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 900,
+      "loadMs": 59,
+      "route": "administration",
+      "heading": "Administration",
+      "navItems": 10,
+      "activeName": "Administration",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 59,
+      "route": "overview",
+      "heading": "Overview",
+      "navItems": 10,
+      "activeName": "Overview",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 57,
+      "route": "library",
+      "heading": "Test Library",
+      "navItems": 10,
+      "activeName": "Test Library",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 68,
+      "route": "runs",
+      "heading": "Runs",
+      "navItems": 10,
+      "activeName": "Runs",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 62,
+      "route": "leaderboard",
+      "heading": "Leaderboard",
+      "navItems": 10,
+      "activeName": "Leaderboard",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 58,
+      "route": "analysis",
+      "heading": "Analysis",
+      "navItems": 10,
+      "activeName": "Analysis",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 59,
+      "route": "defects",
+      "heading": "Defects",
+      "navItems": 10,
+      "activeName": "Defects",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 56,
+      "route": "regression",
+      "heading": "Regression",
+      "navItems": 10,
+      "activeName": "Regression",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 56,
+      "route": "insights",
+      "heading": "Insights",
+      "navItems": 10,
+      "activeName": "Insights",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 58,
+      "route": "reports",
+      "heading": "Reports",
+      "navItems": 10,
+      "activeName": "Reports",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "tablet",
+      "width": 820,
+      "height": 1000,
+      "loadMs": 58,
+      "route": "administration",
+      "heading": "Administration",
+      "navItems": 10,
+      "activeName": "Administration",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 61,
+      "route": "overview",
+      "heading": "Overview",
+      "navItems": 10,
+      "activeName": "Overview",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 57,
+      "route": "library",
+      "heading": "Test Library",
+      "navItems": 10,
+      "activeName": "Test Library",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 59,
+      "route": "runs",
+      "heading": "Runs",
+      "navItems": 10,
+      "activeName": "Runs",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 59,
+      "route": "leaderboard",
+      "heading": "Leaderboard",
+      "navItems": 10,
+      "activeName": "Leaderboard",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 60,
+      "route": "analysis",
+      "heading": "Analysis",
+      "navItems": 10,
+      "activeName": "Analysis",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 53,
+      "route": "defects",
+      "heading": "Defects",
+      "navItems": 10,
+      "activeName": "Defects",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 61,
+      "route": "regression",
+      "heading": "Regression",
+      "navItems": 10,
+      "activeName": "Regression",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 54,
+      "route": "insights",
+      "heading": "Insights",
+      "navItems": 10,
+      "activeName": "Insights",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 56,
+      "route": "reports",
+      "heading": "Reports",
+      "navItems": 10,
+      "activeName": "Reports",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "loadMs": 62,
+      "route": "administration",
+      "heading": "Administration",
+      "navItems": 10,
+      "activeName": "Administration",
+      "navNames": [
+        "Overview",
+        "Test Library",
+        "Runs",
+        "Leaderboard",
+        "Analysis",
+        "Defects",
+        "Regression",
+        "Insights",
+        "Reports",
+        "Administration"
+      ],
+      "rootHorizontalOverflow": false,
+      "unnamedButtons": 0,
+      "unlabeledInputs": 0,
+      "scrollRegionsKeyboardReachable": true,
+      "landmarks": {
+        "complementary": true,
+        "navigation": true,
+        "main": true
+      },
+      "oneH1": true,
+      "routeMatches": true
+    }
+  ],
+  "largePages": [
+    {
+      "route": "overview",
+      "loadMs": 65,
+      "responsePageLimit": 8,
+      "rows": [
+        7,
+        8,
+        1,
+        8,
+        8,
+        6
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": false,
+          "totalRows": 7,
+          "renderedRows": 7
+        },
+        {
+          "virtualized": false,
+          "totalRows": 8,
+          "renderedRows": 8
+        },
+        {
+          "virtualized": false,
+          "totalRows": 1,
+          "renderedRows": 1
+        },
+        {
+          "virtualized": false,
+          "totalRows": 8,
+          "renderedRows": 8
+        },
+        {
+          "virtualized": false,
+          "totalRows": 8,
+          "renderedRows": 8
+        },
+        {
+          "virtualized": false,
+          "totalRows": 6,
+          "renderedRows": 6
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "library",
+      "loadMs": 70,
+      "responsePageLimit": 100,
+      "rows": [
+        25,
+        25,
+        25,
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "runs",
+      "loadMs": 66,
+      "responsePageLimit": 100,
+      "rows": [
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "leaderboard",
+      "loadMs": 70,
+      "responsePageLimit": 100,
+      "rows": [
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "analysis",
+      "loadMs": 70,
+      "responsePageLimit": 100,
+      "rows": [
+        25,
+        25,
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 1100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "defects",
+      "loadMs": 64,
+      "responsePageLimit": 100,
+      "rows": [
+        25,
+        25,
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "regression",
+      "loadMs": 70,
+      "responsePageLimit": 100,
+      "rows": [
+        25,
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "insights",
+      "loadMs": 60,
+      "responsePageLimit": 100,
+      "rows": [
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "reports",
+      "loadMs": 58,
+      "responsePageLimit": 100,
+      "rows": [
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    },
+    {
+      "route": "administration",
+      "loadMs": 68,
+      "responsePageLimit": 100,
+      "rows": [
+        25,
+        25,
+        25,
+        25,
+        25,
+        25
+      ],
+      "virtualizedTables": [
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 200,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 200,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        },
+        {
+          "virtualized": true,
+          "totalRows": 100,
+          "renderedRows": 24
+        }
+      ],
+      "scrollableTables": true,
+      "rootHorizontalOverflow": false,
+      "partialNotice": true
+    }
+  ],
+  "keyboard": {
+    "firstTabTarget": "skip-link",
+    "skipLinkVisibleTop": "16px",
+    "skipLinkOutline": "auto",
+    "skippedToMain": true,
+    "navFocusOutline": "solid",
+    "keyboardNavigation": "Test Library"
+  },
+  "leaderboard": {
+    "pivots": [
+      {
+        "pivot": "model",
+        "pressed": "model",
+        "urlPivot": "model",
+        "urlSlice": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "exactSlice": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "badge": "Authoritative denominatorSWE-Bench Verified · sampled subset · 500/5000 · seed 42 · stratified by repository · filters language=python (10%)aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "rows": 1,
+        "csvDownload": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.csv",
+        "jsonDownload": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+      },
+      {
+        "pivot": "agent_type",
+        "pressed": "agent type",
+        "urlPivot": "agent_type",
+        "urlSlice": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "exactSlice": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "badge": "Authoritative denominatorSWE-Bench Verified · sampled subset · 500/5000 · seed 42 · stratified by repository · filters language=python (10%)aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "rows": 1,
+        "csvDownload": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.csv",
+        "jsonDownload": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+      },
+      {
+        "pivot": "test_dataset",
+        "pressed": "test dataset",
+        "urlPivot": "test_dataset",
+        "urlSlice": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "exactSlice": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "badge": "Authoritative denominatorSWE-Bench Verified · sampled subset · 500/5000 · seed 42 · stratified by repository · filters language=python (10%)aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "rows": 1,
+        "csvDownload": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.csv",
+        "jsonDownload": "leaderboard-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+      }
+    ],
+    "requests": [
+      {
+        "resource": "leaderboard",
+        "pivot": "model",
+        "sliceManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "view": "active",
+        "sortBy": "primary_metric",
+        "sortDirection": "desc",
+        "page": {
+          "limit": 100
+        }
+      },
+      {
+        "resource": "leaderboard",
+        "pivot": "model",
+        "sliceManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "view": "active",
+        "sortBy": "primary_metric",
+        "sortDirection": "desc",
+        "page": {
+          "limit": 100
+        }
+      },
+      {
+        "resource": "leaderboard",
+        "pivot": "agent_type",
+        "sliceManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "view": "active",
+        "sortBy": "primary_metric",
+        "sortDirection": "desc",
+        "page": {
+          "limit": 100
+        }
+      },
+      {
+        "resource": "leaderboard",
+        "pivot": "test_dataset",
+        "sliceManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "view": "active",
+        "sortBy": "primary_metric",
+        "sortDirection": "desc",
+        "page": {
+          "limit": 100
+        }
+      },
+      {
+        "resource": "leaderboard",
+        "pivot": "test_dataset",
+        "sliceManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "view": "audit",
+        "agentType": "codex",
+        "modelId": "fixture-model",
+        "sortBy": "cost",
+        "sortDirection": "asc",
+        "page": {
+          "limit": 100
+        }
+      },
+      {
+        "resource": "leaderboard",
+        "pivot": "test_dataset",
+        "sliceManifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "view": "active",
+        "agentType": "codex",
+        "modelId": "fixture-model",
+        "sortBy": "cost",
+        "sortDirection": "asc",
+        "page": {
+          "limit": 100
+        }
+      }
+    ],
+    "querySliceHashes": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "expansion": {
+      "links": [
+        {
+          "text": "Contributing runs",
+          "href": "/runs?runId=browser-run-1"
+        },
+        {
+          "text": "Task-level results",
+          "href": "/runs?runId=browser-run-1&trialState=completed"
+        },
+        {
+          "text": "Methodology",
+          "href": "/reports?runId=browser-run-1"
+        },
+        {
+          "text": "Artifacts",
+          "href": "/runs?runId=browser-run-1&trialId="
+        }
+      ],
+      "comparabilityKey": "swe-bench-verified|2|test|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|verified-1|dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd|official"
+    },
+    "audit": {
+      "url": {
+        "fixture": "ready",
+        "pivot": "test_dataset",
+        "sliceManifestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "view": "audit",
+        "sortBy": "cost",
+        "sortDirection": "asc",
+        "agentType": "codex",
+        "modelId": "fixture-model"
+      },
+      "view": "audit",
+      "heading": "Invalidated & superseded audit",
+      "ranks": [
+        "—"
+      ],
+      "statuses": [
+        "superseded"
+      ]
+    },
+    "comparison": {
+      "urlSlice": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "requestedSlice": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "badge": "Exploratory denominator · no shared rankSWE-Bench Verified · sampled subset · 500/5000 · seed 42 · stratified by repository · filters language=pythoncccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "ranks": [
+        "—"
+      ],
+      "warning": "Not directly rank-comparableThe requested slice has a different immutable denominator. It will appear in a separate unranked group and will never receive a shared rank.I understand · load unranked comparison",
+      "requestsBeforePreview": 5,
+      "requestsAfterPreview": 5
+    }
+  },
+  "liveEvents": {
+    "sequence": "2",
+    "liveState": "connected",
+    "authoritativeQueries": 9,
+    "eventRequests": [
+      {
+        "runId": "browser-live-run",
+        "after": "0"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "0"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "2"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "2"
+      },
+      {
+        "runId": "browser-live-run",
+        "after": "2"
+      }
+    ],
+    "droppedSequenceDetected": true,
+    "resumedAfterSequence": true
+  },
+  "operatorCommands": {
+    "sessionBeforeReload": "operator-123e4567-e89b-42d3-a456-426614170008",
+    "sessionAfterReload": "operator-123e4567-e89b-42d3-a456-426614170008",
+    "cancel": {
+      "beforeConfirmation": 0,
+      "afterWrongConfirmation": 0,
+      "wrongConfirmationDisabled": true,
+      "command": {
+        "schemaVersion": 1,
+        "commandId": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-42661417000f",
+        "idempotencyKey": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-42661417000f",
+        "submittedAt": "2026-08-03T13:05:20.704Z",
+        "type": "run.cancel",
+        "runId": "browser-run-1",
+        "reason": "confirmed by local operator session operator-123e4567-e89b-42d3-a456-426614170008"
+      },
+      "authoritativeRunQueries": 4
+    },
+    "publish": {
+      "beforeConfirmation": 1,
+      "initiallyDisabled": true,
+      "command": {
+        "schemaVersion": 1,
+        "commandId": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-426614170002",
+        "idempotencyKey": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-426614170002",
+        "submittedAt": "2026-08-03T13:05:20.760Z",
+        "type": "leaderboard.publish",
+        "runId": "browser-run-1"
+      }
+    },
+    "deletion": {
+      "queriesBefore": 20,
+      "impactQueried": true,
+      "beforeConfirmation": 2,
+      "command": {
+        "schemaVersion": 1,
+        "commandId": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-42661417000a",
+        "idempotencyKey": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-42661417000a",
+        "submittedAt": "2026-08-03T13:05:20.831Z",
+        "type": "run.delete",
+        "runId": "browser-run-1",
+        "expectedImpactHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "confirmation": "delete:browser-run-1"
+      },
+      "protectedDeleteDisabled": true,
+      "commandsAfterProtectedDelete": 3
+    },
+    "retry": {
+      "failedStateRestored": "failed",
+      "committedStateRestoredBeforeRefresh": "committed",
+      "committedStateRestoredAfterRefresh": "committed",
+      "firstIdempotencyKey": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-426614170004",
+      "retryIdempotencyKey": "operator-123e4567-e89b-42d3-a456-426614170008:123e4567-e89b-42d3-a456-426614170004",
+      "sameCommand": true,
+      "attempts": 2
+    }
+  },
+  "productWorkflows": {
+    "runDetails": {
+      "selectedRun": "browser-run-1",
+      "selectedTrial": "browser-trial-1",
+      "trialRows": "1",
+      "artifactLinks": 1,
+      "traceState": "ready",
+      "traceVisualHidden": "true",
+      "traceRows": "4",
+      "traceRenderedRows": "4",
+      "traceTableKeyboardReachable": "0",
+      "immutablePreviewEntry": true
+    },
+    "largeTrace": {
+      "totalRows": 180,
+      "renderedRows": 24,
+      "virtualized": "true",
+      "keyboardReachable": "0"
+    },
+    "analysis": {
+      "route": "analysis",
+      "panels": 5,
+      "commandWorkflow": true,
+      "supportedCommandText": "Supported here: run.grade, run.analyze, run.align, run.cluster, run.counterfactual"
+    },
+    "defects": {
+      "route": "defects",
+      "panels": 4,
+      "commandWorkflow": true,
+      "supportedCommandText": "Supported here: defect.promote, failure-cluster.promote"
+    },
+    "regression": {
+      "route": "regression",
+      "panels": 3,
+      "commandWorkflow": true,
+      "supportedCommandText": "Supported here: regression.evaluate"
+    },
+    "insights": {
+      "route": "insights",
+      "panels": 2,
+      "commandWorkflow": true,
+      "supportedCommandText": "Supported here: insight.record"
+    },
+    "reports": {
+      "route": "reports",
+      "panels": 3,
+      "commandWorkflow": true,
+      "supportedCommandText": "Supported here: report.generate",
+      "reportDownloads": 7
+    },
+    "administration": {
+      "route": "administration",
+      "panels": 8,
+      "commandWorkflow": true,
+      "supportedCommandText": "Supported here: retention.set",
+      "retentionVisible": true
+    }
+  },
+  "internationalization": {
+    "initial": {
+      "language": "zh-CN",
+      "heading": "排行榜",
+      "activeNav": "排行榜",
+      "selector": "zh-CN"
+    },
+    "switched": {
+      "language": "en",
+      "heading": "Leaderboard",
+      "stored": "en"
+    }
+  },
+  "contrast": {
+    "background": "#07100f",
+    "ratios": {
+      "ink": 17.6,
+      "muted": 7.21,
+      "green": 14.08,
+      "amber": 11.16
+    }
+  },
+  "telemetry": {
+    "pageErrors": [],
+    "consoleErrors": [
+      {
+        "context": "overview:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "overview:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "overview:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "library:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "library:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "runs:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "runs:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "runs:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "runs:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "runs:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "runs:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "runs:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "runs:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "leaderboard:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "leaderboard:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "leaderboard:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "analysis:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "analysis:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "analysis:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "analysis:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "analysis:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "analysis:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "analysis:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "defects:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "defects:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "defects:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "defects:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "defects:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "defects:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "defects:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "regression:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "regression:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "regression:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "regression:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "regression:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "insights:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "insights:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "insights:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "reports:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "reports:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "reports:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:error",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:offline",
+        "message": "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "administration:stale",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      },
+      {
+        "context": "operator-commands:retryable-failure",
+        "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      }
+    ],
+    "httpErrors": [
+      {
+        "context": "overview:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "overview:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "library:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "runs:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "runs:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "runs:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "runs:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "runs:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "leaderboard:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "leaderboard:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "analysis:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "analysis:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "analysis:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "analysis:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "analysis:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "analysis:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "defects:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "defects:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "defects:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "defects:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "defects:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "defects:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "regression:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "regression:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "regression:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "regression:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "insights:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "insights:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "reports:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "reports:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:error",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "administration:stale",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/query"
+      },
+      {
+        "context": "operator-commands:retryable-failure",
+        "status": 503,
+        "url": "http://127.0.0.1:42377/api/v1/commands"
+      }
+    ],
+    "requestFailures": [
+      {
+        "context": "overview:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "overview:offline",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "overview:stale",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "overview:stale",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "library:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "runs:offline",
+        "url": "http://127.0.0.1:42377/api/v1/query",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "runs:offline",
+        "url": "http://127.0.0.1:42377/favicon.ico",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "runs:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "runs:offline",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "runs:stale",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "runs:stale",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "leaderboard:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "analysis:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "defects:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "regression:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "insights:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "reports:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "administration:offline",
+        "url": "http://127.0.0.1:42377/api/v1/capabilities",
+        "error": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      {
+        "context": "live-event-recovery",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-live-run&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "live-event-recovery",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-live-run&after=2",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "live-event-recovery",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-live-run&after=2",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "operator-commands",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "operator-commands",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "operator-commands",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "context": "operator-commands:retryable-failure",
+        "url": "http://127.0.0.1:42377/api/v1/events?runId=browser-run-1&after=0",
+        "error": "net::ERR_ABORTED"
+      }
+    ]
+  },
+  "summary": {
+    "routes": 10,
+    "routeStateChecks": 90,
+    "responsiveChecks": 30,
+    "largePageChecks": 10,
+    "leaderboardPivots": 3,
+    "liveEventRecoveryChecks": 1,
+    "operatorCommandChecks": 5,
+    "productWorkflowChecks": 8,
+    "failures": 0
+  },
+  "sourceHashes": [
+    {
+      "path": "packages/eval-dashboard/src/app.tsx",
+      "sha256": "93dd9de3f4319351602ac92cc9f6da897643054bb6c121e2aae5291ec857a375"
+    },
+    {
+      "path": "packages/eval-dashboard/src/client.ts",
+      "sha256": "764f00ca77b3d8219b5564fe1d6a3d8ff1c81431b0e1531b81485c116a680f07"
+    },
+    {
+      "path": "packages/eval-dashboard/src/operator-session.ts",
+      "sha256": "c67c7b7ce9ee8c7326f0a60605dd3e83c98416c6eb2c084c42a5a2772cf512b7"
+    },
+    {
+      "path": "packages/eval-dashboard/src/routes.ts",
+      "sha256": "dbbcb86a840420ee89847bd200269dd7efe58980e5ecbd2557132b61f2cd8a47"
+    },
+    {
+      "path": "packages/eval-dashboard/src/styles.css",
+      "sha256": "14ad83f1e146a9ceaba5aa0c64068416311b994fe775626ea25b833d125af453"
+    },
+    {
+      "path": "scripts/evaluation/dashboard-fixture-server.mjs",
+      "sha256": "b0d35fa5366ee41a6354d46ca0fcce5c11ac362a2f39923ee2a43af60906ace2"
+    },
+    {
+      "path": "scripts/evaluation/verify-dashboard-browser.mjs",
+      "sha256": "d7bfcab214013e8bf047333f0c54397c0638b09ed981ca4e4be86fc0f4940bc6"
+    }
+  ]
+}

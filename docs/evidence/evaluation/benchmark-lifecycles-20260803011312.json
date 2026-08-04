@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T01:13:12.883Z",
+  "scope": "fresh adapter, sandbox, and verifier lifecycle; not Agent performance evidence",
+  "results": [
+    { "benchmark": "terminal-bench", "provider": "docker", "metrics": { "reward": 1, "resolved": true, "verifier_protocol_valid": true } },
+    { "benchmark": "program-bench", "provider": "docker", "metrics": { "submission_contract": true, "compile_passed": true, "tests_passed": true, "verifier_protocol_valid": true } },
+    { "benchmark": "swe-marathon", "provider": "docker", "metrics": { "resolved_tasks": 2, "total_tasks": 3, "completion_rate": 0.6666666666666666, "verifier_protocol_valid": true } },
+    { "benchmark": "sdlc-journey", "provider": "lxd-container", "metrics": { "journey_completed": true, "completed_stages": 8, "total_stages": 8 } },
+    { "benchmark": "fault-scenarios", "provider": "lxd-container", "metrics": { "recovered": true, "recovery_stages": 5, "total_recovery_stages": 5 } }
+  ]
+}

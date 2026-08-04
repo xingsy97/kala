@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T11:52:31.905Z",
+  "scope": "current-source accepted-spec Control Plane to Worker to fresh Docker sandbox to native verifier to canonical evidence to grader/analyzer lifecycle for swe-marathon; no historical Session input",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "scripts/evaluation/verify-remaining-benchmark-lifecycles.mjs": "11cd32a34a79b7ac5c18939cf8a5d7eacce225b18654d12a6aca4bd7504fb278",
+    "adapters/benchmarks/swe-marathon/src/index.ts": "c37314db99a4d1be5ecaa9c581f23dac0d859530b562ebfe5915da1252a4b62c",
+    "adapters/benchmarks/custom-task-pack/src/index.ts": "1cc7ca55951aa73c8b8860482a956961e58b88a62f8c7ecb0ebc40a2dd3bb298",
+    "packages/eval-worker/src/trial-runner.ts": "6fbef62444d3c96b846835bbd562f24588781b902bc62a4231a8f8504d80421f",
+    "packages/eval-orchestrator/src/control-plane.ts": "4ec9400515ff4a4f6bacdb42c228a69fce30bf2591de170c06e76845e91fe222",
+    "packages/eval-analyzer/src/runner.ts": "170bf18a83fe3324dd6952d88557f24f9a2a0faced8ada19ebbbc5600735db44",
+    "packages/eval-sdk/src/metamorphic.ts": "fac00145f545402a586b06d535c1b59fcee66b63aab138cfcf9027d1c259aa6a"
+  },
+  "mode": "swe-marathon",
+  "runId": "fresh-swe-marathon-lifecycle-20260803115230-21515",
+  "runState": "completed",
+  "trialCount": 1,
+  "freshSandboxes": 1,
+  "cleanupVerified": true,
+  "workerErrors": [],
+  "gradingJobId": "grading-run-grade-21515",
+  "analysisJobId": "analysis-run-analyze-21515",
+  "sweMarathon": {
+    "trialId": "fresh-swe-marathon-lifecycle-20260803115230-21515:public-release-marathon:deterministic-lifecycle-agent:0",
+    "taskId": "public-release-marathon",
+    "benchmarkId": "swe-marathon",
+    "sandboxId": "eval-docker-fresh-swe-marathon-lifecycle-ebc295fc",
+    "resultHash": "cef6927a94f9af129f54c6b6abffed3958c4c98242cf90799b1efc56d830a996",
+    "artifactManifestHash": "907416e8561c688c72a901ec7f517d38c8d53ef292f0f41610040de498d70d70",
+    "normalizedEventCount": 2,
+    "nativeMetrics": {
+      "resolved_tasks": 2,
+      "total_tasks": 3,
+      "passedSteps": 1,
+      "totalSteps": 1,
+      "completion_rate": 0.6666666666666666,
+      "verifier_protocol_valid": true
+    }
+  },
+  "runtimeResidue": {
+    "instances": [],
+    "networks": [],
+    "acls": []
+  }
+}

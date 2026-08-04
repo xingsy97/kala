@@ -150,7 +150,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run typecheck
-      - run: pnpm run test
+      - run: pnpm run test:extended
       - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --no-native
       - run: pnpm run verify:release-assets
       - name: Install-time smoke on release assets (host + dashboard bundle)

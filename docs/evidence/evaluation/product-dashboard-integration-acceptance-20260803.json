@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:04:29.850Z",
+  "scope": "the three permitted Product Dashboard integration links only; no evaluation state, benchmark route, artifact browser, forwarding API, or legacy compatibility reader",
+  "requiredTests": [
+    {
+      "test": "AppShellNav renders nav tabs and marks the active section",
+      "status": "passed",
+      "durationMs": 8.863407000000052
+    },
+    {
+      "test": "SessionMetadataDialog exports a governed private reference and links only an explicit evaluation reference",
+      "status": "passed",
+      "durationMs": 63.888496999999916
+    },
+    {
+      "test": "SessionMetadataDialog does not infer an evaluation link without an explicit session-scoped reference",
+      "status": "passed",
+      "durationMs": 12.222815999999966
+    },
+    {
+      "test": "evaluation integration uses the standalone default URL and accepts an explicit HTTP URL",
+      "status": "passed",
+      "durationMs": 0.4806499999999687
+    },
+    {
+      "test": "evaluation integration rejects non-HTTP and malformed configured URLs",
+      "status": "passed",
+      "durationMs": 0.4246049999999286
+    },
+    {
+      "test": "evaluation integration creates links only from an explicit reference scoped to the same session",
+      "status": "passed",
+      "durationMs": 0.5012580000000071
+    },
+    {
+      "test": "evaluation integration exports only a governed reference without session content or workspace paths",
+      "status": "passed",
+      "durationMs": 0.22556300000019291
+    }
+  ],
+  "sourceHashes": {
+    "packages/dashboard/src/evaluation-integration.ts": "5dbd609031ac1d3e7152f64b93f98463bd6439a601cf01a9e0a3e7adaf39f878",
+    "packages/dashboard/src/evaluation-integration.test.ts": "1b6f3f16da0600d2b52201090f3d72ca650ddde452d7de2cf42e774ba01cfbdf",
+    "packages/dashboard/src/app-shell/AppShellNav.tsx": "06403f2f7dd55f706be75b690556015f5bb3e9b9f4d99aa33ed3e43a4841c315",
+    "packages/dashboard/src/app-shell/AppShellNav.test.tsx": "92585fdfd9b184d963329e34e5cc84febd17c53732bdd4782c6ae735df318981",
+    "packages/dashboard/src/features/chat/SessionMetadataDialog.tsx": "2acd5adbf35d73fedfae051ec48792546ad66afad4805a57000d1740d6bd9f33",
+    "packages/dashboard/src/features/chat/SessionMetadataDialog.test.tsx": "9985722e7428e1433ace54bbb4a4a190bf87d2180a63c94800808ee03be013ab",
+    "scripts/evaluation/verify-product-dashboard-integration.mjs": "e6801bc6c01761b68e86f262c7006f5fc98ee9cd8206137a62c3c25aaefe4d02"
+  },
+  "integrations": {
+    "standalonePlatformLink": true,
+    "governedSessionTaskCandidateExport": true,
+    "explicitSessionScopedRunDefectLink": true
+  },
+  "privacy": {
+    "contentIncluded": false,
+    "workspacePathIncluded": false,
+    "privateOnly": true,
+    "explicitReviewRequired": true,
+    "redactionAndProvenanceApprovalRequired": true
+  },
+  "security": {
+    "httpHttpsOnly": true,
+    "invalidConfiguredUrlFallsBackToLocalStandalone": true,
+    "inferredEvaluationLinkRejected": true
+  }
+}

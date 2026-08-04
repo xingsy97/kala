@@ -1,0 +1,570 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T05:27:48.108Z",
+  "scope": "fresh standalone Compose deployment acceptance; deterministic canonical trial; durable grader and analyzer",
+  "baseUrl": "http://127.0.0.1:13100",
+  "runId": "fresh-compose-mscsfmed-353b8086",
+  "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+  "run": {
+    "accepted": {
+      "schemaVersion": 1,
+      "spec": {
+        "schemaVersion": 1,
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "taskPack": {
+          "id": "custom-task-pack",
+          "version": "1.0.0",
+          "evaluatedSlice": {
+            "sliceId": "compose-smoke-full",
+            "dataset": {
+              "datasetId": "compose-smoke",
+              "displayName": "Compose Smoke",
+              "version": "1.0.0",
+              "sourceRevision": "compose-smoke-revision",
+              "manifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "taskIdsHash": "0bdb9ab2edf71893ce148e433c5ab70409964f185b4a1acb95c13ab4e6ebe058",
+              "totalItems": 1,
+              "officialBenchmark": false,
+              "license": "MIT",
+              "evaluationPermission": "local standalone deployment acceptance"
+            },
+            "selectionKind": "full",
+            "selectionSpec": {
+              "kind": "full",
+              "taskIdsHash": "0bdb9ab2edf71893ce148e433c5ab70409964f185b4a1acb95c13ab4e6ebe058"
+            },
+            "selectedItems": 1,
+            "coverageRatio": 1,
+            "taskIdsManifestRef": "catalog/compose-smoke.json",
+            "sliceManifestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        "agents": [
+          {
+            "variantId": "compose-agent",
+            "backendId": "custom-command",
+            "agentVersion": "acceptance",
+            "model": {
+              "modelId": "deterministic-fixture"
+            },
+            "configHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "config": {},
+            "credentialRefs": []
+          }
+        ],
+        "execution": {
+          "repeats": 1,
+          "priority": 0,
+          "maxConcurrency": 1,
+          "maxConcurrencyPerBackend": 1,
+          "maxConcurrencyPerProvider": 1,
+          "leaseMs": 30000,
+          "timeoutMs": 30000,
+          "inactivityTimeoutMs": 5000,
+          "retryPolicy": {
+            "maxAttempts": 1,
+            "retryableCategories": [],
+            "backoffMs": 0
+          }
+        },
+        "sandbox": {
+          "provider": "docker",
+          "imageDigest": "alpine@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "readOnlyBase": true,
+          "ephemeralOverlay": true,
+          "resources": {
+            "cpu": 1,
+            "memoryMb": 256,
+            "diskMb": 256,
+            "pids": 64
+          },
+          "network": {
+            "mode": "denied",
+            "allowedDestinations": []
+          },
+          "artifactAllowlist": []
+        },
+        "verification": {
+          "verifierId": "compose-native",
+          "verifierVersion": "1.0.0",
+          "officialRequired": false,
+          "timeoutMs": 30000,
+          "configHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "analysis": {
+          "detectorIds": [
+            "instruction-drift"
+          ],
+          "repeatsRequired": 1,
+          "configHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "createdAt": "2026-08-03T05:27:47.750Z"
+      },
+      "specHash": "c00e366e37485cf060931fb63ccd7c68cee0d22dc9193e6acd016de0a2b972f1",
+      "acceptedAt": "2026-08-03T05:27:47.772Z"
+    },
+    "state": "completed",
+    "events": [
+      {
+        "schemaVersion": 1,
+        "sequence": 0,
+        "at": "2026-08-03T05:27:47.772Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "draft"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 1,
+        "at": "2026-08-03T05:27:47.786Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "trial.created",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "taskId": "compose-smoke-task",
+          "agentVariantId": "compose-agent",
+          "backendId": "custom-command",
+          "sandboxProvider": "docker",
+          "repeatIndex": 0
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 2,
+        "at": "2026-08-03T05:27:47.786Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "validating"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 3,
+        "at": "2026-08-03T05:27:47.786Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "preparing"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 4,
+        "at": "2026-08-03T05:27:47.786Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "running"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 5,
+        "at": "2026-08-03T05:27:47.797Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "type": "trial.state",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "state": "leased",
+          "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 6,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "type": "trial.state",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "state": "environment_preparing",
+          "resultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 7,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "type": "trial.state",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "state": "agent_running",
+          "resultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 8,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "type": "trial.state",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "state": "artifacts_collecting",
+          "resultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 9,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "type": "trial.state",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "state": "verifying",
+          "resultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 10,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "type": "trial.state",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "state": "analyzing",
+          "resultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 11,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "type": "trial.state",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+          "state": "completed",
+          "resultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 12,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "verifying"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 13,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "analyzing"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 14,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "reporting"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 15,
+        "at": "2026-08-03T05:27:47.801Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "completed"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 16,
+        "at": "2026-08-03T05:27:47.844Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "command.requested",
+        "data": {
+          "commandType": "run.grade",
+          "commandId": "run-grade-123e4567-e89b-42d3-a456-42661417000c"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 17,
+        "at": "2026-08-03T05:27:47.849Z",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "producer": "control-plane",
+        "type": "command.requested",
+        "data": {
+          "commandType": "run.analyze",
+          "commandId": "run-analyze-123e4567-e89b-42d3-a456-426614170005"
+        }
+      }
+    ],
+    "trialIds": [
+      "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0"
+    ],
+    "createdSequence": 2,
+    "resourceUsage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "wallMs": 1
+    },
+    "updatedAt": "2026-08-03T05:27:47.849Z",
+    "startedAt": "2026-08-03T05:27:47.786Z",
+    "lastLeaseSequence": 5
+  },
+  "trial": {
+    "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+    "runId": "fresh-compose-mscsfmed-353b8086",
+    "taskId": "compose-smoke-task",
+    "agentVariantId": "compose-agent",
+    "backendId": "custom-command",
+    "sandboxProvider": "docker",
+    "repeatIndex": 0,
+    "state": "completed",
+    "attempt": 1,
+    "updatedAt": "2026-08-03T05:27:47.801Z",
+    "terminalResultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38",
+    "evidence": {
+      "schemaVersion": 1,
+      "runId": "fresh-compose-mscsfmed-353b8086",
+      "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+      "agentVariantId": "compose-agent",
+      "taskId": "compose-smoke-task",
+      "repeatIndex": 0,
+      "environmentLock": {
+        "schemaVersion": 1,
+        "provider": "docker",
+        "imageDigest": "alpine@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "repositoryRevision": "compose-smoke-revision",
+        "dependencyLockHashes": {},
+        "redactedEnvironment": {},
+        "resourcePolicyHash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "networkPolicyHash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "toolchainVersions": {},
+        "fixtureVersions": {},
+        "faultInjectorVersions": {}
+      },
+      "nativeEventsRef": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/native-events.jsonl",
+      "normalizedEventsRef": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/normalized-events.jsonl",
+      "normalizedEventCount": 1,
+      "analyzerInputRef": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/analyzer-input.json",
+      "finalDiffRef": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/final.diff",
+      "stdoutRef": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/stdout.log",
+      "stderrRef": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/stderr.log",
+      "usage": {
+        "availability": "unavailable",
+        "reason": "deterministic deployment acceptance"
+      },
+      "benchmarkResult": {
+        "schemaVersion": 1,
+        "benchmarkId": "custom-task-pack",
+        "verifierId": "compose-native",
+        "verifierVersion": "1.0.0",
+        "nativeMetrics": {
+          "passed": true
+        },
+        "rawResultRef": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/verifier-result.json",
+        "officialEvidence": false
+      },
+      "artifactManifest": {
+        "schemaVersion": 1,
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "trialId": "fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170006",
+        "generatedAt": "2026-08-03T05:27:47.801Z",
+        "entries": [
+          {
+            "artifactId": "native-events.jsonl",
+            "path": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/native-events.jsonl",
+            "mediaType": "application/x-ndjson",
+            "bytes": 21,
+            "sha256": "1e5a53e8fd46b881bbbf77faa5496c703681d7fd1e7a72f77e0ab7626a572511",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "normalized-events.jsonl",
+            "path": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/normalized-events.jsonl",
+            "mediaType": "application/x-ndjson",
+            "bytes": 110,
+            "sha256": "38335f3d1f4b2745b14a0bd94049316f0b59ecf4097a0a94c97602c311a38865",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "analyzer-input.json",
+            "path": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/analyzer-input.json",
+            "mediaType": "application/json",
+            "bytes": 1262,
+            "sha256": "8c8cf3ac0e832198b3891f6da99fa9114fd6c549d73a6e19dc6dfadb6aac0cdd",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "final.diff",
+            "path": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/final.diff",
+            "mediaType": "text/plain; charset=utf-8",
+            "bytes": 31,
+            "sha256": "ce8d24c50da8c0bde0f7c89bf6e11e1578f556e6af88893f05c010e5aee5c242",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "stdout.log",
+            "path": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/stdout.log",
+            "mediaType": "text/plain; charset=utf-8",
+            "bytes": 19,
+            "sha256": "8d60871a0631a6ed8d04439a90f1808cc50598fc4dc450f65805a26cc1f23d18",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "stderr.log",
+            "path": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/stderr.log",
+            "mediaType": "text/plain; charset=utf-8",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "verifier-result.json",
+            "path": "fresh-compose-mscsfmed-353b8086/fresh-compose-mscsfmed-353b8086:compose-smoke-task:compose-agent:0/verifier-result.json",
+            "mediaType": "application/json",
+            "bytes": 15,
+            "sha256": "11c11db30f4b3f6c758722ba3e27eea08145b7d212f6a157451e364b48475280",
+            "redaction": "passed",
+            "classification": "operator"
+          }
+        ],
+        "manifestHash": "de8f14d3dc017dcaa179369076a078d509c4c99e38564d3f416c87be9f5bba6d"
+      },
+      "evidenceLevel": "native",
+      "resultHash": "146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+    }
+  },
+  "jobs": [
+    {
+      "schemaVersion": 1,
+      "protocolVersion": 1,
+      "jobId": "grading-run-grade-123e4567-e89b-42d3-a456-42661417000c",
+      "runId": "fresh-compose-mscsfmed-353b8086",
+      "kind": "grading",
+      "inputRefs": [
+        "trial-result:146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+      ],
+      "inputManifestHash": "e674529b9f781365ee9d3af7d7e80ff677622f8e1c8758b7a60ca46fd9dd3519",
+      "implementationId": "compose-native",
+      "implementationVersion": "1.0.0",
+      "configHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "attempt": 0,
+      "state": "completed",
+      "createdAt": "2026-08-03T05:27:47.844Z",
+      "updatedAt": "2026-08-03T05:27:47.988Z",
+      "executorId": "analyzer-compose-grader",
+      "startedAt": "2026-08-03T05:27:47.960Z",
+      "finishedAt": "2026-08-03T05:27:47.988Z",
+      "heartbeatAt": "2026-08-03T05:27:47.960Z",
+      "leaseExpiresAt": "2026-08-03T05:28:17.960Z",
+      "outputManifestRef": "analysis/grading-run-grade-123e4567-e89b-42d3-a456-42661417000c/output-manifest.json",
+      "outputManifestHash": "6bab3c2df7144c9d4814de066ae49e81981978d984828d3aa8c4c5e8171abab5",
+      "output": {
+        "schemaVersion": 1,
+        "jobId": "grading-run-grade-123e4567-e89b-42d3-a456-42661417000c",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "inputManifestHash": "e674529b9f781365ee9d3af7d7e80ff677622f8e1c8758b7a60ca46fd9dd3519",
+        "generatedAt": "2026-08-03T05:27:47.986Z",
+        "outputs": [
+          {
+            "outputId": "grading-146a1bc17b8b192fa5090d39",
+            "kind": "grading-result",
+            "artifactRef": "analysis/grading-run-grade-123e4567-e89b-42d3-a456-42661417000c/grading-146a1bc17b8b192fa5090d39.json",
+            "mediaType": "application/json",
+            "bytes": 964,
+            "sha256": "c752e3b70f29826f38dcb42cbd223aace89e68ee0a7b7cedba84fdc80e8f1e53"
+          }
+        ],
+        "manifestHash": "6bab3c2df7144c9d4814de066ae49e81981978d984828d3aa8c4c5e8171abab5"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "protocolVersion": 1,
+      "jobId": "analysis-run-analyze-123e4567-e89b-42d3-a456-426614170005",
+      "runId": "fresh-compose-mscsfmed-353b8086",
+      "kind": "detectors",
+      "inputRefs": [
+        "trial-result:146a1bc17b8b192fa5090d390c33282440ceedab755e0cba00ea10b26fb54a38"
+      ],
+      "inputManifestHash": "7d4b31264540367f1c6d005962dccd004ba4c4bf465b3b401c33588ce81a8a46",
+      "implementationId": "eval-analyzer",
+      "implementationVersion": "0.0.0",
+      "configHash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "detectorIds": [
+        "instruction-drift"
+      ],
+      "attempt": 0,
+      "state": "completed",
+      "createdAt": "2026-08-03T05:27:47.849Z",
+      "updatedAt": "2026-08-03T05:27:47.975Z",
+      "executorId": "analyzer-compose",
+      "startedAt": "2026-08-03T05:27:47.945Z",
+      "finishedAt": "2026-08-03T05:27:47.975Z",
+      "heartbeatAt": "2026-08-03T05:27:47.945Z",
+      "leaseExpiresAt": "2026-08-03T05:28:17.945Z",
+      "outputManifestRef": "analysis/analysis-run-analyze-123e4567-e89b-42d3-a456-426614170005/output-manifest.json",
+      "outputManifestHash": "9ee592bc3c690e0b00cd8c8438b3a079508f91ecd566bed0a39bf49d3c519f84",
+      "output": {
+        "schemaVersion": 1,
+        "jobId": "analysis-run-analyze-123e4567-e89b-42d3-a456-426614170005",
+        "runId": "fresh-compose-mscsfmed-353b8086",
+        "inputManifestHash": "7d4b31264540367f1c6d005962dccd004ba4c4bf465b3b401c33588ce81a8a46",
+        "generatedAt": "2026-08-03T05:27:47.971Z",
+        "outputs": [],
+        "manifestHash": "9ee592bc3c690e0b00cd8c8438b3a079508f91ecd566bed0a39bf49d3c519f84"
+      }
+    }
+  ]
+}

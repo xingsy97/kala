@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T08:47:26.602Z",
+  "scope": "fresh standalone Control Plane + Worker + grader + analyzer + real Agent backends + LXD sandbox + native verifier",
+  "runId": "fresh-terminal-bench-20260803084645-27768",
+  "taskPackId": "terminal-bench",
+  "taskIds": [
+    "release-ledger-reconciliation"
+  ],
+  "agentIds": [
+    "codex"
+  ],
+  "agentConfigs": [
+    {
+      "variantId": "codex",
+      "backendId": "codex",
+      "model": {
+        "provider": "openai",
+        "modelId": "gpt-5.6-sol"
+      },
+      "configHash": "b0bc87c8e4c7004748fa15755efe8c33c78cdba673431d756ca16fcca733aa7a",
+      "config": {
+        "baseUrl": "http://192.0.2.5:3000/v1",
+        "transport": "app-server",
+        "reasoningEffort": "medium"
+      }
+    }
+  ],
+  "runState": "completed",
+  "startedAt": "2026-08-03T08:46:44.990Z",
+  "completedAt": "2026-08-03T08:47:26.602Z",
+  "durationMs": 41612,
+  "freshSandboxes": 1,
+  "cleanupVerified": true,
+  "environmentLockEqualAcrossAgents": true,
+  "gradingJobId": "grading-run-grade-27768",
+  "gradingOutputHash": "457cc412962d05c978a97893921f8ed2e8e76f8c932e70852eaf9a1a21976e70",
+  "analysisJobId": "analysis-run-analyze-27768",
+  "analysisOutputHash": "cb8ef7e3dea0586bf179dc98d38d45482b6588ef3bffe951bda116ccb39d0a4b",
+  "defects": 0,
+  "workerErrors": [],
+  "trials": [
+    {
+      "trialId": "fresh-terminal-bench-20260803084645-27768:release-ledger-reconciliation:codex:0",
+      "taskId": "release-ledger-reconciliation",
+      "agentVariantId": "codex",
+      "resultHash": "8ba14f160ac3dd72c105719fdd9251e9a8029563bd02d7f480e43f855380b5e3",
+      "artifactManifestHash": "3a6c52d1e8d56683a359c0388e0b589c74e1982dbf62586a5d7dddf4ca75bd4f",
+      "evidenceLevel": "native",
+      "nativeMetrics": {
+        "reward": 1,
+        "passedSteps": 1,
+        "totalSteps": 1,
+        "verifier_protocol_valid": true,
+        "resolved": true
+      },
+      "normalizedEventCount": 207
+    }
+  ]
+}

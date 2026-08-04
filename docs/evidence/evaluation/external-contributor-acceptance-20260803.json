@@ -1,0 +1,353 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-04T10:05:21.934Z",
+  "scope": "clean temporary workspaces using packed public eval-protocol/eval-sdk plus public npm dependencies; no workspace links or orchestrator source imports",
+  "publicPackages": {
+    "protocol": {
+      "name": "agent-kernel-eval-protocol-0.0.0.tgz",
+      "bytes": 133829,
+      "sha256": "873d6b833436e95ba3b0610c9fd54c60ada2ef95b3990bdee9e12a3c9109fa58"
+    },
+    "sdk": {
+      "name": "agent-kernel-eval-sdk-0.0.0.tgz",
+      "bytes": 47715,
+      "sha256": "61fdc595f21879ccc960e1c6ec9fc2882ce19def6153164429c5bdfb3742d630"
+    }
+  },
+  "cleanWorkspaces": [
+    {
+      "template": "agent-adapter",
+      "package": "@example/eval-agent-sample",
+      "plugin": {
+        "kind": "agent-backend",
+        "id": "example:sample-agent",
+        "version": "1.0.0",
+        "protocolVersions": [
+          1
+        ],
+        "negotiation": {
+          "protocolVersion": 1,
+          "capabilities": [
+            "non-interactive",
+            "workspace-injection",
+            "isolated-config",
+            "cancellation",
+            "absolute-deadline",
+            "native-events",
+            "normalized-events",
+            "final-diff",
+            "usage-unavailable-explicit"
+          ]
+        },
+        "ranked": false
+      }
+    },
+    {
+      "template": "task-pack",
+      "package": "@example/eval-task-pack-sample",
+      "plugin": {
+        "kind": "benchmark-adapter",
+        "id": "example:sample-task-pack",
+        "version": "1.0.0",
+        "protocolVersions": [
+          1
+        ],
+        "negotiation": {
+          "protocolVersion": 1,
+          "capabilities": [
+            "resolve-tasks",
+            "prepare-task",
+            "verify",
+            "explain",
+            "normalize-failure"
+          ]
+        }
+      }
+    },
+    {
+      "template": "sandbox-provider",
+      "package": "@example/eval-sandbox-sample",
+      "plugin": {
+        "kind": "sandbox-provider",
+        "id": "example:sample-sandbox",
+        "version": "1.0.0",
+        "protocolVersions": [
+          1
+        ],
+        "negotiation": {
+          "protocolVersion": 1,
+          "capabilities": [
+            "preflight",
+            "create",
+            "execute",
+            "snapshot",
+            "collect",
+            "destroy",
+            "verify-destroyed",
+            "reap-orphans"
+          ]
+        }
+      }
+    },
+    {
+      "template": "detector",
+      "package": "@example/eval-detector-sample",
+      "plugin": {
+        "kind": "defect-detector",
+        "id": "example:sample-error-detector",
+        "version": "1.0.0",
+        "protocolVersions": [
+          1
+        ],
+        "negotiation": {
+          "protocolVersion": 1,
+          "capabilities": [
+            "analyze"
+          ]
+        }
+      }
+    }
+  ],
+  "fixtureValidation": {
+    "tasks": [
+      "write-answer"
+    ],
+    "taskPolicy": {
+      "license": {
+        "status": "granted",
+        "basis": "CC0-1.0"
+      },
+      "permissions": {
+        "evaluation": {
+          "status": "granted",
+          "basis": "public synthetic evaluation"
+        },
+        "training": {
+          "status": "denied"
+        }
+      },
+      "sourceProvenance": {
+        "status": "granted",
+        "sourceRefs": [
+          "synthetic:sample-task-pack"
+        ]
+      },
+      "publication": {
+        "artifact": {
+          "status": "granted"
+        },
+        "report": {
+          "status": "granted"
+        },
+        "leaderboard": {
+          "status": "denied"
+        },
+        "redistribution": {
+          "status": "granted",
+          "basis": "CC0-1.0"
+        }
+      }
+    },
+    "detectorCases": [
+      {
+        "caseId": "explicit-error",
+        "expectedFinding": true,
+        "findings": 1
+      },
+      {
+        "caseId": "successful-status",
+        "expectedFinding": false,
+        "findings": 0
+      }
+    ],
+    "license": "CC0-1.0",
+    "evaluationPermission": "public synthetic evaluation and redistribution"
+  },
+  "runtimeLoading": {
+    "workerExportContract": "evaluationPlugins",
+    "analyzerExportContract": "evaluationPlugins",
+    "externalAgentsUnranked": true,
+    "officialRequiredRejected": true
+  },
+  "privateImportScan": [],
+  "documentation": [
+    {
+      "path": "docs/evaluation/CONTRIBUTING.md",
+      "sha256": "75adb07462bb9a6f9ad5aa5b808cd2db8ce9a2e70c149a700c604aa5456fbcd4",
+      "requiredTerms": [
+        "public @agent-kernel/eval-sdk",
+        "verify:evaluation-contributor",
+        "precision/recall"
+      ]
+    },
+    {
+      "path": "docs/evaluation/SECURITY.md",
+      "sha256": "de1a04a3a6a6843b653feec90cbd8b0d04f1adf188775aa90da920a8c6c00b7d",
+      "requiredTerms": [
+        "credential reference",
+        "denied-by-default network",
+        "symlinks"
+      ]
+    },
+    {
+      "path": "docs/evaluation/COMPATIBILITY.md",
+      "sha256": "137ff58bad6c20384eb3de641acfab74d64986e83952105ccf76f8e8f83c6190",
+      "requiredTerms": [
+        "protocolVersions",
+        "capabilities",
+        "namespaced",
+        "isolated",
+        "unranked",
+        "no legacy-v1"
+      ]
+    },
+    {
+      "path": "docs/evaluation/RELEASING.md",
+      "sha256": "09a46ec3e77ddda67dffaaabcc2a9e04bc80ab49a2be5a0a11b64774bb886af9",
+      "requiredTerms": [
+        "pack",
+        "Rollback",
+        "fresh runs"
+      ]
+    },
+    {
+      "path": "deploy/evaluation/README.md",
+      "sha256": "4b246c684fd518958bd467bfa8288b56b5e81e38e99d8b8098416807f5f950a0",
+      "requiredTerms": [
+        "docker compose",
+        "/healthz"
+      ]
+    }
+  ],
+  "orchestratorInternalsUnchanged": true,
+  "runtimeSourceHashes": [
+    {
+      "path": "packages/eval-analyzer/src/detector-plugins.ts",
+      "sha256": "a06fd2072f5f2b6b1983550ed1b3448f2a9dfc2b8c8d5cf6cd5121a591323e16"
+    },
+    {
+      "path": "packages/eval-orchestrator/bin/eval-ci.ts",
+      "sha256": "904e98e0e24d9b0358843a1174e51330853f52c2c901cf556255b77776e0a7da"
+    },
+    {
+      "path": "packages/eval-orchestrator/bin/eval-cli.ts",
+      "sha256": "e1a78c8fa147851747bbaf328e83804e37cd8f03b1fa12d7a8372c50294b7fb4"
+    },
+    {
+      "path": "packages/eval-orchestrator/bin/eval-orchestrator.ts",
+      "sha256": "47ee00b821c43bfa557409c334dccad67ad3ea800f3420d1097fd6b3bc20b01f"
+    },
+    {
+      "path": "packages/eval-orchestrator/package.json",
+      "sha256": "eebe84d218f78947651d1adcab591a2018ffff42f1027d58830d07cae910ead2"
+    },
+    {
+      "path": "packages/eval-orchestrator/README.md",
+      "sha256": "06b44c7810304a4183a26098e4762c747083a441c9c59abb6563e33f557e04f8"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/artifact-store.test.ts",
+      "sha256": "5a0a0b4bfb5b48e315e346450011df0102c2f5367b5f8c955261d0b200f421c1"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/artifact-store.ts",
+      "sha256": "b440a1796518f3a2b5df912f13c17d05592e59ad46c62491e066e491616015e9"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/auth.test.ts",
+      "sha256": "17c154c81723b22eb44834dcc9e55aff28325eefbfc61b0807da869d1357b134"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/auth.ts",
+      "sha256": "72dde792fc7587468195d468bfa72ce16d20e28c7429285ddbb536e86b239d73"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/capability-vector.test.ts",
+      "sha256": "a64a0a81c591479423482b81b24288b2161ec3bbaaa25c5d6fa2f84c725db609"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/capability-vector.ts",
+      "sha256": "cba7139b82623c392aff48cfbcce23cf9c9e7e6e40e1800028150dda55b15285"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.test.ts",
+      "sha256": "7b8c8c1dad2bf635b033d81c2c67f4a3687d8836733300bde2de7d14c75828ce"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/control-plane.ts",
+      "sha256": "291368f2671678d444904b5e8b434cac21872f613cfd253bb003176087246d63"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/evidence-archive.test.ts",
+      "sha256": "93e5da59c12c0607d919d97c4f12e8d0f51c7d3709fbf603f01862a6ea2a205d"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/evidence-archive.ts",
+      "sha256": "0a7abbfff4cecb8f14a4739d9ece68337fcf734cabdcf3757e3458965ed74134"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/http-server.test.ts",
+      "sha256": "f79acbb04ea41ff027db488bb2ed67c8902d1dedcfe30726368bf4066f6f5b9b"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/http-server.ts",
+      "sha256": "0f6091a690754a602014e5ea7dcf928d40a24a615899144d10e9dcfe334f3ca4"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/index.ts",
+      "sha256": "9e0c366528096b2469d288688a7e71616437fa8cac0787239e60ce6568e38ac7"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/journal.ts",
+      "sha256": "a6d0aff7bd2c550af5c38ec54cfa1e08e9d14509b0afde6d81606356b878bc04"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/maintenance.test.ts",
+      "sha256": "06d803447be7345a6fee8b52e6c3d9cc9744686dca6b0e8ba17a4bc5a32aa585"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/maintenance.ts",
+      "sha256": "fe200eb0c2b9e170f7103f586d7bd272d097283e1adf484a42880618bf8bd269"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/model.ts",
+      "sha256": "f70bac648d0c44eafb4d5c8c020a79778ef7e9f835dd0284f17b85ae86cd3672"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/principal-context.ts",
+      "sha256": "6322b590b4dec19b649fe9db4edfdffeca5c7a2c0dab95643698093e43336d65"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/projection.ts",
+      "sha256": "6f7cae93187505d18cacbb1fa71979b705d7b41a2eaf8d493b0f20f0edeb84db"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/regression-gate.test.ts",
+      "sha256": "ee1dfeca9f0efa6be57888828316482f20eb3c68b2aeb0ba9a13b62c891db647"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/regression-gate.ts",
+      "sha256": "c70d4911d704e1fb6f2c6f21e8f3f7f4eac9b1f20260d5fec1453a328fe05de7"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/report-generator.test.ts",
+      "sha256": "bf96b74f0befc0768fbe290c9a8fa0533a259cfc26ef76d56f7615158ebd1050"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/report-generator.ts",
+      "sha256": "f4ec0c6a1c20a7348ba5e70bc13d62245ebdcb4767c3b2ed4b68a2250008b0e5"
+    },
+    {
+      "path": "packages/eval-orchestrator/src/task-catalog.ts",
+      "sha256": "e441b25c7db66729f50dd6bb99117566b37b1baf0ee448fd5c68513f4a93377a"
+    },
+    {
+      "path": "packages/eval-orchestrator/tsconfig.json",
+      "sha256": "d520a7a6f1f75189f862898b052e4f518308e198ca90c52d3d17e414fbc98bd9"
+    },
+    {
+      "path": "packages/eval-worker/src/plugin-loader.ts",
+      "sha256": "c968dd51eeeec07271f0cc54f64f8dc3a20d0bbd4865628d33a534dfbb56712b"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T09:58:17.840Z",
+  "scope": "isolated deployment of the current production-form eval-worker image and a fresh real Docker trial; no production service was touched",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceBundleSha256": "25dc7941eb480abcda31535fb60e2953cc72154b84efb3db0750c2fd1e810b1f",
+  "sourceFiles": {
+    "adapters/environments/common/src/process.ts": "14fd7507ae47d58e6d248302d4390ffc2f23df8eb085dafaf200d5c4e24ec3b7",
+    "adapters/environments/docker/src/index.ts": "bbc0b4f93e59dbf4329bbc31483f63ef44dcf80148c8c5c5f280d955f96f4276",
+    "deploy/evaluation/images/Dockerfile.worker": "914d57c64f2aaccb8ba4e91349e72aaceca012c04c08399dc707594dcf35fdee",
+    "deploy/evaluation/images/Dockerfile.worker.dockerignore": "5ec81f6062f2b05120bdc27c0efb9ca2d88db043ece3df2c380c1de45ebf88c2",
+    "deploy/evaluation/acceptance/compose.worker-acceptance.yaml": "9c034bf60e88dfa9ac6deab4a0d7e673d15297e0aa6ed03a17ccac1a5bf30c49",
+    "scripts/evaluation/verify-worker-deployment.mjs": "1cd77b551a37e42739c5f9ceec9dfbaca41862056969cc98a1483c7fc5568c58",
+    "adapters/agents/custom-command/src/index.ts": "02160688927aab66955d2900c2d8753de9d37065bb3910b81ec5eb9d3f98270b",
+    "adapters/benchmarks/custom-task-pack/src/index.ts": "1cc7ca55951aa73c8b8860482a956961e58b88a62f8c7ecb0ebc40a2dd3bb298",
+    "packages/eval-worker/src/trial-runner.ts": "6fbef62444d3c96b846835bbd562f24588781b902bc62a4231a8f8504d80421f",
+    "pnpm-lock.yaml": "9df3924410aec8fd6a3dc51f3e0ada05141d19f073ecf6c85aa462a6847c376a"
+  },
+  "deployment": {
+    "lxdInstance": "devbox-lxd",
+    "composeProject": "agent-eval-worker-current-20260803",
+    "service": "worker",
+    "containerId": "cc49ad228be31f1b93254df82bfd52cc24909bbc1de8c4789a0e725a3268c102",
+    "containerStatus": "running",
+    "restartCount": 0,
+    "startedAt": "2026-08-03T09:57:31.451044807Z",
+    "imageId": "sha256:83718e975fc67e09d7c445a3df7fcc8fe194226eb6e8da39d842c34067492dbb",
+    "imageDigest": "agent-eval-worker-current-20260803-worker@sha256:83718e975fc67e09d7c445a3df7fcc8fe194226eb6e8da39d842c34067492dbb",
+    "imageCreatedAt": "2026-08-03T09:56:49.88407683Z",
+    "dockerClientVersion": "29.1.3",
+    "dockerServerVersion": "29.1.3",
+    "composeVersion": "2.40.3"
+  },
+  "protocolRegistration": {
+    "workerId": "worker-compose",
+    "workerVersion": "acceptance",
+    "protocolVersions": [1],
+    "sandboxProviders": ["docker"],
+    "agentBackends": ["custom-command"],
+    "benchmarkAdapters": ["custom-task-pack"]
+  },
+  "acceptance": {
+    "artifact": "docs/evidence/evaluation/worker-deployment-acceptance-20260803.json",
+    "artifactSha256": "174016c4b5873e570a3f9496d04be2dd7d6e4d46fda8f399dc5b35968cb857e7",
+    "runId": "fresh-worker-msd22o52-6c757265",
+    "trialId": "fresh-worker-msd22o52-6c757265:compose-smoke-task:compose-worker-agent:0",
+    "trialState": "completed",
+    "trialAttempt": 1,
+    "lifecycleStates": ["leased", "environment_preparing", "agent_running", "artifacts_collecting", "verifying", "analyzing", "completed"],
+    "trialImageDigest": "node@sha256:7725a5c2c83eed1d36258c66efae14b1ceccd021db9ed1d9559d3335ed3d68ed",
+    "resultHash": "0add336231b8d8835146100a0d85b9e35b3bbb96f32c87ae33ec83895cc1446b",
+    "artifactManifestHash": "533817369523646360a905f22d8888f6847070036ffb80897eccef142311a171",
+    "finalDiffBytes": 177,
+    "normalizedEventCount": 2,
+    "managedTrialContainersAfterCompletion": 0
+  }
+}

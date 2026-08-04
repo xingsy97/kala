@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:16:06.448Z",
+  "scope": "current-source completion audit for CC09 per-adapter unified lifecycle and V01/V02 verification graphs; fresh standalone evidence only, with no historical Session or compatibility input",
+  "sourceRevision": "58dccafb37fba85afa6f921fd1f8dc9403368b8c",
+  "sourceFiles": {
+    "scripts/evaluation/verify-completion-matrix.mjs": "ab4128571e9fb4f02c371c7a87162d5f896520593d89d0acf3f2faa4ef4b4597",
+    "docs/evidence/evaluation/protocol-contracts-acceptance-20260803.json": "ef0ec84188dc7f8fbf645b656763ecea89c33419a72dbfc086b1ba24fd1e0175",
+    "docs/evidence/evaluation/control-plane-parity-acceptance-20260803.json": "acd6c0919619fea094eceaacaeb2aa2bb32de147b7869c986f7aa548e1912224",
+    "docs/evidence/evaluation/scheduler-recovery-acceptance-20260803.json": "905a0d39bc26fe1a2085526b9081c65615cd4625fad48cbf35d918fe31ff2f0c",
+    "docs/evidence/evaluation/worker-deployment-acceptance-20260803.json": "174016c4b5873e570a3f9496d04be2dd7d6e4d46fda8f399dc5b35968cb857e7",
+    "docs/evidence/evaluation/worker-boundary-acceptance-20260803.json": "78b65ead581b9c100d320c856ef575a2dff4429feaca214ec5a78e6e6cae5adb",
+    "docs/evidence/evaluation/sandbox-conformance-20260803.json": "8b6db08997327c47ba2fcd09b66fe094c35f8ebd800fa7ec2af9a8bf32a0174a",
+    "docs/evidence/evaluation/agent-adapters-acceptance-20260803.json": "61c97a115984dfe32675dc0eeaa30bcacb7a17c9cc96d45da79ef646b5ef55ed",
+    "docs/evidence/evaluation/benchmark-lifecycles-20260803011312.json": "97cb80c15ce0008adca093de400547f4b27db54f7e00aa83f3dea853ad4b2ff6",
+    "docs/evidence/evaluation/benchmark-agent-lifecycles-acceptance-20260803.json": "a31109bd40c780ce47bd0173086abbf590397885348d9afdd58f773cc6e57a27",
+    "docs/evidence/evaluation/external-contributor-acceptance-20260803.json": "05fba8589035eea35801dee8b7f673d4de469c112e4a7387b7bc280fb139acd3",
+    "docs/evidence/evaluation/final-fresh-swe-bench-astropy-12907-20260803.json": "e458fcc3e3d4529cb7a99f3dd47ee7d72f267f03b53ff841db3ed43d1b033a78",
+    "docs/evidence/evaluation/final-fresh-sdlc-journey-20260803.json": "42b6117f9310850020845c985239644ba9c7a60448b23db7204202149f3417b4",
+    "docs/evidence/evaluation/flagship-closed-loop-baseline-20260803.json": "9e92b222a289fcbc9a18a69ffcae919908840667a74c58ca4302b98f755a2c0c",
+    "docs/evidence/evaluation/code-understanding-acceptance-20260803.json": "881d5b7dd82e37badff38d16154e6a0fa65037cce46d07f28acded6081d87d20",
+    "docs/evidence/evaluation/memory-planning-acceptance-20260803.json": "be5b6f11fdf111e60631c6a09e45352d3574474d72664852d3e6f5ee49db7b3f",
+    "docs/evidence/evaluation/metamorphic-variants-acceptance-20260803.json": "aa9030d24b3737241cfbdb7792382ef0f8000563aba60963589caf84b3ad14e6",
+    "docs/evidence/evaluation/swe-marathon-lifecycle-acceptance-20260803.json": "2b04806473745ede09500862060da35c706058f492b8cfcdf17d2a92068a3129",
+    "docs/evidence/evaluation/metamorphic-lifecycle-acceptance-20260803.json": "7709dd7acb123711786d07c94e5cc081ccf6942c79f2d2139056b83fd1fe2156",
+    "docs/evidence/evaluation/analysis-mining-acceptance-20260803.json": "7e1c7b4def7a2337b3bdc1db82f029985ee3d8f0fb2d9a6b20099bf4ee522b6d",
+    "docs/evidence/evaluation/flagship-fresh-reproduction-20260803.json": "82b7d113d4137bd70d4e7edbb7ebda78b6783121cd3738a47f924ddc2ebd41a8",
+    "docs/evidence/evaluation/regression-reporting-acceptance-20260803.json": "02b353f7e02669b087f6bf4e747e85ce7d173a9a269a091dfcea398e23bd3ca5",
+    "docs/evidence/evaluation/product-dashboard-integration-acceptance-20260803.json": "67893fcf26eb958faeb5e049bb420effdd786bed2e512ead53663bdcc4d942de"
+  },
+  "lifecycle": [
+    {
+      "adapter": "swe-bench",
+      "kind": "official real-Agent lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/final-fresh-swe-bench-astropy-12907-20260803.json",
+        "runId": "fresh-swe-bench-astropy__astropy-12907-20260803052938-37670",
+        "trials": 3,
+        "evidenceLevel": "official"
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "terminal-bench",
+      "kind": "fresh real-Agent lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/benchmark-agent-lifecycles-acceptance-20260803.json",
+        "runId": "fresh-terminal-bench-20260803084645-27768",
+        "trials": 1
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "program-bench",
+      "kind": "fresh real-Agent lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/benchmark-agent-lifecycles-acceptance-20260803.json",
+        "runId": "fresh-program-bench-20260803084732-34165",
+        "trials": 1
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "swe-marathon",
+      "kind": "fresh full unified lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/swe-marathon-lifecycle-acceptance-20260803.json",
+        "runId": "fresh-swe-marathon-lifecycle-20260803115230-21515",
+        "trials": 1
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "custom-task-pack",
+      "kind": "clean-workspace public plugin plus deployed Worker lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/benchmark-agent-lifecycles-acceptance-20260803.json",
+        "pluginId": "sample-task-pack",
+        "deployedRunId": "fresh-worker-msd22o52-6c757265"
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "code-understanding",
+      "kind": "fixture/property plus fresh real-Agent lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/code-understanding-acceptance-20260803.json",
+        "runId": "fresh-code-understanding-20260803094524-36650",
+        "trials": 1
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "memory-planning",
+      "kind": "fixture/property plus fresh real-Agent lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/memory-planning-acceptance-20260803.json",
+        "runId": "fresh-memory-planning-20260803094524-36651",
+        "trials": 1
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "sdlc-journey",
+      "kind": "fresh three-Agent lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/final-fresh-sdlc-journey-20260803.json",
+        "runId": "fresh-sdlc-journey-20260803052811-19080",
+        "trials": 3
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "fault-scenarios",
+      "kind": "fresh five-task three-Agent lifecycle",
+      "proof": {
+        "path": "docs/evidence/evaluation/flagship-closed-loop-baseline-20260803.json",
+        "runId": "fresh-fault-scenarios-20260803100157-8557",
+        "trials": 15
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    },
+    {
+      "adapter": "metamorphic-variants",
+      "kind": "generated variants plus fresh full unified lifecycle",
+      "proof": {
+        "generationPath": "docs/evidence/evaluation/metamorphic-variants-acceptance-20260803.json",
+        "lifecyclePath": "docs/evidence/evaluation/metamorphic-lifecycle-acceptance-20260803.json",
+        "runId": "fresh-metamorphic-lifecycle-20260803115236-23044",
+        "variants": 6,
+        "trials": 6
+      },
+      "acceptedSpec": true,
+      "controlPlane": true,
+      "workerOrPublicPluginContract": true,
+      "isolatedSandbox": true,
+      "nativeVerifier": true,
+      "canonicalEvidence": true,
+      "gradingAndAnalysis": true,
+      "cleanupVerified": true
+    }
+  ],
+  "tenMinuteDemo": {
+    "durationMs": 261106,
+    "thresholdMs": 600000,
+    "passed": true,
+    "tasks": 5,
+    "agents": 3,
+    "trials": 15,
+    "freshSandboxes": 15,
+    "cleanupVerified": true
+  },
+  "unitProperty": {
+    "schemasMigrations": true,
+    "reducersReplay": true,
+    "leasesRetries": true,
+    "sandboxConformance": true,
+    "detectors": true,
+    "minimizerPrivacy": true,
+    "statisticsReports": true
+  },
+  "integration": {
+    "cliApiParity": true,
+    "controlPlaneWorker": true,
+    "restartCancel": true,
+    "artifacts": true,
+    "adapterNormalization": true,
+    "officialGrader": true,
+    "defectPromotion": true,
+    "productDashboardLinks": true
+  },
+  "runtimeResidue": {
+    "instances": [],
+    "networks": [],
+    "acls": []
+  },
+  "summary": {
+    "lifecycleAdapters": 10,
+    "unitPropertyGroups": 7,
+    "integrationGroups": 8,
+    "failures": 0
+  }
+}

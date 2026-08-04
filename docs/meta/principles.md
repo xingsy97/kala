@@ -21,7 +21,10 @@ Server absolute paths, artifact hashes, JSONL filenames, and raw `instance_id` s
 
 UI copy must answer "what is the user trying to do at this step", not "which internal component is being invoked".
 
-**Enforcement**: on review, cross-check `resources.ts` against the rename table in [../planning/roadmap-notes/product-polish.md](../planning/roadmap-notes/product-polish.md); internal vocabulary such as `executor`, `predictions`, `ingest`, or `patchesDir` appearing in the default view DOM causes a failure.
+**Enforcement**: locale structure tests keep English and Chinese resources in
+sync, and focused component/browser tests assert user-visible labels rather than
+internal component names. Standalone evaluation vocabulary is tested in the
+standalone Dashboard, not the product Dashboard.
 
 ### A3. Distinct vocabulary per state transition
 
@@ -31,7 +34,9 @@ Each layer of state transition must use its own vocabulary; do not reuse a term 
 - Only SWE-bench uses `resolved`. Terminal-Bench uses `resolved/unresolved` but must annotate the source parser. WebArena uses `score`. Tau-bench uses `reward`.
 - `resolved` may only appear after Import Results has completed.
 
-**Enforcement**: `BenchmarksPage.test.tsx` asserts that when the state is `Run Agent completed`, the DOM does not contain the word `resolved`. The benchmark copy matrix test asserts Terminal-Bench does not surface `Official Score`, WebArena does not surface `resolved`, and Tau-bench does not surface `Required actions` except when `ACTION` is in the reward basis.
+**Enforcement**: standalone adapter and Dashboard tests assert benchmark-specific
+result semantics. The product Dashboard has no benchmark state machine or
+evaluation terminology.
 
 ### A4. English and Chinese kept in sync
 
@@ -53,7 +58,7 @@ After writing UI copy, re-read it as a reader with no prior context. If a phrase
 
 Any PR that touches the dashboard must be exercised by Puppeteer or Playwright and produce a screenshot. HTTP probes, unit tests, and typechecks are not equivalent evidence.
 
-**Enforcement**: `scripts/verify-wizard-e2e.mjs` and the follow-up `verify-visual-pages.mjs`, `verify-benchmarks-page.mjs`, and `verify-operations-page.mjs` are gates. The PR description must include the screenshot path.
+**Enforcement**: production browser acceptance must exercise the current product routes and include its evidence artifact in the release record.
 
 ### B2. Default choices must be exercised end-to-end
 

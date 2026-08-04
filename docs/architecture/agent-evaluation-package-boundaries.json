@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "rules": [
+    { "package": "packages/kernel", "allowedWorkspaceDependencies": [] },
+    { "package": "packages/executor", "allowedWorkspaceDependencies": ["@agent-kernel/kernel", "@agent-kernel/shared"] },
+    { "package": "packages/host", "allowedWorkspaceDependencies": ["@agent-kernel/executor", "@agent-kernel/kernel", "@agent-kernel/shared"] },
+    { "package": "packages/dashboard", "allowedWorkspaceDependencies": ["@agent-kernel/kernel", "@agent-kernel/shared"] },
+    { "package": "packages/eval-protocol", "allowedWorkspaceDependencies": [] },
+    { "package": "packages/eval-sdk", "allowedWorkspaceDependencies": ["@agent-kernel/eval-protocol"] },
+    { "package": "packages/eval-orchestrator", "allowedWorkspaceDependencies": ["@agent-kernel/eval-protocol", "@agent-kernel/eval-sdk"] },
+    { "package": "packages/eval-worker", "allowedWorkspaceDependencies": ["@agent-kernel/eval-protocol", "@agent-kernel/eval-sdk"] },
+    { "package": "packages/eval-analyzer", "allowedWorkspaceDependencies": ["@agent-kernel/eval-protocol", "@agent-kernel/eval-sdk"] },
+    { "package": "packages/eval-dashboard", "allowedWorkspaceDependencies": ["@agent-kernel/eval-protocol", "@agent-kernel/eval-sdk"] },
+    { "package": "adapters/agents/*", "allowedWorkspaceDependencyPrefixes": ["@agent-kernel/eval-", "@agent-kernel/shared"] },
+    { "package": "adapters/benchmarks/*", "allowedWorkspaceDependencyPrefixes": ["@agent-kernel/eval-"] },
+    { "package": "adapters/environments/*", "allowedWorkspaceDependencyPrefixes": ["@agent-kernel/eval-"] }
+  ],
+  "forbiddenSourceImports": [
+    { "from": ["packages/kernel", "packages/executor", "packages/host/src", "packages/dashboard/src"], "patterns": ["@agent-kernel/eval-", "/eval-orchestrator", "/eval-worker", "/eval-analyzer", "/eval-dashboard"] },
+    { "from": ["packages/eval-orchestrator", "packages/eval-worker", "packages/eval-sdk"], "patterns": ["packages/host/src/eval", "@agent-kernel/host", "@agent-kernel/dashboard"] }
+  ]
+}

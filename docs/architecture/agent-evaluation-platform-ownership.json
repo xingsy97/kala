@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "cleanCutover": {
+    "canonicalSince": "eval-protocol-v1",
+    "legacyReadPolicy": "reject-and-never-discover",
+    "authoritativeWriter": "packages/eval-orchestrator",
+    "forbiddenCompatibilityEntries": ["legacy-v1"]
+  },
+  "targetOwners": [
+    { "capability": "protocols", "owner": "packages/eval-protocol" },
+    { "capability": "orchestration-and-durable-state", "owner": "packages/eval-orchestrator" },
+    { "capability": "trial-execution", "owner": "packages/eval-worker" },
+    { "capability": "plugin-sdk", "owner": "packages/eval-sdk" },
+    { "capability": "analysis-and-reproduction", "owner": "packages/eval-analyzer" },
+    { "capability": "production-web-ui", "owner": "packages/eval-dashboard" },
+    { "capability": "agent-adapters", "owner": "adapters/agents" },
+    { "capability": "benchmark-adapters", "owner": "adapters/benchmarks" },
+    { "capability": "sandbox-providers", "owner": "adapters/environments" }
+  ],
+  "evidenceCatalog": {
+    "protocol-contracts": "docs/evidence/evaluation/protocol-contracts-acceptance-20260803.json",
+    "control-plane-authority": "docs/evidence/evaluation/control-plane-authority-acceptance-20260803.json",
+    "control-plane-parity": "docs/evidence/evaluation/control-plane-parity-acceptance-20260803.json",
+    "analysis-mining": "docs/evidence/evaluation/analysis-mining-acceptance-20260803.json",
+    "regression-reporting": "docs/evidence/evaluation/regression-reporting-acceptance-20260803.json",
+    "swe-bench-real": "docs/evidence/evaluation/final-fresh-swe-bench-astropy-12907-20260803.json",
+    "benchmark-agent-lifecycles": "docs/evidence/evaluation/benchmark-agent-lifecycles-acceptance-20260803.json",
+    "swe-marathon-lifecycle": "docs/evidence/evaluation/swe-marathon-lifecycle-acceptance-20260803.json",
+    "agent-adapters": "docs/evidence/evaluation/agent-adapters-acceptance-20260803.json",
+    "dashboard-browser": "docs/evidence/evaluation/dashboard-browser-acceptance-20260803.json",
+    "completion-matrix": "docs/evidence/evaluation/completion-matrix-acceptance-20260803.json",
+    "ci-integrations": "docs/evidence/evaluation/ci-integrations-acceptance-20260803.json",
+    "governance": "docs/evidence/evaluation/governance-acceptance-20260803.json"
+  },
+  "deletionTestCatalog": {
+    "path-absence-gate": {
+      "command": "pnpm verify:evaluation-boundaries",
+      "source": "scripts/evaluation/verify-boundaries.mjs",
+      "marker": "removed migration source must not exist"
+    },
+    "source-surface-gate": {
+      "command": "pnpm verify:evaluation-boundaries",
+      "source": "scripts/evaluation/verify-boundaries.mjs",
+      "marker": "sourceSurfaceProofs"
+    },
+    "clean-cutover-gate": {
+      "command": "pnpm verify:evaluation-boundaries",
+      "source": "scripts/evaluation/verify-clean-cutover.mjs",
+      "marker": "reject-and-never-discover"
+    },
+    "host-route-rejection": {
+      "command": "pnpm --dir packages/host test",
+      "source": "packages/host/src/server.test.ts",
+      "marker": "rejects removed product evaluation entry points after the clean cutover"
+    },
+    "swe-bench-fixture-generator": {
+      "command": "pnpm --dir adapters/benchmarks/swe-bench test",
+      "source": "adapters/benchmarks/swe-bench/src/fixture-generator.test.ts",
+      "marker": "emits canonical adapter input and rejects missing immutable lineage"
+    },
+    "dashboard-standalone-browser": {
+      "command": "pnpm verify:evaluation-dashboard-browser",
+      "source": "scripts/evaluation/verify-dashboard-browser.mjs",
+      "marker": "routeStateChecks"
+    },
+    "ci-standalone-contract": {
+      "command": "pnpm verify:evaluation-ci-integrations",
+      "source": "scripts/evaluation/verify-ci-integrations.mjs",
+      "marker": "three CI examples consuming one versioned standalone machine-readable gate contract"
+    }
+  },
+  "migrationSources": [
+    { "source": "packages/shared/src/benchmark-orchestrator.ts", "sourceKind": "path", "target": "packages/eval-protocol", "targetPaths": ["packages/eval-protocol/src"], "action": "move-then-delete", "compatibilityEvidence": ["protocol-contracts"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/shared/src/eval-types.ts", "sourceKind": "path", "target": "packages/eval-protocol plus product-owned session profile", "targetPaths": ["packages/eval-protocol/src", "packages/host/src/session-profile.ts"], "action": "split-product-types-then-delete-evaluation-types", "compatibilityEvidence": ["protocol-contracts"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/shared/src/swebench-types.ts", "sourceKind": "path", "target": "adapters/benchmarks/swe-bench", "targetPaths": ["adapters/benchmarks/swe-bench/src"], "action": "move-then-delete", "compatibilityEvidence": ["swe-bench-real", "governance"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/eval/core", "sourceKind": "path", "target": "packages/eval-orchestrator", "targetPaths": ["packages/eval-orchestrator/src"], "action": "move-then-delete", "compatibilityEvidence": ["control-plane-authority", "control-plane-parity"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/eval/session", "sourceKind": "path", "target": "packages/eval-analyzer, packages/eval-orchestrator, and product-owned session profile", "targetPaths": ["packages/eval-analyzer/src", "packages/eval-orchestrator/src", "packages/host/src/session-profile.ts"], "action": "split-then-delete", "compatibilityEvidence": ["analysis-mining", "regression-reporting"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/eval/badcases", "sourceKind": "path", "target": "packages/eval-analyzer", "targetPaths": ["packages/eval-analyzer/src"], "action": "move-then-delete", "compatibilityEvidence": ["analysis-mining"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/eval/swebench", "sourceKind": "path", "target": "adapters/benchmarks/swe-bench", "targetPaths": ["adapters/benchmarks/swe-bench/src"], "action": "move-then-delete", "compatibilityEvidence": ["swe-bench-real", "governance"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/eval/terminal-bench", "sourceKind": "path", "target": "adapters/benchmarks/terminal-bench", "targetPaths": ["adapters/benchmarks/terminal-bench/src"], "action": "move-then-delete", "compatibilityEvidence": ["benchmark-agent-lifecycles"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/eval/programbench", "sourceKind": "path", "target": "adapters/benchmarks/program-bench", "targetPaths": ["adapters/benchmarks/program-bench/src"], "action": "move-then-delete", "compatibilityEvidence": ["benchmark-agent-lifecycles"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/eval/swe-marathon", "sourceKind": "path", "target": "adapters/benchmarks/swe-marathon", "targetPaths": ["adapters/benchmarks/swe-marathon/src"], "action": "move-then-delete", "compatibilityEvidence": ["swe-marathon-lifecycle"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/bin/run-agent-runlab-prompt.ts", "sourceKind": "path", "target": "adapters/agents/agent-runlab", "targetPaths": ["adapters/agents/agent-runlab/src"], "action": "extract-then-delete", "compatibilityEvidence": ["agent-adapters"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/bin/run-agent-runlab-swebench.ts", "sourceKind": "path", "target": "adapters/agents/agent-runlab", "targetPaths": ["adapters/agents/agent-runlab/src"], "action": "extract-then-delete", "compatibilityEvidence": ["agent-adapters", "swe-bench-real"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/bin/run-claude-code-prompt.ts", "sourceKind": "path", "target": "adapters/agents/claude-code", "targetPaths": ["adapters/agents/claude-code/src"], "action": "extract-then-delete", "compatibilityEvidence": ["agent-adapters"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/bin/run-claude-code-swebench.ts", "sourceKind": "path", "target": "adapters/agents/claude-code", "targetPaths": ["adapters/agents/claude-code/src"], "action": "extract-then-delete", "compatibilityEvidence": ["agent-adapters", "swe-bench-real"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/bin/run-benchmark-web.ts", "sourceKind": "path", "target": "packages/eval-orchestrator and packages/eval-dashboard", "targetPaths": ["packages/eval-orchestrator/src", "packages/eval-dashboard/src"], "action": "replace-then-delete", "compatibilityEvidence": ["control-plane-parity", "dashboard-browser"], "deletionTests": ["path-absence-gate", "dashboard-standalone-browser"] },
+    { "source": "packages/host/bin/run-programbench-legacy-runner.ts", "sourceKind": "path", "target": "adapters/benchmarks/program-bench", "targetPaths": ["adapters/benchmarks/program-bench/src"], "action": "move-then-delete", "compatibilityEvidence": ["benchmark-agent-lifecycles"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/bin/backfill-programbench-compile-probes.ts", "sourceKind": "path", "target": "adapters/benchmarks/program-bench", "targetPaths": ["adapters/benchmarks/program-bench/src"], "action": "move-then-delete", "compatibilityEvidence": ["benchmark-agent-lifecycles"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": "packages/host/src/rl/fixtures/swebench-mini", "sourceKind": "path", "target": "adapters/benchmarks/swe-bench/fixtures", "targetPaths": ["adapters/benchmarks/swe-bench/fixtures/generate.py"], "action": "move-then-delete", "compatibilityEvidence": ["governance", "swe-bench-real"], "deletionTests": ["path-absence-gate", "swe-bench-fixture-generator"] },
+    { "source": "packages/dashboard/src/features/benchmarks", "sourceKind": "path", "target": "packages/eval-dashboard", "targetPaths": ["packages/eval-dashboard/src/app.tsx"], "action": "move-then-delete", "compatibilityEvidence": ["dashboard-browser"], "deletionTests": ["path-absence-gate", "dashboard-standalone-browser"] },
+    { "source": "packages/dashboard/src/features/artifacts/BadCasesTab.tsx", "sourceKind": "path", "target": "packages/eval-dashboard defects route", "targetPaths": ["packages/eval-dashboard/src/app.tsx"], "action": "move-then-delete", "compatibilityEvidence": ["dashboard-browser", "analysis-mining"], "deletionTests": ["path-absence-gate", "dashboard-standalone-browser"] },
+    { "source": "packages/dashboard/src/features/artifacts/BadCasesView.tsx", "sourceKind": "path", "target": "packages/eval-dashboard defects route", "targetPaths": ["packages/eval-dashboard/src/app.tsx"], "action": "move-then-delete", "compatibilityEvidence": ["dashboard-browser", "analysis-mining"], "deletionTests": ["path-absence-gate", "dashboard-standalone-browser"] },
+    { "source": "packages/dashboard/src/features/artifacts/EvalRunsView.tsx", "sourceKind": "path", "target": "packages/eval-dashboard runs route", "targetPaths": ["packages/eval-dashboard/src/app.tsx"], "action": "move-then-delete", "compatibilityEvidence": ["dashboard-browser", "control-plane-parity"], "deletionTests": ["path-absence-gate", "dashboard-standalone-browser"] },
+    { "source": "packages/dashboard/src/features/artifacts/RunBenchmarkWizard.tsx", "sourceKind": "path", "target": "packages/eval-dashboard run creation", "targetPaths": ["packages/eval-dashboard/src/app.tsx"], "action": "move-then-delete", "compatibilityEvidence": ["dashboard-browser", "control-plane-parity"], "deletionTests": ["path-absence-gate", "dashboard-standalone-browser"] },
+    { "source": "packages/host/src/http/routes.ts evaluation routes", "sourceKind": "source-surface", "target": "packages/eval-orchestrator HTTP API", "targetPaths": ["packages/eval-orchestrator/src/http-server.ts"], "action": "replace-then-remove-routes", "compatibilityEvidence": ["control-plane-parity"], "deletionTests": ["source-surface-gate", "host-route-rejection"] },
+    { "source": "packages/host/src/index.ts benchmark exports", "sourceKind": "source-surface", "target": "adapters/benchmarks", "targetPaths": ["adapters/benchmarks"], "action": "replace-then-remove-exports", "compatibilityEvidence": ["completion-matrix"], "deletionTests": ["source-surface-gate", "clean-cutover-gate"] },
+    { "source": "scripts/eval", "sourceKind": "path", "target": "standalone package scripts and acceptance", "targetPaths": ["scripts/evaluation"], "action": "classify-move-or-delete", "compatibilityEvidence": ["completion-matrix"], "deletionTests": ["path-absence-gate", "clean-cutover-gate"] },
+    { "source": ".github/workflows/eval-smoke.yml", "sourceKind": "path", "target": "standalone Control Plane CLI workflow", "targetPaths": ["deploy/evaluation/ci/github-actions.yml", ".github/workflows/ci.yml"], "action": "replace-host-cli-then-delete-old-flow", "compatibilityEvidence": ["ci-integrations"], "deletionTests": ["path-absence-gate", "ci-standalone-contract"] }
+  ],
+  "mustRemainProductOwned": [
+    "packages/kernel",
+    "packages/executor",
+    "packages/host/src/loop.ts",
+    "packages/host/src/store",
+    "packages/host/src/memory*",
+    "packages/host/src/agent-modules",
+    "packages/dashboard product session surfaces"
+  ]
+}

@@ -1,0 +1,570 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:14:54.753Z",
+  "scope": "fresh standalone Compose deployment acceptance; deterministic canonical trial; durable grader and analyzer",
+  "baseUrl": "http://127.0.0.1:23300",
+  "runId": "fresh-compose-msd94bpf-92fc1e2e",
+  "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+  "run": {
+    "accepted": {
+      "schemaVersion": 1,
+      "spec": {
+        "schemaVersion": 1,
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "taskPack": {
+          "id": "custom-task-pack",
+          "version": "1.0.0",
+          "evaluatedSlice": {
+            "sliceId": "compose-smoke-full",
+            "dataset": {
+              "datasetId": "compose-smoke",
+              "displayName": "Compose Smoke",
+              "version": "1.0.0",
+              "sourceRevision": "compose-smoke-revision",
+              "manifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "taskIdsHash": "0bdb9ab2edf71893ce148e433c5ab70409964f185b4a1acb95c13ab4e6ebe058",
+              "totalItems": 1,
+              "officialBenchmark": false,
+              "license": "MIT",
+              "evaluationPermission": "local standalone deployment acceptance"
+            },
+            "selectionKind": "full",
+            "selectionSpec": {
+              "kind": "full",
+              "taskIdsHash": "0bdb9ab2edf71893ce148e433c5ab70409964f185b4a1acb95c13ab4e6ebe058"
+            },
+            "selectedItems": 1,
+            "coverageRatio": 1,
+            "taskIdsManifestRef": "catalog/compose-smoke.json",
+            "sliceManifestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        "agents": [
+          {
+            "variantId": "compose-agent",
+            "backendId": "custom-command",
+            "agentVersion": "acceptance",
+            "model": {
+              "modelId": "deterministic-fixture"
+            },
+            "configHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "config": {},
+            "credentialRefs": []
+          }
+        ],
+        "execution": {
+          "repeats": 1,
+          "priority": 0,
+          "maxConcurrency": 1,
+          "maxConcurrencyPerBackend": 1,
+          "maxConcurrencyPerProvider": 1,
+          "leaseMs": 30000,
+          "timeoutMs": 30000,
+          "inactivityTimeoutMs": 5000,
+          "retryPolicy": {
+            "maxAttempts": 1,
+            "retryableCategories": [],
+            "backoffMs": 0
+          }
+        },
+        "sandbox": {
+          "provider": "docker",
+          "imageDigest": "alpine@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "readOnlyBase": true,
+          "ephemeralOverlay": true,
+          "resources": {
+            "cpu": 1,
+            "memoryMb": 256,
+            "diskMb": 256,
+            "pids": 64
+          },
+          "network": {
+            "mode": "denied",
+            "allowedDestinations": []
+          },
+          "artifactAllowlist": []
+        },
+        "verification": {
+          "verifierId": "compose-native",
+          "verifierVersion": "1.0.0",
+          "officialRequired": false,
+          "timeoutMs": 30000,
+          "configHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "analysis": {
+          "detectorIds": [
+            "instruction-drift"
+          ],
+          "repeatsRequired": 1,
+          "configHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "createdAt": "2026-08-03T13:14:54.148Z"
+      },
+      "specHash": "3494772e7ec3522d4bbd5697dcc9ea2966f87fbcb4b5e10f96e7be001c7ad9cc",
+      "acceptedAt": "2026-08-03T13:14:54.169Z"
+    },
+    "state": "completed",
+    "events": [
+      {
+        "schemaVersion": 1,
+        "sequence": 0,
+        "at": "2026-08-03T13:14:54.169Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "draft"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 1,
+        "at": "2026-08-03T13:14:54.178Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "trial.created",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "taskId": "compose-smoke-task",
+          "agentVariantId": "compose-agent",
+          "backendId": "custom-command",
+          "sandboxProvider": "docker",
+          "repeatIndex": 0
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 2,
+        "at": "2026-08-03T13:14:54.178Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "validating"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 3,
+        "at": "2026-08-03T13:14:54.178Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "preparing"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 4,
+        "at": "2026-08-03T13:14:54.178Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "running"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 5,
+        "at": "2026-08-03T13:14:54.189Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "type": "trial.state",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "state": "leased",
+          "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 6,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "type": "trial.state",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "state": "environment_preparing",
+          "resultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 7,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "type": "trial.state",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "state": "agent_running",
+          "resultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 8,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "type": "trial.state",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "state": "artifacts_collecting",
+          "resultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 9,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "type": "trial.state",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "state": "verifying",
+          "resultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 10,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "type": "trial.state",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "state": "analyzing",
+          "resultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 11,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "type": "trial.state",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "data": {
+          "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+          "state": "completed",
+          "resultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 12,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "verifying"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 13,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "analyzing"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 14,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "reporting"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 15,
+        "at": "2026-08-03T13:14:54.193Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "run.state",
+        "data": {
+          "state": "completed"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 16,
+        "at": "2026-08-03T13:14:54.236Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "command.requested",
+        "data": {
+          "commandType": "run.grade",
+          "commandId": "run-grade-123e4567-e89b-42d3-a456-426614170003"
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "sequence": 17,
+        "at": "2026-08-03T13:14:54.241Z",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "producer": "control-plane",
+        "type": "command.requested",
+        "data": {
+          "commandType": "run.analyze",
+          "commandId": "run-analyze-123e4567-e89b-42d3-a456-426614170010"
+        }
+      }
+    ],
+    "trialIds": [
+      "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0"
+    ],
+    "createdSequence": 1,
+    "resourceUsage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "wallMs": 1
+    },
+    "updatedAt": "2026-08-03T13:14:54.241Z",
+    "startedAt": "2026-08-03T13:14:54.178Z",
+    "lastLeaseSequence": 4
+  },
+  "trial": {
+    "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+    "runId": "fresh-compose-msd94bpf-92fc1e2e",
+    "taskId": "compose-smoke-task",
+    "agentVariantId": "compose-agent",
+    "backendId": "custom-command",
+    "sandboxProvider": "docker",
+    "repeatIndex": 0,
+    "state": "completed",
+    "attempt": 1,
+    "updatedAt": "2026-08-03T13:14:54.193Z",
+    "terminalResultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730",
+    "evidence": {
+      "schemaVersion": 1,
+      "runId": "fresh-compose-msd94bpf-92fc1e2e",
+      "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+      "agentVariantId": "compose-agent",
+      "taskId": "compose-smoke-task",
+      "repeatIndex": 0,
+      "environmentLock": {
+        "schemaVersion": 1,
+        "provider": "docker",
+        "imageDigest": "alpine@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "repositoryRevision": "compose-smoke-revision",
+        "dependencyLockHashes": {},
+        "redactedEnvironment": {},
+        "resourcePolicyHash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "networkPolicyHash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "toolchainVersions": {},
+        "fixtureVersions": {},
+        "faultInjectorVersions": {}
+      },
+      "nativeEventsRef": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/native-events.jsonl",
+      "normalizedEventsRef": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/normalized-events.jsonl",
+      "normalizedEventCount": 1,
+      "analyzerInputRef": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/analyzer-input.json",
+      "finalDiffRef": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/final.diff",
+      "stdoutRef": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/stdout.log",
+      "stderrRef": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/stderr.log",
+      "usage": {
+        "availability": "unavailable",
+        "reason": "deterministic deployment acceptance"
+      },
+      "benchmarkResult": {
+        "schemaVersion": 1,
+        "benchmarkId": "custom-task-pack",
+        "verifierId": "compose-native",
+        "verifierVersion": "1.0.0",
+        "nativeMetrics": {
+          "passed": true
+        },
+        "rawResultRef": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/verifier-result.json",
+        "officialEvidence": false
+      },
+      "artifactManifest": {
+        "schemaVersion": 1,
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "trialId": "fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0",
+        "leaseId": "lease-123e4567-e89b-42d3-a456-426614170007",
+        "generatedAt": "2026-08-03T13:14:54.193Z",
+        "entries": [
+          {
+            "artifactId": "native-events.jsonl",
+            "path": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/native-events.jsonl",
+            "mediaType": "application/x-ndjson",
+            "bytes": 21,
+            "sha256": "1e5a53e8fd46b881bbbf77faa5496c703681d7fd1e7a72f77e0ab7626a572511",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "normalized-events.jsonl",
+            "path": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/normalized-events.jsonl",
+            "mediaType": "application/x-ndjson",
+            "bytes": 110,
+            "sha256": "31ef451f6e6ad421fe84dc3076f3ed6cac413dfdba8923c86dfef11d0d49d956",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "analyzer-input.json",
+            "path": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/analyzer-input.json",
+            "mediaType": "application/json",
+            "bytes": 1262,
+            "sha256": "b170ae8389db01fb9d4d8507297e247559a6fb77c76cff6c3811203f91e32392",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "final.diff",
+            "path": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/final.diff",
+            "mediaType": "text/plain; charset=utf-8",
+            "bytes": 31,
+            "sha256": "ce8d24c50da8c0bde0f7c89bf6e11e1578f556e6af88893f05c010e5aee5c242",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "stdout.log",
+            "path": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/stdout.log",
+            "mediaType": "text/plain; charset=utf-8",
+            "bytes": 19,
+            "sha256": "8d60871a0631a6ed8d04439a90f1808cc50598fc4dc450f65805a26cc1f23d18",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "stderr.log",
+            "path": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/stderr.log",
+            "mediaType": "text/plain; charset=utf-8",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "redaction": "passed",
+            "classification": "operator"
+          },
+          {
+            "artifactId": "verifier-result.json",
+            "path": "fresh-compose-msd94bpf-92fc1e2e/fresh-compose-msd94bpf-92fc1e2e:compose-smoke-task:compose-agent:0/verifier-result.json",
+            "mediaType": "application/json",
+            "bytes": 15,
+            "sha256": "11c11db30f4b3f6c758722ba3e27eea08145b7d212f6a157451e364b48475280",
+            "redaction": "passed",
+            "classification": "operator"
+          }
+        ],
+        "manifestHash": "1a6f3b19e2bb3cc5a72480bc4e76324e6401b867b596243a631a0de4134d901b"
+      },
+      "evidenceLevel": "native",
+      "resultHash": "075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+    }
+  },
+  "jobs": [
+    {
+      "schemaVersion": 1,
+      "protocolVersion": 1,
+      "jobId": "grading-run-grade-123e4567-e89b-42d3-a456-426614170003",
+      "runId": "fresh-compose-msd94bpf-92fc1e2e",
+      "kind": "grading",
+      "inputRefs": [
+        "trial-result:075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+      ],
+      "inputManifestHash": "3f04450fa0d67832cebc72a78164ef66c6549fe3eec3a2fae90192cdb87889b1",
+      "implementationId": "compose-native",
+      "implementationVersion": "1.0.0",
+      "configHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "attempt": 0,
+      "state": "completed",
+      "createdAt": "2026-08-03T13:14:54.235Z",
+      "updatedAt": "2026-08-03T13:14:54.710Z",
+      "executorId": "analyzer-compose-grader",
+      "startedAt": "2026-08-03T13:14:54.689Z",
+      "finishedAt": "2026-08-03T13:14:54.710Z",
+      "heartbeatAt": "2026-08-03T13:14:54.689Z",
+      "leaseExpiresAt": "2026-08-03T13:15:24.689Z",
+      "outputManifestRef": "analysis/grading-run-grade-123e4567-e89b-42d3-a456-426614170003/output-manifest.json",
+      "outputManifestHash": "ee73ca03d797ea14ee43c33814d4d0abd0d7f2e24865020133ba643af9df7a20",
+      "output": {
+        "schemaVersion": 1,
+        "jobId": "grading-run-grade-123e4567-e89b-42d3-a456-426614170003",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "inputManifestHash": "3f04450fa0d67832cebc72a78164ef66c6549fe3eec3a2fae90192cdb87889b1",
+        "generatedAt": "2026-08-03T13:14:54.708Z",
+        "outputs": [
+          {
+            "outputId": "grading-075e9b30f66f0d69b744f51e",
+            "kind": "grading-result",
+            "artifactRef": "analysis/grading-run-grade-123e4567-e89b-42d3-a456-426614170003/grading-075e9b30f66f0d69b744f51e.json",
+            "mediaType": "application/json",
+            "bytes": 964,
+            "sha256": "855d55fa13f0fbfc1c3ebdfd42bd4c720477eadef7f232200a7ff159bacf7bda"
+          }
+        ],
+        "manifestHash": "ee73ca03d797ea14ee43c33814d4d0abd0d7f2e24865020133ba643af9df7a20"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "protocolVersion": 1,
+      "jobId": "analysis-run-analyze-123e4567-e89b-42d3-a456-426614170010",
+      "runId": "fresh-compose-msd94bpf-92fc1e2e",
+      "kind": "detectors",
+      "inputRefs": [
+        "trial-result:075e9b30f66f0d69b744f51e93baa78e9b89f1f050ac1e2259ca00bc32553730"
+      ],
+      "inputManifestHash": "b9e1c379e47e756db2e01d62ae67b7a676e385613867121c475d67dc1e00c216",
+      "implementationId": "eval-analyzer",
+      "implementationVersion": "0.0.0",
+      "configHash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "detectorIds": [
+        "instruction-drift"
+      ],
+      "attempt": 0,
+      "state": "completed",
+      "createdAt": "2026-08-03T13:14:54.241Z",
+      "updatedAt": "2026-08-03T13:14:54.432Z",
+      "executorId": "analyzer-compose",
+      "startedAt": "2026-08-03T13:14:54.418Z",
+      "finishedAt": "2026-08-03T13:14:54.432Z",
+      "heartbeatAt": "2026-08-03T13:14:54.418Z",
+      "leaseExpiresAt": "2026-08-03T13:15:24.418Z",
+      "outputManifestRef": "analysis/analysis-run-analyze-123e4567-e89b-42d3-a456-426614170010/output-manifest.json",
+      "outputManifestHash": "6976ee9d41649219eb8f6ce2210c536f19a2d1c8e3d88560c892296fcfe10f9c",
+      "output": {
+        "schemaVersion": 1,
+        "jobId": "analysis-run-analyze-123e4567-e89b-42d3-a456-426614170010",
+        "runId": "fresh-compose-msd94bpf-92fc1e2e",
+        "inputManifestHash": "b9e1c379e47e756db2e01d62ae67b7a676e385613867121c475d67dc1e00c216",
+        "generatedAt": "2026-08-03T13:14:54.430Z",
+        "outputs": [],
+        "manifestHash": "6976ee9d41649219eb8f6ce2210c536f19a2d1c8e3d88560c892296fcfe10f9c"
+      }
+    }
+  ]
+}

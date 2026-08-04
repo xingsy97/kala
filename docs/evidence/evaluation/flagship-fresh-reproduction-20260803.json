@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T12:52:58.339Z",
+  "runId": "fresh-reproduction-20260803125224-29487",
+  "bundleId": "fresh-reproduction-20260803125224-29487-config-schema",
+  "findingId": "flagship-config-schema-finding",
+  "faultScenarioId": "invalid-port-type-v1",
+  "failureFingerprint": "22c8deac8ad90f21f2052db688f62b81efe9da439a9a96714a4bbe0e5bc3ff06",
+  "environmentLockHash": "99c7fb54e115e8284ad8cb8a7bdb5c1530ee7de73a67496af8259d1bf061443d",
+  "freshSandboxExecutions": 8,
+  "cleanupVerified": true,
+  "uniqueFreshEnvironments": true,
+  "minimization": {
+    "originalUnits": 3,
+    "minimizedUnits": 1,
+    "attempts": 4
+  },
+  "reproduction": {
+    "attempts": [
+      {
+        "attemptId": "attempt-1",
+        "freshEnvironmentId": "eval-ct-fresh-reproduction-202608031-cf024764",
+        "environmentLockHash": "99c7fb54e115e8284ad8cb8a7bdb5c1530ee7de73a67496af8259d1bf061443d",
+        "observedFailureFingerprint": "22c8deac8ad90f21f2052db688f62b81efe9da439a9a96714a4bbe0e5bc3ff06",
+        "reproduced": true,
+        "evidenceRefs": [
+          "sandbox:eval-ct-fresh-reproduction-202608031-cf024764",
+          "stderr-sha256:41d5eb3ea40150345478e6e2e06c652fadb93fb4ae3f3261d37eb24e78d1a587"
+        ]
+      },
+      {
+        "attemptId": "attempt-2",
+        "freshEnvironmentId": "eval-ct-fresh-reproduction-202608031-70ff1adf",
+        "environmentLockHash": "99c7fb54e115e8284ad8cb8a7bdb5c1530ee7de73a67496af8259d1bf061443d",
+        "observedFailureFingerprint": "22c8deac8ad90f21f2052db688f62b81efe9da439a9a96714a4bbe0e5bc3ff06",
+        "reproduced": true,
+        "evidenceRefs": [
+          "sandbox:eval-ct-fresh-reproduction-202608031-70ff1adf",
+          "stderr-sha256:41d5eb3ea40150345478e6e2e06c652fadb93fb4ae3f3261d37eb24e78d1a587"
+        ]
+      }
+    ],
+    "reproduced": 2,
+    "expectedSuccessControl": {
+      "freshEnvironmentId": "eval-ct-fresh-reproduction-202608031-6221993d",
+      "environmentLockHash": "99c7fb54e115e8284ad8cb8a7bdb5c1530ee7de73a67496af8259d1bf061443d",
+      "passed": true,
+      "evidenceRefs": [
+        "sandbox:eval-ct-fresh-reproduction-202608031-6221993d",
+        "stderr-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ]
+    },
+    "minimization": {
+      "originalUnits": 3,
+      "minimizedUnits": 1,
+      "attempts": 4
+    }
+  },
+  "successControl": {
+    "passed": true,
+    "freshEnvironment": true
+  },
+  "privacy": {
+    "redactionPassed": true,
+    "secretScanPassed": true,
+    "absolutePathScanPassed": true
+  },
+  "signatureVerified": true,
+  "signedPayloadHash": "a92efe010586e5d058d130becadb5c6ca9ddbfc4cd05128849ac2a3b8966004c",
+  "unifiedTrace": {
+    "totalSpans": 10,
+    "analyzerDetectSpans": 1,
+    "reproductionVerifySpans": 3,
+    "successfulVerificationSpans": 3,
+    "failureReproductionSpans": 2,
+    "successControlSpans": 1
+  },
+  "bundleManifestPath": "/tmp/agent-eval-flagship-lxd-reproduction-unified-trace-20260803-nvFa7k/bundles/fresh-reproduction-20260803125224-29487-config-schema/bundle.json",
+  "bundleFiles": [
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/agent-config.json",
+      "sha256": "c735708b82d004757c9911901fe875a58e5859aa460f21ac2b825f259b85fec2",
+      "bytes": 73,
+      "mediaType": "application/json"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/analysis.json",
+      "sha256": "ff70f3a9d333655f0a262edd6d260c0b58737305665308ef944f1d41e7fae50c",
+      "bytes": 1303,
+      "mediaType": "application/json"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/defect.json",
+      "sha256": "b39e39b3d8df548feb03eefce2fbaff378286fc767cbd606774356d1b7203924",
+      "bytes": 471,
+      "mediaType": "application/json"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/environment.lock.json",
+      "sha256": "fc568d49cbd2ae1c93a1aa77bb789350a2b69911460291ea0291c284df45b4e9",
+      "bytes": 672,
+      "mediaType": "application/json"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/expected.json",
+      "sha256": "2fa8bf03ace83193f44f5c23a3c72ee5afa97a33f047a1be9e01ac5a7f054c13",
+      "bytes": 146,
+      "mediaType": "application/json"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/final.diff",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "mediaType": "text/x-diff"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/minimal-workspace.tar.zst",
+      "sha256": "ea0ed618b82c0bfee8f70a1bbf8c3a594ae435a265244b6a58ce0ef1e581c8ad",
+      "bytes": 107,
+      "mediaType": "application/zstd"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/replay.jsonl",
+      "sha256": "a5be3a3cc0a57f26bb521a553640d6f2ee904fb7f5b14d962342d35079375def",
+      "bytes": 103,
+      "mediaType": "application/x-ndjson"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/reproduce.sh",
+      "sha256": "3c5ef9d27f1dd575b4e039b7ea44434e499d79efedebb23fafc6082c53ac86f7",
+      "bytes": 100,
+      "mediaType": "text/x-shellscript"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/SHA256SUMS",
+      "sha256": "4303b3617804bc27c7116262a15a3b397c3e4154ad2f24d1ef371fdca8a3efcd",
+      "bytes": 1063,
+      "mediaType": "text/plain"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/task.json",
+      "sha256": "cd3dfe3c425acd208ee886ca009d4d7079926b6e2cf98bb744dec381b732b1b9",
+      "bytes": 525,
+      "mediaType": "application/json"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/tool-registry.json",
+      "sha256": "2ca570124de1bdfda56ffcf74f81db1b51f94d96df6bbcee3273414b70dddcfb",
+      "bytes": 65,
+      "mediaType": "application/json"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/trace.jsonl",
+      "sha256": "3eded25c68b56c414bdc7fc8a859c36de1cb7d62d1d82adbef80007a5201340a",
+      "bytes": 6219,
+      "mediaType": "application/x-ndjson"
+    },
+    {
+      "path": "bundles/fresh-reproduction-20260803125224-29487-config-schema/verifier-result.json",
+      "sha256": "456dd8516751987612ef7e01288d99f68908904178a8c75398028ef191dd91dc",
+      "bytes": 75,
+      "mediaType": "application/json"
+    }
+  ]
+}
