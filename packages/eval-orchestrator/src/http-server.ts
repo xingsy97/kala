@@ -181,7 +181,7 @@ async function route(controlPlane: EvaluationControlPlane, authenticator: Authen
       sendJson(response, 200, { expired: await controlPlane.expireLeases() })
       return
     case '/api/v1/analysis/expire':
-      authorize(authenticator, request, 'analyzer:execute')
+      authorizeAny(authenticator, request, ['analyzer:execute', 'evaluation:write'])
       sendJson(response, 200, { expired: await controlPlane.expireAnalysisJobs() })
       return
     case '/api/v1/results/commit': {
@@ -219,6 +219,12 @@ function queryScope(value: unknown): AuthorizationScope {
   if (resource === 'capabilities' || resource === 'platform-metrics') return 'platform:read'
   if (['artifacts', 'analysis-output', 'reports', 'archive-summary', 'archived-runs', 'archived-run', 'archive-documents', 'archive-document', 'audit'].includes(String(resource))) return 'evidence:read'
   return 'evaluation:read'
+}
+
+function authorizeAny(authenticator: Authenticator, request: IncomingMessage, scopes: readonly AuthorizationScope[]): Principal {
+  const principal = requireAuthenticatedPrincipal(authenticator, request.headers.authorization)
+  if (!scopes.some((scope) => principalHasScope(principal, scope))) throw new AuthorizationError(403, 'FORBIDDEN', 'principal lacks every accepted scope')
+  return principal
 }
 
 function authorizeQuery(authenticator: Authenticator, request: IncomingMessage, controlPlane: EvaluationControlPlane, value: unknown): void {
