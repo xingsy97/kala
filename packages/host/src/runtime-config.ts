@@ -20,7 +20,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import process from 'node:process'
 
 import type { ManualModelInput, ManualProviderInput, ModelInfo, ModelSource, ProviderWire } from '@agent-kernel/shared'
@@ -204,10 +204,6 @@ export function redactedUrlForArtifact(raw: string): string {
   } catch {
     return '<invalid-url>'
   }
-}
-
-export function defaultBenchmarkEnvPath(cwd = process.cwd()): string {
-  return resolve(cwd, 'experiments/evals/2026-07-agent-benchmark-comparison/.env.local')
 }
 
 export function loadEnvFile(path: string, opts: { override?: boolean; sourceName?: string } = {}): Record<string, string> {

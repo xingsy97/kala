@@ -332,6 +332,7 @@ export async function startHostServer(
     ...(auth ? { auth } : {}),
     audit,
     capabilities,
+    deploymentMode,
     metrics,
     memoStore,
     sessions: store,

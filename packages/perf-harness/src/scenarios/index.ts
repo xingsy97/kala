@@ -37,7 +37,7 @@ export type ScenarioDefinition = {
 export const SCENARIOS: readonly ScenarioDefinition[] = [
   {
     name: 'saas-capabilities',
-    reproduces: 'SaaS exposes Agent while hiding and blocking Benchmark/Evaluation.',
+    reproduces: 'SaaS publishes only product capabilities and has no legacy evaluation route.',
     makeLlm: () => SAAS_CAPABILITIES_LLM(),
     mobile: true,
     cpuThrottleRate: 1,

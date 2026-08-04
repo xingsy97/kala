@@ -8,7 +8,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 export type SubAgentPolicyView = {
-  role?: 'research' | 'test' | 'review' | 'benchmark-triage'
+  role?: 'research' | 'test' | 'review'
   objective?: string
   allowedTools?: readonly string[]
   maxTurns?: number
@@ -93,5 +93,5 @@ function normalize(raw: Required<PolicyArtifact>['policy']): SubAgentPolicyView 
 }
 
 function isRole(value: unknown): value is SubAgentPolicyView['role'] {
-  return value === 'research' || value === 'test' || value === 'review' || value === 'benchmark-triage'
+  return value === 'research' || value === 'test' || value === 'review'
 }

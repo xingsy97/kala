@@ -1,4 +1,4 @@
-export type SubAgentRole = 'research' | 'test' | 'review' | 'benchmark-triage'
+export type SubAgentRole = 'research' | 'test' | 'review'
 
 export type SubAgentPolicyReasonCode =
   | 'role_template_applied'
@@ -76,14 +76,6 @@ export const SUB_AGENT_ROLE_TEMPLATES: Readonly<Record<SubAgentRole, SubAgentRol
     defaultMaxTurns: 15,
     defaultTimeoutMs: 3 * 60_000,
     defaultExpectedOutput: 'Ranked list of risks/regressions with file references.',
-  },
-  'benchmark-triage': {
-    role: 'benchmark-triage',
-    purpose: 'For failed benchmark trials, summarize why the patch failed.',
-    defaultAllowedTools: ['read', 'grep', 'glob', 'ls', 'bash', 'todowrite'],
-    defaultMaxTurns: 30,
-    defaultTimeoutMs: 15 * 60_000,
-    defaultExpectedOutput: 'Failure category label plus supporting evidence from logs and diff.',
   },
 }
 

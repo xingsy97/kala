@@ -108,7 +108,7 @@ describe('resolveSubAgentPolicy', () => {
 
 describe('SubAgent role registry', () => {
   it('exposes deterministic templates for each role', () => {
-    for (const role of ['research', 'test', 'review', 'benchmark-triage'] as const) {
+    for (const role of ['research', 'test', 'review'] as const) {
       const template = getSubAgentRoleTemplate(role)
       expect(template).toBeDefined()
       expect(template?.role).toBe(role)

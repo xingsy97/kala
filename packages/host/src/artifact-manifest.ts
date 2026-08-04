@@ -145,8 +145,6 @@ function inferKind(path: string): string {
   if (path.endsWith('/crash-kill-report.json')) return 'reliability_crash_kill'
   if (path.endsWith('/tool-catalog-diff.json')) return 'tool_catalog_diff'
   if (path.endsWith('/executor-capabilities.json')) return 'executor_capabilities'
-  if (path.endsWith('/profile-aggregate.json')) return 'profile_aggregate'
-  if (path.endsWith('/profile-budget.json')) return 'profile_budget'
   if (path.endsWith('/regression-gate.json')) return 'eval_regression_gate'
   if (path.endsWith('/memory-index.json')) return 'memory_index'
   if (path.endsWith('/memory-retrieval.json') || (inPath(path, 'memory-retrieval'))) return 'memory_retrieval'

@@ -7,7 +7,7 @@ import { AppShellNav } from './AppShellNav.js'
 function renderNav(overrides: Partial<Parameters<typeof AppShellNav>[0]> = {}): void {
   render(
     <AppShellNav
-      section="benchmarks"
+      section="agent"
       onSelect={() => {}}
       onOpenSettings={() => {}}
       collapsed={false}
@@ -25,20 +25,13 @@ describe('AppShellNav', () => {
 
   it('renders nav tabs and marks the active section', () => {
     renderNav()
-    for (const id of ['agent', 'benchmarks', 'operations', 'artifacts', 'pipeline', 'docs']) {
+    for (const id of ['agent', 'operations', 'artifacts', 'pipeline', 'docs']) {
       expect(screen.getByTestId(`app-shell-nav-${id}`)).toBeTruthy()
     }
-    expect(screen.getByTestId('app-shell-nav-benchmarks').textContent).toContain('Benchmarks')
-    expect(screen.getByTestId('app-shell-nav-benchmarks').textContent).not.toContain('评测')
     expect(screen.queryByTestId('app-shell-nav-settings')).toBeNull()
-    expect(screen.getByTestId('app-shell-nav-benchmarks').getAttribute('aria-current')).toBe('page')
-    expect(screen.getByTestId('app-shell-nav-agent').getAttribute('aria-current')).toBeNull()
-  })
-
-  it('hides Benchmarks when the authoritative capability is disabled', () => {
-    renderNav({ capabilities: { agent: true, benchmarks: false, evaluations: false }, section: 'agent' })
-    expect(screen.queryByTestId('app-shell-nav-benchmarks')).toBeNull()
-    expect(screen.getByTestId('app-shell-nav-agent')).toBeTruthy()
+    expect(screen.getByTestId('app-shell-nav-agent').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('href')).toBe('http://127.0.0.1:13180')
+    expect(screen.getByTestId('app-shell-open-evaluation').getAttribute('target')).toBe('_blank')
   })
 
   it('shows the authenticated account and signs out from the account menu', () => {
@@ -86,16 +79,8 @@ describe('AppShellNav', () => {
   it('invokes onSelect when a tab is clicked', () => {
     const onSelect = vi.fn()
     renderNav({ section: 'agent', onSelect })
-    fireEvent.click(screen.getByTestId('app-shell-nav-benchmarks'))
-    expect(onSelect).toHaveBeenCalledWith('benchmarks')
-  })
-
-  it('localizes the benchmark tab label in Chinese', async () => {
-    await i18n.changeLanguage('zh')
-    renderNav()
-
-    expect(screen.getByTestId('app-shell-nav-benchmarks').textContent).toContain('评测')
-    expect(screen.getByTestId('app-shell-nav-benchmarks').textContent).not.toContain('Benchmarks')
+    fireEvent.click(screen.getByTestId('app-shell-nav-artifacts'))
+    expect(onSelect).toHaveBeenCalledWith('artifacts')
   })
 
   it('settings icon fires onOpenSettings', () => {
@@ -109,7 +94,7 @@ describe('AppShellNav', () => {
     const onCollapse = vi.fn()
     const { rerender } = render(
       <AppShellNav
-        section="benchmarks"
+        section="agent"
         onSelect={() => {}}
         onOpenSettings={() => {}}
         collapsed={false}
@@ -122,7 +107,7 @@ describe('AppShellNav', () => {
 
     rerender(
       <AppShellNav
-        section="benchmarks"
+        section="agent"
         onSelect={() => {}}
         onOpenSettings={() => {}}
         collapsed
@@ -131,7 +116,7 @@ describe('AppShellNav', () => {
       />,
     )
     expect(screen.queryByTestId('app-shell-nav')).toBeNull()
-    expect(screen.queryByTestId('app-shell-nav-benchmarks')).toBeNull()
+    expect(screen.queryByTestId('app-shell-nav-agent')).toBeNull()
   })
 
   it('keeps collapse as the rightmost global control', () => {

@@ -54,6 +54,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "publish:npm": "pnpm run build && pnpm publish --access public --no-git-checks"
   },
@@ -64,7 +65,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
   },
   "sideEffects": false,
   "license": "MIT",

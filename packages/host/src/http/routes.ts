@@ -14,7 +14,7 @@
  */
 
 import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http'
 import { dirname, extname, join, normalize, resolve as resolvePath, sep } from 'node:path'
 
@@ -39,7 +39,6 @@ import type {
 } from '@agent-kernel/shared'
 import { schema } from '@agent-kernel/shared'
 import { parseWire } from '../wire-validation.js'
-import { disabledEnhancementCapability } from '../runtime-capabilities.js'
 
 import { buildArtifactManifest, pruneArtifacts } from '../artifact-manifest.js'
 import {
@@ -49,58 +48,8 @@ import {
 } from '../rl-export.js'
 import { verifyReward } from '../rl-reward.js'
 import { exportSessionTraceArtifacts } from '../session-export.js'
+import { profileSession } from '../session-profile.js'
 import { exportTraceOtlp, loadHeadersFile } from '../trace-otlp-export.js'
-import { compareEvalRuns, judgeScore, profileSession, scoreSession } from '../eval/session/generic.js'
-import { evaluateRegressionGate, type RegressionThresholdPolicy } from '../eval/session/regression-gate.js'
-import { aggregateProfiles } from '../eval/session/cost-aggregate.js'
-import { evaluateProfileBudget, type ProfileBudgetPolicy } from '../eval/session/profile-budget.js'
-import {
-  exportSessionForSweBench,
-  inferSweBenchPatchRun,
-  ingestSweBenchResults,
-  planSweBenchWorkerRun,
-  runSweBenchAgentPatchRun,
-  runSweBenchGrade,
-  sweBenchRunLayout,
-} from '../eval/swebench/swebench.js'
-import {
-  importTerminalBenchResults,
-  resolveTerminalBenchTasks,
-  runTerminalBenchRun,
-  terminalBenchRunLayout,
-} from '../eval/terminal-bench/terminal-bench.js'
-import { runTerminalBench21Run } from '../eval/terminal-bench/terminal-bench-2_1.js'
-import {
-  importProgramBenchResults,
-  programBenchRunLayout,
-  runProgramBenchRun,
-} from '../eval/programbench/programbench.js'
-import {
-  importSweMarathonResults,
-  runSweMarathonRun,
-} from '../eval/swe-marathon/swe-marathon.js'
-import { mineBadCases } from '../eval/badcases/badcase-mining.js'
-import { readSweBenchRunRegistry, unregisterSweBenchRun } from '../eval/core/run-registry.js'
-import { getAgentBackend, listAgentBackends } from '../eval/core/agent-backend.js'
-import { importLegacySweBench } from '../eval/core/legacy-swebench-import.js'
-import { BenchmarkRunService } from '../eval/core/benchmark-run-service.js'
-import { AgentBackendIdSchema } from '@agent-kernel/shared'
-import { exportForRL, exportForSFT } from '../eval/badcases/badcase-export.js'
-import { exportRollouts } from '../eval/badcases/rollout-export.js'
-import { annotateBadCase, readBadCaseAnnotations, BAD_CASE_LABELS, type BadCaseLabel } from '../eval/badcases/badcase-annotations.js'
-import {
-  InstancesSourceError,
-  resolveSweBenchInstances,
-  type InstancesSource,
-} from '../eval/swebench/swebench-instances-source.js'
-import {
-  PatchesSourceError,
-  resolveSweBenchPatches,
-} from '../eval/swebench/swebench-patches-source.js'
-import {
-  ResultsSourceError,
-  resolveSweBenchResults,
-} from '../eval/swebench/swebench-results-source.js'
 import { buildMemoryIndex } from '../memory-index.js'
 import { retrieveMemory } from '../memory-retrieval.js'
 import { auditSessionReliability, replayReliabilityChaos } from '../reliability.js'
@@ -151,33 +100,9 @@ const MIME: Record<string, string> = {
 }
 
 const ROUTE_CLAIMED = Symbol('agent-kernel-route-claimed')
-const BENCHMARK_RUN_SERVICES = new Map<string, BenchmarkRunService>()
-
-function benchmarkRunService(rootDir: string): BenchmarkRunService {
-  const key = resolvePath(rootDir)
-  const existing = BENCHMARK_RUN_SERVICES.get(key)
-  if (existing) return existing
-  const service = new BenchmarkRunService(key)
-  BENCHMARK_RUN_SERVICES.set(key, service)
-  return service
-}
 
 const MAX_ARTIFACT_CONTENT_BYTES = 1024 * 1024
 const MAX_DOC_CONTENT_BYTES = 1024 * 1024
-
-type CreateSweBenchPlanRequest = {
-  rootDir?: string
-  runId?: string
-  dataset?: string
-  split?: string
-  model?: string
-  instancesJsonl?: string
-  instanceIds?: readonly string[] | string
-  limit?: number
-  maxWorkers?: number
-  timeoutMs?: number
-  repoCacheDir?: string
-}
 
 type EnhancementActionRequest = {
   action?: string
@@ -188,21 +113,8 @@ type EnhancementActionRequest = {
   sessionLogPaths?: readonly string[] | string
   workspaceRoot?: string
   runId?: string
-  confirmRunId?: string
-  confirmPermanent?: boolean
   evalInstanceId?: string
-  instanceId?: string
-  patchPath?: string
-  requireDone?: boolean
   pricingPath?: string
-  baselineSummaryPath?: string
-  candidateSummaryPath?: string
-  promptPath?: string
-  responsePath?: string
-  judgeModel?: string
-  scorer?: string
-  threshold?: number | string
-  inputRef?: string
   includeGlobal?: boolean
   sessionsDir?: string
   taskId?: string
@@ -215,42 +127,7 @@ type EnhancementActionRequest = {
   sidecarPath?: string
   trialPath?: string
   scorePath?: string
-  dataset?: string
-  split?: string
-  instancesJsonl?: string
-  instanceIds?: readonly string[] | string
-  limit?: number | string
-  patchesDir?: string
-  modelPatchPath?: string
-  resultsDir?: string
-  predictionsPath?: string
-  maxWorkers?: number | string
-  modal?: boolean
-  cwd?: string
-  minPassRate?: number | string
-  maxPassRateDrop?: number | string
-  maxFailedIncrease?: number | string
-  maxTimeoutIncrease?: number | string
-  maxResolvedDrop?: number | string
-  failureLabelCaps?: Record<string, number | string>
   outputFilename?: string
-  summaryPath?: string
-  profilePath?: string
-  maxEstimatedCostUsd?: number | string
-  maxInputTokens?: number | string
-  maxOutputTokens?: number | string
-  maxTotalTokens?: number | string
-  maxLlmCalls?: number | string
-  maxToolCalls?: number | string
-  maxToolErrors?: number | string
-  maxWallTimeMs?: number | string
-  maxAverageLlmDurationMs?: number | string
-  maxP95LlmDurationMs?: number | string
-  maxAverageTimeToFirstChunkMs?: number | string
-  maxP95TimeToFirstChunkMs?: number | string
-  maxMissingUsageCalls?: number | string
-  maxLlmTraceMissingCalls?: number | string
-  requireCostEstimated?: boolean | string
   chaosReportPath?: string
   maxDanglingCount?: number | string
   minRecoverableRatio?: number | string
@@ -270,7 +147,6 @@ type EnhancementActionRequest = {
   olderThanDays?: number | string
   maxTotalBytes?: number | string
   kinds?: readonly string[] | string
-  kind?: string
   dryRun?: boolean
   endpoint?: string
   headers?: Record<string, string> | string
@@ -280,22 +156,7 @@ type EnhancementActionRequest = {
   timeoutMs?: number | string
   serviceName?: string
   hostVersion?: string
-  source?: string
-  inlineContent?: string
-  datasetRef?: string
-  configName?: string
-  datasetSplit?: string
-  datasetLimit?: number | string
-  hfToken?: string
-  hfDatasetsServerBaseUrl?: string
-  patches?: Record<string, string>
-  resultsFiles?: Record<string, string>
   sessionLogContent?: string
-  patchContent?: string
-  promptContent?: string
-  responseContent?: string
-  baselineSummaryContent?: string
-  candidateSummaryContent?: string
   chaosReportContent?: string
   heartbeatContent?: string
   baselineCatalogContent?: string
@@ -306,27 +167,7 @@ type EnhancementActionRequest = {
   trialContent?: string
   scoreContent?: string
   headersFileContent?: string
-  modelPatchContent?: string
-  profileContent?: string
-  summaryContent?: string
   pricingContent?: string
-  agentCommand?: string
-  agentBackend?: string
-  agentBackendConfig?: Record<string, unknown>
-  spec?: unknown
-  after?: number | string
-  sourceDir?: string
-  importId?: string
-  skipCompleted?: boolean
-  tasksJsonl?: string
-  tasksContent?: string
-  tasksDir?: string
-  taskIds?: readonly string[] | string
-  label?: string
-  note?: string
-  format?: string
-  target?: string
-  includeStatuses?: readonly string[] | string
 }
 
 function parseAllowedOriginsFromEnv(): string[] | null {
@@ -383,6 +224,7 @@ export function attachJsonRoutes(
      */
     enqueueUserMessage?: (input: { sessionId: string; text: string }) => Promise<void>
     capabilities?: import('@agent-kernel/shared').RuntimeCapabilities
+    deploymentMode?: import('@agent-kernel/shared').DeploymentMode
     metrics?: OperationalMetrics
     memoStore?: MemoStore
   },
@@ -457,8 +299,8 @@ export function attachJsonRoutes(
     if (path === '/runtime/capabilities' && (req.method === 'GET' || req.method === 'HEAD')) {
       claimRoute(req)
       sendJson(req, res, {
-        mode: payloads.capabilities?.benchmarks === false && payloads.capabilities?.evaluations === false ? 'saas' : 'standalone',
-        capabilities: payloads.capabilities ?? { agent: true, benchmarks: true, evaluations: true },
+        mode: payloads.deploymentMode ?? 'standalone',
+        capabilities: payloads.capabilities ?? { agent: true, workspace: true },
       })
       return
     }
@@ -851,26 +693,12 @@ export function attachJsonRoutes(
         .catch((err: unknown) => sendError(res, 400, err instanceof Error ? err.message : String(err)))
       return
     }
-    if (path === '/eval/swebench/plan' && req.method === 'POST') {
-      claimRoute(req)
-      if (payloads.capabilities?.evaluations === false || payloads.capabilities?.benchmarks === false) {
-        sendError(res, 403, 'FEATURE_DISABLED: evaluations')
-        return
-      }
-      void readJson(req)
-        .then((body) => createSweBenchPlan(body as CreateSweBenchPlanRequest, payloads.artifactRootDir))
-        .then((result) => sendJson(req, res, result))
-        .catch((err: unknown) => sendError(res, err instanceof HttpRouteError ? err.status : 400, err instanceof Error ? err.message : String(err)))
-      return
-    }
     if (path === '/enhancement/action' && req.method === 'POST') {
       claimRoute(req)
       void readJson(req)
         .then((body) => {
           const request = body as EnhancementActionRequest
-          const action = requiredString(request.action, 'action')
-          const disabled = payloads.capabilities ? disabledEnhancementCapability(action, payloads.capabilities) : null
-          if (disabled) throw new HttpRouteError(403, `FEATURE_DISABLED: ${disabled}`)
+          requiredString(request.action, 'action')
           return runEnhancementAction(request, payloads)
         })
         .then((result) => {
@@ -984,7 +812,6 @@ function isProtectedJsonRoute(path: string): boolean {
     path === '/auth/executor-invites' ||
     path.startsWith('/auth/executor-invites/') ||
     path === '/auth/executor-identities' ||
-    path.startsWith('/eval/') ||
     path.startsWith('/enhancement/') ||
     path.startsWith('/artifacts/') ||
     path.startsWith('/docs/') ||
@@ -1021,46 +848,15 @@ async function runEnhancementAction(
     await payloads.enqueueUserMessage({ sessionId, text })
     return { action, sessionId, queued: true }
   }
-  if (action === 'swebench-grade-command') {
-    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
-    const instanceIds = listInput(body.instanceIds)
-    const runId = requiredString(body.runId, 'runId')
-    let predictionsPath = cleanString(body.predictionsPath)
-    if (!predictionsPath) {
-      const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-      if (!rootDir) throw new HttpRouteError(400, 'predictionsPath is required (or configure artifact capture so it can be derived from runId)')
-      predictionsPath = sweBenchRunLayout(rootDir, runId).predictionsPath
-    }
-    const result = await runSweBenchGrade({
-      datasetName: requiredString(body.dataset, 'dataset'),
-      predictionsPath,
-      runId,
-      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
-      ...(instanceIds ? { instanceIds } : {}),
-      ...(body.modal === true ? { modal: true } : {}),
-      ...(cleanString(body.cwd) ? { cwd: cleanString(body.cwd) } : {}),
-      execute: false,
-    })
-    // Hide absolute paths from clients: replace predictionsPath in the emitted
-    // command with the plain filename so users don't see any server-side
-    // filesystem layout. The command is meant to be run inside the run's
-    // artifact directory (or with predictions.jsonl available in $PWD).
-    const predictionsFilename = 'predictions.jsonl'
-    const sanitizedCommand = result.command.map((token) => (token === predictionsPath ? predictionsFilename : token))
-    return {
-      action,
-      gradingAuthority: 'official-swebench-harness',
-      gradingMode: 'dry-run',
-      requiresDocker: true,
-      command: sanitizedCommand,
-      shellCommand: sanitizedCommand.map(shellQuote).join(' '),
-    }
-  }
   const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
   if (!rootDir) throw new HttpRouteError(400, 'rootDir is required when artifact capture is not configured')
   if (action === 'profile-session') {
     const pricingPath = await resolveInputPath(body, 'pricingPath', 'pricingContent', 'pricing', '.json', rootDir, action)
-    const result = await profileSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action), ...(pricingPath ? { pricingPath } : {}) })
+    const result = await profileSession({
+      rootDir,
+      sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action),
+      ...(pricingPath ? { pricingPath } : {}),
+    })
     return { action, profilePath: result.profilePath, profile: result.profile }
   }
   if (action === 'reliability-audit-session') {
@@ -1225,864 +1021,6 @@ async function runEnhancementAction(
       reasonCodes: result.reward.reasonCodes,
     }
   }
-  if (action === 'eval-score-session') {
-    const patchPath = await resolveInputPath(body, 'patchPath', 'patchContent', 'patch', '.diff', rootDir, action)
-    const result = await scoreSession({ rootDir, sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action), ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}), ...(patchPath ? { patchPath } : {}), ...(body.requireDone === true ? { requireDone: true } : {}), ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}) })
-    return { action, scoresPath: result.scoresPath, summary: result.summary }
-  }
-  if (action === 'eval-judge-score') {
-    const threshold = positiveNumber(body.threshold, 'threshold')
-    const promptPath = await resolveInputPath(body, 'promptPath', 'promptContent', 'prompt', '.txt', rootDir, action, { required: true })
-    const responsePath = await resolveInputPath(body, 'responsePath', 'responseContent', 'response', '.txt', rootDir, action, { required: true })
-    const result = await judgeScore({
-      rootDir,
-      promptPath: promptPath!,
-      responsePath: responsePath!,
-      judgeModel: requiredString(body.judgeModel, 'judgeModel'),
-      ...(cleanString(body.scorer) ? { scorer: cleanString(body.scorer) } : {}),
-      ...(cleanString(body.instanceId) ? { instanceId: cleanString(body.instanceId) } : {}),
-      ...(threshold !== undefined ? { threshold } : {}),
-      ...(cleanString(body.inputRef) ? { inputRef: cleanString(body.inputRef) } : {}),
-      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
-    })
-    return { action, scoresPath: result.scoresPath, judgeTrace: result.judgeTrace, summary: result.summary }
-  }
-  if (action === 'eval-compare-runs') {
-    const baselineSummaryPath = await resolveInputPath(body, 'baselineSummaryPath', 'baselineSummaryContent', 'baselineSummary', '.json', rootDir, action, { required: true })
-    const candidateSummaryPath = await resolveInputPath(body, 'candidateSummaryPath', 'candidateSummaryContent', 'candidateSummary', '.json', rootDir, action, { required: true })
-    const result = await compareEvalRuns({ rootDir, baselineSummaryPath: baselineSummaryPath!, candidateSummaryPath: candidateSummaryPath! })
-    return { action, comparisonPath: result.comparisonPath, comparison: result.comparison }
-  }
-  if (action === 'eval-regression-gate') {
-    const policy: RegressionThresholdPolicy = {}
-    const minPassRate = positiveNumber(body.minPassRate, 'minPassRate')
-    const maxPassRateDrop = positiveNumber(body.maxPassRateDrop, 'maxPassRateDrop')
-    const maxFailedIncrease = positiveNumber(body.maxFailedIncrease, 'maxFailedIncrease')
-    const maxTimeoutIncrease = positiveNumber(body.maxTimeoutIncrease, 'maxTimeoutIncrease')
-    const maxResolvedDrop = positiveNumber(body.maxResolvedDrop, 'maxResolvedDrop')
-    if (minPassRate !== undefined) policy.minPassRate = minPassRate
-    if (maxPassRateDrop !== undefined) policy.maxPassRateDrop = maxPassRateDrop
-    if (maxFailedIncrease !== undefined) policy.maxFailedIncrease = maxFailedIncrease
-    if (maxTimeoutIncrease !== undefined) policy.maxTimeoutIncrease = maxTimeoutIncrease
-    if (maxResolvedDrop !== undefined) policy.maxResolvedDrop = maxResolvedDrop
-    const rawCaps = body.failureLabelCaps
-    if (rawCaps && typeof rawCaps === 'object' && !Array.isArray(rawCaps)) {
-      const parsed: Record<string, number> = {}
-      for (const [label, raw] of Object.entries(rawCaps as Record<string, unknown>)) {
-        const cap = positiveNumber(raw, `failureLabelCaps.${label}`)
-        if (cap !== undefined) parsed[label] = cap
-      }
-      if (Object.keys(parsed).length > 0) policy.failureLabelCaps = parsed
-    }
-    const baselineSummaryPath = await resolveInputPath(body, 'baselineSummaryPath', 'baselineSummaryContent', 'baselineSummary', '.json', rootDir, action, { required: true })
-    const candidateSummaryPath = await resolveInputPath(body, 'candidateSummaryPath', 'candidateSummaryContent', 'candidateSummary', '.json', rootDir, action, { required: true })
-    const result = await evaluateRegressionGate({
-      rootDir,
-      baselineSummaryPath: baselineSummaryPath!,
-      candidateSummaryPath: candidateSummaryPath!,
-      ...(cleanString(body.outputFilename) ? { outputFilename: cleanString(body.outputFilename)! } : {}),
-      policy,
-    })
-    return { action, verdictPath: result.verdictPath, verdict: result.verdict }
-  }
-  if (action === 'profile-aggregate') {
-    const summaryPath = await resolveInputPath(body, 'summaryPath', 'summaryContent', 'summary', '.json', rootDir, action)
-    const output = cleanString(body.outputFilename)
-    const result = await aggregateProfiles({
-      rootDir,
-      ...(summaryPath ? { summaryPath } : {}),
-      ...(output ? { outputFilename: output } : {}),
-    })
-    return { action, reportPath: result.reportPath, report: result.report }
-  }
-  if (action === 'profile-budget') {
-    const policy: ProfileBudgetPolicy = {}
-    for (const key of [
-      'maxEstimatedCostUsd',
-      'maxInputTokens',
-      'maxOutputTokens',
-      'maxTotalTokens',
-      'maxLlmCalls',
-      'maxToolCalls',
-      'maxToolErrors',
-      'maxWallTimeMs',
-      'maxAverageLlmDurationMs',
-      'maxP95LlmDurationMs',
-      'maxAverageTimeToFirstChunkMs',
-      'maxP95TimeToFirstChunkMs',
-      'maxMissingUsageCalls',
-      'maxLlmTraceMissingCalls',
-    ] as const) {
-      const value = positiveNumber(body[key], key)
-      if (value !== undefined) policy[key] = value
-    }
-    if (body.requireCostEstimated === true || body.requireCostEstimated === 'true') {
-      policy.requireCostEstimated = true
-    }
-    const output = cleanString(body.outputFilename)
-    const profilePath = await resolveInputPath(body, 'profilePath', 'profileContent', 'profile', '.json', rootDir, action, { required: true })
-    const result = await evaluateProfileBudget({
-      rootDir,
-      profilePath: profilePath!,
-      policy,
-      ...(output ? { outputFilename: output } : {}),
-    })
-    return { action, verdictPath: result.verdictPath, verdict: result.verdict }
-  }
-  if (action === 'swebench-infer-patches') {
-    const instanceIds = listInput(body.instanceIds)
-    const limit = positiveInteger(body.limit, 'limit')
-    const runId = requiredString(body.runId, 'runId')
-    const layout = sweBenchRunLayout(rootDir, runId)
-    const instancesJsonl = cleanString(body.instancesJsonl) ?? layout.instancesPath
-    const patchesDir = cleanString(body.patchesDir) ?? layout.patchesDir
-    const result = await inferSweBenchPatchRun({
-      rootDir,
-      runId,
-      dataset: requiredString(body.dataset, 'dataset'),
-      ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
-      model: requiredString(body.model, 'model'),
-      instancesJsonl,
-      patchesDir,
-      ...(instanceIds ? { instanceIds } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
-    })
-    return {
-      action,
-      runId: result.layout.runId,
-      predictionsPath: result.layout.predictionsPath,
-      experimentPath: result.layout.experimentPath,
-      summaryPath: result.layout.summaryPath,
-      trialCount: result.trials.length,
-      gradingAuthority: 'official-swebench-harness',
-      gradingStatus: 'not_graded',
-    }
-  }
-  if (action === 'swebench-run-agent-infer') {
-    const runId = requiredString(body.runId, 'runId')
-    const layout = sweBenchRunLayout(rootDir, runId)
-    const instanceIds = listInput(body.instanceIds)
-    const limit = positiveInteger(body.limit, 'limit')
-    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
-    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
-    const skipCompletedFlag = body.skipCompleted
-    const skipCompleted = typeof skipCompletedFlag === 'boolean' ? skipCompletedFlag : true
-    const started = Date.now()
-    const model = requiredString(body.model, 'model')
-    const backendId = AgentBackendIdSchema.parse(cleanString(body.agentBackend) ?? (cleanString(body.agentCommand) ? 'custom-command' : 'agent-runlab'))
-    const backend = getAgentBackend(backendId)
-    const backendConfig = {
-      id: backendId,
-      model,
-      config: {
-        ...(body.agentBackendConfig ?? {}),
-        ...(cleanString(body.agentCommand) ? { command: cleanString(body.agentCommand) } : {}),
-      },
-    }
-    const validation = backend.validate(backendConfig)
-    if (!backend.descriptor.available) throw new HttpRouteError(400, backend.descriptor.unavailableReason ?? `${backendId} backend is unavailable`)
-    if (!validation.ok) throw new HttpRouteError(400, validation.errors.join('; '))
-    const result = await runSweBenchAgentPatchRun({
-      rootDir,
-      runId,
-      dataset: requiredString(body.dataset, 'dataset'),
-      ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
-      model,
-      instancesJsonl: cleanString(body.instancesJsonl) ?? layout.instancesPath,
-      agentCommand: backend.command(backendConfig),
-      ...(instanceIds ? { instanceIds } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-      skipCompleted,
-    })
-    const trials = result.trials
-    let passed = 0
-    let failed = 0
-    let errored = 0
-    for (const trial of trials) {
-      if (trial.status === 'completed') passed += 1
-      else if (trial.status === 'failed') failed += 1
-      else errored += 1
-    }
-    return {
-      action,
-      runId: result.layout.runId,
-      totalInstances: trials.length,
-      completed: trials.length,
-      passed,
-      failed,
-      errored,
-      durationMs: Date.now() - started,
-      predictionsPath: result.layout.predictionsPath,
-      progressPath: result.layout.progressPath,
-      summaryPath: result.layout.summaryPath,
-      gradingAuthority: 'official-swebench-harness',
-      gradingStatus: 'not_graded',
-    }
-  }
-  if (action === 'swebench-read-progress') {
-    const runId = requiredString(body.runId, 'runId')
-    const layout = sweBenchRunLayout(rootDir, runId)
-    let raw: string
-    try {
-      raw = await readFile(layout.progressPath, 'utf8')
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException | undefined)?.code
-      if (code === 'ENOENT') return { action, runId, status: 'not_started', total: 0, completed: 0, running: 0, failed: 0 }
-      throw err
-    }
-    let parsed: Record<string, unknown> = {}
-    try { parsed = JSON.parse(raw) as Record<string, unknown> } catch { parsed = {} }
-    const status = typeof parsed.status === 'string' ? parsed.status : 'running'
-    const total = typeof parsed.selectedCount === 'number' ? parsed.selectedCount : 0
-    const completedCount = typeof parsed.completedCount === 'number' ? parsed.completedCount : 0
-    const failedCount = typeof parsed.failedCount === 'number' ? parsed.failedCount : 0
-    const runningCount = typeof parsed.runningCount === 'number' ? parsed.runningCount : 0
-    const skippedCount = typeof parsed.skippedCount === 'number' ? parsed.skippedCount : 0
-    const timedOutCount = typeof parsed.timedOutCount === 'number' ? parsed.timedOutCount : 0
-    const instances = Array.isArray(parsed.instances) ? parsed.instances as Array<Record<string, unknown>> : []
-    const currentInstance = instances.find((entry) => entry?.status === 'running')?.instanceId
-    return {
-      action,
-      runId,
-      status,
-      total,
-      completed: completedCount,
-      failed: failedCount + timedOutCount,
-      running: runningCount,
-      skipped: skippedCount,
-      ...(typeof currentInstance === 'string' ? { currentInstance } : {}),
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : null,
-    }
-  }
-  if (action === 'swebench-export-session') {
-    let modelPatch: string
-    const explicitModelPatchPath = cleanString(body.modelPatchPath ?? body.patchPath)
-    if (explicitModelPatchPath) {
-      modelPatch = await readFile(explicitModelPatchPath, 'utf8')
-    } else if (typeof body.modelPatchContent === 'string' && body.modelPatchContent.length > 0) {
-      modelPatch = body.modelPatchContent
-    } else if (typeof body.patchContent === 'string' && body.patchContent.length > 0) {
-      modelPatch = body.patchContent
-    } else {
-      throw new HttpRouteError(400, 'modelPatchPath is required (or provide modelPatchContent)')
-    }
-    const result = await exportSessionForSweBench({
-      rootDir,
-      runId: requiredString(body.runId, 'runId'),
-      dataset: requiredString(body.dataset, 'dataset'),
-      ...(cleanString(body.split) ? { split: cleanString(body.split) } : {}),
-      model: requiredString(body.model, 'model'),
-      instanceId: requiredString(body.instanceId, 'instanceId'),
-      sessionLogPath: await sessionLogPath(body, payloads.sessions, rootDir, action),
-      modelPatch,
-      ...(cleanString(body.workspaceRoot) ? { workspaceRoot: cleanString(body.workspaceRoot) } : {}),
-    })
-    return { action, runId: result.layout.runId, predictionsPath: result.layout.predictionsPath, experimentPath: result.layout.experimentPath, traceArtifact: result.traceArtifact }
-  }
-  if (action === 'swebench-ingest-results') {
-    const runId = requiredString(body.runId, 'runId')
-    const layout = sweBenchRunLayout(rootDir, runId)
-    const resultsDir = cleanString(body.resultsDir) ?? layout.gradeResultsDir
-    const result = await ingestSweBenchResults({ rootDir, runId, resultsDir })
-    return {
-      action,
-      runId: result.layout.runId,
-      resultsPath: result.resultsPath,
-      summaryPath: result.summaryPath,
-      trialCount: result.trials.length,
-      resolved: result.trials.filter((trial) => trial.resolved).length,
-      gradingAuthority: 'official-swebench-harness',
-      gradingStatus: 'ingested',
-    }
-  }
-  if (action === 'swebench-resolve-instances') {
-    const source = requiredString(body.source, 'source')
-    const runId = requiredString(body.runId, 'runId')
-    let instancesSource: InstancesSource
-    if (source === 'inline') {
-      const content = requiredString(body.inlineContent, 'inlineContent')
-      instancesSource = { kind: 'inline', content }
-    } else if (source === 'huggingface') {
-      const datasetLimit = positiveInteger(body.datasetLimit, 'datasetLimit')
-      instancesSource = {
-        kind: 'huggingface',
-        datasetRef: requiredString(body.datasetRef, 'datasetRef'),
-        ...(cleanString(body.configName) ? { config: cleanString(body.configName) } : {}),
-        ...(cleanString(body.datasetSplit) ? { split: cleanString(body.datasetSplit) } : {}),
-        ...(datasetLimit !== undefined ? { limit: datasetLimit } : {}),
-        ...(cleanString(body.hfToken) ? { hfToken: cleanString(body.hfToken) } : {}),
-      }
-    } else {
-      throw new HttpRouteError(400, `unsupported instances source: ${source}`)
-    }
-    try {
-      const result = await resolveSweBenchInstances({
-        rootDir,
-        runId,
-        source: instancesSource,
-        ...(cleanString(body.hfDatasetsServerBaseUrl)
-          ? { huggingFaceOverrides: { baseUrl: cleanString(body.hfDatasetsServerBaseUrl)! } }
-          : {}),
-      })
-      return {
-        action,
-        instancesJsonlPath: result.instancesJsonlPath,
-        rowCount: result.rowCount,
-        bytes: result.bytes,
-        source: result.source,
-      }
-    } catch (err) {
-      if (err instanceof InstancesSourceError) throw new HttpRouteError(err.httpStatus, err.message)
-      throw err
-    }
-  }
-  if (action === 'swebench-upload-patches') {
-    const runId = requiredString(body.runId, 'runId')
-    const patches = body.patches
-    if (!patches || typeof patches !== 'object' || Array.isArray(patches)) {
-      throw new HttpRouteError(400, 'patches is required (object of instanceId → diff content)')
-    }
-    try {
-      const result = await resolveSweBenchPatches({
-        rootDir,
-        runId,
-        source: { kind: 'inline', patches: patches as Record<string, string> },
-      })
-      return {
-        action,
-        patchesDir: result.patchesDir,
-        instanceCount: result.instanceCount,
-        bytes: result.bytes,
-      }
-    } catch (err) {
-      if (err instanceof PatchesSourceError) throw new HttpRouteError(err.httpStatus, err.message)
-      throw err
-    }
-  }
-  if (action === 'swebench-upload-results') {
-    const runId = requiredString(body.runId, 'runId')
-    const files = body.resultsFiles
-    if (!files || typeof files !== 'object' || Array.isArray(files)) {
-      throw new HttpRouteError(400, 'resultsFiles is required (object of fileName → content)')
-    }
-    try {
-      const result = await resolveSweBenchResults({
-        rootDir,
-        runId,
-        source: { kind: 'inline', files: files as Record<string, string> },
-      })
-      return {
-        action,
-        resultsDir: result.resultsDir,
-        fileCount: result.fileCount,
-        bytes: result.bytes,
-      }
-    } catch (err) {
-      if (err instanceof ResultsSourceError) throw new HttpRouteError(err.httpStatus, err.message)
-      throw err
-    }
-  }
-  if (action === 'terminal-bench-resolve-tasks') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to resolve tasks')
-    const inline = cleanString(body.tasksContent)
-    const path = cleanString(body.tasksJsonl)
-    if (!inline && !path) throw new HttpRouteError(400, 'tasksContent or tasksJsonl is required')
-    const taskIds = listInput(body.taskIds)
-    const limit = positiveInteger(body.limit, 'limit')
-    const tasks = await resolveTerminalBenchTasks({
-      ...(inline ? { inlineContent: inline } : {}),
-      ...(path ? { tasksJsonlPath: path } : {}),
-      ...(taskIds ? { taskIds } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-    })
-    const layout = terminalBenchRunLayout(rootDir, runId)
-    await mkdir(layout.rootDir, { recursive: true })
-    await writeFile(layout.tasksJsonl, tasks.map((t) => JSON.stringify(t)).join('\n') + (tasks.length ? '\n' : ''), 'utf8')
-    // Response intentionally omits filesystem paths (see docs/meta/principles.md A1).
-    return { action, runId, taskCount: tasks.length }
-  }
-  if (action === 'terminal-bench-run-agent') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run terminal-bench')
-    const layout = terminalBenchRunLayout(rootDir, runId)
-    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
-    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
-    const started = Date.now()
-    const result = await runTerminalBenchRun({
-      rootDir,
-      runId,
-      agentCommand: cleanString(body.agentCommand) ?? 'true',
-      tasksJsonl: cleanString(body.tasksJsonl) ?? layout.tasksJsonl,
-      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
-      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
-      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    })
-    return {
-      action,
-      runId,
-      total: result.summary.total,
-      resolved: result.summary.resolved,
-      unresolved: result.summary.unresolved,
-      errored: result.summary.errored,
-      accuracy: result.summary.accuracy,
-      durationMs: Date.now() - started,
-    }
-  }
-  if (action === 'terminal-bench-read-progress') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const layout = terminalBenchRunLayout(rootDir, runId)
-    let raw: string
-    try {
-      raw = await readFile(layout.progressPath, 'utf8')
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException | undefined)?.code
-      if (code === 'ENOENT') return { action, runId, status: 'not_started', total: 0, completed: 0 }
-      throw err
-    }
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    return {
-      action,
-      runId,
-      status: typeof parsed.status === 'string' ? parsed.status : 'running',
-      total: typeof parsed.total === 'number' ? parsed.total : 0,
-      completed: typeof parsed.completed === 'number' ? parsed.completed : 0,
-      resolved: typeof parsed.resolved === 'number' ? parsed.resolved : 0,
-      unresolved: typeof parsed.unresolved === 'number' ? parsed.unresolved : 0,
-      errored: typeof parsed.errored === 'number' ? parsed.errored : 0,
-      ...(typeof parsed.currentTask === 'string' ? { currentTask: parsed.currentTask } : {}),
-      lastUpdatedAt: typeof parsed.lastUpdatedAt === 'string' ? parsed.lastUpdatedAt : null,
-    }
-  }
-  if (action === 'terminal-bench-import-results') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const summary = await importTerminalBenchResults({ rootDir, runId })
-    return {
-      action,
-      runId,
-      total: summary.total,
-      resolved: summary.resolved,
-      unresolved: summary.unresolved,
-      errored: summary.errored,
-      accuracy: summary.accuracy,
-    }
-  }
-  if (action === 'terminal-bench-2_1-run') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run terminal-bench 2.1')
-    const datasetDir = requiredString(body.tasksDir, 'tasksDir')
-    const taskIds = listInput(body.taskIds)
-    const limit = positiveInteger(body.limit, 'limit')
-    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
-    const started = Date.now()
-    const { summary } = await runTerminalBench21Run({
-      rootDir,
-      runId,
-      datasetDir,
-      agent: cleanString(body.agentCommand) === 'none' ? 'none' : 'solution',
-      ...(taskIds ? { taskIds } : {}),
-      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
-      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    })
-    return {
-      action,
-      runId,
-      total: summary.total,
-      resolved: summary.resolved,
-      unresolved: summary.unresolved,
-      errored: summary.errored,
-      accuracy: summary.accuracy,
-      durationMs: Date.now() - started,
-    }
-  }
-  if (action === 'program-bench-run-agent') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run program-bench')
-    const layout = programBenchRunLayout(rootDir, runId)
-    const limit = positiveInteger(body.limit, 'limit')
-    const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
-    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
-    const started = Date.now()
-    const result = await runProgramBenchRun({
-      rootDir,
-      runId,
-      tasksJsonl: cleanString(body.tasksJsonl) ?? layout.tasksJsonl,
-      ...(cleanString(body.tasksContent) ? { inlineTasksContent: cleanString(body.tasksContent) } : {}),
-      ...(cleanString(body.agentCommand) ? { agentCommand: cleanString(body.agentCommand) } : {}),
-      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
-      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-      ...(maxWorkers !== undefined ? { maxWorkers } : {}),
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    })
-    return {
-      action,
-      runId,
-      total: result.summary.total,
-      resolved: result.summary.resolved,
-      unresolved: result.summary.unresolved,
-      errored: result.summary.errored,
-      accuracy: result.summary.accuracy,
-      durationMs: Date.now() - started,
-    }
-  }
-  if (action === 'program-bench-import-results') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const summary = await importProgramBenchResults({ rootDir, runId })
-    return {
-      action,
-      runId,
-      total: summary.total,
-      resolved: summary.resolved,
-      unresolved: summary.unresolved,
-      errored: summary.errored,
-      accuracy: summary.accuracy,
-    }
-  }
-  if (action === 'swe-marathon-run-agent') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured to run swe-marathon')
-    const tasksDir = requiredString(body.tasksDir, 'tasksDir')
-    const taskIds = listInput(body.taskIds)
-    const limit = positiveInteger(body.limit, 'limit')
-    const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
-    const started = Date.now()
-    const result = await runSweMarathonRun({
-      rootDir,
-      runId,
-      tasksDir,
-      ...(taskIds ? { taskIds } : {}),
-      ...(cleanString(body.dataset) ? { dataset: cleanString(body.dataset) } : {}),
-      ...(cleanString(body.model) ? { model: cleanString(body.model) } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    })
-    return {
-      action,
-      runId,
-      total: result.summary.total,
-      resolved: result.summary.resolved,
-      unresolved: result.summary.unresolved,
-      errored: result.summary.errored,
-      accuracy: result.summary.accuracy,
-      durationMs: Date.now() - started,
-    }
-  }
-  if (action === 'swe-marathon-import-results') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const summary = await importSweMarathonResults({ rootDir, runId })
-    return {
-      action,
-      runId,
-      total: summary.total,
-      resolved: summary.resolved,
-      unresolved: summary.unresolved,
-      errored: summary.errored,
-      accuracy: summary.accuracy,
-    }
-  }
-  if (action === 'badcase-list') {
-    const runId = requiredString(body.runId, 'runId')
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (runId.startsWith('legacy:')) {
-      if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-      const name = runId.slice('legacy:'.length)
-      const imported = JSON.parse(await readFile(join(rootDir, 'legacy-imports', name, 'import.json'), 'utf8')) as {
-        failureTaxonomy?: { cases?: Record<string, { category?: string; label?: string; cause?: string; failedTests?: string[]; evidence?: string; lesson?: string }> }
-      }
-      const rows = Object.entries(imported.failureTaxonomy?.cases ?? {}).map(([instanceId, item]) => ({
-        instanceId,
-        failureCategory: item.category === 'regression' ? 'verifier-failure' : 'unresolved-other',
-        traceHead: item.label ? [item.label] : [],
-        traceTail: item.lesson ? [item.lesson] : [],
-        toolCallErrors: [],
-        verifierReason: [item.cause, item.evidence, ...(item.failedTests ?? [])].filter(Boolean).join('\n'),
-      }))
-      return { action, runId, counts: { 'patch-apply-failure': 0, 'test-timeout': 0, 'agent-error': 0, 'infra-error': 0, 'verifier-failure': rows.filter((row) => row.failureCategory === 'verifier-failure').length, 'unresolved-other': rows.filter((row) => row.failureCategory === 'unresolved-other').length }, cases: rows }
-    }
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const [{ cases, counts }, annotations] = await Promise.all([
-      mineBadCases({ rootDir, runId }),
-      readBadCaseAnnotations(rootDir, runId),
-    ])
-    // Response intentionally omits filesystem paths (see docs/meta/principles.md A1).
-    return {
-      action,
-      runId,
-      counts,
-      cases: cases.map((c) => ({
-        instanceId: c.instanceId,
-        failureCategory: c.failureCategory,
-        traceHead: c.traceHead,
-        traceTail: c.traceTail,
-        toolCallErrors: c.toolCallErrors,
-        ...(c.verifierReason ? { verifierReason: c.verifierReason } : {}),
-        ...(c.minimalRepro ? { minimalRepro: c.minimalRepro } : {}),
-        ...(annotations.get(c.instanceId) ? {
-          annotation: {
-            label: annotations.get(c.instanceId)!.label,
-            ...(annotations.get(c.instanceId)!.note ? { note: annotations.get(c.instanceId)!.note } : {}),
-            updatedAt: annotations.get(c.instanceId)!.updatedAt,
-          },
-        } : {}),
-      })),
-    }
-  }
-  if (action === 'badcase-annotate') {
-    const runId = requiredString(body.runId, 'runId')
-    const instanceId = requiredString(body.instanceId, 'instanceId')
-    const rawLabel = requiredString(body.label, 'label')
-    if (!BAD_CASE_LABELS.includes(rawLabel as BadCaseLabel)) {
-      throw new HttpRouteError(400, `unknown label: ${rawLabel}`)
-    }
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const annotation = await annotateBadCase({
-      rootDir,
-      runId,
-      instanceId,
-      label: rawLabel as BadCaseLabel,
-      ...(cleanString(body.note) ? { note: cleanString(body.note) } : {}),
-    })
-    return { action, runId, instanceId, label: annotation.label, updatedAt: annotation.updatedAt }
-  }
-  if (action === 'badcase-export') {
-    const runId = requiredString(body.runId, 'runId')
-    const rawFormat = requiredString(body.format, 'format')
-    if (rawFormat !== 'sft' && rawFormat !== 'rl') {
-      throw new HttpRouteError(400, `unsupported format: ${rawFormat}`)
-    }
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const wanted = listInput(body.instanceIds)
-    const { cases } = await mineBadCases({ rootDir, runId })
-    const selected = wanted && wanted.length > 0
-      ? cases.filter((c) => wanted.includes(c.instanceId))
-      : cases
-    const content = rawFormat === 'sft' ? exportForSFT(selected) : exportForRL(selected)
-    // Content string is returned inline; the browser wraps it in a Blob and
-    // downloads. No absolute path leaks into the response envelope.
-    return { action, runId, format: rawFormat, count: selected.length, content }
-  }
-  if (action === 'rollout-export') {
-    const runId = requiredString(body.runId, 'runId')
-    const rawTarget = requiredString(body.target, 'target')
-    if (rawTarget !== 'verl' && rawTarget !== 'slime') {
-      throw new HttpRouteError(400, `unsupported target: ${rawTarget}`)
-    }
-    const rootDir = cleanString(body.rootDir) ?? (payloads.artifactRootDir || undefined)
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const includeStatuses = listInput(body.includeStatuses)
-    const { content, rolloutCount } = await exportRollouts({
-      rootDir,
-      runId,
-      target: rawTarget,
-      ...(includeStatuses ? { includeStatuses } : {}),
-    })
-    // No paths in the response — the browser wraps `content` in a Blob.
-    return { action, target: rawTarget, rolloutCount, content }
-  }
-  if (action === 'agent-backend-list') {
-    return { action, backends: listAgentBackends() }
-  }
-  if (action === 'benchmark-run-create') {
-    const service = benchmarkRunService(rootDir)
-    return { action, run: await service.create(body.spec) }
-  }
-  if (action === 'benchmark-run-list') {
-    const service = benchmarkRunService(rootDir)
-    return { action, runs: await service.list() }
-  }
-  if (action === 'benchmark-run-get') {
-    const service = benchmarkRunService(rootDir)
-    return { action, run: await service.get(requiredString(body.runId, 'runId')) }
-  }
-  if (action === 'benchmark-run-start') {
-    const service = benchmarkRunService(rootDir)
-    return { action, run: await service.start(requiredString(body.runId, 'runId')) }
-  }
-  if (action === 'benchmark-run-grade') {
-    const service = benchmarkRunService(rootDir)
-    return { action, run: await service.grade(requiredString(body.runId, 'runId'), body.dryRun !== true) }
-  }
-  if (action === 'benchmark-run-cancel') {
-    const service = benchmarkRunService(rootDir)
-    return { action, run: await service.cancel(requiredString(body.runId, 'runId')) }
-  }
-  if (action === 'benchmark-run-events') {
-    const service = benchmarkRunService(rootDir)
-    return { action, ...(await service.events(requiredString(body.runId, 'runId'), nonNegativeInteger(body.after, 'after') ?? -1, positiveInteger(body.limit, 'limit') ?? 100)) }
-  }
-  if (action === 'legacy-swebench-import') {
-    const sourceDir = requiredString(body.sourceDir, 'sourceDir')
-    const result = await importLegacySweBench({
-      sourceDir,
-      outputRoot: rootDir,
-      ...(cleanString(body.importId) ? { importId: cleanString(body.importId) } : {}),
-    })
-    const headline = result.imported.headline as { agent_runlab?: { resolved?: number; selected?: number }; claude_code?: { resolved?: number; selected?: number } }
-    const taxonomy = result.imported.failureTaxonomy as { cases?: Record<string, unknown> }
-    return {
-      action,
-      importPath: result.path,
-      source: result.imported.source,
-      agentRunLab: headline.agent_runlab,
-      claudeCode: headline.claude_code,
-      badCaseCount: Object.keys(taxonomy.cases ?? {}).length,
-    }
-  }
-  if (action === 'run-registry-list') {
-    const kindFilter = cleanString(body.kind)
-    const registry = await readSweBenchRunRegistry(rootDir)
-    const entries = registry.entries.filter((entry) => {
-      if (!kindFilter) return true
-      const entryKind = entry.kind ?? 'swebench'
-      return entryKind === kindFilter
-    })
-    const runs = await Promise.all(entries.map(async (entry) => {
-      // Best-effort enrich: read summary.json for resolved/total, or progress.json
-      // for status. Paths intentionally NOT surfaced in the response (principle A1).
-      let status: 'running' | 'complete' | 'failed' | 'pending' = 'pending'
-      let totalInstances: number | undefined
-      let resolved: number | undefined
-      try {
-        const summaryText = await readFile(join(entry.runDir, 'summary.json'), 'utf8')
-        const summary = JSON.parse(summaryText) as { total?: number; resolved?: number }
-        if (typeof summary.total === 'number') totalInstances = summary.total
-        if (typeof summary.resolved === 'number') resolved = summary.resolved
-        status = 'complete'
-      } catch {
-        try {
-          const progressText = await readFile(join(entry.runDir, 'progress.json'), 'utf8')
-          const progress = JSON.parse(progressText) as { status?: string; total?: number }
-          if (progress.status === 'error' || progress.status === 'failed') status = 'failed'
-          else if (progress.status === 'complete' || progress.status === 'done') status = 'complete'
-          else status = 'running'
-          if (typeof progress.total === 'number') totalInstances = progress.total
-        } catch {
-          // Neither summary nor progress present — leave as pending.
-        }
-      }
-      const kind = entry.kind ?? 'swebench'
-      return {
-        runId: entry.runId,
-        kind,
-        label: entry.runId,
-        dataset: entry.dataset,
-        ...(entry.split ? { split: entry.split } : {}),
-        model: entry.model,
-        selectedCount: entry.selectedCount,
-        status,
-        createdAt: entry.registeredAt,
-        updatedAt: entry.updatedAt,
-        ...(totalInstances !== undefined ? { totalInstances } : {}),
-        ...(resolved !== undefined ? { resolved } : {}),
-      }
-    }))
-    const unified: Array<Record<string, unknown> & { runId: string; updatedAt: string }> = [...runs]
-    for (const record of await benchmarkRunService(rootDir).list()) {
-      const totalInstances = Math.max(0, ...record.status.backends.map((backend) => backend.total ?? 0))
-      const allTrialsFailed = totalInstances > 0 && record.status.backends.every((backend) => (backend.completed ?? 0) === 0 && (backend.failed ?? 0) + (backend.timedOut ?? 0) >= (backend.total ?? 0))
-      const officiallyGraded = record.status.backends.length > 0 && record.status.backends.every((backend) => backend.state === 'completed' && backend.gradingCommand && typeof backend.resolved === 'number')
-      unified.push({
-        runId: record.spec.runId,
-        kind: record.spec.benchmark,
-        label: record.spec.runId,
-        dataset: record.spec.dataset.source,
-        ...(record.spec.dataset.split ? { split: record.spec.dataset.split } : {}),
-        model: record.spec.backends.map((backend) => `${backend.id}:${backend.model || 'none'}`).join(', '),
-        selectedCount: record.spec.dataset.instanceIds?.length ?? record.spec.dataset.limit ?? totalInstances,
-        status: record.status.state === 'failed' || allTrialsFailed ? 'failed' : record.status.state === 'completed' ? 'complete' : record.status.state === 'running' ? 'running' : 'pending',
-        createdAt: record.status.createdAt,
-        updatedAt: record.status.updatedAt,
-        evidenceLevel: record.spec.backends.some((backend) => backend.id === 'smoke') ? 'smoke' : officiallyGraded ? 'official' : 'predictions_only',
-        orchestrated: true,
-        backends: record.status.backends,
-        totalInstances,
-        ...(record.status.state === 'completed' ? { resolved: Math.max(0, ...record.status.backends.map((backend) => backend.resolved ?? 0)) } : {}),
-      })
-    }
-    try {
-      for (const name of await readdir(join(rootDir, 'legacy-imports'))) {
-        try {
-          const imported = JSON.parse(await readFile(join(rootDir, 'legacy-imports', name, 'import.json'), 'utf8')) as {
-            importedAt: string
-            headline?: { agent_runlab?: { run_id?: string; selected?: number; resolved?: number }; claude_code?: { resolved?: number } }
-            failureTaxonomy?: { cases?: Record<string, unknown> }
-          }
-          const agent = imported.headline?.agent_runlab
-          if (!agent?.run_id) continue
-          unified.push({
-            runId: `legacy:${name}`,
-            kind: 'swebench',
-            label: `Historical SWE-bench: ${name}`,
-            dataset: 'princeton-nlp/SWE-bench_Lite',
-            model: 'multiple historical backends/models',
-            selectedCount: agent.selected ?? 0,
-            status: 'complete',
-            createdAt: imported.importedAt,
-            updatedAt: imported.importedAt,
-            totalInstances: agent.selected,
-            resolved: agent.resolved,
-            evidenceLevel: 'legacy_official',
-            legacy: true,
-            badCaseCount: Object.keys(imported.failureTaxonomy?.cases ?? {}).length,
-            comparison: { agentRunLabResolved: agent.resolved, claudeCodeResolved: imported.headline?.claude_code?.resolved },
-          })
-        } catch { /* ignore malformed imports */ }
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    const deduped = [...new Map(unified.map((run) => [run.runId, run])).values()]
-    deduped.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
-    return { action, runs: deduped }
-  }
-  if (action === 'benchmark-run-delete-impact' || action === 'benchmark-run-delete') {
-    const runId = requiredString(body.runId, 'runId')
-    if (!rootDir) throw new HttpRouteError(400, 'artifact capture must be configured')
-    const targets: string[] = []
-    const orchestratedDir = join(rootDir, 'benchmark-runs', runId)
-    if (existsSync(orchestratedDir)) targets.push(orchestratedDir)
-    if (runId.startsWith('legacy:')) {
-      const importDir = join(rootDir, 'legacy-imports', runId.slice('legacy:'.length))
-      if (existsSync(importDir)) targets.push(importDir)
-    } else {
-      const registry = await readSweBenchRunRegistry(rootDir)
-      const entry = registry.entries.find((candidate) => candidate.runId === runId)
-      if (entry && isPathInside(rootDir, entry.runDir) && existsSync(entry.runDir)) targets.push(entry.runDir)
-    }
-    const uniqueTargets = [...new Set(targets.map((target) => resolvePath(target)))]
-    let files = 0
-    let bytes = 0
-    for (const target of uniqueTargets) { const impact = await deletionDirectoryImpact(target); files += impact.files; bytes += impact.bytes }
-    if (action === 'benchmark-run-delete-impact') return { action, runId, files, bytes, targets: uniqueTargets.map((target) => target.slice(resolvePath(rootDir).length + 1)) }
-    if (body.confirmRunId !== runId || body.confirmPermanent !== true) throw new HttpRouteError(400, 'permanent deletion confirmation does not match')
-    const service = benchmarkRunService(rootDir)
-    if (existsSync(orchestratedDir)) await service.delete(runId)
-    for (const target of uniqueTargets) if (target !== resolvePath(orchestratedDir)) await rm(target, { recursive: true, force: false })
-    if (!runId.startsWith('legacy:')) await unregisterSweBenchRun(rootDir, runId)
-    return { action, runId, deleted: true, files, bytes }
-  }
   if (action === 'artifacts-manifest') {
     const maxHashBytes = positiveInteger(body.maxHashBytes, 'maxHashBytes')
     const result = await buildArtifactManifest({
@@ -2229,40 +1167,6 @@ function frameworkTarget(value: string): 'slime' | 'verl' | 'trl' | 'openrlhf' |
   throw new HttpRouteError(400, `invalid frameworkTarget: ${value}`)
 }
 
-async function createSweBenchPlan(body: CreateSweBenchPlanRequest, artifactRootDir: string | false | undefined): Promise<unknown> {
-  const rootDir = cleanString(body.rootDir) ?? (artifactRootDir || undefined)
-  if (!rootDir) throw new HttpRouteError(400, 'rootDir is required when artifact capture is not configured')
-  const split = cleanString(body.split)
-  const instanceIds = listInput(body.instanceIds)
-  const limit = positiveInteger(body.limit, 'limit')
-  const maxWorkers = positiveInteger(body.maxWorkers, 'maxWorkers')
-  const timeoutMs = positiveInteger(body.timeoutMs, 'timeoutMs')
-  const repoCacheDir = cleanString(body.repoCacheDir)
-  const result = await planSweBenchWorkerRun({
-    rootDir,
-    runId: requiredString(body.runId, 'runId'),
-    dataset: requiredString(body.dataset, 'dataset'),
-    ...(split ? { split } : {}),
-    model: requiredString(body.model, 'model'),
-    instancesJsonl: requiredString(body.instancesJsonl, 'instancesJsonl'),
-    ...(instanceIds ? { instanceIds } : {}),
-    ...(limit !== undefined ? { limit } : {}),
-    ...(maxWorkers !== undefined ? { maxWorkers } : {}),
-    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    ...(repoCacheDir ? { repoCacheDir } : {}),
-  })
-  return {
-    planPath: result.planPath,
-    registryPath: result.registryPath,
-    runId: result.layout.runId,
-    selectedCount: result.plan.selectedCount,
-    maxWorkers: result.plan.maxWorkers,
-    shardCount: result.plan.shards.length,
-    warnings: result.plan.warnings,
-    plan: result.plan,
-  }
-}
-
 function requiredString(value: unknown, name: string): string {
   const cleaned = cleanString(value)
   if (!cleaned) throw new HttpRouteError(400, `${name} is required`)
@@ -2304,11 +1208,6 @@ function positiveNumber(value: unknown, name: string): number | undefined {
   const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
   if (!Number.isFinite(number) || number < 0) throw new HttpRouteError(400, `${name} must be a non-negative number`)
   return number
-}
-
-function shellQuote(value: string): string {
-  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value
-  return `'${value.replace(/'/g, `'\''`)}'`
 }
 
 function valueOf<T>(value: T | (() => T)): T {
@@ -2834,24 +1733,6 @@ function serveEmbeddedReleaseAsset(
     return
   }
   res.end(body)
-}
-
-function isPathInside(root: string, candidate: string): boolean {
-  const normalizedRoot = resolvePath(root)
-  const normalizedCandidate = resolvePath(candidate)
-  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}${sep}`)
-}
-
-async function deletionDirectoryImpact(directory: string): Promise<{ files: number; bytes: number }> {
-  let files = 0
-  let bytes = 0
-  const visit = async (path: string): Promise<void> => {
-    const info = await stat(path)
-    if (!info.isDirectory()) { files += 1; bytes += info.size; return }
-    for (const name of await readdir(path)) await visit(join(path, name))
-  }
-  await visit(directory)
-  return { files, bytes }
 }
 
 async function pickFile(abs: string, root: string): Promise<string | null> {

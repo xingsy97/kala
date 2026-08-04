@@ -74,9 +74,8 @@ describe('dashboard i18n', () => {
 
   it('resolves recently added dashboard UI keys instead of rendering raw key paths', async () => {
     const keys = [
-      'benchmarks.terminalWizard.description',
-      'artifacts.eval.artifactCategories.patch',
-      'artifacts.eval.details.session',
+      'artifacts.profiles.actions',
+      'artifacts.memory.actions',
       'artifacts.ops.stats.reliabilityIssues',
       'inspector.llm.messagesTab',
       'inspector.llm.descriptionBytesLabel',
@@ -87,20 +86,6 @@ describe('dashboard i18n', () => {
       for (const key of keys) {
         expect(i18n.t(key), `${lang}.${key}`).not.toBe(key)
       }
-    }
-  })
-
-  it('never claims resolved status at the Run Agent stage (principle A3)', () => {
-    // `inferDescription` covers the Run Agent step — before official grading.
-    // It may reference `resolved` only to say the status is *unknown* until
-    // the official harness runs. It must not assert that predictions imply
-    // resolved outcomes.
-    for (const lang of ['en', 'zh'] as const) {
-      const infer = resources[lang].translation.artifacts?.eval?.wizard?.inferDescription
-      expect(infer, `${lang}.inferDescription must exist`).toBeDefined()
-      const text = String(infer)
-      const bad = /\b(?:has been|is|are)\s+resolved\b|已经\s*resolved|已解决/i
-      expect(bad.test(text), `${lang}.inferDescription must not claim resolved status: ${text}`).toBe(false)
     }
   })
 })

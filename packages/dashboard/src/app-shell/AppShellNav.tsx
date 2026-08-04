@@ -1,12 +1,12 @@
-import type { RuntimeCapabilities } from '@agent-kernel/shared'
 import { useTranslation } from 'react-i18next'
-import { BarChart3, BookOpen, Bot, Boxes, ChevronUp, CircleHelp, LogOut, NotebookPen, Settings as SettingsIcon, Sparkles, UserRound, Workflow } from 'lucide-react'
+import { BookOpen, Bot, Boxes, ChevronUp, CircleHelp, ExternalLink, LogOut, NotebookPen, Settings as SettingsIcon, Sparkles, UserRound, Workflow } from 'lucide-react'
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import { Button } from '../components/ui/button.js'
 import { cn } from '../lib/utils.js'
 import type { AccountProfile } from '../auth-session.js'
 import type { AppSection } from './section.js'
+import { resolveEvaluationPlatformUrl } from '../evaluation-integration.js'
 
 type NavItem = {
   id: AppSection
@@ -17,7 +17,6 @@ type NavItem = {
 
 const NAV_ITEMS: readonly NavItem[] = [
   { id: 'agent', labelKey: 'appShell.nav.agent', Icon: Bot, testid: 'app-shell-nav-agent' },
-  { id: 'benchmarks', labelKey: 'appShell.nav.benchmarks', Icon: BarChart3, testid: 'app-shell-nav-benchmarks' },
   { id: 'operations', labelKey: 'appShell.nav.operations', Icon: Workflow, testid: 'app-shell-nav-operations' },
   { id: 'artifacts', labelKey: 'appShell.nav.artifacts', Icon: Boxes, testid: 'app-shell-nav-artifacts' },
   { id: 'pipeline', labelKey: 'appShell.nav.pipeline', Icon: Sparkles, testid: 'app-shell-nav-pipeline' },
@@ -39,7 +38,6 @@ export function AppShellNav({
   connectionStatus,
   collapsed,
   onCollapse,
-  capabilities,
   account,
   accountLoading = false,
   onSignOut,
@@ -53,7 +51,6 @@ export function AppShellNav({
   collapsed: boolean
   onCollapse(): void
   onExpand(): void
-  capabilities?: RuntimeCapabilities
   account?: AccountProfile
   accountLoading?: boolean
   onSignOut?(): void | Promise<void>
@@ -149,7 +146,7 @@ export function AppShellNav({
             aria-hidden
           />
         ) : null}
-        {NAV_ITEMS.filter((item) => item.id !== 'benchmarks' || capabilities?.benchmarks !== false).map(({ id, labelKey, Icon, testid }) => {
+        {NAV_ITEMS.map(({ id, labelKey, Icon, testid }) => {
           const active = section === id
           return (
             <Button
@@ -175,6 +172,9 @@ export function AppShellNav({
         })}
       </div>
       <span className="ml-auto flex flex-none items-center gap-1">
+        <Button variant="ghost" size="icon" asChild className="h-9 w-9 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8">
+          <a href={resolveEvaluationPlatformUrl()} target="_blank" rel="noreferrer" data-testid="app-shell-open-evaluation" title={t('appShell.nav.evaluation')} aria-label={t('appShell.nav.evaluation')}><ExternalLink className="h-4 w-4" aria-hidden /></a>
+        </Button>
         {account || accountLoading ? <AccountMenu account={account} loading={accountLoading} onSignOut={onSignOut} onOpenAccount={onOpenAccount} onOpenAdmin={onOpenAdmin} /> : null}
         <Button
           variant="ghost"

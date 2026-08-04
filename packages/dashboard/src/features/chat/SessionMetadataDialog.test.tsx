@@ -39,6 +39,10 @@ vi.mock('../../components/ui/select.js', async () => {
 })
 
 import { SessionMetadataDialog } from './SessionMetadataDialog.js'
+import { governedSessionTaskCandidate } from '../../evaluation-integration.js'
+import { saveFile } from '../../lib/save-file.js'
+
+vi.mock('../../lib/save-file.js', () => ({ saveFile: vi.fn(async () => 'downloaded') }))
 
 const baseState: AgentState = {
   status: 'idle',
@@ -68,12 +72,36 @@ const baseSummary: SessionSummary = {
 
 describe('SessionMetadataDialog', () => {
   beforeEach(() => {
+    history.replaceState({}, '', '/')
     if (!HTMLElement.prototype.hasPointerCapture) {
       Object.defineProperty(HTMLElement.prototype, 'hasPointerCapture', {
         configurable: true,
         value: () => false,
       })
     }
+  })
+
+  it('exports a governed private reference and links only an explicit evaluation reference', async () => {
+    history.replaceState({}, '', '/?evaluationSessionId=' + baseSummary.sessionId + '&evaluationRunId=run-one&evaluationDefectId=finding-one')
+    render(<SessionMetadataDialog open onOpenChange={() => {}} sessionId={baseSummary.sessionId} summary={baseSummary} state={baseState} selectedModel="model-one" onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
+    fireEvent.click(screen.getByTestId('session-export-task-candidate'))
+    expect(saveFile).toHaveBeenCalledOnce()
+    const input = vi.mocked(saveFile).mock.calls[0]![0]
+    expect(input).toMatchObject({
+      suggestedName: `agent-eval-task-candidate-${baseSummary.sessionId}.json`,
+      mimeType: 'application/json',
+    })
+    expect(input.blob).toBeInstanceOf(Blob)
+    const candidate = governedSessionTaskCandidate(baseSummary.sessionId, baseSummary, 'model-one')
+    expect(candidate).toMatchObject({ sourceClassification: 'private_workspace', publicTaskPack: false, candidateMetadata: { contentIncluded: false, workspacePathIncluded: false }, governance: { requiresExplicitOperatorReview: true, redactionStatus: 'not_reviewed', provenanceApprovalStatus: 'not_reviewed' } })
+    expect(JSON.stringify(candidate)).not.toContain('/tmp/current')
+    expect(screen.getByTestId('session-open-evaluation-reference').getAttribute('href')).toContain('/defects?runId=run-one&findingId=finding-one')
+  })
+
+  it('does not infer an evaluation link without an explicit session-scoped reference', () => {
+    history.replaceState({}, '', '/?evaluationRunId=run-one')
+    render(<SessionMetadataDialog open onOpenChange={() => {}} sessionId={baseSummary.sessionId} summary={baseSummary} state={baseState} selectedModel={null} onRename={() => {}} onOpenChangeCwdDialog={() => {}} onChangeApprovalMode={() => {}} onChangeToolCardMode={() => {}} />)
+    expect(screen.queryByTestId('session-open-evaluation-reference')).toBeNull()
   })
 
   it('renders read-only summary fields', () => {

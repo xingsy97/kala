@@ -12,7 +12,7 @@ describe('parseSessionDeepLink', () => {
   })
   it('returns null for non-session hashes', () => {
     expect(parseSessionDeepLink('#/agent')).toBeNull()
-    expect(parseSessionDeepLink('#/benchmarks')).toBeNull()
+    expect(parseSessionDeepLink('#/artifacts')).toBeNull()
     expect(parseSessionDeepLink('')).toBeNull()
     expect(parseSessionDeepLink('#/sessions')).toBeNull()
     expect(parseSessionDeepLink('#/sessions/')).toBeNull()

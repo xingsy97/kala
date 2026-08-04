@@ -21,7 +21,7 @@ export async function runScenarioOnce(
 ): Promise<ScenarioResult> {
   const stack = await startLocalStack({
     llm: definition.makeLlm(), tools: options.extraTools,
-    ...(definition.name === 'saas-capabilities' ? { deploymentMode: 'saas' as const, capabilities: { agent: true, workspace: true, benchmarks: false, evaluations: false } } : {}),
+    ...(definition.name === 'saas-capabilities' ? { deploymentMode: 'saas' as const, capabilities: { agent: true, workspace: true } } : {}),
   })
   try {
     const session = await openDashboard({

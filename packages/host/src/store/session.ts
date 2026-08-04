@@ -15,8 +15,7 @@ import type {
   Effect,
   UsageTotal,
 } from '@agent-kernel/kernel'
-import type { LLMTrace, SessionPreferences } from '@agent-kernel/shared'
-import type { EvalMemoryPolicy } from '@agent-kernel/shared/enhancement'
+import type { LLMTrace, SessionMemoryPolicy, SessionPreferences } from '@agent-kernel/shared'
 import { createInitialState, fold } from '@agent-kernel/kernel'
 import type { SessionSummary } from '@agent-kernel/shared'
 import { ulid } from 'ulid'
@@ -56,13 +55,13 @@ export type SessionRecord = {
   preferences: SessionPreferences
   /**
    * Host-side memory policy for this session. When `mode: 'disabled'`, the
-   * loop rejects `memory` tool calls to workspace/global scope so a benchmark
+   * loop rejects `memory` tool calls to workspace/global scope so an isolated
    * session cannot inadvertently pull cross-task state from disk. Not part of
    * kernel state — the reducer never sees it and it is never persisted into
-   * the JSONL ledger. Callers (eval runners, tests, CLI) attach it via
+   * the JSONL ledger. Callers attach it via
    * `CreateSessionParams.memoryPolicy`.
    */
-  memoryPolicy?: EvalMemoryPolicy
+  memoryPolicy?: SessionMemoryPolicy
 }
 
 export type CreateSessionParams = {
@@ -79,7 +78,7 @@ export type CreateSessionParams = {
   workspaceName?: string
   initialCwd?: string
   initialApprovalMode?: import('@agent-kernel/kernel').ApprovalMode
-  memoryPolicy?: EvalMemoryPolicy
+  memoryPolicy?: SessionMemoryPolicy
   preferences?: SessionPreferences
 }
 
@@ -505,7 +504,7 @@ export class SessionStore {
    * runners after `ensure`/`create` when the session is a benchmark trial and
    * cross-task memory must be disabled. Pass `undefined` to clear.
    */
-  setMemoryPolicy(sessionId: string, policy: EvalMemoryPolicy | undefined): void {
+  setMemoryPolicy(sessionId: string, policy: SessionMemoryPolicy | undefined): void {
     const rec = this.records.get(sessionId)
     if (!rec) return
     if (policy === undefined) delete rec.memoryPolicy

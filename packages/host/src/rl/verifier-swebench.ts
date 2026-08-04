@@ -7,7 +7,6 @@ import { join } from 'node:path'
 import {
   AgentRewardArtifactSchema,
   createArtifactStore,
-  createSweBenchPrediction,
   type AgentRewardArtifact,
   type AgentRlTask,
   type ArtifactRef,
@@ -162,7 +161,7 @@ export async function runSwebenchVerifier(
 
   // 2. Write predictions JSON
   const predPath = join(workDir, `pred-${runId}.json`)
-  const pred = [createSweBenchPrediction({ instanceId, modelNameOrPath: modelName, modelPatch: patch })]
+  const pred = [createSwebenchPrediction({ instanceId, modelNameOrPath: modelName, modelPatch: patch })]
   await writeFile(predPath, JSON.stringify(pred), 'utf8')
 
   // 3. Invoke harness
@@ -221,6 +220,18 @@ export async function runSwebenchVerifier(
     patchArtifact,
     store,
   })
+}
+
+function createSwebenchPrediction(input: {
+  instanceId: string
+  modelNameOrPath: string
+  modelPatch: string
+}): { instance_id: string; model_name_or_path: string; model_patch: string } {
+  return {
+    instance_id: input.instanceId,
+    model_name_or_path: input.modelNameOrPath,
+    model_patch: input.modelPatch,
+  }
 }
 
 async function finalize(args: {

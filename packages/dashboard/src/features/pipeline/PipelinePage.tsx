@@ -1,4 +1,3 @@
-import type { RuntimeCapabilities } from '@agent-kernel/shared'
 import type { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
@@ -14,22 +13,15 @@ type Step = {
   signal: string
 }
 
-type TrackKey = 'runtime' | 'benchmark'
-
 type Slide =
   | { kind: 'step'; step: Step; index: number; total: number }
   | { kind: 'principles' }
 
-export function PipelinePage({ capabilities }: { capabilities: RuntimeCapabilities }): JSX.Element {
+export function PipelinePage(): JSX.Element {
   const { t } = useTranslation()
-  const [track, setTrack] = useState<TrackKey>('runtime')
   const [cursor, setCursor] = useState(0)
 
-  const runtimeSteps = t('pipeline.steps', { returnObjects: true }) as Step[]
-  const benchmarkSteps = t('pipeline.benchmarkSteps', { returnObjects: true }) as Step[]
-  const benchmarkEnabled = capabilities.benchmarks && capabilities.evaluations
-  const effectiveTrack = benchmarkEnabled ? track : 'runtime'
-  const steps = effectiveTrack === 'runtime' ? runtimeSteps : benchmarkSteps
+  const steps = t('pipeline.steps', { returnObjects: true }) as Step[]
 
   const slides = useMemo<Slide[]>(() => {
     const stepSlides: Slide[] = steps.map((step, i) => ({
@@ -49,11 +41,6 @@ export function PipelinePage({ capabilities }: { capabilities: RuntimeCapabiliti
     setCursor(Math.max(0, Math.min(total - 1, next)))
   }, [total])
 
-  const switchTrack = useCallback((next: TrackKey) => {
-    setTrack(next)
-    setCursor(0)
-  }, [])
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement | null
@@ -65,10 +52,6 @@ export function PipelinePage({ capabilities }: { capabilities: RuntimeCapabiliti
       } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
         e.preventDefault()
         goto(safeCursor - 1)
-      } else if (e.key === '1') {
-        switchTrack('runtime')
-      } else if (e.key === '2' && benchmarkEnabled) {
-        switchTrack('benchmark')
       } else if (e.key === 'Home') {
         goto(0)
       } else if (e.key === 'End') {
@@ -77,9 +60,9 @@ export function PipelinePage({ capabilities }: { capabilities: RuntimeCapabiliti
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [benchmarkEnabled, goto, safeCursor, switchTrack, total])
+  }, [goto, safeCursor, total])
 
-  const trackTitle = t(`pipeline.tracks.${effectiveTrack}.title`)
+  const trackTitle = t('pipeline.tracks.runtime.title')
   const footerLabel = current.kind === 'step' ? current.step.title : t('pipeline.principlesTitle')
 
   return (
@@ -91,33 +74,12 @@ export function PipelinePage({ capabilities }: { capabilities: RuntimeCapabiliti
           <span aria-hidden="true">·</span>
           <span>{trackTitle}</span>
         </div>
-        {benchmarkEnabled ? <div className="inline-flex rounded-md border border-border/60 bg-muted/40 p-0.5" role="tablist">
-          {(['runtime', 'benchmark'] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={track === key}
-              data-testid={`pipeline-tab-${key}`}
-              onClick={() => switchTrack(key)}
-              className={cn(
-                'rounded px-3 py-1 text-xs font-medium transition-colors',
-                track === key
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {t(`pipeline.tracks.${key}.title`)}
-              <span className="ml-1.5 text-[10px] text-muted-foreground/70">{key === 'runtime' ? '1' : '2'}</span>
-            </button>
-          ))}
-        </div> : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="pipeline-scroll-body">
         <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center px-4 py-6 sm:px-8 sm:py-10">
           {current.kind === 'step' ? (
-            <StepSlide step={current.step} index={current.index} total={current.total} track={effectiveTrack} whereToLook={t('pipeline.whereToLook')} />
+            <StepSlide step={current.step} index={current.index} total={current.total} whereToLook={t('pipeline.whereToLook')} />
           ) : (
             <PrinciplesSlide t={t} />
           )}
@@ -183,25 +145,20 @@ function StepSlide({
   step,
   index,
   total,
-  track,
   whereToLook,
 }: {
   step: Step
   index: number
   total: number
-  track: TrackKey
   whereToLook: string
 }): JSX.Element {
-  const accent = track === 'benchmark'
-    ? 'text-emerald-600 dark:text-emerald-400'
-    : 'text-primary'
   return (
     <article
       className="w-full max-w-2xl"
       data-testid="pipeline-slide-step"
       data-step-index={index}
     >
-      <div className={cn('font-mono text-4xl font-bold leading-none tracking-tight sm:text-6xl', accent)}>
+      <div className="font-mono text-4xl font-bold leading-none tracking-tight text-primary sm:text-6xl">
         {String(index + 1).padStart(2, '0')}
         <span className="ml-2 text-2xl text-muted-foreground/60">/ {String(total).padStart(2, '0')}</span>
       </div>

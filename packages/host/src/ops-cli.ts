@@ -17,30 +17,6 @@ import {
   type TraceExportOtlpInput,
 } from './trace-otlp-export.js'
 import { buildArtifactManifest, pruneArtifacts, type BuildArtifactManifestInput, type PruneArtifactsInput } from './artifact-manifest.js'
-import {
-  compareEvalRuns,
-  judgeScore,
-  profileSession,
-  scoreSession,
-  type CompareEvalRunsInput,
-  type JudgeScoreInput,
-  type ProfileSessionInput,
-  type ScoreSessionInput,
-} from './eval/session/generic.js'
-import {
-  evaluateRegressionGate,
-  parseFailureCapArgs,
-  type RegressionGateInput,
-} from './eval/session/regression-gate.js'
-import {
-  aggregateProfiles,
-  type ProfileAggregateInput,
-} from './eval/session/cost-aggregate.js'
-import {
-  evaluateProfileBudget,
-  parseThresholdArgs,
-  type ProfileBudgetInput,
-} from './eval/session/profile-budget.js'
 import { auditSessionReliability, replayReliabilityChaos, type AuditSessionReliabilityInput, type ReliabilityChaosReplayInput } from './reliability.js'
 import {
   evaluateReliabilityGate,
@@ -64,13 +40,6 @@ import { readFile } from 'node:fs/promises'
 
 export type EnhancementCliCommand =
   | { kind: 'none' }
-  | ({ kind: 'eval-score-session' } & ScoreSessionInput)
-  | ({ kind: 'eval-judge-score' } & JudgeScoreInput)
-  | ({ kind: 'eval-compare-runs' } & CompareEvalRunsInput)
-  | ({ kind: 'eval-regression-gate' } & RegressionGateInput)
-  | ({ kind: 'profile-session' } & ProfileSessionInput)
-  | ({ kind: 'profile-aggregate' } & ProfileAggregateInput)
-  | ({ kind: 'profile-budget' } & ProfileBudgetInput)
   | ({ kind: 'reliability-audit-session' } & AuditSessionReliabilityInput)
   | ({ kind: 'reliability-chaos-replay' } & ReliabilityChaosReplayInput)
   | ({ kind: 'reliability-gate' } & ReliabilityGateInput)
@@ -131,99 +100,6 @@ export function parseEnhancementCli(argv: readonly string[]): EnhancementCliComm
       outputFilename: value(rest, '--output'),
       serviceName: value(rest, '--service-name'),
       hostVersion: value(rest, '--host-version'),
-    }
-  }
-  if (commandArgv[1] === 'eval' && commandArgv[2] === 'score-session') {
-    const rest = commandArgv.slice(3)
-    return {
-      kind: 'eval-score-session',
-      rootDir: value(rest, '--root-dir') ?? 'runs/eval/session-score',
-      sessionLogPath: required(rest, '--session-log'),
-      instanceId: value(rest, '--instance-id'),
-      patchPath: value(rest, '--patch'),
-      requireDone: flag(rest, '--require-done'),
-      workspaceRoot: value(rest, '--workspace-root'),
-    }
-  }
-  if (commandArgv[1] === 'eval' && commandArgv[2] === 'compare-runs') {
-    const rest = commandArgv.slice(3)
-    return {
-      kind: 'eval-compare-runs',
-      rootDir: value(rest, '--root-dir') ?? 'runs/eval/compare',
-      baselineSummaryPath: required(rest, '--baseline-summary'),
-      candidateSummaryPath: required(rest, '--candidate-summary'),
-    }
-  }
-  if (commandArgv[1] === 'eval' && commandArgv[2] === 'regression-gate') {
-    const rest = commandArgv.slice(3)
-    const failureLabelCaps = parseFailureCapArgs(rest)
-    const minPassRate = numberValue(rest, '--min-pass-rate')
-    const maxPassRateDrop = numberValue(rest, '--max-pass-rate-drop')
-    const maxFailedIncrease = numberValue(rest, '--max-failed-increase')
-    const maxTimeoutIncrease = numberValue(rest, '--max-timeout-increase')
-    const maxResolvedDrop = numberValue(rest, '--max-resolved-drop')
-    const policy = {
-      ...(minPassRate !== undefined ? { minPassRate } : {}),
-      ...(maxPassRateDrop !== undefined ? { maxPassRateDrop } : {}),
-      ...(maxFailedIncrease !== undefined ? { maxFailedIncrease } : {}),
-      ...(maxTimeoutIncrease !== undefined ? { maxTimeoutIncrease } : {}),
-      ...(maxResolvedDrop !== undefined ? { maxResolvedDrop } : {}),
-      ...(failureLabelCaps ? { failureLabelCaps } : {}),
-    }
-    return {
-      kind: 'eval-regression-gate',
-      rootDir: value(rest, '--root-dir') ?? 'runs/eval/regression-gate',
-      baselineSummaryPath: required(rest, '--baseline-summary'),
-      candidateSummaryPath: required(rest, '--candidate-summary'),
-      outputFilename: value(rest, '--output'),
-      policy,
-    }
-  }
-  if (commandArgv[1] === 'eval' && commandArgv[2] === 'judge-score') {
-    const rest = commandArgv.slice(3)
-    return {
-      kind: 'eval-judge-score',
-      rootDir: value(rest, '--root-dir') ?? 'runs/eval/judge-score',
-      promptPath: required(rest, '--prompt'),
-      responsePath: required(rest, '--response'),
-      judgeModel: required(rest, '--judge-model'),
-      scorer: value(rest, '--scorer'),
-      instanceId: value(rest, '--instance-id'),
-      threshold: numberValue(rest, '--threshold'),
-      inputRef: value(rest, '--input-ref'),
-      workspaceRoot: value(rest, '--workspace-root'),
-    }
-  }
-  if (commandArgv[1] === 'profile' && commandArgv[2] === 'session') {
-    const rest = commandArgv.slice(3)
-    return {
-      kind: 'profile-session',
-      rootDir: value(rest, '--root-dir') ?? 'runs/profile/session',
-      sessionLogPath: required(rest, '--session-log'),
-      pricingPath: value(rest, '--pricing'),
-    }
-  }
-  if (commandArgv[1] === 'profile' && commandArgv[2] === 'aggregate') {
-    const rest = commandArgv.slice(3)
-    const summaryPath = value(rest, '--summary')
-    const output = value(rest, '--output')
-    return {
-      kind: 'profile-aggregate',
-      rootDir: value(rest, '--root-dir') ?? 'runs/profile/aggregate',
-      ...(summaryPath ? { summaryPath } : {}),
-      ...(output ? { outputFilename: output } : {}),
-    }
-  }
-  if (commandArgv[1] === 'profile' && commandArgv[2] === 'budget') {
-    const rest = commandArgv.slice(3)
-    const output = value(rest, '--output')
-    const parsed = parseThresholdArgs(rest) ?? {}
-    return {
-      kind: 'profile-budget',
-      rootDir: value(rest, '--root-dir') ?? 'runs/profile/budget',
-      profilePath: required(rest, '--profile'),
-      policy: parsed,
-      ...(output ? { outputFilename: output } : {}),
     }
   }
   if (commandArgv[1] === 'reliability' && commandArgv[2] === 'audit-session') {
@@ -515,47 +391,6 @@ export async function runEnhancementCli(command: EnhancementCliCommand): Promise
     }
     const result = await exportTraceOtlp(input)
     console.log(JSON.stringify(result, null, 2))
-    return true
-  }
-  if (command.kind === 'eval-score-session') {
-    const result = await scoreSession(command)
-    console.log(JSON.stringify({ scoresPath: result.scoresPath, summary: result.summary }, null, 2))
-    return true
-  }
-  if (command.kind === 'eval-compare-runs') {
-    const result = await compareEvalRuns(command)
-    console.log(JSON.stringify({ comparisonPath: result.comparisonPath, comparison: result.comparison }, null, 2))
-    return true
-  }
-  if (command.kind === 'eval-regression-gate') {
-    const result = await evaluateRegressionGate(command)
-    console.log(JSON.stringify({ verdictPath: result.verdictPath, verdict: result.verdict }, null, 2))
-    if (!result.verdict.pass) {
-      process.exitCode = 2
-    }
-    return true
-  }
-  if (command.kind === 'eval-judge-score') {
-    const result = await judgeScore(command)
-    console.log(JSON.stringify({ scoresPath: result.scoresPath, judgeTrace: result.judgeTrace, summary: result.summary }, null, 2))
-    return true
-  }
-  if (command.kind === 'profile-session') {
-    const result = await profileSession(command)
-    console.log(JSON.stringify({ profilePath: result.profilePath, profile: result.profile }, null, 2))
-    return true
-  }
-  if (command.kind === 'profile-aggregate') {
-    const result = await aggregateProfiles(command)
-    console.log(JSON.stringify({ reportPath: result.reportPath, report: result.report }, null, 2))
-    return true
-  }
-  if (command.kind === 'profile-budget') {
-    const result = await evaluateProfileBudget(command)
-    console.log(JSON.stringify({ verdictPath: result.verdictPath, verdict: result.verdict }, null, 2))
-    if (!result.verdict.pass) {
-      process.exitCode = 2
-    }
     return true
   }
   if (command.kind === 'reliability-audit-session') {

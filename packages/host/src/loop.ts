@@ -1193,9 +1193,9 @@ function guardPostCompactionLoop(
 
 /**
  * Reject `memory` tool calls that would reach across-task disk state when the
- * session's memoryPolicy is `disabled`. Benchmark trials set `mode: disabled`
- * by default so a SWE-bench task cannot inadvertently read workspace/global
- * memory notes written during unrelated sessions. Session-scope memory is
+ * session's memoryPolicy is `disabled`. Isolated Sessions set `mode: disabled`
+ * so they cannot inadvertently read workspace/global memory notes written
+ * during unrelated Sessions. Session-scope memory is
  * kernel-managed and stays available regardless of policy.
  */
 function guardMemoryPolicy(

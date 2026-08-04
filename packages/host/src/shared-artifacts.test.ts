@@ -4,23 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { EventEntry, HeaderEntry, LLMTrace } from '@agent-kernel/shared'
-import { redactLlmTrace } from '@agent-kernel/shared'
+import { deriveSessionMemoryPolicy, redactLlmTrace } from '@agent-kernel/shared'
 import {
-  buildSweBenchEvaluationCommand,
   createArtifactStore,
-  createEvalExperiment,
   createMessageAssemblyArtifact,
   createRolloutSidecar,
   createRouterDecisionArtifact,
   createSessionProfile,
-  createSweBenchPrediction,
   createToolCatalogArtifact,
-  deriveEvalMemoryPolicy,
   exportSessionSpans,
   redactForPersistence,
-  serializeJsonl,
-  summarizeEvalRun,
-  summarizeEvalScores,
 } from '@agent-kernel/shared/enhancement'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -227,40 +220,6 @@ describe('enhancement foundation', () => {
     expect(replaced.attributes['agent_kernel.message_replace.count']).toBe(1)
   })
 
-  it('creates official SWE-bench prediction rows and harness command args', () => {
-    const row = createSweBenchPrediction({
-      instanceId: 'sympy__sympy-20590',
-      modelNameOrPath: 'agent-kernel/gpt-test',
-      modelPatch: 'diff --git a/x b/x\n',
-    })
-    expect(serializeJsonl([row])).toBe(
-      '{"instance_id":"sympy__sympy-20590","model_name_or_path":"agent-kernel/gpt-test","model_patch":"diff --git a/x b/x\\n"}\n',
-    )
-    expect(
-      buildSweBenchEvaluationCommand({
-        datasetName: 'princeton-nlp/SWE-bench_Lite',
-        predictionsPath: 'runs/predictions.jsonl',
-        runId: 'run1',
-        maxWorkers: 2,
-        instanceIds: ['sympy__sympy-20590'],
-      }),
-    ).toEqual([
-      'python',
-      '-m',
-      'swebench.harness.run_evaluation',
-      '--dataset_name',
-      'princeton-nlp/SWE-bench_Lite',
-      '--predictions_path',
-      'runs/predictions.jsonl',
-      '--max_workers',
-      '2',
-      '--run_id',
-      'run1',
-      '--instance_ids',
-      'sympy__sympy-20590',
-    ])
-  })
-
   it('creates RL rollout sidecars as indexes, not trajectory schemas', () => {
     const sidecar = createRolloutSidecar({
       rolloutId: 'rollout_1',
@@ -284,42 +243,6 @@ describe('enhancement foundation', () => {
       model: 'local-policy',
       metadata: {},
     })
-  })
-
-  it('summarizes eval trials with low-cardinality failure labels', () => {
-    const experiment = createEvalExperiment({
-      experimentId: 'run1',
-      dataset: 'local',
-      model: 'gpt-test',
-      createdAt: '2026-07-09T00:00:00.000Z',
-    })
-    const summary = summarizeEvalRun(experiment, [
-      {
-        trialId: 't1',
-        experimentId: 'run1',
-        instanceId: 'i1',
-        status: 'completed',
-        resolved: true,
-        failureLabel: 'resolved',
-        artifacts: [],
-        metrics: {},
-      },
-      {
-        trialId: 't2',
-        experimentId: 'run1',
-        instanceId: 'i2',
-        status: 'completed',
-        resolved: false,
-        failureLabel: 'empty_patch',
-        artifacts: [],
-        metrics: {},
-      },
-    ])
-
-    expect(summary.trialCount).toBe(2)
-    expect(summary.resolved).toBe(1)
-    expect(summary.emptyPatch).toBe(1)
-    expect(summary.metrics.passRate).toBe(0.5)
   })
 
   it('builds message assembly artifacts from messages and tool schemas', () => {
@@ -408,20 +331,7 @@ describe('enhancement foundation', () => {
     expect(artifact.budget!.reasonCodes).toContain('active_turn_missing')
   })
 
-  it('summarizes eval scores and session profiles without kernel state changes', () => {
-    const score = summarizeEvalScores([
-      {
-        scorer: 'patch.non_empty',
-        passed: false,
-        label: 'empty_patch',
-        score: 0,
-        metrics: {},
-        artifactRefs: [],
-      },
-    ], 'i1')
-    expect(score.failureLabel).toBe('empty_patch')
-    expect(score.resolved).toBe(false)
-
+  it('summarizes session profiles without kernel state changes', () => {
     const profile = createSessionProfile({
       header,
       events: [
@@ -529,31 +439,31 @@ describe('enhancement foundation', () => {
     expect(decision.capabilityRequirements).toBeUndefined()
   })
 
-  it('derives eval memory policy defaults from workspace/global flags', () => {
-    const workspaceOnly = deriveEvalMemoryPolicy({ workspaceRoot: '/repo' })
+  it('derives Session memory policy defaults from workspace/global flags', () => {
+    const workspaceOnly = deriveSessionMemoryPolicy({ workspaceRoot: '/repo' })
     expect(workspaceOnly.mode).toBe('workspace_only')
     expect(workspaceOnly.includeGlobal).toBe(false)
     expect(workspaceOnly.reasonCodes).toContain('memory_mode:workspace_only')
 
-    const workspaceAndGlobal = deriveEvalMemoryPolicy({ workspaceRoot: '/repo', includeGlobal: true })
+    const workspaceAndGlobal = deriveSessionMemoryPolicy({ workspaceRoot: '/repo', includeGlobal: true })
     expect(workspaceAndGlobal.mode).toBe('workspace_and_global')
     expect(workspaceAndGlobal.reasonCodes).toContain('global_included')
   })
 
-  it('flags benchmark isolation as disabled memory unless explicit', () => {
-    const isolated = deriveEvalMemoryPolicy({ benchmarkIsolation: true })
+  it('flags cross-task isolation as disabled memory unless explicit', () => {
+    const isolated = deriveSessionMemoryPolicy({ crossTaskIsolation: true })
     expect(isolated.mode).toBe('disabled')
-    expect(isolated.reasonCodes).toContain('benchmark_isolation')
+    expect(isolated.reasonCodes).toContain('cross_task_isolation')
     expect(isolated.reasonCodes).toContain('memory_disabled')
 
-    const isolatedButPinned = deriveEvalMemoryPolicy({ benchmarkIsolation: true, mode: 'snapshot_pinned', snapshotRef: 'snap.json' })
+    const isolatedButPinned = deriveSessionMemoryPolicy({ crossTaskIsolation: true, mode: 'snapshot_pinned', snapshotRef: 'snap.json' })
     expect(isolatedButPinned.mode).toBe('snapshot_pinned')
-    expect(isolatedButPinned.reasonCodes).toContain('benchmark_isolation')
+    expect(isolatedButPinned.reasonCodes).toContain('cross_task_isolation')
     expect(isolatedButPinned.reasonCodes).toContain('snapshot_pinned')
   })
 
   it('counts active and tombstoned entries from memory index', () => {
-    const policy = deriveEvalMemoryPolicy({
+    const policy = deriveSessionMemoryPolicy({
       workspaceRoot: '/repo',
       memoryIndex: {
         generatedAt: '2026-07-09T00:00:00.000Z',
@@ -569,13 +479,4 @@ describe('enhancement foundation', () => {
     expect(policy.generatedAt).toBe('2026-07-09T00:00:00.000Z')
   })
 
-  it('records memory policy on eval experiments for reproducibility', () => {
-    const policy = deriveEvalMemoryPolicy({ workspaceRoot: '/repo' })
-    const experiment = createEvalExperiment({
-      dataset: 'SWE-bench_Verified',
-      model: 'gpt-test',
-      memoryPolicy: policy,
-    })
-    expect(experiment.memoryPolicy).toEqual(policy)
-  })
 })

@@ -356,7 +356,7 @@ describe('host loop', () => {
       memoryPolicy: {
         mode: 'disabled',
         includeGlobal: false,
-        reasonCodes: ['memory_mode:disabled', 'benchmark_isolation', 'memory_disabled'],
+        reasonCodes: ['memory_mode:disabled', 'cross_task_isolation', 'memory_disabled'],
       },
     })
     const llm = scriptedLlm([
@@ -408,7 +408,7 @@ describe('host loop', () => {
       memoryPolicy: {
         mode: 'disabled',
         includeGlobal: false,
-        reasonCodes: ['memory_mode:disabled', 'benchmark_isolation', 'memory_disabled'],
+        reasonCodes: ['memory_mode:disabled', 'cross_task_isolation', 'memory_disabled'],
       },
     })
     const llm = scriptedLlm([

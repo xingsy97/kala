@@ -5,7 +5,7 @@ import {
   fetchArtifactContent,
   type ProfileRow,
   type SessionProfile,
-} from './artifact-views.js'
+} from './product-artifact-views.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 
 export function ProfilesView(): JSX.Element {

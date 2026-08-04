@@ -7,7 +7,7 @@ import {
   type ArtifactDetailRequest,
   type OpsArtifactKind,
   type OpsArtifactRow,
-} from './artifact-views.js'
+} from './product-artifact-views.js'
 import { asRecord, isOpsArtifactKind, opsKindOrder } from './artifact-model.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 

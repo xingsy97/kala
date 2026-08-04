@@ -91,7 +91,7 @@ describe('verifyReward', () => {
     )
     const { reward } = await verifyReward({ rootDir: root, scorePath, sessionId: 'session-9' })
     expect(reward.reward).toBe(0)
-    expect(reward.sourceKind).toBe('eval_score')
+    expect(reward.sourceKind).toBe('score_result')
     expect(reward.sessionId).toBe('session-9')
     expect(new Set(reward.shapedLabels)).toEqual(new Set(['test_failed', 'agent_error']))
   })

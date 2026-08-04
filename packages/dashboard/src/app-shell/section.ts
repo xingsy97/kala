@@ -2,7 +2,7 @@
  * Top-level nav for the dashboard. URL-hash routing.
  *
  * Deep-link contract (per principle C4):
- * - `#/agent`, `#/benchmarks`, `#/operations`, `#/artifacts`, `#/pipeline`, `#/docs`
+ * - `#/agent`, `#/operations`, `#/artifacts`, `#/pipeline`, `#/docs`
  * - default (empty hash) resolves to `#/agent`
  * - back/forward and refresh restore the same section
  *
@@ -12,49 +12,30 @@
  * pages. Settings is not a tab — it lives as an icon on the right of the nav.
  */
 
-import type { RuntimeCapabilities } from '@agent-kernel/shared'
 import { useEffect, useState } from 'react'
 
-export type AppSection = 'agent' | 'benchmarks' | 'operations' | 'artifacts' | 'pipeline' | 'docs' | 'memo'
+export type AppSection = 'agent' | 'operations' | 'artifacts' | 'pipeline' | 'docs' | 'memo'
 
-const SECTIONS: readonly AppSection[] = ['agent', 'benchmarks', 'operations', 'artifacts', 'pipeline', 'docs', 'memo']
+const SECTIONS: readonly AppSection[] = ['agent', 'operations', 'artifacts', 'pipeline', 'docs', 'memo']
 
 function parseHash(hash: string): AppSection {
   const cleaned = hash.replace(/^#\/?/, '').split('/')[0]?.toLowerCase() ?? ''
   return (SECTIONS as readonly string[]).includes(cleaned) ? (cleaned as AppSection) : 'agent'
 }
 
-export function isSectionEnabled(section: AppSection, capabilities?: RuntimeCapabilities): boolean {
-  if (section === 'benchmarks') return capabilities?.benchmarks ?? true
-  return true
-}
-
-export function useAppSection(capabilities?: RuntimeCapabilities): [AppSection, (next: AppSection) => void] {
-  const enabledSection = (hash: string): AppSection => {
-    const parsed = parseHash(hash)
-    return isSectionEnabled(parsed, capabilities) ? parsed : 'agent'
-  }
+export function useAppSection(): [AppSection, (next: AppSection) => void] {
   const [section, setSection] = useState<AppSection>(() =>
-    typeof window === 'undefined' ? 'agent' : enabledSection(window.location.hash),
+    typeof window === 'undefined' ? 'agent' : parseHash(window.location.hash),
   )
   useEffect(() => {
     const onHash = (): void => {
-      const next = enabledSection(window.location.hash)
+      const next = parseHash(window.location.hash)
       setSection(next)
-      if (next === 'agent' && parseHash(window.location.hash) !== 'agent') {
-        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/agent`)
-      }
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
-  }, [capabilities?.benchmarks])
-  useEffect(() => {
-    if (isSectionEnabled(section, capabilities)) return
-    setSection('agent')
-    if (typeof window !== 'undefined') window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/agent`)
-  }, [capabilities, section])
+  }, [])
   const go = (next: AppSection): void => {
-    if (!isSectionEnabled(next, capabilities)) next = 'agent'
     if (typeof window === 'undefined') {
       setSection(next)
       return

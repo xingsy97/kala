@@ -1,21 +1,16 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
   arrayLength,
   booleanField,
-  evalRunRoot,
   formatBytes,
-  formatDuration,
   formatInteger,
-  formatPercent,
-  groupTrialArtifacts,
   isOpsArtifactKind,
-  mergeEvalRuns,
   numberField,
   opsKindOrder,
   stringField,
-  trialInstanceId,
-  trialStableId,
 } from './artifact-model.js'
 
 describe('field accessors', () => {
@@ -37,26 +32,9 @@ describe('formatters', () => {
     expect(formatBytes(2048)).toBe('2.0 KB')
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB')
   })
-  it('formatPercent / formatDuration / formatInteger handle non-numbers', () => {
-    expect(formatPercent(0.25)).toBe('25%')
-    expect(formatPercent('x')).toBe('n/a')
-    expect(formatDuration(500)).toBe('500ms')
-    expect(formatDuration(1500)).toBe('1.5s')
-    expect(formatDuration(120000)).toBe('2m')
-    expect(formatDuration(null)).toBe('n/a')
+  it('formatInteger handles non-numbers', () => {
     expect(formatInteger(1234)).toBe('1,234')
     expect(formatInteger('x')).toBe('0')
-  })
-})
-
-
-describe('evalRunRoot', () => {
-  it('strips known summary/progress filenames', () => {
-    expect(evalRunRoot('a/b/summary.json')).toBe('a/b')
-    expect(evalRunRoot('a/b/progress.json')).toBe('a/b')
-  })
-  it('falls back to stripping the last path segment', () => {
-    expect(evalRunRoot('a/b/other.json')).toBe('a/b')
   })
 })
 
@@ -70,49 +48,10 @@ describe('isOpsArtifactKind / opsKindOrder', () => {
   })
 })
 
-describe('trialStableId / trialInstanceId', () => {
-  const base = { trial: {}, path: 'runs/x/trial-7.json' } as never
-  it('prefers trialId, then instanceId, then path', () => {
-    expect(trialStableId({ trial: { trialId: 't1', instanceId: 'i1' }, path: 'p' } as never)).toBe('t1')
-    expect(trialStableId({ trial: { instanceId: 'i1' }, path: 'p' } as never)).toBe('i1')
-    expect(trialStableId(base)).toBe('runs/x/trial-7.json')
-  })
-  it('derives an instance id from the filename when unset', () => {
-    expect(trialInstanceId(base)).toBe('trial-7')
-    expect(trialInstanceId({ trial: { instanceId: 'i1' }, path: 'p' } as never)).toBe('i1')
-  })
-})
-
-describe('mergeEvalRuns', () => {
-  it('merges summaries and progresses by run root, newest first', () => {
-    const rows = mergeEvalRuns(
-      [{ path: 'r/a/summary.json', summary: { s: 1 } } as never],
-      [
-        { path: 'r/a/progress.json', progress: { updatedAt: '2020-01-01' } } as never,
-        { path: 'r/b/progress.json', progress: { updatedAt: '2021-01-01' } } as never,
-      ],
-    )
-    expect(rows).toHaveLength(2)
-    // newest (2021 root b) sorts first
-    expect(rows[0].root).toBe('r/b')
-    const a = rows.find((r) => r.root === 'r/a')
-    expect(a?.summary).toEqual({ s: 1 })
-    expect(a?.progress).toEqual({ updatedAt: '2020-01-01' })
-  })
-})
-
-describe('groupTrialArtifacts', () => {
-  it('classifies artifacts into ordered categories, resolving relative paths', () => {
-    const groups = groupTrialArtifacts('run/root', [
-      { uri: 'fix.patch', kind: 'diff' } as never,
-      { uri: 'run/root/out.log', kind: 'log' } as never,
-    ])
-    const cats = groups.map((g) => g.category)
-    expect(cats).toContain('patch')
-    expect(cats).toContain('log')
-    // patch appears before log per the category order
-    expect(cats.indexOf('patch')).toBeLessThan(cats.indexOf('log'))
-    const patch = groups.find((g) => g.category === 'patch')
-    expect(patch?.items[0].path).toBe('run/root/fix.patch')
+describe('product artifact language', () => {
+  it('does not expose evaluation or benchmark workflow inputs', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/features/artifacts/product-artifact-views.tsx'), 'utf8')
+    expect(source).not.toMatch(/rollout-verify-reward|trialPath|scorePath|benchmark|grader/iu)
+    expect(source).toContain('profile,trace,memory_index')
   })
 })

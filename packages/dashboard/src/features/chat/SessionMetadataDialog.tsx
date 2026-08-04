@@ -29,6 +29,8 @@ import {
   dialogTouchCloseClassName,
 } from '../../components/ui/dialog.js'
 import { cn } from '../../lib/utils.js'
+import { saveFile } from '../../lib/save-file.js'
+import { evaluationReferenceUrl, explicitEvaluationReference, governedSessionTaskCandidate } from '../../evaluation-integration.js'
 import { Input } from '../../components/ui/input.js'
 import {
   Select,
@@ -94,6 +96,11 @@ export function SessionMetadataDialog({
   const approvalChanged = approvalDraft !== approvalMode
   const toolCardModeChanged = toolCardModeDraft !== toolCardMode
   const canSave = labelChanged || approvalChanged || toolCardModeChanged
+  const evaluationReference = typeof window === 'undefined' ? undefined : explicitEvaluationReference(window.location, sessionId)
+  const exportTaskCandidate = async (): Promise<void> => {
+    const candidate = governedSessionTaskCandidate(sessionId, summary, selectedModel)
+    await saveFile({ suggestedName: 'agent-eval-task-candidate-' + sessionId.replace(/[^A-Za-z0-9._:-]/gu, '-') + '.json', blob: new Blob([JSON.stringify(candidate, null, 2) + '\n'], { type: 'application/json' }), mimeType: 'application/json' })
+  }
 
   const save = (): void => {
     const nextLabel = labelDraft.trim()
@@ -162,6 +169,17 @@ export function SessionMetadataDialog({
           ) : null}
           <ReadOnlyRow label={t('dialogs.sessionCost')} value="—" />
         </div>
+
+        <div className="border-t border-border/50 pt-3" />
+
+        <section className="grid gap-2 text-sm" aria-label="Evaluation integration">
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">Evaluation integration</span>
+          <p className="text-xs text-muted-foreground">Exports a private, reference-only task candidate. Session content and workspace paths are excluded; public use still requires explicit review, redaction, and provenance approval.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" data-testid="session-export-task-candidate" onClick={() => void exportTaskCandidate()}>Export governed task candidate</Button>
+            {evaluationReference ? <Button type="button" variant="outline" size="sm" asChild><a data-testid="session-open-evaluation-reference" href={evaluationReferenceUrl(evaluationReference)} target="_blank" rel="noreferrer">Open linked evaluation evidence</a></Button> : null}
+          </div>
+        </section>
 
         <div className="border-t border-border/50 pt-3" />
 

@@ -93,9 +93,10 @@ export function onLlmResponse(
     ...message,
     content: message.content.map((content) => {
       if (content.type !== 'tool_call') return content
-      const rawIntent = content.input._intent
+      const input = content.input ?? {}
+      const rawIntent = input._intent
       const intent = typeof rawIntent === 'string' && rawIntent.trim().length > 0 ? rawIntent.trim().slice(0, 160) : undefined
-      const { _intent: _discarded, ...executionInput } = content.input
+      const { _intent: _discarded, ...executionInput } = input
       return { ...content, input: executionInput, ...(intent ? { intent } : {}) }
     }),
   }

@@ -3,10 +3,10 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { AgentConfig, AgentEvent, AgentState, Effect, ToolSchema } from '@agent-kernel/kernel'
+import { deriveSessionMemoryPolicy } from '@agent-kernel/shared'
 import {
   AgentRlRolloutResultSchema,
   createArtifactStore,
-  deriveEvalMemoryPolicy,
   type AgentRlRolloutResult,
   type AgentRlTask,
   type ArtifactRef,
@@ -84,7 +84,7 @@ export async function runRlRollout(input: RunRlRolloutInput): Promise<RunRlRollo
     },
     initialCwd: workspace,
     initialApprovalMode: 'allow_all',
-    memoryPolicy: deriveEvalMemoryPolicy({ benchmarkIsolation: true }),
+    memoryPolicy: deriveSessionMemoryPolicy({ crossTaskIsolation: true }),
   })
   const loop = runHostLoop({
     store: sessionStore,

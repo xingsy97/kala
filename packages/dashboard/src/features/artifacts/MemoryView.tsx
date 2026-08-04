@@ -5,7 +5,7 @@ import {
   fetchArtifactContent,
   type MemoryIndex,
   type MemoryIndexRow,
-} from './artifact-views.js'
+} from './product-artifact-views.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 
 export function MemoryView(): JSX.Element {

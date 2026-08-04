@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, BarChart3, Boxes, ChevronDown, ChevronRight, Eraser, Files, FolderGit2, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow, X } from 'lucide-react'
+import { Archive, Boxes, ChevronDown, ChevronRight, Eraser, Files, FolderGit2, FolderOpen, Info, ListChecks, Loader2, Menu, Moon, PanelLeftClose, PanelRight, PanelRightClose, Plus, Settings, ShieldCheck, Sparkles, Square, Sun, Workflow, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -82,7 +82,6 @@ import { useAuthSession } from './auth-session.js'
 // own async chunk (see vite build output) and drops the initial JS payload
 // substantially. Fallback is a bare blank div so we don't flash a skeleton
 // while the chunk arrives on a fast connection.
-const BenchmarksPage = lazy(() => import('./features/benchmarks/BenchmarksPage.js').then((m) => ({ default: m.BenchmarksPage })))
 const OperationsPage = lazy(() => import('./features/operations/OperationsPage.js').then((m) => ({ default: m.OperationsPage })))
 const ArtifactsPage = lazy(() => import('./features/artifacts-browser/ArtifactsPage.js').then((m) => ({ default: m.ArtifactsPage })))
 const DocsPage = lazy(() => import('./features/docs/DocsPage.js').then((m) => ({ default: m.DocsPage })))
@@ -1215,7 +1214,7 @@ export function App(): JSX.Element {
     setCwdDialogOpen(true)
   }
 
-  const [section, setSection] = useAppSection(runtimeCapabilities)
+  const [section, setSection] = useAppSection()
   // Notification deep-links: `#/sessions/<id>` selects that session (works both
   // on cold-start openWindow and the focused-tab PUSH_NAVIGATE path).
   useSessionDeepLink(selectSession)
@@ -1230,7 +1229,7 @@ export function App(): JSX.Element {
   })
   const handleSectionSelect = (next: AppSection): void => {
     setSection(next)
-    // Benchmarks, Operations, Artifacts, Pipeline & Docs are all real pages — rendered inline below.
+    // Operations, Artifacts, Pipeline, and Docs are real pages rendered inline below.
   }
 
   const commandPaletteCommands = useMemo<readonly CommandPaletteItem[]>(() => {
@@ -1345,18 +1344,6 @@ export function App(): JSX.Element {
       keywords: ['preferences', 'config'],
       run: () => setSettingsOpen(true),
     })
-    if (runtimeCapabilities.benchmarks) cmds.push({
-      id: 'view.eval',
-      group: t('commandPalette.groups.view'),
-      label: t('commandPalette.commands.openEval'),
-      hint: t('commandPalette.commands.openEvalHint'),
-      icon: BarChart3,
-      keywords: ['swebench', 'benchmark', 'comparison', 'score'],
-      run: () => {
-        setSection('benchmarks')
-        if (typeof window !== 'undefined') window.location.hash = '#/benchmarks'
-      },
-    })
     cmds.push(
       {
         id: 'view.artifacts',
@@ -1457,7 +1444,6 @@ export function App(): JSX.Element {
     onModelChange,
     runCompactNow,
     runConsolidateMemory,
-    runtimeCapabilities.benchmarks,
     session.socket,
     session.state,
     sessionWorkspaceKnownOffline,
@@ -1596,7 +1582,6 @@ export function App(): JSX.Element {
         collapsed={!topbarOpen}
         onCollapse={() => setTopbarOpen(false)}
         onExpand={() => setTopbarOpen(true)}
-        capabilities={runtimeCapabilities}
         account={account}
         accountLoading={saasMode && authSession.loading}
         onOpenAccount={saasMode ? () => setAccountCenterOpen(true) : undefined}
@@ -1613,11 +1598,7 @@ export function App(): JSX.Element {
       <PwaUpdateGlobalBanner />
       <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       <div className="hidden" data-testid="login-column-hidden" />
-      {section === 'benchmarks' ? (
-        <Suspense fallback={<PageLoadingFallback />}>
-          <BenchmarksPage onOpenSession={(sessionId) => selectSession(sessionId)} />
-        </Suspense>
-      ) : section === 'operations' ? (
+      {section === 'operations' ? (
         <Suspense fallback={<PageLoadingFallback />}>
           <OperationsPage onOpenSession={(sessionId) => selectSession(sessionId)} />
         </Suspense>
@@ -1631,7 +1612,7 @@ export function App(): JSX.Element {
         </Suspense>
       ) : section === 'pipeline' ? (
         <Suspense fallback={<PageLoadingFallback />}>
-          <PipelinePage capabilities={runtimeCapabilities} />
+          <PipelinePage />
         </Suspense>
       ) : section === 'memo' ? (
         <Suspense fallback={<PageLoadingFallback />}>

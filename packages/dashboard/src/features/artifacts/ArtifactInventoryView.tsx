@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 
-import { ArtifactInventory } from './artifact-views.js'
+import { ArtifactInventory } from './product-artifact-views.js'
 import { useArtifactManifest } from './useArtifactManifest.js'
 
 export function ArtifactInventoryView(): JSX.Element {

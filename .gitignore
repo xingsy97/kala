@@ -51,6 +51,7 @@ __pycache__/
 # Session data (event logs will land here)
 sessions/
 .agent-kernel/
+.agent-evaluation/
 
 # Reference projects (cloned for study, not committed)
 references/

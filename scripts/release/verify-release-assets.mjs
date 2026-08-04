@@ -15,6 +15,14 @@ if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) {
   fail('manifest.assets must be a non-empty array')
 }
 
+const forbiddenLegacyEvaluationMarkers = [
+  'src/eval/',
+  'run-benchmark-web',
+  'run-programbench-legacy-runner',
+  'run-browsecomp-legacy-runner',
+  'run-jobbench-legacy-runner',
+]
+
 for (const asset of manifest.assets) {
   const path = join(releaseDir, asset)
   if (!existsSync(path)) fail(`missing asset ${asset}`)
@@ -22,6 +30,9 @@ for (const asset of manifest.assets) {
     const text = readFileSync(path, 'utf8')
     if (!text.startsWith('#!/usr/bin/env node\n')) {
       fail(`${asset} is missing node shebang`)
+    }
+    for (const marker of forbiddenLegacyEvaluationMarkers) {
+      if (text.includes(marker)) fail(`${asset} contains legacy evaluation content: ${marker}`)
     }
     accessSync(path, constants.X_OK)
   }
